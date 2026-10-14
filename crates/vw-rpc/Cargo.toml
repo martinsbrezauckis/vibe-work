@@ -1,0 +1,20 @@
+[package]
+name = "vw-rpc"
+description = "JSON-RPC over stdio: framing, request matching, callbacks"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+vw-protocol = { path = "../vw-protocol" }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["float_roundtrip"] }  # exact float parsing (durationMs etc.)
+thiserror = "2"
+tokio = { version = "1.53", features = ["io-util", "macros", "rt", "sync", "time"] }
+tracing = "0.1"

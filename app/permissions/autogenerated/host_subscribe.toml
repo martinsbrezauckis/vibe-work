@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-host-subscribe"
+description = "Enables the host_subscribe command without any pre-configured scope."
+commands.allow = ["host_subscribe"]
+
+[[permission]]
+identifier = "deny-host-subscribe"
+description = "Denies the host_subscribe command without any pre-configured scope."
+commands.deny = ["host_subscribe"]

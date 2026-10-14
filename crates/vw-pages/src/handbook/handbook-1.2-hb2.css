@@ -1,0 +1,31 @@
+/* Vibe Work handbook.css 1.2 */
+/* Shared handbook frame and light/dark tokens; bundled by vw-pages and installed by handbook_check. */
+:root{--bg:#fbfbf8;--panel:#f7f6f1;--raised:#ffffff;--line:#0000001f;--text:#201f1c;--text-2:#615f57;--text-3:#706d65;--accent:#c43c00;--blue:#0068b8;--green:#26734d;--red:#c4210f;color-scheme:light}
+@media (prefers-color-scheme:dark){:root:not([data-theme=light]){--bg:#0e0e11;--panel:#16161a;--raised:#1e1e23;--line:#ffffff1f;--text:#f4f4f5;--text-2:#b4b4bc;--text-3:#8e8e98;--accent:#ff8205;--blue:#55b3fb;--green:#44ba82;--red:#f66c60;color-scheme:dark}}
+:root[data-theme=dark]{--bg:#0e0e11;--panel:#16161a;--raised:#1e1e23;--line:#ffffff1f;--text:#f4f4f5;--text-2:#b4b4bc;--text-3:#8e8e98;--accent:#ff8205;--blue:#55b3fb;--green:#44ba82;--red:#f66c60;color-scheme:dark}
+:root[data-theme=light]{color-scheme:light}
+body{margin:0;background:var(--bg);color:var(--text);font:15px/1.6 Inter,system-ui,sans-serif;overflow-wrap:break-word}
+body>header,body>main,body>footer{max-width:760px;margin:0 auto;padding:0 20px}
+body>header{padding-top:28px}body>main{padding-bottom:60px}
+.hb-kind{margin:0;font:600 11px/1 ui-monospace,monospace;letter-spacing:.08em;text-transform:uppercase;color:var(--text-3)}
+h1{font-size:26px;line-height:1.25;margin:6px 0 4px}
+h2{font-size:18px;margin:28px 0 8px;padding-top:14px;border-top:1px solid var(--line)}
+h3{font-size:15px;margin:18px 0 6px}
+.hb-meta{margin:0;color:var(--text-3);font-size:13px}
+.hb-related{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:13px;margin-top:6px}
+a{color:var(--blue)}
+code,pre{font:13px ui-monospace,monospace;background:var(--panel);border:1px solid var(--line);border-radius:6px}
+code{padding:0 4px}pre{padding:10px 12px;overflow:auto}pre code{border:0;padding:0}
+table{border-collapse:collapse;display:block;max-width:100%;overflow-x:auto}td,th{border:1px solid var(--line);padding:4px 8px;text-align:left}
+img,svg,video{max-width:100%;height:auto}
+ol.hb-steps{list-style:none;padding:0;margin:0}
+ol.hb-steps li{display:flex;gap:10px;padding:8px 0;border-top:1px solid var(--line)}
+ol.hb-steps li::before{content:attr(data-status);min-width:62px;font:600 11px/1.9 ui-monospace,monospace;text-transform:uppercase;color:var(--text-3)}
+ol.hb-steps li[data-status=done]::before{color:var(--green)}
+ol.hb-steps li[data-status=doing]::before{color:var(--accent)}
+ol.hb-steps li[data-status=blocked]::before{color:var(--red)}
+.hb-input{margin:14px 0;padding:10px 14px;background:var(--panel);border:1px solid var(--line);border-radius:8px}
+.hb-input .hb-question{margin:0 0 6px;font-weight:600}.hb-input ul,.hb-input ol{margin:0;padding-left:20px}
+.hb-answer{margin:8px 0 0;color:var(--text-2);font-size:14px}
+main section>ul{padding-left:18px}details>summary{cursor:pointer;color:var(--text-2)}
+.hb-flag{color:var(--red);font-size:12px;margin-left:8px}

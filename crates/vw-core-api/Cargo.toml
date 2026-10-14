@@ -1,0 +1,100 @@
+[package]
+name = "vw-core-api"
+description = "The core command API (Command, CommandResult, CoreEvent, CoreError) and its one dispatcher"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[features]
+# TypeScript bindings for the UI (ui/src/protocol/core/), written by the gen-core-ts binary and
+# checked for drift by scripts/public/check.sh. Off in the app build.
+# The vault test switch (three locks: this feature, a run-time switch, an isolated test profile). Its source is
+# outside the exported tree; private e2e builds only, a release build with it fails to compile (lib.rs). Off by default.
+vault-e2e = []
+e2e-script = ["vw-browser/e2e-script", "vw-preview/e2e-script"]
+ts = ["dep:ts-rs", "vw-vibe-install/ts", "vw-changes/ts", "vw-preview/ts", "vw-browser/ts", "vw-pages/ts", "vw-worktrees/ts", "vw-projects/ts", "vw-git/ts", "vw-market/ts"]
+
+[[bin]]
+name = "gen-core-ts"
+path = "src/bin/gen_core_ts.rs"
+required-features = ["ts"]
+
+[dependencies]
+vw-vocabulary = { path = "../vw-vocabulary" }
+# The Vibe install at setup (`vibe` commands) and the deferred first server start.
+vw-vibe-install = { path = "../vw-vibe-install" }
+# Stored secret values register here so the Debug API never returns them.
+vw-secrets = { path = "../vw-secrets" }
+vw-keys = { path = "../vw-keys" }
+vw-keyproxy = { path = "../vw-keyproxy" }
+vw-vault = { path = "../vw-vault" }
+vw-mistral = { path = "../vw-mistral" }
+vw-documents = { path = "../vw-documents" }
+# The Tools marketplace: catalog, installer, store.
+vw-market = { path = "../vw-market" }
+# `documents/takePicture` answers image bytes as base64.
+base64 = "0.23"
+# Random dictation stream ids; already in the lock file through vw-documents.
+getrandom = "0.3"
+zeroize = "1.8"
+vw-gate = { path = "../vw-gate" }
+vw-session = { path = "../vw-session" }
+vw-supervisor = { path = "../vw-supervisor" }
+vw-terminal = { path = "../vw-terminal" }
+vw-rpc = { path = "../vw-rpc" }
+vw-protocol = { path = "../vw-protocol" }
+vw-procmon = { path = "../vw-procmon" }
+# Session-scoped agent tools: credentials, kill parser types, agent spawn.
+vw-agent-tools = { path = "../vw-agent-tools" }
+# User-only files (hook endpoint, launch records).
+vw-platform = { path = "../vw-platform" }
+vw-changes = { path = "../vw-changes" }
+# Worktree per session: base branches, session branch, preflight, inspection, records.
+vw-worktrees = { path = "../vw-worktrees" }
+# The outer git loop: branch bar, commit, push, pull requests, PR card, bring a copy in.
+vw-git = { path = "../vw-git" }
+# The PR card's public GitHub API reads with vw-mistral's HTTPS client (same version and TLS setup).
+reqwest = { version = "0.13.5", default-features = false }
+# Preview pane model and engine seam.
+vw-preview = { path = "../vw-preview" }
+# The agent browser's network guard: loopback answers, Vibe Work's own ports.
+vw-netguard = { path = "../vw-netguard" }
+# The agent browser: observe, act, receipts, prompt guard, Stop and the action log.
+vw-browser = { path = "../vw-browser" }
+# Project Pages: hub, page server, comments, viewer, the vw-plan profile.
+vw-pages = { path = "../vw-pages" }
+# The user's project groups: store, filing rules, reconcile.
+vw-projects = { path = "../vw-projects" }
+cap-std = "4.0.3"
+pulldown-cmark = { version = "0.13.4", default-features = false }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["float_roundtrip"] }  # exact float parsing for durationMs and similar values
+thiserror = "2"
+# The MCP servers of Vibe Work's own Vibe config (`connectors_config.rs`, read-only) and
+# addresses without their query part. Both already in Cargo.lock (toml 1.1.7 through tauri, url through vw-platform).
+toml = "1"
+# Adds and re-ports Vibe Work's own MCP entries in Vibe's config.toml, keeping the rest of the file as the
+# user or Vibe wrote it (`mcp_keys_config.rs`). Already in Cargo.lock (0.25.16 through proc-macro-crate).
+toml_edit = { version = "0.25", default-features = false, features = ["parse", "display"] }
+# Line diffs for the Markdown export; already in the lock file through vw-changes.
+similar = "3.2.0"
+url = "2"
+tokio = { version = "1.53", features = ["macros", "rt", "sync", "time", "net", "io-util", "process"] }
+tracing = "0.1"
+# Generates the TypeScript declarations for the command API.
+ts-rs = { version = "12.0.1", optional = true, features = ["serde-json-impl", "no-serde-warnings"] }
+# A secret_run consent binds to the content of the program and the files its arguments name.
+blake3 = "1.8"
+
+[target.'cfg(unix)'.dependencies]
+rustix = { version = "1.1.5", default-features = false, features = ["std", "fs"] }
+
+[target.'cfg(windows)'.dependencies]
+# Rust-only BLAKE3 on Windows (same output), as vw-vault: no C/asm build in the msvc cross lint.
+blake3 = { version = "1.8", features = ["pure"] }

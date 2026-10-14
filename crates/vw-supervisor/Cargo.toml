@@ -1,0 +1,30 @@
+[package]
+name = "vw-supervisor"
+description = "Spawns and supervises vibe-app-server"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+vw-agent-tools = { path = "../vw-agent-tools" }
+# stored secret values register here so the Debug API never returns them.
+vw-secrets = { path = "../vw-secrets" }
+vw-rpc = { path = "../vw-rpc" }
+vw-protocol = { path = "../vw-protocol" }
+serde_json = { version = "1", features = ["float_roundtrip"] }  # exact float parsing (durationMs etc.)
+thiserror = "2"
+tokio = { version = "1.53", features = ["io-util", "macros", "process", "rt", "sync", "time"] }
+tracing = "0.1"
+# Process groups (Unix) and kill-on-close job objects created suspended + assigned by handle
+# (Windows), without unsafe code in our crates. 10.0.1, MIT OR Apache-2.0.
+process-wrap = { version = "10.0.1", default-features = false, features = ["tokio1", "kill-on-drop", "process-group", "job-object", "creation-flags"] }
+
+[target.'cfg(windows)'.dependencies]
+# Only for the CREATE_NO_WINDOW constant type that process-wrap's CreationFlags takes.
+windows = { version = "0.62", features = ["Win32_System_Threading"] }

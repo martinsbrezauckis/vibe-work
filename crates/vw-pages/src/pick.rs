@@ -1,0 +1,202 @@
+//! "Point Vibe at this" and page comments: the script the ENGINE evaluates in a page to find what the user means
+//! (the selected text, or the element they click next), and the parsing of its answer. Adapted from ShellX
+//! `shellx_browser_element_identity.rs:1-60` @ e38c2b5c (DOM path segments `tag#id`, `[data-testid]`, `[name]`,
+//! `:nth-of-type`, depth 16, clip 512; role by tag); ShellX's fingerprint hashes and shadow/frame paths are left out.
+//!
+//! Depends on: serde, getrandom. Called by: `service` (pages), vw-preview users through vw-core-api (preview
+//! elements), tests.
+//! Invariants:
+//! - The answer is untrusted page data: parsed as JSON only, every field length-capped again here (path 512,
+//!   ids 8 × 100, text and quote 2,000, url 512); a malformed answer is "nothing picked", never an error the page
+//!   can use.
+//! - With a non-empty selection the pick answers at once; otherwise the next click (capture phase, default action
+//!   prevented) answers, Escape cancels. The overlay is removed when it answers.
+//! - For pages, the caller never trusts `ids`: it takes the first one that exists in the page FILE (`page.rs`).
+
+use serde::{Deserialize, Serialize};
+
+/// Longest answer parsed (bytes).
+const MAX_ANSWER: usize = 64 * 1024;
+
+/// What the user pointed at.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+pub struct Picked {
+    /// A readable DOM path (`main > section#steps > li:nth-of-type(2)`).
+    pub path: String,
+    /// `id` and `data-step` values of the element and its ancestors, nearest first (at most 8).
+    pub ids: Vec<String>,
+    /// The element's tag.
+    pub tag: String,
+    /// Its role (`link`, `button`, `heading`, the tag otherwise).
+    pub role: String,
+    /// Its text (at most 2,000 characters).
+    pub text: String,
+    /// The selected text, when the pick came from a selection.
+    pub quote: Option<String>,
+    /// The page URL.
+    pub url: String,
+}
+
+/// The state of a pick.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PickAnswer {
+    /// Still waiting for a click.
+    Pending,
+    /// Escape, or the page went away.
+    Cancelled,
+    /// Done.
+    Picked(Picked),
+}
+
+/// A random accessor name for one pick (`__vw_pick_<16 hex>`; a collision guard, not a secret).
+#[must_use]
+pub fn accessor_name() -> String {
+    let mut bytes = [0u8; 8];
+    if getrandom::fill(&mut bytes).is_err() {
+        return "__vw_pick_fallback".to_owned();
+    }
+    format!("__vw_pick_{}", crate::comments::hex(&bytes))
+}
+
+fn quoted(name: &str) -> String {
+    serde_json::Value::String(name.to_owned()).to_string()
+}
+
+/// The script that starts a pick (its value is the first answer).
+#[must_use]
+pub fn start_script(name: &str) -> String {
+    format!(
+        r##"(() => {{
+  const NAME = {name};
+  const clip = (v, n) => String(v || "").replace(/\s+/g, " ").trim().slice(0, n);
+  const esc = (v) => (window.CSS && CSS.escape) ? CSS.escape(String(v)) : String(v).replace(/[^a-zA-Z0-9_-]/g, "\\$&");
+  const role = (el) => {{
+    const r = el.getAttribute && el.getAttribute("role"); if (r) return clip(r, 40);
+    const t = String(el.localName || "").toLowerCase();
+    if (t === "a") return "link"; if (t === "button") return "button";
+    if (/^h[1-6]$/.test(t)) return "heading"; if (t === "li") return "listitem";
+    return t || "element";
+  }};
+  const seg = (el) => {{
+    const t = el.localName.toLowerCase();
+    if (el.id) return t + "#" + esc(el.id);
+    const s = el.getAttribute("data-step"); if (s) return t + '[data-step="' + clip(s, 60) + '"]';
+    const n = el.getAttribute("name"); if (n) return t + '[name="' + clip(n, 60) + '"]';
+    const p = el.parentElement; if (!p) return t;
+    const same = Array.from(p.children).filter((c) => c.localName === el.localName);
+    return same.length > 1 ? t + ":nth-of-type(" + (same.indexOf(el) + 1) + ")" : t;
+  }};
+  const path = (el) => {{
+    const parts = []; let n = el, d = 0;
+    while (n && n.nodeType === 1 && d < 16 && n.localName !== "html") {{ parts.unshift(seg(n)); n = n.parentElement; d++; }}
+    return clip(parts.join(" > "), 512);
+  }};
+  const describe = (el, quote) => {{
+    const ids = [];
+    for (let n = el; n && n.nodeType === 1 && ids.length < 8; n = n.parentElement) {{
+      const id = n.getAttribute("id"); if (id) ids.push(clip(id, 100));
+      const st = n.getAttribute("data-step"); if (st && ids.length < 8) ids.push(clip(st, 100));
+    }}
+    return {{ state: "picked", path: path(el), ids, tag: el.localName, role: role(el),
+      text: clip(el.innerText || el.textContent, 2000), quote: quote ? clip(quote, 2000) : null,
+      url: String(location.href).slice(0, 512) }};
+  }};
+  const old = window[NAME + "_stop"]; if (typeof old === "function") old();
+  const st = {{ result: {{ state: "pending" }} }};
+  const sel = window.getSelection && window.getSelection();
+  if (sel && !sel.isCollapsed && String(sel).trim()) {{
+    let node = sel.getRangeAt(0).commonAncestorContainer;
+    if (node.nodeType !== 1) node = node.parentElement;
+    st.result = describe(node || document.body, String(sel));
+  }} else {{
+    const box = document.createElement("div");
+    box.style.cssText = "position:fixed;pointer-events:none;z-index:2147483647;outline:2px solid #fa500f;background:#fa500f1a;border-radius:3px;display:none";
+    document.documentElement.appendChild(box);
+    const move = (e) => {{ const r = e.target.getBoundingClientRect && e.target.getBoundingClientRect(); if (!r) return;
+      box.style.display = "block"; box.style.left = r.left + "px"; box.style.top = r.top + "px";
+      box.style.width = r.width + "px"; box.style.height = r.height + "px"; }};
+    const stop = () => {{ window.removeEventListener("mousemove", move, true); window.removeEventListener("click", click, true);
+      window.removeEventListener("keydown", key, true); box.remove(); }};
+    const click = (e) => {{ e.preventDefault(); e.stopImmediatePropagation(); st.result = describe(e.target, ""); stop(); }};
+    const key = (e) => {{ if (e.key === "Escape") {{ e.preventDefault(); st.result = {{ state: "cancelled" }}; stop(); }} }};
+    window.addEventListener("mousemove", move, true); window.addEventListener("click", click, true);
+    window.addEventListener("keydown", key, true);
+    Object.defineProperty(window, NAME + "_stop", {{ value: () => {{ st.result = {{ state: "cancelled" }}; stop(); }}, configurable: true }});
+  }}
+  Object.defineProperty(window, NAME, {{ value: () => JSON.stringify(st.result), configurable: true }});
+  return JSON.stringify(st.result);
+}})()"##,
+        name = quoted(name)
+    )
+}
+
+/// The script that reads a pick's state.
+#[must_use]
+pub fn poll_script(name: &str) -> String {
+    format!(
+        "(() => {{ const f = window[{n}]; return typeof f === 'function' ? f() : '{{\"state\":\"gone\"}}'; }})()",
+        n = quoted(name)
+    )
+}
+
+/// The script that cancels a pick (removes the overlay).
+#[must_use]
+pub fn cancel_script(name: &str) -> String {
+    format!(
+        "(() => {{ const f = window[{n} + '_stop']; if (typeof f === 'function') f(); return 'null'; }})()",
+        n = quoted(name)
+    )
+}
+
+fn text(value: Option<&serde_json::Value>, max: usize) -> String {
+    match value {
+        Some(serde_json::Value::String(s)) => s.chars().take(max).collect(),
+        _ => String::new(),
+    }
+}
+
+/// Parses an evaluation result (the JSON of the returned value: a JSON string holding the answer object).
+#[must_use]
+pub fn parse(result: &str) -> PickAnswer {
+    if result.len() > MAX_ANSWER {
+        return PickAnswer::Cancelled;
+    }
+    let outer: serde_json::Value = match serde_json::from_str(result) {
+        Ok(v) => v,
+        Err(_) => return PickAnswer::Cancelled,
+    };
+    let value = match outer {
+        serde_json::Value::String(inner) => serde_json::from_str(&inner).unwrap_or_default(),
+        other => other,
+    };
+    match value.get("state").and_then(serde_json::Value::as_str) {
+        Some("pending") => PickAnswer::Pending,
+        Some("picked") => {
+            let ids = value
+                .get("ids")
+                .and_then(serde_json::Value::as_array)
+                .map(|a| {
+                    a.iter()
+                        .filter_map(serde_json::Value::as_str)
+                        .map(|s| s.chars().take(100).collect::<String>())
+                        .filter(|s| !s.is_empty())
+                        .take(8)
+                        .collect()
+                })
+                .unwrap_or_default();
+            let quote = text(value.get("quote"), 2000);
+            PickAnswer::Picked(Picked {
+                path: text(value.get("path"), 512),
+                ids,
+                tag: text(value.get("tag"), 40),
+                role: text(value.get("role"), 40),
+                text: text(value.get("text"), 2000),
+                quote: Some(quote).filter(|q| !q.is_empty()),
+                url: text(value.get("url"), 512),
+            })
+        }
+        _ => PickAnswer::Cancelled,
+    }
+}

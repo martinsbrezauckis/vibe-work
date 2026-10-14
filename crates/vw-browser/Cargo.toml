@@ -1,0 +1,38 @@
+[package]
+name = "vw-browser"
+description = "The agent-controlled browser: observe, act with actionability checks, receipts, prompt guard, redaction, Stop and the action log"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[features]
+# TypeScript bindings for the UI (through vw-core-api's gen-core-ts).
+ts = ["dep:ts-rs"]
+# Private end-to-end builds may map one explicit loopback origin to a provider.
+e2e-script = []
+
+[dependencies]
+vw-vocabulary = { path = "../vw-vocabulary" }
+# A captured key is held in a zeroizing buffer until the core stores it.
+zeroize = "1.8"
+vw-preview = { path = "../vw-preview" }
+# Capture files are written with every registered stored secret withheld (a vault password a page copied
+# into its text must not reach a file the agent then reads with Vibe's own tools).
+vw-secrets = { path = "../vw-secrets" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# Annotation crops travel as base64 (the version vw-preview uses).
+base64 = "0.22"
+tokio = { version = "1.53", features = ["sync", "time", "macros", "rt"] }
+# Capture: page URLs (the folder's host fallback) and bounded parallel media fetches.
+url = "2"
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
+# Captured SVGs are re-serialised through an allowlist; 0.42.0 is already in the lock file.
+quick-xml = "0.42"
+ts-rs = { version = "12.0.1", optional = true, features = ["serde-json-impl", "no-serde-warnings"] }

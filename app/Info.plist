@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  macOS keys Tauri merges into the app bundle's Info.plist (it reads an Info.plist next to tauri.conf.json; a
+  development build embeds it into the binary). Dictation opens the microphone from the
+  main window (getUserMedia in WKWebView), and macOS shows this sentence in its one-time permission prompt. Without
+  it macOS refuses the microphone.
+-->
+<plist version="1.0">
+<dict>
+  <key>NSMicrophoneUsageDescription</key>
+  <string>Dictation sends your voice to Mistral's Voxtral to turn it into text while the mic button is on.</string>
+</dict>
+</plist>

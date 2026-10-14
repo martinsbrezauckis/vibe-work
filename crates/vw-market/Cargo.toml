@@ -1,0 +1,34 @@
+[package]
+name = "vw-market"
+description = "The Tools marketplace: the curated catalog of skill packs, MCP servers and plugins, pinned downloads, safe unpacking, plugin assembly and the installed state"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[features]
+# TypeScript bindings of the catalog types, enabled by vw-core-api's `ts` feature (gen-core-ts).
+ts = ["dep:ts-rs"]
+
+[dependencies]
+# All already in the lock file: sha2 0.10.9 (vw-changes, vw-pages), flate2 1.1 and zip 8.6.0
+# (vw-documents), tar 0.4.46 (through the Tauri bundler stack), base64 0.23 (vw-pages), reqwest 0.13.5 (vw-mistral).
+sha2 = "0.10.9"
+flate2 = "1.1"
+tar = { version = "0.4.46", default-features = false }
+zip = { version = "8.6.0", default-features = false, features = ["deflate"] }
+base64 = "0.23"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tracing = "0.1"
+tokio = { version = "1.53", features = ["fs", "process", "rt", "time", "io-util"] }
+# The shared HTTPS client (OS trust store, no redirects followed) for the downloads.
+vw-mistral = { path = "../vw-mistral" }
+reqwest = { version = "0.13.5", default-features = false }
+ts-rs = { version = "12.0.1", optional = true, features = ["serde-json-impl", "no-serde-warnings"] }

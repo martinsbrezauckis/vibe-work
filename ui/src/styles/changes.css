@@ -1,0 +1,253 @@
+/*
+ * Changes tab: file list beside the review when the panel is wide, hunks with a
+ * header and Keep/Revert, split or unified lines. Tokens only (scripts/public/check_colors.mjs).
+ * Used by: ui/src/features/changes/*. Diff lines reuse the `.diff`/`.dl` rows (transcript-cards.css).
+ */
+.changes-tab {
+  container-type: inline-size;
+}
+.chg {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+}
+@container (min-width: 640px) {
+  .chg {
+    grid-template-columns: 230px minmax(0, 1fr);
+    align-items: start;
+  }
+}
+.bulk {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin: 0 0 8px;
+}
+.bulk .live2 {
+  font-size: 11.5px;
+  color: var(--text-3);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-right: auto;
+}
+.files {
+  list-style: none;
+  margin: 0 0 12px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.files li button {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 2px 8px;
+  width: 100%;
+  align-items: center;
+  padding: 8px 12px;
+  border: 0;
+  border-top: 1px solid var(--line);
+  background: var(--bg);
+  cursor: pointer;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--text-2);
+  text-align: left;
+}
+.files li:first-child button {
+  border-top: 0;
+}
+.files li button[aria-current="true"] {
+  background: var(--active);
+  color: var(--text);
+}
+.files li button > span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.files .fst {
+  grid-column: 1 / 3;
+  font-family: Inter, sans-serif;
+  font-size: 11px;
+  color: var(--text-3);
+}
+.filebar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+.filebar .fname {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--text-2);
+  margin-right: auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.dtool {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+}
+.dtool .fmeta {
+  font-size: 11.5px;
+  color: var(--text-3);
+}
+.mini {
+  border: 1px solid var(--line-2);
+  background: var(--panel);
+  border-radius: 6px;
+  padding: 2px 8px;
+  font-size: 11.5px;
+  cursor: pointer;
+  font-family: Inter, sans-serif;
+  color: var(--text-2);
+}
+.mini:hover:not(:disabled) {
+  color: var(--text);
+  border-color: var(--line-3);
+}
+.mini:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.review {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--bg);
+}
+.review-note {
+  padding: 12px;
+  font-size: 12.5px;
+  color: var(--text-3);
+}
+.hunk + .hunk {
+  border-top: 1px solid var(--line-2);
+}
+.hunk-h {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  background: var(--raised);
+  border-bottom: 1px solid var(--line);
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--text-3);
+}
+.hunk-h .sp {
+  flex: 1;
+}
+.hunk-acts {
+  display: inline-flex;
+  gap: 6px;
+}
+.split {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.65;
+}
+.split > div {
+  min-width: 0;
+  overflow-x: auto;
+}
+.split > div + div {
+  border-left: 1px solid var(--line);
+}
+.split .sl {
+  display: grid;
+  grid-template-columns: 34px 1fr;
+  white-space: pre;
+  padding-right: 10px;
+  min-height: 19.8px;
+  width: max-content;
+  min-width: 100%;
+}
+.split .sl .n {
+  color: var(--text-3);
+  text-align: right;
+  padding-right: 8px;
+  opacity: 0.7;
+}
+.split .sl.d {
+  background: var(--red-soft);
+}
+.split .sl.a {
+  background: var(--green-soft);
+}
+.split .sl.e {
+  background: repeating-linear-gradient(45deg, transparent 0 4px, var(--line) 4px 5px);
+}
+.bnote {
+  font-size: 12px;
+  color: var(--text-3);
+  margin-top: 10px;
+}
+.changes-error {
+  color: var(--red);
+  font-size: 12.5px;
+  margin: 0 0 10px;
+}
+.history-offer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--raised);
+  font-size: 12.5px;
+  color: var(--text-2);
+}
+.history-offer span {
+  flex: 1 1 240px;
+}
+.turn-changes {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  overflow: hidden;
+  margin-bottom: 12px;
+  background: var(--bg);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .files li button {
+    transition: background 0.12s ease;
+  }
+}
+.shared-note {
+  flex-basis: 100%;
+  font-size: 12.5px;
+  color: var(--text-2);
+  margin: 4px 0;
+}
+.lost-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+  border: 1px solid var(--orange);
+  border-radius: 10px;
+  background: var(--orange-soft);
+  font-size: 12.5px;
+  color: var(--text);
+}
+.lost-banner p {
+  flex: 1 1 260px;
+  margin: 0;
+}

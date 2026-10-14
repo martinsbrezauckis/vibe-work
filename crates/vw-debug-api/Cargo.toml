@@ -1,0 +1,37 @@
+[package]
+name = "vw-debug-api"
+description = "Loopback Debug API (HTTP + SSE) over the core command API"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[features]
+# the end-to-end runs' in-page channel (`POST /e2e/script`, `GET /e2e/windows`). Debug builds made by the
+# private e2e scripts only; a release build with it fails to compile (lib.rs). Off by default.
+e2e-script = []
+# the vault test switch's routes (three locks: this feature, a run-time switch, an isolated test profile;
+# the source is outside the exported tree). Private e2e debug builds only; a release build with it fails to compile.
+vault-e2e = ["vw-core-api/vault-e2e"]
+
+[dependencies]
+vw-core-api = { path = "../vw-core-api" }
+vw-platform = { path = "../vw-platform" }
+vw-secrets = { path = "../vw-secrets" }
+# Crops of window screenshots (decode, crop, encode).
+vw-preview = { path = "../vw-preview" }
+# HTTP/1.1 server. axum 0.8.9 (MIT, MSRV 1.80), on hyper 1 and tokio, which
+# the workspace already uses; SSE is built in. Only the features we use.
+axum = { version = "0.8.9", default-features = false, features = ["http1", "tokio", "query", "json"] }
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
+getrandom = "0.3"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["float_roundtrip"] }  # exact float parsing (durationMs etc.)
+thiserror = "2"
+tokio = { version = "1.53", features = ["macros", "net", "rt", "sync", "time"] }
+tracing = "0.1"

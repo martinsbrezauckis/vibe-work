@@ -1,0 +1,360 @@
+/*
+ * Transcript cards and blocks: approval and question cards, inline diffs, code blocks with highlighting classes
+ * (`syn-*`, colours from the `--syn-*` tokens), the todo strip and the link dialog.
+ * Colours from tokens.css only.
+ */
+
+/* Approval and question cards */
+.approval {
+  margin: 4px 0 22px;
+  border: 1px solid color-mix(in srgb, var(--orange) 55%, transparent);
+  border-radius: 12px;
+  background: var(--panel);
+  overflow: hidden;
+}
+.approval .ah {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--line);
+  flex-wrap: wrap;
+}
+.approval .ah .sub {
+  color: var(--text-3);
+  font-size: 12.5px;
+}
+.approval .why {
+  display: grid;
+  gap: 4px;
+  font-size: 12.5px;
+  color: var(--text-2);
+  padding: 10px 14px 0;
+}
+.approval .why .summary {
+  font-family: var(--mono);
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+.approval .why .reason {
+  color: var(--orange-3);
+}
+.approval pre.cmd {
+  margin: 10px 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg);
+}
+.approval .diff,
+.approval .show-all {
+  margin: 10px 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 10px 14px 10px;
+}
+/* Tight enough that all five approval choices share a row at a 700 px chat column. */
+.cbtn {
+  border: 1px solid var(--line-2);
+  background: var(--raised);
+  border-radius: 8px;
+  padding: 6px 9px;
+  cursor: pointer;
+  font-size: 13px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+.cbtn:hover:not(:disabled) {
+  border-color: var(--line-3);
+}
+.cbtn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.cbtn.go {
+  background: var(--primary-bg);
+  color: var(--primary-fg);
+  border-color: transparent;
+  font-weight: 600;
+}
+.cbtn.no {
+  color: var(--red);
+}
+.feedback,
+.q-other {
+  display: grid;
+  gap: 4px;
+  padding: 0 14px 10px;
+  font-size: 12.5px;
+  color: var(--text-3);
+}
+.feedback input,
+.q-other input {
+  font: inherit;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--line-2);
+  border-radius: 7px;
+  padding: 6px 8px;
+}
+.scopes {
+  border: 0;
+  margin: 0;
+  padding: 0 14px 6px;
+  display: flex;
+  gap: 14px;
+  font-size: 12.5px;
+  color: var(--text-2);
+}
+.scopes legend {
+  float: left;
+  margin-right: 8px;
+  color: var(--text-3);
+}
+.card-state {
+  margin: 0;
+  padding: 0 14px 12px;
+  font-size: 12.5px;
+  color: var(--orange-3);
+}
+.card-state:empty {
+  display: none;
+}
+.q {
+  border: 0;
+  margin: 0;
+  padding: 12px 14px 4px;
+  display: grid;
+  gap: 6px;
+}
+.q legend {
+  font-weight: 600;
+  padding: 0;
+  margin-bottom: 6px;
+}
+.q-tag {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-3);
+  border: 1px solid var(--line-2);
+  border-radius: 6px;
+  padding: 0 6px;
+  margin-right: 8px;
+}
+.q-opt {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px 8px;
+  align-items: baseline;
+  font-size: 13.5px;
+  cursor: pointer;
+}
+.q-desc {
+  grid-column: 2;
+  font-size: 12px;
+  color: var(--text-3);
+}
+.q-other {
+  padding: 4px 0 0;
+}
+.q-footer {
+  margin: 0;
+  padding: 6px 14px 0;
+  font-size: 12px;
+  color: var(--text-3);
+}
+
+/* Inline diff */
+.diff {
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.65;
+  overflow-x: auto;
+}
+.diff .fh {
+  padding: 6px 12px;
+  color: var(--text-3);
+  border-bottom: 1px solid var(--line);
+  background: var(--raised);
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+.fh-path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fh-stat {
+  white-space: nowrap;
+}
+.dl {
+  display: grid;
+  grid-template-columns: 38px 16px 1fr;
+  padding-right: 12px;
+  white-space: pre;
+  width: max-content;
+  min-width: 100%;
+}
+.dl .n {
+  color: var(--text-3);
+  text-align: right;
+  padding-right: 8px;
+  opacity: 0.7;
+}
+.dl.a {
+  background: var(--green-soft);
+}
+.dl.a .s {
+  color: var(--green);
+}
+.dl.d {
+  background: var(--red-soft);
+}
+.dl.d .s {
+  color: var(--red);
+}
+.dl.d .c {
+  opacity: 0.7;
+}
+.dl.gap {
+  display: block;
+  color: var(--text-3);
+  padding-left: 54px;
+}
+
+/* Code blocks in Markdown */
+.md-code {
+  margin: 4px 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+  overflow: hidden;
+}
+.md-code-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 2px 4px 2px 12px;
+  border-bottom: 1px solid var(--line);
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-3);
+}
+.md-code pre {
+  margin: 0;
+  padding: 10px 12px;
+  overflow-x: auto;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+.syn-token-keyword {
+  color: var(--syn-keyword);
+}
+.syn-token-constant {
+  color: var(--syn-constant);
+}
+.syn-token-string,
+.syn-token-string-expression {
+  color: var(--syn-string);
+}
+.syn-token-comment {
+  color: var(--syn-comment);
+}
+.syn-token-function {
+  color: var(--syn-function);
+}
+.syn-token-parameter {
+  color: var(--syn-parameter);
+}
+.syn-token-punctuation {
+  color: var(--syn-punctuation);
+}
+.syn-token-link {
+  color: var(--syn-link);
+}
+.syn-italic {
+  font-style: italic;
+}
+.syn-bold {
+  font-weight: 700;
+}
+.syn-underline {
+  text-decoration: underline;
+}
+
+/* Todo strip */
+.todo-strip {
+  max-width: 760px;
+  width: 100%;
+  margin: 0 auto;
+  padding: 8px 32px 4px;
+  border-bottom: 1px solid var(--line);
+}
+.todo-count {
+  font-family: var(--mono);
+  font-size: 12px;
+}
+.todo-now {
+  color: var(--text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.todo-list {
+  list-style: none;
+  margin: 4px 0 6px;
+  padding: 0;
+  display: grid;
+  gap: 3px;
+  font-size: 13px;
+}
+.todo-list li {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.step-b .todo-list {
+  padding: 8px 12px;
+}
+.todo-mark {
+  width: 9px;
+  height: 9px;
+  border: 1px solid var(--line-3);
+  flex: none;
+}
+.todo-list li[data-status="in_progress"] .todo-mark {
+  background: var(--orange);
+  border-color: transparent;
+}
+.todo-list li[data-status="completed"] {
+  color: var(--text-3);
+  text-decoration: line-through;
+}
+.todo-list li[data-status="completed"] .todo-mark {
+  background: var(--green);
+  border-color: transparent;
+}
+
+/* Link dialog */
+.link-full {
+  overflow-wrap: anywhere;
+  background: var(--bg);
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  padding: 8px 10px;
+  user-select: all;
+}
+.link-host {
+  font-family: var(--mono);
+}
+.link-refused {
+  color: var(--red);
+}

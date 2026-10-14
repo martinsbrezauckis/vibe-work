@@ -1,0 +1,54 @@
+[package]
+name = "vw-vibe-install"
+description = "Installs the pinned Vibe for the user at setup, app-private, from the official sources (uv from Astral, mistral-vibe from PyPI with hashes)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[features]
+# TypeScript bindings of the views (ui/src/protocol/core/vibe.ts), through vw-core-api's `ts` feature.
+ts = ["dep:ts-rs"]
+
+[dependencies]
+# The shared HTTPS client (OS trust store, system proxy) for the uv download.
+vw-mistral = { path = "../vw-mistral" }
+# Server discovery (PATH + known locations, canonical, `.exe` only on Windows) for "use my existing install",
+# and the `initialize` parameters of the version probe.
+vw-supervisor = { path = "../vw-supervisor" }
+vw-protocol = { path = "../vw-protocol" }
+reqwest = { version = "0.13.5", default-features = false, features = ["stream"] }
+# Loopback check of redirect targets (already in Cargo.lock through reqwest and vw-host).
+url = "2"
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10.9"
+# The offer id (OS random source), as vw-debug-api and vw-agent-tools.
+getrandom = "0.3"
+thiserror = "2"
+tokio = { version = "1.53", features = ["rt", "sync", "time", "process", "io-util", "fs", "macros"] }
+tracing = "0.1"
+# Archives of Astral's uv release: .tar.gz (Linux, macOS) and .zip (Windows). All three are already in
+# Cargo.lock (zip 8.6.0 + flate2 1.1.10 with zlib-rs through calamine, tar 0.4.46); same features, no new crates.
+flate2 = { version = "1.1.10", default-features = false, features = ["zlib-rs"] }
+tar = { version = "0.4.46", default-features = false }
+zip = { version = "8.6.0", default-features = false, features = ["deflate"] }
+# Whole-tree containment of the uv steps (cancel and timeout kill uv and every child it started), as the
+# supervisor does for the server: process group on Unix, kill-on-close Job Object on Windows.
+process-wrap = { version = "10.0.1", default-features = false, features = ["tokio1", "kill-on-drop", "process-group", "job-object", "creation-flags"] }
+ts-rs = { version = "12.0.1", optional = true, features = ["serde-json-impl", "no-serde-warnings"] }
+# The signed supported-Vibe manifest: the same minisign check and encodings the app updater uses
+# (vw-host `update_verify`); all three are already in Cargo.lock through vw-host and the updater plugin.
+minisign-verify = "0.2.5"
+base64 = "0.22"
+semver = "1"
+
+[target.'cfg(windows)'.dependencies]
+# Only for the CREATE_NO_WINDOW constant process-wrap's CreationFlags takes (as vw-supervisor).
+windows = { version = "0.62", features = ["Win32_System_Threading"] }

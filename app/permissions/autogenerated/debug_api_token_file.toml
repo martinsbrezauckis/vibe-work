@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-debug-api-token-file"
+description = "Enables the debug_api_token_file command without any pre-configured scope."
+commands.allow = ["debug_api_token_file"]
+
+[[permission]]
+identifier = "deny-debug-api-token-file"
+description = "Denies the debug_api_token_file command without any pre-configured scope."
+commands.deny = ["debug_api_token_file"]

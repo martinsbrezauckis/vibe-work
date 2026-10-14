@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-cli-sharing"
+description = "Enables the cli_sharing command without any pre-configured scope."
+commands.allow = ["cli_sharing"]
+
+[[permission]]
+identifier = "deny-cli-sharing"
+description = "Denies the cli_sharing command without any pre-configured scope."
+commands.deny = ["cli_sharing"]

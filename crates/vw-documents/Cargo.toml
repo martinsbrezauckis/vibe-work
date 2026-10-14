@@ -1,0 +1,24 @@
+[package]
+name = "vw-documents"
+description = "Documents the user attaches: type detection, page counts, local reading of spreadsheets and text, the pending-document store"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+# Versions checked on crates.io 2026-10-09.
+# calamine 0.36.1 (MIT): XLSX read locally (exact values, no OCR quota). `dates`: date cells as ISO text.
+calamine = { version = "0.36.1", default-features = false, features = ["dates"] }
+# zip 8.6.0 (MIT): DOCX/PPTX/XLSX are ZIP files; the same features calamine asks for, so one build.
+zip = { version = "8.6.0", default-features = false, features = ["deflate"] }
+# flate2 (already in the lock file through zip): inflates PDF object streams for the page count.
+flate2 = "1.1"
+getrandom = "0.3"
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"

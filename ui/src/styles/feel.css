@@ -1,0 +1,550 @@
+/*
+ * "Feels good": the motion and small responses that make the app pleasant to keep open. One vocabulary
+ * (tokens.css: --t-press/hover/ui/panel/arrive, --ease-std/out/in), calm by default: short glides, one pulse for
+ * attention, nothing loops except work that is running. Reduced motion (tokens.css) drops every animation and
+ * transition; states still change, only without movement.
+ * Loaded after every other stylesheet so the shared rules here win over older per-feature ones.
+ * Design: the feel proposal (items 1-15). Colours: tokens only.
+ */
+
+/* 2-3. Every control answers the hand: hover fades in, a press goes down. */
+.tb-btn,
+.mini,
+.ibtn,
+.pbtn,
+.btn-primary,
+.btn-danger,
+.pj-btn,
+.pages-btn,
+.preview-btn,
+.copy-btn,
+.cbtn,
+.rbtn,
+.rbtn-wide,
+.srow-more,
+.sec-btn,
+.link-btn,
+.key-link,
+.vw-term-tool,
+.vw-term-tab,
+.more-btn,
+.show-all-btn,
+.jump-latest,
+.ptab,
+.ptab-x,
+.set-cat,
+.set-result,
+.set-hit,
+.scope-chip,
+.toast > .ibtn {
+  transition:
+    background-color var(--t-hover) var(--ease-std),
+    color var(--t-hover) var(--ease-std),
+    border-color var(--t-hover) var(--ease-std),
+    box-shadow var(--t-hover) var(--ease-std),
+    opacity var(--t-hover) var(--ease-std),
+    transform 160ms var(--ease-out);
+}
+.srow,
+.srow-main,
+.proj-h,
+.proj-bar,
+.cmenu-item,
+.lc-row,
+.ctile-main,
+.pj-card,
+.ptab-group,
+.thought,
+.steps-h,
+.step-h,
+.todo-h,
+.fref,
+.source {
+  transition:
+    background-color var(--t-hover) var(--ease-std),
+    color var(--t-hover) var(--ease-std),
+    border-color var(--t-hover) var(--ease-std);
+}
+:is(
+    .tb-btn,
+    .mini,
+    .ibtn,
+    .pbtn,
+    .btn-primary,
+    .btn-danger,
+    .pj-btn,
+    .pages-btn,
+    .preview-btn,
+    .copy-btn,
+    .cbtn,
+    .rbtn,
+    .rbtn-wide,
+    .srow-more,
+    .sec-btn,
+    .vw-term-tool,
+    .more-btn,
+    .show-all-btn,
+    .ptab-x,
+    .scope-chip,
+    .toast > .ibtn
+  ):active:not(:disabled) {
+  transform: scale(0.97);
+  transition-duration: var(--t-press);
+}
+/* Rows do not shrink (a whole row scaling reads as a glitch); they darken while pressed. */
+:is(.srow-main, .proj-h, .cmenu-item, .set-cat, .set-result, .set-hit, .ctile-main):active {
+  background: var(--active);
+}
+/* Primary buttons carry a "key" edge (Mistral's pressed-key feel) that flips when pressed. */
+.btn-primary,
+.tb-btn.primary,
+.pj-btn.primary {
+  box-shadow: inset 0 -1.5px 0 var(--key-edge);
+}
+.btn-primary:active:not(:disabled),
+.tb-btn.primary:active:not(:disabled),
+.pj-btn.primary:active:not(:disabled) {
+  box-shadow: inset 0 1px 0 var(--key-edge);
+}
+/* Icons follow their button's text colour on hover (rail and toolbars). */
+.rbtn svg.i,
+.tb-btn svg.i,
+.ibtn svg.i {
+  transition: color var(--t-hover) var(--ease-std);
+}
+
+/* 4. Keyboard focus settles in instead of snapping on. */
+:focus-visible {
+  transition: box-shadow var(--t-ui) var(--ease-out);
+}
+/* controls that draw their own box-shadow (the primary buttons' key edge, the mic's outline) hid the
+   keyboard focus ring, which is also a box-shadow: New chat, Install Vibe, Save and test the key and the mic showed
+   no focus at all. Their focused state keeps the ring (and the mic its outline). */
+.btn-primary:focus-visible,
+.tb-btn.primary:focus-visible,
+.pj-btn.primary:focus-visible {
+  box-shadow:
+    0 0 0 2px var(--bg),
+    0 0 0 4px var(--focus);
+}
+.ccorner .ibtn.mic:focus-visible {
+  box-shadow:
+    inset 0 0 0 1px var(--line-2),
+    0 0 0 2px var(--bg),
+    0 0 0 4px var(--focus);
+}
+
+/* Disclosure chevrons turn as a group opens. */
+.caret svg.i,
+.twist svg.i,
+.proj-h .caret svg.i {
+  transition: transform var(--t-ui) var(--ease-out);
+}
+/* The transcript's disclosure chevron is drawn in CSS (a 1.5 px line like the icons): the trusted-surface tests allow
+   no SVG inside transcript rows. The span turns 90 degrees when open (transcript.css). */
+.caret {
+  display: inline-grid;
+  place-items: center;
+  width: 14px;
+  height: 14px;
+}
+.caret:empty::before {
+  content: "";
+  width: 5px;
+  height: 5px;
+  margin-left: -2px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: rotate(-45deg);
+}
+
+/* 5. Side panel tabs: the selected pill slides; a new tab body fades in. */
+.ptabs {
+  position: relative;
+  isolation: isolate;
+}
+.ptab-pill {
+  position: absolute;
+  z-index: -1;
+  top: 7px;
+  bottom: 7px;
+  left: 0;
+  border-radius: 7px;
+  background: var(--active);
+  transition:
+    transform var(--t-ui) var(--ease-out),
+    width var(--t-ui) var(--ease-out);
+}
+.ptabs:has(.ptab-pill) .ptab-group[data-selected="true"] {
+  background: transparent;
+}
+.pbody > * {
+  animation: vw-fade-in 150ms var(--ease-std);
+}
+
+/* 6. The side panel: its content fades in just after the panel starts to open. */
+.body.has-panel .panel .pbody {
+  animation: vw-fade-in 160ms var(--ease-std) 60ms both;
+}
+
+/* 7. Approval and question cards: rise in and send one pulse, the first time they are on screen. */
+.approval.arrive {
+  animation:
+    vw-arrive var(--t-arrive) var(--ease-out),
+    vw-attention 900ms var(--ease-std) 260ms 1;
+}
+@keyframes vw-arrive {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.985);
+  }
+}
+@keyframes vw-attention {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--orange) 45%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 10px transparent;
+  }
+}
+
+/* 8. Streaming text: a stepped orange block marks where Vibe is writing. */
+.a-msg.streaming .md > :last-child::after {
+  content: "";
+  display: inline-block;
+  width: 0.5em;
+  height: 1em;
+  margin-left: 3px;
+  vertical-align: -0.14em;
+  background: var(--orange);
+  animation: vw-blink 1s steps(1) infinite;
+}
+@keyframes vw-blink {
+  50% {
+    opacity: 0;
+  }
+}
+.jump-latest {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  animation: vw-rise 200ms var(--ease-out);
+}
+.jump-latest:hover {
+  background: var(--hover);
+}
+
+/* 9. The working indicator (components/Walker): one lit pixel steps round a 2x2 square, 200 ms a step. */
+.walker {
+  display: inline-grid;
+  grid-template-columns: repeat(2, var(--wp, 5px));
+  gap: 1px;
+  flex: none;
+  vertical-align: middle;
+}
+.walker i {
+  width: var(--wp, 5px);
+  height: var(--wp, 5px);
+  background: color-mix(in srgb, var(--orange) 22%, transparent);
+  animation: vw-walk 0.8s steps(1) infinite;
+}
+/* Clockwise: top-left, top-right, bottom-right, bottom-left. */
+.walker i:nth-child(2) {
+  animation-delay: -0.6s;
+}
+.walker i:nth-child(4) {
+  animation-delay: -0.4s;
+}
+.walker i:nth-child(3) {
+  animation-delay: -0.2s;
+}
+.walker-badge {
+  --wp: 3px;
+}
+.walker-large {
+  --wp: 9px;
+  gap: 2px;
+}
+@keyframes vw-walk {
+  0% {
+    background: var(--orange);
+  }
+  25% {
+    background: color-mix(in srgb, var(--orange) 55%, transparent);
+  }
+  50%,
+  100% {
+    background: color-mix(in srgb, var(--orange) 22%, transparent);
+  }
+}
+
+/* 10. A row that moves into "Needs you" lands with one orange wash (sessions/listMotion). */
+.landed {
+  animation: vw-landed 900ms var(--ease-std);
+}
+@keyframes vw-landed {
+  from {
+    background: color-mix(in srgb, var(--orange) 20%, transparent);
+  }
+}
+
+/* 11. Toasts: rise in, a hairline shows the time left (paused on hover), slide out sideways. */
+.toast {
+  position: relative;
+  overflow: hidden;
+  animation: vw-toast-in var(--t-panel) var(--ease-out);
+}
+.toast.out {
+  animation: vw-toast-out 160ms var(--ease-in) forwards;
+}
+.toast-timer {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  background: var(--line-3);
+  transform-origin: left;
+  animation-name: vw-timer;
+  animation-timing-function: linear;
+  animation-fill-mode: forwards;
+}
+.toast-timer[data-paused="true"] {
+  animation-play-state: paused;
+}
+@keyframes vw-toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.98);
+  }
+}
+@keyframes vw-toast-out {
+  to {
+    opacity: 0;
+    transform: translateX(16px);
+  }
+}
+@keyframes vw-timer {
+  to {
+    transform: scaleX(0);
+  }
+}
+
+/* 12. The calm idle state: a faint construction grid fading out from the centre behind the start view. */
+.view-welcome {
+  position: relative;
+}
+.welcome-grid {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(var(--line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line) 1px, transparent 1px);
+  background-size: 32px 32px;
+  mask-image: radial-gradient(ellipse at 50% 32%, var(--bg) 0%, transparent 62%);
+  -webkit-mask-image: radial-gradient(ellipse at 50% 32%, var(--bg) 0%, transparent 62%);
+}
+.welcome {
+  position: relative;
+}
+.welcome .brand-mark {
+  display: block;
+  margin-bottom: 18px;
+}
+
+/* 13. Empty states and skeletons. */
+.empty-state {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  text-align: center;
+  color: var(--text-2);
+  padding: 28px 16px;
+}
+.empty-state .pixel {
+  fill: var(--text-3);
+  opacity: 0.8;
+}
+.empty-state.small {
+  padding: 18px 8px;
+  gap: 8px;
+}
+.empty-state .empty-text {
+  max-width: 44ch;
+}
+.sk-card {
+  display: grid;
+  gap: 10px;
+  align-content: start;
+  min-height: 150px;
+  pointer-events: none;
+}
+.sk {
+  position: relative;
+  display: block;
+  height: 10px;
+  border-radius: 4px;
+  background: var(--hover);
+  overflow: hidden;
+}
+.sk.sk-bar {
+  height: 5px;
+  width: 100%;
+}
+.sk::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in srgb, var(--text) 7%, transparent),
+    transparent
+  );
+  transform: translateX(-100%);
+  animation: vw-shimmer 1.6s var(--ease-std) infinite;
+}
+@keyframes vw-shimmer {
+  to {
+    transform: translateX(100%);
+  }
+}
+.pj-skeleton + * {
+  animation: vw-fade-in 220ms var(--ease-out);
+}
+
+/* 14. Small confirmations: the copy icon turns into a check. */
+.copy-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.copy-ic {
+  position: relative;
+  width: 14px;
+  height: 14px;
+  flex: none;
+}
+/* Two offset rounded squares (Lucide's copy, 1.5 px line) that turn into a check mark when copied. */
+.copy-ic::before,
+.copy-ic::after {
+  content: "";
+  position: absolute;
+  border: 1.5px solid currentColor;
+  border-radius: 2.5px;
+  transition:
+    opacity 150ms var(--ease-std),
+    transform 200ms var(--ease-out);
+}
+.copy-ic::before {
+  left: 0;
+  top: 0;
+  width: 9px;
+  height: 9px;
+  border-right-color: transparent;
+  border-bottom-color: transparent;
+}
+.copy-ic::after {
+  left: 4px;
+  top: 4px;
+  width: 9px;
+  height: 9px;
+}
+.copy-btn.copied .copy-ic::before {
+  opacity: 0;
+}
+.copy-btn.copied .copy-ic::after {
+  left: 3px;
+  top: 1px;
+  width: 6px;
+  height: 10px;
+  border-width: 0 1.75px 1.75px 0;
+  border-radius: 0 0 1px 0;
+  transform: rotate(45deg);
+}
+.copy-btn.copied {
+  color: var(--green);
+}
+.copy-btn.failed {
+  color: var(--red);
+}
+
+/* 15. The theme switch: the icon turns as it swaps; the window cross-fades (view transition). */
+.ibtn[data-theme-switch] svg {
+  animation: vw-turn var(--t-ui) var(--ease-out);
+}
+@keyframes vw-turn {
+  from {
+    opacity: 0;
+    transform: rotate(-90deg) scale(0.7);
+  }
+}
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: var(--t-ui);
+  animation-timing-function: var(--ease-std);
+}
+
+/* Search matches. */
+mark {
+  background: var(--mark);
+  color: inherit;
+  border-radius: 3px;
+  padding: 0 1px;
+}
+
+/* The title-bar brand: Inter at weight 650 with tight tracking squeezed the space ("VibeWork"); keep it readable. */
+.brand-name {
+  word-spacing: 0.1em;
+  white-space: nowrap;
+}
+
+/* Pages that lie over the work view (Settings, Projects overview, Tools): the view underneath stays mounted. */
+.content-base {
+  display: contents;
+}
+.content.has-page > .content-base > * {
+  visibility: hidden;
+}
+.content-page {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
+  background: var(--bg);
+  animation: vw-fade-in 150ms var(--ease-std);
+}
+
+@keyframes vw-fade-in {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes vw-rise {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 6px);
+  }
+}
+
+/* 14. A kept or reverted hunk folds shut while the change is applied. */
+.hunk {
+  transition:
+    opacity var(--t-ui) var(--ease-std),
+    max-height var(--t-ui) var(--ease-in);
+  max-height: 4000px;
+}
+.hunk.leaving {
+  opacity: 0.35;
+  max-height: 44px;
+  overflow: hidden;
+  pointer-events: none;
+}
+.mini {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}

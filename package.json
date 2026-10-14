@@ -1,0 +1,16 @@
+{
+  "name": "vibe-work-workspace",
+  "private": true,
+  "license": "MIT",
+  "description": "Workspace root for Vibe Work, a desktop app for Mistral's Vibe coding agent. Holds the project-local Tauri CLI; the UI lives in ui/.",
+  "packageManager": "pnpm@10.33.0",
+  "scripts": {
+    "tauri": "tauri",
+    "icons:generate": "node scripts/public/generate_icons.mjs",
+    "ui:dev": "pnpm --filter vibe-work-ui dev",
+    "check": "bash scripts/public/check.sh"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "2.12.1"
+  }
+}

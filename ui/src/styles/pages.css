@@ -1,0 +1,429 @@
+/*
+ * Pages tab: the project handbook. Toolbar, hub, the plan's progress header, the page area the native
+ * page viewer is placed over, notices and the comments of the shown page. Tokens only (scripts/public/check_colors.mjs).
+ * Used by: ui/src/features/pages/*.
+ */
+.pbody:has(> .pages-tab) {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 12px;
+}
+.pages-tab {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1;
+  min-height: 0;
+}
+.pages-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  flex-wrap: wrap;
+}
+.pages-path {
+  flex: 1;
+  min-width: 60px;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pages-sandbox {
+  font-size: 11px;
+  color: var(--text-3);
+  border: 1px solid var(--line-2);
+  border-radius: 999px;
+  padding: 1px 8px;
+  white-space: nowrap;
+}
+.pages-actions {
+  display: inline-flex;
+  gap: 4px;
+  margin-left: auto;
+}
+.pages-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid var(--line-2);
+  background: var(--raised);
+  color: var(--text);
+  border-radius: 7px;
+  padding: 4px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.pages-btn:hover:not(:disabled) {
+  background: var(--hover);
+}
+.pages-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.pages-btn[aria-pressed="true"] {
+  background: var(--active);
+}
+.pages-btn.go {
+  background: var(--primary-bg);
+  color: var(--primary-fg);
+  border-color: transparent;
+}
+.pages-error {
+  margin: 0;
+  color: var(--red);
+  font-size: 12.5px;
+}
+.pages-note {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-3);
+}
+.pages-external,
+.pages-stale {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 8px 10px;
+  border-radius: 8px;
+  font-size: 12.5px;
+  background: color-mix(in srgb, var(--orange-3) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--orange-3) 40%, transparent);
+}
+.pages-url {
+  font-family: var(--mono);
+  word-break: break-all;
+}
+.pages-planhead {
+  flex: none;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+}
+.pages-planhead-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 13px;
+}
+.pages-planhead-title {
+  font-weight: 600;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pages-planhead-sub {
+  color: var(--text-3);
+  font-size: 12px;
+}
+.pages-planhead-live {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--orange-2);
+}
+.pages-pbar {
+  display: flex;
+  gap: 3px;
+  margin: 8px 0 2px;
+}
+.pages-pbar i {
+  flex: 1;
+  height: 5px;
+  border-radius: 3px;
+  background: var(--line-2);
+}
+.pages-pbar i[data-status="done"] {
+  background: var(--green);
+}
+.pages-pbar i[data-status="doing"],
+.pages-pbar i[data-live="true"] {
+  background: var(--orange);
+}
+.pages-pbar i[data-status="blocked"] {
+  background: var(--red);
+}
+.pages-planhead .pages-stale {
+  margin-top: 8px;
+}
+.pages-hub {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+.pages-empty {
+  /* Intrinsic item heights keep the mouse hit box stable through focus and press. */
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 24px 8px;
+  font-size: 13px;
+  color: var(--text-2);
+}
+.pages-empty p {
+  margin: 0;
+  max-width: 42ch;
+}
+.pages-empty .pages-btn {
+  max-width: 100%;
+  min-height: 36px;
+  text-align: left;
+  white-space: normal;
+}
+.pages-plan-link {
+  margin-top: 8px;
+  border: 0;
+  padding: 4px 0;
+  background: transparent;
+  color: var(--blue);
+  font-size: 12px;
+  text-align: left;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+.pages-plan-link:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.pages-hub-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.pages-hub-top h3 {
+  margin: 0;
+  font-size: 15px;
+}
+.pages-hub-group {
+  margin: 12px 0 0;
+}
+.pages-hub-group h4 {
+  display: flex;
+  justify-content: space-between;
+  margin: 0 0 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-3);
+}
+.pages-hub-group ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.pages-hub-row {
+  display: grid;
+  gap: 2px;
+  width: 100%;
+  text-align: left;
+  border: 0;
+  border-top: 1px solid var(--line);
+  background: var(--bg);
+  color: var(--text);
+  padding: 8px 12px;
+  font: inherit;
+  font-size: 13px;
+}
+li:first-child > .pages-hub-row {
+  border-top: 0;
+}
+button.pages-hub-row {
+  cursor: pointer;
+}
+button.pages-hub-row:hover {
+  background: var(--hover);
+}
+.pages-hub-meta,
+.pages-hub-path {
+  font-size: 11.5px;
+  color: var(--text-3);
+}
+.pages-hub-path {
+  font-family: var(--mono);
+}
+.pages-flag {
+  font-size: 11.5px;
+  color: var(--red);
+}
+.pages-flag[data-severity="warning"] {
+  color: var(--orange-2);
+}
+.pages-flag[data-severity="info"] {
+  color: var(--text-3);
+}
+/* the handbook's manifest, notices, findings and tags. */
+.pages-pill {
+  font-size: 11px;
+  color: var(--text-2);
+  border: 1px solid var(--line-2);
+  border-radius: 999px;
+  padding: 1px 8px;
+  text-transform: capitalize;
+}
+.pages-summary {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: var(--text-2);
+}
+.pages-notice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 0 0;
+  padding: 8px 10px;
+  font-size: 12.5px;
+  color: var(--text-2);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--orange-3) 9%, transparent);
+}
+.pages-notice > span {
+  flex: 1 1 220px;
+}
+.pages-health {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 0 0;
+  font-size: 12px;
+  color: var(--text-3);
+}
+.pages-health > span {
+  flex: 1 1 auto;
+}
+.pages-findings {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+}
+.pages-findings li {
+  display: flex;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-2);
+  padding: 5px 8px;
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--orange-3) 9%, transparent);
+}
+.pages-findings li[data-severity="error"] {
+  background: var(--red-soft);
+}
+.pages-findings code {
+  font: 11px var(--mono);
+  color: var(--text-3);
+  white-space: nowrap;
+  padding-top: 1px;
+}
+.pages-tag {
+  font-size: 10.5px;
+  font-weight: 500;
+  color: var(--text-3);
+  border: 1px solid var(--line-2);
+  border-radius: 5px;
+  padding: 0 5px;
+  margin-left: 6px;
+  vertical-align: 1px;
+}
+.pages-hub-desc {
+  font-size: 12px;
+  color: var(--text-2);
+}
+.pages-hub-group details > summary {
+  display: flex;
+  justify-content: space-between;
+  margin: 0 0 6px;
+  font-size: 12px;
+  color: var(--text-3);
+  cursor: pointer;
+}
+.pages-viewport {
+  flex: 1;
+  min-height: 120px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--raised);
+}
+.pages-tab[data-view="hub"] .pages-viewport {
+  display: none;
+}
+.pages-comments {
+  flex: none;
+  max-height: 40%;
+  overflow: auto;
+  font-size: 13px;
+}
+.pages-comments summary {
+  cursor: pointer;
+  color: var(--text-2);
+  font-size: 12.5px;
+}
+.pages-cbox {
+  display: grid;
+  gap: 6px;
+}
+.pages-cbox textarea {
+  width: 100%;
+  min-height: 60px;
+  resize: vertical;
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+  padding: 8px 10px;
+  font: inherit;
+  font-size: 13px;
+}
+.pages-cbox-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.pages-quote {
+  color: var(--text-3);
+}
+.pages-comment-list {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+.pages-comment {
+  display: grid;
+  gap: 2px;
+  border-left: 2px solid var(--blue);
+  padding: 2px 0 2px 10px;
+}
+.pages-comment-where {
+  font-size: 11.5px;
+  color: var(--text-3);
+}
+.pages-comment-acts {
+  display: flex;
+  gap: 6px;
+  margin-top: 2px;
+}
+.pages-detached {
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--text-3);
+  border: 1px dashed var(--line-2);
+  border-radius: 8px;
+  padding: 8px 10px;
+}

@@ -1,0 +1,31 @@
+[package]
+name = "vw-gate"
+description = "Method gate: allowlist and typed privileged handlers"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+vw-vocabulary = { path = "../vw-vocabulary" }
+vw-session = { path = "../vw-session" }
+vw-rpc = { path = "../vw-rpc" }
+vw-protocol = { path = "../vw-protocol" }
+vw-supervisor = { path = "../vw-supervisor" }
+vw-platform = { path = "../vw-platform" }
+vw-mistral = { path = "../vw-mistral" }
+serde = { version = "1", features = ["derive"] }
+# float_roundtrip: parse f64 exactly so forwarded params stay byte-faithful; features unify across
+# the workspace (same note as vw-session).
+serde_json = { version = "1", features = ["float_roundtrip"] }
+thiserror = "2"
+# WHATWG URL parsing for the MCP server address rule (`mcp_url.rs`; already in Cargo.lock via vw-platform).
+url = "2"
+tracing = "0.1"
+# CSPRNG for confirmation tokens and client message ids (getrandom 0.3.4 is already in Cargo.lock).
+getrandom = "0.3"

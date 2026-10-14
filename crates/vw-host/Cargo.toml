@@ -1,0 +1,49 @@
+[package]
+name = "vw-host"
+description = "Everything the Vibe Work app does that is not Tauri: starts the core and the Debug API, forwards events, brokers UI-control requests, guards navigation"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+vw-core-api = { path = "../vw-core-api" }
+# The guard names and matchers of the hooks.toml block.
+vw-agent-tools = { path = "../vw-agent-tools" }
+vw-debug-api = { path = "../vw-debug-api" }
+vw-gate = { path = "../vw-gate" }
+vw-platform = { path = "../vw-platform" }
+vw-supervisor = { path = "../vw-supervisor" }
+# Vibe is installed at setup (the installer the user build hands to the core).
+vw-vibe-install = { path = "../vw-vibe-install" }
+vw-keys = { path = "../vw-keys" }
+# The user-build launch (product.rs) builds the key service config: vault location and
+# device store, proxy upstreams.
+vw-vault = { path = "../vw-vault" }
+vw-keyproxy = { path = "../vw-keyproxy" }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["float_roundtrip"] }
+thiserror = "2"
+tokio = { version = "1.53", features = ["macros", "process", "rt", "sync", "time"] }
+tracing = "0.1"
+# UI-control capabilities: 256 bits from the OS RNG; getrandom 0.3 is already in the
+# lock file (vw-gate, vw-debug-api, ...).
+getrandom = "0.3"
+# URL parsing for the navigation guard; already in the tree through tauri (MIT/Apache-2.0).
+url = "2"
+# Update packages kept on disk are verified again by us before they are offered or installed: the
+# plugin verifies only right after its own download. minisign-verify 0.2.5 (MIT, zero dependencies; the plugin uses
+# the same crate), base64 0.22 and sha2 0.10.9 (RustCrypto) and semver 1 are already in the tree.
+minisign-verify = "0.2.5"
+base64 = "0.22"
+sha2 = "0.10.9"
+semver = "1"
+# Session titles: reads Vibe Work's own config.toml to decide whether to add a title model; toml 1 is
+# already in the tree (vw-core-api, tauri).
+toml = "1"
+toml_edit = { version = "0.25", default-features = false, features = ["parse", "display"] }

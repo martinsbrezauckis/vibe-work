@@ -1,0 +1,348 @@
+/*
+ * The Mistral key screens: the first-run setup screen, the inline unlock prompt, and the
+ * Settings sections for the key and the default model. Colours and the shadow come from tokens.css
+ * only; sizes follow the welcome view.
+ */
+.setup {
+  max-width: 560px;
+  margin: 0 auto;
+  padding: 10vh 24px 32px;
+}
+/* The chat remains usable for drafting; this notice only explains why the agent cannot answer. */
+.key-notice {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 12px 0;
+  padding: 14px 16px;
+  border: 1px solid var(--orange);
+  border-radius: 8px;
+  background: var(--panel);
+  text-align: left;
+}
+.key-notice p {
+  flex: 1 1 240px;
+  margin: 0;
+  color: var(--text);
+  line-height: var(--leading-ui);
+}
+.key-notice .btn-primary {
+  flex-shrink: 0;
+}
+.view-tx > .key-notice {
+  margin: 12px 24px 0;
+}
+.setup h2 {
+  font-size: var(--text-28);
+  letter-spacing: -0.02em;
+  font-weight: var(--weight-heading);
+  margin: 0 0 14px;
+}
+.setup-step {
+  display: grid;
+  gap: 14px;
+}
+.setup-step h3 {
+  margin: 0;
+  font-size: var(--text-17);
+  font-weight: var(--weight-heading);
+}
+.setup-step > p,
+.setup p {
+  margin: 0;
+  color: var(--text-2);
+  line-height: var(--leading-ui);
+}
+.key-field {
+  display: grid;
+  gap: 6px;
+}
+.key-field label {
+  font-size: var(--text-13);
+  font-weight: var(--weight-semibold);
+  color: var(--text);
+}
+.key-field-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.key-field-row input {
+  flex: 1;
+  min-width: 0;
+  height: var(--control-height-field);
+  box-sizing: border-box;
+  padding: 0 12px;
+  border-radius: 9px;
+  border: 1px solid var(--line-2);
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--text-14);
+}
+.key-field-row input:focus-visible {
+  outline: none;
+  box-shadow:
+    0 0 0 2px var(--bg),
+    0 0 0 4px var(--focus);
+}
+.key-field-row input[aria-invalid="true"] {
+  border-color: var(--red);
+}
+.key-field-hint {
+  margin: 0;
+  font-size: var(--text-12-5);
+  color: var(--text-3);
+  line-height: var(--leading-helper);
+}
+.key-field-hint[data-level="short"] {
+  color: var(--orange-3);
+}
+.key-field-hint[data-level="good"] {
+  color: var(--green);
+}
+.key-problem {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--line-2);
+  border-left: 3px solid var(--red);
+  border-radius: 8px;
+  background: var(--red-soft);
+  color: var(--text);
+  font-size: var(--text-13);
+  line-height: var(--leading-helper);
+}
+.key-success {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--line-2);
+  border-left: 3px solid var(--green);
+  border-radius: 8px;
+  background: var(--green-soft);
+  color: var(--text);
+  font-size: var(--text-14);
+}
+.key-offer {
+  display: grid;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--line-2);
+  border-radius: 10px;
+  background: var(--panel);
+  margin: 0;
+}
+.key-offer p {
+  margin: 0;
+}
+fieldset.key-offer {
+  min-width: 0;
+}
+.key-saved {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.key-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.key-actions.wrap {
+  margin-top: 6px;
+}
+.key-remember {
+  display: grid;
+  gap: 6px;
+}
+.key-check {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  font-size: var(--text-13-5);
+  color: var(--text);
+}
+.key-check input {
+  accent-color: var(--orange);
+  width: 16px;
+  height: 16px;
+}
+.key-link {
+  all: unset;
+  cursor: pointer;
+  color: var(--blue);
+  font-size: var(--text-12-5);
+  text-decoration: underline;
+  justify-self: start;
+}
+.key-link:focus-visible {
+  outline: none;
+  box-shadow:
+    0 0 0 2px var(--bg),
+    0 0 0 4px var(--focus);
+}
+.vault-choices {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+}
+.vault-choice {
+  all: unset;
+  cursor: pointer;
+  display: grid;
+  gap: 4px;
+  padding: 12px 14px;
+  border: 1px solid var(--line-2);
+  border-radius: 10px;
+  background: var(--panel);
+  font-size: var(--text-12-5);
+  color: var(--text-2);
+}
+.vault-choice strong {
+  color: var(--text);
+  font-size: var(--text-14);
+}
+.vault-choice[aria-checked="true"] {
+  border-color: var(--orange-2);
+  background: var(--orange-soft);
+}
+.vault-choice:focus-visible {
+  outline: none;
+  box-shadow:
+    0 0 0 2px var(--bg),
+    0 0 0 4px var(--focus);
+}
+.key-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+.key-ask {
+  display: grid;
+  gap: 10px;
+}
+.key-line {
+  margin: 0 0 8px;
+  font-size: var(--text-13);
+  color: var(--text-2);
+  line-height: var(--leading-helper);
+}
+.vault-path {
+  overflow-wrap: anywhere;
+}
+.key-select {
+  height: var(--control-height-small);
+  max-width: 220px;
+  border-radius: 8px;
+  border: 1px solid var(--line-2);
+  background-color: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--text-13);
+  padding: 0 24px 0 8px;
+}
+.modal .key-field-row input {
+  height: 32px;
+}
+@media (max-width: 600px) {
+  .setup {
+    padding: 24px 16px 32px;
+  }
+  .setup h2 {
+    font-size: var(--text-24);
+  }
+  .vault-choices {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* the Vibe install step (offer, progress output, existing installs). */
+.vibe-install {
+  display: grid;
+  gap: 10px;
+  justify-items: start;
+  margin-bottom: 28px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid var(--line-2);
+}
+.vibe-install > progress,
+.vibe-install > .vibe-tail,
+.vibe-install > p,
+.vibe-install > details {
+  justify-self: stretch;
+}
+.vibe-install > progress {
+  width: 100%;
+  height: 6px;
+  accent-color: var(--orange);
+}
+.vibe-sources,
+.vibe-commands,
+.vibe-existing {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 6px;
+}
+.vibe-sha {
+  display: block;
+  font-size: var(--text-11);
+  color: var(--text-3);
+  overflow-wrap: anywhere;
+}
+.vibe-commands code,
+.vibe-existing code {
+  overflow-wrap: anywhere;
+}
+/* the offer's facts as one spaced column; secondary actions as outlined buttons (they were native grey
+   buttons); the "Commands that will run" toggle reads like the rest of the step. */
+.vibe-offer {
+  justify-self: stretch;
+  display: grid;
+  gap: 10px;
+  justify-items: start;
+}
+.vibe-offer > p,
+.vibe-offer > details,
+.vibe-offer > .vibe-sources {
+  margin: 0;
+  justify-self: stretch;
+}
+.vibe-install details > summary {
+  cursor: pointer;
+  color: var(--text-2);
+  font-size: var(--text-13);
+}
+.vibe-install details[open] > summary {
+  margin-bottom: 6px;
+}
+.vibe-install .tb-btn {
+  border: 1px solid var(--line-2);
+  height: var(--control-height-search);
+  padding: 0 12px;
+  font-size: var(--text-13);
+  color: var(--text);
+}
+.vibe-existing > li {
+  display: grid;
+  gap: 6px;
+  justify-items: start;
+}
+.vibe-tail {
+  margin: 0;
+  max-height: 180px;
+  overflow: auto;
+  padding: 8px 10px;
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  font-size: var(--text-11);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

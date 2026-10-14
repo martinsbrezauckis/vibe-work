@@ -1,0 +1,108 @@
+/*
+ * The content area: session header with the side-panel buttons, the view below it, the welcome
+ * (new-session) view and the server note. The stylesheet stays separate from shell.css
+ * to keep each layout file within the size target; the transcript itself is styled in
+ * transcript.css. Colours come from tokens.css only.
+ */
+.content {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  grid-template-columns: minmax(0, 1fr);
+  min-height: 0;
+  min-width: 0;
+  position: relative;
+  overflow: hidden;
+}
+.shead {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px 10px 22px;
+  min-height: 54px;
+  border-bottom: 1px solid var(--line);
+  min-width: 0;
+}
+.shead h1 {
+  font-size: 15px;
+  font-weight: 600;
+  margin: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.shead .acts {
+  margin-left: auto;
+  display: flex;
+  gap: 2px;
+  align-items: center;
+  flex: none;
+}
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-2);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 3px 8px;
+  white-space: nowrap;
+}
+.pbtn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  background: none;
+  color: var(--text-3);
+  padding: 6px 8px;
+  border-radius: 7px;
+  cursor: pointer;
+  font-size: 12.5px;
+}
+.pbtn:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+.pbtn[aria-pressed="true"] {
+  color: var(--text);
+  background: var(--active);
+}
+.has-panel .shead .lbltxt {
+  display: none;
+}
+.view {
+  overflow: auto;
+  min-height: 0;
+  min-width: 0;
+}
+.welcome {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 18vh 32px 22px;
+}
+.welcome h2 {
+  font-size: 34px;
+  letter-spacing: -0.025em;
+  font-weight: 650;
+  margin: 0 0 6px;
+}
+.welcome p {
+  color: var(--text-2);
+  margin: 0;
+}
+.server-note {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  margin: 18px 0 0;
+  padding: 10px 12px;
+  border: 1px solid var(--line-2);
+  border-left: 3px solid var(--orange-3);
+  border-radius: 8px;
+  background: var(--panel);
+  font-size: 13px;
+  color: var(--text-2);
+}

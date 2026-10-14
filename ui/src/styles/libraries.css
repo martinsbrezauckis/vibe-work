@@ -1,0 +1,199 @@
+/* Libraries page: the Ask box with its answer and sources, the library list beside the selected
+   library's documents, and the text viewer. Builds on the Connectors page's layout classes (cpage, cmain, chead).
+   Tokens only; works down to 390 px. */
+.lib-costs {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+.lib-ask {
+  margin: 16px 0 6px;
+  padding: 14px 16px;
+  background: var(--panel);
+  border: 1px solid var(--line-2);
+  border-radius: 10px;
+}
+.lib-ask h3,
+.lib-detail-head h3 {
+  margin: 0 0 8px;
+  font-size: 14px;
+}
+.lib-ask-row,
+.lib-new,
+.lib-detail-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.lib-ask-row input,
+.lib-new input {
+  flex: 1 1 220px;
+  min-width: 0;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  padding: 7px 10px;
+  font-size: 13px;
+}
+.lib-answer {
+  margin-top: 12px;
+}
+.lib-answer-text {
+  white-space: pre-wrap;
+  font-size: 13.5px;
+  line-height: 1.55;
+  margin: 0 0 10px;
+}
+.lib-sources {
+  margin: 0 0 8px;
+  padding-left: 0;
+  list-style: none;
+  display: grid;
+  gap: 6px;
+}
+.lib-source {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--blue);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  text-align: left;
+}
+.lib-source:disabled {
+  color: var(--text-3);
+  cursor: default;
+}
+.lib-snippet {
+  margin: 2px 0 0;
+}
+.lib-columns {
+  display: grid;
+  grid-template-columns: 280px minmax(0, 1fr);
+  gap: 18px;
+  margin-top: 16px;
+}
+.lib-side {
+  display: grid;
+  gap: 12px;
+  align-content: start;
+  min-width: 0;
+}
+.lib-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+}
+.lib-item {
+  width: 100%;
+  display: grid;
+  gap: 2px;
+  text-align: left;
+  background: none;
+  color: var(--text);
+  border: 1px solid transparent;
+  border-radius: 8px;
+  padding: 8px 10px;
+  cursor: pointer;
+}
+.lib-item:hover {
+  background: var(--hover);
+}
+.lib-item[aria-current="true"] {
+  border-color: var(--line-3);
+  background: var(--raised);
+}
+.lib-item-name,
+.lib-doc-name {
+  font-size: 13.5px;
+  overflow-wrap: anywhere;
+}
+.lib-scope {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  font-size: 12.5px;
+  color: var(--text-2);
+}
+.lib-scope select {
+  background-color: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  padding: 5px 24px 5px 8px;
+  font: inherit;
+  font-size: 12.5px;
+}
+/* "Make library" is a real button next to the field (it read as plain text). */
+.lib-new .tb-btn {
+  border: 1px solid var(--line-2);
+}
+.lib-side .lib-new input {
+  flex-basis: 100%;
+}
+.lib-detail {
+  min-width: 0;
+}
+.lib-detail-bar {
+  margin: 4px 0 12px;
+}
+.lib-docs {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border-top: 1px solid var(--line);
+}
+.lib-doc {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: space-between;
+  align-items: center;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--line);
+}
+.lib-doc-main {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  flex: 1 1 260px;
+}
+.lib-summary {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.lib-processing {
+  color: var(--orange-2);
+}
+.lib-doc-actions {
+  display: flex;
+  gap: 6px;
+}
+.modal.lib-viewer {
+  width: min(760px, calc(100vw - 32px));
+}
+.lib-text {
+  margin: 0;
+  max-height: 60vh;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: 12.5px/1.55 var(--mono);
+  background: var(--bg);
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+@media (max-width: 900px) {
+  .lib-columns {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

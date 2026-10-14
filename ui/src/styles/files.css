@@ -1,0 +1,170 @@
+/*
+ * File tab and file references: the header with the file's name, path and tools, notices, the text view
+ * with line numbers, Markdown and picture views, the area the isolated viewer is placed over, and the look of a
+ * clickable path in the transcript. Tokens only (scripts/public/check_colors.mjs).
+ * Used by: ui/src/features/files/*, the transcript rows (FileRef).
+ */
+.fref {
+  display: inline;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  background: none;
+  color: var(--syn-link);
+  font: inherit;
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-underline-offset: 2px;
+  cursor: pointer;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+.fref:hover {
+  text-decoration-style: solid;
+}
+.fref:focus-visible {
+  outline: none;
+  box-shadow:
+    0 0 0 2px var(--bg),
+    0 0 0 4px var(--focus);
+  border-radius: 3px;
+}
+.fref code {
+  color: inherit;
+}
+.step-file {
+  margin: 0 0 6px;
+  font-size: 12px;
+  color: var(--text-2);
+  font-family: var(--mono);
+}
+.pbody:has(> .file-tab) {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 12px;
+}
+.file-tab {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1;
+  min-height: 0;
+}
+.file-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  flex: none;
+}
+.file-title {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1 1 160px;
+}
+.file-name {
+  font-weight: 600;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.file-path,
+.file-meta {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.file-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+}
+.file-tools select {
+  max-width: 180px;
+  background-color: var(--raised);
+  color: var(--text);
+  border: 1px solid var(--line-2);
+  border-radius: 7px;
+  padding: 3px 22px 3px 6px;
+  font-size: 12px;
+}
+.file-note {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-2);
+  border: 1px solid var(--line-2);
+  background: var(--raised);
+  border-radius: 7px;
+  padding: 6px 10px;
+  flex: none;
+}
+.file-note.warn {
+  border-color: var(--orange);
+  background: var(--orange-soft);
+  color: var(--text);
+}
+.file-url {
+  font-family: var(--mono);
+  overflow-wrap: anywhere;
+}
+.file-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+.file-text pre {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text);
+  white-space: pre;
+}
+.file-line {
+  display: block;
+}
+.file-line.at {
+  background: var(--active);
+}
+.file-ln {
+  display: inline-block;
+  min-width: 3.5em;
+  padding-right: 10px;
+  text-align: right;
+  color: var(--text-3);
+  user-select: none;
+}
+.file-md {
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+.file-image {
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+}
+.file-image img {
+  max-width: 100%;
+  height: auto;
+  border: 1px solid var(--line-2);
+  border-radius: 6px;
+  background: var(--panel);
+}
+.file-viewport {
+  flex: 1;
+  min-height: 160px;
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  background: var(--panel);
+}

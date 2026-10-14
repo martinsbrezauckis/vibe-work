@@ -1,0 +1,75 @@
+# Workspace manifest for the copied ShellX Vault crates (Vibe Work's own file, NOT copied from Vault).
+#
+# The crates under crates/ are a byte-for-byte copy of ShellX Vault (MIT) at the
+# revision named in PROVENANCE.json (per-file SHA-256), which the maintainers' provenance check and contract
+# test prove. Never edit those files: anything that needs changing goes to Vault.
+#
+# Why a separate workspace: the copied crates inherit `version`, `edition` and their dependency
+# versions from a workspace (`workspace = true`). The root Vibe Work workspace excludes this folder,
+# so this manifest supplies the same values the upstream root manifest does (versions copied from
+# ShellX Vault's root Cargo.toml at the same revision; only the member list differs; the dependency
+# versions only vault-broker used (png, fs2, base64) are kept so the table stays a verbatim copy).
+#
+# Use: `vault-core` (the shared storage core) is a dependency of crates/vw-vault (product).
+# `vault-client` and `vault-server` are compiled only by the maintainers' integration tests, as the oracle that writes
+# and reads real vault data in the interop tests. Everything above the storage core (profiles,
+# grants, agent requests: upstream `vault-broker`) is not copied: Vibe Work's own client replaces it
+# (Martins, 2026-10-09).
+# Never build this folder on its own; it is compiled as a path dependency of the root workspace and
+# of the private test crate, so it shares their lockfiles.
+[workspace]
+resolver = "2"
+members = [
+    "crates/vault-core",
+    "crates/vault-server",
+    "crates/vault-client",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+authors = ["Martins"]
+
+[workspace.dependencies]
+vault-core = { path = "crates/vault-core" }
+vault-client = { path = "crates/vault-client" }
+
+argon2 = "0.5.3"
+chacha20poly1305 = "0.10.1"
+x25519-dalek = { version = "2.0.1", features = ["static_secrets"] }
+blake3 = "1.8"
+subtle = "2.6"
+zeroize = { version = "1.8", features = ["zeroize_derive"] }
+
+fastcdc = "4.0.1"
+postcard = { version = "1.1", features = ["use-std"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+lz4_flex = "0.13"
+hex = "0.4"
+base64 = "0.22"
+png = "0.17"
+
+axum = "0.8.9"
+tower-http = { version = "0.6", features = ["timeout"] }
+reqwest = { version = "0.13", features = ["json"] }
+walkdir = "2.5"
+globset = "0.4"
+notify = "8.2"
+notify-debouncer-full = "0.7"
+rpassword = "7.5"
+futures-util = "0.3"
+anyhow = "1"
+tokio = { version = "1.52", features = ["rt-multi-thread", "macros", "fs", "signal", "process", "time", "io-util"] }
+clap = { version = "4.6", features = ["derive"] }
+memory-serve = "2.1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+fs2 = "0.4"
+
+thiserror = "2"
+libc = "0.2"
+
+tower = { version = "0.5", features = ["util"] }
+http-body-util = "0.1"

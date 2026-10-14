@@ -1,0 +1,245 @@
+/*
+ * Design tokens for Vibe Work (Mistral product grammar), light and dark.
+ * Shared colour, spacing and motion tokens for the UI, copied from the design mockup.
+ * Dark is the default; light applies when <html data-theme="light"> is set.
+ * Rule: components use these variables, never raw colour values.
+ * Fonts: Inter (UI) and Space Mono (data), bundled below (the CSP allows font-src 'self' only).
+ */
+@import "@fontsource-variable/inter/index.css";
+@import "@fontsource/space-mono/400.css";
+@import "@fontsource/space-mono/700.css";
+
+:root {
+  --bg: #0e0e11;
+  --chrome: #121216;
+  --panel: #16161a;
+  --raised: #1e1e23;
+  --hover: #24242a;
+  --active: #2b2b32;
+  --line: #ffffff10;
+  --line-2: #ffffff1f;
+  --line-3: #ffffff36;
+  --text: #f4f4f5;
+  --text-2: #b4b4bc;
+  --text-3: #7c7c86;
+  --orange: #fa500f;
+  --orange-2: #ff8205;
+  --orange-3: #ffaf00;
+  --red: #f66c60;
+  --green: #44ba82;
+  --blue: #55b3fb;
+  --orange-soft: #fa500f1a;
+  --green-soft: #44ba821a;
+  --red-soft: #f66c601a;
+  --primary-bg: #f4f4f5;
+  --primary-fg: #131317;
+  --shadow: 0 18px 50px -12px #000000aa, 0 0 0 1px var(--line-2);
+  /* Colours that are not theme-dependent: fixed ink on accent fills, the brand mark, overlays. */
+  --on-accent: #ffffff;
+  --accent-ink: #1a1300;
+  --brand-1: #ff8205;
+  --brand-2: #fa500f;
+  --brand-3: #e61300;
+  --scrim: #00000066;
+  --danger-strong: #e81123;
+  --mono: "Space Mono", ui-monospace, Menlo, monospace;
+  /* Shared typography and control geometry used by Settings and Vault. */
+  --font-ui: "Inter Variable", Inter, system-ui, sans-serif;
+  --font-mono: var(--mono);
+  --text-10-5: 10.5px;
+  --text-11: 11px;
+  --text-11-5: 11.5px;
+  --text-12: 12px;
+  --text-12-5: 12.5px;
+  --text-13: 13px;
+  --text-13-5: 13.5px;
+  --text-14: 14px;
+  --text-16: 16px;
+  --text-17: 17px;
+  --text-22: 22px;
+  --text-24: 24px;
+  --text-28: 28px;
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+  --weight-heading: 650;
+  --leading-ui: 1.5;
+  --leading-helper: 1.45;
+  --space-control-gap: 8px;
+  --space-card-gap: 16px;
+  --space-card-inline: 16px;
+  --space-card-bottom: 10px;
+  --space-row-block: 10px;
+  --space-toolbar-block: 6px;
+  --control-height-small: 30px;
+  --control-height-search: 34px;
+  --control-height-field: 36px;
+  --settings-row-min-height: 50px;
+  /* Motion (styles/feel.css): one vocabulary for every response. Exits run about 0.7x their entries. */
+  --t-press: 80ms; /* a press going down (release: 160 ms) */
+  --t-hover: 140ms; /* hover in and out, colour changes */
+  --t-ui: 200ms; /* tabs, segmented thumbs, switches, chevrons, the theme cross-fade */
+  --t-panel: 240ms; /* the side panel, toasts, list rows moving */
+  --t-arrive: 320ms; /* cards that arrive (approval, question) */
+  --ease-std: cubic-bezier(0.4, 0, 0.2, 1); /* colour changes: the curve Mistral's sites use */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1); /* anything that arrives or follows the hand */
+  --ease-in: cubic-bezier(0.5, 0, 0.75, 0); /* exits */
+  /* The "key" edge under primary buttons (flips on press) and the keyboard focus ring. */
+  --key-edge: #00000026;
+  --focus: var(--blue);
+  /* Search matches: every match, and the current one. */
+  --mark: #ffaf0033;
+  --mark-on: #fa500f59;
+  /* Code highlighting: shiki's CSS-variables theme maps each token class to these. */
+  --syn-keyword: var(--orange-2);
+  --syn-constant: var(--orange-3);
+  --syn-string: var(--green);
+  --syn-comment: var(--text-3);
+  --syn-function: var(--blue);
+  --syn-parameter: var(--text);
+  --syn-punctuation: var(--text-2);
+  --syn-link: var(--blue);
+  --pw: 520px; /* side panel width; set by sizePanel() per tab kind, or by dragging */
+  /* Integrated terminal: xterm needs concrete colours, read from these by features/terminal/theme.ts. */
+  --term-font-size: 13px;
+  --term-bg: #0e0e11;
+  --term-fg: #e4e4e7;
+  --term-cursor: #fa500f;
+  --term-selection: #55b3fb40;
+  --term-black: #1e1e23;
+  --term-red: #f66c60;
+  --term-green: #44ba82;
+  --term-yellow: #ffaf00;
+  --term-blue: #55b3fb;
+  --term-magenta: #c792ea;
+  --term-cyan: #4fd1c5;
+  --term-white: #b4b4bc;
+  --term-bright-black: #7c7c86;
+  --term-bright-red: #ff8a7f;
+  --term-bright-green: #6fd6a3;
+  --term-bright-yellow: #ffd166;
+  --term-bright-blue: #82c8ff;
+  --term-bright-magenta: #dcb0ff;
+  --term-bright-cyan: #7ee6dc;
+  --term-bright-white: #f4f4f5;
+  color-scheme: dark;
+}
+:root[data-theme="light"] {
+  --bg: #fbfbf8;
+  --chrome: #f3f2ec;
+  --panel: #f7f6f1;
+  --raised: #ffffff;
+  --hover: #eeece5;
+  --active: #e7e5dc;
+  --line: #00000012;
+  --line-2: #0000001f;
+  --line-3: #00000036;
+  --text: #201f1c;
+  --text-2: #615f57;
+  --text-3: #928f86;
+  --red: #e51300;
+  --green: #3aa475;
+  --blue: #0082e6;
+  --orange-soft: #fa500f12;
+  --green-soft: #3aa47514;
+  --red-soft: #e513000f;
+  --primary-bg: #1a1a1e;
+  --primary-fg: #ffffff;
+  --shadow: 0 18px 40px -14px #0000002e, 0 0 0 1px var(--line-2);
+  --term-bg: #fbfbf8;
+  --term-fg: #201f1c;
+  --term-cursor: #fa500f;
+  --term-selection: #0082e630;
+  --term-black: #201f1c;
+  --term-red: #c4210f;
+  --term-green: #2f855a;
+  --term-yellow: #a86400;
+  --term-blue: #0068b8;
+  --term-magenta: #8a3fb8;
+  --term-cyan: #0f7c75;
+  --term-white: #928f86;
+  --term-bright-black: #615f57;
+  --term-bright-red: #e51300;
+  --term-bright-green: #3aa475;
+  --term-bright-yellow: #c27c00;
+  --term-bright-blue: #0082e6;
+  --term-bright-magenta: #a050d0;
+  --term-bright-cyan: #16958c;
+  --term-bright-white: #b9b6ad;
+  /* Darker code colours on the light page (contrast against --panel). */
+  --syn-keyword: #b83c00;
+  --syn-constant: #8f5300;
+  --syn-string: #2a7650;
+  --syn-function: #0064b0;
+  --mark: #ffaf0040;
+  --mark-on: #fa500f38;
+  color-scheme: light;
+}
+
+/* Baseline copied from the design mockup: sizing, body typography, visible focus and reduced motion. */
+* {
+  box-sizing: border-box;
+}
+html,
+body {
+  height: 100%;
+}
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: var(--text-14);
+  line-height: var(--leading-ui);
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+button {
+  font: inherit;
+  color: inherit;
+}
+/* Selects: the system look (a grey GTK button on Linux, a macOS pop-up button) is replaced by the app's
+   field look with a drawn caret, the same on every system. Feature rules set the colours, borders and padding;
+   they use background-color (not the background shorthand) so the caret stays, and leave room on the right. */
+select {
+  appearance: none;
+  -webkit-appearance: none;
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--text-3) 50%),
+    linear-gradient(135deg, var(--text-3) 50%, transparent 50%);
+  background-position:
+    calc(100% - 13px) 50%,
+    calc(100% - 8px) 50%;
+  background-size: 5px 5px;
+  background-repeat: no-repeat;
+  cursor: pointer;
+}
+select:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+/* Keyboard focus: a 2 px gap in the page colour, then the blue ring, following each element's own corners
+   (the old outline forced a 6 px radius on everything). Only for keyboard focus. */
+:focus-visible {
+  outline: none;
+  box-shadow:
+    0 0 0 2px var(--bg),
+    0 0 0 4px var(--focus);
+}
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+  /* The working indicator stops as four half-lit pixels (it still says "working"). */
+  .walker i {
+    background: color-mix(in srgb, var(--orange) 55%, transparent) !important;
+  }
+  ::view-transition-group(*),
+  ::view-transition-old(*),
+  ::view-transition-new(*) {
+    animation: none !important;
+  }
+}

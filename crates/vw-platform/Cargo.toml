@@ -1,0 +1,93 @@
+[package]
+name = "vw-platform"
+description = "OS edges: keychain, paths, PTY, notifications"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+publish = false
+
+# The workspace lints, except `unsafe_code`: "deny" instead of "forbid", so the one module that needs OS
+# calls without a safe wrapper (`process.rs`) can `allow` it locally with SAFETY comments
+# (vw-platform is the only crate allowed to relax the ban). Keep the rest in sync
+# with the workspace [workspace.lints] table.
+[lints.rust]
+unsafe_code = "deny"
+missing_docs = "deny"
+
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+unwrap_used = "deny"
+expect_used = "deny"
+
+[features]
+# Native webview calls for the preview engine (`webview.rs`); only vw-webview turns it on.
+webview = [
+    "dep:webview2-com",
+    "dep:base64",
+    "dep:serde_json",
+    "dep:objc2",
+    "dep:objc2-web-kit",
+    "dep:block2",
+    "dep:gtk",
+    "dep:gdk",
+    "dep:glib",
+    "dep:webkit2gtk",
+    "dep:javascriptcore-rs",
+]
+
+[dependencies]
+thiserror = "2"
+arboard = { version = "=3.6.1", default-features = false, features = ["wayland-data-control"] }
+tokio = { version = "1.53", features = ["sync", "time", "rt"] }
+zeroize = "1.8"
+# Link checks before opening the browser; same major version as vw-host.
+url = "2"
+# OS notifications with click handling. The Tauri notification plugin (2.5.1) drops the handle on
+# desktop and exposes no click, so the library underneath is used directly (default features =
+# pure-Rust zbus on Linux, no libdbus). Pinned exactly.
+notify-rust = "=4.18.2"
+# The everyday spelling of canonical paths on Windows (`paths.rs`): no `\\?\` prefix in what people
+# read or in a program's working folder. Pure string rules; already in the lockfile through Tauri (1.0.5).
+dunce = "1.0.5"
+# Strict JSON boolean result from the page's final native-click guard (all webview platforms).
+serde_json = { version = "1", optional = true }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# `WKWebView` snapshots (webview.rs, feature `webview`). The versions wry 0.57 already uses (lockfile).
+objc2 = { version = "0.6", optional = true }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSData", "NSDictionary", "NSError", "NSString", "NSArray", "NSHTTPCookie", "NSProcessInfo", "NSJSONSerialization"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSPasteboard", "NSImage", "NSImageRep", "NSBitmapImageRep", "NSView", "NSWindow", "NSResponder", "NSEvent", "NSGraphicsContext", "objc2-core-foundation"] }
+# Content rule lists per preview webview (WKContentRuleListStore, the configuration's user content controller).
+objc2-web-kit = { version = "0.3", optional = true, default-features = false, features = ["std", "block2", "objc2-app-kit", "WKWebView", "WKSnapshotConfiguration", "WKContentRuleList", "WKContentRuleListStore", "WKUserContentController", "WKWebViewConfiguration", "WKWebsiteDataStore", "WKHTTPCookieStore"] }
+block2 = { version = "0.6", optional = true }
+# proc_pidinfo(PROC_PIDTBSDINFO) for precise start times (process.rs). Already in the lockfile.
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+# WebView2 DevTools screenshot (webview.rs, feature `webview`). Same version as wry 0.57 (lockfile).
+webview2-com = { version = "0.39", optional = true }
+base64 = { version = "0.22", optional = true }
+# OpenProcess / GetProcessTimes / TerminateProcess (process.rs). Same version as vw-supervisor and listeners.
+# Window captures (`window_capture.rs`): GDI, PrintWindow (Storage_Xps), the display ICC profile.
+# User-only folders and files (`private_file.rs`): the token's SID, SDDL, Get/SetNamedSecurityInfoW.
+# The main window's bare Alt tap (`window_keys.rs`): comctl32 SetWindowSubclass (wry uses it too).
+# The WebView2 UserDataFolder policy (webview.rs `shared_user_data_folder`): Win32_System_Registry.
+windows = { version = "0.62", features = ["Win32_System_Registry", "Win32_Foundation", "Win32_System_Threading", "Win32_Graphics_Gdi", "Win32_Storage_Xps", "Win32_UI_WindowsAndMessaging", "Win32_UI_ColorSystem", "Win32_Security", "Win32_Security_Authorization", "Win32_UI_Shell"] }
+# Toasts with an Activated handler that lives as long as the toast (notify.rs `show_toast`): the crate
+# notify-rust uses on Windows, same version (already in the lockfile).
+tauri-winrt-notification = "=0.8.1"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# Native click delivery on the Tauri child WebKitGTK widget, using GTK's event queue.
+gtk = { version = "0.18", optional = true }
+gdk = { version = "0.18", optional = true }
+glib = { version = "0.18", optional = true }
+webkit2gtk = { version = "=2.0.2", optional = true }
+javascriptcore-rs = { version = "1.1.2", optional = true }
+
+[target.'cfg(unix)'.dependencies]
+# Process hardening without our own `unsafe`: safe wrappers for prctl/setrlimit.
+# rustix 1.1.5 is already in the lockfile through other crates.
+rustix = { version = "1.1.5", features = ["process"] }

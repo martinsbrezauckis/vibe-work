@@ -1,0 +1,84 @@
+/* Settings panels: instruction editors, the review diff, usage bar. Tokens only. */
+.modal section h4 {
+  margin: 14px 0 6px;
+  font-size: var(--text-12-5);
+  font-weight: var(--weight-semibold);
+  color: var(--text-2);
+}
+.instr {
+  margin: 0 0 14px;
+}
+.instr h4 {
+  margin-top: 4px;
+}
+.instr-text {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 120px;
+  resize: vertical;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-family: var(--font-mono);
+  font-size: var(--text-12-5);
+  line-height: var(--leading-ui);
+}
+.instr-text:focus-visible {
+  outline: none;
+  box-shadow:
+    0 0 0 2px var(--bg),
+    0 0 0 4px var(--focus);
+}
+.tb-btn.primary,
+.set-cat-body .btn-primary {
+  background: var(--primary-bg);
+  color: var(--primary-fg);
+  border-color: transparent;
+}
+.tb-btn.primary:hover,
+.set-cat-body .btn-primary:hover {
+  background: var(--primary-bg);
+  color: var(--primary-fg);
+  opacity: 0.9;
+  filter: none;
+}
+.diff-lines {
+  margin: 0;
+  padding: 8px 0;
+  max-height: 260px;
+  overflow: auto;
+  background: var(--bg);
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  font-family: var(--font-mono);
+  font-size: var(--text-12-5);
+  line-height: var(--leading-ui);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.diff-line,
+.diff-fold {
+  display: block;
+  padding: 0 10px;
+}
+.diff-add {
+  background: var(--green-soft);
+  color: var(--text);
+}
+.diff-del {
+  background: var(--red-soft);
+  color: var(--text-2);
+}
+.diff-fold {
+  color: var(--text-3);
+}
+.usage-bar {
+  display: block;
+  width: 100%;
+  height: 8px;
+  margin: 8px 0 0;
+  accent-color: var(--orange);
+}

@@ -1,0 +1,493 @@
+/*
+ * Session list: activity badges, rows, tags, the action menu, project bars, the archive toggle,
+ * the new-session controls. Badge geometry and states are adapted from ShellX; colours come from tokens.css only.
+ */
+/*
+ * Badge: no box. A bordered square read as a checkbox in a list, so the state is drawn by itself:
+ * idle shows nothing (the slot keeps its width so titles stay aligned), working is a small orange dot that breathes
+ * (still under reduced motion), done is a plain green tick, needs-input a bold mark, failed a red dot. The accessible
+ * name is on the element (Badge.tsx); colour is never the only signal.
+ */
+.sb {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 15px;
+  height: 15px;
+  color: var(--text-3);
+  background: transparent;
+  transition: color var(--t-ui) var(--ease-std);
+}
+/* The dot for working and failed. */
+.sb.run::before,
+.sb.failed::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentcolor;
+}
+/* "Needs you": a bold exclamation mark. */
+.sb-bang {
+  font-size: var(--text-12);
+  font-weight: var(--weight-heading);
+  line-height: 1;
+}
+/* Running: the dot breathes (the one loop for a session badge; tokens.css stops it under reduced motion). */
+.sb.run {
+  color: var(--orange);
+}
+.sb.run::before {
+  animation: vw-dot 1.4s ease-in-out infinite;
+}
+@keyframes vw-dot {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.3;
+  }
+}
+.sb.done {
+  color: var(--green);
+}
+.sb.input {
+  color: var(--orange);
+}
+.sb.failed {
+  color: var(--red);
+}
+.cnt .sb {
+  width: 11px;
+  height: 11px;
+}
+.cnt .sb.run::before,
+.cnt .sb.failed::before {
+  width: 6px;
+  height: 6px;
+}
+
+/* Unread dot: Vibe's is_unseen. */
+.unread {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--orange);
+  display: inline-block;
+  flex: none;
+}
+
+/* Rows. */
+.srow-wrap {
+  position: relative;
+}
+.srow {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr) 8px 22px;
+  align-items: center;
+  gap: 4px;
+  border-radius: 8px;
+  color: var(--text-2);
+}
+.srow:hover,
+.srow:focus-within {
+  background: var(--hover);
+  color: var(--text);
+}
+.srow:has(.srow-main[aria-current="true"]) {
+  background: var(--active);
+  color: var(--text);
+}
+.srow.is-archived {
+  opacity: 0.7;
+}
+.srow-main {
+  all: unset;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  padding: 6px 4px;
+  cursor: pointer;
+}
+.srow-main:focus-visible {
+  outline: none;
+  /* Inset: the row sits flush in a scrolling column that would clip an outer ring. */
+  box-shadow: inset 0 0 0 2px var(--focus);
+  border-radius: 6px;
+}
+.srow .t {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: var(--text-13-5);
+}
+.srow.is-unread .t {
+  color: var(--text);
+  font-weight: var(--weight-semibold);
+}
+.tag {
+  flex: none;
+  font-size: var(--text-10-5);
+  color: var(--text-3);
+  border: 1px solid var(--line-2);
+  border-radius: 999px;
+  padding: 0 6px;
+  line-height: 16px;
+}
+.tag.pin {
+  border: 0;
+  padding: 0;
+  display: inline-flex;
+}
+.twist,
+.twist-gap {
+  width: 14px;
+  height: 14px;
+}
+.twist {
+  all: unset;
+  display: grid;
+  place-items: center;
+  width: 14px;
+  height: 14px;
+  cursor: pointer;
+  color: var(--text-3);
+}
+.twist[aria-expanded="true"] svg {
+  transform: rotate(90deg);
+}
+.twist:focus-visible {
+  outline: none;
+  border-radius: 3px;
+  box-shadow:
+    0 0 0 2px var(--bg),
+    0 0 0 4px var(--focus);
+}
+.srow-more {
+  all: unset;
+  box-sizing: border-box;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  cursor: pointer;
+  color: var(--text-3);
+  opacity: 0;
+}
+.srow:hover .srow-more,
+.srow:focus-within .srow-more,
+.proj-bar:hover .srow-more,
+.proj-bar:focus-within .srow-more,
+.srow-more[aria-expanded="true"] {
+  opacity: 1;
+}
+.srow-more:hover {
+  background: var(--active);
+  color: var(--text);
+}
+.srow-more:focus-visible {
+  outline: none;
+  box-shadow:
+    0 0 0 2px var(--bg),
+    0 0 0 4px var(--focus);
+}
+.rename {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  font-size: var(--text-13-5);
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--line-3);
+  border-radius: 6px;
+  padding: 2px 6px;
+}
+.proj-bar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.proj-new-chat {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  opacity: 0;
+}
+.proj-bar:hover .proj-new-chat,
+.proj-bar:focus-within .proj-new-chat {
+  opacity: 1;
+}
+/* Drawer and touch users can start a chat without discovering a hover-only action. */
+@media (max-width: 1100px), (hover: none), (pointer: coarse) {
+  .proj-new-chat {
+    opacity: 1;
+    width: 32px;
+    height: 32px;
+  }
+}
+@media (pointer: coarse) {
+  .proj-new-chat {
+    width: 44px;
+    height: 44px;
+  }
+}
+.pinned {
+  padding-left: 0;
+}
+
+/* The row / project action menu. */
+.menu {
+  position: fixed;
+  z-index: 60;
+  min-width: 190px;
+  display: grid;
+  padding: 4px;
+  background: var(--raised);
+  border-radius: 10px;
+  box-shadow: var(--shadow);
+}
+.menu button {
+  all: unset;
+  box-sizing: border-box;
+  padding: 7px 10px;
+  border-radius: 6px;
+  font-size: var(--text-13);
+  cursor: pointer;
+  color: var(--text-2);
+}
+.menu button:hover,
+.menu button:focus-visible {
+  background: var(--active);
+  color: var(--text);
+}
+.menu button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.menu button.danger {
+  color: var(--red);
+}
+.menu button.sep {
+  margin-top: 4px;
+  border-top: 1px solid var(--line);
+  border-radius: 0 0 6px 6px;
+  padding-top: 9px;
+}
+
+/* Filter row, archive toggle, load more. */
+.filter-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.filter-row .filter {
+  flex: 1;
+  min-width: 0;
+}
+.filter-row .ibtn[aria-pressed="true"] {
+  background: var(--active);
+  color: var(--text);
+}
+.more-btn {
+  display: block;
+  width: 100%;
+  margin: 8px 0 0;
+  padding: 7px;
+  border: 1px dashed var(--line-3);
+  border-radius: 8px;
+  background: none;
+  color: var(--text-2);
+  font-size: var(--text-12-5);
+  cursor: pointer;
+}
+.more-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.col-note.error {
+  color: var(--red);
+}
+
+/* The new-chat view's folder and copy controls (the composer under them starts the session). */
+.new-session {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+  margin: 14px 0 4px;
+  min-width: 0;
+}
+.folder-path {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-2);
+  font-size: var(--text-12);
+}
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 14px 20px;
+}
+.modal ul {
+  margin: 4px 0 0;
+  padding-left: 18px;
+  font-size: var(--text-12);
+  color: var(--text-2);
+}
+
+/* the user's project groups (drop targets, drag feedback, folder chip, empty project, new project). */
+.sec-btn {
+  all: unset;
+  box-sizing: border-box;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  cursor: pointer;
+  color: var(--text-3);
+}
+.sec-btn:hover {
+  background: var(--active);
+  color: var(--text);
+}
+.sec-btn:focus-visible {
+  outline: none;
+  box-shadow:
+    0 0 0 2px var(--bg),
+    0 0 0 4px var(--focus);
+}
+.proj {
+  position: relative;
+  border-radius: 9px;
+}
+/* Sessions dragged over a project (or "Not in a project"): the whole group lights up as the target. */
+.proj[data-drop="into"] {
+  background: color-mix(in srgb, var(--blue) 10%, transparent);
+  outline: 1.5px dashed color-mix(in srgb, var(--blue) 70%, transparent);
+  outline-offset: -1px;
+}
+/* A project dragged over another: a line where it will land. */
+.proj[data-drop="before"]::before,
+.proj[data-drop="after"]::after {
+  content: "";
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--blue);
+  pointer-events: none;
+}
+.proj[data-drop="before"]::before {
+  top: -1px;
+}
+.proj[data-drop="after"]::after {
+  bottom: -1px;
+}
+.srow.is-dragging {
+  opacity: 0.45;
+}
+.proj-bar[draggable="true"],
+.srow[draggable="true"] {
+  -webkit-user-drag: element;
+}
+/* The chip gives way before the title: it shrinks to an ellipsis while the title keeps at least 5em. */
+.srow-main:has(.folder-chip) .t {
+  min-width: 5em;
+}
+.tag.folder-chip {
+  flex: 0 1 auto;
+  min-width: 34px;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+}
+.tag.folder-chip svg {
+  flex: none;
+}
+.proj-empty {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+  padding: 4px 10px 8px 26px;
+  font-size: var(--text-12);
+  color: var(--text-3);
+}
+.link-btn {
+  all: unset;
+  cursor: pointer;
+  color: var(--blue);
+  font-size: var(--text-12);
+  border-radius: 4px;
+}
+.link-btn:hover {
+  text-decoration: underline;
+}
+.link-btn:focus-visible {
+  outline: none;
+  box-shadow:
+    0 0 0 2px var(--bg),
+    0 0 0 4px var(--focus);
+}
+.proj-h.proj-rename {
+  grid-template-columns: 16px 1fr;
+  cursor: default;
+}
+.proj-h.proj-rename:hover {
+  background: none;
+}
+.proj.unfiled {
+  margin-top: 6px;
+}
+.proj.unfiled .proj-h {
+  font-weight: var(--weight-medium);
+  color: var(--text-2);
+}
+
+/* The new-chat view's folder chip row lights up after Send is pressed without a folder. */
+.folder-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.folder-chip {
+  padding: 3px 8px;
+  border: 1px solid var(--line-2);
+  border-radius: 7px;
+  background: var(--raised);
+}
+.new-session[data-ask-folder="true"] .folder-row .tb-btn {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--orange) 55%, transparent);
+  transition: box-shadow var(--t-ui) var(--ease-std);
+}
+.folder-hint {
+  /* Readable in both themes (the orange ring on the button is the signal; orange text fails contrast on light). */
+  color: var(--text);
+  font-size: var(--text-12);
+}
+/* The composer sits in the welcome column (the column's own padding replaces the composer's). */
+.new-chat-composer {
+  margin: 14px 0 4px;
+}
+.new-chat-composer .composer-wrap {
+  padding: 0;
+}

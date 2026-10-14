@@ -1,0 +1,6 @@
+# Production code must not panic; tests may unwrap/expect.
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+# Product names that are not code identifiers ("ShellX" is the sibling app our code is extracted
+# from and is cited in many doc comments). ".." keeps clippy's default list.
+doc-valid-idents = ["ShellX", ".."]

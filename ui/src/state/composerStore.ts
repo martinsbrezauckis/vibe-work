@@ -1,0 +1,458 @@
+/**
+ * The composer's state: per session the draft text, the context chips and attached images,
+ * sends in flight, the keys of a failed send (so pressing Enter again resends without a duplicate turn),
+ * the skills for the `/` menu, which menu is open, the queued turn being edited and the rewind dialog.
+ * Plain state and small mutations only; the actions that talk to the core are in `composerSend.ts`,
+ * `composerSession.ts` and `composerRewind.ts`.
+ * Depends on: createStore, the composer model (drafts, message types). Called by: createComposer
+ * (`composer.ts`), the composer views (read only), tests.
+ * Invariants:
+ * - Context chips and images are separate from the text: nothing the app inserts ever becomes typed
+ *   text ("sent context is never a command"). Text the app puts back into the box (a rewound
+ *   message, which may come from another client such as the CLI or the Debug API) is marked `literal`:
+ *   it is sent as a message, never run as a `!cmd` or `/command`, until the user edits it (security
+ *   review of the draft).
+ * - Provenance, not timing (the trust rule): text, chips and images a Debug API client
+ *   wrote through `ui/composer` are marked `debug-api` (`draftBy`, `ContextItem.by`, `ImageItem.by`).
+ *   A message holding any of it is sent with the Debug API origin whoever presses Enter (a label;
+ *   the Debug API acts as the user, so its typed `!cmd` / `/cmd` runs like the user's; `takeContent` reports
+ *   `by`); marks are sticky: the draft marks (`draftBy`, `literal`) end only when the box becomes empty or with
+ *   `adopt` (the explicit "Use as my command" of a rewound message), a chip or image mark only when that item
+ *   is removed. Every state change that drops or restores content keeps the
+ *   marks with it (`clear`, `restore`, `forget`), so the state never drifts to "user" on its own.
+ * - Drafts are stored on every change (when `persist`) WITH their provenance (`user` / `debug-api` /
+ *   `literal`). The default reasoning preference is stored only on an explicit pick. Images and context
+ *   stay in memory: they can be large and belong to one message. Unknown draft provenance loads as Debug API.
+ */
+import type { JsonValue } from "../protocol/core";
+import {
+  type DraftBy,
+  type Drafts,
+  loadDrafts,
+  saveDrafts,
+  withDraft,
+  withoutDrafts,
+} from "../features/composer/model/drafts";
+import type { ContextItem, ImageItem } from "../features/composer/model/message";
+import { createStore } from "./createStore";
+import { loadDefaultReasoning, saveDefaultReasoning } from "./defaultReasoning";
+
+/** Keys of a send that failed in transport, reused when the same content is sent again. */
+export interface ResendKeys {
+  /** The content they belong to (`contentKey`). */
+  content: string;
+  idempotencyKey: string;
+  clientUserMessageId: string;
+}
+
+/** A skill as the `/` menu lists it. */
+export interface SkillEntry {
+  name: string;
+  description: string;
+}
+
+/** The rewind dialog. */
+export interface RewindDialog {
+  sessionId: string;
+  entryId: string;
+  /** The message being rewound to (shown in the dialog). */
+  text: string;
+  loading: boolean;
+  /** Files Vibe will restore (`session/rewind/read`). */
+  paths: readonly string[];
+  hasFileChanges: boolean;
+  error: string | null;
+  busy: boolean;
+}
+
+/** The composer's state. */
+export interface ComposerState {
+  drafts: Drafts;
+  context: Readonly<Record<string, readonly ContextItem[]>>;
+  images: Readonly<Record<string, readonly ImageItem[]>>;
+  /** Sessions with a send in flight. */
+  sending: Readonly<Record<string, true>>;
+  /** Manual context compaction in progress, cancellable through Stop. */
+  compacting: Readonly<Record<string, true>>;
+  /** A short message under the composer per session (a refused send, a stale steer). */
+  notes: Readonly<Record<string, string>>;
+  resend: Readonly<Record<string, ResendKeys>>;
+  skills: Readonly<Record<string, readonly SkillEntry[]>>;
+  /** Models from `config/read`, for sessions whose runtime is not known yet. */
+  config: JsonValue | null;
+  /** New-chat preference; null follows the model. Unsupported saved levels stay saved. */
+  defaultReasoning: string | null;
+  menu: { sessionId: string; kind: "access" | "model" } | null;
+  /** The highlighted row of the `/` menu. */
+  slashIndex: number;
+  editing: { sessionId: string; queueItemId: string; text: string } | null;
+  rewind: RewindDialog | null;
+  /** Sessions whose draft the app put back (a rewound message): sent as text until the user edits it. */
+  literal: Readonly<Record<string, true>>;
+  /** Sessions whose draft text a Debug API client wrote (until the user edits it). */
+  draftBy: Readonly<Record<string, "debug-api">>;
+  /** The new-chat view: picks held until the first send, and whether Send asked for a folder. */
+  newChat: NewChatHeld;
+}
+
+/**
+ * What the new-chat view holds before its session exists: the access mode and model the user picked
+ * (`null`: Vibe's default), applied to the new session before its first turn; `askFolder` lights up the folder
+ * chip after a Send without a folder.
+ */
+export interface NewChatHeld {
+  mode: string | null;
+  /** Consent from the latest native access pick; never granted by synthetic or Debug API picks. */
+  trustedAccessPick: boolean;
+  alias: string | null;
+  effort: string | null;
+  /** Who held a pick: `debug-api` once any held pick came from a Debug API client (provenance), `null`: none. */
+  by: "ui" | "debug-api" | null;
+  askFolder: boolean;
+}
+
+const NO_PICKS: NewChatHeld = {
+  mode: null,
+  trustedAccessPick: false,
+  alias: null,
+  effort: null,
+  by: null,
+  askFolder: false,
+};
+
+const EMPTY: ComposerState = {
+  drafts: {},
+  context: {},
+  images: {},
+  sending: {},
+  compacting: {},
+  notes: {},
+  resend: {},
+  skills: {},
+  config: null,
+  defaultReasoning: null,
+  menu: null,
+  slashIndex: 0,
+  editing: null,
+  rewind: null,
+  literal: {},
+  draftBy: {},
+  newChat: NO_PICKS,
+};
+
+/** One message as it was in the composer when the user pressed the key. */
+export interface SentContent {
+  /** Put back by the app (not typed): never a command. */
+  literal: boolean;
+  /** Who wrote any of it: `debug-api` when a Debug API client did (the send then uses its origin). */
+  by: "user" | "debug-api";
+  text: string;
+  context: readonly ContextItem[];
+  images: readonly ImageItem[];
+  /** Separate button requests leave the draft untouched, including after a failed send. */
+  restoreOnFailure?: false;
+  /**
+   * A voice chat turn: it goes out as a queued turn whose context entry carries the voice instruction
+   * (never inside the text), and its display content carries the "voice" marker. A steer stays a plain steer.
+   */
+  voice?: boolean;
+}
+
+/**
+ * Takes the composer content of `sessionId` and empties the composer, synchronously (so a key press
+ * sends exactly what was in the box at that moment, even while the action code is still loading), or
+ * returns `null` when there is nothing to send.
+ */
+export function takeContent(composer: ComposerStore, sessionId: string): SentContent | null {
+  const s = composer.store.get();
+  const context = s.context[sessionId] ?? [];
+  const images = s.images[sessionId] ?? [];
+  const text = s.drafts[sessionId] ?? "";
+  const fromApi =
+    (s.draftBy[sessionId] === "debug-api" && text !== "") ||
+    context.some((c) => c.by === "debug-api") ||
+    images.some((i) => i.by === "debug-api");
+  const content: SentContent = {
+    // Debug API text is the user's (its `!cmd` runs); only a rewound message is literal.
+    literal: s.literal[sessionId] === true,
+    by: fromApi ? "debug-api" : "user",
+    text,
+    context,
+    images,
+  };
+  if (content.text.trim() === "" && content.context.length === 0 && content.images.length === 0) {
+    return null;
+  }
+  composer.take(sessionId);
+  return content;
+}
+
+/** A key that identifies the content of one message (text + chips + images). */
+export function contentKey(
+  text: string,
+  context: readonly ContextItem[],
+  images: readonly ImageItem[],
+): string {
+  return JSON.stringify([
+    text,
+    context.map((c) => [c.label, c.source, c.text]),
+    images.map((i) => i.data),
+  ]);
+}
+
+function setIn<T>(
+  map: Readonly<Record<string, T>>,
+  id: string,
+  value: T | undefined,
+): Record<string, T> {
+  if (value !== undefined) return { ...map, [id]: value };
+  if (!(id in map)) return map;
+  return Object.fromEntries(Object.entries(map).filter(([key]) => key !== id));
+}
+
+/** Creates the store; `persist` keeps drafts and explicit default reasoning picks in app storage. */
+export function createComposerStore(persist: boolean) {
+  const stored = persist ? loadDrafts() : { drafts: {}, by: {} };
+  const marks = (by: string) =>
+    Object.fromEntries(
+      Object.entries(stored.by)
+        .filter(([, who]) => who === by)
+        .map(([id]) => [id, by]),
+    );
+  const store = createStore<ComposerState>({
+    ...EMPTY,
+    defaultReasoning: persist ? loadDefaultReasoning() : null,
+    drafts: stored.drafts,
+    draftBy: marks("debug-api") as Record<string, "debug-api">,
+    literal: Object.fromEntries(Object.keys(marks("literal")).map((id) => [id, true as const])),
+  });
+  let saved: Pick<ComposerState, "drafts" | "draftBy" | "literal"> = store.get();
+  if (persist) {
+    store.subscribe(() => {
+      const s = store.get();
+      if (s.drafts === saved.drafts && s.draftBy === saved.draftBy && s.literal === saved.literal)
+        return;
+      saved = s;
+      const by: Record<string, DraftBy> = {};
+      for (const id of Object.keys(s.literal)) by[id] = "literal";
+      for (const id of Object.keys(s.draftBy)) by[id] = "debug-api";
+      saveDrafts(s.drafts, by);
+    });
+  }
+  let counter = 0;
+  const taking = new Set<string>();
+  const nextId = (prefix: string) => {
+    counter += 1;
+    return `${prefix}-${String(Date.now())}-${String(counter)}`;
+  };
+  const clear = (sessionId: string): void => {
+    store.set((s) => ({
+      ...s,
+      drafts: withDraft(s.drafts, sessionId, ""),
+      context: setIn(s.context, sessionId, undefined),
+      images: setIn(s.images, sessionId, undefined),
+      literal: setIn(s.literal, sessionId, undefined),
+      draftBy: setIn(s.draftBy, sessionId, undefined),
+    }));
+  };
+
+  return {
+    store,
+    /** True only while a send takes content out of the composer. */
+    isTaking: (sessionId: string): boolean => taking.has(sessionId),
+    take(sessionId: string): void {
+      taking.add(sessionId);
+      try {
+        clear(sessionId);
+      } finally {
+        taking.delete(sessionId);
+      }
+    },
+    /** Saves the user's explicit new-chat reasoning preference, without changing existing chats. */
+    setDefaultReasoning(level: string | null): void {
+      if (persist) saveDefaultReasoning(level);
+      store.set((s) => ({ ...s, defaultReasoning: level }));
+    },
+    /** A fresh local id for a chip or image. */
+    nextId,
+    /**
+     * The user's own typing. Marks (`draftBy`, `literal`) are sticky: an edit keeps them (one keystroke
+     * must not launder Debug API or put-back text into a command); they
+     * end only when the box becomes empty, or with `adopt` (the explicit "Use as my command").
+     */
+    setDraft(sessionId: string, text: string): void {
+      store.set((s) => {
+        const drafts = withDraft(s.drafts, sessionId, text);
+        const emptied = text === "";
+        const literal = emptied ? setIn(s.literal, sessionId, undefined) : s.literal;
+        const draftBy = emptied ? setIn(s.draftBy, sessionId, undefined) : s.draftBy;
+        return drafts === s.drafts && s.slashIndex === 0
+          ? s
+          : { ...s, drafts, literal, draftBy, slashIndex: 0 };
+      });
+    },
+    /** The user's explicit "Use as my command": the draft becomes their own text (origin ui). */
+    adopt(sessionId: string): void {
+      store.set((s) => ({
+        ...s,
+        literal: setIn(s.literal, sessionId, undefined),
+        draftBy: setIn(s.draftBy, sessionId, undefined),
+      }));
+    },
+    /** Text a Debug API client wrote (the `ui/composer` `type` action): marked until the user edits it. */
+    setDraftFromDebugApi(sessionId: string, text: string): void {
+      store.set((s) => ({
+        ...s,
+        drafts: withDraft(s.drafts, sessionId, text),
+        literal: setIn(s.literal, sessionId, undefined),
+        draftBy: setIn(s.draftBy, sessionId, text === "" ? undefined : "debug-api"),
+        slashIndex: 0,
+      }));
+    },
+    /** Text the app puts back (a rewound message), when the box is empty: sent as text only. */
+    putBack(sessionId: string, text: string): boolean {
+      if ((store.get().drafts[sessionId] ?? "") !== "" || text === "") return false;
+      store.set((s) => ({
+        ...s,
+        drafts: withDraft(s.drafts, sessionId, text),
+        literal: setIn(s.literal, sessionId, true),
+      }));
+      return true;
+    },
+    /** Adds a context chip (the text is data, shown as a chip, never put in the draft). */
+    addContext(sessionId: string, item: Omit<ContextItem, "id">): ContextItem {
+      const added: ContextItem = { ...item, id: nextId("ctx") };
+      store.set((s) => ({
+        ...s,
+        context: setIn(s.context, sessionId, [...(s.context[sessionId] ?? []), added]),
+      }));
+      return added;
+    },
+    removeContext(sessionId: string, id: string): void {
+      store.set((s) => {
+        const left = (s.context[sessionId] ?? []).filter((c) => c.id !== id);
+        return { ...s, context: setIn(s.context, sessionId, left.length > 0 ? left : undefined) };
+      });
+    },
+    addImage(sessionId: string, image: ImageItem): void {
+      store.set((s) => ({
+        ...s,
+        images: setIn(s.images, sessionId, [...(s.images[sessionId] ?? []), image]),
+      }));
+    },
+    removeImage(sessionId: string, id: string): void {
+      store.set((s) => {
+        const left = (s.images[sessionId] ?? []).filter((i) => i.id !== id);
+        return { ...s, images: setIn(s.images, sessionId, left.length > 0 ? left : undefined) };
+      });
+    },
+    /** Empties the composer of `sessionId` (after a send left it). */
+    clear,
+    /**
+     * Puts a message back after a failed send, unless the user already typed something new (then the
+     * new text wins and the failed text is offered in the note).
+     */
+    restore(
+      sessionId: string,
+      text: string,
+      context: readonly ContextItem[],
+      images: readonly ImageItem[],
+      literal = false,
+      by: "user" | "debug-api" = "user",
+    ): boolean {
+      const s = store.get();
+      const busy =
+        (s.drafts[sessionId] ?? "") !== "" ||
+        (s.context[sessionId] ?? []).length > 0 ||
+        (s.images[sessionId] ?? []).length > 0;
+      if (busy) return false;
+      store.set((prev) => ({
+        ...prev,
+        drafts: withDraft(prev.drafts, sessionId, text),
+        context: setIn(prev.context, sessionId, context.length > 0 ? [...context] : undefined),
+        images: setIn(prev.images, sessionId, images.length > 0 ? [...images] : undefined),
+        literal: setIn(prev.literal, sessionId, literal ? true : undefined),
+        draftBy: setIn(
+          prev.draftBy,
+          sessionId,
+          by === "debug-api" && text !== "" ? "debug-api" : undefined,
+        ),
+      }));
+      return true;
+    },
+    setSending(sessionId: string, on: boolean): void {
+      store.set((s) => ({ ...s, sending: setIn(s.sending, sessionId, on ? true : undefined) }));
+    },
+    /** Tracks manual compaction independently of the turn stream. */
+    setCompacting(sessionId: string, on: boolean): void {
+      store.set((s) => ({
+        ...s,
+        compacting: setIn(s.compacting, sessionId, on ? true : undefined),
+      }));
+    },
+    note(sessionId: string, text: string | null): void {
+      store.set((s) => ({ ...s, notes: setIn(s.notes, sessionId, text ?? undefined) }));
+    },
+    setResend(sessionId: string, keys: ResendKeys | null): void {
+      store.set((s) => ({ ...s, resend: setIn(s.resend, sessionId, keys ?? undefined) }));
+    },
+    setSkills(sessionId: string, skills: readonly SkillEntry[]): void {
+      store.set((s) => ({ ...s, skills: setIn(s.skills, sessionId, skills) }));
+    },
+    setConfig(config: JsonValue): void {
+      store.set((s) => ({ ...s, config }));
+    },
+    setMenu(menu: ComposerState["menu"]): void {
+      store.set((s) => (s.menu === menu ? s : { ...s, menu }));
+    },
+    setSlashIndex(index: number): void {
+      store.set((s) => (s.slashIndex === index ? s : { ...s, slashIndex: index }));
+    },
+    setEditing(editing: ComposerState["editing"]): void {
+      store.set((s) => ({ ...s, editing }));
+    },
+    setRewind(rewind: RewindDialog | null): void {
+      store.set((s) => ({ ...s, rewind }));
+    },
+    /** Holds a pick for the new-chat view's first send, or sets `askFolder`. */
+    holdNewChat(patch: Partial<NewChatHeld>): void {
+      store.set((s) => ({ ...s, newChat: { ...s.newChat, ...patch } }));
+    },
+    /** Forgets the new-chat view's held picks (after its session started). */
+    resetNewChat(): void {
+      store.set((s) => (s.newChat === NO_PICKS ? s : { ...s, newChat: NO_PICKS }));
+    },
+    /** Drops everything kept for sessions that were deleted. */
+    forget(ids: readonly string[]): void {
+      store.set((s) => {
+        const drafts = withoutDrafts(s.drafts, ids);
+        let { context, images, resend, skills, notes, literal, draftBy, compacting } = s;
+        for (const id of ids) {
+          literal = setIn(literal, id, undefined);
+          draftBy = setIn(draftBy, id, undefined);
+          context = setIn(context, id, undefined);
+          images = setIn(images, id, undefined);
+          resend = setIn(resend, id, undefined);
+          skills = setIn(skills, id, undefined);
+          notes = setIn(notes, id, undefined);
+          compacting = setIn(compacting, id, undefined);
+        }
+        return {
+          ...s,
+          drafts,
+          context,
+          images,
+          resend,
+          skills,
+          notes,
+          literal,
+          draftBy,
+          compacting,
+        };
+      });
+    },
+  };
+}
+
+/** The store and its mutations. */
+export type ComposerStore = ReturnType<typeof createComposerStore>;

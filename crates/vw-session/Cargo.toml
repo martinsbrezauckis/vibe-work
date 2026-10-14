@@ -1,0 +1,20 @@
+[package]
+name = "vw-session"
+description = "Session state of record, JSON-Patch apply, event fan-out"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+vw-rpc = { path = "../vw-rpc" }
+vw-protocol = { path = "../vw-protocol" }
+# float_roundtrip: parse f64 exactly (default parsing can be 1 ulp off, e.g. durationMs), so stored
+# state stays byte-faithful to what Vibe sent; features unify across the workspace.
+serde_json = { version = "1", features = ["float_roundtrip"] }
+thiserror = "2"

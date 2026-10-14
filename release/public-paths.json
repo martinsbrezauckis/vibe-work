@@ -1,0 +1,60 @@
+{
+  "_comment": "Positive allowlist for the public export: a path that is not listed here is not exported. The exporter copies only these paths from one commit into an empty folder; scripts/public/check_public_paths.mjs keeps the list honest.",
+  "roots": [
+    "crates/",
+    "app/",
+    "ui/",
+    "tools/public/",
+    "third_party/mistral-vibe/",
+    "third_party/lucide/",
+    "third_party/remend/",
+    "third_party/jsdiff/",
+    "third_party/tauri-runtime-wry/",
+    "third_party/shellx-vault/",
+    "docs/public/",
+    "tests/public/",
+    "scripts/public/",
+    "release/public-paths.json",
+    ".github/workflows/"
+  ],
+  "files": [
+    "README.md",
+    "AGENTS.md",
+    "LICENSE",
+    "CHANGELOG.md",
+    "SECURITY.md",
+    "CONTRIBUTING.md",
+    "NOTICE",
+    "Cargo.toml",
+    "Cargo.lock",
+    "package.json",
+    "pnpm-lock.yaml",
+    "pnpm-workspace.yaml",
+    "rust-toolchain.toml",
+    "rustfmt.toml",
+    "clippy.toml",
+    ".gitattributes",
+    "THIRD-PARTY-NOTICES.txt",
+    ".gitignore",
+    ".cargo/config.toml"
+  ],
+  "neverExport": [
+    ".project/",
+    "docs/private/",
+    "tests/private/",
+    "scripts/private/",
+    "output/",
+    "data/",
+    "fixtures/private/",
+    "private/"
+  ],
+  "forbiddenPublicMarkers": [
+    "docs/private/",
+    ".project/",
+    "tests/private/",
+    "scripts/private/",
+    "output/research/",
+    "output/design/"
+  ],
+  "_markersNote": "Strings no exported file may contain. More markers (local paths, machine and host names, tool and vendor names) live in a maintainers' file outside the export and are checked on the source before every export."
+}

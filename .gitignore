@@ -1,0 +1,11 @@
+/data
+node_modules
+__pycache__/
+# bench runs stay on disk, not in git (final/ = 17 MB of redacted transcripts)
+output/bench/
+.worktrees/
+.scratch/
+target/
+dist/
+app/gen/
+.release/

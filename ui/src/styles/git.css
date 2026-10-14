@@ -1,0 +1,254 @@
+/*
+ * The outer git loop: the branch bar at the top of the Changes tab, its result line, the PR card,
+ * the header's PR chip and the git dialogs' fields. Tokens only (scripts/public/check_colors.mjs).
+ * Used by: ui/src/features/git/*.
+ */
+.git-bar {
+  display: grid;
+  gap: 6px;
+  margin: 0 0 12px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--bg);
+  min-width: 0;
+}
+.git-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  font-size: 12px;
+  color: var(--text-2);
+  min-width: 0;
+}
+.git-branch {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.git-repo select {
+  max-width: 18ch;
+  min-height: 28px;
+  padding: 2px 5px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--text);
+  background: var(--bg);
+  font: inherit;
+}
+.git-repo-name {
+  color: var(--text);
+  font-weight: 600;
+}
+.git-reasons {
+  margin: 0;
+  font-size: 11px;
+  color: var(--text-3);
+}
+.git-base,
+.git-meta {
+  color: var(--text-3);
+}
+.git-stat {
+  color: var(--text-2);
+}
+.git-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.git-notice {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-2);
+  overflow-wrap: anywhere;
+}
+.git-notice.error,
+.git-warn {
+  color: var(--red);
+}
+.git-warn {
+  margin: 0 0 10px;
+  font-size: 12.5px;
+  overflow-wrap: anywhere;
+}
+.git-note,
+.git-sub {
+  margin: 0 0 10px;
+  font-size: 12.5px;
+  color: var(--text-2);
+  overflow-wrap: anywhere;
+}
+.git-from {
+  color: var(--text-3);
+  font-weight: 400;
+}
+.git-field {
+  display: grid;
+  gap: 4px;
+  margin: 0 0 10px;
+  font-size: 12.5px;
+  color: var(--text-2);
+}
+.git-field input,
+.git-field textarea {
+  font: inherit;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 6px 8px;
+  min-width: 0;
+  resize: vertical;
+}
+.git-field textarea {
+  font-family: var(--mono);
+  font-size: 12.5px;
+}
+.git-inline {
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+}
+.git-files {
+  list-style: none;
+  margin: 0 0 10px;
+  padding: 0;
+  max-height: 220px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.git-files li {
+  padding: 4px 8px;
+  border-top: 1px solid var(--line);
+  font-size: 12px;
+}
+.git-files li:first-child {
+  border-top: 0;
+}
+.git-files label {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+.git-files .mono {
+  overflow-wrap: anywhere;
+}
+.git-st {
+  color: var(--text-3);
+  font-size: 11px;
+}
+.git-check {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+  margin: 0 0 8px;
+  font-size: 12.5px;
+  color: var(--text-2);
+}
+.git-modal footer {
+  flex-wrap: wrap;
+}
+.pr-card {
+  display: grid;
+  gap: 6px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-size: 12px;
+  color: var(--text-2);
+  min-width: 0;
+}
+.pr-card.pr-none {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.pr-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.pr-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.pr-state {
+  border-radius: 6px;
+  padding: 1px 6px;
+  font-size: 11px;
+  background: var(--active);
+  color: var(--text);
+}
+.pr-state.merged {
+  background: var(--green-soft);
+}
+.pr-state.closed {
+  background: var(--red-soft);
+}
+.pr-lines,
+.pr-failing {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+}
+.pr-lines .bad,
+.pr-failing {
+  color: var(--red);
+}
+.pr-lines .ok {
+  color: var(--green);
+}
+.pr-lines .wait {
+  color: var(--orange);
+}
+.pr-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.pr-when {
+  color: var(--text-3);
+  font-size: 11px;
+}
+.pr-chip {
+  cursor: pointer;
+  background: transparent;
+  max-width: 32ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pr-chip.bad {
+  color: var(--red);
+}
+.git-rule {
+  margin: 0 0 10px;
+  font-size: 12.5px;
+  color: var(--text-2);
+}
+.git-rule textarea {
+  width: 100%;
+  margin-top: 6px;
+  font: inherit;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 6px 8px;
+  box-sizing: border-box;
+  resize: vertical;
+}

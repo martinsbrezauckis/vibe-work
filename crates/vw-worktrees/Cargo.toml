@@ -1,0 +1,31 @@
+[package]
+name = "vw-worktrees"
+description = "Worktree per session: base branches, the session branch, the repository-program preflight, inspection before removal, per-session records"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[features]
+# TypeScript bindings of the public types, enabled by vw-core-api's `ts` feature (gen-core-ts).
+ts = ["dep:ts-rs", "vw-changes/ts"]
+
+[dependencies]
+# The one hardened git runner and its filter-free working-tree reading.
+vw-changes = { path = "../vw-changes" }
+vw-platform = { path = "../vw-platform" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tracing = "0.1"
+ts-rs = { version = "12.0.1", optional = true, features = ["serde-json-impl", "no-serde-warnings"] }
+
+# Handle-relative opens for the `.worktreeinclude` copy: every path level is opened with O_NOFOLLOW
+# from the handle of its parent, so no link can be swapped in between a check and the use.
+[target.'cfg(unix)'.dependencies]
+rustix = { version = "1.1.5", default-features = false, features = ["std", "fs"] }

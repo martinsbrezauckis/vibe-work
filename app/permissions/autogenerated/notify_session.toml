@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-notify-session"
+description = "Enables the notify_session command without any pre-configured scope."
+commands.allow = ["notify_session"]
+
+[[permission]]
+identifier = "deny-notify-session"
+description = "Denies the notify_session command without any pre-configured scope."
+commands.deny = ["notify_session"]

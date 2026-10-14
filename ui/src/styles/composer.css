@@ -1,0 +1,578 @@
+/*
+ * The composer layout, adapted from the design mockup. Tokens only. The top rule's dashes show the access mode (`lvl-*`).
+ */
+.composer-wrap {
+  flex: none;
+  padding: 0 32px 14px;
+  min-width: 0;
+}
+.composer-loading {
+  min-height: 112px;
+}
+.composer {
+  container-type: inline-size;
+  max-width: 760px;
+  margin: 0 auto;
+  border: 1px solid var(--line-2);
+  border-radius: 16px;
+  background: var(--panel);
+  position: relative;
+  box-shadow: var(--shadow);
+}
+.composer::before {
+  content: "";
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  top: -1px;
+  height: 2px;
+  background: var(--line-3);
+}
+.composer.lvl-yolo::before {
+  background: repeating-linear-gradient(90deg, var(--orange) 0 6px, transparent 6px 8px);
+}
+.composer.lvl-safe::before {
+  background: repeating-linear-gradient(90deg, var(--green) 0 6px, transparent 6px 8px);
+}
+.composer.lvl-smart::before {
+  background: repeating-linear-gradient(90deg, var(--blue) 0 6px, transparent 6px 8px);
+}
+.composer.lvl-warn::before {
+  background: repeating-linear-gradient(90deg, var(--orange-3) 0 6px, transparent 6px 8px);
+}
+.runbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 14px 0;
+  font-size: 12.5px;
+  color: var(--text-2);
+}
+.runbar .stop {
+  margin-left: auto;
+}
+/* `.typing` (the three pixels) comes from transcript.css. */
+.composer-input {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  border: 0;
+  background: none;
+  resize: none;
+  padding: 14px 16px 6px;
+  color: var(--text);
+  font:
+    15px/1.5 Inter,
+    system-ui,
+    sans-serif;
+  min-height: 54px;
+  outline: none;
+}
+.composer-input::placeholder {
+  color: var(--text-3);
+}
+.composer:focus-within {
+  border-color: var(--line-3);
+}
+/* the text box never draws the global keyboard ring inside the composer (a text field always counts as
+   :focus-visible, so the ring showed as a box inside the box on every focus). The composer's own border carries
+   the focus instead, tinted with the focus colour. */
+.composer-input:focus-visible {
+  box-shadow: none;
+}
+.composer:has(.composer-input:focus-visible) {
+  border-color: color-mix(in srgb, var(--focus) 55%, var(--line-3));
+}
+.ctools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 8px 8px;
+  min-width: 0;
+}
+.ctools > .cmenu-anchor {
+  flex-shrink: 0;
+  max-width: 100%;
+}
+.cchip {
+  /* Tighter than a plain .chip so both labels fit a 376 px composer next to an open side panel; the
+     full values are also in each chip's accessible name and tooltip when a narrower pane still cuts one. */
+  padding: 3px 6px;
+  gap: 4px;
+  min-width: 0;
+  flex: 0 1 auto;
+  cursor: pointer;
+  background: none;
+  font: inherit;
+  font-size: 12px;
+}
+.cchip:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+.cchip > span:not(.lv) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cchip .effort {
+  color: var(--text-3);
+  font-size: 11px;
+}
+.lv {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: none;
+  background: var(--text-3);
+}
+.lv-yolo {
+  background: var(--orange);
+}
+.lv-smart {
+  background: var(--blue);
+}
+.lv-warn {
+  background: var(--orange-3);
+}
+.lv-safe {
+  background: var(--green);
+}
+.send {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border-radius: 9px;
+  border: 0;
+  background: var(--primary-bg);
+  color: var(--primary-fg);
+  cursor: pointer;
+  flex: none;
+}
+.send:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.push-right {
+  margin-left: auto;
+}
+/*
+ * The right corner: the dictation mic, always shown, then one action slot whose
+ * face is Send while there is something to send (Voice chat while empty). The slot keeps its 32 px box
+ * in both states and the faces cross-fade in place, so nothing moves sideways; the hidden face is inert (no tab
+ * stop) and its visibility flips only after the fade. Mic and Send never look alike: the mic is a round, outlined
+ * ghost (red ring and tint while recording), Send a filled rounded square, with a 10 px gap between them.
+ */
+.ccorner {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  flex: none;
+}
+.ccorner .ibtn.mic {
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1px var(--line-2);
+}
+.ccorner .ibtn.mic[aria-pressed="true"] {
+  box-shadow: inset 0 0 0 1.5px var(--red);
+}
+/* "Finishing…" with a queued next dictation keeps its orange ring (voice.css) over the outline. */
+.ccorner .ibtn.mic[data-queued="true"] {
+  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--orange) 60%, transparent);
+}
+.cslot {
+  position: relative;
+  width: 32px;
+  height: 32px;
+  flex: none;
+}
+.cslot-face {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  opacity: 0;
+  transform: scale(0.9);
+  visibility: hidden;
+  transition:
+    opacity var(--t-ui) var(--ease-std),
+    transform var(--t-ui) var(--ease-out),
+    visibility 0s linear var(--t-ui);
+}
+/* `inherit`, not `visible`: a page over the work view hides the composer with `visibility: hidden`, and a `visible`
+   child would show through it (the Voice chat face showed over Settings). */
+.cslot-face[data-shown="true"] {
+  opacity: 1;
+  transform: none;
+  visibility: inherit;
+  transition:
+    opacity var(--t-ui) var(--ease-std),
+    transform var(--t-ui) var(--ease-out),
+    visibility 0s;
+}
+.mini {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid var(--line-2);
+  background: var(--raised);
+  color: var(--text-2);
+  border-radius: 7px;
+  padding: 3px 9px;
+  font:
+    500 12px Inter,
+    system-ui,
+    sans-serif;
+  cursor: pointer;
+}
+.mini:hover:not(:disabled) {
+  color: var(--text);
+  border-color: var(--line-3);
+}
+.mini:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.mini[aria-checked="true"] {
+  color: var(--text);
+  border-color: var(--orange-2);
+}
+.ibtn.sm {
+  width: 24px;
+  height: 24px;
+}
+.hint {
+  font-size: 11.5px;
+  color: var(--text-3);
+  text-align: center;
+  margin: 8px 0 0;
+}
+.composer-note {
+  color: var(--text-2);
+}
+
+/* Context chips and attached images. */
+.ctx-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 10px 12px 0;
+}
+.ctxchip,
+.att {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  max-width: 100%;
+  font-size: 12px;
+  border-radius: 8px;
+  color: var(--text-2);
+  min-width: 0;
+}
+.ctxchip {
+  border: 1px solid color-mix(in srgb, var(--orange-2) 45%, var(--line-2));
+  background: var(--orange-soft);
+  padding: 3px 4px 3px 8px;
+}
+.ctxchip b {
+  color: var(--text);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.ctxchip .mono {
+  font-family: var(--mono);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  max-width: 260px;
+}
+.att {
+  border: 1px solid var(--line-2);
+  padding: 3px 4px 3px 3px;
+}
+.att-img {
+  width: 34px;
+  height: 24px;
+  object-fit: cover;
+  border-radius: 5px;
+}
+.att-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 180px;
+}
+.ctxchip button,
+.att button {
+  width: 18px;
+  height: 18px;
+  border: 0;
+  background: none;
+  color: var(--text-3);
+  border-radius: 4px;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  flex: none;
+  padding: 0;
+}
+.ctxchip button:hover,
+.att button:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+/* Queued turns above the composer; Retry after a stopped or failed turn. */
+.queue,
+.retry-row {
+  max-width: 760px;
+  margin: 0 auto 8px;
+  padding: 0;
+}
+.queue {
+  list-style: none;
+  display: grid;
+  gap: 4px;
+}
+.queue-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  color: var(--text-2);
+  border: 1px dashed var(--line-2);
+  border-radius: 9px;
+  padding: 4px 6px 4px 10px;
+  min-width: 0;
+}
+.queue-n {
+  font-family: var(--mono);
+  color: var(--text-3);
+  font-size: 11px;
+}
+.queue-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.queue-extra {
+  color: var(--text-3);
+}
+.queue-edit {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--line-3);
+  border-radius: 6px;
+  padding: 3px 6px;
+}
+.retry-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12.5px;
+  color: var(--text-2);
+}
+
+/* Menus: access mode, model + thinking, and the `/` menu. */
+.cmenu-anchor {
+  position: relative;
+  display: inline-flex;
+  min-width: 0;
+}
+.cmenu {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 8px);
+  z-index: 20;
+  width: min(340px, 86vw);
+  max-height: 380px;
+  overflow: auto;
+  display: grid;
+  padding: 6px;
+  background: var(--raised);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+}
+.cmenu-sec {
+  font-size: 11.5px;
+  color: var(--text-3);
+  padding: 6px 10px 2px;
+}
+.cmenu-empty {
+  font-size: 12.5px;
+  color: var(--text-3);
+  padding: 6px 10px;
+}
+.cmenu-item {
+  all: unset;
+  box-sizing: border-box;
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 7px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--text-2);
+}
+.cmenu-item .lv {
+  margin-top: 5px;
+}
+.cmenu-item:hover,
+.cmenu-item:focus-visible,
+.cmenu-item[aria-checked="true"] {
+  background: var(--active);
+  color: var(--text);
+}
+.cmenu-text {
+  display: grid;
+  gap: 2px;
+}
+.cmenu-text .d {
+  font-size: 12px;
+  color: var(--text-3);
+}
+.cmenu-levels {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 4px 10px 8px;
+}
+/*
+ * The `/` menu: compact suggestions above the composer, like the command lists of other desktop
+ * tools: "/name" and one short description per row, about eight rows then a scroll, the typed letters marked, and a
+ * tooltip above the menu for the selected row (what it runs; the method names live only there).
+ */
+.slash {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(100% + 8px);
+  max-width: 560px;
+  background: var(--raised);
+  box-shadow: var(--shadow);
+  border-radius: 12px;
+  padding: 6px;
+  z-index: 20;
+}
+.slash-list {
+  /* Eight rows (34 px) plus the two section headings. */
+  max-height: 324px;
+  overflow: auto;
+}
+.slash .secl {
+  font-size: 11.5px;
+  color: var(--text-3);
+  padding: 6px 10px 2px;
+}
+.slash .it {
+  display: grid;
+  grid-template-columns: minmax(96px, 150px) minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  padding: 7px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--text-2);
+}
+.slash .it[aria-selected="true"] {
+  background: var(--active);
+  color: var(--text);
+}
+.slash .it b {
+  font-family: var(--mono);
+  font-weight: 500;
+  color: var(--orange-2);
+  font-size: 12.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.slash .it mark {
+  background: transparent;
+  color: var(--text);
+  font-weight: 700;
+}
+.slash .it > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.slash-empty {
+  padding: 10px;
+  font-size: 13px;
+  color: var(--text-3);
+}
+/* What the selected row runs: above the menu, so the scrolling list never clips it. */
+.slash-tip {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 4px);
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: var(--raised);
+  box-shadow: var(--shadow);
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--text-3);
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+/* The rewind dialog. */
+.rewind-msg {
+  margin: 0 0 8px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  border-left: 2px solid var(--orange-2);
+  padding-left: 10px;
+  color: var(--text);
+}
+.rewind-dialog .d {
+  font-size: 12.5px;
+  color: var(--text-3);
+  margin: 0;
+}
+.rewind-files {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.rewind-error {
+  color: var(--red);
+  margin: 0;
+}
+.rewind-acts {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+@media (max-width: 600px) {
+  .composer-wrap {
+    padding: 0 10px 10px;
+  }
+  .ctools > .cmenu-anchor {
+    position: static;
+  }
+  .ctools .cmenu {
+    left: 8px;
+    right: 8px;
+    width: auto;
+  }
+  .hint {
+    display: none;
+  }
+}

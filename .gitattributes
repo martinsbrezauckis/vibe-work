@@ -1,0 +1,13 @@
+# Line endings: LF in the repository and in every checkout, on every OS.
+# Prettier, rustfmt and the generated-code drift check compare bytes, so a CRLF checkout (Git for
+# Windows defaults to core.autocrlf=true) would fail them. Windows-only scripts keep CRLF.
+* text=auto eol=lf
+*.ps1 text eol=crlf
+*.cmd text eol=crlf
+*.bat text eol=crlf
+# Binary assets: never touch.
+*.png binary
+*.ico binary
+*.icns binary
+*.woff2 binary
+*.bundle binary

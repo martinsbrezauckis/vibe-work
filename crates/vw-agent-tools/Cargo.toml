@@ -1,0 +1,26 @@
+[package]
+name = "vw-agent-tools"
+description = "Session-scoped agent tools: the stdio MCP server and kill-guard hook binary, their wire format, credentials, the kill-command parser and the detached agent-process spawn"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[[bin]]
+# One small binary with two modes (`mcp`, `kill-guard`): Vibe starts it per session and per bash call,
+# so it stays std + serde_json only (no async runtime, no webview stack).
+name = "vw-agent-tools"
+path = "src/main.rs"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# Random credentials (same version as vw-keyproxy, already in the lockfile).
+getrandom = "0.3"
+# Constant-time credential comparison (same as vw-keyproxy).
+subtle = "2.6"

@@ -1,0 +1,76 @@
+[package]
+name = "app"
+description = "Vibe Work Tauri application: thin wiring between the window and the vw-* crates"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[build-dependencies]
+tauri-build = { version = "2.7.1", features = [] }
+
+[features]
+# Embed ui/dist instead of loading the dev server (what `tauri build` turns on). The private
+# end-to-end runs build with it so a debug binary (Debug API and dev launch on) shows the real UI.
+custom-protocol = ["tauri/custom-protocol"]
+# The e2e runs' in-page channel through the Debug API (vw-debug-api `e2e_script`), for driving the real
+# window where no WebDriver exists (macOS). Debug test builds only: refused in release builds (src/lib.rs and vw-debug-api).
+e2e-script = ["vw-debug-api/e2e-script", "vw-core-api/e2e-script"]
+# The vault test switch (private e2e debug builds only; refused in release builds by vw-core-api and
+# vw-debug-api).
+vault-e2e = ["vw-debug-api/vault-e2e"]
+
+[dependencies]
+tauri = { version = "2.12.1", features = [] }
+# Native dialogs (folder picker, delete confirmation), used from Rust only: the webview gets no plugin
+# permission (capabilities/main.json lists bridge commands only). Pinned exactly (checked 2026-10-08:
+# latest stable). Notifications use vw-platform (notify-rust), see its notify.rs for why.
+tauri-plugin-dialog = "=2.8.1"
+# `tauri::generate_context!` emits `serde_json` values for a build whose config has plugin settings (the
+# updater channel of a release or test overlay), so the crate must name it.
+serde_json = "1"
+vw-host = { path = "../crates/vw-host" }
+# The Vibe installer type held for the Vibe update check (`updater::VibeSlot`).
+vw-vibe-install = { path = "../crates/vw-vibe-install" }
+vw-core-api = { path = "../crates/vw-core-api" }
+vw-supervisor = { path = "../crates/vw-supervisor" }
+vw-platform = { path = "../crates/vw-platform" }
+vw-gate = { path = "../crates/vw-gate" }
+tokio = { version = "1.53", features = ["rt", "sync", "time"] }
+vw-mistral = { path = "../crates/vw-mistral" }
+vw-keys = { path = "../crates/vw-keys" }
+vw-keyproxy = { path = "../crates/vw-keyproxy" }
+vw-vault = { path = "../crates/vw-vault" }
+# Preview pane: the model the core drives and its Tauri engine (child webviews).
+vw-preview = { path = "../crates/vw-preview" }
+vw-webview = { path = "../crates/vw-webview" }
+# The agent browser's network guard.
+vw-netguard = { path = "../crates/vw-netguard" }
+# The Debug API's window routes: the `AppWindow` this crate implements on Tauri.
+vw-debug-api = { path = "../crates/vw-debug-api" }
+# Project Pages: the page viewer settings.
+vw-pages = { path = "../crates/vw-pages" }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "env-filter", "std"] }
+
+# Updates: registered only for builds whose config carries an accepted update channel
+# (vw_host::updates). Pinned exactly (checked 2026-10-09: latest stable 2.13.2, 2026-10-07). TLS follows
+# vw-mistral: rustls (ring) on Linux, the OS's native TLS on Windows and macOS (the plugin's default rustls
+# would also build ring for Windows, which the cross-target lint on WSL cannot compile).
+[dev-dependencies]
+tempfile = "3"
+# The release manifest tool: its output must parse with the updater plugin (`updater::manifest_format`).
+make-latest-json = { path = "../tools/public/update-manifest" }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+tauri-plugin-updater = { version = "=2.13.2", default-features = false, features = ["rustls-tls", "system-proxy"] }
+# Confirmation windows need a handle so cancellation can close the GTK dialog.
+gtk = "0.18"
+
+[target.'cfg(not(target_os = "linux"))'.dependencies]
+tauri-plugin-updater = { version = "=2.13.2", default-features = false, features = ["native-tls", "system-proxy", "zip"] }

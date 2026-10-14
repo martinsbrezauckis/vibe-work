@@ -1,0 +1,335 @@
+/*
+ * Overlays: scrim, command palette, settings dialog, switch, toasts.
+ * Adapted from the design mockup. Toast placement is computed in code
+ * (features/shell/toastPlacement.ts): a toast uses a clear corner or gap; if none fits it uses the status bar.
+ * The floating stack clips child animations to its measured, padded bounds so moving to a clear
+ * corner cannot briefly paint over a control.
+ */
+.scrim {
+  position: fixed;
+  inset: 0;
+  background: var(--scrim);
+  z-index: 40;
+}
+.palette {
+  position: fixed;
+  left: 50%;
+  top: 14vh;
+  transform: translateX(-50%);
+  width: min(620px, 92vw);
+  background: var(--raised);
+  border-radius: 14px;
+  box-shadow: var(--shadow);
+  z-index: 50;
+  overflow: hidden;
+}
+.palette input {
+  all: unset;
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 16px 18px;
+  font-size: var(--text-16);
+  border-bottom: 1px solid var(--line);
+  color: var(--text);
+}
+.palette input::placeholder {
+  color: var(--text-3);
+}
+.plist {
+  max-height: 380px;
+  overflow: auto;
+  padding: 6px;
+  margin: 0;
+  list-style: none;
+}
+.plist li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  color: var(--text-2);
+}
+.plist li[aria-selected="true"] {
+  background: var(--active);
+  color: var(--text);
+}
+.plist .k {
+  margin-left: auto;
+  font-size: var(--text-11-5);
+  color: var(--text-3);
+  font-family: var(--font-mono);
+}
+.plist .secl {
+  font-size: var(--text-11-5);
+  color: var(--text-3);
+  padding: 8px 12px 2px;
+  cursor: default;
+}
+.palette-hint {
+  font-size: var(--text-11-5);
+  color: var(--text-3);
+  padding: 8px 14px;
+  border-top: 1px solid var(--line);
+}
+.modal {
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: min(640px, 94vw);
+  max-height: 86vh;
+  overflow: auto;
+  background: var(--raised);
+  border-radius: 16px;
+  box-shadow: var(--shadow);
+  z-index: 50;
+  /* a dialog opened from the status bar (Processes) inherited its small monospace, no-wrap text, so the
+     whole dialog was in the data font and its lines ran past the edge. Every dialog starts from the body text. */
+  font-family: var(--font-ui);
+  font-size: var(--text-14);
+  line-height: var(--leading-ui);
+  white-space: normal;
+  color: var(--text);
+}
+.modal header {
+  display: flex;
+  align-items: center;
+  padding: 18px 20px;
+  border-bottom: 1px solid var(--line);
+}
+.modal header h2 {
+  margin: 0;
+  font-size: var(--text-16);
+}
+.modal header .ibtn {
+  margin-left: auto;
+}
+.modal section {
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--line);
+}
+.modal section:last-child {
+  border-bottom: 0;
+}
+.modal h3 {
+  font-size: var(--text-13-5);
+  margin: 0 0 10px;
+}
+.check {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 10px;
+  align-items: center;
+  padding: 8px 0;
+  font-size: var(--text-13-5);
+}
+.check > span {
+  /* The text column may shrink and wrap so the control column keeps its natural width. */
+  min-width: 0;
+}
+.check .d {
+  color: var(--text-3);
+  font-size: var(--text-12);
+  display: block;
+}
+.switch {
+  width: 34px;
+  height: 20px;
+  border-radius: 999px;
+  background: var(--line-3);
+  border: 0;
+  position: relative;
+  cursor: pointer;
+  flex: none;
+}
+.switch::after {
+  content: "";
+  position: absolute;
+  left: 3px;
+  top: 3px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--on-accent);
+  transition: left 0.15s;
+}
+.switch[aria-checked="true"] {
+  background: var(--orange);
+}
+.switch[aria-checked="true"]::after {
+  left: 17px;
+}
+.switch:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.legal {
+  font-size: var(--text-12);
+  color: var(--text-3);
+}
+
+/* Toasts use a clear corner, or one navigable notice in the existing status bar. */
+.toasts {
+  position: fixed;
+  z-index: 60;
+  display: grid;
+  gap: 8px;
+  max-width: min(420px, calc(100vw - var(--toast-left-inset, 18px) - 18px));
+  width: min(420px, calc(100vw - var(--toast-left-inset, 18px) - 18px));
+  white-space: normal;
+}
+.toasts:not([data-docked]) {
+  overflow: auto;
+  padding: 8px;
+  box-sizing: border-box;
+  max-height: min(30vh, 180px);
+}
+.toasts[data-corner="bottom-right"] {
+  right: 18px;
+  bottom: 40px;
+}
+.toasts[data-corner="top-right"] {
+  right: 18px;
+  top: 48px;
+}
+.toasts[data-corner="bottom-left"] {
+  left: 18px;
+  bottom: 40px;
+}
+.toasts[data-corner="top-left"] {
+  left: 18px;
+  top: 48px;
+}
+.statusbar > .toasts[data-docked] {
+  position: relative;
+  inset: auto;
+  display: flex;
+  align-items: center;
+  flex: 1 1 0;
+  min-width: 0;
+  max-width: none;
+  width: auto;
+  gap: 4px;
+}
+.toasts[data-docked] .toast:not([data-active]) {
+  display: none;
+}
+.toasts[data-docked] .toast[data-active] {
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 2px 5px;
+  font-size: var(--text-11);
+  line-height: 18px;
+  border-radius: 4px;
+  box-shadow: none;
+  animation: none;
+}
+.toast-content {
+  flex: 1 1 0;
+  min-width: 0;
+}
+.toast-text {
+  display: block;
+  min-width: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 18px;
+}
+.toast-measure {
+  position: absolute;
+  visibility: hidden;
+  pointer-events: none;
+  left: 0;
+  top: 0;
+}
+.toasts[data-docked] .toast-content {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.toast [data-toast-more] {
+  margin-top: 4px;
+}
+.toasts[data-docked] [data-toast-more] {
+  margin-top: 0;
+  min-height: 20px;
+  padding: 0 4px;
+  font-size: var(--text-11);
+}
+@media (max-width: 640px) {
+  .toasts[data-docked] .toast-text {
+    display: none;
+  }
+}
+.toasts[data-docked] .ibtn {
+  flex: none;
+  width: 20px;
+  height: 20px;
+}
+.toast-dialog {
+  position: fixed;
+  inset: auto;
+  margin: 0;
+  z-index: 65;
+  width: min(460px, calc(100vw - 16px));
+  max-height: calc(100dvh - 80px);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  padding: var(--space-card-inline);
+  border: 1px solid var(--line-2);
+  border-radius: 12px;
+  background: var(--panel);
+  color: var(--text);
+  box-shadow: var(--shadow);
+  white-space: normal;
+}
+.toast-dialog-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-control-gap);
+  flex: none;
+  margin-bottom: var(--space-control-gap);
+}
+.toast-dialog-body {
+  overflow-y: auto;
+  min-height: 0;
+}
+.toast-dialog-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-width: 100%;
+}
+.toast-dialog-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-control-gap);
+}
+.toast {
+  display: flex;
+  align-items: start;
+  gap: 10px;
+  background: var(--raised);
+  box-shadow: var(--shadow);
+  border-radius: 10px;
+  padding: 10px 14px;
+  font-size: var(--text-13);
+  color: var(--text);
+  font-family: var(--font-ui);
+  animation: tin 0.25s ease-out;
+}
+.toast > .ibtn {
+  flex: none;
+  margin-left: auto;
+}
+@keyframes tin {
+  from {
+    transform: translateY(8px);
+    opacity: 0;
+  }
+}

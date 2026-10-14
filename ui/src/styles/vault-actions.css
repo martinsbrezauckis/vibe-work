@@ -1,0 +1,105 @@
+/*
+ * Row-end vault actions in Settings: compact menus, a one-line rename editor and a secret
+ * replacement field. Depends on Settings row geometry and shared design tokens.
+ * Called by: settings-page.css. Shared Settings rows, fields and buttons own the control sizes.
+ */
+.set-cat-body .secrets-row > .vault-actions {
+  flex: none;
+  margin-left: auto;
+}
+.set-cat-body .vault-actions-menu,
+.set-cat-body .vault-actions-editor {
+  position: absolute;
+  z-index: 5;
+  right: 0;
+  top: 100%;
+  width: min(290px, calc(100vw - 32px));
+  padding: 8px;
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  background: var(--raised);
+  box-shadow: var(--shadow);
+  white-space: normal;
+}
+.set-cat-body .vault-actions-menu[data-placement="above"],
+.set-cat-body .vault-actions-editor[data-placement="above"] {
+  top: auto;
+  bottom: 100%;
+}
+.set-cat-body .vault-actions-menu {
+  display: grid;
+  gap: 4px;
+}
+.set-cat-body .vault-actions-menu .tb-btn {
+  justify-content: flex-start;
+}
+.set-cat-body .vault-actions-editor {
+  align-items: end;
+}
+.set-cat-body .vault-actions-editor[data-placement="viewport"] {
+  position: fixed;
+  top: 8px;
+  right: auto;
+  left: 8px;
+  max-height: calc(100dvh - 56px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.set-cat-body .vault-actions-editor .key-field {
+  width: 100%;
+  min-width: 0;
+}
+.set-cat-body .vault-actions-editor input {
+  max-width: 100%;
+}
+.set-cat-body .vault-actions-editor.is-rename {
+  left: 0;
+  right: 0;
+  top: 0;
+  width: auto;
+  bottom: 0;
+  flex-wrap: nowrap;
+  align-items: center;
+  padding: 0;
+  border: 0;
+  box-shadow: none;
+  white-space: nowrap;
+}
+.set-cat-body .vault-actions-editor.is-rename input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.set-cat-body .vault-actions-editor.is-rename .tb-btn {
+  flex: none;
+}
+
+.vault-actions-editor .generator-options {
+  width: 100%;
+}
+.generator-replace {
+  width: 100%;
+}
+.sb-vault {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 0;
+  border-radius: 4px;
+  padding: 2px 4px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.sb-vault:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+.sb-vault:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.titlebar [data-rail="vault-narrow"][aria-current="true"] {
+  background: var(--active);
+  color: var(--text);
+}

@@ -1,0 +1,129 @@
+/*
+ * The side panel (Pages, Browser, Changes, Terminal): closed by default, opens with tabs, resizable.
+ * Split out of shell.css when that file exceeded the size target. Colours come from
+ * tokens.css only.
+ */
+.panel {
+  border-left: 1px solid var(--line);
+  background: var(--panel);
+  display: grid;
+  grid-template-rows: auto 1fr;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+  position: relative;
+}
+.body:not(.has-panel) .panel {
+  border-left: 0;
+  visibility: hidden;
+}
+.grip {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 6px;
+  cursor: col-resize;
+  z-index: 5;
+  touch-action: none;
+}
+/* the grip shows a blue hairline on hover and while dragging (the panel follows the pointer at once). */
+.grip::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: transparent;
+  transition: background-color var(--t-hover) var(--ease-std);
+}
+.grip:hover::after,
+.dragging .grip::after {
+  background: var(--focus);
+}
+.ptabs {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 7px 8px 7px 12px;
+  border-bottom: 1px solid var(--line);
+  min-width: 0;
+  overflow-x: auto;
+}
+.ptab-group {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 7px;
+}
+.ptab-group:hover {
+  background: var(--hover);
+}
+.ptab-group[data-selected="true"] {
+  background: var(--active);
+}
+.ptab {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border: 0;
+  background: none;
+  color: var(--text-3);
+  padding: 5px 4px 5px 10px;
+  border-radius: 7px;
+  cursor: pointer;
+  font-size: var(--text-13);
+  white-space: nowrap;
+}
+.ptab-group:hover .ptab,
+.ptab[aria-selected="true"] {
+  color: var(--text);
+}
+.ptab-x {
+  width: 18px;
+  height: 18px;
+  margin-right: 6px;
+  display: grid;
+  place-items: center;
+  border-radius: 5px;
+  color: var(--text-3);
+  border: 0;
+  background: none;
+  cursor: pointer;
+  padding: 0;
+}
+.ptab-x:hover {
+  background: var(--line-2);
+  color: var(--text);
+}
+.ptabs .end {
+  margin-left: auto;
+  display: flex;
+  gap: 2px;
+}
+.ibtn {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  border: 0;
+  background: none;
+  color: var(--text-2);
+  cursor: pointer;
+}
+.ibtn:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+.pbody {
+  overflow: auto;
+  min-height: 0;
+  padding: 18px;
+}
+.empty {
+  color: var(--text-3);
+  font-size: var(--text-13);
+  padding: 30px 6px;
+  text-align: center;
+}

@@ -1,0 +1,41 @@
+[package]
+name = "vw-preview"
+description = "Preview pane model: per-session previews, URL policy, live cap, layout, screenshots, console, downloads, the engine seam"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[features]
+# TypeScript bindings for the UI (through vw-core-api's gen-core-ts).
+ts = ["dep:ts-rs"]
+# Test fixture only: exact loopback origin may exercise the shared browser profile.
+e2e-script = []
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tokio = { version = "1.53", features = ["sync", "time", "macros", "rt"] }
+tracing = "0.1"
+url = "2"
+# Stable per-session storage identifiers (already used by vw-changes).
+sha2 = "0.10.9"
+# Screenshot shaping: decode, downscale, re-encode (0.18.1 is already in the lockfile through tauri).
+png = "0.18"
+# Screenshots travel as base64 in command results and MCP image content (0.22.1 already in the lockfile).
+base64 = "0.22"
+# Random name of the in-page console accessor (same version as the other crates).
+getrandom = "0.3"
+ts-rs = { version = "12.0.1", optional = true, features = ["serde-json-impl", "no-serde-warnings"] }
+# Screenshots captured in a display colour space (WebView2 tags them with an ICC profile) are converted to
+# sRGB before the re-encode drops the tag. Pure Rust, BSD-3-Clause OR Apache-2.0.
+moxcms = "0.9"
+# Address classes of literal hosts and the canary suffix.
+vw-netguard = { path = "../vw-netguard" }
+sysinfo = { version = "=0.38.4", default-features = false, features = ["system"] }

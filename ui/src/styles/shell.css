@@ -1,0 +1,541 @@
+/*
+ * Shell layout: title bar, icon rail, list column, content, side panel, status bar.
+ * Colours come from tokens.css only (scripts/public/check_colors.mjs fails on any literal colour outside it).
+ * Grid mechanics: the .body grid always has four explicit tracks (rail, list, content, panel);
+ * hiding an area collapses its track to 0, it never shifts the others (explicit placement below).
+ */
+.app {
+  height: 100vh;
+  display: grid;
+  grid-template-rows: 38px 1fr 26px;
+  grid-template-columns: minmax(0, 1fr);
+}
+.sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+}
+/* Icons (components/Icon): size and line weight come from the component (size tokens 12/14/16/20, a 1.5 px line at
+   every size); CSS sets only paint and joins. Never size an icon in CSS: that would scale its line too. */
+svg.i {
+  stroke: currentColor;
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  flex: none;
+}
+.mono {
+  font-family: var(--font-mono);
+}
+kbd {
+  font-family: var(--font-mono);
+  font-size: var(--text-11);
+  color: var(--text-3);
+  border: 1px solid var(--line-2);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  padding: 0 5px;
+  background: var(--raised);
+}
+
+/* Title bar (the native window frame stays; this is the in-app toolbar) */
+.titlebar {
+  min-width: 0;
+  overflow-x: auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 8px 0 14px;
+  background: var(--chrome);
+  border-bottom: 1px solid var(--line);
+  user-select: none;
+}
+.titlebar .ibtn {
+  flex: none;
+  position: relative;
+}
+.titlebar .ibtn[data-icon="bell"] .ui-badge {
+  position: absolute;
+  right: 0;
+  top: 0;
+  color: var(--accent-ink);
+  background: var(--orange-3);
+  border-color: var(--chrome);
+}
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-weight: var(--weight-heading);
+  letter-spacing: -0.01em;
+}
+.brand-mark .c1 {
+  fill: var(--brand-1);
+}
+.brand-mark .c2 {
+  fill: var(--brand-2);
+}
+.brand-mark .c3 {
+  fill: var(--brand-3);
+}
+.spacer {
+  flex: 1;
+}
+.search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  /* Shrinks before it clips: the label ends in an ellipsis only when the window is really small. */
+  flex: 0 1 340px;
+  width: 340px;
+  white-space: nowrap;
+  overflow: hidden;
+  min-width: 0;
+  padding: 4px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--text-3);
+  cursor: pointer;
+  font-size: var(--text-13);
+}
+.search kbd {
+  margin-left: auto;
+  flex: none;
+}
+.search .s-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* Setup-derived forms inside Settings share the same controls without changing first-run screens. */
+.tb-btn,
+.set-cat-body .btn-primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  background: none;
+  color: var(--text-2);
+  padding: 5px 8px;
+  border-radius: 7px;
+  cursor: pointer;
+  font-size: var(--text-12-5);
+}
+/* a disabled toolbar button looks disabled everywhere (a disabled "primary" one kept its full fill). */
+.tb-btn:disabled,
+.set-cat-body .btn-primary:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.tb-btn:hover,
+.set-cat-body .btn-primary:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+.dbg {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-ui);
+  font-size: var(--text-11);
+  font-weight: var(--weight-semibold);
+  color: var(--accent-ink);
+  background: var(--orange-3);
+  border: 0;
+  border-radius: 999px;
+  padding: 2px 9px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.dbg i {
+  width: 6px;
+  height: 6px;
+  background: var(--accent-ink);
+  display: inline-block;
+}
+
+/* Body grid */
+.body {
+  display: grid;
+  grid-template-columns: 56px 284px minmax(0, 1fr) 0;
+  min-height: 0;
+  transition: grid-template-columns 0.22s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.body.no-col {
+  grid-template-columns: 56px 0 minmax(0, 1fr) 0;
+}
+.body.has-panel {
+  grid-template-columns: 56px 284px minmax(380px, 1fr) var(--pw);
+}
+.body.no-col.has-panel {
+  grid-template-columns: 56px 0 minmax(380px, 1fr) var(--pw);
+}
+.body.has-panel.panel-max {
+  grid-template-columns: 56px 0 0 1fr;
+}
+.body.dragging {
+  transition: none;
+}
+.rail {
+  grid-column: 1;
+}
+.column {
+  grid-column: 2;
+}
+.content {
+  grid-column: 3;
+}
+.panel {
+  grid-column: 4;
+}
+
+/* Rail */
+.rail {
+  background: var(--chrome);
+  border-right: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 10px 0;
+}
+.rbtn {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  border: 0;
+  background: none;
+  color: var(--text-3);
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  position: relative;
+}
+.rbtn:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+.rbtn[aria-current="true"] {
+  background: var(--active);
+  color: var(--text);
+}
+.rbtn[aria-current="true"]::before {
+  content: "";
+  position: absolute;
+  left: -8px;
+  top: 12px;
+  width: 3px;
+  height: 16px;
+  background: var(--orange);
+}
+.rbtn .dot {
+  position: absolute;
+  right: 7px;
+  top: 7px;
+  width: 7px;
+  height: 7px;
+  background: var(--orange);
+  box-shadow: 0 0 0 2px var(--chrome);
+}
+.rail .grow {
+  flex: 1;
+}
+
+/* List column */
+.column {
+  background: var(--panel);
+  border-right: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+.col-top {
+  padding: 12px 12px 8px;
+  display: grid;
+  gap: 8px;
+}
+.btn-primary {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 34px;
+  border: 0;
+  border-radius: 9px;
+  background: var(--primary-bg);
+  color: var(--primary-fg);
+  font-weight: var(--weight-semibold);
+  cursor: pointer;
+  padding: 0 14px;
+}
+.btn-primary:hover {
+  filter: brightness(0.94);
+}
+.filter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 9px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  color: var(--text-3);
+  font-size: var(--text-13);
+  background: var(--bg);
+}
+.filter input {
+  all: unset;
+  flex: 1;
+  color: var(--text);
+  min-width: 0;
+}
+.filter input::placeholder {
+  color: var(--text-3);
+}
+.col-scroll {
+  overflow: auto;
+  scrollbar-gutter: stable;
+  padding: 2px 8px 12px;
+  flex: 1;
+}
+/* Hidden filter/fold rows retain their identities without contributing height or focus targets. */
+.col-scroll [hidden] {
+  display: none !important;
+}
+.sec {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: var(--text-12);
+  color: var(--text-3);
+  padding: 12px 8px 4px;
+}
+.needs-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  border: 1px solid color-mix(in srgb, var(--orange) 38%, transparent);
+  background: var(--orange-soft);
+  color: var(--text);
+  padding: 7px 9px;
+  border-radius: 8px;
+  cursor: pointer;
+  text-align: left;
+  font-size: var(--text-13);
+  margin: 2px 0 4px;
+}
+.needs-row .t {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.needs-row .p {
+  color: var(--text-3);
+  font-size: var(--text-11);
+  margin-left: auto;
+  font-family: var(--font-mono);
+  white-space: nowrap;
+}
+.proj-h {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 12px 16px minmax(0, 1fr) auto;
+  gap: 7px;
+  align-items: center;
+  width: 100%;
+  border: 0;
+  background: none;
+  padding: 7px 8px;
+  border-radius: 8px;
+  cursor: pointer;
+  color: var(--text);
+  text-align: left;
+  font-weight: var(--weight-medium);
+  font-size: var(--text-13-5);
+}
+.proj-h:hover {
+  background: var(--hover);
+}
+.proj-h .caret,
+.proj-h .fold {
+  color: var(--text-3);
+}
+.proj-h .caret {
+  transition: transform 0.15s;
+}
+.proj[data-open="true"] .proj-h .caret {
+  transform: rotate(90deg);
+}
+.proj-h .pname {
+  /* One line with an ellipsis (the button's title holds the full name): a long name must not push the count out. */
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.proj-h .cnt {
+  font-family: var(--font-mono);
+  font-size: var(--text-11);
+  color: var(--text-3);
+  font-weight: var(--weight-regular);
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+}
+.proj-sessions {
+  padding-left: 12px;
+}
+.proj[data-open="false"] .proj-sessions {
+  display: none;
+}
+.col-note {
+  font-size: var(--text-12);
+  color: var(--text-3);
+  padding: 10px 10px 0;
+}
+.px {
+  width: 9px;
+  height: 9px;
+  display: inline-block;
+  flex: none;
+}
+.px.run {
+  background: var(--orange);
+}
+.px.ok {
+  background: var(--green);
+}
+.px.warn {
+  background: var(--orange-3);
+}
+.px.err {
+  background: var(--red);
+}
+
+/* Status bar */
+.statusbar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 0 12px;
+  font-size: var(--text-11-5);
+  color: var(--text-3);
+  background: var(--chrome);
+  border-top: 1px solid var(--line);
+  font-family: var(--font-mono);
+  white-space: nowrap;
+  overflow: hidden;
+}
+.statusbar .push {
+  margin-left: auto;
+}
+.statusbar:has(> .toasts[data-docked]) {
+  gap: 8px;
+}
+.statusbar:has(> .toasts[data-docked]) .sb-cwd {
+  display: none;
+}
+@media (max-width: 640px) {
+  .statusbar:has(> .toasts[data-docked]) > :first-child {
+    display: none;
+  }
+  /* The docked notification needs room for Show all, navigation and Dismiss. The lock keeps its icon,
+     accessible status and tooltip while the tray is present. */
+  .statusbar:has(> .toasts[data-docked]) .sb-vault span {
+    display: none;
+  }
+}
+.statusbar .ok {
+  color: var(--green);
+}
+.statusbar .warn {
+  color: var(--orange-3);
+}
+/* "N left running" (processes from deleted sessions) and its list dialog. */
+.sb-usage.sb-left {
+  color: var(--orange-3);
+}
+.left-running-intro {
+  margin: 0 0 12px;
+  font-size: var(--text-13);
+  color: var(--text-2);
+}
+.modal ul.left-running-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 8px;
+  font-size: var(--text-13);
+  color: var(--text);
+}
+.left-running-list li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.left-running-what {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  margin-right: auto;
+}
+.left-running-what .d {
+  font-size: var(--text-12);
+  color: var(--text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.statusbar .err {
+  color: var(--red);
+}
+
+/* Column inner wrapper and drawer scrim: transparent in the grid layout, used by the drawer. */
+.column-inner {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+}
+.drawer-scrim {
+  display: none;
+}
+.col-foot {
+  padding: 8px 12px 12px;
+  border-top: 1px solid var(--line);
+}
+.rbtn-wide {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  border: 0;
+  background: none;
+  color: var(--text-2);
+  padding: 8px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: var(--text-13-5);
+}
+.rbtn-wide:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+.welcome h2 {
+  text-wrap: balance;
+}
+
+/* A path that loses its start, not its end (components/PathText, UX-14). */
+.path-start {
+  direction: rtl;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

@@ -1,0 +1,70 @@
+# Workspace root for Vibe Work. Logic lives in crates/, the Tauri crate in app/ is thin wiring only.
+# Dependency direction: app -> host -> debug-api -> core-api -> gate -> session
+# -> rpc -> protocol; supervisor used by core-api/gate, platform and mistral by app/gate/debug-api.
+# No cycles.
+[workspace]
+resolver = "2"
+members = [
+    "crates/vw-protocol",
+    "crates/vw-rpc",
+    "crates/vw-session",
+    "crates/vw-supervisor",
+    "crates/vw-gate",
+    "crates/vw-vocabulary",
+    "crates/vw-core-api",
+    "crates/vw-debug-api",
+    "crates/vw-host",
+    "crates/vw-platform",
+    "crates/vw-secrets",
+    "crates/vw-mistral",
+    "crates/vw-vault",
+    "crates/vw-keyproxy",
+    "crates/vw-keys",
+    "crates/vw-procmon",
+    "crates/vw-terminal",
+    "crates/vw-documents",
+    "crates/vw-agent-tools",
+    "crates/vw-changes",
+    "crates/vw-worktrees",
+    "crates/vw-git",
+    "crates/vw-preview",
+    "crates/vw-netguard",
+    "crates/vw-browser",
+    "crates/vw-pages",
+    "crates/vw-projects",
+    "crates/vw-vibe-install",
+    "crates/vw-market",
+    "tools/public/vibe-support/sign",
+    "tools/public/update-manifest",
+    "tests/public/rust",
+    "app",
+]
+# The copied ShellX Vault crates have their own workspace manifest (third_party/shellx-vault/Cargo.toml)
+# and are compiled as path dependencies only. The patched tauri-runtime-wry copy (below) is third-party
+# code too: excluded from the workspace so our lints never apply to it.
+exclude = ["third_party/shellx-vault", "third_party/tauri-runtime-wry"]
+
+# tauri-runtime-wry 2.12.1 with one patch: on Windows it applies
+# `data_store_identifier` as a WebView2 profile name (tauri-apps/tauri PR #16054), so each session's preview
+# keeps its own cookies even when WEBVIEW2_USER_DATA_FOLDER or the UserDataFolder policy overrides the
+# per-session data folder. Same version as the registry crate, so tauri 2.12.1 resolves to it. Byte-identical
+# to the published crate except src/lib.rs (third_party/tauri-runtime-wry/PROVENANCE.json). Exit: remove when
+# a release contains the change; vw-webview's mount check refuses a Windows preview without its own profile.
+[patch.crates-io]
+tauri-runtime-wry = { path = "third_party/tauri-runtime-wry" }
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+authors = ["Martins Brezauckis"]
+rust-version = "1.89"  # 1.89: std File::lock (vw-vault commit lock); keyring store crates need 1.88. Was 1.87 (process-wrap 10). Checked 2026-10-09
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_docs = "deny"
+
+[workspace.lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+unwrap_used = "deny"
+expect_used = "deny"

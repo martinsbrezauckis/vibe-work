@@ -1,0 +1,66 @@
+/*
+ * Update notice and the Settings "Updates" buttons. The notice is a card under the title bar, right
+ * side; it sits above the content and below the toasts, and never moves the layout (fixed position).
+ */
+/* The stack holds the Vibe Work card and the Vibe card. */
+.update-notices {
+  position: fixed;
+  z-index: 55;
+  top: 46px;
+  right: 18px;
+  width: min(440px, 92vw);
+  display: grid;
+  gap: 8px;
+}
+.update-notice {
+  display: grid;
+  gap: 10px;
+  background: var(--raised);
+  box-shadow: var(--shadow);
+  border-radius: 10px;
+  padding: 12px 14px;
+  font-size: var(--text-13);
+  border-left: 3px solid var(--text-3);
+}
+.update-notice[data-tone="ask"] {
+  border-left-color: var(--primary-bg);
+}
+.update-notice[data-tone="error"] {
+  border-left-color: var(--red);
+}
+.update-notice-text {
+  display: grid;
+  gap: 4px;
+}
+.update-notice-text .d {
+  color: var(--text-3);
+  font-size: var(--text-12);
+}
+.update-notice progress {
+  width: 100%;
+  height: 6px;
+}
+.update-notice-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+}
+/* Show where "Open release page" goes beside the button. */
+.update-link-host {
+  color: var(--text-3);
+  font-size: var(--text-12);
+}
+
+/* The Vibe update consent dialog: the offer can be long (sources, commands). */
+.vibe-update-dialog section {
+  max-height: min(60vh, 520px);
+  overflow: auto;
+}
+
+/* While a modal dialog is open everything outside it is inert (hooks/useModalFocus); the stack sits above the scrim
+   (z-index 55 > 40), so it would cover the dialog (seen with the Vibe update dialog at 390 px): hide it meanwhile. */
+.update-notices[inert] {
+  display: none;
+}

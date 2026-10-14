@@ -1,0 +1,783 @@
+{
+  "schema": 1,
+  "version": "2026-10-10.3",
+  "entries": [
+    {
+      "id": "headless-browser",
+      "kind": "plugin",
+      "name": "Headless browser",
+      "publisher": "Microsoft (Playwright MCP)",
+      "category": "browser",
+      "summary": "A browser the agent drives in the background, for pages the built-in browser does not open for it, such as sites on this computer or the local network.",
+      "licence": "Apache-2.0 AND MIT",
+      "homepage": "https://github.com/microsoft/playwright-mcp",
+      "review": "Vendor-official (Microsoft). Pinned: @playwright/mcp 0.0.83 and its two Playwright packages by the npm registry's SHA-512, Node.js 24.21.0 LTS by nodejs.org's SHA-256. Chromium comes from Playwright's own installer.",
+      "notes": [
+        "It has none of the built-in browser's address guards: it can open local and private addresses, follows redirects anywhere and runs page scripts. Use the built-in browser for ordinary sites.",
+        "Runs headless with a fresh profile on every start (--isolated): no cookies or logins are kept.",
+        "Installs app-private: Node.js and the Playwright packages inside the plugin, Chromium in Vibe Work's data folder. Nothing is installed system-wide.",
+        "Linux: Chromium needs the usual desktop libraries (present on desktop installs)."
+      ],
+      "plugin": {
+        "version": "0.0.83",
+        "runtime": {
+          "name": "node",
+          "version": "24.21.0",
+          "targets": {
+            "linux-x64": {
+              "url": "https://nodejs.org/dist/v24.21.0/node-v24.21.0-linux-x64.tar.gz",
+              "sha256": "6e1db87ef58b8819e5d5402eff1536491b18edd8eb7bee5ef7897876e88dc5ff",
+              "format": "tarGz",
+              "bytes": 58088022,
+              "executable": "runtime/node",
+              "files": [
+                {
+                  "from": "node-v24.21.0-linux-x64/bin/node",
+                  "to": "runtime/node",
+                  "executable": true
+                },
+                {
+                  "from": "node-v24.21.0-linux-x64/LICENSE",
+                  "to": "runtime/LICENSE"
+                }
+              ]
+            },
+            "linux-arm64": {
+              "url": "https://nodejs.org/dist/v24.21.0/node-v24.21.0-linux-arm64.tar.gz",
+              "sha256": "724282c3b43aec998aa9527380465b45d229e021b58035f5f4f63095eabfe5d5",
+              "format": "tarGz",
+              "bytes": 57824078,
+              "executable": "runtime/node",
+              "files": [
+                {
+                  "from": "node-v24.21.0-linux-arm64/bin/node",
+                  "to": "runtime/node",
+                  "executable": true
+                },
+                {
+                  "from": "node-v24.21.0-linux-arm64/LICENSE",
+                  "to": "runtime/LICENSE"
+                }
+              ]
+            },
+            "darwin-x64": {
+              "url": "https://nodejs.org/dist/v24.21.0/node-v24.21.0-darwin-x64.tar.gz",
+              "sha256": "1462cb3b3046b815cf8ea436d3da450ec1a9f11dac7e5a46b0ada5305d7e8097",
+              "format": "tarGz",
+              "bytes": 54203979,
+              "executable": "runtime/node",
+              "files": [
+                {
+                  "from": "node-v24.21.0-darwin-x64/bin/node",
+                  "to": "runtime/node",
+                  "executable": true
+                },
+                {
+                  "from": "node-v24.21.0-darwin-x64/LICENSE",
+                  "to": "runtime/LICENSE"
+                }
+              ]
+            },
+            "darwin-arm64": {
+              "url": "https://nodejs.org/dist/v24.21.0/node-v24.21.0-darwin-arm64.tar.gz",
+              "sha256": "bed7eea5325e1108f32ce5228ddd6a5f0f08a499ee42aa7442aea583702f6057",
+              "format": "tarGz",
+              "bytes": 52909993,
+              "executable": "runtime/node",
+              "files": [
+                {
+                  "from": "node-v24.21.0-darwin-arm64/bin/node",
+                  "to": "runtime/node",
+                  "executable": true
+                },
+                {
+                  "from": "node-v24.21.0-darwin-arm64/LICENSE",
+                  "to": "runtime/LICENSE"
+                }
+              ]
+            },
+            "win-x64": {
+              "url": "https://nodejs.org/dist/v24.21.0/node-v24.21.0-win-x64.zip",
+              "sha256": "158f7685b44de51f6c0df1d153526cbcd3e1bc739a8dfc607721cef75de9e541",
+              "format": "zip",
+              "bytes": 37618919,
+              "executable": "runtime/node.exe",
+              "files": [
+                {
+                  "from": "node-v24.21.0-win-x64/node.exe",
+                  "to": "runtime/node.exe",
+                  "executable": true
+                },
+                {
+                  "from": "node-v24.21.0-win-x64/LICENSE",
+                  "to": "runtime/LICENSE"
+                }
+              ]
+            },
+            "win-arm64": {
+              "url": "https://nodejs.org/dist/v24.21.0/node-v24.21.0-win-arm64.zip",
+              "sha256": "8779b1bde1d39f8d420e3b57aa657b39891af434d3de44a919044cec06785921",
+              "format": "zip",
+              "bytes": 33679608,
+              "executable": "runtime/node.exe",
+              "files": [
+                {
+                  "from": "node-v24.21.0-win-arm64/node.exe",
+                  "to": "runtime/node.exe",
+                  "executable": true
+                },
+                {
+                  "from": "node-v24.21.0-win-arm64/LICENSE",
+                  "to": "runtime/LICENSE"
+                }
+              ]
+            }
+          }
+        },
+        "npm": [
+          {
+            "name": "@playwright/mcp",
+            "version": "0.0.83",
+            "url": "https://registry.npmjs.org/@playwright/mcp/-/mcp-0.0.83.tgz",
+            "integrity": "sha512-oNcl+Ae2/IAjhfPeP46BfIkSakfmprY+aOtkv5MjrQ4lPav4/yNtPhL0iq8SlIM90oApWgBDUxaNKvktazUKOg==",
+            "maxBytes": 4194304
+          },
+          {
+            "name": "playwright",
+            "version": "1.64.0-alpha-1790635538000",
+            "url": "https://registry.npmjs.org/playwright/-/playwright-1.64.0-alpha-1790635538000.tgz",
+            "integrity": "sha512-/5XDUMxpOd/9AojJtWDFIRV3EJZNQ0AwvK69wgt3CPzy8wTgiBG9pX45VfxtqtvIRGwfWzMhrvawNKreG69Snw==",
+            "maxBytes": 16777216
+          },
+          {
+            "name": "playwright-core",
+            "version": "1.64.0-alpha-1790635538000",
+            "url": "https://registry.npmjs.org/playwright-core/-/playwright-core-1.64.0-alpha-1790635538000.tgz",
+            "integrity": "sha512-pNwaXirhXMRLaRQs4NQ18EpTdtDoFwyPH9FOaaDC7YXG4hpwE2xmwCic/1srbuExVQC7zT9LJSJpDBAru+Vo9A==",
+            "maxBytes": 33554432
+          }
+        ],
+        "postInstall": {
+          "args": [
+            "${ROOT}/node_modules/playwright-core/cli.js",
+            "install",
+            "chromium"
+          ],
+          "env": {
+            "PLAYWRIGHT_BROWSERS_PATH": "${DATA}/browsers"
+          },
+          "what": "Downloading Chromium with Playwright's installer",
+          "timeoutSecs": 1800
+        },
+        "mcpServers": {
+          "browser": {
+            "type": "stdio",
+            "command": "${RUNTIME}",
+            "args": [
+              "${PLUGIN_ROOT}/node_modules/@playwright/mcp/cli.js",
+              "--headless",
+              "--isolated",
+              "--browser",
+              "chromium",
+              "--output-dir",
+              "${PLUGIN_DATA}/output"
+            ],
+            "env": {
+              "PLAYWRIGHT_BROWSERS_PATH": "${DATA}/browsers"
+            }
+          }
+        },
+        "bundled": {
+          "skills/headless-browser/SKILL.md": "headless-browser/SKILL.md"
+        },
+        "consent": "Downloads Node.js 24.21.0, Microsoft's Playwright MCP server 0.0.83 and Chromium into Vibe Work's own folders, then lets the agent start that browser. Node.js and the Playwright packages are checked against pinned checksums; Chromium is fetched by Playwright's own installer, which downloads Chromium from Playwright's CDN over HTTPS without a published checksum. It has none of the built-in browser's address guards.",
+        "downloadMb": 250,
+        "diskMb": 700
+      }
+    },
+    {
+      "id": "context7",
+      "kind": "pack",
+      "name": "Context7",
+      "publisher": "Upstash",
+      "category": "docs",
+      "summary": "Current, version-specific library documentation and code examples for the agent.",
+      "licence": "MIT",
+      "homepage": "https://context7.com",
+      "review": "Vendor's own Agent Plugins skill, read in full (research 11: no scripts, no credentials, network only through the Context7 server).",
+      "notes": [
+        "The agent's documentation questions are sent to Context7 as search queries.",
+        "Uses Context7's public server without an account (rate-limited)."
+      ],
+      "pack": {
+        "version": "feef1b2",
+        "source": {
+          "repo": "upstash/context7",
+          "commit": "feef1b2f6078ac8a33acd38d76817000af001373",
+          "maxBytes": 67108864
+        },
+        "files": [
+          {
+            "from": "plugins/agent-plugins/context7/skills/context7-mcp/SKILL.md",
+            "to": "skills/context7-mcp/SKILL.md",
+            "sha256": "99f31814733079106d708f2ab676e27b784219e318b3f10c98ecda44477658c2"
+          }
+        ],
+        "licenceFile": {
+          "from": "plugins/agent-plugins/context7/LICENSE",
+          "to": "LICENSE",
+          "sha256": "85cfb556dc2b22b55d2565674fcdaac82f3f2f6b7a928d27003132721bb6736c"
+        },
+        "mcpServers": {
+          "context7": {
+            "type": "streamable-http",
+            "url": "https://mcp.context7.com/mcp"
+          }
+        }
+      }
+    },
+    {
+      "id": "atlassian",
+      "kind": "pack",
+      "name": "Atlassian skills",
+      "publisher": "Atlassian",
+      "category": "work",
+      "summary": "Six Jira and Confluence workflows: triage, status reports, specs to backlog, meeting notes to tasks, sprint dashboard, knowledge search.",
+      "licence": "Apache-2.0",
+      "homepage": "https://github.com/atlassian/atlassian-mcp-server",
+      "review": "Listed in an official agent plugin marketplace (research 11): safety review accepted; checked for Vibe compatibility and licence.",
+      "notes": [
+        "Works with the Atlassian connector from your Mistral account (Connectors tab).",
+        "Not yet tested with Mistral models (planned)."
+      ],
+      "pairsWith": {
+        "connector": "atlassian"
+      },
+      "pack": {
+        "version": "eb9a595",
+        "source": {
+          "repo": "atlassian/atlassian-mcp-server",
+          "commit": "eb9a5956a7ac6380c731c725a8382da53ad6d980",
+          "maxBytes": 16777216
+        },
+        "files": [
+          {
+            "from": "skills/capture-tasks-from-meeting-notes/SKILL.md",
+            "to": "skills/capture-tasks-from-meeting-notes/SKILL.md",
+            "sha256": "10603589f81d61908094f573cc6218308b95f6d7ce14498c3cf208ceee7435c1"
+          },
+          {
+            "from": "skills/capture-tasks-from-meeting-notes/references/action-item-patterns.md",
+            "to": "skills/capture-tasks-from-meeting-notes/references/action-item-patterns.md",
+            "sha256": "b630fd46b06d348803de5b97b8180269c1f9b51ea3121dfa1e9e50ce0dbb6195"
+          },
+          {
+            "from": "skills/generate-status-report/SKILL.md",
+            "to": "skills/generate-status-report/SKILL.md",
+            "sha256": "e9fd30be0ae63f07daf60d5c02271f56177d78f156e97c496c56bd06940db960"
+          },
+          {
+            "from": "skills/generate-status-report/references/jql-patterns.md",
+            "to": "skills/generate-status-report/references/jql-patterns.md",
+            "sha256": "bac0cc8f2cff9cbff8a715f4900803968b5984a33086f612ee788a05a8e9f649"
+          },
+          {
+            "from": "skills/generate-status-report/references/report-templates.md",
+            "to": "skills/generate-status-report/references/report-templates.md",
+            "sha256": "618ac02868d47504db18147543b69577105a47bc3dff7116fa5067f3a6b21cf1"
+          },
+          {
+            "from": "skills/generate-status-report/scripts/jql_builder.py",
+            "to": "skills/generate-status-report/scripts/jql_builder.py",
+            "sha256": "7ebf59034972cdf04d73b30f885885d6a6359609778fa584c06759ae03c5f303"
+          },
+          {
+            "from": "skills/jira-sprint-dashboard/SKILL.md",
+            "to": "skills/jira-sprint-dashboard/SKILL.md",
+            "sha256": "0a812dc617d59e4771ad96b39f6472b2c542be165c7ee077b56a4fcd48d7afdf"
+          },
+          {
+            "from": "skills/search-company-knowledge/SKILL.md",
+            "to": "skills/search-company-knowledge/SKILL.md",
+            "sha256": "2c734047a8710c5b5b007d107e594b0213d88769b476b9888913e4947c6f3d8e"
+          },
+          {
+            "from": "skills/spec-to-backlog/SKILL.md",
+            "to": "skills/spec-to-backlog/SKILL.md",
+            "sha256": "7c2aa5b6327437bfefe77f845d0be4a3a431fb88d5f8e0ca9bf6256df5ac2a89"
+          },
+          {
+            "from": "skills/spec-to-backlog/references/breakdown-examples.md",
+            "to": "skills/spec-to-backlog/references/breakdown-examples.md",
+            "sha256": "57ff3c616ef0e761911cde849848497028faf570b027c9a16689a2889525eb30"
+          },
+          {
+            "from": "skills/spec-to-backlog/references/epic-templates.md",
+            "to": "skills/spec-to-backlog/references/epic-templates.md",
+            "sha256": "ca1c28239608b0dfef47426ab0420f6ddcf16370f30f6ed6796e0c391ebb5ce8"
+          },
+          {
+            "from": "skills/spec-to-backlog/references/ticket-writing-guide.md",
+            "to": "skills/spec-to-backlog/references/ticket-writing-guide.md",
+            "sha256": "fcc9369f54089ac41bd7a2813f8c19b1b6d092d6226cf4b4104d494b03400754"
+          },
+          {
+            "from": "skills/triage-issue/SKILL.md",
+            "to": "skills/triage-issue/SKILL.md",
+            "sha256": "8b9f857efb4a29ded4cc3c758e3d1b2f93cf78ae549801df72ef9a80182aee00"
+          },
+          {
+            "from": "skills/triage-issue/references/search-patterns.md",
+            "to": "skills/triage-issue/references/search-patterns.md",
+            "sha256": "7f25799e3d2cda78c98c37b75c7e46b838025e06c6b42ca1c929a6ab797ede02"
+          },
+          {
+            "from": "skills/triage-issue/references/bug-report-templates.md",
+            "to": "skills/triage-issue/references/bug-report-templates.md",
+            "sha256": "ece9041b1c1a827707d70113c5c29cf6b2638ddd102dac496ddbef326f559d8a"
+          }
+        ],
+        "licenceFile": {
+          "from": "LICENSE",
+          "to": "LICENSE",
+          "sha256": "fff3bdc1d0125e492d7a2cb866c01a8ab587dee0405e77440ca524205a1f8c28"
+        }
+      }
+    },
+    {
+      "id": "grafana-cloud",
+      "kind": "pack",
+      "name": "Grafana Cloud skill",
+      "publisher": "Grafana Labs",
+      "category": "observability",
+      "summary": "How to use the Grafana Cloud MCP server well: dashboards, queries, alerts and incidents.",
+      "licence": "Apache-2.0",
+      "homepage": "https://grafana.com",
+      "review": "Listed in an official agent plugin marketplace (research 11): safety review accepted; checked for Vibe compatibility and licence.",
+      "notes": [
+        "Add the Grafana Cloud server too (MCP servers group).",
+        "Not yet tested with Mistral models (planned)."
+      ],
+      "pairsWith": {
+        "server": "grafana-cloud-server"
+      },
+      "pack": {
+        "version": "12be563",
+        "source": {
+          "repo": "grafana/ai-marketplace",
+          "commit": "12be5634a492f73c189d466c5449d09b853ad7a4",
+          "maxBytes": 16777216
+        },
+        "files": [
+          {
+            "from": "plugins/grafana-cloud-mcp/skills/grafana-cloud-mcp-tools/SKILL.md",
+            "to": "skills/grafana-cloud-mcp-tools/SKILL.md",
+            "sha256": "ef06860b9d2e983e9c36c8ca17e321bca6f084ab1849c4f187429c79d42e7b51"
+          }
+        ],
+        "licenceFile": {
+          "from": "LICENSE",
+          "to": "LICENSE",
+          "sha256": "0bb63293c48db68f1b0c0005969aea5de4555c9a08ec664e7b993ef9e7389bc1"
+        }
+      }
+    },
+    {
+      "id": "canva",
+      "kind": "pack",
+      "name": "Canva skills",
+      "publisher": "Canva",
+      "category": "design",
+      "summary": "Six Canva workflows: edit a design, brand check, bulk create, design feedback, apply feedback, resize for social media.",
+      "licence": "Apache-2.0",
+      "homepage": "https://www.canva.dev",
+      "review": "Listed in an official agent plugin marketplace (research 11): safety review accepted; folders renamed to the skill names so Vibe loads them.",
+      "notes": [
+        "Add the Canva server too (MCP servers group).",
+        "Not yet tested with Mistral models (planned)."
+      ],
+      "pairsWith": {
+        "server": "canva-server"
+      },
+      "pack": {
+        "version": "b56291e",
+        "source": {
+          "repo": "canva-sdks/canva-skills",
+          "commit": "b56291ea0a36d0a941e1478b47959be5f1771dee",
+          "maxBytes": 16777216
+        },
+        "files": [
+          {
+            "from": "plugins/canva/skills/brand-check/SKILL.md",
+            "to": "skills/canva-brand-check/SKILL.md",
+            "sha256": "b292189744392db22b9e72481056a0db94781bd64892480abe2ce50c76efbb73"
+          },
+          {
+            "from": "plugins/canva/skills/bulk-create/SKILL.md",
+            "to": "skills/canva-bulk-create/SKILL.md",
+            "sha256": "65deda62b60ce9e748c7a90b3e41e91dadc38f6deee3ba4aca799fd7502eb8b4"
+          },
+          {
+            "from": "plugins/canva/skills/edit-design/SKILL.md",
+            "to": "skills/canva-edit-design/SKILL.md",
+            "sha256": "842eeec8f89bfcfb3490ca92092f4ef441577ff7f9b7bae979aad99cc92ceaa8"
+          },
+          {
+            "from": "plugins/canva/skills/get-design-feedback/SKILL.md",
+            "to": "skills/canva-design-feedback/SKILL.md",
+            "sha256": "e18303be61308ad6dc8e05c4735b7254873f42ab9c6bc6c37b9cec339119be7b"
+          },
+          {
+            "from": "plugins/canva/skills/implement-feedback/SKILL.md",
+            "to": "skills/canva-implement-feedback/SKILL.md",
+            "sha256": "cb0d8a7434e7abd7a129ef74aa526ea7f5c0c7ea89db17e3a0ebf27d6108aa36"
+          },
+          {
+            "from": "plugins/canva/skills/resize-for-social-media/SKILL.md",
+            "to": "skills/canva-resize-for-social-media/SKILL.md",
+            "sha256": "bb36807630daf3ba7c2a27e83de64b329e03ce68457da874c36c5022ceff7094"
+          }
+        ],
+        "licenceFile": {
+          "from": "LICENSE",
+          "to": "LICENSE",
+          "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
+        }
+      }
+    },
+    {
+      "id": "hugging-face",
+      "kind": "pack",
+      "name": "Hugging Face",
+      "publisher": "Hugging Face",
+      "category": "data",
+      "summary": "Search models, datasets, Spaces and papers on the Hugging Face Hub.",
+      "licence": "n/a",
+      "homepage": "https://huggingface.co",
+      "review": "Connects Hugging Face's own server without an account (it answered anonymously on 2026-10-10); no vendor files installed.",
+      "notes": [
+        "Anonymous use: public Hub data only."
+      ],
+      "pack": {
+        "version": "2026-10-10",
+        "mcpServers": {
+          "hugging-face": {
+            "type": "streamable-http",
+            "url": "https://huggingface.co/mcp"
+          }
+        }
+      }
+    },
+    {
+      "id": "cloudflare-docs",
+      "kind": "pack",
+      "name": "Cloudflare docs",
+      "publisher": "Cloudflare",
+      "category": "docs",
+      "summary": "Search Cloudflare's developer documentation.",
+      "licence": "n/a",
+      "homepage": "https://developers.cloudflare.com",
+      "review": "Connects Cloudflare's own documentation server, which needs no account (answered anonymously on 2026-10-10); no vendor files installed.",
+      "pack": {
+        "version": "2026-10-10",
+        "mcpServers": {
+          "cloudflare-docs": {
+            "type": "streamable-http",
+            "url": "https://docs.mcp.cloudflare.com/mcp"
+          }
+        }
+      }
+    },
+    {
+      "id": "gitlab",
+      "kind": "server",
+      "name": "GitLab",
+      "publisher": "GitLab",
+      "category": "code",
+      "summary": "Projects, issues, merge requests and pipelines.",
+      "licence": "n/a",
+      "review": "Address and sign-in checked against the live server on 2026-10-10 (no account used).",
+      "notes": [],
+      "server": {
+        "url": "https://gitlab.com/api/v4/mcp",
+        "access": "signIn",
+        "checked": "2026-10-10: asks for sign-in and lets new apps register themselves (dynamic client registration), so Vibe can sign in."
+      },
+      "homepage": "https://docs.gitlab.com/user/model_context_protocol/mcp_server/"
+    },
+    {
+      "id": "sentry",
+      "kind": "server",
+      "name": "Sentry",
+      "publisher": "Sentry",
+      "category": "observability",
+      "summary": "Errors, issues and releases.",
+      "licence": "n/a",
+      "review": "Address and sign-in checked against the live server on 2026-10-10 (no account used).",
+      "notes": [],
+      "server": {
+        "url": "https://mcp.sentry.dev/mcp",
+        "access": "signIn",
+        "checked": "2026-10-10: asks for sign-in and lets new apps register themselves (dynamic client registration), so Vibe can sign in."
+      },
+      "homepage": "https://docs.sentry.io"
+    },
+    {
+      "id": "supabase",
+      "kind": "server",
+      "name": "Supabase",
+      "publisher": "Supabase",
+      "category": "data",
+      "summary": "Projects, databases, SQL and edge functions.",
+      "licence": "n/a",
+      "review": "Address and sign-in checked against the live server on 2026-10-10 (no account used).",
+      "notes": [
+        "It can change your databases: point it at a development project first."
+      ],
+      "server": {
+        "url": "https://mcp.supabase.com/mcp",
+        "access": "signIn",
+        "checked": "2026-10-10: asks for sign-in and lets new apps register themselves (dynamic client registration), so Vibe can sign in."
+      },
+      "homepage": "https://supabase.com/docs/guides/getting-started/mcp"
+    },
+    {
+      "id": "neon",
+      "kind": "server",
+      "name": "Neon",
+      "publisher": "Neon",
+      "category": "data",
+      "summary": "Serverless Postgres projects, branches and queries.",
+      "licence": "n/a",
+      "review": "Address and sign-in checked against the live server on 2026-10-10 (no account used).",
+      "notes": [],
+      "server": {
+        "url": "https://mcp.neon.tech/mcp",
+        "access": "signIn",
+        "checked": "2026-10-10: asks for sign-in and lets new apps register themselves (dynamic client registration), so Vibe can sign in."
+      },
+      "homepage": "https://neon.com/docs"
+    },
+    {
+      "id": "airtable",
+      "kind": "server",
+      "name": "Airtable",
+      "publisher": "Airtable",
+      "category": "data",
+      "summary": "Bases, tables and records.",
+      "licence": "n/a",
+      "review": "Address and sign-in checked against the live server on 2026-10-10 (no account used).",
+      "notes": [],
+      "server": {
+        "url": "https://mcp.airtable.com/mcp",
+        "access": "signIn",
+        "checked": "2026-10-10: asks for sign-in and lets new apps register themselves (dynamic client registration), so Vibe can sign in."
+      },
+      "homepage": "https://airtable.com"
+    },
+    {
+      "id": "miro",
+      "kind": "server",
+      "name": "Miro",
+      "publisher": "Miro",
+      "category": "design",
+      "summary": "Boards, diagrams and sticky notes.",
+      "licence": "n/a",
+      "review": "Address and sign-in checked against the live server on 2026-10-10 (no account used).",
+      "notes": [],
+      "server": {
+        "url": "https://mcp.miro.com/",
+        "access": "signIn",
+        "checked": "2026-10-10: asks for sign-in and lets new apps register themselves (dynamic client registration), so Vibe can sign in."
+      },
+      "homepage": "https://miro.com"
+    },
+    {
+      "id": "canva-server",
+      "kind": "server",
+      "name": "Canva",
+      "publisher": "Canva",
+      "category": "design",
+      "summary": "Designs, brand kits and exports.",
+      "licence": "n/a",
+      "review": "Address and sign-in checked against the live server on 2026-10-10 (no account used).",
+      "notes": [],
+      "server": {
+        "url": "https://mcp.canva.com/mcp",
+        "access": "signIn",
+        "checked": "2026-10-10: asks for sign-in and lets new apps register themselves (dynamic client registration), so Vibe can sign in."
+      },
+      "homepage": "https://www.canva.dev"
+    },
+    {
+      "id": "grafana-cloud-server",
+      "kind": "server",
+      "name": "Grafana Cloud",
+      "publisher": "Grafana Labs",
+      "category": "observability",
+      "summary": "Dashboards, metrics, logs and alerts in Grafana Cloud.",
+      "licence": "n/a",
+      "review": "Address and sign-in checked against the live server on 2026-10-10 (no account used).",
+      "notes": [],
+      "server": {
+        "url": "https://mcp.grafana.com/mcp",
+        "access": "signIn",
+        "checked": "2026-10-10: asks for sign-in and lets new apps register themselves (dynamic client registration), so Vibe can sign in."
+      },
+      "homepage": "https://grafana.com"
+    },
+    {
+      "id": "tavily",
+      "kind": "server",
+      "name": "Tavily",
+      "publisher": "Tavily",
+      "category": "search",
+      "summary": "Web search and extraction built for agents.",
+      "licence": "n/a",
+      "review": "Address and sign-in checked against the live server on 2026-10-10 (no account used).",
+      "notes": [],
+      "server": {
+        "url": "https://mcp.tavily.com/mcp",
+        "access": "signIn",
+        "checked": "2026-10-10: asks for sign-in and lets new apps register themselves (dynamic client registration), so Vibe can sign in."
+      },
+      "homepage": "https://tavily.com"
+    },
+    {
+      "id": "figma",
+      "kind": "server",
+      "name": "Figma",
+      "publisher": "Figma",
+      "category": "design",
+      "summary": "Design files, components and variables.",
+      "licence": "n/a",
+      "review": "Address and sign-in checked against the live server on 2026-10-10 (no account used).",
+      "notes": [],
+      "server": {
+        "url": "https://mcp.figma.com/mcp",
+        "access": "approvedOnly",
+        "checked": "2026-10-10: asks for sign-in; Figma only lets listed apps finish it.",
+        "rule": "Only clients listed in the Figma MCP Catalog can connect to the Figma MCP Server.",
+        "ruleSource": "https://developers.figma.com/docs/figma-mcp-server/",
+        "whatToDo": "Vibe signs in as \"Mistral Vibe\", which is not on Figma's list yet. Figma's desktop app has a local MCP server that needs no approval, but it has no sign-in step, so Vibe Work cannot add it yet."
+      }
+    },
+    {
+      "id": "vercel",
+      "kind": "server",
+      "name": "Vercel",
+      "publisher": "Vercel",
+      "category": "code",
+      "summary": "Deployments, projects and logs.",
+      "licence": "n/a",
+      "review": "Address and sign-in checked against the live server on 2026-10-10 (no account used).",
+      "notes": [],
+      "server": {
+        "url": "https://mcp.vercel.com",
+        "access": "approvedOnly",
+        "checked": "2026-10-10: asks for sign-in; Vercel only lets reviewed apps finish it.",
+        "rule": "Vercel MCP only supports AI clients that have been reviewed and approved by Vercel.",
+        "ruleSource": "https://vercel.com/docs/mcp/vercel-mcp",
+        "whatToDo": "Vibe signs in as \"Mistral Vibe\", which Vercel has to approve first. Until then, ask the agent to use the Vercel command line in a terminal."
+      }
+    },
+    {
+      "id": "monday",
+      "kind": "server",
+      "name": "monday.com",
+      "publisher": "monday.com",
+      "category": "work",
+      "summary": "Boards, items and updates.",
+      "licence": "n/a",
+      "review": "Address and sign-in checked against the live server on 2026-10-10 (no account used).",
+      "notes": [],
+      "server": {
+        "url": "https://mcp.monday.com/mcp",
+        "access": "approvedOnly",
+        "checked": "2026-10-10: asks for sign-in; public apps must be registered and reviewed by monday.com.",
+        "rule": "Public distribution: you must register it with monday.com and authenticate through dynamic client registration.",
+        "ruleSource": "https://developer.monday.com/api-reference/docs/mcp-dynamic-client-registration",
+        "whatToDo": "monday.com has to review the \"Mistral Vibe\" app first. A personal API token works, but servers with keys are not supported in Vibe Work yet."
+      }
+    },
+    {
+      "id": "dropbox",
+      "kind": "server",
+      "name": "Dropbox",
+      "publisher": "Dropbox",
+      "category": "files",
+      "summary": "Files and folders in Dropbox.",
+      "licence": "n/a",
+      "review": "Address and sign-in checked against the live server on 2026-10-10 (no account used).",
+      "notes": [],
+      "server": {
+        "url": "https://mcp.dropbox.com/mcp",
+        "access": "approvedOnly",
+        "checked": "2026-10-10: asks for sign-in; Dropbox lets only a trusted set of apps register themselves.",
+        "rule": "Dynamic client registration is available only for a trusted set of MCP clients; others create a Dropbox app.",
+        "ruleSource": "https://help.dropbox.com/integrations/connect-dropbox-mcp-server",
+        "whatToDo": "Sign-in may be refused until Dropbox trusts the \"Mistral Vibe\" app."
+      }
+    },
+    {
+      "id": "asana",
+      "kind": "server",
+      "name": "Asana",
+      "publisher": "Asana",
+      "category": "work",
+      "summary": "Tasks, projects and goals.",
+      "licence": "n/a",
+      "review": "Address and sign-in checked against the live server on 2026-10-10 (no account used).",
+      "notes": [],
+      "server": {
+        "url": "https://mcp.asana.com/v2/mcp",
+        "access": "ownApp",
+        "checked": "2026-10-10: asks for sign-in but offers no self-registration for new apps.",
+        "rule": "Asana's authorization server does not support dynamic client registration.",
+        "ruleSource": "https://developers.asana.com/docs/connecting-mcp-clients-to-asanas-v2-server",
+        "whatToDo": "Needs your own Asana app (made in Asana's developer console). Vibe Work cannot use your own app details yet."
+      }
+    },
+    {
+      "id": "hubspot",
+      "kind": "server",
+      "name": "HubSpot",
+      "publisher": "HubSpot",
+      "category": "work",
+      "summary": "Contacts, companies and deals.",
+      "licence": "n/a",
+      "review": "Address and sign-in checked against the live server on 2026-10-10 (no account used).",
+      "notes": [],
+      "server": {
+        "url": "https://mcp.hubspot.com/",
+        "access": "ownApp",
+        "checked": "2026-10-10: asks for sign-in but offers no self-registration for new apps.",
+        "rule": "Create an MCP connector under Development > MCP Connectors in your HubSpot account.",
+        "ruleSource": "https://developers.hubspot.com/docs/apps/developer-platform/build-apps/integrate-with-the-remote-hubspot-mcp-server",
+        "whatToDo": "Needs an app you create in HubSpot. Vibe Work cannot use your own app details yet."
+      }
+    },
+    {
+      "id": "github",
+      "kind": "server",
+      "name": "GitHub",
+      "publisher": "GitHub",
+      "category": "code",
+      "summary": "Repositories, issues, pull requests and Actions.",
+      "licence": "n/a",
+      "review": "Address checked against the live server on 2026-10-10 (no account used): it asks for an Authorization header.",
+      "notes": [
+        "Use a fine-grained personal access token limited to the repositories and permissions you want the agent to have."
+      ],
+      "server": {
+        "url": "https://api.githubcopilot.com/mcp/",
+        "access": "key",
+        "checked": "2026-10-10: answers 401 \"missing required Authorization header\" without a token; GitHub documents a personal access token as Authorization: Bearer for MCP hosts.",
+        "rule": "Any host application that supports remote MCP servers should support the remote GitHub server with PAT authentication.",
+        "ruleSource": "https://github.com/github/github-mcp-server",
+        "whatToDo": "Create a personal access token on GitHub (Settings, Developer settings), then add the server with it: the token stays in your vault."
+      },
+      "homepage": "https://github.com/github/github-mcp-server"
+    }
+  ]
+}

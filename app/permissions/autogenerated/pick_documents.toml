@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-pick-documents"
+description = "Enables the pick_documents command without any pre-configured scope."
+commands.allow = ["pick_documents"]
+
+[[permission]]
+identifier = "deny-pick-documents"
+description = "Denies the pick_documents command without any pre-configured scope."
+commands.deny = ["pick_documents"]

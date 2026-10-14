@@ -1,0 +1,20 @@
+[package]
+name = "make-latest-json"
+description = "Release tool: writes and checks the updater's latest.json from the final, signed update artifacts of one release (fails closed on any mismatch)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+# All four are already in the tree (the app's own update check uses minisign-verify, base64 and semver for the same
+# rule; serde_json is everywhere). minisign-verify 0.2.5: MIT, no dependencies, the crate the updater plugin uses.
+minisign-verify = "0.2.5"
+base64 = "0.22"
+semver = "1"
+serde_json = "1"

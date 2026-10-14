@@ -1,0 +1,23 @@
+<!--
+  Vibe Work desktop icon: the title-bar pixel W padded inside a visible dark-grey rounded tile.
+  Depends on BrandMark.tsx and the brand tokens; scripts/public/generate_icons.mjs renders it.
+  The 256-unit master has 12.5% horizontal tile padding; the generator fits each frame to integer cells.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 256 256">
+  <rect id="tile" x="16.5" y="16.5" width="223" height="223" rx="49.5" fill="#25252b" stroke="#55555f" stroke-width="1" />
+  <g id="mark" transform="translate(44 68) scale(12)" shape-rendering="crispEdges">
+    <rect class="c1" x="0" y="1" width="2" height="2" fill="#ff8205" />
+    <rect class="c2" x="1" y="3" width="2" height="2" fill="#fa500f" />
+    <rect class="c2" x="2" y="5" width="2" height="2" fill="#fa500f" />
+    <rect class="c3" x="3" y="7" width="2" height="2" fill="#e61300" />
+    <rect class="c2" x="4" y="5" width="2" height="2" fill="#fa500f" />
+    <rect class="c2" x="5" y="3" width="2" height="2" fill="#fa500f" />
+    <rect class="c1" x="6" y="1" width="2" height="2" fill="#ff8205" />
+    <rect class="c2" x="7" y="3" width="2" height="2" fill="#fa500f" />
+    <rect class="c2" x="8" y="5" width="2" height="2" fill="#fa500f" />
+    <rect class="c3" x="9" y="7" width="2" height="2" fill="#e61300" />
+    <rect class="c2" x="10" y="5" width="2" height="2" fill="#fa500f" />
+    <rect class="c2" x="11" y="3" width="2" height="2" fill="#fa500f" />
+    <rect class="c1" x="12" y="1" width="2" height="2" fill="#ff8205" />
+  </g>
+</svg>

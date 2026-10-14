@@ -1,0 +1,184 @@
+/*
+ * Documents in the composer and web sources in the transcript: waiting document chips
+ * (`.doc-row`, `.docchip`), read document chips (`.ctxchip.docctx`), the text preview (`.doc-preview`),
+ * the sources list of a search step and of an answer (`.sources`), the answer's "Sources (n)" chip and
+ * its side list (`.sources-panel`). Tokens only; works from 390 px up.
+ */
+.doc-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 10px 12px 0;
+}
+.docchip {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  max-width: 100%;
+  width: 320px;
+  padding: 8px 10px;
+  border: 1px solid var(--line-2);
+  border-radius: 10px;
+  background: var(--panel);
+  font-size: 12px;
+  color: var(--text-2);
+}
+.docchip.failed {
+  border-color: color-mix(in srgb, var(--red) 55%, var(--line-2));
+  background: var(--red-soft);
+}
+.docchip-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.docchip-name {
+  color: var(--text);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.docchip-meta {
+  flex: none;
+  color: var(--text-3);
+}
+.docchip-note {
+  margin: 0;
+  line-height: 1.4;
+}
+.docchip.failed .docchip-note {
+  color: var(--text);
+}
+.docchip-acts {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.docchip-acts .ibtn {
+  margin-left: auto;
+}
+/* The chip's Preview button is a text button, not the 18 px icon button of `.ctxchip button`. */
+.ctxchip.docctx button.mini {
+  width: auto;
+  height: auto;
+  display: inline-flex;
+  padding: 1px 7px;
+  border: 1px solid var(--line-2);
+  border-radius: 6px;
+  color: var(--text-2);
+  font-size: 11px;
+}
+.doc-preview .d {
+  font-size: 12.5px;
+  color: var(--text-3);
+  margin: 0 0 8px;
+}
+.doc-kept {
+  margin: 0 0 8px;
+  font-size: 12.5px;
+  color: var(--orange-3);
+}
+.doc-text {
+  max-height: 50vh;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* Web sources */
+.search-q {
+  margin: 0 0 6px;
+  padding: 8px 8px 0;
+  font-size: 12.5px;
+  color: var(--text-2);
+}
+.sources {
+  list-style: none;
+  margin: 0 0 8px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.source {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  width: 100%;
+  text-align: left;
+  border: 0;
+  background: none;
+  color: var(--text);
+  padding: 5px 8px;
+  border-radius: 8px;
+  cursor: pointer;
+  font: inherit;
+  min-width: 0;
+}
+.source:hover,
+.source:focus-visible {
+  background: var(--hover);
+}
+.source-title {
+  font-size: 13px;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.source-host {
+  font-size: 11px;
+  color: var(--text-3);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sources-chip[aria-expanded="true"] {
+  background: var(--active);
+  color: var(--text);
+}
+.sources-panel {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  bottom: 8px;
+  width: min(360px, calc(100% - 16px));
+  display: flex;
+  flex-direction: column;
+  background: var(--raised);
+  border-radius: 14px;
+  box-shadow: var(--shadow);
+  z-index: 20;
+  overflow: hidden;
+}
+.sources-panel header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--line);
+}
+.sources-panel h2 {
+  margin: 0;
+  font-size: 14px;
+}
+.sources-panel .sources-close {
+  margin-left: auto;
+}
+.sources-panel .d {
+  margin: 10px 14px 6px;
+  font-size: 12px;
+  color: var(--text-3);
+}
+.sources-panel .sources {
+  overflow: auto;
+  padding: 0 6px 10px;
+  margin: 0;
+}

@@ -1,0 +1,114 @@
+/*
+ * Integrated terminal: the Terminal tab's tab strip, toolbar, notices and xterm host.
+ * Colours come from tokens.css (`--term-*` for the terminal itself). xterm's own stylesheet
+ * (@xterm/xterm/css/xterm.css) is bundled as a file; its runtime styles go through the CSSOM shim
+ * (features/terminal/xtermCsp.ts), whose carrier elements must never render their text.
+ */
+vw-xterm-style {
+  display: none !important;
+}
+
+.pbody:has(> .vw-term-panel) {
+  padding: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.vw-term-panel {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  background: var(--term-bg);
+}
+.vw-term-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--line);
+  background: var(--chrome);
+  min-height: 38px;
+}
+.vw-term-tabs {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  overflow-x: auto;
+  flex: 1;
+}
+.vw-term-tab {
+  border: 0;
+  background: none;
+  color: var(--text-3);
+  padding: 4px 10px;
+  border-radius: 6px;
+  font: 12px var(--mono);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.vw-term-tab:hover {
+  background: var(--hover);
+  color: var(--text-2);
+}
+.vw-term-tab[aria-selected="true"] {
+  background: var(--active);
+  color: var(--text);
+}
+.vw-term-tab[data-state="exited"] {
+  text-decoration: line-through;
+}
+.vw-term-new {
+  width: 26px;
+  height: 26px;
+}
+.vw-term-tools {
+  display: flex;
+  gap: 2px;
+}
+.vw-term-tool {
+  border: 0;
+  background: none;
+  color: var(--text-2);
+  font-size: 12px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.vw-term-tool:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+.vw-term-error,
+.vw-term-exited {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 12px;
+  font-size: 12px;
+  border-bottom: 1px solid var(--line);
+}
+.vw-term-error {
+  color: var(--red);
+  background: var(--red-soft);
+}
+.vw-term-exited {
+  color: var(--text-2);
+  background: var(--raised);
+}
+.vw-term-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.vw-terminal {
+  flex: 1;
+  min-height: 0;
+  padding: 6px 4px 4px 10px;
+  background: var(--term-bg);
+}
+.vw-terminal .xterm {
+  height: 100%;
+}

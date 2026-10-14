@@ -1,0 +1,195 @@
+/*
+ * find bars (a conversation, a file), the marks they place (CSS Custom Highlight API), the palette's
+ * index note, quick edits in the File tab, the temporary-chat switch and chip. Colours are tokens only.
+ */
+
+/* Find in this conversation / this file. */
+.find-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+}
+.tx > .find-bar {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+.find-bar input {
+  flex: 1 1 160px;
+  min-width: 120px;
+  font: inherit;
+  font-size: var(--text-13);
+  padding: 4px 8px;
+  border: 1px solid var(--line-2);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+}
+.find-bar button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-2);
+  padding: 3px 6px;
+  cursor: pointer;
+}
+.find-bar button:hover:not(:disabled) {
+  background: var(--hover);
+}
+.find-bar button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.find-scope {
+  font-size: var(--text-12);
+  color: var(--text-2);
+  border: 1px solid var(--line-2) !important;
+  border-radius: 999px !important;
+  padding: 2px 8px !important;
+  white-space: nowrap;
+}
+.find-count {
+  font-size: var(--text-12);
+  color: var(--text-3);
+  min-width: 64px;
+  text-align: right;
+}
+.find-note {
+  flex-basis: 100%;
+  margin: 2px 0 0;
+  font-size: var(--text-12);
+  color: var(--text-2);
+}
+::highlight(vw-find) {
+  background-color: var(--mark);
+}
+::highlight(vw-find-current) {
+  background-color: var(--mark-on);
+}
+.find-current {
+  outline: 2px solid var(--mark-on);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+/* The palette's "Searching older conversations…" line. */
+.pal-note {
+  margin: 0;
+  padding: 6px 14px;
+  font-size: var(--text-12);
+  color: var(--text-2);
+  border-top: 1px solid var(--line);
+}
+
+/* Quick edits in the File tab. */
+.file-edit {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+.file-edit-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--line);
+}
+.file-edit-hint {
+  flex: 1 1 auto;
+  font-size: var(--text-12);
+  color: var(--text-2);
+}
+.file-edit-area {
+  flex: 1 1 auto;
+  min-height: 240px;
+  width: 100%;
+  box-sizing: border-box;
+  resize: none;
+  border: 0;
+  padding: 10px 12px;
+  font-family: var(--font-mono);
+  font-size: var(--text-12-5);
+  line-height: 1.55;
+  tab-size: 4;
+  background: var(--bg);
+  color: var(--text);
+  white-space: pre;
+  overflow: auto;
+}
+.file-edit-area:focus-visible {
+  outline: 2px solid var(--accent-ink);
+  outline-offset: -2px;
+}
+
+/* The new chat's "Temporary chat" switch and the session header's chip. */
+.temp-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  font-size: var(--text-12-5);
+  color: var(--text-2);
+}
+.temp-chip {
+  font-size: var(--text-11-5);
+  color: var(--text-2);
+}
+
+/* The Processes panel: this session's processes, their live output. */
+.proc-section {
+  padding: 0 4px;
+}
+.proc-section h3 {
+  font-size: var(--text-12);
+  font-weight: var(--weight-semibold);
+  color: var(--text-2);
+  margin: 10px 0 6px;
+}
+.proc-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.proc-row .left-running-what {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.proc-cmd {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.proc-output {
+  max-height: 220px;
+  overflow: auto;
+  margin: 6px 0 4px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  font-family: var(--font-mono);
+  font-size: var(--text-11-5);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.left-running-list li[data-session-process] {
+  display: block;
+}
+
+/* A session another process holds: the composer keeps its place, dimmed and inert. */
+.held-wrap {
+  display: contents;
+}
+.held-wrap[data-held="true"] > * {
+  opacity: 0.55;
+}

@@ -1,0 +1,44 @@
+[package]
+name = "vw-procmon"
+description = "Process and port monitor: listening sockets, attribution to sessions, port leases, safe stop, process ledger"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+# 1.88, not the workspace's 1.87: `listeners` >= 0.4 (needed: 0.3 cannot tell LISTEN sockets from
+# connections) and sysinfo >= 0.37 use let-chains (stable in 1.88), and so does this crate. The Windows test machine builds with
+# 1.94.1. Raising the workspace value instead would turn on let-chain lints in every crate.
+rust-version = "1.88"
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+vw-platform = { path = "../vw-platform" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tokio = { version = "1.53", features = ["rt", "sync", "time"] }
+tracing = "0.1"
+
+[target.'cfg(unix)'.dependencies]
+# killpg/kill/getpgid with a safe API. Already in the lockfile through process-wrap (vw-supervisor).
+nix = { version = "0.31", default-features = false, features = ["signal", "process", "user"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# pidfd_open / pidfd_send_signal (safe API) to pin a stop target against pid reuse. Already in the lockfile
+# (1.1.5, through listeners' and tempfile's trees).
+rustix = { version = "1.1", default-features = false, features = ["std", "process"] }
+
+[target.'cfg(any(windows, target_os = "macos"))'.dependencies]
+# Listening TCP sockets with their owner pid (Windows: GetExtendedTcpTable, macOS: libproc fd walk); checked
+# 0.6.1 (MIT), deps windows 0.62 / byteorder only; no declared MSRV, edition 2024 +
+# let-chains = 1.88 in practice (0.4.0-0.6.1 all use let-chains; 0.3.0 has none but no socket state field). Linux uses our own /proc reader
+# (keeps other users' listeners as "other app").
+listeners = "=0.6.1"
+# Command line, cwd, parent and owner of other processes (Windows PEB reads, macOS KERN_PROCARGS2). Checked
+# 0.38.4 (MIT, MSRV 1.88, windows 0.62 like listeners and vw-supervisor); 0.39.x needs
+# 1.95 (the Windows test machine has 1.94.1), 0.36.1 (MSRV 1.75) would gain nothing (listeners needs 1.88) and add windows 0.61.
+# Start times come from vw-platform (sysinfo's are seconds).
+sysinfo = { version = "=0.38.4", default-features = false, features = ["system"] }

@@ -1,0 +1,32 @@
+[package]
+name = "vw-terminal"
+description = "Integrated terminals per session: PTY/ConPTY shells, process containment, scrollback and output flow control"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+# The hijack-variable rule and the key's name, shared with vibe-app-server.
+vw-supervisor = { path = "../vw-supervisor" }
+thiserror = "2"
+tokio = { version = "1.53", features = ["rt", "sync", "time"] }
+tracing = "0.1"
+# PTY on Unix and ConPTY on Windows. 0.9.0 (2025-02, MIT, wezterm) is the newest;
+# ShellX pins 0.8 (library table).
+portable-pty = "0.9.0"
+
+[target.'cfg(unix)'.dependencies]
+# Safe getsid/kill for the session-wide kill (portable-pty makes every shell a session leader).
+# 0.31 is already in the lockfile (notification stack).
+nix = { version = "0.31", default-features = false, features = ["signal", "process"] }
+
+[target.'cfg(windows)'.dependencies]
+# Kill-on-close Job Object per terminal through a safe API (our crates forbid unsafe code).
+# 2.0.3, MIT OR Apache-2.0.
+win32job = "2.0.3"

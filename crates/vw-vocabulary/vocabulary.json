@@ -1,0 +1,190 @@
+{
+  "accessModes": {
+    "auto-approve": {
+      "name": "Full access",
+      "description": "Vibe tools run without Vibe's approval card, including outside the folder. Vibe Work's protected actions still need your permission.",
+      "tooltip": "Use Full access access mode"
+    },
+    "smart-approve": {
+      "name": "Smart approve",
+      "description": "A model checks each tool call. Safe ones run, risky ones ask.",
+      "tooltip": "Use Smart approve access mode"
+    },
+    "accept-edits": {
+      "name": "Accept edits",
+      "description": "File edits run. Commands and anything outside the folder ask.",
+      "tooltip": "Use Accept edits access mode"
+    },
+    "ask": {
+      "name": "Ask",
+      "description": "Asks before tool use.",
+      "tooltip": "Use Ask access mode"
+    },
+    "plan": {
+      "name": "Plan first",
+      "description": "Vibe plans before it changes files. Not read-only: shell commands can still change files.",
+      "tooltip": "Use Plan first access mode"
+    },
+    "vw-plan": {
+      "name": "Plan on a page",
+      "description": "Plans first and writes the plan as a page in the project's handbook (docs/handbook/plans/). Other file writes are refused; shell commands still run.",
+      "tooltip": "Use Plan on a page access mode"
+    },
+    "explore": {
+      "name": "Explore",
+      "description": "Explore the project with Vibe's configured profile.",
+      "tooltip": "Use Explore access mode"
+    }
+  },
+  "thinkingLevels": {
+    "off": {
+      "name": "off",
+      "description": "Turn off the model's optional thinking.",
+      "tooltip": "Use off thinking level"
+    },
+    "low": {
+      "name": "low",
+      "description": "Use a small thinking budget.",
+      "tooltip": "Use low thinking level"
+    },
+    "medium": {
+      "name": "medium",
+      "description": "Use a medium thinking budget.",
+      "tooltip": "Use medium thinking level"
+    },
+    "high": {
+      "name": "high",
+      "description": "Use a large thinking budget.",
+      "tooltip": "Use high thinking level"
+    },
+    "max": {
+      "name": "max",
+      "description": "Use the model's largest offered thinking budget.",
+      "tooltip": "Use max thinking level"
+    }
+  },
+  "vaultKinds": {
+    "vibeWork": {
+      "name": "Vibe Work vault",
+      "description": "Private to this app, in its own folder, with your own password.",
+      "tooltip": "Create a new Vibe Work vault"
+    },
+    "shellx": {
+      "name": "ShellX Vault",
+      "description": "Open the vault you already use in ShellX.",
+      "tooltip": "Use my ShellX Vault"
+    },
+    "desktop": {
+      "name": "Vault app",
+      "description": "Open the vault you already use in the Vault app.",
+      "tooltip": "Use my Vault app"
+    }
+  },
+  "vaultPermissions": {
+    "askEachTime": {
+      "name": "Ask each time",
+      "description": "Ask before agent use; commands and sites you already granted remain allowed.",
+      "tooltip": "Ask before agent use; commands and sites you already granted remain allowed."
+    },
+    "allowed": {
+      "name": "Allowed",
+      "description": "Standing permission during delegated tasks. Local sign-ins still ask each time; MCP forwarding also needs its server grant.",
+      "tooltip": "Standing permission during delegated tasks. Local sign-ins still ask each time; MCP forwarding also needs its server grant."
+    },
+    "never": {
+      "name": "Never",
+      "description": "Refuse agent use.",
+      "tooltip": "Refuse agent use. MCP forwarding is blocked while this entry's default or any project refuses."
+    }
+  },
+  "browserPermissions": {
+    "closeUserTabs": {
+      "name": "Close tabs you opened",
+      "description": "Choose whether the agent asks before closing a tab you opened or took over.",
+      "tooltip": "Ask me requests Close or Keep for each tab you opened or took over. Allow skips that question. The App preview cannot be closed."
+    },
+    "closeAsk": {
+      "name": "Ask me (default)",
+      "description": "Ask before the agent closes a tab you opened or took over.",
+      "tooltip": "Ask you to Close or Keep each tab you opened or took over."
+    },
+    "closeAllow": {
+      "name": "Allow",
+      "description": "Let the agent close tabs you opened or took over during your task.",
+      "tooltip": "The agent may close tabs you opened or took over during your task without asking again."
+    }
+  },
+  "locks": {
+    "agentPause": {
+      "name": "Pause agent access to secrets",
+      "description": "Agent access to secrets is paused. Sessions keep working.",
+      "tooltip": "Pause the agent's access to secrets. Sessions keep working."
+    },
+    "agentResume": {
+      "name": "Resume agent access to secrets",
+      "description": "Agent access to secrets is available. Sessions keep working.",
+      "tooltip": "Resume the agent's access to secrets. Sessions keep working."
+    },
+    "vaultLock": {
+      "name": "Lock vault",
+      "description": "The vault is locked. Sessions stop until you unlock.",
+      "tooltip": "Lock the vault. Sessions stop until you unlock."
+    },
+    "vaultUnlock": {
+      "name": "Unlock vault",
+      "description": "The vault is unlocked. Sessions can work again.",
+      "tooltip": "Unlock the vault. Sessions can work again."
+    }
+  },
+  "texts": {
+    "accessMode": "Access mode",
+    "accessUnknown": "Access",
+    "accessChoose": "Choose access mode: {name}",
+    "accessUse": "Use {name} access mode",
+    "accessDefaultDescription": "The mode new sessions start in. Full access asks you to confirm first.",
+    "accessDefaultFallback": "Vibe's default",
+    "customAccessDescription": "A profile from your Vibe configuration.",
+    "model": "Model",
+    "defaultModel": "Default model",
+    "defaultModelDescription": "The model new sessions start with.",
+    "modelDescription": "A model from your Vibe configuration.",
+    "modelUse": "Use {name} model",
+    "modelChoose": "Choose model: {name}",
+    "modelFallback": "Default",
+    "modelThinking": "Model and thinking",
+    "modelThinkingChoose": "Choose model and thinking level: {name}{thinking}",
+    "modelThinkingSuffix": ", thinking {name}",
+    "thinkingLevel": "Thinking level",
+    "defaultThinkingLevel": "Default thinking level",
+    "defaultThinkingDescription": "New chats start with this level. You can change it in each chat.",
+    "modelDefaultThinking": "Model's own default",
+    "modelDefaultThinkingDescription": "Follow the selected model's own thinking default.",
+    "thinkingUse": "Use {name} thinking level",
+    "thinkingChoose": "Choose thinking level: {name}",
+    "customThinkingDescription": "A thinking level reported by your model.",
+    "thinkingUnavailable": "Saved thinking level “{level}” is not offered by {model}; using the model's own default.",
+    "slashThinking": "Pick the thinking level",
+    "slashModel": "Pick the model",
+    "slashAccess": "Pick the access mode",
+    "vault": "Vault",
+    "vaultGeneric": "vault",
+    "vaultRailTooltip": "Vault: keys, passwords and logins",
+    "vaultChoiceEmpty": "No existing vault was found on this computer. Create a Vibe Work vault to continue.",
+    "agentPausedNotice": "Agent access to secrets is paused. Sessions keep working.",
+    "agentPausedRefusal": "Not run: agent access to secrets is paused. There is no access to secrets until the user resumes it.",
+    "vaultLockedNotice": "The vault is locked. Sessions stop until you unlock.",
+    "agentUnavailableStatus": "Agent secrets: unavailable",
+    "agentPausedStatus": "Agent secrets: paused",
+    "agentAvailableStatus": "Agent secrets: available",
+    "vaultLockedStatus": "Vault: locked",
+    "vaultUnlockedStatus": "Vault: unlocked",
+    "permissionNeedsProject": "Choose a project to change permissions.",
+    "browserDelegationTitle": "Delegation permissions",
+    "browserDelegationHint": "Tab closing permissions apply only while the agent does a task you gave it. Ask me asks before closing one of your tabs.",
+    "secretPermissionsTitle": "Secret permissions",
+    "secretPermissionsSummary": "Choose each Vault entry's permission in Vault. Browser delegation does not change secret access.",
+    "secretPermissionsOpenVault": "Open Vault",
+    "browserPermissionAuthority": "Permission: {name}",
+    "browserConfirmedAuthority": "Confirmed by you"
+  }
+}

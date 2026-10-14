@@ -1,0 +1,21 @@
+[package]
+name = "vw-netguard"
+description = "Egress guard for the agent browser: address classes and an app-local HTTP/CONNECT proxy that resolves, checks and connects"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+tokio = { version = "1.53", features = ["net", "io-util", "time", "sync", "rt", "macros"] }
+tracing = "0.1"
+url = "2"
+# Canary tokens (same version as the other crates).
+getrandom = "0.3"
+# The content-rule JSON for macOS webviews (same version as the other crates).
+serde_json = "1"

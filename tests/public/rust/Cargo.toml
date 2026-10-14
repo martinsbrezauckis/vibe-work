@@ -1,0 +1,55 @@
+# Public integration tests over synthetic services and disposable files. The root workspace's
+# check runs these on every platform; no installed app, account or private source is needed.
+[package]
+name = "vw-public-tests"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+# Shared fixture code also builds with optional extensions in the maintainers' test runner.
+# This public crate has no such feature or dependency; all-features stays self-contained.
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(feature, values("fixture-extensions"))'] }
+
+[dependencies]
+serde = "1"
+serde_json = "1"
+tokio = { version = "1.53", features = ["full", "test-util"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["fmt"] }
+axum = { version = "0.8.9", default-features = false, features = ["http1", "tokio", "ws"] }
+reqwest = { version = "0.13.5", default-features = false, features = ["stream"] }
+futures-util = "0.3"
+sha2 = "0.10"
+base64 = "0.23"
+minisign = "0.9.1"
+toml = "0.8"
+url = "2"
+zip = { version = "8.6.0", default-features = false, features = ["deflate"] }
+tar = { version = "0.4.46", default-features = false }
+flate2 = { version = "1.1.10", default-features = false, features = ["zlib-rs"] }
+vw-protocol = { path = "../../../crates/vw-protocol" }
+vw-rpc = { path = "../../../crates/vw-rpc" }
+vw-session = { path = "../../../crates/vw-session" }
+vw-supervisor = { path = "../../../crates/vw-supervisor" }
+vw-platform = { path = "../../../crates/vw-platform" }
+vw-secrets = { path = "../../../crates/vw-secrets" }
+vw-gate = { path = "../../../crates/vw-gate" }
+vw-core-api = { path = "../../../crates/vw-core-api" }
+vw-debug-api = { path = "../../../crates/vw-debug-api" }
+vw-host = { path = "../../../crates/vw-host" }
+vw-vault = { path = "../../../crates/vw-vault" }
+vw-keyproxy = { path = "../../../crates/vw-keyproxy" }
+vw-keys = { path = "../../../crates/vw-keys" }
+vw-procmon = { path = "../../../crates/vw-procmon" }
+vw-documents = { path = "../../../crates/vw-documents" }
+vw-agent-tools = { path = "../../../crates/vw-agent-tools" }
+vw-changes = { path = "../../../crates/vw-changes" }
+vw-worktrees = { path = "../../../crates/vw-worktrees" }
+vw-pages = { path = "../../../crates/vw-pages" }
+vw-vibe-install = { path = "../../../crates/vw-vibe-install" }
+vibe-support-sign = { path = "../../../tools/public/vibe-support/sign" }
+make-latest-json = { path = "../../../tools/public/update-manifest" }
+
+[target.'cfg(unix)'.dependencies]
+nix = { version = "0.31", default-features = false, features = ["signal", "process"] }

@@ -1,0 +1,22 @@
+[package]
+name = "vw-secrets"
+description = "The process-wide set of stored secret values that never leave through the Debug API"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+# Substring search (already in the lockfile through regex/aho-corasick users).
+memchr = "2"
+# The base64 forms a value can take inside an encoded answer (same major version as the workspace).
+base64 = "0.22"
+# Every stored form is wiped when the registry drops (process exit); already in the lockfile (vw-vault).
+zeroize = "1"
+# The warning when the registry is full (kind only, never a value); already in the lockfile.
+tracing = "0.1"

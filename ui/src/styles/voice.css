@@ -1,0 +1,173 @@
+/*
+ * Voice: the mic button states (`.mic`), the dictation strip above the text box
+ * (`.dictation`) and the narration bar above the composer (`.narration`). Tokens only; works from 390 px
+ * up; the recording pulse respects reduced motion.
+ */
+.ibtn.mic[aria-pressed="true"] {
+  color: var(--red);
+  background: var(--red-soft);
+}
+.ibtn.mic {
+  position: relative;
+}
+.ibtn.mic.mic-transcribing {
+  color: var(--orange-2);
+}
+/* "Finishing…" shows the pixel walker in the corner; a queued next dictation adds an orange ring. */
+.ibtn.mic .walker {
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+}
+.ibtn.mic[data-queued="true"] {
+  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--orange) 60%, transparent);
+}
+.ibtn.mic.mic-error {
+  color: var(--text-3);
+}
+.dictation {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 8px 12px 0;
+  padding: 6px 10px;
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  background: var(--panel);
+  font-size: 12px;
+  color: var(--text-2);
+  min-width: 0;
+}
+.dictation-error {
+  border-color: color-mix(in srgb, var(--red) 55%, var(--line-2));
+  background: var(--red-soft);
+}
+.dictation-text {
+  flex: 1 1 160px;
+  min-width: 0;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+.dictation-time {
+  color: var(--text-3);
+  font-size: 11px;
+}
+.rec-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--red);
+  flex: none;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .rec-dot {
+    animation: recpulse 1.2s ease-in-out infinite;
+  }
+}
+@keyframes recpulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+.narration {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 760px;
+  margin: 0 auto 6px;
+  padding: 6px 10px;
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  background: var(--raised);
+  font-size: 12px;
+  color: var(--text-2);
+  min-width: 0;
+}
+.narration-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+}
+/*
+ * Voice chat: the slot's Voice chat face (`.vchat`, a filled round button with the waveform: never
+ * mistaken for the outlined mic or the square Send), its live states, the strip above the text box and the session
+ * row tag. The listening pulse respects reduced motion.
+ */
+.vchat {
+  position: relative;
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  background: var(--primary-bg);
+  color: var(--primary-fg);
+  cursor: pointer;
+}
+.vchat:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.vchat .walker {
+  position: absolute;
+  right: 1px;
+  bottom: 1px;
+}
+.vchat-listening {
+  background: var(--red);
+  color: var(--on-accent);
+}
+.vchat-speaking {
+  background: var(--orange-2);
+  color: var(--on-accent);
+}
+.vchat-thinking,
+.vchat-sending,
+.vchat-waiting {
+  background: var(--raised);
+  color: var(--text);
+  box-shadow: inset 0 0 0 1.5px var(--orange-2);
+}
+.vchat-error {
+  background: var(--red-soft);
+  color: var(--red);
+  box-shadow: inset 0 0 0 1.5px var(--red);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .vchat-listening {
+    animation: vchat-pulse 1.4s ease-in-out infinite;
+  }
+}
+@keyframes vchat-pulse {
+  50% {
+    box-shadow: 0 0 0 5px color-mix(in srgb, var(--red) 25%, transparent);
+  }
+}
+.vchat-tag {
+  font-weight: 600;
+  color: var(--text);
+  flex: none;
+}
+.vchat-note {
+  color: var(--text-3);
+}
+.vchat-row {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  color: var(--orange-2);
+}
+.vchat-row-listening,
+.vchat-row-error {
+  color: var(--red);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .vchat-row-listening {
+    animation: recpulse 1.2s ease-in-out infinite;
+  }
+}

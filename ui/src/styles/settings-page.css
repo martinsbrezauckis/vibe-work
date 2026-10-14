@@ -1,0 +1,659 @@
+/*
+ * The Settings page: categories and the search inside Settings in the list column
+ * (features/settings/SettingsNav), the chosen category's sections in the content area (SettingsPage). No back arrow and
+ * no close ×: leaving is Home, any rail item or Esc. Narrow windows reuse the session list's drawer for the column.
+ * Also the global search's layout (features/shell/CommandPalette): groups, paths, preview. Tokens only.
+ */
+
+@import "./vault-actions.css";
+@import "./vault-page.css";
+
+/* The column. The session list stays mounted under it (its scroll and folds kept), invisible and inert. */
+.column.is-settings {
+  position: relative;
+}
+.column-inner.behind {
+  position: absolute;
+  inset: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+.set-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 12px 12px;
+  min-height: 0;
+  height: 100%;
+  overflow-y: auto;
+}
+.set-title {
+  margin: 4px 6px 4px;
+  font-size: var(--text-16);
+  font-weight: var(--weight-semibold);
+  letter-spacing: -0.01em;
+}
+.set-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: var(--control-height-search);
+  padding: 0 8px 0 10px;
+  border: 1px solid var(--line-2);
+  border-radius: 9px;
+  background: var(--bg);
+  color: var(--text-3);
+  flex: none;
+  transition:
+    border-color var(--t-hover) var(--ease-std),
+    box-shadow var(--t-hover) var(--ease-std);
+}
+.set-search:focus-within {
+  border-color: var(--focus);
+}
+.set-search input {
+  all: unset;
+  flex: 1;
+  min-width: 0;
+  font-size: var(--text-13);
+  color: var(--text);
+}
+.set-search input::placeholder {
+  color: var(--text-3);
+}
+/* The scope chip: says what the field covers; a click widens the search to everything (its words carried over). */
+.scope-chip {
+  display: inline-grid;
+  height: 22px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 6px;
+  background: var(--active);
+  color: var(--text);
+  font-size: var(--text-11-5);
+  font-weight: var(--weight-medium);
+  cursor: pointer;
+  flex: none;
+  white-space: nowrap;
+}
+.scope-chip > span {
+  grid-area: 1 / 1;
+  align-self: center;
+  transition: opacity var(--t-hover) var(--ease-std);
+}
+.scope-chip .scope-all {
+  opacity: 0;
+  color: var(--blue);
+}
+.scope-chip:hover .scope-in,
+.scope-chip:focus-visible .scope-in {
+  opacity: 0;
+}
+.scope-chip:hover .scope-all,
+.scope-chip:focus-visible .scope-all {
+  opacity: 1;
+}
+.set-cats,
+.set-results {
+  display: grid;
+  gap: 2px;
+  margin-top: 4px;
+}
+.set-cat {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 34px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--text-2);
+  font-size: var(--text-13-5);
+  text-align: left;
+  cursor: pointer;
+}
+.set-cat svg.i {
+  color: var(--text-3);
+}
+.set-cat:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+.set-cat[aria-current="page"] {
+  background: var(--active);
+  color: var(--text);
+}
+.set-cat[aria-current="page"] svg.i,
+.set-cat:hover svg.i {
+  color: var(--text);
+}
+/* The selected category carries the same orange bar as the rail's current item. */
+.set-cat[aria-current="page"]::before {
+  content: "";
+  position: absolute;
+  left: -12px;
+  top: 9px;
+  width: 3px;
+  height: 16px;
+  background: var(--orange);
+}
+.set-result {
+  display: grid;
+  gap: 1px;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+  color: var(--text);
+  font-size: var(--text-13);
+}
+.set-result:hover,
+.set-result:focus-visible {
+  background: var(--active);
+}
+.set-result-path {
+  font-size: var(--text-11-5);
+  color: var(--text-3);
+}
+
+/* The body. */
+.settings-page {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr);
+  min-height: 0;
+  height: 100%;
+}
+.set-body {
+  overflow-y: auto;
+  padding: 30px 32px 56px;
+}
+.set-body > * {
+  max-width: 720px;
+  margin-left: auto;
+  margin-right: auto;
+}
+.set-head h2 {
+  margin: 0;
+  font-size: var(--text-22);
+  font-weight: var(--weight-semibold);
+  letter-spacing: -0.02em;
+}
+.set-path {
+  margin: 4px 0 18px;
+  font-size: var(--text-12-5);
+  color: var(--text-3);
+}
+.set-cat-body {
+  animation: vw-fade-in 150ms var(--ease-std);
+}
+.set-cat-body > section,
+.set-group {
+  background: var(--raised);
+  border: 1px solid var(--line-2);
+  border-radius: 12px;
+  padding: var(--space-toolbar-block) var(--space-card-inline) var(--space-card-bottom);
+  margin-bottom: var(--space-card-gap);
+}
+.set-cat-body > section > h3,
+.set-group > h3 {
+  margin: 10px 0 4px;
+  font-size: var(--text-13);
+  font-weight: var(--weight-semibold);
+  color: var(--text-2);
+}
+/* One-section categories: the section title repeats the page title, so only screen readers get it. */
+.set-cat-body > section:only-child > h3 {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+}
+.set-cat-body > section:only-child {
+  padding-top: 4px;
+}
+/* a one-section category that opens with a paragraph (Project secrets, Safety) got its text against the
+   card's top edge once the title was hidden; give it the same breathing room a row gets. */
+.set-cat-body > section:only-child > h3 + p {
+  margin-top: 10px;
+}
+.set-cat-body section h4 {
+  margin: 14px 0 6px;
+  font-size: var(--text-12-5);
+  font-weight: var(--weight-semibold);
+  color: var(--text-2);
+}
+.set-cat-body .check + .check {
+  border-top: 1px solid var(--line);
+}
+.set-cat-body .check {
+  padding: var(--space-row-block) 0;
+  border-radius: 6px;
+}
+.set-cat-body .check .d {
+  font-weight: var(--weight-regular);
+}
+.browser-secret-permissions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-card-inline);
+  border-top: 1px solid var(--line);
+  margin-top: var(--space-row-block);
+  padding-top: var(--space-row-block);
+}
+.set-cat-body .browser-secret-permissions h4 {
+  margin: 0;
+}
+.browser-secret-permissions p {
+  margin: 4px 0 0;
+  color: var(--text-3);
+  font-size: var(--text-12-5);
+}
+.browser-secret-permissions .tb-btn {
+  flex: none;
+}
+/* Only Settings normalizes setup-derived primary controls to the shared inline button geometry. */
+.set-cat-body .btn-primary {
+  height: auto;
+  font-weight: var(--weight-regular);
+}
+/* A setting a search found: lit for 1.5 s with the orange bar, then back to normal. */
+.set-flash {
+  animation: vw-set-flash 1.5s var(--ease-std);
+}
+@keyframes vw-set-flash {
+  0%,
+  45% {
+    background: color-mix(in srgb, var(--orange) 12%, transparent);
+    box-shadow: inset 3px 0 0 var(--orange);
+  }
+}
+.set-hit {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 10px 0;
+  border: 0;
+  border-top: 1px solid var(--line);
+  background: none;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  font-size: var(--text-13-5);
+}
+.set-group > h3 + .set-hit {
+  border-top: 0;
+}
+.set-hit > span {
+  flex: 1;
+  min-width: 0;
+}
+.set-hit b {
+  display: block;
+  font-weight: var(--weight-medium);
+}
+.set-hit .d {
+  display: block;
+  font-size: var(--text-12);
+  color: var(--text-3);
+}
+.set-hit svg.i {
+  color: var(--text-3);
+}
+.set-hit:hover svg.i {
+  color: var(--text);
+}
+/* Definition-list facts use shared .check rows; values wrap without squeezing their labels. */
+.set-facts {
+  margin: 0;
+}
+.set-facts .check {
+  grid-template-columns: auto minmax(0, 1fr);
+}
+.set-facts dt,
+.set-facts dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.set-facts dd {
+  text-align: right;
+}
+/* About. */
+.about-name {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-weight: var(--weight-semibold);
+}
+.about-sep {
+  margin: 0 8px;
+  color: var(--text-3);
+}
+
+@media (max-width: 640px) {
+  .set-body {
+    padding: 20px 16px 40px;
+  }
+}
+
+/* ===== The global search (CommandPalette) ===== */
+.palette {
+  width: min(860px, 94vw);
+  top: 10vh;
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  max-height: min(600px, 82vh);
+  animation: vw-palette-in 220ms var(--ease-out);
+}
+@keyframes vw-palette-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -6px) scale(0.985);
+  }
+}
+.pal-in {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--line);
+  color: var(--text-3);
+}
+.pal-in input {
+  padding: 15px 0;
+}
+.pal-f {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--line);
+}
+.plist .secl .c {
+  font-family: var(--font-mono);
+  font-size: var(--text-10-5);
+  color: var(--text-3);
+}
+.pal-b {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 300px;
+  min-height: 0;
+}
+.pal-b .plist {
+  max-height: none;
+  min-height: 0;
+  overflow-y: auto;
+  border-right: 1px solid var(--line);
+}
+.plist li[role="option"] {
+  align-items: flex-start;
+}
+.plist li[role="option"] > svg.i {
+  margin-top: 2px;
+  color: var(--text-3);
+}
+.plist li[aria-selected="true"] > svg.i {
+  color: var(--orange);
+}
+.pr-main {
+  display: grid;
+  min-width: 0;
+  flex: 1;
+}
+.pr-title,
+.pr-path {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pr-path {
+  font-size: var(--text-11-5);
+  color: var(--text-3);
+}
+.plist .secl {
+  display: flex;
+  justify-content: space-between;
+}
+.pal-more button {
+  border: 0;
+  background: none;
+  color: var(--text-3);
+  font-size: var(--text-11-5);
+  padding: 2px 12px 6px;
+  cursor: pointer;
+}
+.pal-more button:hover {
+  color: var(--text);
+}
+.pal-empty {
+  display: grid;
+  gap: 6px;
+  padding: 28px 16px;
+  text-align: center;
+  color: var(--text-2);
+  font-size: var(--text-13);
+  cursor: default;
+}
+.pal-pv {
+  overflow-y: auto;
+  padding: 14px 16px;
+  background: var(--panel);
+  font-size: var(--text-13);
+}
+.pv-kind {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: var(--text-11-5);
+  color: var(--text-3);
+  margin-bottom: 6px;
+}
+.pv-path {
+  font-size: var(--text-12);
+  color: var(--text-2);
+  margin-bottom: 10px;
+}
+.pv-card {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--line-2);
+  border-radius: 10px;
+  background: var(--raised);
+}
+.pv-card b {
+  font-weight: var(--weight-medium);
+}
+.pv-card span {
+  color: var(--text-2);
+  font-size: var(--text-12-5);
+}
+.pv-go {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 12px 0 0;
+  font-size: var(--text-12);
+  color: var(--text-3);
+}
+@media (max-width: 760px) {
+  .pal-b {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .pal-pv {
+    display: none;
+  }
+  .pal-b .plist {
+    border-right: 0;
+  }
+}
+
+/* The status bar's context readout (StatusBar.UsageReadout): plain text that is also a button. */
+.sb-usage {
+  border: 0;
+  background: none;
+  padding: 0 4px;
+  border-radius: 4px;
+  font: inherit;
+  color: var(--text-3);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.sb-usage:hover {
+  color: var(--text);
+  background: var(--hover);
+}
+
+/* Links to Mistral's pages (MistralLinks): an "Open ↗" button per row; web-only settings carry a small tag. */
+.ext-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+/* The status bar: the folder shrinks first (the context readout must stay visible at 390 px). */
+.statusbar > * {
+  flex: none;
+}
+.statusbar > .sb-cwd {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sb-usage.sb-rate {
+  color: var(--orange-3);
+}
+/* Narrow windows: the long tails give way ("Rate limit: 12%", "● Debug API", the server's version); the full text
+   stays in the accessible text and the tooltips, so the readouts fit 390 px side by side. */
+@media (max-width: 600px) {
+  .statusbar {
+    gap: 10px;
+  }
+  .statusbar .sb-tail {
+    display: none;
+  }
+  /* After the folder, the server's name gives way too (full name and version in its tooltip). */
+  .statusbar > .sb-server {
+    flex: 0 1 auto;
+    min-width: 3ch;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+}
+
+/* the add forms of Project secrets and Safety, and the use log. */
+.set-cat-body .secrets-add {
+  display: grid;
+  gap: 10px;
+  padding: 12px 0 6px;
+  border-top: 1px solid var(--line);
+}
+.set-cat-body .secrets-add > *,
+.set-cat-body .secrets-add .key-field > * {
+  min-width: 0;
+}
+.set-cat-body .secrets-add > button {
+  justify-self: start;
+}
+/* "Add rule" reads as a button (it looked like a line of text under the field). */
+.set-cat-body .secrets-add > .tb-btn:not(.primary) {
+  border: 1px solid var(--line-2);
+}
+.set-cat-body .secrets-uses {
+  margin: 4px 0 8px;
+  padding: 0;
+  list-style: none;
+}
+.set-cat-body section h4 + .key-line {
+  margin-top: 0;
+}
+
+/* the MCP tag, the All / MCP filter and the info sign (colours from the tokens: both themes). */
+.set-cat-body .secrets-filter {
+  margin: 4px 0 8px;
+}
+.set-cat-body .mcp-info {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  max-width: 100%;
+}
+.set-cat-body .mcp-info-text {
+  flex-basis: 100%;
+  max-width: 52ch;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: var(--raised);
+}
+
+/* Metadata stays on one line; shared .check rows own typography, padding and separators. */
+.set-cat-body .secrets-row {
+  display: flex;
+  position: relative;
+  align-items: center;
+  white-space: nowrap;
+}
+.set-cat-body .secrets-row:hover,
+.set-cat-body .secrets-row:focus-within {
+  background: var(--hover);
+}
+.set-cat-body .secrets-name,
+.set-cat-body .secrets-detail {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.set-cat-body .secrets-name {
+  flex: 1 1 12ch;
+  color: var(--text);
+}
+.set-cat-body .secrets-detail {
+  flex: 0 1 auto;
+  max-width: 48%;
+}
+.set-cat-body .secrets-row > .tb-btn {
+  flex: none;
+  margin-left: auto;
+}
+.set-cat-body .secrets-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-control-gap);
+  margin: 6px 0;
+}
+.set-cat-body .secrets-toolbar .set-search {
+  flex: 1;
+  min-width: 0;
+}
+.set-cat-body .secrets-count {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.account-provider {
+  grid-template-columns: minmax(0, 1fr) auto auto;
+}
+@media (max-width: 640px) {
+  .account-provider {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .account-provider > span {
+    grid-column: 1 / -1;
+  }
+}
+.account-sign-in-viewport {
+  height: min(560px, 55vh);
+  min-height: 320px;
+  margin-top: 12px;
+  border: 1px solid var(--line-2);
+}

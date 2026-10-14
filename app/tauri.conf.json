@@ -1,0 +1,62 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Vibe Work",
+  "version": "0.1.0",
+  "identifier": "app.vibework.desktop",
+  "mainBinaryName": "vibe-work",
+  "build": {
+    "devUrl": "http://127.0.0.1:1420",
+    "frontendDist": "../ui/dist",
+    "beforeDevCommand": "pnpm --filter vibe-work-ui dev",
+    "beforeBuildCommand": "pnpm --filter vibe-work-ui build"
+  },
+  "app": {
+    "withGlobalTauri": false,
+    "windows": [
+      {
+        "label": "main",
+        "title": "Vibe Work",
+        "width": 1280,
+        "height": 800,
+        "minWidth": 900,
+        "minHeight": 600,
+        "dragDropEnabled": false,
+        "create": false
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self' ipc: http://ipc.localhost; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+      "devCsp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self' ipc: http://ipc.localhost ws://127.0.0.1:1420; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/16x16.png",
+      "icons/24x24.png",
+      "icons/48x48.png",
+      "icons/64x64.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "category": "DeveloperTool",
+    "shortDescription": "Desktop app for Mistral's Vibe coding agent",
+    "longDescription": "Vibe Work runs Mistral's Vibe coding agent in a desktop interface for Windows, macOS and Linux. Requires a Mistral API key. Independent project, not affiliated with Mistral AI.",
+    "publisher": "Martins Brezauckis",
+    "copyright": "Copyright (c) 2026 Martins Brezauckis",
+    "license": "MIT",
+    "licenseFile": "../LICENSE",
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser",
+        "template": "installer.nsi",
+        "installerHooks": "installer-hooks.nsh"
+      }
+    }
+  }
+}

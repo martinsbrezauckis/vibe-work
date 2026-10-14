@@ -1,0 +1,127 @@
+/*
+ * Vault's unified list uses Settings typography, fields, buttons, selectors and theme tokens.
+ * Only list geometry and semantic permission colours live here. Imported by settings-page.css.
+ */
+.vault-page .vault-toolbar {
+  flex-wrap: nowrap;
+  padding: var(--space-toolbar-block) 0;
+}
+.vault-toolbar > .ui-selector,
+.vault-toolbar > .tb-btn,
+.vault-toolbar > .ibtn {
+  flex: none;
+}
+.vault-toolbar > .tb-btn {
+  min-height: var(--control-height-search);
+}
+.vault-toolbar > .set-search {
+  flex: 1 1 10ch;
+  min-width: 0;
+}
+.vault-permission-scope > .ui-selector {
+  flex: 1 1 20ch;
+  min-width: 0;
+}
+.vault-permission-scope > .tb-btn {
+  flex: none;
+}
+.vault-permission-scope-disclosure {
+  padding: var(--space-control-gap) 0;
+}
+.vault-permission-scope-disclosure summary {
+  cursor: pointer;
+  color: var(--text-2);
+}
+.vault-default-label {
+  color: var(--text-2);
+  font-size: var(--text-12);
+}
+.vault-entry-line > .tb-btn {
+  flex: none;
+}
+.vault-project-permissions {
+  padding: var(--space-control-gap) 0 var(--space-control-gap) var(--space-card-bottom);
+}
+.vault-project-permission-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-control-gap);
+  min-height: var(--settings-row-min-height);
+}
+.vault-project-permission-row > span:first-child {
+  flex: 1 1 18ch;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.vault-entry-list {
+  border-top: 1px solid var(--line);
+}
+.vault-entry + .vault-entry,
+.vault-model-key-row + .vault-entry {
+  border-top: 1px solid var(--line);
+}
+.vault-entry-line,
+.vault-model-key-row .secrets-row {
+  min-height: var(--settings-row-min-height);
+  gap: var(--space-control-gap);
+}
+.vault-entry-line {
+  flex-wrap: wrap;
+}
+.vault-entry-line > .ui-disclosure {
+  flex: 1 1 19ch;
+  min-width: 0;
+}
+.vault-entry-line .ui-disclosure .secrets-name,
+.vault-model-key-row .ui-disclosure .secrets-name {
+  flex: 1 1 12ch;
+  font-size: var(--text-13-5);
+  font-weight: var(--weight-regular);
+}
+.vault-entry-line .ui-disclosure .secrets-detail {
+  flex: 0 1 16ch;
+  font-size: var(--text-13-5);
+  font-weight: var(--weight-regular);
+}
+.vault-entry-line > .ui-selector {
+  flex: none;
+}
+.vault-entry-details {
+  padding: 0 0 var(--space-card-bottom);
+}
+.set-cat-body .vault-actions-inline .vault-actions-menu,
+.set-cat-body .vault-actions-inline .vault-actions-editor {
+  position: static;
+  display: flex;
+  width: auto;
+  max-height: none;
+  padding: 0;
+  border: 0;
+  box-shadow: none;
+  background: transparent;
+  gap: var(--space-control-gap);
+}
+.set-cat-body .vault-actions-inline .vault-actions-menu {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+}
+.set-cat-body .vault-actions-inline .vault-actions-editor.is-rename {
+  flex-wrap: wrap;
+}
+.set-cat-body .vault-actions-inline .vault-actions-editor {
+  flex-wrap: wrap;
+}
+.vault-add-entry {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.vault-add-entry > .generator-options {
+  grid-column: 1 / -1;
+}
+.vault-model-key-row .vault-model-key-address {
+  color: var(--text-3);
+  font-size: var(--text-13-5);
+  font-weight: var(--weight-regular);
+}

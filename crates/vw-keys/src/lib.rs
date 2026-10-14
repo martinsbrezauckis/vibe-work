@@ -1,0 +1,42 @@
+//! The key service: the Mistral API key lives in the user's Vault and in
+//! this process's memory only; `vibe-app-server` gets a placeholder and talks to Mistral through the
+//! local model proxy.
+//!
+//! Modules: `service` (the [`KeyService`] owner), `secrets` (project secrets), `mcp` (MCP server key bindings), `grants` (the secret broker's command grants), `logins` (website logins and their fill grants), `speech` (its Voxtral calls), `work` (Libraries and image generation), `vibe_env` (the `VIBE_*` overrides that point Vibe
+//! at the proxy), `existing` (finding and importing a key Vibe itself stored), `settings` (which
+//! vault item holds the key), `error`.
+//!
+//! Depends on: vw-vault, vw-keyproxy, vw-mistral, vw-supervisor. Called by: vw-core-api (commands),
+//! vw-host (construction). Invariant: no public function returns the key.
+
+mod entry_defaults;
+mod entry_permissions;
+mod error;
+pub mod existing;
+mod grants;
+mod logins;
+mod mcp;
+mod secrets;
+mod service;
+mod settings;
+mod speech;
+mod vibe_env;
+mod work;
+
+pub use error::KeyError;
+pub use existing::{ExistingKey, ExistingKeys, ExistingSource};
+pub use logins::{LoginCounts, StoredLogin};
+pub use secrets::{Stored, is_locked};
+pub use service::{
+    KeyEvent, KeyMetadata, KeyPresence, KeyService, KeyServiceConfig, KeySource, KeyStatus,
+    MAX_KEY_LEN, OcrFailure,
+};
+pub use speech::SpeechFailure;
+pub use vibe_env::vibe_env;
+pub use vw_vault::command_grant::CommandGrant;
+pub use vw_vault::entry_permission::EntryPermission;
+pub use vw_vault::fill_grant::FillGrant;
+pub use vw_vault::login::Login;
+pub use vw_vault::mcp_binding::McpBinding;
+pub use vw_vault::project_secret::{ProjectSecret, SecretLabel};
+pub use work::WorkFailure;

@@ -1,0 +1,83 @@
+# Vibe Work build-only release smoke.
+#
+# Started by hand. Proves that a release-mode build of the app and its bundle (Linux deb, Windows NSIS, macOS
+# .app) compiles on each system. It cannot create a tag, a GitHub release or a release asset, and it uploads no
+# artifact: its outputs are disposable. Official releases are assembled from installers built, signed (Windows
+# Authenticode with an RFC-3161 timestamp, macOS Developer ID + notarization) and tested on maintainer machines,
+# then attached to a GitHub release by hand. No secret is used here. Third-party actions are pinned to full
+# commit SHAs (the tag is in the comment).
+
+name: Build-only release smoke
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  CARGO_INCREMENTAL: "0"
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: bundle (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            bundles: deb
+          - os: windows-2025
+            bundles: nsis
+          - os: macos-15
+            bundles: app
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Linux build packages
+        if: runner.os == 'Linux'
+        timeout-minutes: 15
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          sudo apt-get -o Acquire::Retries=3 update
+          sudo apt-get -o Dpkg::Use-Pty=0 -o Acquire::Retries=3 install -y --no-install-recommends \
+            build-essential pkg-config libssl-dev libdbus-1-dev \
+            libwebkit2gtk-4.1-dev libjavascriptcoregtk-4.1-dev libsoup-3.0-dev libgtk-3-dev \
+            libayatana-appindicator3-dev librsvg2-dev patchelf
+
+      - name: Rust toolchain (rust-toolchain.toml)
+        run: |
+          rustup toolchain install
+          rustup show active-toolchain
+
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          version: 10.33.0
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install JavaScript dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build unsigned bundle (nothing is published)
+        env:
+          BUNDLES: ${{ matrix.bundles }}
+        run: >-
+          pnpm tauri build
+          --ci
+          --no-sign
+          --bundles "$BUNDLES"
+          --config '{"bundle":{"createUpdaterArtifacts":false}}'

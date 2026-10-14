@@ -1,0 +1,95 @@
+/*
+ * Narrow-window rules: the side panel and the session list become overlay drawers (<= 1100 px), the
+ * rail and long title-bar labels drop away (<= 640 px). The toast fallback lives in the
+ * existing status bar, so drawers keep the same bounds while feedback appears.
+ * Loaded after shell.css so these override it.
+ */
+/* Narrow windows: the panel is an overlay drawer and the list hides; phones also lose the rail. */
+@media (max-width: 1100px) {
+  .body,
+  .body.has-panel,
+  .body.no-col.has-panel {
+    grid-template-columns: 56px 0 minmax(0, 1fr) 0;
+  }
+  .body.has-panel .panel {
+    position: fixed;
+    right: 0;
+    top: 38px;
+    bottom: 26px;
+    width: min(var(--pw), 92vw);
+    z-index: 35;
+    box-shadow: var(--shadow);
+  }
+  .column {
+    visibility: hidden;
+  }
+}
+@media (max-width: 640px) {
+  .rail {
+    visibility: hidden;
+  }
+  .body,
+  .body.has-panel {
+    grid-template-columns: 0 0 1fr 0;
+  }
+  .search {
+    display: none;
+  }
+  .shead .lbltxt {
+    display: none;
+  }
+  .shead {
+    padding-left: 14px;
+  }
+  .welcome {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+}
+
+/* Narrow windows: the list opens as an overlay drawer from the rail's button (at phone width from
+   the title bar's menu button). Closed it stays hidden, as before. */
+@media (max-width: 1100px) {
+  .column.drawer-open {
+    position: fixed;
+    inset: 38px 0 26px 0;
+    visibility: visible;
+    z-index: 36;
+    border: 0;
+    background: none;
+    overflow: visible;
+  }
+  .column.drawer-open .drawer-scrim {
+    display: block;
+    position: absolute;
+    inset: 0;
+    background: var(--scrim);
+  }
+  .column.drawer-open .column-inner {
+    position: absolute;
+    left: 56px;
+    top: 0;
+    bottom: 0;
+    width: min(284px, 92vw);
+    background: var(--panel);
+    box-shadow: var(--shadow);
+    height: auto;
+  }
+}
+@media (max-width: 640px) {
+  .column.drawer-open .column-inner {
+    left: 0;
+  }
+  /* The title bar holds menu, brand mark, search, badge and theme: drop the long labels. */
+  .titlebar {
+    gap: 4px;
+    padding-left: 6px;
+  }
+  .brand-name,
+  .dbg-text {
+    display: none;
+  }
+  .dbg {
+    padding: 4px 8px;
+  }
+}

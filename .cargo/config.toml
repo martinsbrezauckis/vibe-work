@@ -1,0 +1,12 @@
+# Cargo settings shared by the root workspace and the maintainers' private test workspace, which
+# both build into the same target dir. Profile settings live here, not in either Cargo.toml, so the two
+# workspaces stay identical and never rebuild each other's dependencies.
+#
+# Debug info: full DWARF for every dependency made each debug target dir 15-30 GB (every test binary links
+# all of them). Dependencies get none; our own crates keep line tables, so panics and backtraces still
+# name file:line. Measured 2026-10-09.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false

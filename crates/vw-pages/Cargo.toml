@@ -1,0 +1,57 @@
+[package]
+name = "vw-pages"
+description = "Project handbook (Handbook Format 1.2): page heads, plan steps, the validator, the live hub, the Projects overview, the loopback page server, comments, the vw-plan profile, the page viewer on the preview engine"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[features]
+# TypeScript bindings for the UI (through vw-core-api's gen-core-ts).
+ts = ["dep:ts-rs"]
+
+[dependencies]
+vw-vocabulary = { path = "../vw-vocabulary" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tokio = { version = "1.53", features = ["sync", "time", "macros", "rt", "net", "fs"] }
+tracing = "0.1"
+url = "2"
+# Project keys for app-data files (same version as vw-preview and vw-changes).
+sha2 = "0.10.9"
+# Random comment ids and pick accessor names (same version as the other crates).
+getrandom = "0.3"
+# The loopback page server: same axum as vw-debug-api (0.8.9, MIT), HTTP/1.1 only.
+axum = { version = "0.8.9", default-features = false, features = ["http1", "tokio"] }
+# Markdown pages, rendered read-only. pulldown-cmark 0.13.4 (MIT); raw
+# HTML events are turned into text before rendering, so a Markdown page can never carry markup or script.
+pulldown-cmark = { version = "0.13.4", default-features = false, features = ["html"] }
+# Share a page as one file: images and fonts inlined as data: URLs. Same version as vw-core-api.
+base64 = "0.23"
+# Share a page as one file: the exported file leaves our sandbox, so it is
+# sanitized from a parsed tree, never by string surgery. lol_html 3.0.1 (BSD-3-Clause,
+# Cloudflare's HTML5-tokenizer rewriter) does our rewrites (inline styles and images, answers after inputs), then
+# ammonia 4.2.3 (MIT OR Apache-2.0, html5ever tree, allowlist) sanitizes and serializes the body.
+lol_html = { version = "3.0.1", default-features = false }
+ammonia = "4.2.3"
+# Share a page as one file: every file the export reads is opened through a directory
+# capability rooted at the handbook folder (openat2 RESOLVE_BENEATH on Linux, per-component no-follow resolution
+# elsewhere), so a symlink swapped in during the export cannot reach outside it. cap-std 4.0.3
+# (Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT, Bytecode Alliance).
+cap-std = "4.0.3"
+# The preview engine seam: the page viewer is a second engine instance with its own hooks.
+vw-preview = { path = "../vw-preview" }
+# User-only app-data files (comments, settings).
+vw-platform = { path = "../vw-platform" }
+ts-rs = { version = "12.0.1", optional = true, features = ["serde-json-impl", "no-serde-warnings"] }
+
+[target.'cfg(unix)'.dependencies]
+# The export opens files with O_NONBLOCK, so a FIFO in the handbook folder cannot block it (same version as
+# vw-platform).
+libc = "0.2"

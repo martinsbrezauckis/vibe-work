@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-debug-api-set"
+description = "Enables the debug_api_set command without any pre-configured scope."
+commands.allow = ["debug_api_set"]
+
+[[permission]]
+identifier = "deny-debug-api-set"
+description = "Denies the debug_api_set command without any pre-configured scope."
+commands.deny = ["debug_api_set"]

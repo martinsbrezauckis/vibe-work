@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-update-subscribe"
+description = "Enables the update_subscribe command without any pre-configured scope."
+commands.allow = ["update_subscribe"]
+
+[[permission]]
+identifier = "deny-update-subscribe"
+description = "Denies the update_subscribe command without any pre-configured scope."
+commands.deny = ["update_subscribe"]

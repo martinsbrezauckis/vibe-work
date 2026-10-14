@@ -1,0 +1,345 @@
+/* Connectors page: category groups of tiles, toolbar, sign-in
+   banner, servers list, details panel and the add dialog. Tokens only; works down to 390 px. */
+.cpage {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 18px;
+  padding: 22px 28px 40px;
+  max-width: 1180px;
+  margin: 0 auto;
+}
+.cpage.has-detail {
+  grid-template-columns: minmax(0, 1fr) 340px;
+}
+.cmain {
+  min-width: 0;
+}
+.chead h2 {
+  margin: 0 0 4px;
+  font-size: 22px;
+  letter-spacing: -0.01em;
+}
+.cmuted {
+  color: var(--text-3);
+  font-size: 12.5px;
+}
+.cbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin: 14px 0 6px;
+}
+.csearch input {
+  width: 220px;
+  max-width: 100%;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 13px;
+}
+.cnote {
+  margin: 8px 0;
+  font-size: 13px;
+  color: var(--text-2);
+}
+.cgroup {
+  margin: 18px 0 0;
+}
+.cgroup h3 {
+  margin: 0 0 8px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-2);
+  text-transform: none;
+}
+.cgroup-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.cgroup-head h3 {
+  margin: 0;
+}
+.cgrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: 10px;
+}
+.ctile {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+  min-width: 0;
+}
+.ctile.sel {
+  border-color: var(--orange);
+}
+.ctile-main {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  border: 0;
+  background: none;
+  color: var(--text);
+  text-align: left;
+  padding: 12px 12px 6px;
+  cursor: pointer;
+  border-radius: 12px 12px 0 0;
+}
+.ctile-main:hover {
+  background: var(--hover);
+}
+.ctile-main:focus-visible,
+.srows .srow:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 2px var(--focus);
+}
+.ctile-ico {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  background: var(--raised);
+  color: var(--text-2);
+  border: 1px solid var(--line);
+}
+.ctile-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.ctile-name {
+  font-weight: 600;
+  font-size: 13.5px;
+}
+.ctile-line {
+  color: var(--text-3);
+  font-size: 12px;
+  line-height: 1.4;
+}
+.ctile-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px 10px;
+}
+.ctile-foot > .tb-btn {
+  flex: none;
+}
+/* The publisher gives way (one line, ellipsis) so the action stays on the card's line. */
+.ctile-via {
+  color: var(--text-3);
+  font-size: 11.5px;
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cstat {
+  font-size: 11.5px;
+  font-weight: 600;
+  border-radius: 6px;
+  padding: 2px 7px;
+  border: 1px solid var(--line-2);
+  color: var(--text-2);
+  white-space: nowrap;
+}
+.cstat.connected {
+  background: var(--green-soft);
+  color: var(--green);
+  border-color: transparent;
+}
+.cstat.signin {
+  background: var(--orange-soft);
+  color: var(--orange-3);
+  border-color: transparent;
+}
+.cstat.unavailable,
+.cstat.setup {
+  background: var(--red-soft);
+  color: var(--red);
+  border-color: transparent;
+}
+.creason {
+  color: var(--text-2);
+  font-size: 12.5px;
+}
+.csignin {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 10px 0 0;
+}
+.csignin-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--line-2);
+  border-left: 3px solid var(--orange);
+  border-radius: 8px;
+  background: var(--panel);
+  font-size: 13px;
+}
+.csignin-row.done {
+  border-left-color: var(--green);
+}
+.csignin-row.failed {
+  border-left-color: var(--red);
+}
+.csignin-acts {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-left: auto;
+}
+.srows {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+/* Scoped to the server list: a bare `.srow` also styled every row of the session list. */
+.srows .srow {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) minmax(0, 1.4fr) auto;
+  gap: 10px;
+  align-items: center;
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+  color: var(--text);
+  padding: 9px 12px;
+  text-align: left;
+  cursor: pointer;
+}
+.srows .srow.sel {
+  border-color: var(--orange);
+}
+.srow-name {
+  font-weight: 600;
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.srow-addr {
+  font-size: 12px;
+  color: var(--text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cdetail {
+  position: sticky;
+  top: 12px;
+  align-self: start;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--raised);
+  padding: 16px;
+  font-size: 13px;
+  min-width: 0;
+}
+.cdetail h2 {
+  margin: 0;
+  font-size: 16px;
+}
+.cdetail h3 {
+  margin: 14px 0 6px;
+  font-size: 12.5px;
+  color: var(--text-2);
+}
+.cdetail-head {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+.cdetail-head .cmuted {
+  margin: 2px 0 0;
+  word-break: break-all;
+}
+.cdetail-close {
+  float: right;
+}
+.ctools {
+  margin: 0;
+  padding-left: 18px;
+}
+.ctools li.off {
+  opacity: 0.6;
+}
+.cactions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 12px 0 0;
+}
+.tb-btn.danger {
+  color: var(--red);
+}
+.add-server .cfield {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0 0 6px;
+  font-size: 12.5px;
+  color: var(--text-2);
+}
+.add-server input {
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  padding: 7px 10px;
+  font: 13px var(--mono);
+}
+.add-server input[aria-invalid="true"] {
+  border-color: var(--red);
+}
+.cbad {
+  color: var(--red);
+  font-size: 12.5px;
+}
+.cwarn {
+  border-left: 3px solid var(--orange);
+  padding: 6px 10px;
+  background: var(--orange-soft);
+  border-radius: 6px;
+  font-size: 12.5px;
+}
+.csteps {
+  margin: 0 0 10px;
+  padding-left: 18px;
+  font-size: 13px;
+  color: var(--text-2);
+}
+@media (max-width: 900px) {
+  .cpage,
+  .cpage.has-detail {
+    grid-template-columns: minmax(0, 1fr);
+    padding: 16px 16px 32px;
+  }
+  .cdetail {
+    position: static;
+    order: -1;
+  }
+  .srows .srow {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+  }
+  .srow-addr {
+    display: none;
+  }
+}

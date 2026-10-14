@@ -1,0 +1,149 @@
+/*
+ * Diff line comments: the gutter "+" button on every diff row (shown on hover and keyboard focus),
+ * the count marker, the comment form and threads under the rows, and the comments bar of the Changes tab.
+ * Tokens only (scripts/public/check_colors.mjs). Used by: ui/src/features/changes/{HunkLines,LineComment*}.tsx.
+ * Rows keep their layout: the button and the comment dot share the gutter spot at the left of the row
+ * (the button covers the marker on hover and focus), positioned over the row, never inside its grid.
+ */
+.lc-row {
+  position: relative;
+  width: max-content;
+  min-width: 100%;
+}
+.lc-row[data-selected="true"] > .dl,
+.split .sl:has(.lc-add:focus-visible) {
+  outline: none;
+  box-shadow: inset 0 0 0 2px var(--focus);
+}
+.lc-row[data-commented="true"] > .dl {
+  box-shadow: inset 2px 0 0 var(--orange);
+}
+.split .sl {
+  position: relative;
+}
+.lc-add {
+  position: absolute;
+  left: 2px;
+  top: 50%;
+  translate: 0 -50%;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 4px;
+  background: var(--blue);
+  color: var(--on-accent);
+  font: 700 12px/1 var(--mono);
+  cursor: pointer;
+  opacity: 0;
+  z-index: 2;
+}
+.lc-row:hover > .lc-add,
+.split .sl:hover > .lc-add,
+.lc-add:focus-visible {
+  opacity: 1;
+}
+.lc-add:focus-visible {
+  outline: none;
+  box-shadow:
+    0 0 0 2px var(--bg),
+    0 0 0 4px var(--focus);
+}
+.lc-mark {
+  position: absolute;
+  left: 4px;
+  top: 50%;
+  translate: 0 -50%;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--orange);
+  pointer-events: none;
+}
+.lc-add::before {
+  content: "+";
+}
+.lc-form,
+.lc-thread {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 4px 10px 8px 40px;
+  padding: 8px 10px;
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  background: var(--raised);
+  font-size: 12.5px;
+  white-space: normal;
+  width: auto;
+  min-width: 0;
+  max-width: calc(100cqw - 60px);
+}
+.lc-form label {
+  color: var(--text-2);
+  font-size: 12px;
+}
+.lc-form textarea {
+  min-height: 54px;
+  resize: vertical;
+  padding: 6px 8px;
+  border: 1px solid var(--line-2);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--text);
+  font: inherit;
+}
+.lc-form textarea:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 0;
+}
+.lc-form-row,
+.lc-acts,
+.lc-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.lc-note,
+.lc-where,
+.lc-reason {
+  color: var(--text-3);
+  font-size: 11.5px;
+}
+.lc-text {
+  color: var(--text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.lc-thread[data-state="outdated"] {
+  border-style: dashed;
+}
+.lc-quote {
+  margin: 0;
+  padding: 4px 6px;
+  border-radius: 4px;
+  background: var(--panel);
+  color: var(--text-2);
+  font: 11.5px/1.5 var(--mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.lc-panel {
+  margin: 0 0 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  background: var(--panel);
+}
+.lc-panel .lc-thread {
+  margin: 6px 0 0;
+  max-width: none;
+}
+.lc-outdated summary {
+  cursor: pointer;
+  color: var(--text-2);
+  margin-top: 6px;
+}
