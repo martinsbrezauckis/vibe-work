@@ -1,5 +1,10 @@
 //! Temporary repositories verify worktree inspection and cleanup.
 
+// Unix only, like these tests before they became public: on Windows git reports a worktree as `C:/...` while the
+// temporary folder resolves to `\\?\C:\...`, so the path comparisons and readiness waits do not match there.
+// The skip is listed by name in `platform_skips.rs`.
+#![cfg(unix)]
+
 mod changes;
 mod worktrees;
 

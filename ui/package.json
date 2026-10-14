@@ -8,7 +8,7 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "typecheck": "node ../scripts/public/link_ui_test_modules.mjs && tsc --noEmit && tsc --noEmit -p ../tests/public/ui/tsconfig.json",
-    "lint": "node ../scripts/public/link_ui_test_modules.mjs && eslint . --max-warnings 0 --ignore-pattern style-drift.mjs --ignore-pattern vocabulary-drift.mjs && (cd ../tests/public/ui && node ../../../ui/node_modules/eslint/bin/eslint.js . --max-warnings 0) && node style-drift.mjs && node vocabulary-drift.mjs",
+    "lint": "node ../scripts/public/link_ui_test_modules.mjs && eslint . --max-warnings 0 --ignore-pattern style-drift.mjs --ignore-pattern vocabulary-drift.mjs && node ../scripts/public/lint_public_ui_tests.mjs && node style-drift.mjs && node vocabulary-drift.mjs",
     "format:check": "node ../scripts/public/link_ui_test_modules.mjs && prettier --check . ../tests/public/ui",
     "test": "node ../scripts/public/link_ui_test_modules.mjs && vitest run"
   },

@@ -40,3 +40,13 @@ fn file_write_symlink_escape_needs_unix() {}
 #[test]
 #[ignore = "session file-scope symlink confinement test uses Unix symlink creation"]
 fn session_file_symlink_confinement_needs_unix() {}
+
+#[cfg(not(unix))]
+#[test]
+#[ignore = "worktree inspection compares git's worktree paths with Unix-style temporary paths"]
+fn worktree_inspection_needs_unix() {}
+
+#[cfg(not(unix))]
+#[test]
+#[ignore = "worktree session cleanup waits on worktree paths in their Unix form"]
+fn worktree_session_cleanup_needs_unix() {}
