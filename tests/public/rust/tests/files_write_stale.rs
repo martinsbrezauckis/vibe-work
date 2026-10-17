@@ -126,6 +126,64 @@ async fn editor_save_survives_changes_file_revert() {
     rig.core.shutdown().await;
 }
 
+/// The same save with the session's folder reached through a symlinked folder (as a macOS temporary folder is,
+/// `/var` -> `/private/var`): the File tab, the session and git may each write the folder differently, and the
+/// user's line must still reach the Changes baseline so a revert of the agent's change keeps it.
+#[cfg(unix)]
+#[tokio::test]
+async fn editor_save_through_a_linked_folder_survives_changes_file_revert() {
+    let repo =
+        TempRepo::with_files(&[("notes.txt", "agent line\nquiet one\nquiet two\nuser line\n")]);
+    let link = repo.base.join("linked-repo");
+    std::os::unix::fs::symlink(&repo.root, &link).unwrap();
+    let data = repo.data.clone();
+    let rig = script_core_with("editor-save-linked", &[], move |config| {
+        config.changes_dir = Some(data);
+    })
+    .await;
+    let session = start(&rig, &link).await;
+    drop(repo.baseline(&session));
+    repo.write("notes.txt", "agent edit\nquiet one\nquiet two\nuser line\n");
+
+    let (file, fingerprint) = open(&rig, &session, "notes.txt").await;
+    write(
+        &rig,
+        &session,
+        &file,
+        "agent edit\nquiet one\nquiet two\nuser edit\n",
+        &fingerprint,
+    )
+    .await
+    .unwrap();
+
+    let command: Command = serde_json::from_value(json!({"type": "changes", "request": {
+        "op": "read", "sessionId": session
+    }}))
+    .unwrap();
+    let CommandResult::Changes {
+        result: ChangesResult::View { view },
+    } = rig.core.execute(Origin::Ui, command).await.unwrap()
+    else {
+        panic!("expected Changes view")
+    };
+    let agent_change = view
+        .files
+        .iter()
+        .find(|change| change.path == "notes.txt")
+        .unwrap();
+    let command: Command = serde_json::from_value(json!({"type": "changes", "request": {
+        "op": "revert", "sessionId": session,
+        "target": {"kind": "file", "path": "notes.txt", "blob": agent_change.blob}
+    }}))
+    .unwrap();
+    rig.core.execute(Origin::Ui, command).await.unwrap();
+    assert_eq!(
+        repo.read("notes.txt"),
+        "agent line\nquiet one\nquiet two\nuser edit\n"
+    );
+    rig.core.shutdown().await;
+}
+
 #[cfg(unix)]
 #[tokio::test]
 async fn failed_editor_save_rolls_back_changes_baseline() {

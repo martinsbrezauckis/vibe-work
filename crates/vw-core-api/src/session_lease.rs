@@ -71,8 +71,10 @@ fn failure(error: impl std::fmt::Display) -> CoreError {
     )
 }
 
-/// Longest a claim waits for this instance's own lease to finish its release, in milliseconds.
-const RELEASE_WAIT_MS: u32 = 50;
+/// Longest a claim waits for this instance's own lease to finish its release, in milliseconds. A child process
+/// started at that moment shares the lock file until it runs its own program, which can take a while on a busy
+/// machine; the wait applies only when the pointer names this instance, so another window is refused at once.
+const RELEASE_WAIT_MS: u32 = 250;
 
 fn now() -> u64 {
     SystemTime::now()
@@ -256,9 +258,18 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let leases = Leases::new(&dir.join("home"), Some(&dir.join("data"))).unwrap();
         drop(leases.claim("s1").unwrap());
-        // The released lease's lock file is still open: hold the OS lock the way its closing handle does.
+        // The released lease's lock file is still open: hold the OS lock the way its closing handle does. A child
+        // process another test starts at this moment can share the released lock until it runs its own program, so
+        // the setup waits (at most 5 s) for the lock to come free first.
         let closing = leases.lock("s1").unwrap();
-        closing.try_lock().unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while let Err(error) = closing.try_lock() {
+            assert!(
+                matches!(error, TryLockError::WouldBlock) && std::time::Instant::now() < deadline,
+                "the released lock did not come free: {error:?}"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
         assert_eq!(
             leases.foreign("s1").unwrap(),
             None,

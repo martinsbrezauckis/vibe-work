@@ -125,7 +125,15 @@ mod tests {
 
     #[test]
     fn write_error_reports_the_exact_applied_prefix_and_stops() {
-        let root = tempfile::tempdir().unwrap();
+        // Proposals refuse a folder reached through a symbolic link, and the macOS temporary folder lies below
+        // the `/var` link, so the fixture lives below the resolved temporary folder.
+        let base = std::env::temp_dir();
+        let base = if cfg!(unix) {
+            base.canonicalize().unwrap()
+        } else {
+            base
+        };
+        let root = tempfile::tempdir_in(base).unwrap();
         let proposal = Proposal::new(
             root.path(),
             Request {

@@ -375,9 +375,20 @@ impl Core {
 mod tests {
     use super::*;
 
+    /// The system temporary folder, resolved on Unix: discovery never opens a path through a symbolic link, and
+    /// the macOS temporary folder lies below the `/var` link.
+    fn resolved_temp() -> PathBuf {
+        let base = std::env::temp_dir();
+        if cfg!(unix) {
+            base.canonicalize().unwrap()
+        } else {
+            base
+        }
+    }
+
     #[test]
     fn external_metadata_never_becomes_a_watch_or_action_target() {
-        let root = std::env::temp_dir().join(format!("vw-git-browser-core-{}", std::process::id()));
+        let root = resolved_temp().join(format!("vw-git-browser-core-{}", std::process::id()));
         let project = root.join("project");
         let outside = root.join("outside");
         assert!(std::fs::create_dir_all(&project).is_ok());
@@ -401,7 +412,7 @@ mod tests {
 
     #[test]
     fn external_copy_keeps_branch_without_status_or_git_actions() {
-        let root = std::env::temp_dir().join(format!("vw-browser-copy-{}", std::process::id()));
+        let root = resolved_temp().join(format!("vw-browser-copy-{}", std::process::id()));
         let project = root.join("project");
         let outside = root.join("copy");
         let record = project.join(".git/worktrees/copy");

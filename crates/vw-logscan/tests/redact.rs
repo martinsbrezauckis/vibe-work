@@ -72,7 +72,10 @@ fn changed_file_is_skipped_while_unchanged_file_is_redacted() {
     let changed = format!("{{\"content\":\"{TOKEN} newly appended\"}}\n");
     fs::write(&path, &changed).unwrap();
     let result = redact(&report);
-    assert_eq!(result.redacted_files, vec![root.path().join("meta.json")]);
+    // `scan` reports paths below its resolved folder; the system temporary folder can be reached through a link
+    // (`/var` on macOS) or a short name (`RUNNER~1` on Windows).
+    let resolved = root.path().canonicalize().unwrap();
+    assert_eq!(result.redacted_files, vec![resolved.join("meta.json")]);
     assert_eq!(result.skipped_files.len(), 1);
     assert_eq!(
         result.skipped_files[0].reason,

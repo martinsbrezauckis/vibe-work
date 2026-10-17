@@ -6,7 +6,8 @@
 use std::fs;
 use std::path::PathBuf;
 
-use tempfile::TempDir;
+mod support;
+
 use vw_proposals::{Change, Decision, Error, Proposal, Request, Status};
 
 fn request(changes: Vec<Change>) -> Request {
@@ -33,7 +34,7 @@ fn edit(path: &str, content: &[u8]) -> Change {
 
 #[test]
 fn approve_add_edit_remove_only_after_review() {
-    let root = TempDir::new().unwrap();
+    let root = support::tempdir();
     fs::create_dir(root.path().join("profiles")).unwrap();
     fs::write(root.path().join("settings"), b"old settings\n").unwrap();
     fs::write(root.path().join("obsolete"), b"remove this\n").unwrap();
@@ -86,7 +87,7 @@ fn approve_add_edit_remove_only_after_review() {
 
 #[test]
 fn changed_last_base_refuses_the_entire_proposal() {
-    let root = TempDir::new().unwrap();
+    let root = support::tempdir();
     fs::write(root.path().join("edited"), b"original").unwrap();
     fs::write(root.path().join("removed"), b"original").unwrap();
     let proposal = Proposal::new(
@@ -112,7 +113,7 @@ fn changed_last_base_refuses_the_entire_proposal() {
 
 #[test]
 fn same_size_edit_is_stale_and_review_keeps_the_captured_bytes() {
-    let root = TempDir::new().unwrap();
+    let root = support::tempdir();
     fs::write(root.path().join("settings"), b"old\n").unwrap();
     let proposal = Proposal::new(root.path(), request(vec![edit("settings", b"new\n")])).unwrap();
     let review = proposal.review();
@@ -125,7 +126,7 @@ fn same_size_edit_is_stale_and_review_keeps_the_captured_bytes() {
 
 #[test]
 fn add_must_be_absent_at_capture_and_at_approval() {
-    let root = TempDir::new().unwrap();
+    let root = support::tempdir();
     fs::write(root.path().join("exists"), b"existing").unwrap();
     assert!(matches!(
         Proposal::new(root.path(), request(vec![add("exists", b"overwrite")])),
@@ -140,7 +141,7 @@ fn add_must_be_absent_at_capture_and_at_approval() {
 
 #[test]
 fn missing_edit_or_remove_is_refused_and_disappearance_is_stale() {
-    let root = TempDir::new().unwrap();
+    let root = support::tempdir();
     for change in [
         edit("missing", b"new"),
         Change::Remove {
@@ -166,7 +167,7 @@ fn missing_edit_or_remove_is_refused_and_disappearance_is_stale() {
 
 #[test]
 fn decline_has_no_effect_even_when_the_base_changed() {
-    let root = TempDir::new().unwrap();
+    let root = support::tempdir();
     fs::write(root.path().join("settings"), b"old").unwrap();
     fs::write(root.path().join("removed"), b"keep").unwrap();
     let proposal = Proposal::new(
@@ -194,7 +195,7 @@ fn decline_has_no_effect_even_when_the_base_changed() {
 
 #[test]
 fn deleted_parent_of_an_existing_base_is_stale_and_applies_nothing() {
-    let root = TempDir::new().unwrap();
+    let root = support::tempdir();
     fs::create_dir(root.path().join("profiles")).unwrap();
     fs::write(root.path().join("profiles/base"), b"original").unwrap();
     let proposal = Proposal::new(

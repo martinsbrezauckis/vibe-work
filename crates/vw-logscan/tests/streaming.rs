@@ -3,7 +3,7 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-use std::{fs, io::Write};
+use std::{fs, io::Write, path::PathBuf};
 
 use base64::{
     Engine,
@@ -16,6 +16,12 @@ const TOKEN: &str = "ghp_boundaryFixture012345";
 
 fn input() -> Vec<Secret> {
     vec![Secret::new("boundary", TOKEN.to_owned())]
+}
+
+/// The folder in the spelling `scan` reports: `scan` resolves its folder first, and the system temporary folder
+/// can be reached through a link (`/var` on macOS) or a short name (`RUNNER~1` on Windows).
+fn resolved(root: &tempfile::TempDir) -> PathBuf {
+    root.path().canonicalize().unwrap()
 }
 
 #[test]
@@ -43,7 +49,7 @@ fn matches_each_encoding_across_chunk_boundaries_without_duplicate_hits() {
             Encoding::UrlEncoded => "fixture%22%5C%0Avalue%2B%2F%3F".to_owned(),
             _ => value.clone(),
         };
-        let path = root.path().join(format!("{name}.jsonl"));
+        let path = resolved(&root).join(format!("{name}.jsonl"));
         // Try every position within the representation around two successive buffer boundaries.
         for split in 1..stored.len() {
             let prefix = "{\"content\":\"";
@@ -73,7 +79,7 @@ fn matches_each_encoding_across_chunk_boundaries_without_duplicate_hits() {
 #[test]
 fn streams_large_lines_and_legacy_json_and_keeps_original_line_numbers() {
     let root = tempfile::tempdir().unwrap();
-    let messages = root.path().join("messages.jsonl");
+    let messages = resolved(&root).join("messages.jsonl");
     let mut file = fs::File::create(&messages).unwrap();
     writeln!(file, "{{\"content\":\"unrelated\"}}").unwrap();
     write!(
@@ -83,7 +89,7 @@ fn streams_large_lines_and_legacy_json_and_keeps_original_line_numbers() {
     )
     .unwrap();
     drop(file);
-    let legacy = root.path().join("session_legacy.json");
+    let legacy = resolved(&root).join("session_legacy.json");
     let legacy_text = format!(
         "{{\n  \"metadata\": {{}},\n  \"messages\": [{{\"role\":\"tool\",\"content\":\"{TOKEN}\"}}]\n}}"
     );

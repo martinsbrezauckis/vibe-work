@@ -56,7 +56,9 @@ pub use confirm::{
     Clock, Confirmation, ConfirmationRequest, ConfirmationToken, Confirmer, Requester, SystemClock,
 };
 pub use content::{MAX_IMAGE_BYTES, MAX_IMAGES, MAX_TEXT_BYTES};
-pub use dialog::{dialog_line, dialog_quote, dialog_value, is_hidden_char};
+pub use dialog::{
+    dialog_label, dialog_line, dialog_quote, dialog_value, is_hidden_char, is_quote_char,
+};
 pub use error::{CallbackFault, DenyReason, GateError, TokenFault};
 pub use gate::{Gate, GateConfig, Reply, TRUSTED_SURFACE_METHODS};
 pub use inbound::{InboundKind, classify_server_request};

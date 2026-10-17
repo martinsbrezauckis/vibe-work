@@ -215,16 +215,109 @@ async fn start_fails_when_the_record_is_unreadable_and_cannot_be_moved_aside() {
         .expect_err("no durable record is possible");
     assert_eq!(error.code, ErrorCode::Internal, "{error:?}");
     assert!(temporary_ids(&r).await.is_empty());
-    assert_eq!(listed(&r).await, before, "no session was created");
+    assert_eq!(listed(&r).await, before, "no session is left behind");
     // Unix reports a path below a plain file as "not a directory", which freezes the record at load, before any
-    // session exists. Windows reports "not found" there, so the failure only shows when the record is written.
+    // session exists. Windows reports "not found" there: the record looks like a first run, the start goes out,
+    // and the session-ownership folder (below the same plain file) cannot be created. The new session is then
+    // deleted again, so on both systems the start fails as `internal` and nothing is kept; only the step that
+    // notices the broken folder differs.
     #[cfg(unix)]
+    {
+        assert!(
+            !r.received().iter().any(|m| m == "session/start"),
+            "{:?}",
+            r.received()
+        );
+        assert!(logged_error(&log, "temporary"), "{}", log.text());
+    }
+    #[cfg(not(unix))]
+    {
+        let received = r.received();
+        let start = received.iter().position(|m| m == "session/start");
+        let delete = received.iter().rposition(|m| m == "session/delete");
+        assert!(
+            matches!((start, delete), (Some(start), Some(delete)) if start < delete),
+            "the started session was deleted again: {received:?}"
+        );
+        assert!(logged_error(&log, "ownership"), "{}", log.text());
+    }
+    r.core.shutdown().await;
+}
+
+/// The lines of a `--log-channels` file: (method, session id).
+fn channel_requests(path: &Path) -> Vec<(String, String)> {
+    std::fs::read_to_string(path)
+        .unwrap_or_default()
+        .lines()
+        .filter_map(|line| {
+            let mut parts = line.split(' ');
+            let _channel = parts.next()?;
+            Some((parts.next()?.to_owned(), parts.next()?.to_owned()))
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn start_fails_as_internal_and_the_new_session_is_deleted_when_ownership_cannot_be_recorded()
+{
+    let (log, _guard) = logs::capture();
+    let channels = scratch("ownership-channels").join("channels.log");
+    let channels_text = channels.to_string_lossy().into_owned();
+    // The record folder is usable; only the session-ownership folder inside it is a plain file.
+    let (r, dir) = rig_with_flags(
+        "ownership",
+        &["--log-channels", channels_text.as_str()],
+        |d| d.join("sessions"),
+        |d| {
+            std::fs::create_dir_all(d.join("sessions")).unwrap();
+            std::fs::write(d.join("sessions").join("leases"), b"plain file").unwrap();
+        },
+    )
+    .await;
+    let before = listed(&r).await;
+
+    let error = start_temporary(&r)
+        .await
+        .expect_err("a session this app cannot own must not start");
+    // A local folder problem, reported as the core's own failure, not as an answer from Vibe.
+    assert_eq!(error.code, ErrorCode::Internal, "{error:?}");
+    assert_eq!(error.server_code, None, "{error:?}");
     assert!(
-        !r.received().iter().any(|m| m == "session/start"),
-        "{:?}",
-        r.received()
+        error
+            .message
+            .starts_with("Could not check session ownership"),
+        "{}",
+        error.message
     );
-    assert!(logged_error(&log, "temporary"), "{}", log.text());
+
+    // The start went out, and then exactly one delete, for a session that was not there before: the new one
+    // (the fake names a started session `fake-session-<n>`).
+    let received = r.received();
+    let start = received.iter().position(|m| m == "session/start");
+    let delete = received.iter().position(|m| m == "session/delete");
+    assert!(
+        matches!((start, delete), (Some(start), Some(delete)) if start < delete),
+        "{received:?}"
+    );
+    let requests = channel_requests(&channels);
+    let deleted: Vec<&str> = requests
+        .iter()
+        .filter(|(method, _)| method == "session/delete")
+        .map(|(_, id)| id.as_str())
+        .collect();
+    assert_eq!(deleted.len(), 1, "{requests:?}");
+    assert!(
+        deleted[0].starts_with("fake-session-") && !before.iter().any(|id| id == deleted[0]),
+        "the delete names the new session: {deleted:?} / {before:?}"
+    );
+    assert_eq!(
+        listed(&r).await,
+        before,
+        "the started session is gone again"
+    );
+    assert!(temporary_ids(&r).await.is_empty());
+    assert_eq!(record(&dir), None, "nothing was recorded as temporary");
+    assert!(logged_error(&log, "ownership"), "{}", log.text());
     r.core.shutdown().await;
 }
 

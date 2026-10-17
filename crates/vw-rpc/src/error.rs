@@ -1,7 +1,8 @@
 //! Typed errors and the "server is dead" report.
 //!
 //! Depends on: vw-protocol (`ProtocolError`, the server's error object). Called by: every public
-//! API of this crate; the supervisor matches on [`RpcError::ServerDead`] to decide a restart.
+//! API of this crate; the supervisor matches on [`RpcError::ServerDead`] to decide a restart; a
+//! host's transport returns [`RpcError::Local`] for its own failures around a request.
 //! Invariant: once a connection is dead, every waiting and every later request fails with the
 //! same [`DeathReport`] (first cause wins).
 
@@ -175,6 +176,17 @@ pub enum RpcError {
         method: String,
         /// Deserializer error.
         source: serde_json::Error,
+    },
+    /// The request failed in the calling process, not at the server: a check the host runs before or
+    /// after sending (for example a local record it cannot write). The server never answered with an
+    /// error. `source` is the host's own error, kept whole so the host can report it with its own
+    /// code; the message is the host's text alone.
+    #[error("{source}")]
+    Local {
+        /// Method of the request.
+        method: String,
+        /// The host's error.
+        source: Box<dyn std::error::Error + Send + Sync>,
     },
 }
 

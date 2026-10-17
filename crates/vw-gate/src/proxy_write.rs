@@ -68,6 +68,13 @@ mod tests {
         check_write::<ConfigProxyWrite>(&json!({"sessionId": "s", "changes": changes}))
     }
 
+    /// An absolute certificate path on this computer: Windows needs a drive, so `/etc/...` is not absolute there.
+    const CERT_FILE: &str = if cfg!(windows) {
+        "C:\\certs\\company-ca.pem"
+    } else {
+        "/etc/ssl/company-ca.pem"
+    };
+
     #[test]
     fn accepts_each_kind_of_value_and_removal() {
         assert_eq!(
@@ -76,7 +83,7 @@ mod tests {
                 "HTTPS_PROXY": "https://u:p@proxy.corp:8443",
                 "ALL_PROXY": null,
                 "NO_PROXY": ".corp,10.0.0.0/8,localhost",
-                "SSL_CERT_FILE": "/etc/ssl/company-ca.pem",
+                "SSL_CERT_FILE": CERT_FILE,
                 "SSL_CERT_DIR": ""
             })),
             Ok(())

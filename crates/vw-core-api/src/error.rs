@@ -9,7 +9,8 @@
 //!   `error.rs`), and this module adds only method names and fixed text. A server error keeps the
 //!   server's message, which Vibe writes about its own state.
 //! - `GateError::Transport` is the only gate error after which something may have been sent;
-//!   it maps to `serverUnavailable`, `timeout` or `serverError`.
+//!   it maps to `serverUnavailable`, `timeout` or `serverError`, or keeps the core's own error when the
+//!   core itself failed around the request (`RpcError::Local`).
 
 use serde::{Deserialize, Serialize};
 use vw_gate::{CallbackFault, GateError};
@@ -226,9 +227,22 @@ impl CoreError {
         .with_method(method)
     }
 
-    /// Maps a transport failure.
+    /// Maps a transport failure. A failure of the core itself around the request
+    /// ([`RpcError::Local`], for example session ownership that cannot be recorded) keeps the core's own
+    /// error: its code, message and reason word. It is never reported as a server error.
     #[must_use]
     pub fn from_rpc(method: &str, error: &RpcError) -> Self {
+        if let RpcError::Local { source, .. } = error {
+            let mut local = source
+                .downcast_ref::<Self>()
+                .cloned()
+                .unwrap_or_else(|| Self::new(ErrorCode::Internal, source.to_string()));
+            local.message = clip(&local.message, MESSAGE_MAX);
+            if local.method.is_none() {
+                local.method = Some(clip(method, METHOD_MAX));
+            }
+            return local;
+        }
         let (code, server_code) = match error {
             RpcError::ServerDead(_) | RpcError::Timeout { id: 0, .. } => {
                 (ErrorCode::ServerUnavailable, None)
@@ -247,7 +261,9 @@ impl CoreError {
                     (ErrorCode::ServerError, Some(error.code.as_str().to_owned()))
                 }
             }
-            RpcError::Encode { .. } | RpcError::Decode { .. } => (ErrorCode::Internal, None),
+            RpcError::Encode { .. } | RpcError::Decode { .. } | RpcError::Local { .. } => {
+                (ErrorCode::Internal, None)
+            }
         };
         let message = match error {
             RpcError::Timeout { id: 0, after, .. } => {
@@ -313,5 +329,57 @@ fn callback_code(fault: &CallbackFault) -> ErrorCode {
     match fault {
         CallbackFault::UnknownCallback { .. } => ErrorCode::NotFound,
         _ => ErrorCode::CallbackRefused,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{CoreError, ErrorCode};
+    use vw_rpc::RpcError;
+
+    fn local(error: impl std::error::Error + Send + Sync + 'static) -> RpcError {
+        RpcError::Local {
+            method: "session/start".to_owned(),
+            source: Box::new(error),
+        }
+    }
+
+    /// The core's own failure keeps its code and plain message; it is never a server error.
+    #[test]
+    fn a_local_failure_keeps_the_core_error() {
+        let own = CoreError::new(
+            ErrorCode::Internal,
+            "Could not check session ownership: no folder",
+        );
+        let mapped = CoreError::from_rpc("session/start", &local(own));
+        assert_eq!(mapped.code, ErrorCode::Internal);
+        assert_eq!(mapped.server_code, None);
+        assert_eq!(
+            mapped.message,
+            "Could not check session ownership: no folder"
+        );
+        assert_eq!(mapped.method.as_deref(), Some("session/start"));
+    }
+
+    /// A session another window holds stays a `denied` / `sessionHeld` refusal.
+    #[test]
+    fn a_held_session_stays_a_held_refusal() {
+        let held = crate::session_holder::held_refusal(4242);
+        let mapped = CoreError::from_rpc("session/resume", &local(held.clone()));
+        assert_eq!(mapped.code, ErrorCode::Denied);
+        assert_eq!(mapped.server_code.as_deref(), Some("sessionHeld"));
+        assert_eq!(mapped.message, held.message);
+        assert_eq!(mapped.method.as_deref(), Some("session/resume"));
+    }
+
+    /// Any other local error is the core's internal failure, with its text.
+    #[test]
+    fn another_local_error_is_internal() {
+        let io = std::io::Error::other("disk full");
+        let mapped = CoreError::from_rpc("session/fork", &local(io));
+        assert_eq!(mapped.code, ErrorCode::Internal);
+        assert_eq!(mapped.server_code, None);
+        assert_eq!(mapped.message, "disk full");
+        assert_eq!(mapped.method.as_deref(), Some("session/fork"));
     }
 }

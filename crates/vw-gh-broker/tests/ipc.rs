@@ -107,7 +107,11 @@ fn shim_sends_only_argv_and_cwd_on_the_wire() {
             let request: serde_json::Value = serde_json::from_str(&line).unwrap();
             assert_eq!(request.as_object().unwrap().len(), 2);
             assert_eq!(request["argv"], serde_json::json!(["pr", "view", "17"]));
-            assert_eq!(request["cwd"], serde_json::json!(directory.path()));
+            // The shim sends its own current directory, which Unix reports resolved (macOS `/var` is a link).
+            assert_eq!(
+                request["cwd"],
+                serde_json::json!(support::reported_dir(directory.path()))
+            );
             assert!(!line.contains(support::TOKEN));
             stream
                 .get_mut()

@@ -5,7 +5,8 @@
 
 use std::fs;
 
-use tempfile::TempDir;
+mod support;
+
 use vw_proposals::{
     Change, ContentKind, Decision, Error, Kind, MAX_REASON_BYTES, MAX_RECORD_DIFF_BYTES, Proposal,
     Record, Request, Status,
@@ -28,7 +29,7 @@ fn add(path: &str, content: Vec<u8>) -> Change {
 
 #[test]
 fn text_review_has_unified_headers_counts_sizes_and_missing_newline_markers() {
-    let root = TempDir::new().unwrap();
+    let root = support::tempdir();
     fs::write(root.path().join("edited"), b"before\nkept\n").unwrap();
     fs::write(root.path().join("removed"), b"gone\n").unwrap();
     let proposal = Proposal::new(
@@ -75,7 +76,7 @@ fn text_review_has_unified_headers_counts_sizes_and_missing_newline_markers() {
 
 #[test]
 fn binary_reviews_never_include_diffs_or_lossy_file_bytes() {
-    let root = TempDir::new().unwrap();
+    let root = support::tempdir();
     fs::write(root.path().join("edited"), b"text\n").unwrap();
     fs::write(root.path().join("removed"), [0xff, 0xfe]).unwrap();
     let proposal = Proposal::new(
@@ -112,7 +113,7 @@ fn binary_reviews_never_include_diffs_or_lossy_file_bytes() {
 
 #[test]
 fn binary_old_side_makes_text_replacement_binary_and_bytes_apply_exactly() {
-    let root = TempDir::new().unwrap();
+    let root = support::tempdir();
     fs::write(root.path().join("edited"), b"old\0bytes").unwrap();
     let proposal = Proposal::new(
         root.path(),
@@ -136,7 +137,7 @@ fn binary_old_side_makes_text_replacement_binary_and_bytes_apply_exactly() {
 
 #[test]
 fn record_roundtrips_identity_metadata_decision_time_and_diff_sizes() {
-    let root = TempDir::new().unwrap();
+    let root = support::tempdir();
     let proposal = Proposal::new(
         root.path(),
         request(vec![add("new", b"proposed\n".to_vec())]),
@@ -171,7 +172,7 @@ fn record_roundtrips_identity_metadata_decision_time_and_diff_sizes() {
 
 #[test]
 fn record_caps_combined_diff_bytes_on_utf8_boundaries_but_not_live_review() {
-    let root = TempDir::new().unwrap();
+    let root = support::tempdir();
     let text = format!("{}\n", "é".repeat(MAX_RECORD_DIFF_BYTES));
     let proposal = Proposal::new(
         root.path(),
@@ -212,7 +213,7 @@ fn record_caps_combined_diff_bytes_on_utf8_boundaries_but_not_live_review() {
 
 #[test]
 fn unchanged_file_contents_outside_diff_context_are_not_recorded() {
-    let root = TempDir::new().unwrap();
+    let root = support::tempdir();
     let old = format!("old\n{}outside-diff-context\n", "context\n".repeat(20));
     let new = old.replacen("old", "new", 1);
     fs::write(root.path().join("settings"), old).unwrap();
@@ -232,7 +233,7 @@ fn unchanged_file_contents_outside_diff_context_are_not_recorded() {
 
 #[test]
 fn stale_and_approved_records_roundtrip_their_decisions() {
-    let root = TempDir::new().unwrap();
+    let root = support::tempdir();
     let first = Proposal::new(
         root.path(),
         request(vec![add("first", b"proposed".to_vec())]),
@@ -256,7 +257,7 @@ fn stale_and_approved_records_roundtrip_their_decisions() {
 
 #[test]
 fn reason_is_bounded_plain_text_and_every_proposal_requires_session_metadata() {
-    let root = TempDir::new().unwrap();
+    let root = support::tempdir();
     for reason in [
         String::new(),
         " ".into(),

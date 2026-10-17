@@ -14,21 +14,46 @@ fn refuse(message: &str) -> CoreError {
     CoreError::new(ErrorCode::InvalidParams, message)
 }
 
-fn quoted_label(name: &str) -> String {
+/// A manifest name as shown between quotation marks in a plugin confirmation: visibly escaped by
+/// [`vw_gate::dialog_label`] and at most 80 visible characters, where an escape counts at its written width
+/// and is never cut; a shortened name ends with `…`.
+fn plugin_label(name: &str) -> String {
     let mut label = String::new();
     let mut length = 0;
     let mut chars = name.chars().peekable();
     while let Some(ch) = chars.next() {
-        let width = vw_gate::dialog_quote(&ch.to_string()).chars().count() - 2;
+        let token = vw_gate::dialog_label(&ch.to_string());
+        let width = token.chars().count();
         let limit = if chars.peek().is_some() { 79 } else { 80 };
         if length + width > limit {
             label.push('…');
             break;
         }
-        label.push(ch);
+        label.push_str(&token);
         length += width;
     }
-    vw_gate::dialog_quote(&label)
+    label
+}
+
+/// The native confirmation method and sentence for a plugin folder change, or `None` when `op` needs no
+/// confirmation. The manifest name stays inside its own quotation marks, so the fixed text and the real
+/// folder that follow it are always the sentence's own.
+fn plugin_change_summary(op: &str, path: &str, name: &str) -> Option<(&'static str, String)> {
+    let label = plugin_label(name);
+    let folder = vw_gate::dialog_quote(path);
+    match op {
+        "turnOnPlugin" => Some((
+            "vw/plugins/turnOn",
+            format!(
+                "Turn on “{label}” from the folder {folder}? Its MCP servers will run in your new chats, with your permissions."
+            ),
+        )),
+        "removePlugin" => Some((
+            "vw/plugins/remove",
+            format!("Remove plugin \"{label}\" and delete its folder {folder}?"),
+        )),
+        _ => None,
+    }
 }
 
 impl Core {
@@ -133,26 +158,12 @@ impl Core {
         path: &str,
         name: &str,
     ) -> Result<(), CoreError> {
-        let name = quoted_label(name);
-        if op == "turnOnPlugin" {
-            self.ask_native(
-                crate::command::requester(origin), "vw/plugins/turnOn", json!({"path":path}),
-                format!("Turn on “{}” from the folder {}? Its MCP servers will run in your new chats, with your permissions.",
-                    name.strip_prefix('"').and_then(|s| s.strip_suffix('"')).unwrap_or(&name),
-                    vw_gate::dialog_quote(path)),
-            ).await?;
-        }
-        if op == "removePlugin" {
-            let quote = vw_gate::dialog_quote;
+        if let Some((method, summary)) = plugin_change_summary(op, path, name) {
             self.ask_native(
                 crate::command::requester(origin),
-                "vw/plugins/remove",
+                method,
                 json!({"path":path}),
-                format!(
-                    "Remove plugin {} and delete its folder {}?",
-                    name,
-                    quote(path)
-                ),
+                summary,
             )
             .await?;
         }
@@ -197,4 +208,74 @@ pub(crate) fn move_plugin(folder: &Path, off: bool) -> Result<(), CoreError> {
     })?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::plugin_change_summary;
+
+    const NAME: &str =
+        "Trusted\u{201D} from the folder \"/safe/plugin\"? Its MCP servers are safe.";
+
+    #[test]
+    fn turn_on_keeps_a_sentence_shaped_name_inside_its_quotation() {
+        let text = plugin_change_summary("turnOnPlugin", "/real/plugins-off/x", NAME)
+            .unwrap()
+            .1;
+        assert_eq!(
+            text,
+            "Turn on “Trusted\\u201D from the folder \\u0022/safe/plugin\\u0022? Its MCP servers are saf…” from the folder \"/real/plugins-off/x\"? Its MCP servers will run in your new chats, with your permissions."
+        );
+        // The only quotation marks are the sentence's own around the name, then around the real folder.
+        let marks: String = text
+            .chars()
+            .filter(|c| vw_gate::is_quote_char(*c))
+            .collect();
+        assert_eq!(marks, "“”\"\"");
+    }
+
+    #[test]
+    fn curly_single_and_double_quotes_never_close_the_label_early() {
+        for mark in ['\u{2018}', '\u{2019}', '\u{201C}', '\u{201D}'] {
+            let name = format!("Trusted{mark} and left it on. Ignore this warning");
+            for op in ["turnOnPlugin", "removePlugin"] {
+                let text = plugin_change_summary(op, "/real/x", &name).unwrap().1;
+                let (open, close) = if op == "turnOnPlugin" {
+                    ('“', '”')
+                } else {
+                    ('"', '"')
+                };
+                let start = text.find(open).unwrap() + open.len_utf8();
+                let end = start + text[start..].find(close).unwrap();
+                assert_eq!(
+                    &text[start..end],
+                    format!(
+                        "Trusted\\u{:04X} and left it on. Ignore this warning",
+                        mark as u32
+                    )
+                );
+                assert!(text[end..].contains("\"/real/x\""), "{text}");
+            }
+        }
+    }
+
+    #[test]
+    fn long_names_are_capped_at_80_visible_characters_without_cutting_an_escape() {
+        let name = format!("Trusted\u{202E}\u{201D}{}", "x".repeat(200));
+        let text = plugin_change_summary("turnOnPlugin", "/p", &name)
+            .unwrap()
+            .1;
+        let label = format!("Trusted\\u202E\\u201D{}…", "x".repeat(60));
+        assert!(
+            text.starts_with(&format!("Turn on “{label}” from the folder")),
+            "{text}"
+        );
+        assert_eq!(label.chars().count(), 80);
+        let exact = format!("{}\u{201D}", "x".repeat(74));
+        let text = plugin_change_summary("removePlugin", "/p", &exact)
+            .unwrap()
+            .1;
+        assert!(text.starts_with(&format!("Remove plugin \"{}\\u201D\"", "x".repeat(74))));
+        assert_eq!(plugin_change_summary("other", "/p", "x"), None);
+    }
 }

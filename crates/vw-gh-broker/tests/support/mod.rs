@@ -50,6 +50,12 @@ impl Harness {
         }
     }
 
+    /// The cwd as a child process reports it. Unix answers the resolved folder, so the macOS temporary folder
+    /// reads `/private/var/...` although it was given as `/var/...`; Windows answers the folder as it was given.
+    pub fn reported_cwd(&self) -> PathBuf {
+        reported_dir(self.cwd.path())
+    }
+
     pub fn request(&self, argv: &[&str]) -> Request {
         Request {
             argv: argv.iter().map(|arg| (*arg).to_owned()).collect(),
@@ -64,5 +70,14 @@ impl Harness {
             server.join().unwrap();
             reply
         })
+    }
+}
+
+/// `dir` as a child process started there reports its current directory (see [`Harness::reported_cwd`]).
+pub fn reported_dir(dir: &Path) -> PathBuf {
+    if cfg!(unix) {
+        dir.canonicalize().unwrap()
+    } else {
+        dir.to_owned()
     }
 }

@@ -50,3 +50,13 @@ fn worktree_inspection_needs_unix() {}
 #[test]
 #[ignore = "worktree session cleanup waits on worktree paths in their Unix form"]
 fn worktree_session_cleanup_needs_unix() {}
+
+#[cfg(not(unix))]
+#[test]
+#[ignore = "a session folder reached through a symlinked folder uses Unix symlink creation"]
+fn changes_linked_folder_needs_unix() {}
+
+#[cfg(not(unix))]
+#[test]
+#[ignore = "an editor save through a symlinked folder uses Unix symlink creation"]
+fn editor_save_through_a_linked_folder_needs_unix() {}

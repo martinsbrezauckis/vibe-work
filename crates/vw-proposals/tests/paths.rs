@@ -6,7 +6,8 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use tempfile::TempDir;
+mod support;
+
 #[cfg(unix)]
 use vw_proposals::Status;
 use vw_proposals::{Change, Decision, Error, Proposal, Request};
@@ -28,8 +29,8 @@ fn add(path: impl Into<PathBuf>) -> Change {
 
 #[test]
 fn traversal_absolute_and_empty_paths_are_refused() {
-    let root = TempDir::new().unwrap();
-    let outside = TempDir::new().unwrap();
+    let root = support::tempdir();
+    let outside = support::tempdir();
     for path in [
         PathBuf::from("../escape"),
         "profiles/../../escape".into(),
@@ -48,7 +49,7 @@ fn traversal_absolute_and_empty_paths_are_refused() {
 
 #[test]
 fn dot_components_normalize_but_duplicate_targets_are_refused() {
-    let root = TempDir::new().unwrap();
+    let root = support::tempdir();
     let proposal = Proposal::new(root.path(), request(vec![add("./new")])).unwrap();
     assert_eq!(proposal.review()[0].path, Path::new("new"));
     let duplicate = Proposal::new(root.path(), request(vec![add("new"), add("./new")]));
@@ -58,7 +59,7 @@ fn dot_components_normalize_but_duplicate_targets_are_refused() {
 
 #[test]
 fn directories_are_not_files_and_missing_parents_are_not_created() {
-    let root = TempDir::new().unwrap();
+    let root = support::tempdir();
     fs::create_dir(root.path().join("directory")).unwrap();
     for change in [
         Change::Edit {
@@ -84,7 +85,7 @@ fn directories_are_not_files_and_missing_parents_are_not_created() {
 
 #[test]
 fn directory_replacing_a_base_is_stale_before_any_write() {
-    let root = TempDir::new().unwrap();
+    let root = support::tempdir();
     fs::write(root.path().join("base"), b"original").unwrap();
     let proposal = Proposal::new(
         root.path(),
@@ -113,8 +114,8 @@ mod unix {
 
     #[test]
     fn symlink_targets_and_parents_are_refused_even_when_they_stay_inside() {
-        let root = TempDir::new().unwrap();
-        let outside = TempDir::new().unwrap();
+        let root = support::tempdir();
+        let outside = support::tempdir();
         fs::create_dir(root.path().join("real")).unwrap();
         fs::write(root.path().join("real/file"), b"original").unwrap();
         symlink(root.path().join("real/file"), root.path().join("file-link")).unwrap();
@@ -151,7 +152,7 @@ mod unix {
 
     #[test]
     fn root_symlinks_and_symlinked_root_ancestors_are_refused() {
-        let parent = TempDir::new().unwrap();
+        let parent = support::tempdir();
         let root = parent.path().join("real/root");
         fs::create_dir_all(&root).unwrap();
         symlink(&root, parent.path().join("root-link")).unwrap();
@@ -174,7 +175,7 @@ mod unix {
 
     #[test]
     fn target_symlink_inserted_after_capture_refuses_all_changes() {
-        let root = TempDir::new().unwrap();
+        let root = support::tempdir();
         fs::write(root.path().join("base"), b"original").unwrap();
         fs::write(root.path().join("real"), b"original").unwrap();
         let proposal = Proposal::new(
@@ -200,8 +201,8 @@ mod unix {
 
     #[test]
     fn parent_symlink_inserted_after_capture_refuses_all_changes() {
-        let root = TempDir::new().unwrap();
-        let outside = TempDir::new().unwrap();
+        let root = support::tempdir();
+        let outside = support::tempdir();
         fs::create_dir(root.path().join("profiles")).unwrap();
         let proposal =
             Proposal::new(root.path(), request(vec![add("new"), add("profiles/new")])).unwrap();
@@ -215,7 +216,7 @@ mod unix {
 
     #[test]
     fn replacing_the_protected_root_with_a_symlink_is_refused_at_approval() {
-        let parent = TempDir::new().unwrap();
+        let parent = support::tempdir();
         let root = parent.path().join("root");
         let outside = parent.path().join("outside");
         fs::create_dir(&root).unwrap();
@@ -230,7 +231,7 @@ mod unix {
 
     #[test]
     fn non_unicode_paths_are_refused_before_they_can_break_record_serialization() {
-        let root = TempDir::new().unwrap();
+        let root = support::tempdir();
         let path = std::ffi::OsString::from_vec(vec![0xff]);
         assert!(matches!(
             Proposal::new(root.path(), request(vec![add(path)])),
@@ -240,7 +241,7 @@ mod unix {
 
     #[test]
     fn edits_preserve_permissions_and_replace_instead_of_mutating_hardlinks() {
-        let root = TempDir::new().unwrap();
+        let root = support::tempdir();
         let target = root.path().join("settings");
         fs::write(&target, b"original").unwrap();
         fs::set_permissions(&target, fs::Permissions::from_mode(0o640)).unwrap();

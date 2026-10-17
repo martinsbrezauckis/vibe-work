@@ -10,9 +10,12 @@
 //!   index and objects (`hash-object --no-filters`, `update-index --index-info`).
 //! - A revert deletes a file only when the request names it in `delete_paths`; for "all" the named set must
 //!   equal the set it would delete. A folder is never deleted.
+//! - An editor save is placed in the repository by comparing the file's path and the repository root in one
+//!   canonical form (the same folder can be written several ways); a file outside the repository or the
+//!   review's scope is never recorded.
 
 use std::collections::BTreeSet;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use similar::{Algorithm, DiffTag};
@@ -30,6 +33,10 @@ use crate::objects::{Entry, hash_bytes, read_blobs, update_index};
 /// the user's bytes from a later whole-file revert, at the cost of hiding that file's agent edits.
 /// The caller holds the session tracker lock across the disk write and this operation.
 ///
+/// `path` may name the file in any spelling of its folder: it is placed in the repository by comparing
+/// canonical forms (see [`repository_relative`]). A file outside the repository or outside the review's
+/// scope is not recorded (`Ok(None)`).
+///
 /// # Errors
 /// Object or baseline persistence failures; the caller must leave the disk file untouched.
 pub fn record_user_save(
@@ -42,7 +49,7 @@ pub fn record_user_save(
         return Ok(None);
     }
     let repo = baseline.repo();
-    let Ok(relative) = path.strip_prefix(&repo.root) else {
+    let Some(relative) = repository_relative(&repo.root, path) else {
         return Ok(None);
     };
     let raw = crate::paths::os_bytes(relative.as_os_str());
@@ -117,6 +124,28 @@ pub fn undo_user_save(baseline: &mut Baseline, undo: UserSaveUndo) -> Result<(),
         &upserts,
     )?;
     baseline.commit_index()
+}
+
+/// `path` relative to the working tree `root`, or `None` when the file lies outside it.
+///
+/// The two paths are compared in one canonical form because the same folder can be written several ways: git
+/// answers the root with symlinks resolved (`/private/var/...` for a macOS `/var/...` folder, the real folder
+/// for one reached through a link) and on Windows as `C:/...`, while the caller may hold the verbatim
+/// `\\?\C:\...` form, a short name such as `RUNNER~1`, another drive-letter case or other separators. Both sides
+/// go through `std::fs::canonicalize`, which answers one form for both (on Windows always the verbatim form, so a
+/// long file path and a short root can never end up in different spellings). Only the file's folder is
+/// canonicalized and the file name joined back: the file may be new, and a file that is itself a symlink is
+/// the link, never its target. When either side cannot be canonicalized (it is gone), the paths are compared
+/// as written.
+fn repository_relative(root: &Path, path: &Path) -> Option<PathBuf> {
+    let file = path
+        .file_name()
+        .zip(path.parent())
+        .and_then(|(name, folder)| folder.canonicalize().ok().map(|folder| folder.join(name)));
+    match root.canonicalize().ok().zip(file) {
+        Some((root, file)) => file.strip_prefix(&root).ok().map(Path::to_path_buf),
+        None => path.strip_prefix(root).ok().map(Path::to_path_buf),
+    }
 }
 
 /// Replay user changes from `before` to `after` onto the pre-agent baseline. Return None when
@@ -490,115 +519,5 @@ fn modified_ms(baseline: &Baseline, path: &[u8]) -> u64 {
 }
 
 #[cfg(test)]
-mod user_save_tests {
-    use super::*;
-    use std::process::Command;
-
-    #[test]
-    fn disjoint_user_edit_survives_agent_file_revert() {
-        let root = std::env::temp_dir().join(format!(
-            "vw-save-review-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        std::fs::create_dir_all(&root).unwrap();
-        let git = Command::new("git")
-            .arg("init")
-            .arg("-q")
-            .arg(&root)
-            .status()
-            .unwrap();
-        assert!(git.success());
-        let file = root.join("note.txt");
-        let original = b"agent line\nunchanged 1\nunchanged 2\nuser line\n";
-        let agent = b"agent edit\nunchanged 1\nunchanged 2\nuser line\n";
-        let saved = b"agent edit\nunchanged 1\nunchanged 2\nuser edit\n";
-        std::fs::write(&file, original).unwrap();
-        let changes = root.join("review-data");
-        crate::store::prepare_root(&changes).unwrap();
-        let repo = crate::repo::discover(&root).unwrap().unwrap();
-        let dir = crate::store::SessionDir::open(&changes, "session").unwrap();
-        let mut baseline = Baseline::take(repo, dir).unwrap();
-        std::fs::write(&file, agent).unwrap();
-        std::fs::write(&file, saved).unwrap();
-        let _ = record_user_save(&mut baseline, &file, agent, saved).unwrap();
-        let repo = baseline.repo().clone();
-        let dir = baseline.dir().clone();
-        drop(baseline);
-        let baseline = Baseline::load(repo, dir).unwrap();
-        let diff = refresh(&baseline).unwrap();
-        let change = diff.file("note.txt").unwrap();
-        assert_eq!(change.added, 1);
-        assert_eq!(change.removed, 1);
-        revert(
-            &baseline,
-            &Target::File {
-                path: "note.txt".into(),
-                blob: change.blob.clone(),
-            },
-            &[],
-        )
-        .unwrap();
-        assert_eq!(
-            std::fs::read(&file).unwrap(),
-            b"agent line\nunchanged 1\nunchanged 2\nuser edit\n"
-        );
-        std::fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn overlapping_user_edit_becomes_protected_baseline() {
-        let base = b"one\ntwo\n";
-        let agent = b"agent\ntwo\n";
-        let saved = b"user\ntwo\n";
-        assert_eq!(merge_user_save(base, agent, saved), None);
-
-        let root = std::env::temp_dir().join(format!(
-            "vw-overlap-review-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        std::fs::create_dir_all(&root).unwrap();
-        assert!(
-            Command::new("git")
-                .arg("init")
-                .arg("-q")
-                .arg(&root)
-                .status()
-                .unwrap()
-                .success()
-        );
-        let file = root.join("note.txt");
-        std::fs::write(&file, base).unwrap();
-        let changes = root.join("review-data");
-        crate::store::prepare_root(&changes).unwrap();
-        let repo = crate::repo::discover(&root).unwrap().unwrap();
-        let dir = crate::store::SessionDir::open(&changes, "session").unwrap();
-        let mut baseline = Baseline::take(repo, dir).unwrap();
-        std::fs::write(&file, agent).unwrap();
-        let before_view = refresh(&baseline).unwrap();
-        let old_target = Target::File {
-            path: "note.txt".into(),
-            blob: before_view.file("note.txt").unwrap().blob.clone(),
-        };
-        std::fs::write(&file, saved).unwrap();
-        let _ = record_user_save(&mut baseline, &file, agent, saved).unwrap();
-        let repo = baseline.repo().clone();
-        let dir = baseline.dir().clone();
-        drop(baseline);
-        let baseline = Baseline::load(repo, dir).unwrap();
-        assert!(refresh(&baseline).unwrap().file("note.txt").is_none());
-        assert!(matches!(
-            revert(&baseline, &old_target, &[]),
-            Err(ChangesError::Stale { .. })
-        ));
-        assert_eq!(std::fs::read(&file).unwrap(), saved);
-        std::fs::remove_dir_all(root).unwrap();
-    }
-}
+#[path = "review_user_save_tests.rs"]
+mod user_save_tests;

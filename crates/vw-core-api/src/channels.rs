@@ -38,6 +38,12 @@
 //! - Bindings carry the server generation; a restart drops them all (`reset`). A binding whose
 //!   channel is dead counts as no channel (a command then opens one on the new server).
 //! - A session being restored to its profile (`recovery.rs`) counts as having no channel.
+//! - A failure of the core itself around a request (session ownership, plugin approvals) is returned as
+//!   `RpcError::Local` carrying the core's own `CoreError`, never dressed up as a server answer.
+//! - When ownership of a session that this very request created (`session/start`, an attaching
+//!   `session/fork`) cannot be claimed, the new session is deleted again before the error is returned,
+//!   so it cannot live on as an ordinary kept chat. Resuming, continuing or handing off an existing
+//!   session deletes nothing.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -46,7 +52,7 @@ use std::time::{Duration, Instant};
 
 use serde_json::Value;
 use tokio::sync::mpsc;
-use tracing::{debug, warn};
+use tracing::{debug, error, warn};
 use vw_rpc::{Connection, DeathCause, RpcError, Subscription};
 use vw_supervisor::{Supervisor, SupervisorError};
 
@@ -147,24 +153,18 @@ fn to_rpc(method: &str, wait: Duration, error: SupervisorError) -> RpcError {
     }
 }
 
-fn lease_error(method: &str, error: crate::error::CoreError) -> RpcError {
-    RpcError::Remote {
+/// Carries a failure of the core itself (session ownership, plugin approvals) through the gate's
+/// transport unchanged. `CoreError::from_rpc` hands the same `CoreError` back: an ownership record that
+/// cannot be written stays `internal`, a session another window holds stays `denied` / `sessionHeld`.
+fn local_error(method: &str, error: crate::error::CoreError) -> RpcError {
+    RpcError::Local {
         method: method.to_owned(),
-        error: vw_protocol::ProtocolError {
-            code: if error.server_code.as_deref() == Some("sessionHeld") {
-                vw_protocol::ProtocolErrorCode::Conflict
-            } else {
-                vw_protocol::ProtocolErrorCode::InternalError
-            },
-            message: error.message,
-            data: if error.server_code.as_deref() == Some("sessionHeld") {
-                vw_protocol::Maybe::Value(serde_json::json!({"harnessCode": "session_busy"}))
-            } else {
-                vw_protocol::Maybe::Absent
-            },
-        },
+        source: Box::new(error),
     }
 }
+
+/// Longest the clean-up of a just-created session may wait for its channel's close and for the delete.
+const DISCARD_WAIT: Duration = Duration::from_secs(10);
 
 impl Channels {
     pub(crate) fn new(
@@ -198,7 +198,7 @@ impl Channels {
             let _held = self.plugin_approvals.mutations.lock().await;
             self.plugin_approvals
                 .sweep()
-                .map_err(|e| lease_error(method, e))?;
+                .map_err(|e| local_error(method, e))?;
         }
         let ticket = self
             .agent_tools
@@ -237,8 +237,15 @@ impl Channels {
                 if let Some(new_id) = result_session(&result).filter(|new| hand_off && *new != id)
                     && let Err(error) = self.rebind(&id, new_id)
                 {
+                    // The channel now carries `new_id`; closing it waits for Vibe to let go of it.
                     self.close(&id).await;
-                    return Err(lease_error(method, error));
+                    // An attaching fork created `new_id` just now: without ownership it is deleted again.
+                    // A hand-off (`/clear`, a rewind into a new session) moved the user's existing
+                    // conversation to `new_id`, so it is kept.
+                    if method == "session/fork" {
+                        self.discard_created(method, new_id).await;
+                    }
+                    return Err(local_error(method, error));
                 }
                 Ok(result)
             }
@@ -284,7 +291,22 @@ impl Channels {
                             Ok(lease) => lease,
                             Err(error) => {
                                 conn.close_input().await;
-                                return Err(lease_error(method, error));
+                                // `session/start` created this session just now: without ownership it
+                                // is deleted again, so it cannot stay behind as an ordinary kept chat.
+                                // `session/continue` reopened an existing session: it is kept.
+                                if method == "session/start" {
+                                    if tokio::time::timeout(DISCARD_WAIT, conn.closed())
+                                        .await
+                                        .is_err()
+                                    {
+                                        warn!(
+                                            channel_id = key.1,
+                                            "a closed channel was not acknowledged within 10 s"
+                                        );
+                                    }
+                                    self.discard_created(method, id).await;
+                                }
+                                return Err(local_error(method, error));
                             }
                         };
                         self.leases.retain(id, lease);
@@ -310,7 +332,7 @@ impl Channels {
         let lease = self
             .leases
             .claim(id)
-            .map_err(|error| lease_error(method, error))?;
+            .map_err(|error| local_error(method, error))?;
         if let Some(conn) = self.bound(id) {
             return self
                 .supervisor
@@ -329,6 +351,43 @@ impl Channels {
                 conn.close_input().await;
                 Err(to_rpc(method, self.wait, error))
             }
+        }
+    }
+
+    /// Deletes a session that `method` created just now and whose ownership could not be claimed. Its
+    /// channel must already be closed (Vibe refuses to delete a session a channel holds). Best effort:
+    /// a failure is logged and the caller still returns the ownership error. Vibe stores a session on its
+    /// first turn, so "not found" means there was nothing to delete. The core's store never loaded the
+    /// session (the request failed), so there is no bookkeeping to finish.
+    async fn discard_created(&self, method: &str, id: &str) {
+        error!(
+            session_id = id,
+            method, "session ownership could not be claimed for a new session; deleting it again"
+        );
+        let params = serde_json::json!({"sessionId": id});
+        let deleted = tokio::time::timeout(DISCARD_WAIT, async {
+            self.lobby("session/delete")
+                .await?
+                .request("session/delete", params)
+                .await
+        })
+        .await;
+        match deleted {
+            Ok(Ok(_)) => debug!(session_id = id, "the new session was deleted again"),
+            Ok(Err(RpcError::Remote { error, .. }))
+                if error.code == vw_protocol::ProtocolErrorCode::NotFound =>
+            {
+                debug!(session_id = id, "the new session was never stored");
+            }
+            Ok(Err(error)) => error!(
+                session_id = id,
+                %error,
+                "the new session could not be deleted again; it stays in the list as an ordinary chat"
+            ),
+            Err(_) => error!(
+                session_id = id,
+                "the new session was not deleted within 10 s; it may stay in the list as an ordinary chat"
+            ),
         }
     }
 

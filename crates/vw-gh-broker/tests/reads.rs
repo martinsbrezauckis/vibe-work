@@ -65,7 +65,7 @@ fn listed_reads_run_with_token_and_original_argv_cwd() {
         assert!(stdout.contains("gh_token_set=true"), "{stdout}");
         assert!(stdout.contains(&format!("argv={argv:?}")), "{stdout}");
         assert!(
-            stdout.contains(&format!("cwd={}", harness.cwd.path().display())),
+            stdout.contains(&format!("cwd={}", harness.reported_cwd().display())),
             "{stdout}"
         );
         assert!(stdout.contains("config_empty=true"), "{stdout}");

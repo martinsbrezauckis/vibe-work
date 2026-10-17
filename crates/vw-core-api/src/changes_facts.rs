@@ -195,11 +195,32 @@ fn touch(entry: &Value, cwd: Option<&Path>) -> Option<FileTouch> {
 }
 
 /// Per file ([`path_key`] of its absolute path), the last turn whose file effect names it.
-pub(crate) fn last_turn_by_path(facts: &Facts) -> HashMap<PathBuf, String> {
+///
+/// `real_cwd` is the session folder in its canonical form (`std::fs::canonicalize`). The agent names files through
+/// the session folder as the session wrote it, while git names the repository root with links resolved; the same
+/// folder can be written several ways (a symlinked folder, a Windows short name). An effect path below the folder as
+/// written is therefore keyed below `real_cwd`, so it meets a file path built from git's root.
+pub(crate) fn last_turn_by_path(
+    facts: &Facts,
+    real_cwd: Option<&Path>,
+) -> HashMap<PathBuf, String> {
+    let alias = facts
+        .cwd
+        .as_deref()
+        .zip(real_cwd)
+        .map(|(written, real)| (path_key(written), path_key(real)))
+        .filter(|(written, real)| written != real);
     let mut map = HashMap::new();
     for touch in &facts.touches {
         if let Some(turn) = &touch.turn_id {
-            map.insert(path_key(&touch.path), turn.clone());
+            let key = path_key(&touch.path);
+            let key = match &alias {
+                Some((written, real)) => key
+                    .strip_prefix(written)
+                    .map_or_else(|_| key.clone(), |rest| real.join(rest)),
+                None => key,
+            };
+            map.insert(key, turn.clone());
         }
     }
     map

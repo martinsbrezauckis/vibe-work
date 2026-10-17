@@ -423,22 +423,30 @@ impl Core {
 
     async fn folder_sessions(&self, cwd: &str) -> Result<ChangesResult, CoreError> {
         let folder = PathBuf::from(cwd);
-        let probe = folder.clone();
-        let repo = blocking(move || vw_changes::discover(&probe).ok().flatten()).await?;
-        let root = repo
-            .as_ref()
-            .map_or_else(|| folder.clone(), |r| r.root.clone());
+        let views = self.shared.store.views();
+        let cwds: Vec<Option<PathBuf>> = views.iter().map(|view| facts(&view.state).cwd).collect();
+        let (repo, inside) = blocking(move || {
+            let repo = vw_changes::discover(&folder).ok().flatten();
+            let root = repo
+                .as_ref()
+                .map_or_else(|| folder.clone(), |r| r.root.clone());
+            let inside: Vec<bool> = cwds
+                .iter()
+                .map(|their| {
+                    their
+                        .as_deref()
+                        .is_some_and(|their| same_repository(their, &folder, &root))
+                })
+                .collect();
+            (repo, inside)
+        })
+        .await?;
         let mut sessions = Vec::new();
-        for view in self.shared.store.views() {
-            let session = facts(&view.state);
-            let Some(their) = session.cwd.as_deref() else {
-                continue;
-            };
-            // Compared as `path_key`s: git's `C:/x` and the session's `\\?\C:\x` are one folder on Windows.
-            let their = path_key(their);
-            if !(their == path_key(&folder) || their.starts_with(path_key(&root))) {
+        for (view, inside) in views.iter().zip(inside) {
+            if !inside {
                 continue;
             }
+            let session = facts(&view.state);
             let changed = self
                 .shared
                 .changes
@@ -466,6 +474,25 @@ impl Core {
             sessions,
         })
     }
+}
+
+/// True when the session folder `their` is `folder` or lies in the repository `root` (git's root of `folder`).
+///
+/// The folders are compared as written ([`path_key`]s: git's `C:/x` and the session's `\\?\C:\x` are one folder on
+/// Windows), then in their canonical forms, because the same folder can be written several ways: git answers the
+/// root with links resolved, while a session may name its folder through a symlinked folder or a Windows short
+/// name. A folder that cannot be canonicalized (it is gone) is compared as written only.
+fn same_repository(their: &Path, folder: &Path, root: &Path) -> bool {
+    let written = path_key(their);
+    if written == path_key(folder) || written.starts_with(path_key(root)) {
+        return true;
+    }
+    let real = |path: &Path| path.canonicalize().ok().map(|real| path_key(&real));
+    let Some(their) = real(their) else {
+        return false;
+    };
+    real(folder).is_some_and(|folder| folder == their)
+        || real(root).is_some_and(|root| their.starts_with(root))
 }
 
 fn no_review(tracker: &Tracker) -> CoreError {

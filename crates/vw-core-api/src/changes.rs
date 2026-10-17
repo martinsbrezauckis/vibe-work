@@ -675,17 +675,25 @@ fn label_turns(
 ) {
     // Labels of files that are no longer changed are dropped (a later change is labelled afresh).
     observed.retain(|path, _| diff.files.iter().any(|f| &f.path == path));
-    let by_path = last_turn_by_path(session);
+    // Effect paths and git's paths are matched in one canonical form: the same folder can be written several ways
+    // (git's root has links resolved, the agent writes the session folder as the session named it).
+    let real_root = root.canonicalize().ok();
+    let real_cwd = session
+        .cwd
+        .as_deref()
+        .and_then(|cwd| cwd.canonicalize().ok());
+    let by_path = last_turn_by_path(session, real_cwd.as_deref());
     let running = session.running.as_deref().and_then(|id| session.turn(id));
     for file in &mut diff.files {
         // The same path value every consumer uses: git's bytes resolved once (vw-changes `inside_bytes`).
         let Ok(absolute) = vw_changes::inside_bytes(root, &file.raw_path) else {
             continue;
         };
-        if let Some(turn) = by_path
-            .get(&path_key(&absolute))
-            .and_then(|id| session.turn(id))
-        {
+        let effect = by_path.get(&path_key(&absolute)).or_else(|| {
+            let real = vw_changes::inside_bytes(real_root.as_deref()?, &file.raw_path).ok()?;
+            by_path.get(&path_key(&real))
+        });
+        if let Some(turn) = effect.and_then(|id| session.turn(id)) {
             file.turn = Some(TurnLabel {
                 number: turn.number,
                 turn_id: turn.id.clone(),

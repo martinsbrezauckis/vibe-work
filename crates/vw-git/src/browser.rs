@@ -438,6 +438,7 @@ mod tests {
     use super::{Limits, discover, revalidate};
     use std::fs;
     use std::path::{Path, PathBuf};
+    use std::sync::atomic::{AtomicUsize, Ordering};
     #[cfg(unix)]
     use std::time::Instant;
     use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -445,12 +446,22 @@ mod tests {
     struct Fixture(PathBuf);
     impl Fixture {
         fn new() -> Self {
+            // Tests run in parallel and some clocks tick in microseconds, so a counter keeps names apart.
+            static NEXT: AtomicUsize = AtomicUsize::new(0);
             let tick = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
                 .as_nanos();
-            let path =
-                std::env::temp_dir().join(format!("vw-git-browser-{}-{tick}", std::process::id()));
+            let n = NEXT.fetch_add(1, Ordering::Relaxed);
+            // Discovery never opens a path through a symbolic link, and the macOS temporary folder lies below
+            // the `/var` link, so Unix fixtures live below the resolved temporary folder.
+            let base = std::env::temp_dir();
+            let base = if cfg!(unix) {
+                base.canonicalize().unwrap()
+            } else {
+                base
+            };
+            let path = base.join(format!("vw-git-browser-{}-{tick}-{n}", std::process::id()));
             fs::create_dir(&path).unwrap();
             Self(path)
         }

@@ -457,8 +457,13 @@ mod tests {
         assert!(unc.contains("two backslashes"), "{unc}");
         let relative = check_certificate_file("Certificate file", "ca.pem").expect_err("relative");
         assert!(relative.contains("full path"), "{relative}");
-        let missing = check_certificate_file("Certificate file", "/definitely/not/here.pem")
-            .expect_err("missing");
+        // An absolute path on this computer: Windows needs a drive, so `/definitely/...` is not absolute there.
+        let absent = if cfg!(windows) {
+            "C:\\definitely\\not\\here.pem"
+        } else {
+            "/definitely/not/here.pem"
+        };
+        let missing = check_certificate_file("Certificate file", absent).expect_err("missing");
         assert!(missing.contains("No file exists"), "{missing}");
     }
 

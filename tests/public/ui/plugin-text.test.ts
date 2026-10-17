@@ -22,7 +22,9 @@ it("exposes the complete native-dialog hidden-character set", () => {
 });
 
 it("caps the visible label at 80 characters, without cutting an escape or a Unicode character", () => {
-  expect(displayPluginName("Review helper” 🦊")).toBe("Review helper” 🦊");
+  expect(displayPluginName("Review helper” 🦊")).toBe(
+    "Review helper\\u201D 🦊",
+  );
   expect(displayPluginName("x".repeat(80))).toBe("x".repeat(80));
   expect(displayPluginName("x".repeat(300))).toBe(`${"x".repeat(79)}…`);
   expect(displayPluginName(`${"x".repeat(77)}\u202e`)).toBe(
