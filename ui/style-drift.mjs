@@ -309,8 +309,42 @@ export function checkStyleDrift(options = {}) {
   return findings.sort();
 }
 
+/**
+ * Every `var(--name)` without a fallback names a custom property that some UI source defines. An undefined one drops
+ * the declaration to the browser default: a native list drawn white behind the dark theme's light text. Names built
+ * at run time (a prefix ending in "-") are not checked.
+ * @param {string} root the folder to scan (default: ui/src)
+ * @returns {string[]} one finding per undefined name, with the first file that uses it
+ */
+export function undefinedCustomProperties(root = sourceRoot) {
+  const files = [];
+  const walk = (dir) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const path = join(dir, entry.name);
+      if (entry.isDirectory()) walk(path);
+      else if (/\.(css|tsx?)$/.test(entry.name)) files.push(path);
+    }
+  };
+  walk(root);
+  const defined = new Set();
+  const used = new Map();
+  for (const file of files) {
+    const text = readFileSync(file, "utf8");
+    for (const m of text.matchAll(/(--[\w-]+)\s*:/g)) defined.add(m[1]);
+    for (const m of text.matchAll(/["'`](--[\w-]+)["'`]\s*[:,\]]/g)) defined.add(m[1]);
+    for (const m of text.matchAll(/setProperty\(\s*["'`](--[\w-]+)/g)) defined.add(m[1]);
+    for (const m of text.matchAll(/var\((--[\w-]+)\s*(,)?/g)) {
+      if (m[2] !== undefined || m[1].endsWith("-")) continue;
+      if (!used.has(m[1])) used.set(m[1], relative(uiRoot, file).replaceAll("\\", "/"));
+    }
+  }
+  return [...used]
+    .filter(([name]) => !defined.has(name))
+    .map(([name, file]) => `${file}: var(${name}) is defined nowhere in the UI sources`);
+}
+
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const findings = checkStyleDrift();
+  const findings = [...checkStyleDrift(), ...undefinedCustomProperties()];
   if (findings.length > 0) {
     process.stderr.write(`${findings.join("\n")}\nstyle-drift: ${findings.length} violation(s)\n`);
     process.exitCode = 1;

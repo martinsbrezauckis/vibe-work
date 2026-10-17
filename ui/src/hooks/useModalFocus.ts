@@ -13,6 +13,8 @@
  */
 import { type RefObject, useEffect, useRef } from "react";
 
+import { lockModalScroll } from "./modalScrollLock";
+
 const FOCUSABLE = [
   "button:not([disabled])",
   "[href]",
@@ -91,6 +93,7 @@ export function useModalFocus(
     if (!dialog) return;
     const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const restore = inertOutside(dialog);
+    const unlockScroll = lockModalScroll(dialog);
     // The marked initial field takes focus at once: waiting for a frame lost the first keystrokes
     // typed right after opening (seen under load: Ctrl K, "terminal" -> only "l" arrived). The
     // first-focusable fallback still waits a frame, because it needs layout to know what's visible.
@@ -151,6 +154,7 @@ export function useModalFocus(
       window.cancelAnimationFrame(frame);
       document.removeEventListener("keydown", onKey, true);
       restore();
+      unlockScroll();
       if (previous?.isConnected) previous.focus({ preventScroll: true });
     };
   }, [dialogRef, open]);

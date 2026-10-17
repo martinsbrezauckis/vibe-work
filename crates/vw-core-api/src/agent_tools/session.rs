@@ -135,3 +135,19 @@ pub(crate) fn alive(snapshot: &Snapshot, process: ProcessRef) -> bool {
         .alive(process.pid)
         .is_some_and(|p| p.start == Some(process.start))
 }
+
+/// Apply the same app-configuration path rules to commands the core starts without Vibe's bash hook.
+pub(crate) fn check_config_command(
+    shared: &Shared,
+    cwd: &Path,
+    command: &str,
+) -> Result<(), String> {
+    let layout = vw_agent_tools::folders::Layout::new(&shared.instructions.own_home, cwd)
+        .map_err(|e| e.to_string())?;
+    let home = std::env::var_os("HOME").map(PathBuf::from);
+    match vw_agent_tools::folders::check_command(&layout, command, home.as_deref(), &|_, _| Ok(()))
+    {
+        Some(reason) => Err(reason),
+        None => Ok(()),
+    }
+}

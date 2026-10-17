@@ -161,7 +161,9 @@ impl KeyService {
     pub async fn logins(&self) -> Result<Vec<Login>, KeyError> {
         self.login_counters.lookups.fetch_add(1, Ordering::SeqCst);
         let vault = self.vault();
-        let items = blocking(move || vault.list_items()).await??;
+        let items = blocking(move || vault.list_items_strict())
+            .await?
+            .map_err(KeyError::permissions_unreadable)?;
         let mut out: Vec<Login> = items.iter().filter_map(login::from_item).collect();
         out.sort_by(|a, b| {
             a.name
@@ -229,7 +231,7 @@ impl KeyService {
         password.register_as(vw_secrets::SecretKind::VaultValue);
         let vault = self.vault();
         blocking(move || {
-            let items = vault.list_items()?;
+            let items = vault.list_items_strict()?;
             let wanted_user = username.trim().to_owned();
             let same = items.iter().filter_map(login::from_item).find(|l| {
                 l.own && l.origin.eq_ignore_ascii_case(&origin) && l.username == wanted_user
@@ -301,7 +303,9 @@ impl KeyService {
     /// [`KeyError::Vault`].
     pub async fn fill_grants(&self) -> Result<Vec<FillGrant>, KeyError> {
         let vault = self.vault();
-        let items = blocking(move || vault.list_items()).await??;
+        let items = blocking(move || vault.list_items_strict())
+            .await?
+            .map_err(KeyError::permissions_unreadable)?;
         let mut out: Vec<FillGrant> = items.iter().filter_map(fill_grant::from_item).collect();
         out.sort_by_key(|g| std::cmp::Reverse(g.granted_ms));
         Ok(out)

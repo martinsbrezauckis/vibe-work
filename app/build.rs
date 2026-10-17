@@ -18,6 +18,7 @@ const BRIDGE_COMMANDS: &[&str] = &[
     "host_subscribe",
     "pick_folder",
     "pick_documents",
+    "pick_certificate",
     "pick_library_files",
     "export_page",
     "export_session",

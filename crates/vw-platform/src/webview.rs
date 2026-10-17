@@ -24,6 +24,10 @@
 //! ([`shared_user_data_folder`]: the environments then share one browser process and must use identical browser
 //! arguments). The macOS content rules live in `content_rules`.
 
+mod full_clip;
+
+pub use full_clip::{FullClip, full_clip};
+
 /// A completion callback carrying the PNG or a text reason.
 pub type PngDone = Box<dyn FnOnce(Result<Vec<u8>, String>) + Send>;
 
@@ -102,7 +106,7 @@ mod windows_impl {
     use windows::core::{HSTRING, Interface, PWSTR, w};
 
     use super::CookieIdentity;
-    use super::{DecideRequest, PngDone, PostToUi, StorageFacts, Verdict};
+    use super::{DecideRequest, PngDone, PostToUi, StorageFacts, Verdict, full_clip};
 
     /// Reads only cookie names and domains from a `WebView2` cookie list.
     fn cookie_identities(list: &ICoreWebView2CookieList) -> Result<Vec<CookieIdentity>, String> {
@@ -484,18 +488,30 @@ mod windows_impl {
             .map_err(|e| format!("DevTools image is not base64: {e}"))
     }
 
+    /// The page zoom the controller's webview has now (1 when it cannot say). Read, not remembered: `WebView2`
+    /// brings a zoom outside its internal range into it, and the controller is what knows the zoom in force (the
+    /// property keeps the asked value only until `ZoomFactorChanged`, far sooner than any capture).
+    fn page_zoom(controller: &ICoreWebView2Controller) -> f64 {
+        let mut zoom = 1.0;
+        // SAFETY: `controller` is Tauri's live WebView2 controller on the UI thread; the getter only writes the
+        // local out-parameter and its HRESULT is checked.
+        match unsafe { controller.ZoomFactor(&raw mut zoom) } {
+            Ok(()) => zoom,
+            Err(_) => 1.0,
+        }
+    }
+
     /// Takes a PNG of the page shown by `controller`'s webview (call on the UI thread). Answers `done` later, on
     /// the UI thread, when `WebView2` has the image. `full`: the whole document of that CSS size in one render
-    /// (`DevTools` `captureBeyondViewport` with a clip, as in ShellX); otherwise captures what the view shows.
+    /// (`DevTools` `captureBeyondViewport` with a clip, as in ShellX), drawn one device pixel per CSS pixel whatever
+    /// zoom the preview is shown at (`full_clip`); otherwise captures what the view shows.
     pub fn capture_png(
         controller: &ICoreWebView2Controller,
         full: Option<(u32, u32)>,
         done: PngDone,
     ) {
         let params = match full {
-            Some((width, height)) => HSTRING::from(format!(
-                r#"{{"format":"png","fromSurface":true,"captureBeyondViewport":true,"clip":{{"x":0,"y":0,"width":{width},"height":{height},"scale":1}}}}"#
-            )),
+            Some(css) => HSTRING::from(full_clip(css, page_zoom(controller)).params()),
             None => HSTRING::from(r#"{"format":"png","fromSurface":true}"#),
         };
         let done = Arc::new(Mutex::new(Some(done)));

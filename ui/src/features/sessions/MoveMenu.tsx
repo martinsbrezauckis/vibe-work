@@ -5,7 +5,7 @@
  * Invariants: the project every moved session is already in is shown disabled ("(here)"); the menu is the same
  * `RowMenu` as the row's (arrow keys, Enter, Escape, focus returns).
  */
-import { type MenuItem, RowMenu } from "./RowMenu";
+import { type MenuItem, RowMenu } from "../../components/RowMenu";
 import { useGroupActions, useGroups } from "./useGroups";
 
 /** The menu while `groups.mover` is set. */

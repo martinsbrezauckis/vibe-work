@@ -683,8 +683,13 @@ impl Core {
                 self.stop_busy_owner(&session_id, port).await?;
                 PreviewResult::Done {}
             }
-            PreviewRequest::Pick { session_id } => PreviewResult::Picked {
-                picked: crate::preview_pick::pick(service, &session_id).await?,
+            PreviewRequest::Pick { session_id, target } => PreviewResult::Picked {
+                picked: match &target {
+                    Some(target) => {
+                        crate::preview_pick::pick_at(service, &session_id, target).await?
+                    }
+                    None => crate::preview_pick::pick(service, &session_id).await?,
+                },
             },
             PreviewRequest::CancelPick { session_id } => {
                 crate::preview_pick::cancel(service, &session_id).await;

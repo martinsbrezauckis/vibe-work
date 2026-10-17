@@ -173,7 +173,9 @@ pub enum BrowserRequest {
         session_id: String,
     },
     /// "Annotate this page": the user clicks an element (`element`, default) or draws a box (`box`) in the
-    /// Browser tab; answers what and where with a screenshot crop (untrusted page data).
+    /// Browser tab; answers what and where with a screenshot crop (untrusted page data). With `target` the element
+    /// or area is named instead and the answer is immediate; a Debug API request must name it (`ref`, `selector`, or
+    /// `x` and `y` for an element; `rect` for a box): there is no person to point.
     Annotate {
         /// The session.
         session_id: String,
@@ -181,6 +183,10 @@ pub enum BrowserRequest {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[cfg_attr(feature = "ts", ts(optional))]
         mode: Option<String>,
+        /// The element or area to annotate without a pointer.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[cfg_attr(feature = "ts", ts(optional))]
+        target: Option<crate::preview_view::PickTarget>,
     },
     /// Obsolete capture command, refused; saving is a user action in the browser panel.
     CaptureSecret {

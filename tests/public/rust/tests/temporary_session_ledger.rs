@@ -158,9 +158,8 @@ async fn assert_failed_start_leaves_nothing(name: &str, flags: &[&str]) {
     let (log, _guard) = logs::capture();
     let (r, dir) = rig_with_flags(name, flags, |d| d.join("sessions"), |_| {}).await;
     let before = listed(&r).await;
-    // The folder goes away and a plain file takes its name: the record can no longer be written.
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::write(&dir, b"not a folder").unwrap();
+    // Block the record itself, leaving the session-ownership directory usable.
+    std::fs::create_dir_all(dir.join("temporary.json")).unwrap();
 
     let error = start_temporary(&r)
         .await

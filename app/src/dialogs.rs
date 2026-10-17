@@ -1,17 +1,18 @@
 //! The native dialogs the app owns: the confirmation for calls that need one (Rust shows it;
 //! the webview and the Debug API can only ask, never answer), the folder picker, the document
-//! picker, the library file picker and the save dialog of "Share as one file".
+//! picker, the library file picker, the certificate file picker of Settings > Network and the save dialog of
+//! "Share as one file".
 //!
 //! Depends on: tauri, tauri-plugin-dialog, vw-host (`SharedConfirmer`), vw-gate (request type).
 //! Called by: `lib.rs` (builds the confirmer for the host), `commands.rs` (`pick_folder`,
-//! `pick_documents`).
+//! `pick_documents`, `pick_certificate`).
 //! Invariants:
 //! - Both dialogs are parented to the main window when it exists, so they are modal over it.
 //! - A closed dialog, a failed dialog and a dropped channel all count as "declined" / "no folder":
 //!   the confirmer fails closed.
 //! - The text of a confirmation is built from the gate's request (`vw_host::dialog_text`): callers supply complete
-//!   plain explanations and command paragraphs; internal methods and JSON are never displayed. An agent's
-//!   request too long for that is shown visibly shortened and paged through in full before Allow.
+//!   plain explanations and command paragraphs; internal methods and JSON are never displayed. A request too long
+//!   for that (whoever asks) is shown visibly shortened and paged through in full before Allow.
 
 use std::path::PathBuf;
 
@@ -78,7 +79,7 @@ async fn show_dialog<R: Runtime>(
     }
 }
 
-/// A shortened agent request (`vw_host::shortened_dialog_text`): the overview (start, marker,
+/// A shortened request (`vw_host::shortened_dialog_text`): the overview (start, marker,
 /// end; default "Show the full request"), then every part of the full text in turn ("Next part"), and Allow only on
 /// the last part. Each step is one native dialog; anything but the forward button declines.
 async fn shortened<R: Runtime>(app: &AppHandle<R>, request: &ConfirmationRequest) -> Confirmation {
@@ -100,22 +101,19 @@ async fn shortened<R: Runtime>(app: &AppHandle<R>, request: &ConfirmationRequest
 
 /// The confirmer the host hands to the core: shows [`vw_host::dialog_text`] in a native warning
 /// dialog with Continue / Cancel buttons (three labelled buttons when the request offers "always"; their
-/// order and default: `vw_host::dialog_buttons`). A request too long to show in full is declined without a
-/// dialog (never clipped: the hidden part could be the real command), except an AGENT's request:
-/// it is shown shortened and can be allowed only after the user paged through all of it ([`shortened`]), so the
-/// agent's "the user declined" is always true.
+/// order and default: `vw_host::dialog_buttons`). A request too long to show in full is never clipped (the hidden
+/// part could be the real command) and never declined unseen: it is shown shortened and can be allowed only after
+/// the user paged through all of it ([`shortened`]), so a caller's "the user declined" is always true.
 pub fn native_confirmer<R: Runtime>(app: AppHandle<R>) -> SharedConfirmer {
     SharedConfirmer::new(move |request: ConfirmationRequest| {
         let app = app.clone();
         async move {
             let Some(text) = vw_host::dialog_text(&request) else {
-                if request.requester == vw_gate::Requester::Agent {
+                if vw_host::full_pages(&request).is_some() {
                     return shortened(&app, &request).await;
                 }
-                tracing::warn!(
-                    method = %request.method,
-                    "confirmation declined without a dialog: the request is too long to show in full"
-                );
+                // No caller text at all (an empty summary or an unknown capture field): nothing to show, so no consent.
+                tracing::warn!(method = %request.method, "confirmation declined: the request has no text to show");
                 return Confirmation::Declined;
             };
             // A request that offers "always" gets three labelled buttons (`vw_host::dialog_buttons`); the
@@ -154,6 +152,28 @@ pub async fn pick_documents<R: Runtime>(app: &AppHandle<R>) -> Vec<PathBuf> {
         let _ = send.send(paths);
     });
     receive.await.unwrap_or_default()
+}
+
+/// The file types the certificate picker offers; the core reads the file again and checks that it holds a PEM
+/// certificate before anything is saved.
+const CERTIFICATE_TYPES: &[&str] = &["pem", "crt", "cer", "cert"];
+
+/// Opens the native file picker for a company's certificate file (one file) and returns it; `None` when cancelled.
+/// The path is shown to the user and checked by the core when the setting is saved; the webview names no file.
+pub async fn pick_certificate<R: Runtime>(app: &AppHandle<R>) -> Option<PathBuf> {
+    let (send, receive) = oneshot::channel();
+    let mut dialog = app
+        .dialog()
+        .file()
+        .set_title("Choose your company's certificate file")
+        .add_filter("Certificate files", CERTIFICATE_TYPES);
+    if let Some(window) = app.get_webview_window("main") {
+        dialog = dialog.set_parent(&window);
+    }
+    dialog.pick_file(move |chosen| {
+        let _ = send.send(chosen.and_then(|path| path.into_path().ok()));
+    });
+    receive.await.ok().flatten()
 }
 
 /// Opens the native file picker for a library upload (several files, any type Mistral's Libraries

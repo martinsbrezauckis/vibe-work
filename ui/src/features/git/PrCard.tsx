@@ -54,6 +54,7 @@ export function PrCard({ git, sessionId }: { git: Git; sessionId: string }): Rea
       <div className="pr-card pr-none" data-git="pr-card">
         <span>{view?.note ?? "No pull request known for this branch."}</span>
         <button
+          data-testid="git.pr-card-card"
           type="button"
           className="mini"
           disabled={busy}
@@ -64,6 +65,7 @@ export function PrCard({ git, sessionId }: { git: Git; sessionId: string }): Rea
         </button>
         {view?.openUrl != null && (
           <button
+            data-testid="git.pr-card-open"
             type="button"
             className="key-link"
             title={host(view.openUrl)}
@@ -83,6 +85,7 @@ export function PrCard({ git, sessionId }: { git: Git; sessionId: string }): Rea
       <div className="pr-head">
         <span className={`pr-state ${card.state}`}>{stateText(card)}</span>
         <button
+          data-testid="git.pr-card-open-2"
           type="button"
           className="key-link pr-title"
           title={host(card.url)}
@@ -115,11 +118,12 @@ export function PrCard({ git, sessionId }: { git: Git; sessionId: string }): Rea
       {failing.length > 0 && (
         <ul className="pr-failing">
           {failing.slice(0, 5).map((item) => (
-            <li key={item.name}>
+            <li data-item-id={item.name} key={item.name}>
               {item.url === null ? (
                 item.name
               ) : (
                 <button
+                  data-testid="git.pr-card-open-3"
                   type="button"
                   className="key-link"
                   title={host(item.url)}
@@ -137,13 +141,14 @@ export function PrCard({ git, sessionId }: { git: Git; sessionId: string }): Rea
         </ul>
       )}
       {refused !== null && (
-        <p className="git-notice error" role="alert">
+        <p className="key-problem" role="alert">
           {refused}
         </p>
       )}
       <div className="pr-actions">
         {card.checks.failed > 0 && (
           <button
+            data-testid="git.pr-card-prepare"
             type="button"
             className="mini"
             disabled={busy}
@@ -155,6 +160,7 @@ export function PrCard({ git, sessionId }: { git: Git; sessionId: string }): Rea
         )}
         {card.state === "open" && (
           <button
+            data-testid="git.pr-card-prepare-2"
             type="button"
             className="mini"
             disabled={busy}
@@ -165,6 +171,7 @@ export function PrCard({ git, sessionId }: { git: Git; sessionId: string }): Rea
           </button>
         )}
         <button
+          data-testid="git.pr-card-card-2"
           type="button"
           className="mini"
           disabled={busy}

@@ -75,6 +75,7 @@ export function VoiceSettings() {
           </span>
         </span>
         <Selector
+          testId="settings.voice-settings-update"
           label="Microphone"
           value={micId ?? ""}
           options={[
@@ -95,6 +96,7 @@ export function VoiceSettings() {
           </span>
         </span>
         <Selector
+          testId="settings.voice-settings-update-2"
           label="Dictation language"
           value={language ?? ""}
           options={[
@@ -119,6 +121,7 @@ export function VoiceSettings() {
           </span>
         </span>
         <button
+          data-testid="settings.voice-settings-update-3"
           type="button"
           className="switch"
           role="switch"
@@ -139,6 +142,7 @@ export function VoiceSettings() {
           </span>
         </span>
         <button
+          data-testid="settings.voice-settings-update-4"
           type="button"
           className="switch"
           role="switch"
@@ -161,6 +165,7 @@ export function VoiceSettings() {
           </span>
         </span>
         <Selector
+          testId="settings.voice-settings-update-5"
           label="Narration voice"
           value={voiceId ?? ""}
           onOpen={loadVoices}

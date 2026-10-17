@@ -8,6 +8,7 @@
  * the current message gets the `find-current` outline only); a message the result names but the transcript has not
  * loaded is read once with Vibe's largest page (500 entries) before the bar says it is further back.
  */
+import { TEXT } from "../../vocabulary";
 import { type ReactElement, type RefObject, useEffect, useMemo, useRef, useState } from "react";
 import type { VListHandle } from "virtua";
 
@@ -43,7 +44,7 @@ export function FindBar({
   const [deeperDone, setDeeperDone] = useState(false);
   const at = matches.length === 0 ? -1 : Math.min(bar?.at ?? 0, matches.length - 1);
   const current = at >= 0 ? matches[at] : undefined;
-  const findLabel = `Find in this conversation (${formatKeys("Mod+F")})`;
+  const findLabel = `${TEXT.findInSession} (${formatKeys("Mod+F")})`;
 
   useEffect(() => {
     if (open) publishCount(app, "conversation", matches.length);
@@ -91,25 +92,45 @@ export function FindBar({
   // Scroll the current match into the middle and mark the words.
   useEffect(() => {
     if (!open || current === undefined) return;
-    listRef.current?.scrollToIndex(current.index, { align: "center" });
     let cleanup: () => void = () => undefined;
-    const timer = setTimeout(() => {
-      const root = document.querySelector(".tx-list");
-      if (root === null) return;
-      const ids = new Set(matches.map((m) => m.entryId));
-      const shown = [...root.querySelectorAll("[data-entry-id]")].filter((el) =>
-        ids.has(el.getAttribute("data-entry-id") ?? ""),
-      );
-      const here = shown.find((el) => el.getAttribute("data-entry-id") === current.entryId) ?? null;
-      here?.classList.add("find-current");
-      const unmark = markWords(shown, here, findWords(query));
-      cleanup = () => {
-        unmark();
-        here?.classList.remove("find-current");
-      };
-    }, 60);
+    let timer: ReturnType<typeof setTimeout>;
+    const reveal = () => {
+      listRef.current?.scrollToIndex(current.index, { align: "center" });
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        cleanup();
+        const root = document.querySelector(".tx-list");
+        if (root === null) return;
+        const ids = new Set(matches.map((m) => m.entryId));
+        const shown = [...root.querySelectorAll("[data-entry-id]")].filter((el) =>
+          ids.has(el.getAttribute("data-entry-id") ?? ""),
+        );
+        const here =
+          shown.find((el) => el.getAttribute("data-entry-id") === current.entryId) ?? null;
+        here?.classList.add("find-current");
+        const unmark = markWords(shown, here, findWords(query));
+        cleanup = () => {
+          unmark();
+          here?.classList.remove("find-current");
+        };
+      }, 60);
+    };
+    reveal();
+    // Wait for the virtual list's resized viewport before scrolling and marking its current row again.
+    let frame = 0;
+    const resized = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(reveal);
+    };
+    const root = document.querySelector(".tx-list");
+    const observer = new ResizeObserver(resized);
+    if (root) observer.observe(root);
+    window.addEventListener("resize", resized);
     return () => {
       clearTimeout(timer);
+      cancelAnimationFrame(frame);
+      observer.disconnect();
+      window.removeEventListener("resize", resized);
       cleanup();
     };
   }, [open, current, matches, query, listRef]);
@@ -122,8 +143,9 @@ export function FindBar({
     app.find.actions.step("conversation", by, matches.length);
   };
   return (
-    <div className="find-bar" role="search" aria-label="Find in this conversation">
+    <div className="find-bar" role="search" aria-label={TEXT.findInSession}>
       <button
+        data-testid="transcript.find-bar-close"
         type="button"
         className="find-scope"
         title="Search all with these words"
@@ -133,9 +155,10 @@ export function FindBar({
           app.shell.actions.setOverlay("palette", query);
         }}
       >
-        In: This conversation <Icon name="x" size={12} />
+        In: {TEXT.thisSession} <Icon name="x" size={12} />
       </button>
       <input
+        data-testid="transcript.find-bar-set-query"
         ref={input}
         type="search"
         aria-label={findLabel}
@@ -167,6 +190,7 @@ export function FindBar({
             : `${String(at + 1)} of ${String(matches.length)}`}
       </span>
       <button
+        data-testid="transcript.find-bar-step"
         type="button"
         aria-label="Previous match (Shift+Enter or Up Arrow)"
         title="Previous match (Shift+Enter or Up Arrow)"
@@ -178,6 +202,7 @@ export function FindBar({
         <Icon name="arrow-up" size={14} />
       </button>
       <button
+        data-testid="transcript.find-bar-step-2"
         type="button"
         aria-label="Next match (Enter or Down Arrow)"
         title="Next match (Enter or Down Arrow)"
@@ -189,6 +214,7 @@ export function FindBar({
         <Icon name="arrow-down" size={14} />
       </button>
       <button
+        data-testid="transcript.find-bar-button"
         type="button"
         aria-label="Close find (Escape)"
         title="Close find (Escape)"
@@ -198,8 +224,7 @@ export function FindBar({
       </button>
       {bar.older && (
         <p className="find-note">
-          That message is further back than this conversation shows (the newest {DEEPEST_READ}{" "}
-          entries).
+          That message is further back than this session shows (the newest {DEEPEST_READ} entries).
         </p>
       )}
     </div>

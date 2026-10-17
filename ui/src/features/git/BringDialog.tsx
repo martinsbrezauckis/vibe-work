@@ -36,6 +36,7 @@ export function BringDialog({
       actions={
         <>
           <button
+            data-testid="git.bring-dialog-close"
             type="button"
             className="tb-btn"
             onClick={() => {
@@ -46,6 +47,7 @@ export function BringDialog({
           </button>
           {conflicts ? (
             <button
+              data-testid="git.bring-dialog-prepare"
               type="button"
               className="btn-primary"
               disabled={busy}
@@ -61,6 +63,7 @@ export function BringDialog({
           ) : (
             !blocked && (
               <button
+                data-testid="git.bring-dialog-bring-in"
                 type="button"
                 className="btn-primary"
                 disabled={busy}
@@ -75,6 +78,9 @@ export function BringDialog({
       }
     >
       <p data-git-field="sentence">{sentence}</p>
+      <p className="git-sub">
+        Details: from {plan.baseCommit.slice(0, 7)} to {plan.branchCommit.slice(0, 7)}
+      </p>
       {conflicts && (
         <ul className="git-files mono">
           {plan.conflicts.slice(0, 30).map((p) => (
@@ -83,7 +89,7 @@ export function BringDialog({
         </ul>
       )}
       {error !== null && (
-        <p className="git-warn" role="alert">
+        <p className="key-problem" role="alert">
           {error}
         </p>
       )}

@@ -109,7 +109,7 @@ pub(crate) async fn before_open(shared: &Shared, method: &str, params: &Value) -
             Err(error) if vw_keys::is_locked(&error) => {
                 Ok(identity.with_defaults(std::collections::BTreeMap::new()))
             }
-            Err(_) => Err("the entry defaults could not be captured".to_owned()),
+            Err(_) => Err("the secret's permissions could not be read; vault access for this session was refused".to_owned()),
         },
         (Ok(identity), None) => Ok(identity.with_defaults(std::collections::BTreeMap::new())),
         (Err(reason), _) => Err(reason),

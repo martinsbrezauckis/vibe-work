@@ -1,0 +1,212 @@
+{
+  "_comment": "Recorded GTK 3 AT-SPI observations; parsed and replayed by the crate unit tests.",
+  "reverted": {
+    "accepted": true,
+    "verification": {
+      "matched": false,
+      "observed": {
+        "bounds": {
+          "height": 34,
+          "width": 388,
+          "x": 16,
+          "y": 142
+        },
+        "depth": 0,
+        "id": {
+          "bus": ":1.4",
+          "path": "/org/a11y/atspi/accessible/6"
+        },
+        "name": "Reverts text",
+        "name_truncated": false,
+        "role": "Text",
+        "state": [
+          1191184768,
+          0
+        ]
+      },
+      "text": {
+        "truncated": false,
+        "value": "kept"
+      }
+    }
+  },
+  "snapshot": {
+    "elements": [
+      {
+        "bounds": {
+          "height": 240,
+          "width": 420,
+          "x": 0,
+          "y": 0
+        },
+        "depth": 0,
+        "id": {
+          "bus": ":1.4",
+          "path": "/org/a11y/atspi/accessible/1"
+        },
+        "name": "Desktop pilot fixture",
+        "name_truncated": false,
+        "role": "Frame",
+        "state": [
+          1126170882,
+          0
+        ]
+      },
+      {
+        "bounds": {
+          "height": 208,
+          "width": 388,
+          "x": 16,
+          "y": 16
+        },
+        "depth": 1,
+        "id": {
+          "bus": ":1.4",
+          "path": "/org/a11y/atspi/accessible/2"
+        },
+        "name": "",
+        "name_truncated": false,
+        "role": "Filler",
+        "state": [
+          1660944640,
+          0
+        ]
+      },
+      {
+        "bounds": {
+          "height": 34,
+          "width": 388,
+          "x": 16,
+          "y": 16
+        },
+        "depth": 2,
+        "id": {
+          "bus": ":1.4",
+          "path": "/org/a11y/atspi/accessible/3"
+        },
+        "name": "Pressed 1",
+        "name_truncated": false,
+        "role": "Button",
+        "state": [
+          1124075776,
+          0
+        ]
+      },
+      {
+        "bounds": {
+          "height": 34,
+          "width": 388,
+          "x": 16,
+          "y": 58
+        },
+        "depth": 2,
+        "id": {
+          "bus": ":1.4",
+          "path": "/org/a11y/atspi/accessible/4"
+        },
+        "name": "Ignore press",
+        "name_truncated": false,
+        "role": "Button",
+        "state": [
+          1124075776,
+          0
+        ]
+      },
+      {
+        "bounds": {
+          "height": 34,
+          "width": 388,
+          "x": 16,
+          "y": 100
+        },
+        "depth": 2,
+        "id": {
+          "bus": ":1.4",
+          "path": "/org/a11y/atspi/accessible/5"
+        },
+        "name": "Message",
+        "name_truncated": false,
+        "role": "Text",
+        "state": [
+          1191188864,
+          0
+        ]
+      },
+      {
+        "bounds": {
+          "height": 34,
+          "width": 388,
+          "x": 16,
+          "y": 142
+        },
+        "depth": 2,
+        "id": {
+          "bus": ":1.4",
+          "path": "/org/a11y/atspi/accessible/6"
+        },
+        "name": "Reverts text",
+        "name_truncated": false,
+        "role": "Text",
+        "state": [
+          1191184768,
+          0
+        ]
+      },
+      {
+        "bounds": {
+          "height": 19,
+          "width": 388,
+          "x": 16,
+          "y": 184
+        },
+        "depth": 2,
+        "id": {
+          "bus": ":1.4",
+          "path": "/org/a11y/atspi/accessible/7"
+        },
+        "name": "Read only label",
+        "name_truncated": false,
+        "role": "Label",
+        "state": [
+          1124204800,
+          0
+        ]
+      }
+    ],
+    "truncated": false,
+    "window": {
+      "bus": ":1.4",
+      "path": "/org/a11y/atspi/accessible/1"
+    }
+  },
+  "text": {
+    "accepted": true,
+    "verification": {
+      "matched": true,
+      "observed": {
+        "bounds": {
+          "height": 34,
+          "width": 388,
+          "x": 16,
+          "y": 100
+        },
+        "depth": 0,
+        "id": {
+          "bus": ":1.4",
+          "path": "/org/a11y/atspi/accessible/5"
+        },
+        "name": "Message",
+        "name_truncated": false,
+        "role": "Text",
+        "state": [
+          1191184768,
+          0
+        ]
+      },
+      "text": {
+        "truncated": false,
+        "value": "Rīga 🦀 via AT-SPI"
+      }
+    }
+  }
+}

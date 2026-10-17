@@ -28,7 +28,7 @@ export function SecretField(props: {
   autoComplete?: "current-password" | "new-password" | "off";
   invalid?: boolean | undefined;
   /** Stable selector supplied by the calling setup step. */
-  testId?: string | undefined;
+  testId: string;
 }) {
   const id = useId();
   const [shown, setShown] = useState(false);
@@ -58,6 +58,7 @@ export function SecretField(props: {
           }}
         />
         <button
+          data-testid={`${props.testId}.show`}
           type="button"
           className="tb-btn"
           aria-pressed={shown}
@@ -82,12 +83,12 @@ export function SecretField(props: {
 export function NewPasswordField(props: {
   value: string;
   onChange: (value: string) => void;
-  testId?: string;
+  testId: string;
 }) {
   const hint = passwordHint(props.value);
   return (
     <SecretField
-      label="Choose a password to protect it"
+      label="Choose a password to lock it"
       testId={props.testId}
       value={props.value}
       onChange={props.onChange}
@@ -102,7 +103,7 @@ export function NewPasswordField(props: {
 export function RememberChoice(props: {
   checked: boolean;
   onChange: (checked: boolean) => void;
-  testId?: string;
+  testId: string;
 }) {
   const id = useId();
   const [open, setOpen] = useState(false);
@@ -120,6 +121,7 @@ export function RememberChoice(props: {
         <span>Remember on this computer</span>
       </label>
       <button
+        data-testid={`${props.testId}.explanation`}
         type="button"
         className="key-link"
         aria-expanded={open}

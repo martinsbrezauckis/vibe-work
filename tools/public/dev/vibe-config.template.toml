@@ -1,0 +1,4 @@
+# Development Vibe config copied by the README setup and consumed by the app's dev launcher.
+# Uses a built-in model from the pinned Vibe; the setup screen supplies API access through the key service.
+# This template contains no keys or local paths.
+active_model = "mistral-medium-3.5"

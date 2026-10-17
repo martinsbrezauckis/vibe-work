@@ -64,22 +64,18 @@ fn quoted(name: &str) -> String {
     serde_json::Value::String(name.to_owned()).to_string()
 }
 
-/// The script that starts a pick (its value is the first answer).
-#[must_use]
-pub fn start_script(name: &str) -> String {
-    format!(
-        r##"(() => {{
-  const NAME = {name};
-  const clip = (v, n) => String(v || "").replace(/\s+/g, " ").trim().slice(0, n);
+/// The page-side helpers both the click pick and the named-target pick use: `clip`, the readable DOM `path`, the
+/// element `role` and `describe(el, quote)`, which builds the answer object the host parses.
+const DESCRIBE_JS: &str = r##"  const clip = (v, n) => String(v || "").replace(/\s+/g, " ").trim().slice(0, n);
   const esc = (v) => (window.CSS && CSS.escape) ? CSS.escape(String(v)) : String(v).replace(/[^a-zA-Z0-9_-]/g, "\\$&");
-  const role = (el) => {{
+  const role = (el) => {
     const r = el.getAttribute && el.getAttribute("role"); if (r) return clip(r, 40);
     const t = String(el.localName || "").toLowerCase();
     if (t === "a") return "link"; if (t === "button") return "button";
     if (/^h[1-6]$/.test(t)) return "heading"; if (t === "li") return "listitem";
     return t || "element";
-  }};
-  const seg = (el) => {{
+  };
+  const seg = (el) => {
     const t = el.localName.toLowerCase();
     if (el.id) return t + "#" + esc(el.id);
     const s = el.getAttribute("data-step"); if (s) return t + '[data-step="' + clip(s, 60) + '"]';
@@ -87,22 +83,36 @@ pub fn start_script(name: &str) -> String {
     const p = el.parentElement; if (!p) return t;
     const same = Array.from(p.children).filter((c) => c.localName === el.localName);
     return same.length > 1 ? t + ":nth-of-type(" + (same.indexOf(el) + 1) + ")" : t;
-  }};
-  const path = (el) => {{
+  };
+  const path = (el) => {
     const parts = []; let n = el, d = 0;
-    while (n && n.nodeType === 1 && d < 16 && n.localName !== "html") {{ parts.unshift(seg(n)); n = n.parentElement; d++; }}
+    while (n && n.nodeType === 1 && d < 16 && n.localName !== "html") { parts.unshift(seg(n)); n = n.parentElement; d++; }
     return clip(parts.join(" > "), 512);
-  }};
-  const describe = (el, quote) => {{
+  };
+  const describe = (el, quote) => {
     const ids = [];
-    for (let n = el; n && n.nodeType === 1 && ids.length < 8; n = n.parentElement) {{
+    for (let n = el; n && n.nodeType === 1 && ids.length < 8; n = n.parentElement) {
       const id = n.getAttribute("id"); if (id) ids.push(clip(id, 100));
       const st = n.getAttribute("data-step"); if (st && ids.length < 8) ids.push(clip(st, 100));
-    }}
-    return {{ state: "picked", path: path(el), ids, tag: el.localName, role: role(el),
+    }
+    return { state: "picked", path: path(el), ids, tag: el.localName, role: role(el),
       text: clip(el.innerText || el.textContent, 2000), quote: quote ? clip(quote, 2000) : null,
-      url: String(location.href).slice(0, 512) }};
-  }};
+      url: String(location.href).slice(0, 512) };
+  };"##;
+
+/// The script that starts a pick (its value is the first answer).
+#[must_use]
+pub fn start_script(name: &str) -> String {
+    format!(
+        r#"(() => {{
+  const NAME = {name};
+  if(document.querySelector('iframe[data-hb-prototype]') && typeof window.__hbInline==='function') {{
+    window.__hbInline('pick',NAME);
+    Object.defineProperty(window,NAME,{{value:()=>window.__hbInline('pick-poll'),configurable:true}});
+    Object.defineProperty(window,NAME+'_stop',{{value:()=>window.__hbInline('pick-cancel'),configurable:true}});
+    return JSON.stringify({{state:'pending'}});
+  }}
+{DESCRIBE_JS}
   const old = window[NAME + "_stop"]; if (typeof old === "function") old();
   const st = {{ result: {{ state: "pending" }} }};
   const sel = window.getSelection && window.getSelection();
@@ -127,7 +137,7 @@ pub fn start_script(name: &str) -> String {
   }}
   Object.defineProperty(window, NAME, {{ value: () => JSON.stringify(st.result), configurable: true }});
   return JSON.stringify(st.result);
-}})()"##,
+}})()"#,
         name = quoted(name)
     )
 }
@@ -148,6 +158,84 @@ pub fn cancel_script(name: &str) -> String {
         "(() => {{ const f = window[{n} + '_stop']; if (typeof f === 'function') f(); return 'null'; }})()",
         n = quoted(name)
     )
+}
+
+/// Where a pick points when no person clicks (a Debug API request names the element).
+#[derive(Clone, Debug, PartialEq)]
+pub enum PickAt {
+    /// The first element a CSS selector matches.
+    Selector(String),
+    /// The element at a point of the page's viewport (CSS pixels).
+    Point {
+        /// Distance from the left edge.
+        x: f64,
+        /// Distance from the top edge.
+        y: f64,
+    },
+}
+
+/// Why a named target gave no element.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TargetMiss {
+    /// Nothing matches the selector, or nothing is at the point.
+    NotFound,
+    /// The selector is not a valid CSS selector.
+    InvalidSelector,
+    /// The page did not answer in the expected form.
+    Unreadable,
+}
+
+/// The script that picks `at` at once: no overlay and no waiting. Its answer has the shape of a click pick
+/// (`describe` is the same function), so [`parse_target`] returns the same [`Picked`] a person would have caused.
+#[must_use]
+pub fn target_script(at: &PickAt) -> String {
+    let at = match at {
+        PickAt::Selector(selector) => serde_json::json!({ "selector": selector }),
+        PickAt::Point { x, y } => serde_json::json!({ "x": x, "y": y }),
+    };
+    format!(
+        r#"(() => {{
+  const AT = {at};
+{DESCRIBE_JS}
+  let el = null;
+  try {{
+    el = AT.selector !== undefined ? document.querySelector(AT.selector) : document.elementFromPoint(AT.x, AT.y);
+  }} catch (e) {{ return JSON.stringify({{ state: "invalid" }}); }}
+  if (!el || el.nodeType !== 1) return JSON.stringify({{ state: "notfound" }});
+  return JSON.stringify(describe(el, ""));
+}})()"#
+    )
+}
+
+/// Parses the answer of [`target_script`].
+///
+/// # Errors
+/// [`TargetMiss`] when the selector matched nothing, was invalid, or the answer was not readable.
+pub fn parse_target(result: &str) -> Result<Picked, TargetMiss> {
+    if let PickAnswer::Picked(picked) = parse(result) {
+        return Ok(picked);
+    }
+    Err(match state_of(result).as_deref() {
+        Some("notfound") => TargetMiss::NotFound,
+        Some("invalid") => TargetMiss::InvalidSelector,
+        _ => TargetMiss::Unreadable,
+    })
+}
+
+/// The `state` field of an evaluation result (the JSON of a returned JSON string), when readable.
+fn state_of(result: &str) -> Option<String> {
+    if result.len() > MAX_ANSWER {
+        return None;
+    }
+    let outer: serde_json::Value = serde_json::from_str(result).ok()?;
+    let value = match outer {
+        serde_json::Value::String(inner) => serde_json::from_str(&inner).unwrap_or_default(),
+        other => other,
+    };
+    value
+        .get("state")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_owned)
 }
 
 fn text(value: Option<&serde_json::Value>, max: usize) -> String {

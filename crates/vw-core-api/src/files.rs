@@ -32,8 +32,10 @@ use crate::core::{Core, Shared};
 use crate::error::{CoreError, ErrorCode};
 use crate::event::CoreEvent;
 use crate::files_read::{FileKind, read_file};
-use crate::files_scope::{Hit, Scope, resolve};
-use crate::files_view::{FileContent, FileRefView, FilesRequest, FilesResult, MAX_RESOLVE};
+use crate::files_scope::{Hit, Scope};
+use crate::files_view::{
+    FileChoice, FileContent, FileRefView, FilesRequest, FilesResult, MAX_RESOLVE,
+};
 use crate::pages::PagesHub;
 
 /// Most handles kept (the oldest is forgotten; the window re-resolves what it still shows).
@@ -98,6 +100,7 @@ fn new_token() -> String {
 /// The File tab's state in the core.
 pub(crate) struct FilesState {
     handles: Mutex<Handles>,
+    listings: Arc<Mutex<crate::files_lookup::ListingCache>>,
     /// The files viewer (HTML, PDF), when the app gave a viewer engine.
     pub(crate) viewer: Option<Arc<PagesHub>>,
 }
@@ -106,6 +109,7 @@ impl FilesState {
     pub(crate) fn new(viewer: Option<Arc<PagesHub>>) -> Self {
         Self {
             handles: Mutex::new(Handles::default()),
+            listings: Arc::default(),
             viewer,
         }
     }
@@ -277,14 +281,15 @@ impl Core {
             ));
         }
         let scope = self.files_scope(session_id)?;
+        let listings = Arc::clone(&self.shared.files.listings);
         let hits = blocking(move || {
-            paths
-                .into_iter()
-                .map(|text| {
-                    let hit = resolve(&scope, &text);
-                    (text, hit)
-                })
-                .collect::<Vec<_>>()
+            crate::files_lookup::lookup(
+                &scope,
+                paths,
+                &mut listings.lock().unwrap_or_else(PoisonError::into_inner),
+                std::time::Instant::now(),
+                crate::search_files::candidates,
+            )
         })
         .await?;
         let mut handles = self
@@ -295,23 +300,42 @@ impl Core {
             .unwrap_or_else(PoisonError::into_inner);
         let refs = hits
             .into_iter()
-            .map(|(text, hit)| match hit {
-                Some(hit) => FileRefView {
-                    file: Some(handles.token_for(session_id, &hit.canonical)),
-                    display: Some(display(&hit)),
-                    kind: Some(FileKind::guess(&name_of(&hit.canonical))),
-                    size: Some(hit.size),
-                    ok: true,
-                    text,
-                },
-                None => FileRefView {
+            .map(|(text, mut hits)| {
+                hits.sort_by_key(display);
+                let total = hits.len();
+                if total == 1 {
+                    let hit = &hits[0];
+                    return FileRefView {
+                        file: Some(handles.token_for(session_id, &hit.canonical)),
+                        display: Some(display(hit)),
+                        kind: Some(FileKind::guess(&name_of(&hit.canonical))),
+                        size: Some(hit.size),
+                        ok: true,
+                        text,
+                        choices: None,
+                        total: None,
+                    };
+                }
+                FileRefView {
                     text,
                     ok: false,
                     file: None,
                     display: None,
                     kind: None,
                     size: None,
-                },
+                    choices: (total > 1).then(|| {
+                        hits.into_iter()
+                            .take(50)
+                            .map(|hit| FileChoice {
+                                file: handles.token_for(session_id, &hit.canonical),
+                                display: display(&hit),
+                                kind: FileKind::guess(&name_of(&hit.canonical)),
+                                size: hit.size,
+                            })
+                            .collect()
+                    }),
+                    total: (total > 50).then_some(total),
+                }
             })
             .collect();
         Ok(result(FilesResult::Resolved { refs }))

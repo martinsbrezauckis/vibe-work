@@ -16,7 +16,7 @@ export function coreRows(app: App, results: CoreResults): { message: Result[]; f
     title: hit.snippet,
     path: messagePath(hit),
     detail: hit.snippet,
-    opens: "Opens the conversation at this message, with find in this conversation",
+    opens: "Opens the session at this message, with find in this session",
     run: () => void openMessage(app, hit, results.query),
   }));
   const file: Result[] = results.files.map((hit) => ({
@@ -47,7 +47,7 @@ export function coreRows(app: App, results: CoreResults): { message: Result[]; f
 export function indexNote(results: CoreResults): string | null {
   const index = results.index;
   if (index === null) return null;
-  if (index.error !== null) return `Older conversations could not be searched: ${index.error}`;
+  if (index.error !== null) return `Older sessions could not be searched: ${index.error}`;
   if (!index.filling) return null;
-  return `Searching older conversations… (${String(index.indexed)} of ${String(index.total)})`;
+  return `Searching older sessions… (${String(index.indexed)} of ${String(index.total)})`;
 }

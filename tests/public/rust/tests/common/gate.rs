@@ -121,6 +121,15 @@ impl FakeConfirmer {
         lock(&self.holds).push_back(notify.clone());
         notify
     }
+    /// Waits until more than `before` dialogs were shown: the core has recorded what it asks about, so a change
+    /// made now happens while that dialog is open (a fixed sleep loses this race on a loaded machine).
+    pub async fn wait_shown(&self, before: usize) {
+        let until = Instant::now() + Duration::from_secs(30);
+        while lock(&self.shown).len() <= before {
+            assert!(Instant::now() < until, "no dialog within 30 s");
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    }
 }
 
 impl Confirmer for FakeConfirmer {

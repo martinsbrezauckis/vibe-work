@@ -36,6 +36,7 @@ export function LineCommentForm(props: {
         Comment on {path}, {rangeText(lines)}
       </label>
       <textarea
+        data-testid="changes.line-comment-form-set-text"
         id="lc-text"
         ref={box}
         value={text}
@@ -55,6 +56,7 @@ export function LineCommentForm(props: {
       />
       <div className="lc-form-row">
         <button
+          data-testid="changes.line-comment-form-save"
           type="button"
           className="mini"
           disabled={empty}
@@ -65,6 +67,7 @@ export function LineCommentForm(props: {
           Comment
         </button>
         <button
+          data-testid="changes.line-comment-form-save-2"
           type="button"
           className="mini"
           disabled={empty}
@@ -75,7 +78,12 @@ export function LineCommentForm(props: {
         >
           Comment and send to Vibe
         </button>
-        <button type="button" className="mini" onClick={cancel}>
+        <button
+          data-testid="changes.line-comment-form-mini"
+          type="button"
+          className="mini"
+          onClick={cancel}
+        >
           Cancel
         </button>
         <span className="lc-note">

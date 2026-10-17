@@ -109,10 +109,6 @@
   color: var(--primary-fg);
   cursor: pointer;
 }
-.vchat:disabled {
-  opacity: 0.35;
-  cursor: default;
-}
 .vchat .walker {
   position: absolute;
   right: 1px;

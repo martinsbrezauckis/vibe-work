@@ -146,10 +146,14 @@ export function StepBody({ entry, view }: { entry: Obj; view: EffectView }): Rea
           </FileRef>
         </p>
       ) : null}
-      {view.error !== null ? <p className="step-err">{view.error}</p> : null}
+      {view.error !== null ? (
+        <p className="key-problem" role="alert">
+          {view.error}
+        </p>
+      ) : null}
       <KindBody entry={entry} view={view} />
       {view.warnings.length > 0 ? (
-        <ul className="step-warn">
+        <ul className="server-note" role="status">
           {view.warnings.map((w, i) => (
             <li key={i}>{w}</li>
           ))}

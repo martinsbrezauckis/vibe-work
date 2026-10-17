@@ -11,6 +11,7 @@
 //! Invariants: document text, titles and the answer are data from the user's files (possibly hostile): returned
 //! as data, capped, never interpreted here.
 
+use std::collections::BTreeSet;
 use std::time::Duration;
 
 use serde::Serialize;
@@ -56,6 +57,20 @@ pub struct Library {
     /// When it changed last (ISO time, as Mistral gives it).
     pub updated_at: String,
 }
+
+/// Libraries successfully read, with an explicit explanation if enumeration is incomplete.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LibraryList {
+    /// Completed pages, in API order.
+    pub libraries: Vec<Library>,
+    /// `None` only when the API has no more pages.
+    pub partial: Option<String>,
+}
+
+/// Maximum pages read per library listing (200 entries per page, at most 20,000 libraries).
+pub const MAX_LIBRARY_PAGES: usize = 100;
+const LIBRARY_PAGE_SIZE: usize = 200;
 
 /// One document of a library.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -155,13 +170,19 @@ pub fn document_of(v: &Value) -> Option<LibraryDocument> {
     })
 }
 
-fn id_segment(id: &str) -> Result<&str, WorkError> {
+/// Validates an id before it becomes a provider URL segment.
+///
+/// # Errors
+/// [`WorkError::InvalidParams`] for empty, overlong or unsafe ids.
+pub fn id_segment(id: &str) -> Result<&str, WorkError> {
     // Ids are UUIDs; anything else could change the request path.
     if !id.is_empty() && id.len() <= 64 && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
     {
         Ok(id)
     } else {
-        Err(WorkError::Shape("an id must be letters, digits and dashes"))
+        Err(WorkError::InvalidParams(
+            "an id must be 1 to 64 letters, digits or dashes",
+        ))
     }
 }
 
@@ -175,26 +196,95 @@ fn get(path: String, key: &str) -> ApiCall<'_> {
     }
 }
 
-/// The libraries the key can see (own and shared).
+/// The libraries the key can see (own and shared), following opaque continuation tokens.
+/// Reads at most [`MAX_LIBRARY_PAGES`] pages / 20,000 libraries. A failed later page, repeated cursor or reached
+/// bound returns the completed pages with `partial`; the first page's failure remains an error.
+/// Contract: <https://docs.mistral.ai/api/endpoint/beta/libraries>.
 ///
 /// # Errors
-/// [`WorkError`].
+/// [`WorkError`] when no page could be read.
 pub async fn list(
     client: &reqwest::Client,
     base: &str,
     key: &str,
-) -> Result<Vec<Library>, WorkError> {
+) -> Result<LibraryList, WorkError> {
+    let mut result = LibraryList {
+        libraries: Vec::new(),
+        partial: None,
+    };
+    let mut token = None;
+    let mut seen = BTreeSet::new();
+    for page in 0..MAX_LIBRARY_PAGES {
+        let answer = library_page(client, base, key, token.as_deref()).await;
+        let (libraries, next) = match answer {
+            Ok(answer) => answer,
+            Err(error) if page == 0 => return Err(error),
+            Err(error) => {
+                result.partial = Some(format!(
+                    "Only part of your libraries could be read ({} libraries). {error}",
+                    result.libraries.len()
+                ));
+                return Ok(result);
+            }
+        };
+        result.libraries.extend(libraries);
+        let Some(next) = next else {
+            return Ok(result);
+        };
+        if !seen.insert(next.clone()) {
+            result.partial = Some("Only part of your libraries could be read: Mistral repeated a page token. Refresh to try again.".to_owned());
+            return Ok(result);
+        }
+        token = Some(next);
+    }
+    result.partial = Some(format!(
+        "Only part of your libraries could be read: the limit of {MAX_LIBRARY_PAGES} pages (20,000 libraries) was reached. Refresh to try again."
+    ));
+    Ok(result)
+}
+
+async fn library_page(
+    client: &reqwest::Client,
+    base: &str,
+    key: &str,
+    token: Option<&str>,
+) -> Result<(Vec<Library>, Option<String>), WorkError> {
+    let mut url = reqwest::Url::parse(&format!("{}/v1/libraries", base.trim_end_matches('/')))
+        .map_err(|_| WorkError::Shape("invalid API address"))?;
+    {
+        let mut query = url.query_pairs_mut();
+        query.append_pair("page_size", "200");
+        if let Some(token) = token {
+            query.append_pair("page_token", token);
+        }
+    }
     let body = json_call(
         client,
         base,
-        get("/v1/libraries?page_size=200".to_owned(), key),
+        get(
+            format!("/v1/libraries?{}", url.query().unwrap_or_default()),
+            key,
+        ),
     )
     .await?;
     let data = body
         .get("data")
         .and_then(Value::as_array)
-        .ok_or(WorkError::Shape("no data list"))?;
-    Ok(data.iter().filter_map(library_of).collect())
+        .filter(|data| data.len() <= LIBRARY_PAGE_SIZE)
+        .ok_or(WorkError::Shape(
+            "no data list, or a page over 200 libraries",
+        ))?;
+    let libraries = data
+        .iter()
+        .map(library_of)
+        .collect::<Option<Vec<_>>>()
+        .ok_or(WorkError::Shape("invalid library in page"))?;
+    let next = match body.get("next_page_token") {
+        None | Some(Value::Null) => None,
+        Some(Value::String(token)) => (!token.is_empty()).then(|| token.clone()),
+        _ => return Err(WorkError::Shape("invalid next page token")),
+    };
+    Ok((libraries, next))
 }
 
 /// Creates a library.
@@ -417,7 +507,7 @@ pub async fn search(
     libraries: &[String],
 ) -> Result<Answer, WorkError> {
     if libraries.is_empty() {
-        return Err(WorkError::Shape("no library to search"));
+        return Err(WorkError::InvalidParams("no library to search"));
     }
     for id in libraries {
         id_segment(id)?;

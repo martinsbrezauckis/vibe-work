@@ -56,9 +56,8 @@ impl SessionStore {
     }
 
     /// Marks the listed turns of `session_id` `interrupted`, whatever status they have now, and
-    /// publishes them as `TurnUpserted`. For turns the client knows were cut off although the server
-    /// reports them otherwise (Vibe 2.26.0 reports a turn killed by a server crash as `completed`;
-    /// the caller decides which). Unknown sessions or turn ids are skipped.
+    /// publishes them as `TurnUpserted`. For turns the client knows were cut off, whatever status the
+    /// server reports for them (the caller decides which). Unknown sessions or turn ids are skipped.
     pub fn mark_interrupted(&self, session_id: &str, turn_ids: &[String]) -> Applied {
         self.with(|inner| {
             let Some(entry) = inner.sessions.get_mut(session_id) else {
@@ -191,6 +190,12 @@ impl Inner {
                 out.changes.extend(self.emit_all(applied.changes).changes);
                 out.actions.extend(applied.actions);
             }
+        }
+        if kind == LoadKind::Read
+            && let Some(entry) = self.sessions.get_mut(&sid)
+            && !entry.resync_pending
+        {
+            entry.anomalies.recover_patches_through(entry.last_event_id);
         }
         Ok(out)
     }

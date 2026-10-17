@@ -1,0 +1,33 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "encoding": {
+      "$ref": "#/$defs/TranscriptionEncoding"
+    },
+    "language": {
+      "title": "Language",
+      "type": "string"
+    },
+    "name": {
+      "title": "Name",
+      "type": "string"
+    },
+    "sampleRate": {
+      "title": "Samplerate",
+      "type": "integer"
+    },
+    "targetStreamingDelayMs": {
+      "title": "Targetstreamingdelayms",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "name",
+    "sampleRate",
+    "encoding",
+    "language",
+    "targetStreamingDelayMs"
+  ],
+  "title": "TranscribeModelConfigView",
+  "type": "object"
+}

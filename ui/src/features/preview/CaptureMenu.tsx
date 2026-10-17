@@ -97,6 +97,7 @@ export function CaptureMenu({
   return (
     <div className="preview-capture">
       <button
+        data-testid="preview.capture-menu-set-open"
         ref={button}
         type="button"
         className={
@@ -130,6 +131,7 @@ export function CaptureMenu({
             {last.skipped > 0 &&
               `, ${String(last.skipped)} part${last.skipped === 1 ? "" : "s"} skipped (see capture.json)`}
             <button
+              data-testid="preview.capture-menu-reveal"
               type="button"
               className="preview-capture-reveal"
               onClick={() => {
@@ -139,6 +141,7 @@ export function CaptureMenu({
               Show in folder
             </button>
             <button
+              data-testid="preview.capture-menu-dismiss"
               type="button"
               className="ibtn"
               aria-label="Dismiss"
@@ -153,12 +156,13 @@ export function CaptureMenu({
         )}
       </span>
       {error !== null && busy === undefined && (
-        <p className="preview-error" role="alert">
+        <p className="key-problem preview-error" role="alert">
           {captureErrorLabel(error)}
         </p>
       )}
       {open && (
         <div
+          data-testid="preview.capture-menu-div"
           ref={menu}
           className={
             compact ? "preview-capture-menu browser-capture-inline" : "preview-capture-menu"
@@ -169,6 +173,8 @@ export function CaptureMenu({
         >
           {CAPTURE_KINDS.map((kind) => (
             <button
+              data-testid="preview.capture-menu-choose"
+              data-item-id={kind.id}
               key={kind.id}
               type="button"
               role="menuitem"

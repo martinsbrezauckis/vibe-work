@@ -133,6 +133,9 @@ pub async fn detect_cli_version(probe: &CliProbe, timeout: Duration) -> Option<S
         .stderr(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .kill_on_drop(true);
+    // No console window for this probe (the app has no console of its own).
+    #[cfg(windows)]
+    command.creation_flags(0x0800_0000);
     let output = tokio::time::timeout(timeout, command.output())
         .await
         .ok()?

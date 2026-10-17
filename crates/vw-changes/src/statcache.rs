@@ -1,7 +1,7 @@
 //! A stat cache for the working tree: what we know about each file (size, modification and
 //! change time, inode, mode) and the blob id last computed for it, so a refresh hashes only files that
-//! changed (what git's index does for `git add`, which we may not run: it would run the repository's clean
-//! filters).
+//! changed (what git's index does for `git add`; this crate stores blobs itself with
+//! `hash-object --no-filters` instead).
 //!
 //! Depends on: `serde_json`, std. Called by: `worktree`, `baseline`.
 //! Invariants (review integrity: the agent being reviewed must not be able to hide an edit):

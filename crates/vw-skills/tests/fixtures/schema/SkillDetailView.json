@@ -1,0 +1,76 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "aliases": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Aliases",
+      "type": "array"
+    },
+    "body": {
+      "title": "Body",
+      "type": "string"
+    },
+    "createdAt": {
+      "default": "",
+      "title": "Createdat",
+      "type": "string"
+    },
+    "createdBy": {
+      "default": "",
+      "title": "Createdby",
+      "type": "string"
+    },
+    "description": {
+      "default": "",
+      "title": "Description",
+      "type": "string"
+    },
+    "lastModifiedAt": {
+      "default": "",
+      "title": "Lastmodifiedat",
+      "type": "string"
+    },
+    "latestVersion": {
+      "default": 0,
+      "title": "Latestversion",
+      "type": "integer"
+    },
+    "name": {
+      "title": "Name",
+      "type": "string"
+    },
+    "notes": {
+      "default": "",
+      "title": "Notes",
+      "type": "string"
+    },
+    "sharingScope": {
+      "default": "",
+      "title": "Sharingscope",
+      "type": "string"
+    },
+    "skillId": {
+      "title": "Skillid",
+      "type": "string"
+    },
+    "version": {
+      "title": "Version",
+      "type": "integer"
+    },
+    "versionCreatedAt": {
+      "default": "",
+      "title": "Versioncreatedat",
+      "type": "string"
+    }
+  },
+  "required": [
+    "name",
+    "skillId",
+    "version",
+    "body"
+  ],
+  "title": "SkillDetailView",
+  "type": "object"
+}

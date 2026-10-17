@@ -18,9 +18,10 @@ import { useApp } from "../shell/AppContext";
 import { useSessionSummaries, useShellState } from "../shell/hooks";
 import { ConfirmBox } from "./ConfirmBox";
 import { GitReview } from "./GitReview";
+import { LineCommentsProvider } from "./LineCommentsContext";
 import { LineCommentsPanel } from "./LineCommentsPanel";
 import { LostBanner } from "./LostBanner";
-import { historyOfferShown } from "./model";
+import { completionText, historyOfferShown } from "./model";
 import type { Changes } from "./store";
 import { TurnUndo } from "./TurnUndo";
 
@@ -73,6 +74,9 @@ export function ChangesTab({ changes }: { changes: Changes }): ReactElement {
   const error = useStore(changes.store, (s) =>
     sessionId === null ? null : (s.error[sessionId] ?? null),
   );
+  const completion = useStore(changes.store, (s) =>
+    sessionId === null ? undefined : s.completion[sessionId],
+  );
   const badge = useSessionSummaries().find((s) => s.id === sessionId)?.badge;
   const running = badge === "run" || badge === "input";
   useEffect(() => {
@@ -91,6 +95,7 @@ export function ChangesTab({ changes }: { changes: Changes }): ReactElement {
         <div className="empty" data-testid="changes-read-failed">
           The changes could not be read.{" "}
           <button
+            data-testid="changes.changes-tab-load"
             type="button"
             className="key-link"
             onClick={() => {
@@ -101,21 +106,29 @@ export function ChangesTab({ changes }: { changes: Changes }): ReactElement {
           </button>
         </div>
       );
-  else if (view.mode === "git")
+  else if (view.mode === "git" || view.mode === "uncommitted")
     body = (
       <>
         {view.baselineLost && <LostBanner changes={changes} view={view} busy={busy} />}
-        <GitReview changes={changes} view={view} busy={busy} running={running} />
+        {view.mode === "uncommitted" ? (
+          <LineCommentsProvider value={null}>
+            <GitReview changes={changes} view={view} busy={busy} running={running} />
+          </LineCommentsProvider>
+        ) : (
+          <GitReview changes={changes} view={view} busy={busy} running={running} />
+        )}
       </>
     );
   else if (view.mode === "effects")
     body = <Effects git={git} changes={changes} view={view} busy={busy} />;
   else if (view.mode === "unavailable")
     body = <div className="empty">Changes cannot be shown: {view.reason ?? "unknown reason"}</div>;
+  else if (completion === "history")
+    body = <p className="key-success">{completionText(completion)}</p>;
   else
     body = (
       <EmptyState glyph="check" className="empty">
-        No file changes in this session yet.
+        {completionText(completion) ?? "No file changes in this session yet."}
       </EmptyState>
     );
   return (
@@ -124,7 +137,7 @@ export function ChangesTab({ changes }: { changes: Changes }): ReactElement {
       data-mode={view?.mode ?? (error === null || sessionId === null ? "loading" : "failed")}
     >
       {error !== null && (
-        <p className="changes-error" role="alert">
+        <p className="key-problem" role="alert">
           {error}
         </p>
       )}

@@ -23,12 +23,13 @@ function NoteRow({
   const a = item.annotation;
   const what = a.name !== "" ? `${a.role} “${a.name}”` : a.mode === "box" ? "a box" : a.role;
   return (
-    <li className="browser-note" data-status={item.status}>
+    <li data-item-id={item.id} className="browser-note" data-status={item.status}>
       <div className="browser-note-head">
         <span className="browser-note-what">{what}</span>
         <span className="browser-note-route">{a.route}</span>
         <span className="browser-note-status">{statusText(item.status)}</span>
         <button
+          data-testid="preview.annotations-preview-btn"
           type="button"
           className="preview-btn"
           aria-label="Remove this note"
@@ -39,6 +40,7 @@ function NoteRow({
       </div>
       {item.status === "draft" ? (
         <textarea
+          data-testid="preview.annotations-on-note"
           className="browser-note-text"
           aria-label="Your note for the agent"
           placeholder="What should change here?"
@@ -79,6 +81,7 @@ export function Annotations({
           controls && (
             <>
               <button
+                data-testid="preview.annotations-annotate"
                 type="button"
                 className="preview-btn"
                 title="Click an element in the preview to add a note about it"
@@ -87,6 +90,7 @@ export function Annotations({
                 Note on an element
               </button>
               <button
+                data-testid="preview.annotations-annotate-2"
                 type="button"
                 className="preview-btn"
                 title="Drag a box in the preview to add a note about that area"
@@ -103,6 +107,7 @@ export function Annotations({
               (Escape cancels)
             </span>
             <button
+              data-testid="preview.annotations-cancel-pick"
               type="button"
               className="preview-btn"
               onClick={() => void browser.cancelPick(sessionId)}
@@ -113,6 +118,7 @@ export function Annotations({
         )}
         {drafts > 0 && (
           <button
+            data-testid="preview.annotations-send"
             type="button"
             className="preview-btn browser-notes-send"
             onClick={() => {
@@ -124,6 +130,7 @@ export function Annotations({
         )}
         {notes.some((n) => n.status !== "draft") && (
           <button
+            data-testid="preview.annotations-recheck"
             type="button"
             className="preview-btn"
             onClick={() => void browser.recheck(sessionId)}

@@ -21,7 +21,7 @@
   --line-3: #ffffff36;
   --text: #f4f4f5;
   --text-2: #b4b4bc;
-  --text-3: #7c7c86;
+  --text-3: #92929b;
   --orange: #fa500f;
   --orange-2: #ff8205;
   --orange-3: #ffaf00;
@@ -136,10 +136,12 @@
   --line-3: #00000036;
   --text: #201f1c;
   --text-2: #615f57;
-  --text-3: #928f86;
+  --text-3: #66635a;
+  --orange-3: #8f5300;
+  --accent-ink: #ffffff;
   --red: #e51300;
   --green: #3aa475;
-  --blue: #0082e6;
+  --blue: #0068b8;
   --orange-soft: #fa500f12;
   --green-soft: #3aa47514;
   --red-soft: #e513000f;
@@ -214,9 +216,32 @@ select {
   background-repeat: no-repeat;
   cursor: pointer;
 }
-select:disabled {
-  cursor: default;
-  opacity: 0.6;
+/* Checkboxes share the field background in both themes instead of the system's native white box. */
+input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  flex: none;
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  border: 1px solid var(--line-2);
+  border-radius: 4px;
+  background: var(--bg);
+  display: inline-grid;
+  place-content: center;
+  vertical-align: middle;
+}
+input[type="checkbox"]:checked {
+  background: var(--orange);
+  border-color: var(--orange);
+}
+input[type="checkbox"]:checked::before {
+  content: "";
+  width: 7px;
+  height: 4px;
+  border: solid var(--on-accent);
+  border-width: 0 0 2px 2px;
+  transform: translateY(-1px) rotate(-45deg);
 }
 /* Keyboard focus: a 2 px gap in the page colour, then the blue ring, following each element's own corners
    (the old outline forced a 6 px radius on everything). Only for keyboard focus. */

@@ -15,7 +15,8 @@
 //! `hook::PUSH_REASON`), vw-changes (the hardened runner for branch reads), vw-gate (confirmation),
 //! `worktrees` (records), `one_ask`. Called by: `server` (hook credential only), `tools` (`process_start`),
 //! `secret_run`.
-//! Invariant: nothing here runs git that writes; reads use the hardened runner.
+//! Invariant: nothing here runs git that writes; reads use the hardened runner. An allowed own rename
+//! records its intent; the worktree record follows once the rename is verified in that exact copy.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -102,10 +103,40 @@ pub(crate) async fn guard(
     let worker = shared.clone();
     let id = session.to_owned();
     let folder = cwd.to_path_buf();
-    let reading = tokio::task::spawn_blocking(move || own_branch(&worker, &id, &folder))
-        .await
-        .map_err(|e| format!("Not run: Vibe Work could not check this git command ({e})."))?;
-    let own_branch = reading;
+    let mut checked = found.clone();
+    let renames: Vec<String> = found
+        .ops
+        .iter()
+        .filter_map(|op| op.rename_to.clone())
+        .collect();
+    let reading = tokio::task::spawn_blocking(move || {
+        let own = own_branch(&worker, &id, &folder);
+        for op in &mut checked.ops {
+            if !own_paths(&folder, op.git_dir.as_deref(), op.work_tree.as_deref()) {
+                op.elsewhere = true;
+            }
+        }
+        let occupied: Vec<String> = renames
+            .into_iter()
+            .filter(|to| {
+                own.as_deref() != Some(to.as_str())
+                    && Call::new(&folder, Index::User)
+                        .args([
+                            "show-ref",
+                            "--verify",
+                            "--quiet",
+                            &format!("refs/heads/{to}"),
+                        ])
+                        .timeout(Duration::from_secs(5))
+                        .output()
+                        .map_or(true, |out| out.code != Some(1))
+            })
+            .collect();
+        (checked, own, occupied)
+    })
+    .await
+    .map_err(|e| format!("Not run: Vibe Work could not check this git command ({e})."))?;
+    let (found, own_branch, occupied) = reading;
     let own_branch = own_branch.as_deref();
     let (verdict, how) = if found.forge_write() {
         (Err(GH_WRITE_REASON.to_owned()), "denied (forge write)")
@@ -114,13 +145,21 @@ pub(crate) async fn guard(
     } else if found.credential_read() {
         (Err(CREDENTIAL_REASON.to_owned()), "denied (credentials)")
     } else {
-        let asks = needs_user(&found, own_branch);
+        let mut asks = needs_user(&found, own_branch);
+        asks.extend(
+            occupied
+                .iter()
+                .map(|name| format!("renaming onto existing branch `{name}`")),
+        );
         if asks.is_empty() {
+            remember_rename(shared, session, &found, own_branch).await?;
             (Ok(()), "allowed")
         } else if matches!(asked, Asked::Card(true)) {
+            remember_rename(shared, session, &found, own_branch).await?;
             // The user approved Vibe's card for this exact call of our own tool moments ago.
             (Ok(()), "allowed by the user on Vibe's card")
         } else if hold(shared, session, command, &asks).await {
+            remember_rename(shared, session, &found, own_branch).await?;
             if let Asked::Hook {
                 call_id,
                 hook_session,
@@ -144,6 +183,65 @@ pub(crate) async fn guard(
     };
     tracing::info!(session, ops = found.ops.len(), decision = how, "git guard");
     verdict
+}
+
+fn git_path(cwd: &Path, args: &[&str]) -> Option<PathBuf> {
+    let out = Call::new(cwd, Index::User)
+        .args(args)
+        .timeout(Duration::from_secs(5))
+        .output()
+        .ok()?;
+    if !out.ok() {
+        return None;
+    }
+    let path = PathBuf::from(String::from_utf8_lossy(&out.stdout).trim());
+    let path = if path.is_absolute() {
+        path
+    } else {
+        cwd.join(path)
+    };
+    path.canonicalize().ok()
+}
+
+fn own_paths(cwd: &Path, git_dir: Option<&str>, work_tree: Option<&str>) -> bool {
+    let directory_matches = git_dir.is_none_or(|path| {
+        let selected = git_path(cwd, &["rev-parse", "--resolve-git-dir", path]);
+        selected.is_some() && selected == git_path(cwd, &["rev-parse", "--absolute-git-dir"])
+    });
+    let tree_matches = work_tree.is_none_or(|path| {
+        let selected = cwd.join(path).canonicalize().ok();
+        selected.is_some() && selected == git_path(cwd, &["rev-parse", "--show-toplevel"])
+    });
+    directory_matches && tree_matches
+}
+
+async fn remember_rename(
+    shared: &Arc<Shared>,
+    session: &str,
+    found: &GitScan,
+    own: Option<&str>,
+) -> Result<(), String> {
+    let Some(to) = found.ops.iter().find_map(|op| {
+        (own.is_some() && !op.elsewhere && op.name.as_deref().is_none_or(|name| Some(name) == own))
+            .then(|| op.rename_to.clone())
+            .flatten()
+    }) else {
+        return Ok(());
+    };
+    let shared = shared.clone();
+    let session = session.to_owned();
+    tokio::task::spawn_blocking(move || {
+        let records = shared.worktrees.records().map_err(|e| e.to_string())?;
+        let record = records.get(&session).ok_or("the copy record is missing")?;
+        let copy = crate::worktrees::find_path(&record.repo_root, &record.branch)
+            .ok_or("the copy is missing")?;
+        records
+            .note_rename(&session, &to, &copy)
+            .map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+    .map_err(|e| format!("Not run: the copy's branch rename could not be recorded ({e})."))
 }
 
 /// The branch Vibe Work created for this session's copy (record) when `cwd`'s checkout is on it, else `None`.

@@ -77,7 +77,12 @@ export function Viewport({
           <p>Server stopped</p>
           <p className="preview-url">{stopped}</p>
           {onReload && (
-            <button type="button" className="preview-btn" onClick={onReload}>
+            <button
+              data-testid="preview.viewport-preview-btn"
+              type="button"
+              className="preview-btn"
+              onClick={onReload}
+            >
               Reload
             </button>
           )}
@@ -98,7 +103,12 @@ export function Viewport({
           <div className="browser-paused-message">
             <span>Browser paused</span>
             {onReload && (
-              <button type="button" className="preview-btn" onClick={onReload}>
+              <button
+                data-testid="preview.viewport-preview-btn-2"
+                type="button"
+                className="preview-btn"
+                onClick={onReload}
+              >
                 Reload
               </button>
             )}

@@ -13,14 +13,14 @@
 //!   including executable input. Methods and wire parameters never appear in the dialog. Clipping the text would let a
 //!   client put a harmless start in view and the real command past the cut. The same dialog
 //!   guards `session/shellCommand`.
-//! - The one exception: a request **the agent** makes (`Requester::Agent`: the git and kill
-//!   guards' holds) that is too long is no longer declined without a dialog (that told the agent "the user declined"
-//!   while the user saw nothing, and blocked ordinary long `git commit -m` messages). It is shown SHORTENED, never
-//!   silently clipped: a first line says it is shortened and by how much, the start and the end of the text are
-//!   shown with a marker in between naming the characters left out. It can be allowed only after the user paged
-//!   through ALL of it in the same dialog ([`ShortStep`]: overview -> part 1..n -> Allow on the last part; Return
-//!   never approves unseen text; "always" is never offered on it); one too long to page ([`MAX_PAGES`]) can only be
-//!   refused. Window and Debug API requests keep "in full or not at all".
+//! - A request too long for one dialog (any requester: the agent's git and kill holds, a window action such as
+//!   removing a copy with many files, a Debug API vault request) is never declined without a dialog (that told the
+//!   caller "the user declined" while the user saw nothing, and made ordinary long requests fail silently). It is
+//!   shown SHORTENED, never silently clipped: a first line says it is shortened and by how much, the start and the
+//!   end of the text are shown with a marker in between naming the characters left out. It can be allowed only after
+//!   the user paged through ALL of it in the same dialog ([`ShortStep`]: overview -> part 1..n -> Allow on the last
+//!   part; Return never approves unseen text; "always" is never offered on it); one too long to page
+//!   ([`MAX_PAGES`]) can only be refused, with a dialog that says so.
 
 use std::future::Future;
 use std::pin::Pin;
@@ -62,13 +62,7 @@ pub fn dialog_text(request: &ConfirmationRequest) -> Option<String> {
     if text.chars().count() > DIALOG_PARAMS_MAX_CHARS {
         return None;
     }
-    let lead = match request.requester {
-        // `Core` is never shown: the core answers its own requests (`vw-core-api` confirmer).
-        Requester::Window | Requester::Core => String::new(),
-        Requester::DebugApi => format!("{DEBUG_API_LINE}\n\n"),
-        Requester::Agent => format!("{AGENT_LINE}\n\n"),
-    };
-    Some(format!("{lead}{text}"))
+    Some(format!("{}{text}", lead(request)))
 }
 
 fn request_text(request: &ConfirmationRequest) -> Option<String> {
@@ -118,7 +112,7 @@ fn capture_save_text(params: &serde_json::Value) -> Option<String> {
     ))
 }
 
-/// The default button of a shortened agent request: pages through its full text.
+/// The default button of a shortened request: pages through its full text.
 pub const SHOW_FULL: &str = "Show the full request";
 /// The default button of a page of the full text that is not the last.
 pub const NEXT_PART: &str = "Next part";
@@ -133,7 +127,7 @@ pub const PAGE_CHARS: usize = 1000;
 /// Most pages offered; a longer request can only be refused here.
 pub const MAX_PAGES: usize = 12;
 
-/// Where a shortened agent request's dialog is: the overview, or page `n` (1-based) of the full text.
+/// Where a shortened request's dialog is: the overview, or page `n` (1-based) of the full text.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ShortStep {
     /// The shortened overview (start, marker, end).
@@ -151,28 +145,39 @@ pub enum ShortOutcome {
     Done(Confirmation),
 }
 
-fn long_agent_text(request: &ConfirmationRequest) -> Option<Vec<char>> {
+/// The caller text of a request too long for one dialog, as characters (`None`: it fits, or it has no text).
+fn long_text(request: &ConfirmationRequest) -> Option<Vec<char>> {
     let text = request_text(request)?;
-    (request.requester == Requester::Agent && text.chars().count() > DIALOG_PARAMS_MAX_CHARS)
-        .then(|| text.chars().collect())
+    (text.chars().count() > DIALOG_PARAMS_MAX_CHARS).then(|| text.chars().collect())
+}
+
+/// The first line naming who asks, from the request's structured `requester` (empty for a click in this window).
+fn lead(request: &ConfirmationRequest) -> String {
+    match request.requester {
+        // `Core` is never shown: the core answers its own requests (`vw-core-api` confirmer).
+        Requester::Window | Requester::Core => String::new(),
+        Requester::DebugApi => format!("{DEBUG_API_LINE}\n\n"),
+        Requester::Agent => format!("{AGENT_LINE}\n\n"),
+    }
 }
 
 /// How many pages the full caller text takes (`None` when the request is not a shortened one).
 #[must_use]
 pub fn full_pages(request: &ConfirmationRequest) -> Option<usize> {
-    long_agent_text(request).map(|text| text.len().div_ceil(PAGE_CHARS).max(1))
+    long_text(request).map(|text| text.len().div_ceil(PAGE_CHARS).max(1))
 }
 
-/// The text of `step` for an AGENT request too long to show in full; `None` for any other
-/// request (it fits, or it is not the agent's: those keep "in full or not at all") or a page out of range.
+/// The text of `step` for a request too long to show in full; `None` for a request that fits (shown whole by
+/// [`dialog_text`]) or a page out of range.
 ///
-/// The overview: the agent line, a first line saying the request is shortened (total and hidden character counts)
+/// The overview: the requester line (none for a click in this window), a first line saying the request is shortened (total and hidden character counts)
 /// and that it can be allowed only after reading it whole, the first [`SHORT_HEAD`] characters of the caller text,
 /// a marker naming how many are left out, the last [`SHORT_TAIL`]. A page: "part k of n" and [`PAGE_CHARS`]
 /// characters of that text, every character in exactly one page. Neither view exposes wire parameters.
 #[must_use]
 pub fn shortened_dialog_text(request: &ConfirmationRequest, step: ShortStep) -> Option<String> {
-    let params = long_agent_text(request)?;
+    let params = long_text(request)?;
+    let lead = lead(request);
     let total = params.len();
     let pages = total.div_ceil(PAGE_CHARS).max(1);
     match step {
@@ -192,7 +197,7 @@ pub fn shortened_dialog_text(request: &ConfirmationRequest, step: ShortStep) -> 
                 )
             };
             Some(format!(
-                "{AGENT_LINE}\n\nSHORTENED: this request is {total} characters long, more than this window shows; \
+                "{lead}SHORTENED: this request is {total} characters long, more than this window shows; \
                  {hidden} characters in the middle are not shown here. {how}\n\n\
                  {head}\n\n[... {hidden} characters not shown here ...]\n\n{tail}"
             ))
@@ -209,7 +214,7 @@ pub fn shortened_dialog_text(request: &ConfirmationRequest, step: ShortStep) -> 
                 "This is the end of the request.".to_owned()
             };
             Some(format!(
-                "{AGENT_LINE}\n\nThe full request, part {n} of {pages}. {next}\n\n{chunk}"
+                "{lead}The full request, part {n} of {pages}. {next}\n\n{chunk}"
             ))
         }
         ShortStep::Page(_) => None,

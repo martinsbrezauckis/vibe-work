@@ -5,7 +5,11 @@
  * scripts/public/check.sh fails when this file and the Rust types disagree.
  */
 
-export type GitResult = { "kind": "status",
+export type GitResult = { "kind": "identity",
+/**
+ * The values and their origin.
+ */
+settings: GitIdentitySettings, } | { "kind": "status",
 /**
  * The bar.
  */
@@ -169,6 +173,14 @@ files: Array<CommitFile>,
  */
 author: string | null,
 /**
+ * Effective Git name, even if the email is missing.
+ */
+authorName: string | null,
+/**
+ * Effective Git email, even if the name is missing.
+ */
+authorEmail: string | null,
+/**
  * Why git has no author yet (how to set it).
  */
 authorProblem: string | null,
@@ -327,6 +339,18 @@ credit: boolean,
  */
 runHooks: boolean, };
 
+export type GitIdentitySettings = {
+/**
+ * Values for Settings, Commit and repository init (empty values need user input).
+ */
+identity: CommitIdentity,
+/**
+ * Origin of the values shown in Settings.
+ */
+source: GitIdentitySource, };
+
+export type GitIdentitySource = "app" | "global" | "unset";
+
 export type BranchState = {
 /**
  * The working tree root.
@@ -481,6 +505,16 @@ folder: string,
  * Which commit hooks exist there (`pre-commit`, `prepare-commit-msg`, `commit-msg`, `post-commit`).
  */
 hooks: Array<string>, };
+
+export type CommitIdentity = {
+/**
+ * The name Git writes into the commit.
+ */
+name: string,
+/**
+ * The email Git writes into the commit.
+ */
+email: string, };
 
 export type PushPlan = {
 /**

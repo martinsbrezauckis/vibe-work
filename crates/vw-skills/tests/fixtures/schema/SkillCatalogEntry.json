@@ -1,0 +1,34 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "description": {
+      "title": "Description",
+      "type": "string"
+    },
+    "latestVersion": {
+      "title": "Latestversion",
+      "type": "integer"
+    },
+    "name": {
+      "title": "Name",
+      "type": "string"
+    },
+    "sharingScope": {
+      "default": "",
+      "title": "Sharingscope",
+      "type": "string"
+    },
+    "skillId": {
+      "title": "Skillid",
+      "type": "string"
+    }
+  },
+  "required": [
+    "name",
+    "skillId",
+    "description",
+    "latestVersion"
+  ],
+  "title": "SkillCatalogEntry",
+  "type": "object"
+}

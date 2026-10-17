@@ -36,11 +36,13 @@ pub(crate) struct EventsQuery {
 
 fn event_name(event: &CoreEvent) -> &'static str {
     match event {
+        CoreEvent::SecretScan { .. } => "secretScan",
         CoreEvent::Snapshot { .. } => "snapshot",
         CoreEvent::Change { .. } => "change",
         CoreEvent::Lagged {} => "lagged",
         CoreEvent::Server { .. } => "server",
         CoreEvent::WorktreesChanged {} => "worktreesChanged",
+        CoreEvent::GitBrowserChanged { .. } => "gitBrowserChanged",
         CoreEvent::CallbackOpened { .. } => "callbackOpened",
         CoreEvent::CallbackAnswered { .. } => "callbackAnswered",
         CoreEvent::Refused { .. } => "refused",

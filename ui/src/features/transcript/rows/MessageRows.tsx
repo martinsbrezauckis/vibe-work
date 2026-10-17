@@ -1,10 +1,11 @@
 /**
  * Message rows: the user's message (`.u`) and the assistant's answer (`.a-msg`).
- * - User: the text as typed (plain text, `userDisplayContent` when Vibe kept one), images the core
+ * - User: the text as typed (plain text, `userDisplayContent` when Vibe kept one), a "Loop" tag when a loop sent it, images the core
  *   provided as `data:` URLs (never `file://` or asset URLs; a file-path image is named
  *   only), context chips, a "steered" mark for a second message in a running turn, Copy, and
  *   Rewind to here / Branch from here through the composer's actions.
- * - Assistant: Markdown (`components/markdown`, no raw HTML), `remend` while streaming, Copy, time.
+ * - Assistant: Markdown (`components/markdown`, no raw HTML, a single newline is a line break as in chat apps),
+ *   `remend` while streaming, Copy, time.
  *   A message over `MESSAGE_CHARS` renders its start as Markdown; "Show all" shows the whole text as
  *   plain text (a 2 MB Markdown parse would freeze the window).
  * Adapted from ShellX.
@@ -26,6 +27,7 @@ import {
   displayText,
   entryId,
   inProgress,
+  loopMessage,
   messageImages,
   messageText,
   spokenMessage,
@@ -63,6 +65,7 @@ function MessageActions({
   return (
     <>
       <button
+        data-testid="transcript.message-rows-open-rewind"
         type="button"
         className="copy-btn"
         aria-label={rewindLabel}
@@ -73,6 +76,7 @@ function MessageActions({
         Rewind
       </button>
       <button
+        data-testid="transcript.message-rows-branch"
         type="button"
         className="copy-btn"
         aria-label={branchLabel}
@@ -99,14 +103,28 @@ export const UserRow = memo(function UserRow({
   const text = displayText(entry) ?? messageText(entry);
   const { images, fileImages } = messageImages(entry);
   const context = contextNames(entry);
+  const loop = loopMessage(entry);
   return (
-    <div className={`u${steer ? " steer" : ""}`} data-entry-id={entryId(entry)}>
+    <div
+      className={`u${steer ? " steer" : ""}`}
+      data-entry-id={entryId(entry)}
+      data-item-id={entryId(entry)}
+    >
       <div className="acts2">
         <MessageActions entry={entry} sessionId={sessionId} text={messageText(entry)} />
-        <CopyButton text={text} label="Copy message" />
+        <CopyButton testId="transcript.message-rows-copybutton" text={text} label="Copy message" />
       </div>
       <div className="u-meta">
         {steer ? <span className="u-tag">Steered</span> : null}
+        {loop === null ? null : (
+          <span
+            className="u-tag u-loop"
+            data-loop-id={loop}
+            title={`Sent by a loop${loop === "" ? "" : ` (${loop})`} on its own: you did not type it`}
+          >
+            Loop
+          </span>
+        )}
         {spokenMessage(entry) ? (
           <span className="u-tag u-voice" title="Said in voice chat; the answer was read aloud">
             voice
@@ -149,6 +167,7 @@ function SourcesChip({ rowKey, searches }: { rowKey: string; searches: readonly 
   if (sources.length === 0) return null;
   return (
     <button
+      data-testid="transcript.message-rows-show-sources"
       type="button"
       className="copy-btn sources-chip"
       aria-expanded={open}
@@ -182,13 +201,14 @@ export const AssistantRow = memo(function AssistantRow({
   const streaming = inProgress(entry);
   const big = text.length > MESSAGE_CHARS;
   return (
-    <div className={`a-msg${streaming ? " streaming" : ""}`} data-entry-id={id}>
+    <div className={`a-msg${streaming ? " streaming" : ""}`} data-entry-id={id} data-item-id={id}>
       {big && full ? (
         <pre className="out plain">{text}</pre>
       ) : (
         <Markdown
           source={big ? safeHead(text, MESSAGE_CHARS) : text}
           streaming={streaming}
+          lineBreaks
           onOpenLink={(url) => {
             transcript.askLink(url);
           }}
@@ -198,6 +218,7 @@ export const AssistantRow = memo(function AssistantRow({
       )}
       {big && !full ? (
         <button
+          data-testid="transcript.message-rows-toggle"
           type="button"
           className="show-all-btn"
           aria-label="Show full message as plain text"
@@ -212,7 +233,13 @@ export const AssistantRow = memo(function AssistantRow({
       ) : null}
       <div className="a-meta">
         <Time ms={createdAt(entry)} />
-        {streaming ? null : <CopyButton text={text} label="Copy message" />}
+        {streaming ? null : (
+          <CopyButton
+            testId="transcript.message-rows-copybutton-2"
+            text={text}
+            label="Copy message"
+          />
+        )}
         {streaming ? null : <SourcesChip rowKey={rowKey} searches={searches} />}
       </div>
     </div>

@@ -10,6 +10,7 @@ pub(super) fn preview_decls(cfg: &Config) -> Vec<String> {
         crate::PreviewResult::decl(cfg),
         crate::preview_view::BrowserOverlayAction::decl(cfg),
         crate::PreviewTarget::decl(cfg),
+        crate::preview_view::PickTarget::decl(cfg),
         crate::BusyPortView::decl(cfg),
         crate::BusyOption::decl(cfg),
         vw_preview::PreviewView::decl(cfg),

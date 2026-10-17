@@ -120,8 +120,9 @@ function PaletteDialog(): ReactElement {
 
   return (
     <>
-      <div className="scrim" onClick={close} />
+      <div data-testid="shell.command-palette-scrim" className="scrim" onClick={close} />
       <div
+        data-testid="shell.command-palette-palette"
         className="palette"
         role="dialog"
         aria-modal="true"
@@ -132,6 +133,7 @@ function PaletteDialog(): ReactElement {
         <div className="pal-in">
           <Icon name="search" />
           <input
+            data-testid="shell.command-palette-set-query"
             data-dialog-initial-focus="true"
             data-dialog-manages-tab={mode === "text" ? "true" : undefined}
             // Focus during commit (before paint), so keys typed right after Ctrl K are never lost.
@@ -170,6 +172,7 @@ function PaletteDialog(): ReactElement {
         {mode === "text" && (
           <div className="pal-f">
             <Selector
+              testId="shell.command-palette-selector"
               label="Show results"
               value={filter}
               options={FILTERS.map((f) => ({
@@ -185,7 +188,14 @@ function PaletteDialog(): ReactElement {
           </div>
         )}
         <div className="pal-b">
-          <ul className="plist" id={LISTBOX} role="listbox" aria-label="Commands" ref={list}>
+          <ul
+            data-testid="shell.command-palette-plist"
+            className="plist"
+            id={LISTBOX}
+            role="listbox"
+            aria-label="Commands"
+            ref={list}
+          >
             <PaletteEmpty
               query={text}
               mode={mode}
@@ -207,8 +217,14 @@ function PaletteDialog(): ReactElement {
                 ) : null;
               const showAll =
                 more > 0 ? (
-                  <li key={`m-${group}`} className="pal-more" role="presentation">
+                  <li
+                    data-item-id={`m-${group}`}
+                    key={`m-${group}`}
+                    className="pal-more"
+                    role="presentation"
+                  >
                     <button
+                      data-testid="shell.command-palette-set-filter"
                       type="button"
                       className="pal-more-action"
                       tabIndex={-1}
@@ -223,6 +239,8 @@ function PaletteDialog(): ReactElement {
               return [
                 heading,
                 <li
+                  data-testid="shell.command-palette-run"
+                  data-item-id={result.id}
                   key={result.id}
                   id={optionId(i)}
                   role="option"

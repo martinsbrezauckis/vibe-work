@@ -1,0 +1,173 @@
+{
+  "method": "skills/setLatest",
+  "params": {
+    "sessionId": "session-skills",
+    "name": "review",
+    "scope": "project"
+  },
+  "result": {
+    "runtime": {
+      "config": {
+        "activeModel": {
+          "name": "example",
+          "alias": "example",
+          "thinking": "off",
+          "supportsImages": false,
+          "displayName": "example",
+          "maxContextLength": null,
+          "thinkingLevels": [
+            "off",
+            "low",
+            "medium",
+            "high",
+            "max"
+          ],
+          "imageDelivery": null
+        },
+        "activeModelPinned": false,
+        "imagesSupported": false,
+        "awaitingExperimentModel": false,
+        "defaultModelAlias": "example",
+        "defaultAgent": "accept-edits",
+        "theme": "example",
+        "logLevel": null,
+        "disableWelcomeBannerAnimation": false,
+        "cursorBlink": true,
+        "showGreeting": false,
+        "autocopyToClipboard": false,
+        "fileWatcherForAutocomplete": false,
+        "askConfirmationOnExit": false,
+        "voiceModeEnabled": false,
+        "narratorEnabled": false,
+        "showThinkingNodes": false,
+        "showSubagentStatusList": false,
+        "worktreeLimit": 0,
+        "enableUpdateChecks": false,
+        "enableNotifications": false,
+        "enableSystemTrustStore": false,
+        "experimentalEnableTabStatus": false,
+        "enableTelemetry": true,
+        "experimentalEnableRegistrySkills": false,
+        "models": [],
+        "transcribeModels": [],
+        "ttsModels": [],
+        "transcription": {
+          "model": {
+            "name": "example",
+            "sampleRate": 0,
+            "encoding": "pcm_s16le",
+            "language": "example",
+            "targetStreamingDelayMs": 0
+          },
+          "provider": {
+            "apiBase": "example",
+            "apiKeyEnvVar": "example",
+            "client": "mistral"
+          }
+        },
+        "speech": {
+          "model": {
+            "name": "example",
+            "voice": "example",
+            "responseFormat": "pcm"
+          },
+          "provider": {
+            "apiBase": "example",
+            "apiKeyEnvVar": "example",
+            "client": "mistral"
+          }
+        },
+        "validationWarnings": []
+      },
+      "activeAgent": {
+        "name": "example",
+        "displayName": "example",
+        "description": "example",
+        "safety": "safe",
+        "agentType": "agent"
+      },
+      "agents": [],
+      "skills": [
+        {
+          "name": "review",
+          "description": "Project review",
+          "prompt": "Review the changes.",
+          "userInvocable": true,
+          "source": "registry",
+          "scope": "project",
+          "registry": {
+            "skillId": "skill-project-review",
+            "version": 3,
+            "alias": null
+          },
+          "enabled": true,
+          "locked": false
+        },
+        {
+          "name": "vibe",
+          "description": "Vibe guidance",
+          "prompt": "Use Vibe.",
+          "userInvocable": true,
+          "source": "builtin",
+          "scope": "builtin",
+          "registry": null,
+          "enabled": true,
+          "locked": true
+        },
+        {
+          "name": "plugin:notes",
+          "description": "Plugin notes",
+          "prompt": "Read notes.",
+          "userInvocable": true,
+          "source": "plugin",
+          "scope": "global",
+          "registry": null,
+          "enabled": true,
+          "locked": true
+        }
+      ],
+      "tools": [],
+      "stats": {
+        "steps": 0,
+        "modelCalls": null,
+        "sessionPromptTokens": 0,
+        "sessionCompletionTokens": 0,
+        "sessionCachedTokens": 0,
+        "inputPricePerMillion": 0.0,
+        "outputPricePerMillion": 0.0,
+        "cachedInputPricePerMillion": null,
+        "toolCallsAgreed": 0,
+        "toolCallsRejected": 0,
+        "toolCallsFailed": 0,
+        "toolCallsSucceeded": 0,
+        "contextTokens": 0,
+        "lastTurnPromptTokens": 0,
+        "lastTurnCompletionTokens": 0,
+        "lastTurnCachedTokens": 0,
+        "lastTurnDuration": 0.0,
+        "tokensPerSecond": 0.0
+      },
+      "contextWindow": 0,
+      "issues": [
+        {
+          "file": "/workspace/.vibe/skills/broken/SKILL.md",
+          "message": "Missing description"
+        }
+      ],
+      "hooksCount": 0,
+      "connectors": {
+        "connected": 0,
+        "total": null
+      },
+      "mcp": {
+        "sources": [],
+        "discoveryErrors": {},
+        "connectorError": null,
+        "manageConnectorsUrl": null
+      },
+      "bypassToolPermissions": false,
+      "experimentalHarness": false
+    },
+    "status": "applied"
+  }
+}

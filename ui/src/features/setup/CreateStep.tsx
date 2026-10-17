@@ -60,11 +60,11 @@ export function CreateStep() {
           <VibeKeyNote found={found} />
           <Selector
             label="Which key"
-            testId="setup-key-choice"
+            testId="setup.key-choice"
             value={useVibe ? "vibe" : "paste"}
             options={[
-              { value: "vibe", label: "Use Vibe's key", testId: "setup-key-vibe" },
-              { value: "paste", label: "Paste a different key", testId: "setup-key-paste" },
+              { value: "vibe", label: "Use Vibe's key", testId: "setup.key-vibe" },
+              { value: "paste", label: "Paste a different key", testId: "setup.key-paste" },
             ]}
             onChange={(value) => {
               setUseVibe(value === "vibe");
@@ -76,7 +76,7 @@ export function CreateStep() {
         <>
           <SecretField
             label="Paste your Mistral API key"
-            testId="setup-key-input"
+            testId="setup.key-input"
             value={key}
             onChange={setKey}
             placeholder="Your key"
@@ -85,23 +85,24 @@ export function CreateStep() {
           <ConsoleLink />
         </>
       )}
-      <NewPasswordField value={password} onChange={setPassword} testId="setup-password-input" />
+      <NewPasswordField value={password} onChange={setPassword} testId="setup.password-input" />
       <p className="key-field-hint">
         If you forget the password, paste your key again. Vibe Work never sees your Mistral account
         password.
       </p>
-      <RememberChoice checked={remember} onChange={setRemember} testId="setup-remember" />
+      <RememberChoice checked={remember} onChange={setRemember} testId="setup.remember" />
       <Problem text={problem?.text ?? null} />
       <div className="key-actions">
         <button
           type="submit"
           className="btn-primary"
-          data-testid="setup-save"
+          data-testid="setup.save"
           disabled={busy || !ready}
         >
           {busy ? "Saving..." : "Save and test the key"}
         </button>
         <button
+          data-testid="setup.create-step-dismiss"
           type="button"
           className="tb-btn"
           onClick={() => {

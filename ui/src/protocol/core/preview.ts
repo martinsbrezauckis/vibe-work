@@ -118,7 +118,11 @@ port: number, } | { "op": "pick",
 /**
  * The session.
  */
-sessionId: string, } | { "op": "cancelPick",
+sessionId: string,
+/**
+ * The element to pick without a click.
+ */
+target?: PickTarget, } | { "op": "cancelPick",
 /**
  * The session.
  */
@@ -210,6 +214,28 @@ listening: boolean,
  * when it is only inferred from the folder. Only proven ports open for the agent and the Debug API.
  */
 proven: boolean, };
+
+export type PickTarget = {
+/**
+ * A CSS selector.
+ */
+selector?: string,
+/**
+ * An element ref from the agent browser's last read (annotation only).
+ */
+ref?: string,
+/**
+ * Left of the point.
+ */
+x?: number,
+/**
+ * Top of the point.
+ */
+y?: number,
+/**
+ * The area of a box annotation (viewport CSS pixels).
+ */
+rect?: Rect, };
 
 export type BusyPortView = {
 /**

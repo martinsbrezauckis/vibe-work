@@ -68,13 +68,23 @@ function mergeRow(row: SessionRowView, known: SessionEntry | undefined): Session
   const session = row.session;
   if (id === null || !isObject(session)) return null;
   if (known?.state !== null && known !== undefined) {
-    return known.localOnly === row.localOnly ? known : { ...known, localOnly: row.localOnly };
+    if (
+      known.localOnly === row.localOnly &&
+      (row.accessMode === undefined || known.accessMode === row.accessMode)
+    )
+      return known;
+    return {
+      ...known,
+      localOnly: row.localOnly,
+      ...(row.accessMode === undefined ? {} : { accessMode: row.accessMode }),
+    };
   }
   return {
     id,
     session,
     state: null,
     localOnly: row.localOnly,
+    ...(row.accessMode === undefined ? {} : { accessMode: row.accessMode }),
     openCallbackIds: known?.openCallbackIds ?? [],
   };
 }

@@ -73,7 +73,10 @@ export interface FakeClient extends CoreClient {
   /** The native document picker: answers what `pickedDocuments` holds (default: nothing). */
   pickDocuments: ReturnType<typeof vi.fn<() => Promise<DocumentsPicked>>>;
   pickedDocuments: DocumentsPicked;
-  /** The native library picker answers an empty upload unless a test replaces it. */
+  /** The native certificate picker: answers `pickedCertificate` (default: cancelled). */
+  pickCertificate: ReturnType<typeof vi.fn<() => Promise<string | null>>>;
+  pickedCertificate: string | null;
+  /** The native library picker: answers an empty upload unless a test replaces it. */
   pickLibraryFiles: ReturnType<
     typeof vi.fn<(libraryId: string) => Promise<CommandResult>>
   >;
@@ -198,6 +201,10 @@ export function fakeClient(kind: CoreClient["kind"] = "fake"): FakeClient {
       Promise.resolve("/work/picked"),
     ),
     pickedDocuments: { added: [], refused: [] },
+    pickedCertificate: null,
+    pickCertificate: vi.fn<() => Promise<string | null>>(() =>
+      Promise.resolve(client.pickedCertificate),
+    ),
     pickDocuments: vi.fn<() => Promise<DocumentsPicked>>(() =>
       Promise.resolve(client.pickedDocuments),
     ),
@@ -384,6 +391,7 @@ export function snapshot(
         reannouncedEntries: 0,
         completedEntryUpdates: 0,
         patchFailures: 0,
+        recoveredPatchFailures: 0,
         malformedPayloads: 0,
         inconsistentEnvelopes: 0,
         interruptedTurns: 0,

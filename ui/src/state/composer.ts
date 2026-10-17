@@ -33,6 +33,9 @@ const DEFERRED = [
   "prepareSession",
   "loadConfig",
   "loadSkills",
+  "loadLoops",
+  "deleteLoop",
+  "clearLoops",
   "pickModel",
   "setAccess",
   "runCommand",
@@ -88,6 +91,10 @@ export function createComposer(deps: {
     } as const;
   }
 
+  core.listen((event) => {
+    if (event.type === "alert" && event.kind === "pluginReloadFailed" && event.sessionId !== null)
+      composer.pluginReloadRefused(event.sessionId);
+  });
   const chains = new Map<string, Promise<unknown>>();
   const initialization: ComposerInitialization = {
     ready: new Set(),
@@ -268,6 +275,10 @@ export function createComposer(deps: {
       },
       loadSkills(sessionId: string): Promise<void> {
         return sessionId === NEW_CHAT ? Promise.resolve() : deferred.loadSkills(sessionId);
+      },
+      // A chat that has not started has no loops.
+      loadLoops(sessionId: string, force = false): Promise<void> {
+        return sessionId === NEW_CHAT ? Promise.resolve() : deferred.loadLoops(sessionId, force);
       },
       runCommand(sessionId: string, name: string, args: string): Promise<SendOutcome> {
         const blocked = deps.keyGuard?.() ?? null;

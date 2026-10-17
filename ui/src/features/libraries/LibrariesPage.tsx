@@ -31,6 +31,7 @@ function NewLibrary(): ReactElement {
   return (
     <form className="lib-new" onSubmit={submit} aria-label="New library">
       <input
+        data-testid="libraries.libraries-page-set-name"
         value={name}
         placeholder="New library name"
         aria-label="New library name"
@@ -39,8 +40,15 @@ function NewLibrary(): ReactElement {
           setName(e.target.value);
         }}
       />
-      <ScopePicker value={scope} label="Used by" onChange={setScope} disabled={blocked} />
+      <ScopePicker
+        testId="libraries.create-scope"
+        value={scope}
+        label="Used by"
+        onChange={setScope}
+        disabled={blocked}
+      />
       <button
+        data-testid="libraries.libraries-page-tb-btn"
         type="submit"
         className="tb-btn"
         disabled={blocked || busy === "create" || name.trim() === ""}
@@ -64,8 +72,9 @@ function List(): ReactElement {
   return (
     <ul className="lib-list" aria-label="Libraries">
       {libraries.map((l) => (
-        <li key={l.id}>
+        <li data-item-id={l.id} key={l.id}>
           <button
+            data-testid="libraries.libraries-page-select"
             type="button"
             className="lib-item"
             aria-current={selected === l.id ? "true" : undefined}

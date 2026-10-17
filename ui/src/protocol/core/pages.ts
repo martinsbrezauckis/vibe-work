@@ -63,7 +63,11 @@ rect?: Rect, } | { "op": "pickSection",
 /**
  * The session.
  */
-sessionId: string, } | { "op": "cancelPick", } | { "op": "addComment", 
+sessionId: string, 
+/**
+ * The section (or step) id to pick without a click.
+ */
+section?: string, } | { "op": "cancelPick", } | { "op": "addComment", 
 /**
  * The session.
  */
@@ -553,7 +557,7 @@ relations: Array<Relation>,
  */
 steps: Array<Step>, 
 /**
- * Inputs in page order (§6.6, Format 1.2; at most 50, each with at most 100 options).
+ * Inputs in page order (§6.6, Format 1.2; at most 500, each with at most 100 options).
  */
 inputs: Array<Input>, 
 /**

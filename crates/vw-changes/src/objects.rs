@@ -1,6 +1,6 @@
-//! Git objects and our index files, through commands that never read the working tree (so git cannot run working-tree filters or drivers).
-//! review): `hash-object --no-filters`, `cat-file --batch`, `ls-files --stage`, `read-tree`, `update-index
-//! --index-info`, `write-tree`, `diff-tree`. None of them runs a clean/smudge filter, a diff driver, an
+//! Git objects and our index files, read and written directly through commands that never read the
+//! working tree: `hash-object --no-filters`, `cat-file --batch`, `ls-files --stage`, `read-tree`, `update-index
+//! --index-info`, `write-tree`, `diff-tree`. None of them runs a repository filter, a diff driver, an
 //! external diff or a hook.
 //!
 //! Depends on: `git`, `repo`, `error`. Called by: `worktree`, `baseline`, `diff`, `review`.

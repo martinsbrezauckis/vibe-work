@@ -179,7 +179,7 @@ pub enum AnswerError {
     /// The value does not fit the input, or the input does not exist.
     #[error("{0}")]
     Invalid(String),
-    /// The store file could not be written.
+    /// The store file could not be read or written.
     #[error("the answers could not be saved: {0}")]
     Io(String),
 }
@@ -305,17 +305,23 @@ impl AnswerStore {
         self.dir.join(format!("{}.json", project_key(project)))
     }
 
-    fn load(&self, project: &Path) -> File {
+    fn load(&self, project: &Path) -> Result<File, AnswerError> {
         let path = self.file(project);
-        let Ok(text) = std::fs::read_to_string(&path) else {
-            return File::default();
+        let text = match std::fs::read_to_string(&path) {
+            Ok(text) => text,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                return Ok(File::default());
+            }
+            Err(error) => return Err(AnswerError::Io(error.to_string())),
         };
         if let Ok(file) = serde_json::from_str::<File>(&text) {
-            return file;
+            return Ok(file);
         }
-        let aside = vw_platform::set_aside(&path, now_ms());
+        let aside = vw_platform::set_aside(&path, now_ms()).ok_or_else(|| {
+            AnswerError::Io("the unreadable answers file could not be moved aside".to_owned())
+        })?;
         tracing::warn!(file = ?aside, "page answers file did not parse: moved aside");
-        File::default()
+        Ok(File::default())
     }
 
     fn save(&self, project: &Path, file: &File) -> Result<(), AnswerError> {
@@ -330,6 +336,7 @@ impl AnswerStore {
     pub fn list(&self, project: &Path, page: Option<&PagePath>) -> Vec<Answer> {
         let _guard = self.lock.lock();
         self.load(project)
+            .unwrap_or_default()
             .answers
             .into_iter()
             .filter(|a| page.is_none_or(|p| a.page == p.as_str()))
@@ -361,7 +368,7 @@ impl AnswerStore {
             })?;
         let value = fit(input, value).map_err(AnswerError::Invalid)?;
         let _guard = self.lock.lock();
-        let mut file = self.load(project);
+        let mut file = self.load(project)?;
         file.answers
             .retain(|a| !(a.page == page.as_str() && a.input == input.id));
         if file.answers.len() >= MAX_PER_PROJECT {
@@ -394,7 +401,7 @@ impl AnswerStore {
         input_id: &str,
     ) -> Result<bool, AnswerError> {
         let _guard = self.lock.lock();
-        let mut file = self.load(project);
+        let mut file = self.load(project)?;
         let before = file.answers.len();
         file.answers
             .retain(|a| !(a.page == page.as_str() && a.input == input_id));
@@ -411,7 +418,7 @@ impl AnswerStore {
     /// [`AnswerError::Invalid`] when the page has no answers; [`AnswerError::Io`].
     pub fn mark_sent(&self, project: &Path, page: &PagePath) -> Result<u32, AnswerError> {
         let _guard = self.lock.lock();
-        let mut file = self.load(project);
+        let mut file = self.load(project)?;
         let now = now_ms();
         let mut marked = 0u32;
         for answer in file.answers.iter_mut().filter(|a| a.page == page.as_str()) {

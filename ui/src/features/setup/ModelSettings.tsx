@@ -74,6 +74,7 @@ export function ModelSettings() {
         <div className="check">
           <span>New sessions start with</span>
           <Selector
+            testId="setup.model-settings-pick"
             label={TEXT.defaultModel}
             title={
               model === undefined

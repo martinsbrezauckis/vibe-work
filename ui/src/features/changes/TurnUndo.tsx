@@ -3,7 +3,7 @@
  * with the transcript's own diff view (`DiffView` over the session's effect entries), "Undo turn"
  * (previewed, then `session/rewind`), and the one-time version-history offer for code folders.
  * Depends on: store.ts, transcript model (`editDiff`, `writeDiff`, entry helpers) and `DiffView`, shell
- * hooks (the session's entries). Called by: ChangesTab.
+ * hooks (the session and its children's entries). Called by: ChangesTab.
  * Invariant: the limits of this undo are said where the user decides (here and in the confirmation):
  * whole turns only, later turns go too, and only files Vibe saved before changing them.
  */
@@ -17,10 +17,18 @@ import { DiffView } from "../transcript/rows/DiffView";
 import type { Changes } from "./store";
 
 /** One edit or write, titled with the path relative to the session folder (Vibe reports it absolute). */
-function EntryDiff({ entry, path }: { entry: Obj; path: string }): ReactElement | null {
+function EntryDiff({
+  entry,
+  path,
+  sessionId,
+}: {
+  entry: Obj;
+  path: string;
+  sessionId: string;
+}): ReactElement | null {
   const diff = detailOf(entry)["kind"] === "file_edit" ? editDiff(entry) : writeDiff(entry);
   return diff === null ? null : (
-    <DiffView diff={{ ...diff, path }} id={`changes:${entryId(entry)}`} />
+    <DiffView diff={{ ...diff, path }} id={`changes:${sessionId}:${entryId(entry)}`} />
   );
 }
 
@@ -32,21 +40,30 @@ export function TurnUndo(props: {
   foundRepo: boolean;
 }): ReactElement {
   const { changes, view, busy, foundRepo } = props;
-  const history = useCoreState((s) => s.sessions[view.sessionId]?.state?.["history"]);
+  const sessions = useCoreState((s) => s.sessions);
   const entries = useMemo(() => {
-    const byId = new Map<string, Obj>();
-    for (const raw of arr(history)) {
-      const entry = obj(raw);
-      if (entry !== null) byId.set(entryId(entry), entry);
+    const bySession = new Map<string, Map<string, Obj>>();
+    const ids = new Set([
+      view.sessionId,
+      ...view.turns.map((turn) => turn.subagent?.sessionId ?? view.sessionId),
+    ]);
+    for (const id of ids) {
+      const byId = new Map<string, Obj>();
+      for (const raw of arr(sessions[id]?.state?.["history"])) {
+        const entry = obj(raw);
+        if (entry !== null) byId.set(entryId(entry), entry);
+      }
+      bySession.set(id, byId);
     }
-    return byId;
-  }, [history]);
+    return bySession;
+  }, [sessions, view.sessionId, view.turns]);
   return (
     <div className="turn-undo">
       {view.offerHistory && !foundRepo && (
         <div className="history-offer" role="note">
-          <span>Turn on version history</span>
+          <span>Keep versions of this folder so you can save work and go back.</span>
           <button
+            data-testid="changes.turn-undo-ask-history"
             type="button"
             className="mini"
             data-action="enable-history"
@@ -56,43 +73,49 @@ export function TurnUndo(props: {
           </button>
         </div>
       )}
-      {[...view.turns].reverse().map((turn) => (
-        <section
-          key={turn.turnId}
-          className="turn-changes"
-          aria-label={`Turn ${String(turn.number)}`}
-        >
-          <div className="hunk-h">
-            <span>
-              Turn {turn.number} · {turn.files.length} {turn.files.length === 1 ? "file" : "files"}
-            </span>
-            <span className="sp" />
-            {turn.anchorEntryId !== null && (
-              <button
-                type="button"
-                className="mini"
-                disabled={busy}
-                data-action="undo-turn"
-                onClick={() => void changes.askUndo(view.sessionId, turn.turnId, turn.number)}
-              >
-                Undo turn
-              </button>
+      {[...view.turns].reverse().map((turn) => {
+        const source = turn.subagent?.sessionId ?? view.sessionId;
+        const label = `${turn.subagent === undefined ? "" : `${turn.subagent.name} · `}Turn ${String(turn.number)}`;
+        return (
+          <section
+            data-item-id={`${source}:${turn.turnId}`}
+            key={`${source}:${turn.turnId}`}
+            className="turn-changes"
+            aria-label={label}
+          >
+            <div className="hunk-h">
+              <span>
+                {label} · {turn.files.length} {turn.files.length === 1 ? "file" : "files"}
+              </span>
+              <span className="sp" />
+              {turn.subagent === undefined && turn.anchorEntryId !== null && (
+                <button
+                  data-testid="changes.turn-undo-ask-undo"
+                  type="button"
+                  className="mini"
+                  disabled={busy}
+                  data-action="undo-turn"
+                  onClick={() => void changes.askUndo(view.sessionId, turn.turnId, turn.number)}
+                >
+                  Undo turn
+                </button>
+              )}
+            </div>
+            {turn.files.map((file) =>
+              file.entryIds.map((id) => {
+                const entry = entries.get(source)?.get(id);
+                return entry === undefined ? (
+                  <div key={id} className="review-note">
+                    {file.path}
+                  </div>
+                ) : (
+                  <EntryDiff key={id} entry={entry} path={file.path} sessionId={source} />
+                );
+              }),
             )}
-          </div>
-          {turn.files.map((file) =>
-            file.entryIds.map((id) => {
-              const entry = entries.get(id);
-              return entry === undefined ? (
-                <div key={id} className="review-note">
-                  {file.path}
-                </div>
-              ) : (
-                <EntryDiff key={id} entry={entry} path={file.path} />
-              );
-            }),
-          )}
-        </section>
-      ))}
+          </section>
+        );
+      })}
     </div>
   );
 }

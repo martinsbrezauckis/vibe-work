@@ -186,10 +186,6 @@ body[data-browser-overlay="restoring"] [data-browser-overlay-menu] {
 .browser-menu-item:focus-visible {
   background: var(--hover);
 }
-.browser-menu-item:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
 .browser-menu-item[aria-checked="true"] {
   background: var(--active);
 }

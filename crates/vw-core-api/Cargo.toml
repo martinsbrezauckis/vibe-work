@@ -26,6 +26,11 @@ path = "src/bin/gen_core_ts.rs"
 required-features = ["ts"]
 
 [dependencies]
+vw-logscan = { path = "../vw-logscan" }
+# Guessable Vault values must never reach the session-log comparison engine.
+zxcvbn = "3"
+walkdir = "2"
+notify = "8.2.0"
 vw-vocabulary = { path = "../vw-vocabulary" }
 # The Vibe install at setup (`vibe` commands) and the deferred first server start.
 vw-vibe-install = { path = "../vw-vibe-install" }

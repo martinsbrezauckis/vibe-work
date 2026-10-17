@@ -14,7 +14,7 @@
  */
 import type { CoreClient, OsNotification } from "../protocol/client/types";
 import { toCallError } from "../protocol/client/types";
-import type { CoreState } from "./coreModel";
+import { type CoreState, subagentCardsOf } from "./coreModel";
 import { type Store, createStore } from "./createStore";
 import type { ToastSpec } from "./notifications";
 import {
@@ -102,7 +102,12 @@ export function createNotifier(options: { persist?: boolean } = {}) {
         for (const [key, retained] of retainedCallbacks) {
           if (
             next.answeredBy[retained.callbackId] !== undefined ||
-            !next.sessions[retained.sessionId]?.openCallbackIds.includes(retained.callbackId)
+            (!next.sessions[retained.sessionId]?.openCallbackIds.includes(retained.callbackId) &&
+              !subagentCardsOf(
+                next.subagentCards,
+                retained.sessionId,
+                next.sessions[retained.sessionId]?.state?.["childSessions"],
+              ).some((card) => card.callbackId === retained.callbackId))
           ) {
             forget?.(retained.id);
             retainedCallbacks.delete(key);

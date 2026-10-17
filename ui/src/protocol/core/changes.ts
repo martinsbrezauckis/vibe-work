@@ -5,85 +5,102 @@
  * scripts/public/check.sh fails when this file and the Rust types disagree.
  */
 
-export type ChangesRequest = { "op": "read", 
+import type { CommitIdentity } from "./git";
+export type ChangesRequest = { "op": "read",
 /**
  * Session id.
  */
-sessionId: string, } | { "op": "keep", 
+sessionId: string, } | { "op": "readRepo",
 /**
  * Session id.
  */
-sessionId: string, 
+sessionId: string,
+/**
+ * A discovered repository root relative to the session folder.
+ */
+repo: string, } | { "op": "keep",
+/**
+ * Session id.
+ */
+sessionId: string,
 /**
  * What to keep, with the blob/hunk id or fingerprint the user saw.
  */
-target: Target, } | { "op": "revert", 
+target: Target, } | { "op": "revert",
 /**
  * Session id.
  */
-sessionId: string, 
+sessionId: string,
 /**
  * What to revert, with the blob/hunk id or fingerprint the user saw.
  */
-target: Target, 
+target: Target,
 /**
  * Files the revert may delete (created during the session); must name every one it would delete.
  */
-deletePaths?: Array<string>, } | { "op": "previewUndo", 
+deletePaths?: Array<string>, } | { "op": "previewUndo",
 /**
  * Session id.
  */
-sessionId: string, 
+sessionId: string,
 /**
  * The turn to undo (every later turn is undone with it).
  */
-turnId: string, } | { "op": "folderSessions", 
+turnId: string, } | { "op": "folderSessions",
 /**
  * The folder a new session is about to start in.
  */
-cwd: string, } | { "op": "planHistory", 
+cwd: string, } | { "op": "planHistory",
 /**
  * Session id.
  */
-sessionId: string, } | { "op": "enableHistory", 
+sessionId: string, } | { "op": "enableHistory",
 /**
  * Session id.
  */
-sessionId: string, 
+sessionId: string,
 /**
  * The user confirmed in the window.
  */
-confirmed: boolean, } | { "op": "dismissOffer", 
+confirmed: boolean,
+/**
+ * Author details accepted in the init prompt, saved in app settings and this repository.
+ */
+identity?: CommitIdentity, } | { "op": "dismissOffer",
 /**
  * Session id.
  */
-sessionId: string, } | { "op": "restart", 
+sessionId: string, } | { "op": "restart",
 /**
  * Session id.
  */
 sessionId: string, };
 
-export type ChangesResult = { "kind": "view", 
+export type ChangesResult = { "kind": "view",
 /**
  * The session's changes after the request.
  */
-view: ChangesView, } | { "kind": "undoPreview", 
+view: ChangesView, } | { "kind": "undoPreview",
 /**
  * What the undo would do.
  */
-preview: UndoPreview, } | { "kind": "folder", 
+preview: UndoPreview, } | { "kind": "folder",
 /**
  * Whether the folder is in a git repository (a worktree is only possible then).
  */
-isGit: boolean, 
+isGit: boolean,
 /**
  * Live sessions working there.
  */
-sessions: Array<FolderSession>, } | { "kind": "initPlan", 
+sessions: Array<FolderSession>, } | { "kind": "initPlan",
 /**
  * What the first commit would contain.
  */
-plan: InitPlan, };
+plan: InitPlan,
+/**
+ * App identity (or a global Git prefill); empty fields require the init prompt.
+ */
+identity?: CommitIdentity, };
 
 export type ChangesView = { 
 /**
@@ -148,7 +165,7 @@ watching: boolean,
  */
 tookMs: number, };
 
-export type ChangesMode = "none" | "git" | "effects" | "unavailable";
+export type ChangesMode = "none" | "git" | "uncommitted" | "effects" | "unavailable";
 
 export type TurnChanges = { 
 /**
@@ -166,7 +183,21 @@ anchorEntryId: string | null,
 /**
  * Files the turn wrote or edited through Vibe's file tools.
  */
-files: Array<TurnFile>, };
+files: Array<TurnFile>, 
+/**
+ * The child session that owns these effects; absent for the shown session's own turns.
+ */
+subagent?: ChangesSubagent, };
+
+export type ChangesSubagent = { 
+/**
+ * The effect entries belong to this session's history.
+ */
+sessionId: string, 
+/**
+ * Vibe's child-session name, or a generic label when absent.
+ */
+name: string, };
 
 export type TurnFile = { 
 /**

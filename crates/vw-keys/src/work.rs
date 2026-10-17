@@ -10,7 +10,7 @@
 use vw_keyproxy::KeyNeed;
 use vw_mistral::work::WorkError;
 use vw_mistral::work::images::{ImageJob, Made};
-use vw_mistral::work::libraries::{self, Answer, Library, LibraryDocument};
+use vw_mistral::work::libraries::{self, Answer, Library, LibraryDocument, LibraryList};
 
 use crate::service::KeyService;
 
@@ -39,7 +39,7 @@ impl KeyService {
     ///
     /// # Errors
     /// [`WorkFailure`].
-    pub async fn libraries(&self) -> Result<Vec<Library>, WorkFailure> {
+    pub async fn libraries(&self) -> Result<LibraryList, WorkFailure> {
         let key = self.key_for_call().map_err(WorkFailure::KeyNeeded)?;
         let (client, base) = self.api();
         Ok(libraries::list(client, base, key.as_str()).await?)
@@ -143,6 +143,13 @@ impl KeyService {
     pub async fn image_make(&self, job: &ImageJob<'_>) -> Result<Made, WorkFailure> {
         let key = self.key_for_call().map_err(WorkFailure::KeyNeeded)?;
         let (client, base) = self.api();
-        Ok(vw_mistral::work::images::make(client, base, key.as_str(), job).await?)
+        Ok(vw_mistral::work::images::make_with_cleanup_notice(
+            client,
+            base,
+            key.as_str(),
+            job,
+            self.cleanup_notice_handler(),
+        )
+        .await?)
     }
 }

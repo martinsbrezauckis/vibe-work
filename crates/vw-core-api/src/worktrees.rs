@@ -19,6 +19,7 @@
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 use serde_json::{Value, json};
 use vw_worktrees::{Decision, Records, WorktreeError};
@@ -50,6 +51,8 @@ pub(crate) struct WorktreesState {
     root: Option<PathBuf>,
     /// Vibe's worktree folder (`$VIBE_HOME/worktrees`): a copy is acted on only inside it.
     vibe_root: PathBuf,
+    /// Cloned handles share failed-start records when durable writes are unavailable.
+    records: OnceLock<Records>,
     /// One start or removal at a time (two starts could pick the same free name).
     pub(crate) lock: tokio::sync::Mutex<()>,
     /// First-turn setup facts already sent during this run; serialized across concurrent starts.
@@ -63,6 +66,7 @@ impl WorktreesState {
         Self {
             root: changes_dir.map(|d| d.join("worktrees")),
             vibe_root: vibe_home.join("worktrees"),
+            records: OnceLock::new(),
             lock: tokio::sync::Mutex::new(()),
             setup_sent: tokio::sync::Mutex::new(HashSet::new()),
         }
@@ -92,7 +96,11 @@ impl WorktreesState {
 
     /// The record folder.
     pub(crate) fn records(&self) -> Result<Records, CoreError> {
-        Records::open(&self.root()?.join("records")).map_err(core_error)
+        if let Some(records) = self.records.get() {
+            return Ok(records.clone());
+        }
+        let records = Records::open(&self.root()?.join("records")).map_err(core_error)?;
+        Ok(self.records.get_or_init(|| records).clone())
     }
 
     /// The inspection's scratch folder.
@@ -417,6 +425,7 @@ impl Core {
                 continue;
             }
             let kept = record.decision == Some(Decision::Kept);
+            let recovery = records.is_recovery(&record.session_id);
             // A session archived before its first turn is recorded on its copy (Vibe never saved it, so
             // its own archive state cannot be read back); such a copy is listed like a deleted session's.
             let state = if record.session_deleted || record.session_archived {
@@ -426,7 +435,9 @@ impl Core {
             } else {
                 SessionCopyState::Active
             };
-            if state != SessionCopyState::Deleted && !(kept && state == SessionCopyState::Archived)
+            if !recovery
+                && state != SessionCopyState::Deleted
+                && !(kept && state == SessionCopyState::Archived)
             {
                 continue;
             }
@@ -443,6 +454,11 @@ impl Core {
                 .iter()
                 .filter(|(_, folder)| folder.starts_with(&canonical_path))
             {
+                // A failed start is reviewable even when its safe archive failed. Its own session
+                // remains a removal blocker, while another active owner still hides the copy.
+                if recovery && id == &record.session_id {
+                    continue;
+                }
                 let (state, cwd) = self.session_copy_state(id).await;
                 if state == SessionCopyState::Active
                     && cwd

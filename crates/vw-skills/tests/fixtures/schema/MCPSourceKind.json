@@ -1,0 +1,8 @@
+{
+  "enum": [
+    "server",
+    "connector"
+  ],
+  "title": "MCPSourceKind",
+  "type": "string"
+}

@@ -7,10 +7,11 @@
 //! Invariants:
 //! - **Debug API requests:** a request whose `requester` is
 //!   [`Requester::DebugApi`] is answered `Approved` here, without a dialog, and logged (method only, never
-//!   params), except a Full access escalation, which always asks in the native dialog. This is the one choke
-//!   point for every confirmation the core and the gate ask. Who may carry that requester is decided by the
-//!   transport: only the Debug API socket (bearer token) and the window while it serves a Debug API UI-control
-//!   request (`vw-host` `execute_for_ui_control`).
+//!   params), except the vault dialogs below. The Debug API is the operator's console with the operator's access, so a
+//!   Full access escalation, a proxy or certificate change, a provider consent and the rest are answered here too.
+//!   This is the one choke point for every confirmation the core and the gate ask. Who may carry that requester is
+//!   decided by the transport: only the Debug API socket (bearer token) and the window while it serves a Debug API
+//!   UI-control request (`vw-host` `execute_for_ui_control`).
 //! - **Vault dialog exception:** a request whose method is one of the vault's dialogs
 //!   (`vault_scope::DIALOG_METHODS`: giving an MCP server a vault secret, storing a captured key, running a command
 //!   with a secret, filling a vault login's password into a page) always goes to the native dialog,
@@ -23,8 +24,8 @@
 //!   (except `ApprovedAlways` to a request that did not offer it, which becomes `Approved`); it
 //!   must fail closed (`Declined`) when no dialog can be shown (vw-gate rule). A Debug API request that offers
 //!   "always" is answered `Approved` (once): the client acting as the user asks again next time.
-//! - Provider permission grants wider than basic identity use `vibe-work/providerConsent` and always ask in the
-//!   native dialog, including when the Debug API caused the browser action.
+//! - Provider permission grants wider than basic identity use `vibe-work/providerConsent`: the dialog is for the
+//!   user and the agent; a Debug API browser action answers it here like any other confirmation.
 
 use std::future::Future;
 use std::pin::Pin;
@@ -60,12 +61,10 @@ impl DynConfirmer {
         let registry = texts.clone();
         let ask = Arc::new(move |mut request: ConfirmationRequest| {
             // a vault dialog (a key to an MCP server, a captured key stored, a command run with a
-            // secret) is never answered for the Debug API: the user's own answer in the native dialog decides.
+            // secret, a vault login filled) is never answered for the Debug API: the user's own answer in the
+            // native dialog decides. Nothing else waits for a person when the Debug API asks.
             if request.requester == Requester::DebugApi
                 && !crate::vault_scope::DIALOG_METHODS.contains(&request.method.as_str())
-                && request.method != crate::browser_consent::METHOD
-                && !vw_gate::full_access_escalation(&request.method, &request.params)
-                && request.method != "vibe-work/projectInstructions/delete"
             {
                 // The Debug API is the user (module docs): its own request is its consent.
                 info!(
@@ -84,7 +83,7 @@ impl DynConfirmer {
             }
             let confirmer = confirmer.clone();
             if let Some(text) = texts.take(&request.method, &request.params) {
-                request.summary = text;
+                text.apply(&mut request.summary);
             } else if request.method == "session/agent/update"
                 && vw_gate::full_access_escalation(&request.method, &request.params)
             {
@@ -161,5 +160,103 @@ impl DynConfirmer {
 impl Confirmer for DynConfirmer {
     fn confirm(&self, request: &ConfirmationRequest) -> impl Future<Output = Confirmation> + Send {
         (self.0)(request.clone())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Mutex;
+
+    use serde_json::{Value, json};
+
+    use super::*;
+
+    /// A native dialog that records the methods it is shown and declines every one.
+    #[derive(Clone, Default)]
+    struct Dialog(Arc<Mutex<Vec<String>>>);
+
+    impl Dialog {
+        fn shown(&self) -> Vec<String> {
+            self.0.lock().unwrap().clone()
+        }
+    }
+
+    impl Confirmer for Dialog {
+        fn confirm(
+            &self,
+            request: &ConfirmationRequest,
+        ) -> impl Future<Output = Confirmation> + Send {
+            self.0.lock().unwrap().push(request.method.clone());
+            std::future::ready(Confirmation::Declined)
+        }
+    }
+
+    fn request(requester: Requester, method: &str, params: Value) -> ConfirmationRequest {
+        ConfirmationRequest {
+            method: method.to_owned(),
+            summary: "Allow this?".to_owned(),
+            params,
+            requester,
+            always: None,
+        }
+    }
+
+    /// The product rule: through the Debug API only vault actions wait for a person. A vault dialog method goes to
+    /// the native dialog (which here declines it); every other confirmation, a Full access escalation included, is
+    /// answered by the core with no dialog; the window's own request for the same Full access still goes to the dialog.
+    #[tokio::test]
+    async fn the_debug_api_is_answered_for_itself_except_for_the_vault_dialogs() {
+        let dialog = Dialog::default();
+        let confirmer = DynConfirmer::new(
+            dialog.clone(),
+            Arc::new(Names::default()),
+            vw_session::SessionStore::new(),
+        );
+        for method in crate::vault_scope::DIALOG_METHODS {
+            let answer = confirmer
+                .confirm(&request(Requester::DebugApi, method, json!({})))
+                .await;
+            assert_eq!(
+                answer,
+                Confirmation::Declined,
+                "{method} must reach the dialog"
+            );
+        }
+        assert_eq!(
+            dialog.shown().len(),
+            crate::vault_scope::DIALOG_METHODS.len()
+        );
+
+        let full_access = json!({"sessionId": "s1", "agentName": "auto-approve"});
+        let default_profile = json!({"sessionId": "s1", "ops": [
+            {"op": "set", "path": "/default_agent", "value": "auto-approve"}]});
+        let before = dialog.shown().len();
+        for (method, params) in [
+            ("session/agent/update", full_access.clone()),
+            ("config/write", default_profile),
+            ("config/proxy/write", json!({})),
+            (crate::browser_consent::METHOD, json!({})),
+            ("vibe-work/projectInstructions/delete", json!({})),
+            ("session/delete", json!({"sessionId": "s1"})),
+        ] {
+            let answer = confirmer
+                .confirm(&request(Requester::DebugApi, method, params))
+                .await;
+            assert_eq!(answer, Confirmation::Approved, "{method} must not wait");
+        }
+        assert_eq!(dialog.shown().len(), before, "no dialog for the Debug API");
+
+        let window = confirmer
+            .confirm(&request(
+                Requester::Window,
+                "session/agent/update",
+                full_access,
+            ))
+            .await;
+        assert_eq!(window, Confirmation::Declined);
+        assert_eq!(
+            dialog.shown().last().map(String::as_str),
+            Some("session/agent/update")
+        );
     }
 }

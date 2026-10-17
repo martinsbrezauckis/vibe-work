@@ -19,12 +19,14 @@ impl KeyService {
         entry_id: &str,
     ) -> Result<Vec<EntryPolicy>, KeyError> {
         let vault = self.vault();
-        let items = blocking(move || vault.list_items()).await??;
+        let items = blocking(move || vault.list_items_strict())
+            .await?
+            .map_err(KeyError::permissions_unreadable)?;
         let mut policies = Vec::new();
         for item in &items {
             if item.id.starts_with(entry_permission::ID_PREFIX) {
-                let policy = entry_permission::from_item(item)
-                    .ok_or(KeyError::InvalidSecret("invalid entry permission record"))?;
+                let policy =
+                    entry_permission::from_item(item).ok_or(KeyError::PermissionsUnreadable)?;
                 if policy.entry_id == entry_id {
                     policies.push(policy);
                 }
@@ -43,10 +45,7 @@ impl KeyService {
         items
             .iter()
             .filter(|item| item.id.starts_with(entry_permission::ID_PREFIX))
-            .map(|item| {
-                entry_permission::from_item(item)
-                    .ok_or(KeyError::InvalidSecret("invalid entry permission record"))
-            })
+            .map(|item| entry_permission::from_item(item).ok_or(KeyError::PermissionsUnreadable))
             .collect()
     }
 
@@ -77,7 +76,9 @@ impl KeyService {
     ) -> Result<Option<(EntryPermission, i64)>, KeyError> {
         let id = entry_permission::id_for(project, entry_id);
         let vault = self.vault();
-        let item = blocking(move || vault.read_item(&id)).await??;
+        let item = blocking(move || vault.read_item(&id))
+            .await?
+            .map_err(KeyError::permissions_unreadable)?;
         match item {
             None => Ok(None),
             Some(item) => entry_permission::from_item(&item)
@@ -86,7 +87,7 @@ impl KeyService {
                         && entry_permission::id_for(project, entry_id) == policy.id
                 })
                 .map(|policy| Some((policy.permission, policy.changed_ms)))
-                .ok_or(KeyError::InvalidSecret("invalid entry permission record")),
+                .ok_or(KeyError::PermissionsUnreadable),
         }
     }
 

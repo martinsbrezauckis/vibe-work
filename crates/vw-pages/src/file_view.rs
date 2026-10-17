@@ -82,6 +82,7 @@ impl PagesService {
             *viewer = Viewer {
                 pages_dir: server.root().to_path_buf(),
                 port: server.port(),
+                base_url: server.base_url(),
                 path: Some(path),
                 ..Viewer::default()
             };

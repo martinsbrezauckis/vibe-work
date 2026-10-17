@@ -4,6 +4,7 @@
  * files are the only entries. Every text change is reviewed before saving; deletion asks natively.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
+import { Button } from "../../components/Controls";
 import { IconButton } from "../../components/IconButton";
 import { useStore } from "../../state/createStore";
 import { projectInstructionsFor } from "../../state/projectInstructions";
@@ -33,6 +34,7 @@ function Instructions({ controller, folder }: { controller: ProjectInstructions;
       <div className="key-actions wrap">
         <h4 id="pi-instructions-title">Instructions</h4>
         <button
+          data-testid="projects.project-settings-set-adding"
           type="button"
           className="tb-btn"
           disabled={busy}
@@ -43,6 +45,7 @@ function Instructions({ controller, folder }: { controller: ProjectInstructions;
           New file
         </button>
         <button
+          data-testid="projects.project-settings-refresh"
           type="button"
           className="tb-btn"
           disabled={busy}
@@ -72,7 +75,7 @@ function Instructions({ controller, folder }: { controller: ProjectInstructions;
       )}
       <ul className="pi-files" aria-label="Instruction files">
         {state.files.map((file) => (
-          <li key={file.name} data-instruction-file={file.name}>
+          <li data-item-id={file.name} key={file.name} data-instruction-file={file.name}>
             <div className="pi-file-name mono">{file.name}</div>
             <p className="key-field-hint">
               {file.name === "AGENTS.md"
@@ -85,6 +88,7 @@ function Instructions({ controller, folder }: { controller: ProjectInstructions;
             </p>
             <div className="key-actions wrap">
               <button
+                data-testid="projects.project-settings-open"
                 type="button"
                 className="tb-btn"
                 disabled={busy}
@@ -94,6 +98,7 @@ function Instructions({ controller, folder }: { controller: ProjectInstructions;
               </button>
               {file.name !== "AGENTS.md" && (
                 <button
+                  data-testid="projects.project-settings-link"
                   type="button"
                   className="tb-btn"
                   disabled={busy || !file.editable}
@@ -103,14 +108,16 @@ function Instructions({ controller, folder }: { controller: ProjectInstructions;
                 </button>
               )}
               {file.exists && (
-                <button
+                <Button
+                  data-testid="projects.project-settings-remove"
                   type="button"
-                  className="tb-btn"
+                  small
+                  variant="danger"
                   disabled={busy || !file.editable}
                   onClick={() => void controller.remove(file.name)}
                 >
                   Delete
-                </button>
+                </Button>
               )}
             </div>
           </li>
@@ -133,6 +140,7 @@ function Instructions({ controller, folder }: { controller: ProjectInstructions;
             File name
             <span className="key-field-row">
               <input
+                data-testid="projects.project-settings-set-name"
                 autoFocus
                 aria-label="File name"
                 value={name}
@@ -147,10 +155,16 @@ function Instructions({ controller, folder }: { controller: ProjectInstructions;
           </label>
           <p className="key-field-hint">Created in docs/instructions/ after you review and Save.</p>
           <div className="key-actions">
-            <button type="submit" className="tb-btn" disabled={busy || name === ""}>
+            <button
+              data-testid="projects.project-settings-tb-btn"
+              type="submit"
+              className="tb-btn"
+              disabled={busy || name === ""}
+            >
               Create draft
             </button>
             <button
+              data-testid="projects.project-settings-set-adding-2"
               type="button"
               className="tb-btn"
               disabled={busy}
@@ -214,7 +228,13 @@ export function ProjectSettings({
       <div className="pj-dh">
         <div className="row">
           <h3>Project settings</h3>
-          <IconButton ref={closeRef} icon="x" label="Close project settings" onClick={close} />
+          <IconButton
+            data-testid="projects.project-settings-x"
+            ref={closeRef}
+            icon="x"
+            label="Close project settings"
+            onClick={close}
+          />
         </div>
         <p>{title}</p>
         {folder !== null && <p className="mono">{folder}</p>}
@@ -224,7 +244,12 @@ export function ProjectSettings({
           <p className="key-line">
             Choose a main folder to manage this project's instruction files.
           </p>
-          <button type="button" className="tb-btn" onClick={chooseFolder}>
+          <button
+            data-testid="projects.project-settings-tb-btn-2"
+            type="button"
+            className="tb-btn"
+            onClick={chooseFolder}
+          >
             Choose main folder...
           </button>
         </div>

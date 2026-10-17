@@ -1,0 +1,91 @@
+/*
+ * Loops (recurring prompts): the Loops strip above the message box (features/composer/LoopsStrip.tsx), the mark on
+ * a session's row (features/sessions/LoopsTag.tsx) and the "Loop" tag on a message a loop sent
+ * (features/transcript/rows/MessageRows.tsx). Colours and type come from tokens.css only.
+ */
+.loops {
+  margin-block: 0 8px;
+  min-width: 0;
+  border: 1px solid var(--line-2);
+  border-radius: 9px;
+  background: var(--panel);
+  color: var(--text-2);
+  font-size: var(--text-12-5);
+}
+.loops-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 5px 6px 5px 10px;
+}
+.loops-bar svg {
+  flex: none;
+  color: var(--orange-2);
+}
+.loops-sum {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.loops-body {
+  display: grid;
+  gap: 8px;
+  padding: 8px 10px 10px;
+  border-top: 1px solid var(--line);
+}
+.loops-body > .tb-btn {
+  justify-self: start;
+}
+.loops-list {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+/* The prompt and its schedule stack, Delete sits at the right across both lines: nothing overflows at 390 px. */
+.loops-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    "prompt delete"
+    "when delete";
+  align-items: center;
+  gap: 1px 10px;
+  min-width: 0;
+}
+.loops-prompt {
+  grid-area: prompt;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+}
+.loops-when {
+  grid-area: when;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-3);
+  font-family: var(--font-mono);
+  font-size: var(--text-11);
+}
+.loops-item .tb-btn {
+  grid-area: delete;
+}
+.loops-help {
+  margin: 0;
+  color: var(--text-3);
+  font-size: var(--text-11-5);
+  line-height: var(--leading-helper);
+}
+/* The mark on a session's row: icon only (a word squeezed the title at 1280 px, see the voice chat mark). */
+.loops-row {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  color: var(--orange-2);
+}

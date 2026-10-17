@@ -5,6 +5,7 @@
  * shows why "remember on this computer" did not work, if it did not.
  * Depends on: AppContext, useKeys, KeyStep, fields. Called by: SetupScreen.
  */
+import { Button } from "../../components/Controls";
 import { useState } from "react";
 
 import { placeOf } from "./VibeKeyOffer";
@@ -56,16 +57,18 @@ export function ResultStep() {
             {copy === undefined ? "" : ` in ${placeOf(copy)}`}. Remove it so only the vault holds
             the key?
           </p>
-          <button
+          <Button
+            data-testid="setup.result-step-remove-vibe-copy"
             type="button"
-            className="tb-btn"
+            small
+            variant="danger"
             disabled={busy}
             onClick={() => {
               void keys?.removeVibeCopy(removable);
             }}
           >
             Remove Vibe&apos;s copy
-          </button>
+          </Button>
         </div>
       )}
       {notice !== null && <p className="key-field-hint">{notice}</p>}
@@ -75,7 +78,7 @@ export function ResultStep() {
           <button
             type="button"
             className="btn-primary"
-            data-testid="setup-continue"
+            data-testid="setup.continue"
             onClick={() => {
               keys?.finish();
             }}
@@ -88,7 +91,7 @@ export function ResultStep() {
             <button
               type="button"
               className="btn-primary"
-              data-testid="setup-retry"
+              data-testid="setup.retry"
               disabled={busy}
               onClick={() => {
                 void keys?.testKey();
@@ -98,6 +101,7 @@ export function ResultStep() {
             </button>
             {!replacing && (
               <button
+                data-testid="setup.result-step-set-replacing"
                 type="button"
                 className="tb-btn"
                 onClick={() => {
@@ -108,6 +112,7 @@ export function ResultStep() {
               </button>
             )}
             <button
+              data-testid="setup.result-step-finish"
               type="button"
               className="tb-btn"
               onClick={() => {

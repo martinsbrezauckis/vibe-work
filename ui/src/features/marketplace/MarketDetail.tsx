@@ -7,6 +7,7 @@
  * Invariants: vendor pages open only through the link dialog; the headless browser's note that it has none of the
  * built-in browser's address guards is the catalog's text, shown as is.
  */
+import { Button } from "../../components/Controls";
 import type { ReactElement } from "react";
 
 import type { MarketEntryView, MarketView } from "../../protocol/core";
@@ -42,13 +43,13 @@ function SessionPart({ e }: { e: MarketEntryView }): ReactElement | null {
         </ul>
       )}
       {s.issues.map((issue) => (
-        <p key={issue} className="cwarn">
+        <p key={issue} className="server-note" role="status">
           {issue}
         </p>
       ))}
       <p className="cmuted">
-        Vibe has no switch for single plugin skills or for one session: remove the item to turn it
-        off.
+        Vibe has no switch for single plugin skills or for one session: turn off the plugin to stop
+        it in new chats.
       </p>
     </>
   );
@@ -69,6 +70,7 @@ function ServerRule({ e }: { e: MarketEntryView }): ReactElement | null {
             <>
               {" "}
               <button
+                data-testid="marketplace.market-detail-ask-link"
                 type="button"
                 className="linkish"
                 onClick={() => {
@@ -97,6 +99,7 @@ function Actions({ e }: { e: MarketEntryView }): ReactElement {
     <div className="cactions">
       {action === "add" ? (
         <button
+          data-testid="marketplace.market-detail-add-server"
           type="button"
           className="btn-primary"
           onClick={() => void actions?.addServer(e.entry.id)}
@@ -106,6 +109,7 @@ function Actions({ e }: { e: MarketEntryView }): ReactElement {
       ) : null}
       {action === "addKey" ? (
         <button
+          data-testid="marketplace.market-detail-add-key-server"
           type="button"
           className="btn-primary"
           onClick={() => void actions?.addKeyServer(e.entry.id)}
@@ -115,6 +119,7 @@ function Actions({ e }: { e: MarketEntryView }): ReactElement {
       ) : null}
       {action === "install" || action === "update" ? (
         <button
+          data-testid="marketplace.market-detail-install"
           type="button"
           className="btn-primary"
           disabled={installing !== null}
@@ -124,7 +129,12 @@ function Actions({ e }: { e: MarketEntryView }): ReactElement {
         </button>
       ) : null}
       {running ? (
-        <button type="button" className="tb-btn" onClick={() => void actions?.cancel()}>
+        <button
+          data-testid="marketplace.market-detail-cancel"
+          type="button"
+          className="tb-btn"
+          onClick={() => void actions?.cancel()}
+        >
           Stop
         </button>
       ) : null}
@@ -132,6 +142,7 @@ function Actions({ e }: { e: MarketEntryView }): ReactElement {
         <>
           {e.installed.changed === true ? (
             <button
+              data-testid="marketplace.market-detail-install-2"
               type="button"
               className="tb-btn"
               onClick={() => void actions?.install(e.entry.id)}
@@ -139,9 +150,32 @@ function Actions({ e }: { e: MarketEntryView }): ReactElement {
               Reinstall
             </button>
           ) : null}
-          <button type="button" className="tb-btn" onClick={() => void actions?.remove(e.entry.id)}>
+          {e.folder ? (
+            <button
+              type="button"
+              className="tb-btn"
+              data-testid="marketplace.market-detail-toggle"
+              onClick={() => {
+                if (e.folder)
+                  void actions?.changePlugin(e.off ? "turnOnPlugin" : "turnOffPlugin", e.folder);
+              }}
+            >
+              {e.off ? "Turn on" : "Turn off"}
+            </button>
+          ) : null}
+          <Button
+            data-testid="marketplace.market-detail-remove"
+            type="button"
+            small
+            variant="danger"
+            onClick={() =>
+              e.off && e.folder
+                ? void actions?.changePlugin("removePlugin", e.folder)
+                : void actions?.remove(e.entry.id)
+            }
+          >
             Remove
-          </button>
+          </Button>
         </>
       ) : null}
     </div>
@@ -179,7 +213,11 @@ function Body({ e, view }: { e: MarketEntryView; view: MarketView | null }): Rea
         </p>
       ) : null}
       {e.entry.notes.map((n) => (
-        <p key={n} className={n.includes("address guards") ? "cwarn" : "cmuted"}>
+        <p
+          key={n}
+          role="status"
+          className={n.includes("address guards") ? "server-note" : "cmuted"}
+        >
           {n}
         </p>
       ))}
@@ -203,6 +241,7 @@ function Body({ e, view }: { e: MarketEntryView; view: MarketView | null }): Rea
       {e.entry.homepage === undefined ? null : (
         <p>
           <button
+            data-testid="marketplace.market-detail-ask-link-2"
             type="button"
             className="linkish"
             onClick={() => {
@@ -228,7 +267,12 @@ export function MarketDetail(): ReactElement | null {
   if (e === null) return null;
   return (
     <aside className="cdetail" aria-label={`${e.entry.name} details`} data-testid="market-detail">
-      <button type="button" className="tb-btn cdetail-close" onClick={() => actions?.select(null)}>
+      <button
+        data-testid="marketplace.market-detail-select"
+        type="button"
+        className="tb-btn cdetail-close"
+        onClick={() => actions?.select(null)}
+      >
         Close
       </button>
       <Body e={e} view={view} />

@@ -75,7 +75,22 @@ export function createLineComments(app: App, core: CoreController, changes: Chan
         if (result.type === "list") {
           store.set((s) => ({
             ...s,
-            comments: { ...s.comments, [sessionId]: result.comments },
+            comments: {
+              ...s.comments,
+              [sessionId]: result.comments.map((view) => ({
+                ...view,
+                comment: {
+                  ...view.comment,
+                  // Sent is permanent; an older list can finish after markSent's successful reply.
+                  sentMs:
+                    view.comment.sentMs ??
+                    s.comments[sessionId]?.find(
+                      (previous) => previous.comment.id === view.comment.id,
+                    )?.comment.sentMs ??
+                    null,
+                },
+              })),
+            },
             error: { ...s.error, [sessionId]: null },
           }));
         }
@@ -176,7 +191,7 @@ export function createLineComments(app: App, core: CoreController, changes: Chan
      */
     async send(sessionId: string, ids: readonly string[], origin: Origin = "ui"): Promise<number> {
       const all = store.get().comments[sessionId] ?? [];
-      let inserted = 0;
+      const inserted: string[] = [];
       for (const view of all.filter((c) => ids.includes(c.comment.id))) {
         const chip = commentChip(view, controller.currentLines(sessionId, view));
         const outcome = insertChip(app, sessionId, chip, origin);
@@ -184,17 +199,29 @@ export function createLineComments(app: App, core: CoreController, changes: Chan
           setError(sessionId, outcome.reason);
           break;
         }
-        inserted += 1;
+        inserted.push(view.comment.id);
       }
-      if (inserted > 0) {
+      if (inserted.length > 0) {
         try {
-          await run({ op: "markSent", sessionId, ids: [...ids] });
+          await run({ op: "markSent", sessionId, ids: inserted });
+          const sentMs = Date.now();
+          store.set((s) => ({
+            ...s,
+            comments: {
+              ...s.comments,
+              [sessionId]: (s.comments[sessionId] ?? []).map((view) =>
+                inserted.includes(view.comment.id)
+                  ? { ...view, comment: { ...view.comment, sentMs: view.comment.sentMs ?? sentMs } }
+                  : view,
+              ),
+            },
+          }));
           await controller.load(sessionId);
         } catch (thrown) {
           setError(sessionId, toCallError(thrown).error.message);
         }
       }
-      return inserted;
+      return inserted.length;
     },
 
     /** Stops following events. */

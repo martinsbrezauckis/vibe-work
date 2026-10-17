@@ -23,6 +23,7 @@ export function TodoStrip({ todos }: { todos: readonly Todo[] }): ReactElement {
   return (
     <div className="todo-strip">
       <button
+        data-testid="transcript.todo-strip-toggle"
         type="button"
         className="todo-h"
         aria-expanded={open}

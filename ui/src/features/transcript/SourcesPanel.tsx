@@ -44,6 +44,7 @@ export function SourcesPanel(): ReactElement | null {
   };
   return (
     <aside
+      data-testid="transcript.sources-panel-sources-panel"
       ref={ref}
       className="sources-panel"
       aria-labelledby="sources-panel-title"
@@ -57,6 +58,7 @@ export function SourcesPanel(): ReactElement | null {
       <header>
         <h2 id="sources-panel-title">Sources ({String(sources.items.length)})</h2>
         <button
+          data-testid="transcript.sources-panel-mini"
           type="button"
           className="mini sources-close"
           aria-label="Close sources (Escape)"

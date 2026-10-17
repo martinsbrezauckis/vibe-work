@@ -36,6 +36,8 @@ pub enum Policy {
     /// The visual check's own empty document: no script of its own (the engine's script measures), frames of this
     /// server only.
     CheckHost,
+    /// App-owned parent of a sandboxed prototype with inline controls: no page scripts, one local frame.
+    InlineHost,
     /// The File tab's servers: [`csp`] with `scripts`.
     Files {
         /// Inline and same-origin scripts may run.
@@ -68,11 +70,11 @@ impl Policy {
             )
         };
         match self {
-            Self::Document | Self::CheckHost => format!(
+            Self::Document | Self::CheckHost | Self::InlineHost => format!(
                 "default-src 'self'; script-src 'none'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; \
                  font-src 'self' data:; media-src 'self'; connect-src 'none'; frame-src {}; child-src {0}; \
                  worker-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'",
-                if self == Self::CheckHost {
+                if matches!(self, Self::CheckHost | Self::InlineHost) {
                     "'self'"
                 } else {
                     "'none'"

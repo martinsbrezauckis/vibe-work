@@ -34,11 +34,16 @@ pub struct EnginePoolSnapshot {
     pub idle_timeout_minutes: u32,
 }
 
+/// Reads usable total memory in GiB and available memory in MiB.
+/// Hosts may inject a probe; absent readings conservatively admit one engine.
+pub type MemoryProbe = Arc<dyn Fn() -> (Option<u64>, Option<u64>) + Send + Sync>;
+
 pub(crate) const IDLE_TIMEOUT: Duration = Duration::from_secs(600);
 const SETTINGS_FILE: &str = "engine-pool.json";
 
 #[derive(Default)]
 pub(crate) struct PoolState {
+    memory_probe: Option<MemoryProbe>,
     pub(crate) configured: String,
     pub(crate) active: HashMap<String, Instant>,
     pub(crate) waiting: HashSet<String>,
@@ -74,20 +79,24 @@ impl Drop for BrowserSaveGuard {
 }
 
 impl PoolState {
-    pub(crate) fn load(root: &Path) -> Self {
+    pub(crate) fn load(root: &Path, memory_probe: Option<MemoryProbe>) -> Self {
         let configured = std::fs::read_to_string(root.join(SETTINGS_FILE))
             .ok()
             .and_then(|data| serde_json::from_str::<String>(&data).ok())
             .filter(|value| valid_setting(value))
             .unwrap_or_else(|| "auto".to_owned());
         Self {
+            memory_probe,
             configured,
             ..Self::default()
         }
     }
 
     pub(crate) fn snapshot(&self) -> EnginePoolSnapshot {
-        let (total, free) = detect_memory();
+        let (total, free) = self
+            .memory_probe
+            .as_ref()
+            .map_or_else(detect_memory, |probe| probe());
         let mut active_sessions: Vec<_> = self.active.keys().cloned().collect();
         let mut waiting_sessions: Vec<_> = self.waiting.iter().cloned().collect();
         active_sessions.sort();

@@ -23,6 +23,8 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
 tracing = "0.1"
+blake3 = "1.8"
+cap-std = "4.0.3"
 ts-rs = { version = "12.0.1", optional = true, features = ["serde-json-impl", "no-serde-warnings"] }
 
 # Handle-relative opens for the `.worktreeinclude` copy: every path level is opened with O_NOFOLLOW

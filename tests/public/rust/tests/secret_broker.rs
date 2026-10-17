@@ -6,6 +6,7 @@ mod agent_tools;
 mod common;
 mod procmon;
 
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock};
 
 use agent_tools::{Dirs, call, credential_of, rig_with};
@@ -70,6 +71,33 @@ async fn secrets(core: &vw_core_api::Core, origin: Origin, request: Value) -> Va
     }
 }
 
+/// A 200-character canonical project folder, removed on drop even when the test panics.
+/// Deep folders must fit the native consent without changing the pinned command or its arguments.
+struct DeepProject {
+    root: PathBuf,
+    folder: PathBuf,
+}
+
+impl DeepProject {
+    fn new(name: &str) -> Self {
+        let root = std::env::temp_dir().join(format!("{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let root = std::fs::canonicalize(root).unwrap();
+        let padding = 200 - root.to_string_lossy().chars().count() - 1;
+        let folder = root.join("p".repeat(padding));
+        std::fs::create_dir_all(&folder).unwrap();
+        assert_eq!(folder.to_string_lossy().chars().count(), 200);
+        Self { root, folder }
+    }
+}
+
+impl Drop for DeepProject {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.root);
+    }
+}
+
 fn run_args(program: &str, args: &[&str], env: Value) -> Value {
     json!({"program": program, "args": args, "env": env, "purpose": "deploy the test site"})
 }
@@ -101,8 +129,8 @@ async fn the_secret_broker_end_to_end() {
         .unwrap();
     let svc = service.clone();
     let rig = rig_with(&dirs, "broker", move |c| c.keys = Some(svc)).await;
-    let project = dirs.root.join("project");
-    std::fs::create_dir_all(&project).unwrap();
+    let deep_project = DeepProject::new("vwb");
+    let project = deep_project.folder.clone();
     // The program prints the value plainly, as base64 and inside JSON, and writes it to a side file (the falsifier:
     // the output really carried it).
     std::fs::write(
@@ -146,6 +174,21 @@ async fn the_secret_broker_end_to_end() {
             .filter(|r| r.method == method)
             .count()
     };
+
+    // The visible summary, rather than the private JSON payload, determines admission.
+    let oversized = call(
+        &who,
+        "secret_run",
+        run_args("sh", &["printer.sh", &"x".repeat(1500)], env.clone()),
+    )
+    .await
+    .unwrap_err();
+    assert!(
+        oversized.contains("too long to show the user in full"),
+        "{oversized}"
+    );
+    assert_eq!(dialogs("vibe-work/secretRun"), 0);
+    assert!(!project.join("proof.txt").exists());
 
     // Once.
     rig.confirmer.then(Confirmation::Approved);
@@ -198,7 +241,24 @@ async fn the_secret_broker_end_to_end() {
             .collect::<Vec<_>>()
             .join("\n")
     });
+    assert_eq!(dialog.params["args"], json!([project.join("printer.sh")]));
+    assert_eq!(dialog.params["folder"], json!(project));
+    assert!(format!("{:#}", dialog.params).chars().count() > vw_host::DIALOG_PARAMS_MAX_CHARS);
+    assert!(
+        native.chars().count() < vw_host::DIALOG_PARAMS_MAX_CHARS,
+        "{native}"
+    );
+    assert_eq!(
+        native
+            .matches(&vw_gate::dialog_quote(&project.to_string_lossy()))
+            .count(),
+        1
+    );
     for fact in [
+        "Deploy token",
+        "Files checked:",
+        "deploy the test site",
+        "120 seconds",
         "DEPLOY_TOKEN",
         "printer.sh",
         "Program:",
@@ -285,7 +345,11 @@ async fn the_secret_broker_end_to_end() {
     let other = call(
         &who,
         "secret_run",
-        run_args("printenv", &["DEPLOY_TOKEN"], env.clone()),
+        run_args(
+            env!("CARGO_BIN_EXE_secret_exec_helper"),
+            &["printenv", "DEPLOY_TOKEN"],
+            env.clone(),
+        ),
     )
     .await
     .unwrap();
@@ -307,7 +371,11 @@ async fn the_secret_broker_end_to_end() {
     let echoed = call(
         &who,
         "secret_run",
-        run_args("echo", &["$DEPLOY_TOKEN"], env.clone()),
+        run_args(
+            env!("CARGO_BIN_EXE_secret_exec_helper"),
+            &["echo", "$DEPLOY_TOKEN"],
+            env.clone(),
+        ),
     )
     .await
     .unwrap();
@@ -393,8 +461,7 @@ async fn the_secret_broker_end_to_end() {
         json!({"op": "revoke", "grantId": grant["id"]}),
     )
     .await;
-    // Grants are whole ms; a revoke in the same ms as the next dialog's start voids its answer.
-    tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+    common::revoke::after_revoke(&service, grant["id"].as_str().unwrap()).await;
     rig.confirmer.then(Confirmation::Declined);
     let declined = call(
         &who,

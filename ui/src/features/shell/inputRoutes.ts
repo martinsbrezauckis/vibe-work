@@ -47,12 +47,31 @@ function target(selector: unknown, index: unknown): HTMLElement {
   return el;
 }
 
-/** Registers `click` and `key`; returns the function that removes them. */
+const INTERACTIVE =
+  "button,a,input,select,textarea,summary,[role='button'],[role='tab'],[role='menuitem'],[role='option'],[role='switch'],[role='combobox']";
+
+function triggerId(element: Element): string | null {
+  const control = element.closest(INTERACTIVE);
+  return (control ?? element.closest("[data-testid]"))?.getAttribute("data-testid") ?? null;
+}
+
+/** Registers input and read-only trace routes; returns the function that removes them. */
 export function registerInputRoutes(app: App): () => void {
+  const onClick = (event: MouseEvent) => {
+    app.uiControl.clickTrigger(event.target instanceof Element ? triggerId(event.target) : null);
+  };
+  document.addEventListener("click", onClick, true);
   const off = [
+    app.uiControl.register("trace", (body) => {
+      const { since = 0 } = asObject(body);
+      if (typeof since !== "number" || !Number.isSafeInteger(since) || since < 0)
+        throw new UiControlError("invalidParams", "since must be a non-negative safe integer");
+      return app.uiControl.trace.read(since);
+    }),
     app.uiControl.register("click", (body) => {
       const { selector, index } = asObject(body);
       const el = target(selector, index);
+      app.uiControl.clickTrigger(triggerId(el));
       el.focus();
       // Commit click effects before uiControl drains their commands and releases the request's capability.
       flushSync(() => {
@@ -85,6 +104,7 @@ export function registerInputRoutes(app: App): () => void {
     }),
   ];
   return () => {
+    document.removeEventListener("click", onClick, true);
     for (const remove of off) remove();
   };
 }

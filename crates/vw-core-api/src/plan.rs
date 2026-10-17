@@ -3,7 +3,7 @@
 //!
 //! Depends on: `command`. Called by: `dispatch`.
 //! Invariant: every command that reaches Vibe is planned as `Session` or `Forward`, and both are
-//! executed only through the gate; `Local` commands read core state and send nothing.
+//! executed only through the gate; `Local` commands use the core's dedicated handlers.
 
 use serde_json::{Map, Value, json};
 
@@ -30,7 +30,7 @@ pub(crate) enum Planned {
         /// Only the typed composer access switch may use the trusted-window Full access exception.
         trusted_access_switch: bool,
     },
-    /// Handled by the core itself (reads, callbacks, confirmations, listing).
+    /// Handled by the core itself (reads, selection, callbacks, confirmations, listing).
     Local(Command),
 }
 

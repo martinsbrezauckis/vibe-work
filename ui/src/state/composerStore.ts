@@ -1,7 +1,8 @@
 /**
  * The composer's state: per session the draft text, the context chips and attached images,
  * sends in flight, the keys of a failed send (so pressing Enter again resends without a duplicate turn),
- * the skills for the `/` menu, which menu is open, the queued turn being edited and the rewind dialog.
+ * the skills for the `/` menu, the session's loops (recurring prompts) as last read, which menu is open, the queued
+ * turn being edited and the rewind dialog.
  * Plain state and small mutations only; the actions that talk to the core are in `composerSend.ts`,
  * `composerSession.ts` and `composerRewind.ts`.
  * Depends on: createStore, the composer model (drafts, message types). Called by: createComposer
@@ -33,11 +34,16 @@ import {
   withDraft,
   withoutDrafts,
 } from "../features/composer/model/drafts";
+import type { LoopRow } from "../features/composer/model/loops";
 import type { ContextItem, ImageItem } from "../features/composer/model/message";
 import { createStore } from "./createStore";
 import { loadDefaultReasoning, saveDefaultReasoning } from "./defaultReasoning";
 
 /** Keys of a send that failed in transport, reused when the same content is sent again. */
+/** The plain note when Vibe refuses to load changed plugins into an open chat. */
+export const PLUGIN_RELOAD_REFUSED =
+  "This chat cannot load the new plugins. A new chat starts with them.";
+
 export interface ResendKeys {
   /** The content they belong to (`contentKey`). */
   content: string;
@@ -76,8 +82,17 @@ export interface ComposerState {
   compacting: Readonly<Record<string, true>>;
   /** A short message under the composer per session (a refused send, a stale steer). */
   notes: Readonly<Record<string, string>>;
+  /** Chats whose plugin reload failed; their note offers a new chat. */
+  pluginReloadFailed: Readonly<Record<string, true>>;
   resend: Readonly<Record<string, ResendKeys>>;
   skills: Readonly<Record<string, readonly SkillEntry[]>>;
+  /**
+   * Each session's loops as `loops/list` last answered (absent: not read yet). The session row's mark and the Loops
+   * list read it; only `composerLoops.ts` writes it.
+   */
+  loops: Readonly<Record<string, readonly LoopRow[]>>;
+  /** Sessions whose Loops list is expanded (collapsed is the default: one line). */
+  loopsOpen: Readonly<Record<string, true>>;
   /** Models from `config/read`, for sessions whose runtime is not known yet. */
   config: JsonValue | null;
   /** New-chat preference; null follows the model. Unsupported saved levels stay saved. */
@@ -127,8 +142,11 @@ const EMPTY: ComposerState = {
   sending: {},
   compacting: {},
   notes: {},
+  pluginReloadFailed: {},
   resend: {},
   skills: {},
+  loops: {},
+  loopsOpen: {},
   config: null,
   defaultReasoning: null,
   menu: null,
@@ -142,7 +160,7 @@ const EMPTY: ComposerState = {
 
 /** One message as it was in the composer when the user pressed the key. */
 export interface SentContent {
-  /** Put back by the app (not typed): never a command. */
+  /** Recovered drafts need explicit adoption; separate button commands keep their own intent. */
   literal: boolean;
   /** Who wrote any of it: `debug-api` when a Debug API client did (the send then uses its origin). */
   by: "user" | "debug-api";
@@ -391,13 +409,42 @@ export function createComposerStore(persist: boolean) {
       }));
     },
     note(sessionId: string, text: string | null): void {
-      store.set((s) => ({ ...s, notes: setIn(s.notes, sessionId, text ?? undefined) }));
+      store.set((s) => ({
+        ...s,
+        notes: setIn(s.notes, sessionId, text ?? undefined),
+        pluginReloadFailed: setIn(s.pluginReloadFailed, sessionId, undefined),
+      }));
+    },
+    // Vibe's own reason ("cannot re-pin ... non-quiescent") is internal wording: it is logged, not shown.
+    pluginReloadRefused(sessionId: string): void {
+      store.set((s) => ({
+        ...s,
+        pluginReloadFailed: setIn(s.pluginReloadFailed, sessionId, true),
+        notes: setIn(s.notes, sessionId, PLUGIN_RELOAD_REFUSED),
+      }));
+    },
+    pluginReloaded(sessionId: string): void {
+      store.set((s) => ({
+        ...s,
+        pluginReloadFailed: setIn(s.pluginReloadFailed, sessionId, undefined),
+      }));
     },
     setResend(sessionId: string, keys: ResendKeys | null): void {
       store.set((s) => ({ ...s, resend: setIn(s.resend, sessionId, keys ?? undefined) }));
     },
     setSkills(sessionId: string, skills: readonly SkillEntry[]): void {
       store.set((s) => ({ ...s, skills: setIn(s.skills, sessionId, skills) }));
+    },
+    /** Keeps the loops `loops/list` answered for a session. */
+    setLoops(sessionId: string, loops: readonly LoopRow[]): void {
+      store.set((s) => ({ ...s, loops: setIn(s.loops, sessionId, loops) }));
+    },
+    /** Expands or collapses a session's Loops list. */
+    setLoopsOpen(sessionId: string, open: boolean): void {
+      store.set((s) => {
+        if ((s.loopsOpen[sessionId] === true) === open) return s;
+        return { ...s, loopsOpen: setIn(s.loopsOpen, sessionId, open ? true : undefined) };
+      });
     },
     setConfig(config: JsonValue): void {
       store.set((s) => ({ ...s, config }));
@@ -410,6 +457,18 @@ export function createComposerStore(persist: boolean) {
     },
     setEditing(editing: ComposerState["editing"]): void {
       store.set((s) => ({ ...s, editing }));
+    },
+    /** Keeps an edit whose queued message has gone, alongside any message already being typed. */
+    restoreQueueEdit(sessionId: string, text: string): void {
+      store.set((s) => {
+        const draft = s.drafts[sessionId] ?? "";
+        return {
+          ...s,
+          drafts: withDraft(s.drafts, sessionId, draft === "" ? text : `${draft}\n\n${text}`),
+          literal: setIn(s.literal, sessionId, true),
+          editing: null,
+        };
+      });
     },
     setRewind(rewind: RewindDialog | null): void {
       store.set((s) => ({ ...s, rewind }));
@@ -426,7 +485,19 @@ export function createComposerStore(persist: boolean) {
     forget(ids: readonly string[]): void {
       store.set((s) => {
         const drafts = withoutDrafts(s.drafts, ids);
-        let { context, images, resend, skills, notes, literal, draftBy, compacting } = s;
+        let {
+          context,
+          images,
+          resend,
+          skills,
+          loops,
+          loopsOpen,
+          notes,
+          literal,
+          draftBy,
+          compacting,
+          pluginReloadFailed,
+        } = s;
         for (const id of ids) {
           literal = setIn(literal, id, undefined);
           draftBy = setIn(draftBy, id, undefined);
@@ -434,8 +505,11 @@ export function createComposerStore(persist: boolean) {
           images = setIn(images, id, undefined);
           resend = setIn(resend, id, undefined);
           skills = setIn(skills, id, undefined);
+          loops = setIn(loops, id, undefined);
+          loopsOpen = setIn(loopsOpen, id, undefined);
           notes = setIn(notes, id, undefined);
           compacting = setIn(compacting, id, undefined);
+          pluginReloadFailed = setIn(pluginReloadFailed, id, undefined);
         }
         return {
           ...s,
@@ -444,10 +518,13 @@ export function createComposerStore(persist: boolean) {
           images,
           resend,
           skills,
+          loops,
+          loopsOpen,
           notes,
           literal,
           draftBy,
           compacting,
+          pluginReloadFailed,
         };
       });
     },

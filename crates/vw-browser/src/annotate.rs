@@ -120,17 +120,20 @@ fn script(page: &str, session_id: &str, op: &str, mode: &str) -> String {
     scripts::annotate(&json!({"page": page, "name": accessor(session_id), "op": op, "mode": mode}))
 }
 
-/// Runs an annotation in `session_id`'s browser (`box_mode`: draw a box; else click an element).
-///
-/// # Errors
-/// A plain-text reason (nothing open, cancelled, no answer within a minute).
-pub async fn annotate(
+/// The script for a named target: `target` is `{ref}`, `{selector}`, `{x, y}` or (box mode) `{rect}`.
+fn target_script(page: &str, session_id: &str, mode: &str, target: &serde_json::Value) -> String {
+    scripts::annotate(&json!({
+        "page": page, "name": accessor(session_id), "op": "target", "mode": mode, "target": target,
+    }))
+}
+
+/// Starts the overlay and polls until a person picks, cancels, or a minute passes.
+async fn wait_for_pick(
     service: &PreviewService,
     page: &str,
     session_id: &str,
-    box_mode: bool,
-) -> Result<Annotation, String> {
-    let mode = if box_mode { "box" } else { "element" };
+    mode: &'static str,
+) -> Result<Raw, String> {
     let ask = |op: &'static str| async move {
         let raw = service
             .evaluate(session_id, script(page, session_id, op, mode))
@@ -151,6 +154,39 @@ pub async fn annotate(
                 .to_owned(),
         );
     }
+    Ok(answer)
+}
+
+/// Runs an annotation in `session_id`'s browser (`box_mode`: draw a box; else click an element). With `target` (a
+/// request names the element or area, as the Debug API does, because no person points) it answers at once with what
+/// a click or a drawn box would have given, and never shows an overlay or waits.
+///
+/// # Errors
+/// A plain-text reason (nothing open, cancelled, no answer within a minute; for a target: nothing there, or an
+/// invalid selector).
+pub async fn annotate(
+    service: &PreviewService,
+    page: &str,
+    session_id: &str,
+    box_mode: bool,
+    target: Option<&serde_json::Value>,
+) -> Result<Annotation, String> {
+    let mode = if box_mode { "box" } else { "element" };
+    let answer = match target {
+        Some(target) => {
+            let raw = service
+                .evaluate(session_id, target_script(page, session_id, mode, target))
+                .await
+                .map_err(|e| e.to_string())?;
+            let answer = parse_answer::<Raw>(&raw)?;
+            match answer.state.as_str() {
+                "picked" => answer,
+                "invalid" => return Err("the selector is not a valid CSS selector".to_owned()),
+                _ => return Err("no element matches the target".to_owned()),
+            }
+        }
+        None => wait_for_pick(service, page, session_id, mode).await?,
+    };
     let mut annotation = Annotation {
         mode: clip(&answer.mode, 10),
         reference: answer.reference.filter(|r| is_ref(r)),

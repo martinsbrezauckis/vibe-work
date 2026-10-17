@@ -62,6 +62,7 @@ export function registerChangesRoute(
             },
       turns: (view?.turns ?? []).map((t) => ({
         number: t.number,
+        subagent: t.subagent ?? null,
         files: t.files.map((f) => f.path),
       })),
       offerHistory:

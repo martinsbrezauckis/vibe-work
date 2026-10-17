@@ -145,7 +145,7 @@ export type FileRefView = {
  */
 text: string, 
 /**
- * The file may be shown. False says nothing more (missing and not allowed look the same).
+ * One file may be shown directly. Without choices, false keeps missing and refused paths indistinguishable.
  */
 ok: boolean, 
 /**
@@ -163,7 +163,33 @@ kind: FileKind | null,
 /**
  * Size in bytes.
  */
-size: number | null, };
+size: number | null, 
+/**
+ * Several allowed files share the name; the user must choose. Absent for a single hit or a refusal.
+ */
+choices?: Array<FileChoice>, 
+/**
+ * Full count when more than 50 choices passed the scope check.
+ */
+total?: number, };
+
+export type FileChoice = { 
+/**
+ * Session-bound handle, rechecked before every use.
+ */
+file: string, 
+/**
+ * Path relative to the session folder.
+ */
+display: string, 
+/**
+ * Kind suggested by the file name.
+ */
+kind: FileKind, 
+/**
+ * Size in bytes.
+ */
+size: number, };
 
 export type FileContent = { 
 /**

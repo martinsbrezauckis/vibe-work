@@ -121,6 +121,14 @@ pub fn fullpage(page: &str, op: &str, y: f64) -> String {
     assemble(FULLPAGE, &json!({"page": page, "op": op, "y": y}))
 }
 
+/// Full-page helper bound to one capture's temporary state in the original document.
+pub(crate) fn fullpage_capture(page: &str, op: &str, y: f64, token: &str) -> String {
+    assemble(
+        FULLPAGE,
+        &json!({"page": page, "op": op, "y": y, "capture": token}),
+    )
+}
+
 /// The user's selection or element picker for a vault save.
 #[must_use]
 pub fn secret_choice(page: &str, mode: &str, op: &str) -> String {

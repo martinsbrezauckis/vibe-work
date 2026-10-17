@@ -16,6 +16,7 @@ import type {
   CoreEvent,
   FileContent,
   FileKind,
+  FileChoice,
   FilesRequest,
   FilesResult,
   Rect,
@@ -26,6 +27,7 @@ import type { DropReport } from "../features/files/drop";
 import type { CoreController } from "./coreStore";
 import { createStore } from "./createStore";
 import { pruneSessions } from "./prune";
+import { beginFileEdit, normalizeEditText, observeFileEdit, type FileEdit } from "./fileEdits";
 
 /** Maximum inline images kept ready for display. */
 const IMAGE_CACHE = 30;
@@ -34,6 +36,7 @@ const IMAGE_CACHE = 30;
 export type RefState =
   | { status: "pending" }
   | { status: "no" }
+  | { status: "choices"; choices: readonly FileChoice[]; total: number }
   | { status: "ok"; file: string; display: string; kind: FileKind | null; size: number | null };
 
 /** A file the tab shows or showed. */
@@ -50,6 +53,7 @@ export interface FileTab {
   recent: readonly Shown[];
   status: "idle" | "loading" | "ready" | "gone" | "error";
   error: string | null;
+  editNotice: string | null;
   /** The last content read for `shown` (kept while reloading and after a delete). */
   content: FileContent | null;
   /** `rendered` (Markdown rendered, HTML/PDF in the viewer, images) or `source` (the text). */
@@ -65,6 +69,8 @@ export interface FilesState {
   tabs: Readonly<Record<string, FileTab>>;
   /** The last drop on each session's composer (what was attached, what was refused and why). */
   drops: Readonly<Record<string, DropReport>>;
+  /** Open buffers retain their own baseline even when the disk preview advances. */
+  edits: Readonly<Record<string, FileEdit>>;
 }
 
 /** Most entries in a tab's recent list. */
@@ -81,6 +87,7 @@ const EMPTY_TAB: FileTab = {
   recent: [],
   status: "idle",
   error: null,
+  editNotice: null,
   content: null,
   mode: "rendered",
   viewer: null,
@@ -99,7 +106,7 @@ export function viewerKind(kind: FileKind | null | undefined): boolean {
 
 /** Creates the controller. */
 export function createFiles(core: CoreController) {
-  const store = createStore<FilesState>({ refs: {}, tabs: {}, drops: {} });
+  const store = createStore<FilesState>({ refs: {}, tabs: {}, drops: {}, edits: {} });
   const queue = new Map<string, Set<string>>();
   let timer: ReturnType<typeof setTimeout> | null = null;
 
@@ -119,6 +126,53 @@ export function createFiles(core: CoreController) {
   };
   const setTab = (sessionId: string, update: (tab: FileTab) => FileTab) => {
     store.set((s) => ({ ...s, tabs: { ...s.tabs, [sessionId]: update(tabOf(s, sessionId)) } }));
+  };
+  const edit = {
+    begin(sessionId: string): boolean {
+      const tab = tabOf(store.get(), sessionId);
+      if (tab.status !== "ready" || tab.content === null) return false;
+      if (store.get().edits[sessionId] !== undefined) return true;
+      const draft = beginFileEdit(tab.content);
+      if (draft === null) return false;
+      store.set((s) => ({ ...s, edits: { ...s.edits, [sessionId]: draft } }));
+      return true;
+    },
+    update(sessionId: string, patch: Partial<Omit<FileEdit, "id" | "base" | "disk">>): void {
+      store.set((s) => {
+        const draft = s.edits[sessionId];
+        return draft === undefined
+          ? s
+          : {
+              ...s,
+              edits: {
+                ...s.edits,
+                [sessionId]: {
+                  ...draft,
+                  ...patch,
+                  ...(patch.text === undefined ? {} : { text: normalizeEditText(patch.text) }),
+                },
+              },
+            };
+      });
+    },
+    cancel(sessionId: string): void {
+      store.set((s) => {
+        const next = Object.fromEntries(Object.entries(s.edits).filter(([id]) => id !== sessionId));
+        return { ...s, edits: next };
+      });
+    },
+    /** Explicitly discard edits after a successful fresh read. */
+    takeDisk(sessionId: string): boolean {
+      const current = store.get().edits[sessionId];
+      if (current === undefined || current.saving) return false;
+      const tab = tabOf(store.get(), sessionId);
+      const shown = tab.shown?.file === current.base.file;
+      if (shown && (tab.status !== "ready" || tab.content === null)) return false;
+      const draft = beginFileEdit(shown ? (tab.content ?? current.disk) : current.disk);
+      if (draft === null) return false;
+      store.set((s) => ({ ...s, edits: { ...s.edits, [sessionId]: draft } }));
+      return true;
+    },
   };
 
   const flush = async (): Promise<void> => {
@@ -143,7 +197,13 @@ export function createFiles(core: CoreController) {
                     kind: ref.kind,
                     size: ref.size,
                   }
-                : { status: "no" };
+                : ref.choices !== undefined && ref.choices.length > 1
+                  ? {
+                      status: "choices",
+                      choices: ref.choices,
+                      total: ref.total ?? ref.choices.length,
+                    }
+                  : { status: "no" };
           }
           setRefs(sessionId, update);
         } catch {
@@ -223,7 +283,20 @@ export function createFiles(core: CoreController) {
     try {
       const result = await run(origin, { op: "read", sessionId, file: target.file });
       if (!current() || result.kind !== "content") return;
-      setTab(sessionId, (t) => ({ ...t, status: "ready", content: result.content }));
+      store.set((s) => {
+        const draft = s.edits[sessionId];
+        return {
+          ...s,
+          tabs: {
+            ...s.tabs,
+            [sessionId]: { ...tabOf(s, sessionId), status: "ready", content: result.content },
+          },
+          edits:
+            draft === undefined
+              ? s.edits
+              : { ...s.edits, [sessionId]: observeFileEdit(draft, result.content) },
+        };
+      });
       if (viewerKind(result.content.kind) && store.get().tabs[sessionId]?.mode === "rendered") {
         const viewed = await run(origin, { op: "view", sessionId, file: target.file });
         if (current() && viewed.kind === "viewer")
@@ -240,10 +313,56 @@ export function createFiles(core: CoreController) {
     }
   };
 
+  /** Refresh the edited file even when a different file is waiting to be shown after Save or Cancel. */
+  const refreshDraft = async (origin: "ui" | "debug-api", sessionId: string): Promise<boolean> => {
+    const draft = store.get().edits[sessionId];
+    if (draft === undefined) return false;
+    const gen = tabOf(store.get(), sessionId).gen;
+    try {
+      const result = await run(origin, { op: "read", sessionId, file: draft.base.file });
+      if (
+        result.kind !== "content" ||
+        result.content.file !== draft.base.file ||
+        store.get().edits[sessionId]?.id !== draft.id
+      )
+        return false;
+      store.set((s) => {
+        const tab = tabOf(s, sessionId);
+        return {
+          ...s,
+          tabs:
+            tab.shown?.file === draft.base.file && tab.gen === gen
+              ? {
+                  ...s.tabs,
+                  [sessionId]: { ...tab, content: result.content, status: "ready", error: null },
+                }
+              : s.tabs,
+          edits: {
+            ...s.edits,
+            [sessionId]: observeFileEdit(s.edits[sessionId] ?? draft, result.content),
+          },
+        };
+      });
+      return true;
+    } catch (thrown) {
+      if (store.get().edits[sessionId]?.id === draft.id)
+        edit.update(sessionId, { problem: toCallError(thrown).error.message });
+      return false;
+    }
+  };
+
   /** One origin's actions (the window's own clicks, or the `ui/files` route). */
   const actions = (origin: "ui" | "debug-api") => ({
     /** Shows a resolved file in `sessionId`'s tab (and puts it first in the recent list). */
     async show(sessionId: string, shown: Shown): Promise<void> {
+      const draft = store.get().edits[sessionId];
+      if (
+        tabOf(store.get(), sessionId).shown?.file !== shown.file &&
+        draft !== undefined &&
+        !draft.saving &&
+        draft.text === draft.base.text
+      )
+        edit.cancel(sessionId);
       setTab(sessionId, (t) => ({
         ...t,
         shown,
@@ -251,8 +370,46 @@ export function createFiles(core: CoreController) {
         content: t.shown?.file === shown.file ? t.content : null,
         viewer: t.shown?.file === shown.file ? t.viewer : null,
         mode: t.shown?.file === shown.file ? t.mode : "rendered",
+        editNotice: null,
       }));
       await load(origin, sessionId);
+      if (store.get().edits[sessionId]?.base.file !== shown.file)
+        await refreshDraft(origin, sessionId);
+    },
+    /** Open from a file link, then begin editing only that read's complete text. */
+    async showForEdit(sessionId: string, shown: Shown): Promise<void> {
+      const loading = this.show(sessionId, shown);
+      const gen = tabOf(store.get(), sessionId).gen;
+      await loading;
+      const tab = tabOf(store.get(), sessionId);
+      if (tab.gen !== gen || tab.shown?.file !== shown.file || tab.status !== "ready") return;
+      const draft = store.get().edits[sessionId];
+      const reason =
+        draft !== undefined && draft.base.file !== shown.file
+          ? "Save or cancel your current edit first."
+          : tab.content?.tooLarge === true
+            ? "The file is too large to edit here."
+            : tab.content?.truncated === true
+              ? "Only the start of the file was read."
+              : null;
+      if (reason !== null || !edit.begin(sessionId))
+        setTab(sessionId, (t) => ({
+          ...t,
+          editNotice: `The editor did not open. ${reason ?? "This file has no editable text."}`,
+        }));
+    },
+    /** Resolve for a link menu with this origin, keeping choices available to the caller. */
+    async resolveRef(sessionId: string, text: string): Promise<RefState> {
+      const result = await run(origin, { op: "resolve", sessionId, paths: [text] });
+      const ref = result.kind === "resolved" ? result.refs[0] : undefined;
+      const state: RefState =
+        ref?.ok === true && ref.file !== null && ref.display !== null
+          ? { status: "ok", file: ref.file, display: ref.display, kind: ref.kind, size: ref.size }
+          : ref?.choices !== undefined && ref.choices.length > 1
+            ? { status: "choices", choices: ref.choices, total: ref.total ?? ref.choices.length }
+            : { status: "no" };
+      setRefs(sessionId, { [text]: state });
+      return state;
     },
     /** Resolves `text` with this origin's scope and shows it; false when it is not a file the app may show. */
     async openText(sessionId: string, text: string, line: number | null = null): Promise<boolean> {
@@ -263,17 +420,37 @@ export function createFiles(core: CoreController) {
       return true;
     },
     /** Reads the shown file again. */
-    reload(sessionId: string): Promise<void> {
-      return load(origin, sessionId);
+    async reload(sessionId: string): Promise<void> {
+      await load(origin, sessionId);
+      const draft = store.get().edits[sessionId];
+      if (draft !== undefined && draft.base.file !== tabOf(store.get(), sessionId).shown?.file)
+        await refreshDraft(origin, sessionId);
+    },
+    /** Explicit discard uses a fresh read of the edited file, never the pending preview. */
+    async reloadEdit(sessionId: string): Promise<boolean> {
+      const draft = store.get().edits[sessionId];
+      if (draft === undefined || draft.saving) return false;
+      return (await refreshDraft(origin, sessionId)) && edit.takeDisk(sessionId);
     },
     /** Rendered view or source text. */
     async setMode(sessionId: string, mode: FileTab["mode"]): Promise<void> {
       setTab(sessionId, (t) => ({ ...t, mode }));
       if (mode === "rendered") await load(origin, sessionId);
     },
-    /** Empties the tab. */
+    /**
+     * Closes the shown file only: it leaves the tab's file list and the next file in the list is shown. The tab is
+     * empty only when it was the last file (emptying the whole tab looked as if every file in the list was closed).
+     */
     close(sessionId: string): void {
-      setTab(sessionId, (t) => ({ ...EMPTY_TAB, recent: t.recent, gen: t.gen + 1 }));
+      const draft = store.get().edits[sessionId];
+      if (draft?.saving || (draft !== undefined && draft.text !== draft.base.text))
+        throw new Error("Save or Cancel your edit before closing the file.");
+      edit.cancel(sessionId);
+      const before = tabOf(store.get(), sessionId);
+      const rest = before.recent.filter((r) => r.file !== before.shown?.file);
+      setTab(sessionId, (t) => ({ ...EMPTY_TAB, recent: rest, gen: t.gen + 1 }));
+      const next = rest[0];
+      if (next !== undefined) void this.show(sessionId, { ...next, line: null });
     },
     /**
      * Saves `text` as the shown file's whole content. The core refuses when the file changed
@@ -289,10 +466,13 @@ export function createFiles(core: CoreController) {
       base?: { file: string; fingerprint: string },
     ): Promise<{ kind: "saved" } | { kind: "stale" } | { kind: "error"; message: string }> {
       const tab = store.get().tabs[sessionId];
+      const draft = store.get().edits[sessionId];
       const file = base?.file ?? tab?.shown?.file;
       const fingerprint = base?.fingerprint ?? tab?.content?.fingerprint;
       if (file === undefined || fingerprint === undefined)
         return { kind: "error", message: "No file is shown." };
+      if (draft !== undefined && draft.base.file !== file)
+        return { kind: "error", message: "The editor's file is no longer shown." };
       try {
         await run(origin, { op: "write", sessionId, file, text, fingerprint });
       } catch (thrown) {
@@ -305,8 +485,12 @@ export function createFiles(core: CoreController) {
       return { kind: "saved" };
     },
     /** Opens the shown file with its default app, or shows it in its folder (the core asks where it must). */
-    async external(sessionId: string, what: "open" | "reveal"): Promise<string | null> {
-      const file = store.get().tabs[sessionId]?.shown?.file;
+    async external(
+      sessionId: string,
+      what: "open" | "reveal",
+      handle?: string,
+    ): Promise<string | null> {
+      const file = handle ?? store.get().tabs[sessionId]?.shown?.file;
       if (file === undefined) return null;
       try {
         await run(origin, { op: what, sessionId, file });
@@ -334,6 +518,9 @@ export function createFiles(core: CoreController) {
     } catch {
       // The next tick tries again.
     }
+    const draft = store.get().edits[sessionId];
+    if (draft !== undefined && draft.base.file !== tabOf(store.get(), sessionId).shown?.file)
+      await refreshDraft("ui", sessionId);
   };
 
   /** Where the viewer goes (null: hidden). Serialized; only the newest placement is sent. */
@@ -362,7 +549,7 @@ export function createFiles(core: CoreController) {
 
   // a deleted session's entries go with it.
   core.onSessionsGone((ids) => {
-    store.set((s) => pruneSessions(s, ["refs", "tabs", "drops"], ids));
+    store.set((s) => pruneSessions(s, ["refs", "tabs", "drops", "edits"], ids));
   });
   /** Reads `sessionId`'s viewer state again (after `filesChanged`, or a missed one). */
   const readViewer = (sessionId: string): void => {
@@ -395,6 +582,7 @@ export function createFiles(core: CoreController) {
 
   return {
     store,
+    edit,
     want,
     image,
     noteDrop,

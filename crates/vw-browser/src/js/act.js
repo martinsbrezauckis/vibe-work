@@ -46,6 +46,7 @@
   // through here before any event reaches the page. A changed document must be observed and classified again.
   if (
     (authPage || REQ.consent) &&
+    !REQ.postconditionOnly &&
     !REQ.nativeUser &&
     !["hover", "scroll"].includes(REQ.action)
   ) {
@@ -189,6 +190,31 @@
     if (setter && setter.set) setter.set.call(el, value);
     else el.value = value;
   };
+  const checkedState = (el) => el.localName === "input"
+    ? Boolean(el.checked) : el.getAttribute("aria-checked") === "true";
+  const requestedOption = (el) => {
+    const want = String(REQ.value || ""), options = Array.from(el.options || []);
+    return options.find((o) => o.value === want) ||
+      options.find((o) => clip(o.label || o.text, 200) === clip(want, 200)) ||
+      options.find((o) => clip(o.label || o.text, 200).toLowerCase() === clip(want, 200).toLowerCase());
+  };
+  const postcondition = (el, target) => {
+    if (REQ.action === "check") {
+      const checked = checkedState(el);
+      return result(checked === (REQ.checked !== false) ? "done" : "unmet", { target, checked });
+    }
+    if (REQ.action === "select") {
+      const option = requestedOption(el), selected = el.options?.[el.selectedIndex];
+      return result(option && selected === option ? "done" : "unmet", {
+        target, value: clip(selected?.label || selected?.text, 200),
+      });
+    }
+    if (REQ.action === "type") {
+      const actual = String(el.isContentEditable ? el.innerText : el.value);
+      return result(actual === String(REQ.text || "") ? "done" : "unmet", { target, value: clip(actual, 300) });
+    }
+    return result("error", { message: "this action has no requested control state" });
+  };
   const typeInto = (el, text) => {
     if (el.focus) el.focus({ preventScroll: true });
     if (
@@ -304,6 +330,8 @@
       const secret = secretKind(el);
       if (secret) return result("secret", { kind: secret, target });
     }
+    // A second host call reads the settled state. It sends no input, focus or scroll events.
+    if (REQ.postconditionOnly) return postcondition(el, target);
     if (el.scrollIntoView && action !== "press" && !REQ.nativeValidateOnly)
       el.scrollIntoView({
         block: "center",
@@ -342,14 +370,10 @@
     if (action === "scroll")
       return result("done", { target, scrollY: Math.round(window.scrollY) });
     if (action === "type") {
-      if (!typeInto(el, String(REQ.text || "")))
-        return result("notActionable", {
-          failed: ["the page cancelled the input"],
-          target,
-        });
-      const effect = REQ.submit ? press(el, "Enter") : null;
-      const shown = clip(el.isContentEditable ? el.innerText : el.value, 300);
-      return result("done", { target, value: shown, effect });
+      typeInto(el, String(REQ.text || ""));
+      const answer = JSON.parse(postcondition(el, target));
+      if (answer.status === "done" && REQ.submit) answer.effect = press(el, "Enter");
+      return JSON.stringify(answer);
     }
     if (action === "select") {
       if (el.localName !== "select")
@@ -357,16 +381,8 @@
           message: "this element is not a select box (use click)",
           target,
         });
-      const want = String(REQ.value || "");
       const options = Array.from(el.options || []);
-      const option =
-        options.find((o) => o.value === want) ||
-        options.find((o) => clip(o.label || o.text, 200) === clip(want, 200)) ||
-        options.find(
-          (o) =>
-            clip(o.label || o.text, 200).toLowerCase() ===
-            clip(want, 200).toLowerCase(),
-        );
+      const option = requestedOption(el);
       if (!option)
         return result("noOption", {
           options: options
@@ -378,21 +394,17 @@
       setValue(el, option.value);
       fire(el, "input", "Event", { bubbles: true });
       fire(el, "change", "Event", { bubbles: true });
-      return result("done", {
-        target,
-        value: clip(option.label || option.text, 200),
-      });
+      return postcondition(el, target);
     }
     if (action === "check") {
-      const state = () =>
-        el.localName === "input"
-          ? Boolean(el.checked)
-          : el.getAttribute("aria-checked") === "true";
       const want = REQ.checked !== false;
-      if (state() !== want) clickLike(el, hitPoint);
-      return result("done", { target, checked: state() });
+      if (checkedState(el) !== want) clickLike(el, hitPoint);
+      return postcondition(el, target);
     }
     if (action === "press") {
+      // A checked text submission still requires the same value at the instant Enter is dispatched.
+      if (REQ.expectedText !== undefined && String(el.isContentEditable ? el.innerText : el.value) !== REQ.expectedText)
+        return result("unmet", { target });
       const key = String(REQ.key || "Enter");
       return result("done", { target, effect: press(el, key) });
     }

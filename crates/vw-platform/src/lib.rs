@@ -10,11 +10,14 @@
 //! Invariant: the only crate allowed to relax the `unsafe_code` ban, and only behind a safe API with a SAFETY comment.
 //! Only `process` (macOS `proc_pidinfo`, Windows process handles) and `webview` (feature `webview`: `WebView2` and
 //! `WKWebView` screenshots), `native_click` (scoped webview input), `private_file` (Windows DACLs and
-//! owners) and `window_keys` (the
+//! owners), `background` (per-thread scheduling) and `window_keys` (the
 //! main window's bare Alt tap) use it, and `content_rules` (macOS `WKContentRuleList` per preview webview,
 //! with URL rules).
 
+#[allow(unsafe_code)]
+mod background;
 pub mod clipboard;
+pub use background::lower_thread_priority;
 #[cfg(target_os = "macos")]
 #[allow(unsafe_code)]
 mod clipboard_mac;

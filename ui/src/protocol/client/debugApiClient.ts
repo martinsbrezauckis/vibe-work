@@ -49,7 +49,9 @@ export const EVENT_NAMES = [
   "lineCommentsChanged",
   "projectsChanged",
   "worktreesChanged",
+  "gitBrowserChanged",
   "secretsChanged",
+  "secretScan",
   "dictation",
   "connectorSignIn",
   "marketInstall",
@@ -128,6 +130,8 @@ export function createDebugApiClient(): CoreClient {
     pickFolder: () => unsupported("the folder picker works in the app, not in browser dev mode"),
     pickDocuments: () =>
       unsupported("the document picker works in the app, not in browser dev mode"),
+    pickCertificate: () =>
+      unsupported("the certificate picker works in the app, not in browser dev mode"),
     pickLibraryFiles: () =>
       unsupported("the library file picker works in the app, not in browser dev mode"),
     exportPage: () =>

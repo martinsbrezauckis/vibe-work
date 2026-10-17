@@ -18,6 +18,7 @@ export function Link({ url, label }: { url: string; label: string }) {
   return (
     <>
       <button
+        data-testid="setup.vibe-offer-details-open-link"
         type="button"
         className="key-link"
         onClick={() => {
@@ -53,7 +54,7 @@ export function OfferDetails({ offer }: { offer: InstallOffer }) {
         <Link url={offer.docsUrl} label="Vibe's documentation" />
       </p>
       <details>
-        <summary>Commands that will run</summary>
+        <summary data-testid="setup.vibe-offer-details-summary">Commands that will run</summary>
         <ol className="vibe-commands">
           {offer.steps.map((step) => (
             <li key={step}>

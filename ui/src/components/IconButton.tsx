@@ -17,6 +17,7 @@ export function IconButton({
   className = "",
   ...props
 }: Omit<ComponentProps<"button">, "children" | "aria-label"> & {
+  "data-testid": string;
   icon: IconName;
   /** Smaller glyphs for dense row actions; the button retains its own hit area. */
   iconSize?: ComponentProps<typeof Icon>["size"];
@@ -28,6 +29,7 @@ export function IconButton({
     <button
       type="button"
       {...props}
+      data-testid={props["data-testid"]}
       className={`ibtn ${className}`}
       aria-label={label}
       title={title}

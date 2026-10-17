@@ -26,6 +26,7 @@ mod launches;
 pub(crate) mod panel;
 mod preview_tools;
 mod process_reply;
+mod secret_dialog;
 mod secret_exec;
 mod secret_pin;
 mod secret_run;

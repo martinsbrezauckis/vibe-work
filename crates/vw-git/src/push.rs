@@ -289,8 +289,8 @@ pub fn rejection(stdout: &str, stderr: &str) -> String {
     if both.contains("[rejected]")
         && (both.contains("non-fast-forward") || both.contains("fetch first"))
     {
-        return "The remote branch has commits this branch does not have, so git did not push (Vibe Work never \
-                force-pushes). Bring those commits in first: ask Vibe to update the copy from the remote, or use \
+        return "The server has changes this branch does not have, so nothing was pushed (Vibe Work never \
+                overwrites the server). Get those changes first: ask Vibe to update this branch from the server, or use \
                 your own git tool."
             .to_owned();
     }
@@ -317,4 +317,18 @@ pub fn rejection(stdout: &str, stderr: &str) -> String {
             400
         )
     )
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn rejected_push_explains_server_changes_without_overwriting() {
+        let expected = "The server has changes this branch does not have, so nothing was pushed (Vibe Work never overwrites the server). Get those changes first: ask Vibe to update this branch from the server, or use your own git tool.";
+        for reason in ["non-fast-forward", "fetch first"] {
+            assert_eq!(
+                super::rejection(&format!("[rejected] {reason}"), ""),
+                expected
+            );
+        }
+    }
 }

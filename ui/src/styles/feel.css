@@ -13,7 +13,6 @@
 .ibtn,
 .pbtn,
 .btn-primary,
-.btn-danger,
 .pj-btn,
 .pages-btn,
 .preview-btn,
@@ -71,7 +70,6 @@
     .ibtn,
     .pbtn,
     .btn-primary,
-    .btn-danger,
     .pj-btn,
     .pages-btn,
     .preview-btn,
@@ -230,7 +228,7 @@
   gap: 6px;
   animation: vw-rise 200ms var(--ease-out);
 }
-.jump-latest:hover {
+.jump-latest:hover:where(:not(:disabled)) {
   background: var(--hover);
 }
 
@@ -379,6 +377,12 @@
   align-content: start;
   min-height: 150px;
   pointer-events: none;
+}
+.sk-row {
+  display: flex;
+  align-items: center;
+  height: calc(var(--text-13-5) * var(--leading-ui) + 12px);
+  padding-left: 30px;
 }
 .sk {
   position: relative;

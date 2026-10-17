@@ -28,7 +28,7 @@
 //! Invariants:
 //! - Writes only our scratch folder (removed after each inspection) and, like the Changes tab, loose objects
 //!   for changed files (unreachable, pruned by git's normal gc).
-//! - [`Inspection::fingerprint`] covers every listed path, kind, unmerged commit and blocker: a removal names it,
+//! - [`Inspection::fingerprint`] covers listed paths, kinds, bytes, staged objects, unmerged commits and blockers: a removal names it,
 //!   so it acts only on the state the user saw.
 
 use std::path::Path;
@@ -40,6 +40,9 @@ use vw_changes::git::{Call, Index};
 use vw_changes::{FileStatus, SessionDir};
 
 use crate::error::WorktreeError;
+
+#[path = "inspect_content.rs"]
+mod content;
 
 const READ: Duration = Duration::from_secs(30);
 /// Unmerged commits named (the count is always complete).
@@ -171,12 +174,12 @@ impl Inspection {
             blockers: Vec::new(),
             fingerprint: String::new(),
         };
-        gone.fingerprint = fingerprint(&gone);
+        gone.fingerprint = fingerprint(&gone, &[]);
         gone
     }
 }
 
-fn fingerprint(i: &Inspection) -> String {
+fn fingerprint(i: &Inspection, content: &[u8]) -> String {
     let mut parts: Vec<Vec<u8>> = vec![
         vec![u8::from(i.exists)],
         i.branch.clone().unwrap_or_default().into_bytes(),
@@ -187,8 +190,13 @@ fn fingerprint(i: &Inspection) -> String {
     parts.push(i.unmerged_total.to_string().into_bytes());
     parts.extend(i.unmerged.iter().map(|c| c.clone().into_bytes()));
     parts.extend(i.blockers.iter().map(|b| b.clone().into_bytes()));
-    let refs: Vec<&[u8]> = parts.iter().map(Vec::as_slice).collect();
-    vw_changes::fnv_hex(&refs)
+    parts.push(content.to_vec());
+    let mut hash = blake3::Hasher::new();
+    for part in parts {
+        hash.update(&(part.len() as u64).to_le_bytes());
+        hash.update(&part);
+    }
+    hash.finalize().to_hex().to_string()
 }
 
 fn nul_list(out: &[u8]) -> Vec<String> {
@@ -284,7 +292,14 @@ pub fn inspect(
         blockers,
         fingerprint: String::new(),
     };
-    found.fingerprint = fingerprint(&found);
+    let bytes = content::fingerprint(&root, &found.files)?;
+    // A staged change may differ even when the working file was restored to HEAD.
+    let staged_objects = git(
+        &root,
+        &["diff-index", "--cached", "--raw", "-z", "HEAD", "--"],
+    )?;
+    let content = [bytes.as_bytes(), staged_objects.as_slice()].concat();
+    found.fingerprint = fingerprint(&found, &content);
     Ok(found)
 }
 

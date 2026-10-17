@@ -43,6 +43,7 @@ mod mcp_url;
 mod picked;
 mod privileged;
 mod profile;
+mod proxy_write;
 mod runtime_view;
 mod session_rules;
 mod shape;

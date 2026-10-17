@@ -7,14 +7,18 @@
  * Invariants: a handler failure becomes an error reply (the Debug API caller gets a code and a
  * message, never a hung request); an unknown name is a `notFound` reply; the loop never throws
  * and backs off after a transport error; in the real app it only polls while the Debug API is on;
- * the reply is built only after the commands the request sent under its capability were answered by
- * the host, or after `DRAIN_MS`.
+ * slow handlers and tracked commands acknowledge within `REPLY_MS` with a pending id; their final reply follows
+ * on the same transport. Pure state reads remain available; another action answers busy until completion.
+ * The capability stays attached to that one action through its awaits and command drain, for at most `LEASE_MS`:
+ * a wait nobody ends (a native dialog with no person at it) lets go then, like the host's lease does.
  */
 import type {
   UiControlReply,
   UiControlRequest,
   UiControlTransport,
 } from "../protocol/client/types";
+import { createCommandTrace } from "./commandTrace";
+import { createWalkthrough } from "./walkthrough";
 import type { ErrorCode } from "../protocol/core";
 
 /** A handler's failure with a machine-readable code (the Debug API maps it to a status). */
@@ -31,14 +35,28 @@ export class UiControlError extends Error {
 export type UiHandler = (body: unknown) => unknown;
 
 /**
- * Longest wait, after a handler returned, for the commands it started under its capability. Below the
- * Debug API's 10 s UI timeout; a command still running then keeps running, the reply just stops waiting for it.
+ * Drain interval for tracked commands. Direct callers have a bounded drain; the transport acknowledges slow
+ * work and keeps draining in the background until all of the action's commands have finished.
  */
 export const DRAIN_MS = 3_000;
+/** A slow action acknowledges within this budget and completes through the same transport later. */
+export const REPLY_MS = 50;
+/**
+ * How long an acknowledged action keeps the one busy slot and its capability. The host drops both after
+ * `JOB_LIMIT` (`crates/vw-host/src/bridge.rs`, ten minutes, started a moment after this one): it refuses the
+ * capability and discards the answer from then on. The window must let go no later, or every command it sends
+ * (its own clicks included: they are marked with the serving capability) would be refused as a dead claim and every
+ * other action would answer busy until the app restarts. A test keeps the two in step.
+ */
+export const LEASE_MS = 10 * 60_000;
 
 /** Creates a registry of handlers. */
 export function createUiControl() {
-  const handlers = new Map<string, UiHandler>();
+  const trace = createCommandTrace();
+  let clicked: string | null = null;
+  let requestTrigger: string | null = null;
+  const handlers = new Map<string, { handler: UiHandler; readOnly: (body: unknown) => boolean }>();
+  let active: string | null = null;
   // The capabilities of the requests being served right now (the newest last); while any is, the core
   // controller marks every command as the Debug API's and passes the capability (logs, refusal events
   // and the transcript say who acted; the host accepts the Debug API origin, which
@@ -49,12 +67,20 @@ export function createUiControl() {
   // them: the host accepts the capability only while the request is pending, and Tauri does not keep invokes in
   // order, so a command sent before the reply could reach the host after it and be refused.
   const inflight = new Map<string, Set<Promise<unknown>>>();
-  const drain = async (capability: string): Promise<void> => {
+  // Whole actions include deferred commands, such as the prepare/show native menu handoff.
+  const actions = new Map<string, Set<Promise<unknown>>>();
+  // `over` turns true once the action let go (its lease ended): the wait stops, so no timer runs on for it.
+  const drain = async (
+    capability: string,
+    bounded: boolean,
+    over: () => boolean,
+  ): Promise<void> => {
     const deadline = Date.now() + DRAIN_MS;
     for (;;) {
       const pending = inflight.get(capability);
-      const left = deadline - Date.now();
-      if (pending === undefined || pending.size === 0 || left <= 0) return;
+      const actionPending = (actions.get(capability)?.size ?? 0) > 0;
+      const left = bounded && !actionPending ? deadline - Date.now() : DRAIN_MS;
+      if (over() || pending === undefined || pending.size === 0 || left <= 0) return;
       let timer: ReturnType<typeof setTimeout> | undefined;
       await Promise.race([
         Promise.allSettled([...pending]),
@@ -66,11 +92,26 @@ export function createUiControl() {
     }
   };
   return {
+    walkthrough: createWalkthrough(),
+    trace,
+    /** Marks a click for commands dispatched during the same turn; later unrelated work has no trigger. */
+    clickTrigger(testId: string | null): void {
+      clicked = testId;
+      if (serving.length > 0) requestTrigger = testId;
+      queueMicrotask(() => {
+        clicked = null;
+      });
+    },
+    /** The active click, including awaits while a Debug API click request is still pending. */
+    trigger(): string | null {
+      return clicked ?? requestTrigger;
+    },
     /**
      * Records a command the core controller sent with `capability`; the request's reply waits for it (bounded by
-     * [`DRAIN_MS`]). Returns `promise` unchanged.
+     * [`DRAIN_MS`]). Whole actions (`untilComplete`) retain the capability through deferred commands.
+     * Returns `promise` unchanged.
      */
-    track<T>(capability: string, promise: Promise<T>): Promise<T> {
+    track<T>(capability: string, promise: Promise<T>, untilComplete = false): Promise<T> {
       let set = inflight.get(capability);
       if (set === undefined) {
         set = new Set();
@@ -81,8 +122,19 @@ export function createUiControl() {
         () => undefined,
       );
       set.add(entry);
+      let actionSet = actions.get(capability);
+      if (untilComplete) {
+        if (actionSet === undefined) {
+          actionSet = new Set();
+          actions.set(capability, actionSet);
+        }
+        actionSet.add(entry);
+      }
       void entry.then(() => {
         set.delete(entry);
+        actionSet?.delete(entry);
+        if (actionSet?.size === 0 && actions.get(capability) === actionSet)
+          actions.delete(capability);
         if (set.size === 0 && inflight.get(capability) === set) inflight.delete(capability);
       });
       return promise;
@@ -99,9 +151,13 @@ export function createUiControl() {
       return serving.length > 0 ? (serving[serving.length - 1] ?? "") : null;
     },
     /** Registers `name`; returns the function that removes it. Throws on a duplicate. */
-    register(name: string, handler: UiHandler): () => void {
+    register(
+      name: string,
+      handler: UiHandler,
+      readOnly: (body: unknown) => boolean = () => false,
+    ): () => void {
       if (handlers.has(name)) throw new Error(`ui route ${name} is already registered`);
-      handlers.set(name, handler);
+      handlers.set(name, { handler, readOnly });
       return () => {
         handlers.delete(name);
       };
@@ -111,39 +167,89 @@ export function createUiControl() {
       return [...handlers.keys()];
     },
     /** Runs one request and builds its reply. */
-    async handle(request: UiControlRequest): Promise<UiControlReply> {
-      const handler = handlers.get(request.name);
-      if (handler === undefined) {
+    async handle(
+      request: UiControlRequest,
+      completed?: (reply: UiControlReply) => Promise<void>,
+    ): Promise<UiControlReply> {
+      const route = handlers.get(request.name);
+      if (route === undefined) {
         return {
           id: request.id,
           ok: false,
           error: { code: "notFound", message: `the UI has no route ${request.name}` },
         };
       }
+      const readOnly = route.readOnly(request.body);
+      if (active !== null && !readOnly) {
+        return {
+          id: request.id,
+          ok: true,
+          value: { pendingId: active, state: "busy", poll: "/ui/requests" },
+        };
+      }
       const capability = request.capability ?? "";
-      serving.push(capability);
-      let reply: UiControlReply;
-      try {
-        reply = { id: request.id, ok: true, value: await handler(request.body) };
-      } catch (thrown) {
-        if (thrown instanceof UiControlError) {
-          reply = {
-            id: request.id,
-            ok: false,
-            error: { code: thrown.code, message: thrown.message },
-          };
-        } else {
-          const message = thrown instanceof Error ? thrown.message : "the UI route failed";
-          reply = { id: request.id, ok: false, error: { code: "internal", message } };
+      // A pure read cannot send commands or take another action's capability.
+      if (!readOnly) serving.push(capability);
+      // Gives up the capability and the busy slot. Runs once: when the action finishes or when its lease ends.
+      let held = true;
+      const release = (): void => {
+        if (!held) return;
+        held = false;
+        if (!readOnly) {
+          serving.splice(serving.lastIndexOf(capability), 1);
+          if (serving.length === 0) requestTrigger = null;
         }
-      }
-      try {
-        // Still serving while it waits: a command a pending one starts is marked and waited for too.
-        await drain(capability);
-      } finally {
-        serving.splice(serving.lastIndexOf(capability), 1);
-      }
-      return reply;
+        if (active === request.id) active = null;
+      };
+      const work = (async (): Promise<UiControlReply> => {
+        let reply: UiControlReply;
+        try {
+          reply = { id: request.id, ok: true, value: await route.handler(request.body) };
+        } catch (thrown) {
+          const code = thrown instanceof UiControlError ? thrown.code : "internal";
+          const message = thrown instanceof Error ? thrown.message : "the UI route failed";
+          reply = { id: request.id, ok: false, error: { code, message } };
+        }
+        try {
+          // Still serving while it waits: a command a pending one starts is marked and waited for too.
+          if (!readOnly) await drain(capability, completed === undefined, () => !held);
+        } finally {
+          release();
+        }
+        return reply;
+      })();
+      if (completed === undefined) return work;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const reply = await Promise.race([
+        work,
+        new Promise<null>((resolve) => {
+          timer = setTimeout(() => {
+            resolve(null);
+          }, REPLY_MS);
+        }),
+      ]);
+      clearTimeout(timer);
+      if (reply !== null) return reply;
+      active = request.id;
+      // The wait may never end (a native dialog nobody answers). At the lease's end the window lets go and drops the
+      // late answer: the host no longer has the request, so it would refuse it anyway.
+      let expired = false;
+      const lease = setTimeout(() => {
+        expired = true;
+        release();
+      }, LEASE_MS);
+      void work
+        .then((done) => {
+          clearTimeout(lease);
+          return expired ? undefined : completed(done);
+        })
+        .catch(() => undefined);
+      return {
+        id: request.id,
+        ok: true,
+        pending: true,
+        value: { pendingId: request.id, state: "pending", poll: "/ui/requests" },
+      };
     },
   };
 }
@@ -171,7 +277,29 @@ export async function runUiControl(
     }
     try {
       const request = await transport.next(waitMs);
-      if (request !== null) await transport.reply(await control.handle(request));
+      if (request !== null) {
+        let acknowledge!: () => void;
+        const acknowledged = new Promise<void>((resolve) => {
+          acknowledge = resolve;
+        });
+        const reply = await control.handle(request, async (done) => {
+          await acknowledged;
+          for (;;) {
+            try {
+              await transport.reply(done);
+              return;
+            } catch {
+              if (signal.aborted) return;
+              await sleep(1500);
+            }
+          }
+        });
+        try {
+          await transport.reply(reply);
+        } finally {
+          acknowledge();
+        }
+      }
     } catch {
       await sleep(1500);
     }

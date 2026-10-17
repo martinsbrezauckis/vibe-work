@@ -76,6 +76,21 @@ impl Installer<'_> {
     /// # Errors
     /// Any [`MarketError`]; on error nothing in `plugins/` changed.
     pub async fn install(&self, id: &str, on: OnStep<'_>) -> Result<Receipt, MarketError> {
+        self.install_with_commit(id, on, &|id, root| self.store.commit(id, root))
+            .await
+    }
+
+    /// Installs with a synchronous publication step so the app can record user approval together with the move.
+    /// Downloads and setup finish before `commit` runs; cancellation still cleans up the staging folder.
+    ///
+    /// # Errors
+    /// Any build or publication error; an uncommitted staging folder is removed.
+    pub async fn install_with_commit(
+        &self,
+        id: &str,
+        on: OnStep<'_>,
+        commit: &(dyn Fn(&str, &Path) -> Result<(), MarketError> + Send + Sync),
+    ) -> Result<Receipt, MarketError> {
         let entry = self
             .catalog
             .entry(id)
@@ -137,7 +152,7 @@ impl Installer<'_> {
             serde_json::to_vec_pretty(&receipt).map_err(|e| MarketError::Catalog(e.to_string()))?;
         crate::assemble::write_new(&root.join(crate::store::RECEIPT), &text)
             .map_err(|e| MarketError::io("write the receipt", e))?;
-        self.store.commit(id, &root)?;
+        commit(id, &root)?;
         guard.armed = false;
         Ok(receipt)
     }
@@ -393,6 +408,9 @@ async fn run_step(
 ) -> Result<(), MarketError> {
     let mut command = tokio::process::Command::new(runtime);
     command.env_clear();
+    // No console window for an install step (the app has no console of its own).
+    #[cfg(windows)]
+    command.creation_flags(0x0800_0000);
     for name in STEP_ENV {
         if let Some(value) = std::env::var_os(name) {
             command.env(name, value);

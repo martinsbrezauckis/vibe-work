@@ -5,6 +5,7 @@
  * asks its native confirmation and writes the new key.
  */
 import { useId, useState } from "react";
+import { TEXT } from "../../vocabulary";
 import { Badge, Button, LinkButton, RowDisclosure } from "../../components/Controls";
 
 import { when } from "../../state/secrets";
@@ -79,22 +80,24 @@ export function MistralKeyDetails({ location }: { location: "account" | "vault" 
                 : "No Mistral key is in use."}
         </p>
       )}
-      {location === "account" && <p className="key-field-hint">Agents never see values.</p>}
+      {location === "account" && <p className="key-field-hint ui-help">Agents never see values.</p>}
       {location === "account" && (
-        <button
+        <Button
+          data-testid="secrets.mistral-key-settings-open-settings"
           type="button"
-          className="tb-btn"
+          small
           onClick={() => {
             shell.actions.openSettings("secrets", "vault-mistral-key");
           }}
         >
           Manage in Vault
-        </button>
+        </Button>
       )}
-      <div className="key-actions wrap" role="group" aria-label="Mistral key actions">
+      <div className="set-actions" role="group" aria-label="Mistral key actions">
         {location === "vault" && (
           <>
             <LinkButton
+              data-testid="secrets.mistral-key-settings-open-settings-2"
               onClick={() => {
                 shell.actions.openSettings("account", "mistral-key");
               }}
@@ -102,6 +105,7 @@ export function MistralKeyDetails({ location }: { location: "account" | "vault" 
               Account
             </LinkButton>
             <LinkButton
+              data-testid="secrets.mistral-key-settings-open-settings-3"
               onClick={() => {
                 shell.actions.openSettings("usage", "session-usage");
               }}
@@ -113,6 +117,7 @@ export function MistralKeyDetails({ location }: { location: "account" | "vault" 
         {ready && !replacing && (
           <>
             <Button
+              data-testid="secrets.mistral-key-settings-test-key"
               small
               type="button"
               disabled={busy}
@@ -123,6 +128,7 @@ export function MistralKeyDetails({ location }: { location: "account" | "vault" 
               Test
             </Button>
             <Button
+              data-testid="secrets.mistral-key-settings-clear-problem"
               small
               type="button"
               disabled={busy}
@@ -136,15 +142,16 @@ export function MistralKeyDetails({ location }: { location: "account" | "vault" 
           </>
         )}
         {!ready && availability === "ready" && (
-          <button
+          <Button
+            data-testid="secrets.mistral-key-settings-open-settings-4"
             type="button"
-            className="tb-btn"
+            small
             onClick={() => {
               shell.actions.openSettings("account");
             }}
           >
             {locked ? "Unlock in Account" : "Set up the key"}
-          </button>
+          </Button>
         )}
       </div>
       {ready && replacing && (
@@ -165,6 +172,7 @@ export function MistralKeyDetails({ location }: { location: "account" | "vault" 
             <label htmlFor={inputId}>New Mistral key</label>
             <div className="key-field-row">
               <input
+                data-testid="secrets.mistral-key-settings-set-value"
                 id={inputId}
                 type="password"
                 data-secret="true"
@@ -181,21 +189,33 @@ export function MistralKeyDetails({ location }: { location: "account" | "vault" 
               />
             </div>
           </div>
-          <p className="key-field-hint">
+          <p className="key-field-hint ui-help">
             A native confirmation asks before replacing the key used by sessions.
           </p>
           {problem !== null && (
-            <p className="key-line" role="alert">
+            <p className="key-problem" role="alert">
               {problem.text}
             </p>
           )}
-          <div className="key-actions wrap">
-            <button type="submit" className="tb-btn primary" disabled={busy || value.trim() === ""}>
+          <div className="set-actions">
+            <Button
+              data-testid="secrets.mistral-key-settings-tb-btn"
+              type="submit"
+              small
+              variant="primary"
+              disabled={busy || value.trim() === ""}
+            >
               Replace and test
-            </button>
-            <button type="button" className="tb-btn" disabled={busy} onClick={close}>
+            </Button>
+            <Button
+              data-testid="secrets.mistral-key-settings-tb-btn-2"
+              type="button"
+              small
+              disabled={busy}
+              onClick={close}
+            >
               Cancel
-            </button>
+            </Button>
           </div>
         </form>
       )}
@@ -216,6 +236,7 @@ export function MistralKeyRow({
     <div className="vault-model-key-row" data-setting="vault-mistral-key">
       <div className="check secrets-row">
         <RowDisclosure
+          data-testid="secrets.mistral-key-settings-on-expanded-change"
           type="button"
           aria-label={`${expanded ? "Hide" : "Show"} details for Mistral key`}
           aria-expanded={expanded}
@@ -224,8 +245,8 @@ export function MistralKeyRow({
             onExpandedChange(!expanded);
           }}
         >
-          <span className="secrets-name">Mistral key</span>
-          <span className="vault-model-key-address">model</span>
+          <span className="secrets-name ui-body">Mistral key</span>
+          <span className="ui-caption">{TEXT.model}</span>
         </RowDisclosure>
         <Badge title="Stored in your vault. Agents never see this value.">
           Agents never see it

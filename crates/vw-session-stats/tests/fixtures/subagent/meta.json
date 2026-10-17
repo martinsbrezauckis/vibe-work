@@ -1,0 +1,9 @@
+{
+  "_fixture": "Task parent and linked child; synthetic logger fields for attribution tests.",
+  "session_id": "parent",
+  "start_time": "2026-10-14T09:00:00+00:00",
+  "end_time": "2026-10-14T09:01:00+00:00",
+  "total_messages": 4,
+  "child_sessions": [{"session_id":"child","tool_call_id":"task-1","agent":"explore","relative_path":"subagents/child"}],
+  "stats": {"steps":2,"session_prompt_tokens":400,"session_completion_tokens":120,"session_cached_tokens":50,"last_turn_prompt_tokens":200,"last_turn_completion_tokens":60,"last_turn_cached_tokens":25,"last_turn_duration":0.75}
+}

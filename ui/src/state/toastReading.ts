@@ -1,16 +1,21 @@
 /**
  * Reading policy shared by the toast view and its tests. Depends on notification types; called by
- * ToastItem. Warnings/errors persist; information gets enough time for its complete text.
+ * ToastItem. Information and warnings kept in the bell leave after a reading time (the bell keeps them); errors,
+ * and warnings the bell does not keep, stay until dismissed.
  */
-import type { ToastSpec } from "./notifications";
+import { isBellKind, type ToastSpec } from "./notifications";
 
-/** Milliseconds to read information at roughly 200 words/minute, with time to notice it. */
-export function toastLifetime({ kind, text }: ToastSpec): number | null {
-  if (kind !== "info") return null;
+/**
+ * Milliseconds to read a toast at roughly 200 words/minute, with time to notice it, or `null` when it stays until
+ * dismissed. A warning gets a longer minimum and leaves only when the bell keeps it, so it is never lost.
+ */
+export function toastLifetime({ kind, text, bellKind }: ToastSpec): number | null {
+  if (kind === "error" || (kind === "warn" && !isBellKind(bellKind))) return null;
   const words = text.trim().split(/\s+/u).filter(Boolean).length;
   // Long paths and identifiers also take reading time even without whitespace.
   const units = Math.max(words, Math.ceil(Array.from(text).length / 6));
-  return Math.max(5000, 2000 + units * 300);
+  const read = 2000 + units * 300;
+  return kind === "warn" ? Math.max(8000, read + 3000) : Math.max(5000, read);
 }
 
 /** Conservative prefix before layout is available; complete text always remains in history. */

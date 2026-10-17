@@ -1,0 +1,45 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "connectorError": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Connectorerror"
+    },
+    "discoveryErrors": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "title": "Discoveryerrors",
+      "type": "object"
+    },
+    "manageConnectorsUrl": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Manageconnectorsurl"
+    },
+    "sources": {
+      "items": {
+        "$ref": "#/$defs/MCPSourceSummary"
+      },
+      "title": "Sources",
+      "type": "array"
+    }
+  },
+  "title": "MCPState",
+  "type": "object"
+}

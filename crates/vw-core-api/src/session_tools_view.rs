@@ -43,10 +43,10 @@ pub enum SessionToolsRequest {
         /// The session.
         session_id: String,
     },
-    /// Saves "the agent may use subagents" for NEW chats. Vibe 2.26.1 refuses to change it on a chat that already
-    /// exists (and leaves that chat unusable), so the core writes it through a short-lived empty chat in the app's
-    /// own work folder and deletes that chat again (`subagents_setting.rs`). Chats that are already open keep the
-    /// value they started with. The Debug API may use it too: it is the `config/write` the gate already allows.
+    /// Saves "the agent may use subagents" for NEW chats. Vibe applies it when a chat is created, so the core
+    /// writes it through a short-lived empty chat in the app's own work folder and deletes that chat again
+    /// (`subagents_setting.rs`). Chats that are already open keep the value they started with. The Debug API may
+    /// use it too: it is the `config/write` the gate already allows.
     SetSubagents {
         /// The new value.
         enabled: bool,

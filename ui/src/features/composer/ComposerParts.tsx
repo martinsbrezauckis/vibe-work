@@ -23,6 +23,7 @@ export function RunBar({ status, onStop }: { status: string; onStop: () => void 
         {status || "Working."} Enter steers, Tab queues the next prompt.
       </span>
       <button
+        data-testid="composer.composer-parts-mini"
         type="button"
         className="mini stop"
         title="Stop the running turn"
@@ -57,11 +58,12 @@ export function QueueList({
   return (
     <ol className="queue" aria-label="Queued messages">
       {items.map((item, i) => (
-        <li key={item.id} className="queue-item" data-queue-id={item.id}>
+        <li data-item-id={item.id} key={item.id} className="queue-item" data-queue-id={item.id}>
           <span className="queue-n">{String(i + 1)}</span>
           {editing?.queueItemId === item.id ? (
             <>
               <input
+                data-testid="composer.composer-parts-on-change"
                 className="queue-edit"
                 aria-label="Edit the queued message"
                 title="Edit the queued message"
@@ -75,6 +77,7 @@ export function QueueList({
                 }}
               />
               <button
+                data-testid="composer.composer-parts-mini-2"
                 type="button"
                 className="mini"
                 title="Save queued message (Enter)"
@@ -84,6 +87,7 @@ export function QueueList({
                 Save
               </button>
               <button
+                data-testid="composer.composer-parts-mini-3"
                 type="button"
                 className="mini"
                 title="Cancel queued message edit (Escape)"
@@ -102,6 +106,7 @@ export function QueueList({
                 ) : null}
               </span>
               <button
+                data-testid="composer.composer-parts-on-edit"
                 type="button"
                 className="mini"
                 title="Edit queued message"
@@ -113,6 +118,7 @@ export function QueueList({
                 Edit
               </button>
               <button
+                data-testid="composer.composer-parts-on-remove"
                 type="button"
                 className="ibtn sm"
                 aria-label="Remove the queued message"
@@ -157,7 +163,12 @@ function DocContextChip({
   onPreview: () => void;
 }): ReactElement {
   return (
-    <span className="ctxchip docctx" data-context-id={item.id} data-doc-uri={item.uri}>
+    <span
+      data-item-id={item.id}
+      className="ctxchip docctx"
+      data-context-id={item.id}
+      data-doc-uri={item.uri}
+    >
       <Icon name="file-text" size={14} />
       <b>{item.label}</b>
       <span className="mono">
@@ -165,6 +176,7 @@ function DocContextChip({
         {item.doc?.kept === null ? "" : " · shortened"}
       </span>
       <button
+        data-testid="composer.composer-parts-mini-4"
         type="button"
         className="mini"
         title={`Preview text from ${item.label}`}
@@ -174,6 +186,7 @@ function DocContextChip({
         Preview
       </button>
       <button
+        data-testid="composer.composer-parts-button"
         type="button"
         aria-label={`Remove ${item.label}`}
         title={`Remove ${item.label}`}
@@ -205,10 +218,17 @@ export function ChipsRow({
     <div className="ctx-row" aria-label="Sent with the next message">
       {context.map((item) =>
         item.doc === undefined ? (
-          <span key={item.id} className="ctxchip" data-context-id={item.id} title={item.text}>
+          <span
+            data-item-id={item.id}
+            key={item.id}
+            className="ctxchip"
+            data-context-id={item.id}
+            title={item.text}
+          >
             <b>{item.label}</b>
             <span className="mono">{item.text}</span>
             <button
+              data-testid="composer.composer-parts-on-remove-context"
               type="button"
               aria-label={`Remove ${item.label}`}
               title={`Remove ${item.label}`}
@@ -233,10 +253,11 @@ export function ChipsRow({
         ),
       )}
       {images.map((image) => (
-        <span key={image.id} className="att" data-image-id={image.id}>
+        <span data-item-id={image.id} key={image.id} className="att" data-image-id={image.id}>
           <img src={`data:${image.mimeType};base64,${image.data}`} alt="" className="att-img" />
           <span className="att-name">{image.name}</span>
           <button
+            data-testid="composer.composer-parts-on-remove-image"
             type="button"
             aria-label={`Remove ${image.name}`}
             title={`Remove ${image.name}`}
@@ -268,6 +289,7 @@ export function RetryRow({
         {problem === "interrupted" ? "The last turn was stopped." : "The last turn failed."}
       </span>
       <button
+        data-testid="composer.composer-parts-mini-5"
         type="button"
         className="mini"
         disabled={disabled}

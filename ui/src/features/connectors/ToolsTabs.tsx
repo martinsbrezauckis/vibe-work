@@ -17,9 +17,16 @@ export function ToolsTabs(): ReactElement {
   const tab = useMarket((s) => s.tab);
   const actions = useMarketActions();
   return (
-    <div className="ttabs" role="tablist" aria-label="Tools">
+    <div
+      data-testid="connectors.tools-tabs-ttabs"
+      className="ttabs"
+      role="tablist"
+      aria-label="Tools"
+    >
       {TABS.map((t) => (
         <button
+          data-testid="connectors.tools-tabs-show-tab"
+          data-item-id={t.id}
           key={t.id}
           type="button"
           role="tab"

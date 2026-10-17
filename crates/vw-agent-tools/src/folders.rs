@@ -283,6 +283,23 @@ pub enum Access {
     Write,
     /// Unknown (bash, `process.start`, any other tool): judged as a write (fails closed).
     Unknown,
+    /// The shell's working directory, rather than a path the command targets.
+    Context,
+}
+
+// Reserve spellings Windows can interpret as this file before it exists, including default data streams.
+fn approval_path(path: &Path, data: &Path) -> bool {
+    path.strip_prefix(data)
+        .ok()
+        .and_then(|relative| relative.components().next())
+        .and_then(|part| part.as_os_str().to_str())
+        .is_some_and(|name| {
+            name.split(':')
+                .next()
+                .unwrap_or_default()
+                .trim_end_matches(['.', ' '])
+                .eq_ignore_ascii_case("plugin-approvals.json")
+        })
 }
 
 impl Layout {
@@ -390,6 +407,15 @@ impl Layout {
                 ));
             }
         };
+        if access != Access::Read
+            && let Some(data) = self.vibe_home.parent()
+            && (approval_path(&real, data) || access != Access::Context && data.starts_with(&real))
+        {
+            return Some(format!(
+                "Not run: {} contains Vibe Work's plugin approvals; change plugins in Tools. {own}",
+                joined.display()
+            ));
+        }
         if let Some(copy) = self.copy_of(&real) {
             let is_own = self.own.as_ref() == Some(&copy);
             return match permits(&copy, is_own) {
@@ -586,30 +612,8 @@ fn computed_shell_word(source: &Word, expanded: &str) -> bool {
     source.expanded && (expanded.contains('$') || expanded.contains('`'))
 }
 
-/// Absolute paths in the raw command text that start at the Vibe home: catches redirections and quoting the
-/// tokenizer may split (`> /vh/worktrees/x/f`, `"$VIBE_HOME"/worktrees`).
-fn raw_mentions(text: &str, root: &str) -> Vec<String> {
-    let mut out = Vec::new();
-    if root.is_empty() {
-        return out;
-    }
-    let mut from = 0;
-    while let Some(at) = text[from..].find(root) {
-        let start = from + at;
-        let end = text[start..]
-            .find(|c: char| {
-                c.is_whitespace()
-                    || matches!(
-                        c,
-                        '"' | '\'' | ';' | '|' | '&' | ')' | '(' | '<' | '>' | '`'
-                    )
-            })
-            .map_or(text.len(), |n| start + n);
-        out.push(text[start..end].to_owned());
-        from = end.max(start + 1);
-    }
-    out
-}
+mod mentions;
+use mentions::raw_mentions;
 
 /// The refusal for a bash `command` run in `cwd`, or `None`. `home` = `$HOME` of the hook's process.
 #[must_use]
@@ -619,7 +623,7 @@ pub fn check_command(
     home: Option<&Path>,
     permits: &Permits<'_>,
 ) -> Option<String> {
-    if let Some(refusal) = layout.check(&layout.cwd, &layout.cwd, Access::Unknown, permits) {
+    if let Some(refusal) = layout.check(&layout.cwd, &layout.cwd, Access::Context, permits) {
         return Some(refusal);
     }
     let expanded = expand(command, home, &layout.vibe_home);
@@ -683,7 +687,7 @@ fn check_segments(
                 })
             })
             .count();
-        if moved && let Some(refusal) = layout.check(&dir, &dir, Access::Unknown, permits) {
+        if moved && let Some(refusal) = layout.check(&dir, &dir, Access::Context, permits) {
             return Some(refusal);
         }
         let is_cd = words
@@ -712,7 +716,16 @@ fn check_segments(
                 continue;
             };
             let part = if part.is_empty() { "." } else { part };
-            if let Some(refusal) = layout.check(Path::new(part), &dir, Access::Unknown, permits) {
+            if let Some(refusal) = layout.check(
+                Path::new(part),
+                &dir,
+                if is_cd {
+                    Access::Context
+                } else {
+                    Access::Unknown
+                },
+                permits,
+            ) {
                 return Some(refusal);
             }
         }
@@ -722,7 +735,16 @@ fn check_segments(
                 continue;
             }
             if let Some(part) = shell_path_part(&target, &dir)
-                && let Some(refusal) = layout.check(Path::new(part), &dir, Access::Unknown, permits)
+                && let Some(refusal) = layout.check(
+                    Path::new(part),
+                    &dir,
+                    if is_cd {
+                        Access::Context
+                    } else {
+                        Access::Unknown
+                    },
+                    permits,
+                )
             {
                 return Some(refusal);
             }
@@ -732,7 +754,7 @@ fn check_segments(
             && !computed_shell_word(&segment.words[first_command + 1], target)
         {
             let target = Path::new(target);
-            if let Some(refusal) = layout.check(target, &dir, Access::Unknown, permits) {
+            if let Some(refusal) = layout.check(target, &dir, Access::Context, permits) {
                 return Some(refusal);
             }
             dir = join_for_resolution(&dir, target);

@@ -24,9 +24,11 @@ use tokio::task::JoinHandle;
 use tracing::{info, warn};
 use vw_changes::{Baseline, Debounce, Diff, SessionDir, TurnLabel, TurnSource, Watcher};
 
-use crate::changes_facts::{Facts, facts, last_turn_by_path, path_key, shown};
+use crate::changes_children::{ancestors, include_children};
+use crate::changes_effects::effects_view;
+use crate::changes_facts::{Facts, facts, last_turn_by_path, path_key};
 use crate::changes_slots::{ChangesTestHooks, Claim, Slots};
-use crate::changes_view::{ChangesMode, ChangesView, TurnChanges, TurnFile};
+use crate::changes_view::{ChangesMode, ChangesView};
 use crate::core::Shared;
 use crate::event::{CoreEvent, SessionChange};
 use crate::subscription::CoreSubscription;
@@ -414,9 +416,25 @@ async fn run(
                 let Some(shared) = weak.upgrade() else { break };
                 match interesting(&event) {
                     Interest::Refresh(id) => {
-                        due.entry(id).or_insert_with(|| Instant::now() + EFFECT_SETTLE);
+                        for target in ancestors(&shared.store, &id).into_iter().chain([id]) {
+                            due.entry(target).or_insert_with(|| Instant::now() + EFFECT_SETTLE);
+                        }
                     }
-                    Interest::Removed(id) => shared.changes.forget(&id, false),
+                    Interest::Snapshot(id) => {
+                        let mut targets = ancestors(&shared.store, &id);
+                        if shared.changes.tracker(&id).is_some() {
+                            targets.push(id);
+                        }
+                        for target in targets {
+                            due.entry(target).or_insert_with(|| Instant::now() + EFFECT_SETTLE);
+                        }
+                    }
+                    Interest::Removed(id) => {
+                        for target in ancestors(&shared.store, &id) {
+                            due.entry(target).or_insert_with(|| Instant::now() + EFFECT_SETTLE);
+                        }
+                        shared.changes.forget(&id, false);
+                    }
                     Interest::None => {}
                 }
             }
@@ -446,17 +464,23 @@ async fn sleep_until(at: Option<Instant>) {
 
 enum Interest {
     Refresh(String),
+    Snapshot(String),
     Removed(String),
     None,
 }
 
 /// Which session an event should refresh: completed effects (a write, an edit, a command) and folder moves.
 fn interesting(event: &CoreEvent) -> Interest {
+    if let CoreEvent::Snapshot { snapshot } = event {
+        return Interest::Snapshot(snapshot.session_id.clone());
+    }
     let CoreEvent::Change { change } = event else {
         return Interest::None;
     };
     match change {
         SessionChange::Removed { session_id } => Interest::Removed(session_id.clone()),
+        SessionChange::ChildUpserted { session_id, .. }
+        | SessionChange::TurnUpserted { session_id, .. } => Interest::Refresh(session_id.clone()),
         SessionChange::EntryUpserted {
             session_id, entry, ..
         } => {
@@ -504,10 +528,11 @@ pub(crate) async fn refresh_and_emit(shared: &Arc<Shared>, session_id: &str) {
     let Some(view) = shared.store.view(session_id) else {
         return;
     };
-    let session_facts = facts(&view.state);
+    let mut session_facts = facts(&view.state);
     let Some(folder) = session_facts.cwd.clone() else {
         return;
     };
+    include_children(shared, session_id, &mut session_facts).await;
     let hub_owner = shared.clone();
     let id = session_id.to_owned();
     let result = tokio::task::spawn_blocking(move || {
@@ -680,67 +705,4 @@ fn label_turns(
             file.turn = Some(label);
         }
     }
-}
-
-/// Effects mode: files from Vibe's completed writes and edits, by turn; the version-history offer.
-fn effects_view(hub: &Hub, tracker: &Tracker, session: &Facts, view: &mut ChangesView) {
-    let base = session.cwd.as_deref();
-    let mut turns: Vec<TurnChanges> = Vec::new();
-    for touch in &session.touches {
-        let Some(turn) = touch.turn_id.as_deref().and_then(|id| session.turn(id)) else {
-            continue;
-        };
-        if turns.last().is_none_or(|t| t.turn_id != turn.id) {
-            if let Some(existing) = turns.iter().position(|t| t.turn_id == turn.id) {
-                let moved = turns.remove(existing);
-                turns.push(moved);
-            } else {
-                turns.push(TurnChanges {
-                    turn_id: turn.id.clone(),
-                    number: turn.number,
-                    anchor_entry_id: turn.anchor.clone(),
-                    files: Vec::new(),
-                });
-            }
-        }
-        let Some(current) = turns.last_mut() else {
-            continue;
-        };
-        let path = shown(&touch.path, base);
-        match current.files.iter_mut().find(|f| f.path == path) {
-            Some(file) => file.entry_ids.push(touch.entry_id.clone()),
-            None => current.files.push(TurnFile {
-                path,
-                entry_ids: vec![touch.entry_id.clone()],
-                created: touch.created,
-            }),
-        }
-    }
-    turns.sort_by_key(|t| t.number);
-    if turns.is_empty() {
-        view.mode = ChangesMode::None;
-        view.fingerprint = "none".into();
-        return;
-    }
-    view.mode = ChangesMode::Effects;
-    let changed: Vec<String> = turns
-        .iter()
-        .flat_map(|t| t.files.iter().map(|f| f.path.clone()))
-        .collect();
-    let dismissed = hub
-        .dir
-        .as_deref()
-        .is_some_and(|d| vw_changes::offer_dismissed(d, &tracker.folder));
-    view.offer_history = !dismissed && vw_changes::looks_like_code(&tracker.folder, &changed);
-    let ids: Vec<&[u8]> = session
-        .touches
-        .iter()
-        .map(|t| t.entry_id.as_bytes())
-        .collect();
-    view.fingerprint = format!(
-        "effects:{}:{}",
-        vw_changes::fnv_hex(&ids),
-        u8::from(view.offer_history)
-    );
-    view.turns = turns;
 }

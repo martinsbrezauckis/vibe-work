@@ -1,0 +1,68 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "alias": {
+      "title": "Alias",
+      "type": "string"
+    },
+    "displayName": {
+      "title": "Displayname",
+      "type": "string"
+    },
+    "imageDelivery": {
+      "anyOf": [
+        {
+          "enum": [
+            "native",
+            "resource_link"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Imagedelivery"
+    },
+    "maxContextLength": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Maxcontextlength"
+    },
+    "name": {
+      "title": "Name",
+      "type": "string"
+    },
+    "supportsImages": {
+      "title": "Supportsimages",
+      "type": "boolean"
+    },
+    "thinking": {
+      "$ref": "#/$defs/ThinkingLevel"
+    },
+    "thinkingLevels": {
+      "items": {
+        "$ref": "#/$defs/ThinkingLevel"
+      },
+      "title": "Thinkinglevels",
+      "type": "array"
+    }
+  },
+  "required": [
+    "name",
+    "alias",
+    "thinking",
+    "supportsImages",
+    "displayName"
+  ],
+  "title": "ModelConfigView",
+  "type": "object"
+}

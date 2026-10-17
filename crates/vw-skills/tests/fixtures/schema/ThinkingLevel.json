@@ -1,0 +1,10 @@
+{
+  "enum": [
+    "off",
+    "low",
+    "medium",
+    "high",
+    "max"
+  ],
+  "type": "string"
+}

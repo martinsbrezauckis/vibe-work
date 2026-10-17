@@ -161,7 +161,7 @@ export function contextReadout(
     const compacts =
       usage.untilCompaction === null
         ? ""
-        : ` Vibe compacts the conversation at ${formatTokens(usage.untilCompaction)}.`;
+        : ` Vibe compacts the session at ${formatTokens(usage.untilCompaction)}.`;
     return {
       percent: Math.min(100, Math.round((usage.contextTokens / window) * 100)),
       explain: `${formatTokens(usage.contextTokens)} of the model's ${formatTokens(window)}-token context window.${compacts}`,
@@ -171,7 +171,7 @@ export function contextReadout(
   if (percent === null || usage.untilCompaction === null) return null;
   return {
     percent,
-    explain: `${formatTokens(usage.contextTokens)} of ${formatTokens(usage.untilCompaction)} tokens until Vibe compacts the conversation.`,
+    explain: `${formatTokens(usage.contextTokens)} of ${formatTokens(usage.untilCompaction)} tokens until Vibe compacts the session.`,
   };
 }
 

@@ -5,6 +5,7 @@
  */
 import { type ReactNode, createContext, useContext } from "react";
 
+import type { SecretScan } from "../../state/secretScan";
 import type { CoreController } from "../../state/coreStore";
 import type { Commands } from "../../state/commands";
 import type { Composer } from "../../state/composer";
@@ -36,6 +37,8 @@ import type { SessionProcesses } from "../../state/sessionProcesses";
 /** Everything one app instance holds. */
 export interface App {
   core: CoreController | null;
+  /** Session-log scan settings and retained finding actions. */
+  secretScan: SecretScan | null;
   /** Row and folder actions; `null` without a core. */
   sessions: SessionActions | null;
   /** The transcript's UI state and actions (open groups, callback answers, links). */

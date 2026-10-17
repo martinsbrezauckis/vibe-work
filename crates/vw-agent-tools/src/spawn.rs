@@ -419,7 +419,7 @@ mod windows_tests {
 
     fn run(command: &str, preferred: Option<&'static str>) -> (Started, String) {
         let root = std::env::temp_dir().join(format!(
-            "vw-wx1-shell-{}-{}",
+            "vw-spawn-shell-{}-{}",
             std::process::id(),
             crate::credential::new_credential().unwrap()
         ));
@@ -469,7 +469,7 @@ mod windows_tests {
     fn absent_pwsh_falls_back_to_51_and_defines_port() {
         let (started, output) = run(
             "Write-Output \"port=$PORT env=$env:PORT major=$($PSVersionTable.PSVersion.Major)\"",
-            Some("vw-wx1-absent-pwsh.exe"),
+            Some("vw-absent-pwsh.exe"),
         );
         assert_eq!(started.shell, "powershell.exe");
         assert_eq!(started.exited(), Some(Some(0)), "{output}");

@@ -16,13 +16,14 @@ export function LostBanner(props: {
 }): ReactElement {
   const { changes, view, busy } = props;
   return (
-    <div className="lost-banner" role="alert">
+    <div className="key-problem" role="alert">
       <p>
         The starting point for this session was lost ({view.reason ?? "unknown reason"}). Showing
         changes against the last commit instead. Nothing here can be kept or reverted until you
         start reviewing from now.
       </p>
       <button
+        data-testid="changes.lost-banner-restart"
         type="button"
         className="mini"
         disabled={busy}

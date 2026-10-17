@@ -48,6 +48,7 @@ vw-changes = { path = "../../../crates/vw-changes" }
 vw-worktrees = { path = "../../../crates/vw-worktrees" }
 vw-pages = { path = "../../../crates/vw-pages" }
 vw-vibe-install = { path = "../../../crates/vw-vibe-install" }
+vw-netguard = { path = "../../../crates/vw-netguard" }
 vibe-support-sign = { path = "../../../tools/public/vibe-support/sign" }
 make-latest-json = { path = "../../../tools/public/update-manifest" }
 

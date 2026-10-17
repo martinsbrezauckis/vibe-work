@@ -3,7 +3,7 @@
 #![allow(dead_code, unreachable_pub)]
 
 use std::ffi::OsString;
-use std::io::{Read, Write};
+use std::io::{BufRead, BufReader, Write};
 use std::net::TcpStream;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -13,6 +13,10 @@ use serde_json::{Value, json};
 use vw_agent_tools::wire;
 use vw_core_api::{AgentToolsConfig, Command, CommandResult, Core, CoreConfig, Origin};
 use vw_procmon::LeaseConfig;
+
+mod launch_reaper;
+#[allow(unused_imports)]
+pub use launch_reaper::LaunchReaper;
 
 use crate::common::core::CanaryKey;
 use crate::common::fake::{fake_config, scratch};
@@ -217,19 +221,19 @@ pub async fn call(who: &(String, String), tool: &str, args: Value) -> Result<Val
     .unwrap()
 }
 
-/// A plain HTTP GET on 127.0.0.1; returns the status line.
+/// A plain HTTP GET on 127.0.0.1; returns the complete status line after draining the response.
+/// Closing early resets Python's body write and floods its output tail with a traceback.
 pub fn http_get(port: u16) -> Option<String> {
     let mut stream = TcpStream::connect(("127.0.0.1", port)).ok()?;
     stream
         .set_read_timeout(Some(Duration::from_secs(18)))
         .ok()?;
     write!(stream, "GET / HTTP/1.0\r\nHost: 127.0.0.1\r\n\r\n").ok()?;
-    let mut buf = [0u8; 64];
-    let n = stream.read(&mut buf).ok()?;
-    String::from_utf8_lossy(&buf[..n])
-        .lines()
-        .next()
-        .map(str::to_owned)
+    let mut reader = BufReader::new(stream);
+    let mut status = String::new();
+    reader.read_line(&mut status).ok()?;
+    std::io::copy(&mut reader, &mut std::io::sink()).ok()?;
+    Some(status.trim_end().to_owned())
 }
 
 /// True when 127.0.0.1:`port` can be bound (nothing listens).

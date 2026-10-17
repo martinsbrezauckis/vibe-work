@@ -9,7 +9,47 @@ export type MarketRequest = { "op": "read",
 /**
  * The session whose plugin and skill state is merged in.
  */
-sessionId?: string, } | { "op": "install", 
+sessionId?: string, 
+/**
+ * The new-chat folder selected through the native picker, when no chat is open.
+ */
+cwd?: string, } | { "op": "turnOffPlugin", 
+/**
+ * The installed folder shown by the board.
+ */
+path: string, 
+/**
+ * The open chat determines the opened project.
+ */
+sessionId?: string, 
+/**
+ * The new-chat folder picked natively, when no chat is open.
+ */
+cwd?: string, } | { "op": "turnOnPlugin", 
+/**
+ * The installed folder shown by the board.
+ */
+path: string, 
+/**
+ * The open chat determines the opened project.
+ */
+sessionId?: string, 
+/**
+ * The new-chat folder picked natively, when no chat is open.
+ */
+cwd?: string, } | { "op": "removePlugin", 
+/**
+ * The installed folder shown by the board.
+ */
+path: string, 
+/**
+ * The open chat determines the opened project.
+ */
+sessionId?: string, 
+/**
+ * The new-chat folder picked natively, when no chat is open.
+ */
+cwd?: string, } | { "op": "install", 
 /**
  * The catalog entry.
  */
@@ -65,7 +105,71 @@ sessionId: string | null,
 /**
  * Plugin files Vibe could not load in that session (Vibe's sentences), ours or not.
  */
-dropped: Array<DroppedView>, };
+dropped: Array<DroppedView>, 
+/**
+ * Every resolved plugin without a marketplace receipt, plus app-managed off plugins.
+ */
+discovered: Array<LocalPluginView>, 
+/**
+ * Why the current discovery could not be read (pinned chat state can still be shown).
+ */
+discoveryError: string | null, };
+
+export type LocalPluginView = { 
+/**
+ * Vibe's plugin name.
+ */
+name: string, 
+/**
+ * Vibe's description.
+ */
+description: string, 
+/**
+ * Its installed folder, including for restored chats with a separate pinned checkout.
+ */
+path: string, 
+/**
+ * Vibe's scope (`project`, `global`, `builtin`).
+ */
+scope: string, 
+/**
+ * Only direct folders in the app's Vibe home or opened project may be changed.
+ */
+managed: boolean, 
+/**
+ * Kept in the app's off folder, outside Vibe discovery.
+ */
+off: boolean, 
+/**
+ * Vibe selected this installed folder for new chats (false for shadows and retained pins).
+ */
+available: boolean, 
+/**
+ * Current discovered components (skills, MCP servers and other kinds).
+ */
+components: Array<ComponentView>, 
+/**
+ * MCP servers with the chat's known tool count (`null`: not connected in this chat).
+ */
+servers: Array<PluginServerView>, 
+/**
+ * The open chat's pinned state; `null` when unavailable.
+ */
+inSession: SessionPluginView | null, 
+/**
+ * Discovery issues and reasons Vibe selected another folder.
+ */
+issues: Array<string>, };
+
+export type PluginServerView = { 
+/**
+ * The source id Vibe gives it.
+ */
+name: string, 
+/**
+ * Known tools in the chat; absent when no live catalog was read.
+ */
+tools: number | null, };
 
 export type CategoryView = { 
 /**
@@ -90,6 +194,14 @@ installed: InstalledView | null,
  * A folder of this name exists that the marketplace did not install (left alone; install refused).
  */
 foreign: boolean, 
+/**
+ * The installed plugin folder (including the off folder), absent for uninstalled entries.
+ */
+folder: string | null, 
+/**
+ * This catalog install is kept outside Vibe's discovery roots.
+ */
+off: boolean, 
 /**
  * Packs and plugins: false when this computer's platform has no runtime for it.
  */
@@ -163,13 +275,13 @@ name: string,
  */
 description: string, 
 /**
- * On; `null` when this session does not offer the skill yet (Vibe 2.26.0 offers the skills
- * of a plugin installed during a session only to new sessions; 2.26.1 after a reload).
+ * On; `null` when this session does not offer the skill yet (the skills of a plugin installed
+ * during a session are offered to new sessions, or after a plugin reload).
  */
 enabled: boolean | null, 
 /**
- * Vibe does not let it be switched off (Vibe 2.26 marks every plugin skill `locked`,
- * `_unified_harness_backend_adapter.py:1303`): it is on while the plugin is installed.
+ * Vibe reports the skill as `locked` (set by configuration, not per session): it is on while
+ * the plugin is installed.
  */
 locked: boolean, };
 

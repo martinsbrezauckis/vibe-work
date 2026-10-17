@@ -1,5 +1,5 @@
-//! Writing and deleting working-tree files for a revert, done by us: git never
-//! writes the working tree here (no `restore`, `checkout` or `apply`, which run smudge filters).
+//! Writing and deleting working-tree files for a revert, done by us in Rust: git never
+//! writes the working tree here (no `restore`, `checkout` or `apply`), so no repository filter runs.
 //!
 //! Depends on: `paths`, `error`, std. Called by: `review`.
 //! Invariants:

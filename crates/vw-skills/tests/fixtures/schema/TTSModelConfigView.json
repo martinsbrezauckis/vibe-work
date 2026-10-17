@@ -1,0 +1,23 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "name": {
+      "title": "Name",
+      "type": "string"
+    },
+    "responseFormat": {
+      "$ref": "#/$defs/SpeechOutputFormat"
+    },
+    "voice": {
+      "title": "Voice",
+      "type": "string"
+    }
+  },
+  "required": [
+    "name",
+    "voice",
+    "responseFormat"
+  ],
+  "title": "TTSModelConfigView",
+  "type": "object"
+}

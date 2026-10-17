@@ -11,6 +11,7 @@
  * and connectors features.
  * Called by: Shell.
  */
+import { TEXT } from "../../vocabulary";
 import type { ReactNode } from "react";
 
 import { BrandMark } from "../../components/BrandMark";
@@ -39,6 +40,7 @@ import { OrphanList } from "../worktrees/OrphanList";
 import { IncludeNote } from "../worktrees/IncludeNote";
 import { WorktreeChip } from "../worktrees/WorktreeChip";
 import { PrChip } from "../git/PrChip";
+import { sessionHasGit, useSessionGit } from "../git/useSessionGit";
 import { useConnectors } from "../connectors/hooks";
 import { ProjectsPage } from "../projects/ProjectsPage";
 import { SettingsPage } from "../settings/SettingsPage";
@@ -75,21 +77,26 @@ function Header({ title, sessionId }: { title: string; sessionId: string }) {
   const { shell, panelTabs } = useApp();
   const panel = useShellState(panelOf);
   const hidden = useStore(panelTabs.hidden, (h) => h);
+  const gitStatus = useSessionGit(sessionId);
   return (
     <div className="shead">
       <h1>{title}</h1>
-      <WorktreeChip sessionId={sessionId} />
+      <WorktreeChip sessionId={sessionId} status={gitStatus} />
       <IncludeNote sessionId={sessionId} />
       <TemporaryChip sessionId={sessionId} />
       <PrChip sessionId={sessionId} />
       {/* toasts keep these buttons clear (Changes, Files,...): a stack moved off the composer to the top
           right covered Changes. */}
       <div className="acts" role="group" aria-label="Side panel" data-toast-avoid="header">
-        {TAB_KINDS.filter((kind) => !hidden.includes(kind)).map((kind) => {
+        {TAB_KINDS.filter(
+          (kind) => !hidden.includes(kind) && (kind !== "git" || sessionHasGit(gitStatus)),
+        ).map((kind) => {
           const active = panel.open && panel.active === kind;
           const label = `${active ? "Close" : "Open"} ${TAB_META[kind].label} tab${kind === "terminal" && !active ? ` (${formatKeys("Mod+`")})` : ""}`;
           return (
             <button
+              data-testid="shell.content-toggle-tab"
+              data-item-id={kind}
               key={kind}
               type="button"
               className="pbtn"
@@ -122,6 +129,7 @@ function HeldWrap({ sessionId, children }: { sessionId: string; children: ReactN
 
 /** The content area. */
 export function Content() {
+  const { shell } = useApp();
   const selected = useShellState((s) => s.selected);
   const session = useSessionSummaries().find((s) => s.id === selected);
   // The Mistral key setup covers the work view while no working key exists.
@@ -180,7 +188,23 @@ export function Content() {
             </>
           ) : (
             <>
-              <div />
+              <div className="shead">
+                <h1>{TEXT.newChat}</h1>
+                <div className="acts" role="group" aria-label="Side panel">
+                  <button
+                    data-testid="shell.welcome-open-git-tab"
+                    type="button"
+                    className="pbtn"
+                    aria-label="Open Git tab"
+                    onClick={() => {
+                      shell.actions.openTab("git");
+                    }}
+                  >
+                    <Icon name="git-branch" />
+                    <span className="lbltxt">Git</span>
+                  </button>
+                </div>
+              </div>
               <div className="view view-welcome">
                 {/* The calm idle state: a faint construction grid fading out from the centre; nothing moves. */}
                 <div className="welcome-grid" aria-hidden="true" />

@@ -52,6 +52,8 @@ export interface CoreState {
   stuck: StuckMap;
   /** Sessions another process holds: session id -> its pid. Read-only here. */
   held: Readonly<Record<string, number>>;
+  /** Whether a foreign holder is another app window or the terminal. */
+  heldKind: Readonly<Record<string, string>>;
   /** Which client answered a callback through the core, by callback id (the audit row). */
   answeredBy: Readonly<Record<string, Origin>>;
   /**
@@ -86,6 +88,7 @@ export const initialCore: CoreState = {
   lagged: false,
   stuck: {},
   held: {},
+  heldKind: {},
   answeredBy: {},
   subagentCards: {},
   rateLimits: null,
@@ -116,12 +119,14 @@ function entryFromSnapshot(
   const state = snapshot.state;
   const object = typeof state === "object" && state !== null && !Array.isArray(state) ? state : {};
   const session = object["session"];
+  const accessMode = snapshot.accessMode ?? previous?.accessMode;
   return {
     id: snapshot.sessionId,
     session:
       typeof session === "object" && session !== null && !Array.isArray(session) ? session : {},
     state: object,
     localOnly: snapshot.localOnly,
+    ...(accessMode === undefined ? {} : { accessMode }),
     openCallbackIds: previous?.openCallbackIds ?? [],
     // A snapshot carries no runtime: keep the last one.
     ...(previous?.runtime === undefined ? {} : { runtime: previous.runtime }),
@@ -183,7 +188,11 @@ export function applyEvent(state: CoreState, event: CoreEvent): CoreState {
         Object.entries(state.held).filter(([id]) => id !== event.sessionId),
       );
       if (event.holderPid !== null) held[event.sessionId] = event.holderPid;
-      return { ...state, held };
+      const heldKind = Object.fromEntries(
+        Object.entries(state.heldKind).filter(([id]) => id !== event.sessionId),
+      );
+      if (event.holderPid !== null) heldKind[event.sessionId] = event.holderKind ?? "window";
+      return { ...state, held, heldKind };
     }
     case "callbackAnswered": {
       const subagentCards = Object.fromEntries(
@@ -235,6 +244,8 @@ export function applyEvent(state: CoreState, event: CoreEvent): CoreState {
     case "lineCommentsChanged":
     case "projectsChanged":
     case "worktreesChanged":
+    case "gitBrowserChanged":
+    case "secretScan":
     case "secretsChanged":
     case "dictation":
     case "connectorSignIn":

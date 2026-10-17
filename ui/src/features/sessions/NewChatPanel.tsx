@@ -90,6 +90,7 @@ export function NewChatPanel(): ReactElement | null {
     <div className="new-session" data-ask-folder={ask ? "true" : undefined}>
       <div className="folder-row">
         <button
+          data-testid="sessions.new-chat-panel-pick-folder"
           type="button"
           className="tb-btn"
           aria-describedby={ask ? "new-chat-folder-hint" : undefined}
@@ -120,7 +121,7 @@ export function NewChatPanel(): ReactElement | null {
         )}
         {ask && folder === null && (
           <span className="folder-hint" id="new-chat-folder-hint" role="status">
-            Choose the folder this chat works in.
+            Choose the folder this session works in.
           </span>
         )}
       </div>

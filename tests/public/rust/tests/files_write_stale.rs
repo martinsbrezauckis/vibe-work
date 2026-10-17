@@ -1,13 +1,17 @@
 //! Synthetic file edits verify stale writes, session handles, and path safety.
 
+mod changes;
 mod common;
 
 use std::path::Path;
 
+use changes::TempRepo;
 use common::core::{ScriptRig, script_core_with};
 use common::fake::scratch;
 use serde_json::{Value, json};
-use vw_core_api::{Command, CommandResult, CoreError, ErrorCode, FilesResult, Origin};
+use vw_core_api::{
+    ChangesResult, Command, CommandResult, CoreError, ErrorCode, FilesResult, Origin,
+};
 
 async fn files(rig: &ScriptRig, request: Value) -> Result<FilesResult, CoreError> {
     let command: Command =
@@ -65,6 +69,187 @@ async fn write(
     print: &str,
 ) -> Result<FilesResult, CoreError> {
     files(rig, json!({"op": "write", "sessionId": session, "file": file, "text": text, "fingerprint": print})).await
+}
+
+/// A File tab save moves the user's line into the persisted Changes baseline. The test goes
+/// through Core::files, then Core::changes; it fails if files_write omits record_user_save.
+#[tokio::test]
+async fn editor_save_survives_changes_file_revert() {
+    let repo =
+        TempRepo::with_files(&[("notes.txt", "agent line\nquiet one\nquiet two\nuser line\n")]);
+    let data = repo.data.clone();
+    let rig = script_core_with("editor-save-owner", &[], move |config| {
+        config.changes_dir = Some(data);
+    })
+    .await;
+    let session = start(&rig, &repo.root).await;
+    let baseline = repo.baseline(&session);
+    drop(baseline);
+    repo.write("notes.txt", "agent edit\nquiet one\nquiet two\nuser line\n");
+
+    let (file, fingerprint) = open(&rig, &session, "notes.txt").await;
+    write(
+        &rig,
+        &session,
+        &file,
+        "agent edit\nquiet one\nquiet two\nuser edit\n",
+        &fingerprint,
+    )
+    .await
+    .unwrap();
+
+    let command: Command = serde_json::from_value(json!({"type": "changes", "request": {
+        "op": "read", "sessionId": session
+    }}))
+    .unwrap();
+    let CommandResult::Changes {
+        result: ChangesResult::View { view },
+    } = rig.core.execute(Origin::Ui, command).await.unwrap()
+    else {
+        panic!("expected Changes view")
+    };
+    let agent_change = view
+        .files
+        .iter()
+        .find(|change| change.path == "notes.txt")
+        .unwrap();
+    let command: Command = serde_json::from_value(json!({"type": "changes", "request": {
+        "op": "revert", "sessionId": session,
+        "target": {"kind": "file", "path": "notes.txt", "blob": agent_change.blob}
+    }}))
+    .unwrap();
+    rig.core.execute(Origin::Ui, command).await.unwrap();
+    assert_eq!(
+        repo.read("notes.txt"),
+        "agent line\nquiet one\nquiet two\nuser edit\n"
+    );
+    rig.core.shutdown().await;
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn failed_editor_save_rolls_back_changes_baseline() {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    let repo = TempRepo::with_files(&[("notes.txt", "agent line\nuser line\n")]);
+    let data = repo.data.clone();
+    let rig = script_core_with("editor-save-rollback", &[], move |config| {
+        config.changes_dir = Some(data);
+    })
+    .await;
+    let session = start(&rig, &repo.root).await;
+    drop(repo.baseline(&session));
+    repo.write("notes.txt", "agent edit\nuser line\n");
+    let (file, fingerprint) = open(&rig, &session, "notes.txt").await;
+    let original_mode = std::fs::metadata(&repo.root).unwrap().permissions().mode();
+    std::fs::set_permissions(&repo.root, std::fs::Permissions::from_mode(0o500)).unwrap();
+    let result = write(
+        &rig,
+        &session,
+        &file,
+        "agent edit\nuser edit\n",
+        &fingerprint,
+    )
+    .await;
+    std::fs::set_permissions(&repo.root, std::fs::Permissions::from_mode(original_mode)).unwrap();
+    assert_eq!(result.unwrap_err().code, ErrorCode::Internal);
+    assert_eq!(repo.read("notes.txt"), "agent edit\nuser line\n");
+    let persisted = vw_changes::refresh(&repo.reload(&session)).unwrap();
+    let persisted_file = persisted.file("notes.txt").unwrap();
+    assert_eq!((persisted_file.added, persisted_file.removed), (1, 1));
+
+    // A failed replacement must leave the baseline at the original user line. Revert may now
+    // safely restore the agent line, without installing the save that did not reach disk.
+    let command: Command = serde_json::from_value(json!({"type": "changes", "request": {
+        "op": "read", "sessionId": session
+    }}))
+    .unwrap();
+    let CommandResult::Changes {
+        result: ChangesResult::View { view },
+    } = rig.core.execute(Origin::Ui, command).await.unwrap()
+    else {
+        panic!("expected Changes view")
+    };
+    let agent_change = view
+        .files
+        .iter()
+        .find(|change| change.path == "notes.txt")
+        .unwrap();
+    let command: Command = serde_json::from_value(json!({"type": "changes", "request": {
+        "op": "revert", "sessionId": session,
+        "target": {"kind": "file", "path": "notes.txt", "blob": agent_change.blob}
+    }}))
+    .unwrap();
+    rig.core.execute(Origin::Ui, command).await.unwrap();
+    assert_eq!(repo.read("notes.txt"), "agent line\nuser line\n");
+    rig.core.shutdown().await;
+}
+
+/// A baseline persistence error after updating its index must not leave a live review that can
+/// later revert from an attempted save whose bytes never reached disk.
+#[tokio::test]
+async fn failed_attribution_disables_unsafe_revert() {
+    let repo = TempRepo::with_files(&[("notes.txt", "agent line\nuser line\n")]);
+    let data = repo.data.clone();
+    let rig = script_core_with("editor-attribution-failure", &[], move |config| {
+        config.changes_dir = Some(data);
+    })
+    .await;
+    let session = start(&rig, &repo.root).await;
+    drop(repo.baseline(&session));
+    repo.write("notes.txt", "agent edit\nuser line\n");
+    let (file, fingerprint) = open(&rig, &session, "notes.txt").await;
+
+    // `commit_index` reaches persist after changing base.idx; make that final write fail.
+    let large = repo.data.join("sessions").join(&session).join("large.json");
+    let original_large = std::fs::read(&large).unwrap();
+    std::fs::remove_file(&large).unwrap();
+    std::fs::create_dir(&large).unwrap();
+    let result = write(
+        &rig,
+        &session,
+        &file,
+        "agent edit\nuser edit\n",
+        &fingerprint,
+    )
+    .await;
+    std::fs::remove_dir(&large).unwrap();
+    std::fs::write(&large, original_large).unwrap();
+
+    assert_eq!(result.unwrap_err().code, ErrorCode::Internal);
+    assert_eq!(repo.read("notes.txt"), "agent edit\nuser line\n");
+    let persisted = vw_changes::refresh(&repo.reload(&session)).unwrap();
+    let persisted_file = persisted.file("notes.txt").unwrap();
+    assert_eq!((persisted_file.added, persisted_file.removed), (1, 1));
+    let command: Command = serde_json::from_value(json!({"type": "changes", "request": {
+        "op": "read", "sessionId": session
+    }}))
+    .unwrap();
+    let CommandResult::Changes {
+        result: ChangesResult::View { view },
+    } = rig.core.execute(Origin::Ui, command).await.unwrap()
+    else {
+        panic!("expected Changes view")
+    };
+    assert!(
+        view.baseline_lost,
+        "failed attribution left a writable review"
+    );
+    let command: Command = serde_json::from_value(json!({"type": "changes", "request": {
+        "op": "revert", "sessionId": session,
+        "target": {"kind": "file", "path": "notes.txt", "blob": null}
+    }}))
+    .unwrap();
+    assert_eq!(
+        rig.core
+            .execute(Origin::Ui, command)
+            .await
+            .unwrap_err()
+            .code,
+        ErrorCode::Denied
+    );
+    assert_eq!(repo.read("notes.txt"), "agent edit\nuser line\n");
+    rig.core.shutdown().await;
 }
 
 #[tokio::test]

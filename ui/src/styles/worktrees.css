@@ -48,10 +48,36 @@
 .copy-fields select {
   padding-right: 24px;
 }
-.wt-chip {
-  max-width: 40ch;
+.shead:has(.wt-location) {
+  flex-wrap: wrap;
+}
+.shead .wt-location {
+  order: 1;
+  flex: 0 0 100%;
+  min-width: 0;
+}
+.shead .wt-chip {
+  max-width: min(100%, 56ch);
+  font-family: inherit;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+}
+.wt-chip-text {
+  min-width: 0;
   overflow: hidden;
+  white-space: nowrap;
   text-overflow: ellipsis;
+}
+.wt-location-full {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--text-2);
+  overflow-wrap: anywhere;
+}
+.wt-chip svg {
+  flex: none;
 }
 .wt-chip.wt-missing,
 .wt-chip.wt-removed {
@@ -74,23 +100,8 @@
 .wt-blocked {
   color: var(--orange-3);
 }
-.btn-danger {
-  border: 1px solid var(--line);
-  border-radius: 7px;
-  padding: 6px 12px;
-  cursor: pointer;
-  background: var(--red-soft);
-  color: var(--red);
-  font: inherit;
-}
-.btn-danger:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
 .wt-orphans {
   margin-top: 18px;
-  border-top: 1px solid var(--line);
-  padding-top: 12px;
 }
 .wt-orphans h3 {
   font-size: 13px;
@@ -103,11 +114,13 @@
   display: grid;
   gap: 6px;
 }
-.wt-orphans li {
-  display: flex;
-  flex-wrap: wrap;
+.wt-orphans .cactions {
+  margin: 0;
   align-items: center;
-  gap: 8px;
+  justify-content: flex-end;
+}
+.wt-orphans .check + .check {
+  border-top: 1px solid var(--line);
 }
 
 /* what .worktreeinclude copies. In the header the list opens as a small panel under the chip row. */

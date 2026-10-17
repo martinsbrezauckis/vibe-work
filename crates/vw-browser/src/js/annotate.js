@@ -1,7 +1,7 @@
 // "Annotate this page": the USER points at an element (hover outline, click) or draws a box (drag) in
 // the Browser tab; the answer says what it is (ref, role, name, text, DOM path) and where (viewport CSS pixels) so
 // the host can crop a screenshot. Escape cancels. The overlay never sends anything anywhere; the host polls.
-// REQ: { page, name (accessor of this annotation), op: start|poll|cancel, mode: element|box }.
+// REQ: { page, name (accessor of this annotation), op: start|poll|cancel|target, mode: element|box, target? }.
 // Adapted from Vibe Work's own pick script (vw-pages `pick.rs`): capture-phase listeners, default prevented,
 // the overlay removed when it answers.
 (() => {
@@ -17,21 +17,7 @@
     if (typeof stop === "function") stop();
     return reply({ state: "cancelled" });
   }
-  const old = window[NAME + "_stop"];
-  if (typeof old === "function") old();
-  const st = { result: { state: "pending" } };
   const view = { width: Math.round(window.innerWidth), height: Math.round(window.innerHeight) };
-  const box = document.createElement("div");
-  box.style.cssText = "position:fixed;pointer-events:none;z-index:2147483647;outline:2px solid #fa500f;" +
-    "background:#fa500f1a;border-radius:3px;display:none";
-  document.documentElement.appendChild(box);
-  const show = (x, y, w, h) => {
-    box.style.display = "block";
-    box.style.left = x + "px";
-    box.style.top = y + "px";
-    box.style.width = w + "px";
-    box.style.height = h + "px";
-  };
   // A hint to the source file, only when the page's build put one there (no guessing): React/Vite inspector plugins
   // and similar dev tools write data attributes like these on elements or their ancestors.
   const SOURCE_ATTRS = ["data-inspector-relative-path", "data-insp-path", "data-v-inspector", "data-source-file",
@@ -64,6 +50,43 @@
       rect: { x: Math.round(rect.x), y: Math.round(rect.y), width: Math.round(rect.width), height: Math.round(rect.height) },
       viewport: view,
     };
+  };
+  // op "target": a request (the Debug API) names the element, a ref of the last read, a selector or a point, or the
+  // area of a box, since no person can point. It answers at once with the answer a click or a drawn box gives.
+  if (REQ.op === "target") {
+    const at = REQ.target || {};
+    let el = null;
+    let rect = null;
+    try {
+      if (REQ.mode === "box") {
+        rect = { x: Number(at.rect.x), y: Number(at.rect.y), width: Number(at.rect.width), height: Number(at.rect.height) };
+        el = document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2);
+      } else if (typeof at.ref === "string") el = actionRef(at.ref).target;
+      else if (typeof at.selector === "string") el = document.querySelector(at.selector);
+      else el = document.elementFromPoint(Number(at.x), Number(at.y));
+    } catch (e) {
+      return reply({ state: "invalid" });
+    }
+    if (!el || el.nodeType !== 1) return reply({ state: "notfound" });
+    if (!rect) {
+      const r = el.getBoundingClientRect();
+      rect = { x: r.left, y: r.top, width: r.width, height: r.height };
+    }
+    return reply(describeAt(el, rect));
+  }
+  const old = window[NAME + "_stop"];
+  if (typeof old === "function") old();
+  const st = { result: { state: "pending" } };
+  const box = document.createElement("div");
+  box.style.cssText = "position:fixed;pointer-events:none;z-index:2147483647;outline:2px solid #fa500f;" +
+    "background:#fa500f1a;border-radius:3px;display:none";
+  document.documentElement.appendChild(box);
+  const show = (x, y, w, h) => {
+    box.style.display = "block";
+    box.style.left = x + "px";
+    box.style.top = y + "px";
+    box.style.width = w + "px";
+    box.style.height = h + "px";
   };
   let start = null;
   const move = (e) => {

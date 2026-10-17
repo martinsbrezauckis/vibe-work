@@ -146,7 +146,7 @@ impl FilesRequest {
 pub struct FileRefView {
     /// The text as sent.
     pub text: String,
-    /// The file may be shown. False says nothing more (missing and not allowed look the same).
+    /// One file may be shown directly. Without choices, false keeps missing and refused paths indistinguishable.
     pub ok: bool,
     /// The handle for the other requests.
     pub file: Option<String>,
@@ -157,6 +157,30 @@ pub struct FileRefView {
     /// Size in bytes.
     #[cfg_attr(feature = "ts", ts(type = "number | null"))]
     pub size: Option<u64>,
+    /// Several allowed files share the name; the user must choose. Absent for a single hit or a refusal.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
+    pub choices: Option<Vec<FileChoice>>,
+    /// Full count when more than 50 choices passed the scope check.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
+    pub total: Option<usize>,
+}
+
+/// One allowed file in a reference chooser, relative to the session folder.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+pub struct FileChoice {
+    /// Session-bound handle, rechecked before every use.
+    pub file: String,
+    /// Path relative to the session folder.
+    pub display: String,
+    /// Kind suggested by the file name.
+    pub kind: FileKind,
+    /// Size in bytes.
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
+    pub size: u64,
 }
 
 /// A file's content for the File tab.

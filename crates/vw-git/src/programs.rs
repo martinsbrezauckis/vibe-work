@@ -9,9 +9,10 @@
 //!   (`vw_worktrees::preflight`: filter and fsmonitor programs; the canonical git-lfs filter is allowed), plus
 //!   merge drivers (they run in `merge-tree`) and include directives. Hooks, the editor, the pager, external
 //!   diff, textconv and signing never run: the hardened runner pins them on every call.
-//! - **Publish** (push): an **allowlist**. Every repository-scope key must be one of [`PUBLISH_SAFE`] (data git
+//! - **Publish** (push): an **allowlist**. Every repository-scope key in a Git or companion namespace must be one of [`PUBLISH_SAFE`] (data git
 //!   needs: the repository format, line endings, remotes' addresses and refspecs, branch tracking, the user's
-//!   name); anything else is refused by name. Remote addresses must be https, ssh, git, file, scp-like or a
+//!   name). Unknown custom namespaces are inert metadata: no supported push transport or hook consumes them.
+//!   Git's runtime config inventory also restricts namespaces added by a newer executable. Remote addresses must be https, ssh, git, file, scp-like or a
 //!   local path (`names::address_kind`).
 //!
 //! Depends on: vw-changes (the hardened runner), vw-worktrees (worktree preflight), `names`. Called by: `commit`,
@@ -25,6 +26,8 @@ use vw_changes::git::{Call, Index};
 
 use crate::error::{GitError, clip};
 use crate::names::{AddressKind, address_kind};
+
+mod namespaces;
 
 /// What git is about to do.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -114,7 +117,23 @@ pub fn check(root: &Path, purpose: Purpose) -> Result<(), GitError> {
         .timeout(Duration::from_secs(10))
         .run()?;
     let printed = String::from_utf8_lossy(&out).into_owned();
-    if let Some(key) = first_program_key(&printed, purpose) {
+    // The executable's inventory keeps newly introduced Git namespaces restricted after an upgrade.
+    let inventory = if purpose == Purpose::Publish {
+        let out = Call::new(root, Index::User)
+            .args(["help", "--config"])
+            .timeout(Duration::from_secs(10))
+            .run()?;
+        String::from_utf8_lossy(&out)
+            .lines()
+            .filter_map(|line| {
+                line.split_once('.')
+                    .map(|(section, _)| section.to_ascii_lowercase())
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
+    if let Some(key) = first_program_key_with_inventory(&printed, purpose, &inventory) {
         return Err(GitError::Blocked(format!(
             "This repository's own git settings include {} , which Vibe Work does not accept for this action \
              (it could run a program or send your sign-in elsewhere). Use your own git tool for this repository, \
@@ -129,6 +148,14 @@ pub fn check(root: &Path, purpose: Purpose) -> Result<(), GitError> {
 /// Public for tests.
 #[must_use]
 pub fn first_program_key(printed: &str, purpose: Purpose) -> Option<String> {
+    first_program_key_with_inventory(printed, purpose, &[])
+}
+
+fn first_program_key_with_inventory(
+    printed: &str,
+    purpose: Purpose,
+    inventory: &[String],
+) -> Option<String> {
     let mut tokens = printed.split('\0');
     while let (Some(scope), Some(entry)) = (tokens.next(), tokens.next()) {
         // `command` = the runner's own `-c` pins; `global`/`system` = the user's own config.
@@ -137,7 +164,7 @@ pub fn first_program_key(printed: &str, purpose: Purpose) -> Option<String> {
         }
         let (key, value) = entry.split_once('\n').unwrap_or((entry, ""));
         let key = key.to_ascii_lowercase();
-        if refused(&key, value, purpose) {
+        if refused(&key, value, purpose, inventory) {
             return Some(key);
         }
     }
@@ -159,7 +186,7 @@ fn allowed_for_publish(key: &str) -> bool {
     })
 }
 
-fn refused(key: &str, value: &str, purpose: Purpose) -> bool {
+fn refused(key: &str, value: &str, purpose: Purpose, inventory: &[String]) -> bool {
     let (section, sub, name) = parts(key);
     if section == "include" || section == "includeif" {
         return true;
@@ -176,7 +203,7 @@ fn refused(key: &str, value: &str, purpose: Purpose) -> bool {
         return !key.starts_with("filter.lfs.");
     }
     if !allowed_for_publish(key) {
-        return true;
+        return !key.contains('.') || !namespaces::custom(section, inventory);
     }
     section == "remote"
         && matches!(name, "url" | "pushurl")

@@ -32,6 +32,7 @@ mod file_view;
 pub mod handbook;
 mod html;
 mod hub;
+mod inline;
 mod links;
 mod lite;
 mod markdown;
@@ -80,8 +81,8 @@ pub use paths::{
     DEFAULT_FOLDER, INDEX, PagePath, PathError, asset_allowed, clean_relative, is_page_name,
 };
 pub use pick::{
-    PickAnswer, Picked, accessor_name as pick_accessor, cancel_script, parse as parse_pick,
-    poll_script, start_script,
+    PickAnswer, PickAt, Picked, TargetMiss, accessor_name as pick_accessor, cancel_script,
+    parse as parse_pick, parse_target, poll_script, start_script, target_script,
 };
 pub use picking::{run_pick, section_of};
 pub use profile::{

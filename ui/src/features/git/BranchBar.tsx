@@ -39,11 +39,13 @@ export function BranchBar({
   const pushWhy = pushBlocked(status);
   const prWhy = prBlocked(status);
   const copy = status.location === "copy" && status.repo === ".";
+  const bringWhy = copy && base?.ahead === 0 ? `${base.name} already has these changes.` : null;
   const reasons = [
     loadError === null ? null : "Git status unavailable.",
     commitWhy === null ? null : `Commit: ${commitWhy}`,
     pushWhy === null ? null : `Push: ${pushWhy}`,
     prWhy === null ? null : `Create PR: ${prWhy}`,
+    bringWhy === null || base === null ? null : `Bring into ${base.name}: ${bringWhy}`,
   ].filter((reason): reason is string => reason !== null);
   return (
     <div className="git-bar" data-git="bar">
@@ -52,13 +54,19 @@ export function BranchBar({
           <label className="git-repo">
             <span className="sr-only">Repository</span>
             <select
+              data-testid="git.branch-bar-select-repo"
               aria-label="Repository"
               disabled={busy}
               value={selected ?? status.repo ?? ""}
               onChange={(event) => void git.selectRepo(sessionId, event.target.value)}
             >
               {status.repos.map((repo) => (
-                <option key={repo.root} value={repo.root}>
+                <option
+                  data-testid="git.branch-bar-option-surface-1"
+                  data-item-id={repo.root}
+                  key={repo.root}
+                  value={repo.root}
+                >
                   {repo.name}
                 </option>
               ))}
@@ -104,6 +112,7 @@ export function BranchBar({
       {reasons.length > 0 && <p className="git-reasons">{reasons.join(" · ")}</p>}
       <div className="git-actions" role="group" aria-label="Git">
         <button
+          data-testid="git.branch-bar-open-commit"
           type="button"
           className="mini"
           data-action="git-commit"
@@ -114,6 +123,7 @@ export function BranchBar({
           Commit
         </button>
         <button
+          data-testid="git.branch-bar-push"
           type="button"
           className="mini"
           data-action="git-push"
@@ -126,6 +136,7 @@ export function BranchBar({
           Push
         </button>
         <button
+          data-testid="git.branch-bar-open-pr"
           type="button"
           className="mini"
           data-action="git-pr"
@@ -137,6 +148,7 @@ export function BranchBar({
         </button>
         {copy && base !== null && (
           <button
+            data-testid="git.branch-bar-open-bring"
             type="button"
             className="mini"
             data-action="git-bring"
@@ -144,7 +156,7 @@ export function BranchBar({
             title={
               loadError ??
               (base.ahead === 0
-                ? `${base.name} already has these commits`
+                ? (bringWhy ?? undefined)
                 : `Bring this copy's commits into ${base.name}`)
             }
             onClick={() => void git.openBring(sessionId)}
@@ -155,14 +167,19 @@ export function BranchBar({
       </div>
       {notice !== null && (
         <p
-          className={`git-notice ${notice.kind}`}
+          className={notice.kind === "error" ? "key-problem" : "git-notice"}
           role={notice.kind === "error" ? "alert" : "status"}
         >
           {notice.text}
         </p>
       )}
       {loadError !== null && (
-        <button type="button" className="mini" onClick={() => void git.load(sessionId)}>
+        <button
+          data-testid="git.branch-bar-load"
+          type="button"
+          className="mini"
+          onClick={() => void git.load(sessionId)}
+        >
           Retry
         </button>
       )}

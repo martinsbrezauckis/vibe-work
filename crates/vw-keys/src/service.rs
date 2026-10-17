@@ -2,7 +2,7 @@
 //! the key is stored), the model proxy (the only reader of the key at run time) and the supervisor
 //! (which gets the placeholder and the `VIBE_*` overrides, never the key).
 //!
-//! Flow: at start the proxy is up and a remembered unlock is tried; the key, once readable, goes
+//! Flow: remembered unlock and network-record verification precede proxy construction; the key, once readable, goes
 //! into the proxy's key cell; a locked vault or a missing key makes requests wait and raises a
 //! [`KeyEvent::KeyNeeded`] (shows the unlock or setup prompt; a turn never fails silently).
 //! Storing, replacing or removing the key updates the cell at once (no Vibe restart).
@@ -56,7 +56,7 @@ pub struct KeyServiceConfig {
 }
 
 /// Something the UI should know.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum KeyEvent {
     /// A model request waits for a key: unlock or set up.
     KeyNeeded(KeyNeed),
@@ -71,6 +71,8 @@ pub enum KeyEvent {
     /// An answer from Mistral reported the per-minute rate-limit headroom; the latest
     /// snapshot is also kept ([`KeyService::rate_limits`]).
     RateLimits(RateLimits),
+    /// A temporary Mistral source file could not be deleted after retries. Kept for later subscribers too.
+    RemoteFileCleanupFailed(String),
 }
 
 /// Why an OCR request did not run or failed.
@@ -162,12 +164,14 @@ pub struct KeyService {
     settings: KeySettings,
     existing: ExistingKeys,
     events: broadcast::Sender<KeyEvent>,
+    cleanup_notices: Arc<std::sync::Mutex<Vec<String>>>,
     /// The latest rate-limit snapshot the proxy saw; `None` until an answer carried one.
     limits: Arc<std::sync::Mutex<Option<RateLimits>>>,
     /// The proxy's MCP resolver slot, filled by the core (`set_mcp_resolver`).
     pub(crate) mcp: vw_keyproxy::McpResolverSlot,
     /// how often the logins were looked up and a password was handed out (diagnostics; never values).
     pub(crate) login_counters: crate::logins::Counters,
+    pub(crate) network_rejected: bool,
 }
 
 fn valid_key(key: &SecretString) -> bool {
@@ -198,6 +202,17 @@ impl KeyService {
     /// The vault location is refused ([`vw_vault::VaultError::CanonicalForbidden`]) or the proxy
     /// cannot start.
     pub async fn start(config: KeyServiceConfig) -> Result<Arc<Self>, KeyError> {
+        Self::start_with_network(config, None).await
+    }
+
+    /// Starts after verifying saved network settings with the existing vault, before any key-bearing client exists.
+    ///
+    /// # Errors
+    /// As [`Self::start`]. An unavailable vault leaves custom network settings unapplied.
+    pub async fn start_with_network(
+        config: KeyServiceConfig,
+        network_file: Option<PathBuf>,
+    ) -> Result<Arc<Self>, KeyError> {
         let vault = Arc::new(match config.managed_vault {
             Some(data_dir) => Vault::new_managed(config.vault, data_dir)?,
             None => Vault::new(config.vault)?,
@@ -205,6 +220,18 @@ impl KeyService {
         if config.settings_path.is_file() {
             vault.select_legacy_if_used()?;
         }
+        let (network_vault, unlock_vault) = (Arc::clone(&vault), Arc::clone(&vault));
+        match blocking(move || unlock_vault.unlock_remembered()).await? {
+            Ok(true) => info!("key service: vault unlocked with the remembered device"),
+            Ok(false) => {}
+            Err(error) => warn!(%error, "key service: remembered unlock failed"),
+        }
+        let network_rejected = if let Some(file) = network_file {
+            blocking(move || crate::network::load_for_launch(&network_vault, &file).rejected)
+                .await?
+        } else {
+            false
+        };
         let (events, _) = broadcast::channel(64);
         let tokens = Arc::new(TokenSlot::default());
         let key = KeyCell::new(KeyState::Missing(KeyNeed::Unlock));
@@ -236,16 +263,12 @@ impl KeyService {
             settings: KeySettings::new(config.settings_path),
             existing: config.existing,
             events,
+            cleanup_notices: Arc::default(),
             limits,
             mcp,
             login_counters: crate::logins::Counters::default(),
+            network_rejected,
         });
-        let vault = Arc::clone(&service.vault);
-        match blocking(move || vault.unlock_remembered()).await? {
-            Ok(true) => info!("key service: vault unlocked with the remembered device"),
-            Ok(false) => {}
-            Err(error) => warn!(%error, "key service: remembered unlock failed"),
-        }
         service.refresh_key().await;
         Ok(service)
     }
@@ -299,6 +322,31 @@ impl KeyService {
     #[must_use]
     pub fn subscribe(&self) -> broadcast::Receiver<KeyEvent> {
         self.events.subscribe()
+    }
+
+    /// Unconfirmed remote deletions from this run, newest last (at most 100); no key or file contents.
+    #[must_use]
+    pub fn remote_cleanup_notices(&self) -> Vec<String> {
+        self.cleanup_notices
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+
+    pub(crate) fn cleanup_notice_handler(&self) -> vw_mistral::work::CleanupNotice {
+        let events = self.events.clone();
+        let notices = self.cleanup_notices.clone();
+        Arc::new(move |message| {
+            let mut saved = notices
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if saved.len() == 100 {
+                saved.remove(0);
+            }
+            saved.push(message.clone());
+            drop(saved);
+            let _ = events.send(KeyEvent::RemoteFileCleanupFailed(message));
+        })
     }
 
     fn changed(&self) {

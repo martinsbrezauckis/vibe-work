@@ -90,7 +90,7 @@
   border-radius: 8px;
   color: var(--text-2);
 }
-.srow:hover,
+.srow:hover:where(:not(:disabled)),
 .srow:focus-within {
   background: var(--hover);
   color: var(--text);
@@ -131,7 +131,11 @@
   font-weight: var(--weight-semibold);
 }
 .tag {
-  flex: none;
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: var(--text-10-5);
   color: var(--text-3);
   border: 1px solid var(--line-2);
@@ -140,6 +144,7 @@
   line-height: 16px;
 }
 .tag.pin {
+  flex: none;
   border: 0;
   padding: 0;
   display: inline-flex;
@@ -180,14 +185,14 @@
   color: var(--text-3);
   opacity: 0;
 }
-.srow:hover .srow-more,
+.srow:hover:where(:not(:disabled)) .srow-more,
 .srow:focus-within .srow-more,
-.proj-bar:hover .srow-more,
+.proj-bar:hover:where(:not(:disabled)) .srow-more,
 .proj-bar:focus-within .srow-more,
 .srow-more[aria-expanded="true"] {
   opacity: 1;
 }
-.srow-more:hover {
+.srow-more:hover:where(:not(:disabled)) {
   background: var(--active);
   color: var(--text);
 }
@@ -220,7 +225,7 @@
   border-radius: 6px;
   opacity: 0;
 }
-.proj-bar:hover .proj-new-chat,
+.proj-bar:hover:where(:not(:disabled)) .proj-new-chat,
 .proj-bar:focus-within .proj-new-chat {
   opacity: 1;
 }
@@ -240,45 +245,6 @@
 }
 .pinned {
   padding-left: 0;
-}
-
-/* The row / project action menu. */
-.menu {
-  position: fixed;
-  z-index: 60;
-  min-width: 190px;
-  display: grid;
-  padding: 4px;
-  background: var(--raised);
-  border-radius: 10px;
-  box-shadow: var(--shadow);
-}
-.menu button {
-  all: unset;
-  box-sizing: border-box;
-  padding: 7px 10px;
-  border-radius: 6px;
-  font-size: var(--text-13);
-  cursor: pointer;
-  color: var(--text-2);
-}
-.menu button:hover,
-.menu button:focus-visible {
-  background: var(--active);
-  color: var(--text);
-}
-.menu button:disabled {
-  opacity: 0.45;
-  cursor: default;
-}
-.menu button.danger {
-  color: var(--red);
-}
-.menu button.sep {
-  margin-top: 4px;
-  border-top: 1px solid var(--line);
-  border-radius: 0 0 6px 6px;
-  padding-top: 9px;
 }
 
 /* Filter row, archive toggle, load more. */
@@ -306,10 +272,6 @@
   color: var(--text-2);
   font-size: var(--text-12-5);
   cursor: pointer;
-}
-.more-btn:disabled {
-  opacity: 0.6;
-  cursor: default;
 }
 .col-note.error {
   color: var(--red);
@@ -357,7 +319,7 @@
   cursor: pointer;
   color: var(--text-3);
 }
-.sec-btn:hover {
+.sec-btn:hover:where(:not(:disabled)) {
   background: var(--active);
   color: var(--text);
 }
@@ -402,13 +364,16 @@
 .srow[draggable="true"] {
   -webkit-user-drag: element;
 }
-/* The chip gives way before the title: it shrinks to an ellipsis while the title keeps at least 5em. */
-.srow-main:has(.folder-chip) .t {
+/* The chip gives way before the title: it shrinks to an ellipsis while the title keeps a few readable words. */
+.srow-main:has(.tag, .loops-row, .vchat-row) .t {
   min-width: 5em;
+}
+.srow-main:has(.cli-tag) .t {
+  min-width: 5.5em;
 }
 .tag.folder-chip {
   flex: 0 1 auto;
-  min-width: 34px;
+  min-width: 0;
   display: inline-flex;
   align-items: center;
   gap: 3px;
@@ -417,6 +382,12 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   font-family: var(--font-mono);
+}
+.tag.folder-chip > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .tag.folder-chip svg {
   flex: none;
@@ -437,7 +408,7 @@
   font-size: var(--text-12);
   border-radius: 4px;
 }
-.link-btn:hover {
+.link-btn:hover:where(:not(:disabled)) {
   text-decoration: underline;
 }
 .link-btn:focus-visible {
@@ -450,7 +421,7 @@
   grid-template-columns: 16px 1fr;
   cursor: default;
 }
-.proj-h.proj-rename:hover {
+.proj-h.proj-rename:hover:where(:not(:disabled)) {
   background: none;
 }
 .proj.unfiled {
@@ -490,4 +461,13 @@
 }
 .new-chat-composer .composer-wrap {
   padding: 0;
+}
+
+.srow-main .loops-row,
+.srow-main .vchat-row {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }

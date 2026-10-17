@@ -1,16 +1,17 @@
 /**
  * Project management controls shared by overview cards and the detail pane: the visible menu button,
- * right-click menu, and inline rename field. Reuses the session list's RowMenu and RenameField and
+ * right-click menu, and inline rename field. Reuses the shared RowMenu and RenameField and
  * calls the existing projects/groups controllers; deletion opens the shared DeleteProjectDialog.
  * Depends on: AppContext, useGroups, RowMenu, RenameField, Icon. Called by: ProjectCardView, ProjectDetail.
  * Invariants: deleting only unfiles conversations; folder actions use the project's main folder;
  * editing is local to this surface so the session list cannot steal the rename field's focus.
  */
+import { TEXT } from "../../vocabulary";
 import { type MouseEvent, useRef, useState } from "react";
 
 import { Icon } from "../../components/Icon";
 import { RenameField } from "../sessions/RenameField";
-import { type MenuItem, RowMenu } from "../sessions/RowMenu";
+import { type MenuItem, RowMenu } from "../../components/RowMenu";
 import { useGroups } from "../sessions/useGroups";
 import { useApp } from "../shell/AppContext";
 
@@ -56,7 +57,7 @@ export function useProjectActions(projectId: string, title: string) {
     },
     {
       id: "new",
-      label: "New chat in this project",
+      label: `${TEXT.newChat} in this project`,
       run: () => void projects?.newSession(projectId),
     },
     {
@@ -81,6 +82,7 @@ export function useProjectActions(projectId: string, title: string) {
     },
     button: (
       <button
+        data-testid="projects.use-project-actions-stop-propagation"
         ref={button}
         type="button"
         className="pj-actions"
@@ -112,6 +114,7 @@ export function useProjectActions(projectId: string, title: string) {
     menu:
       at === null ? null : (
         <div
+          data-testid="projects.use-project-actions-stop-propagation-2"
           className="pj-action-menu"
           onClick={(event) => {
             event.stopPropagation();

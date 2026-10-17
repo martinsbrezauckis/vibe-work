@@ -78,6 +78,7 @@ export function ActionSlot(p: {
         inert={!sendShown}
       >
         <button
+          data-testid="composer.composer-tools-send"
           type="button"
           className="send"
           aria-label={label}
@@ -106,6 +107,7 @@ export function ComposerTools(p: ToolsProps): ReactElement {
   const picker = useRef<HTMLInputElement>(null);
   return (
     <div
+      data-testid="composer.composer-tools-ctools"
       className="ctools"
       onKeyDown={(e) => {
         if (e.key === "Escape" && p.menu !== null) {
@@ -115,6 +117,7 @@ export function ComposerTools(p: ToolsProps): ReactElement {
       }}
     >
       <button
+        data-testid="composer.composer-tools-click"
         type="button"
         className="ibtn"
         aria-label={ATTACH_LABEL}
@@ -129,7 +132,7 @@ export function ComposerTools(p: ToolsProps): ReactElement {
         accept={ATTACH_ACCEPT}
         multiple
         hidden
-        data-testid="file-picker"
+        data-testid="composer.file-picker"
         onChange={(e) => {
           const files = [...(e.target.files ?? [])];
           e.target.value = "";

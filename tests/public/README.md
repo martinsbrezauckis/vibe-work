@@ -20,6 +20,7 @@ tests render the real shell; `setup.ts` supplies the DOM facilities jsdom lacks.
 | Clean worktree removal and dirty-copy preservation/reporting | `worktree_inspection`, `worktree_session_cleanup` | |
 | Rejecting invalid/missing update signatures | `update_flow`, `update_manifest`, `supported_vibe_manifest` | |
 | Changing Subagents while the open chat keeps working | `subagents_setting` | `subagents-setting` |
+| Agent browser address classes: only public addresses are reachable | `netguard_ip_classes` | |
 
 The Debug API is a user-level interface for ordinary chat commands: callback answers retain their
 actual origin. Vault management and secret values remain user-only operations in the app window.
@@ -38,11 +39,12 @@ Typecheck, lint and formatting include the public UI tests. The public gate runs
 and UI tests on Linux, Windows and macOS through the existing CI matrix. Its generated-code check
 also needs the pinned Vibe Python environment described in the root README.
 
-Unix runs register 120 Rust behavior cases and 10 UI cases. Windows registers 112 active Rust
-cases plus eight explicitly ignored cases in `platform_skips`: four use Unix shell/process groups,
-one needs Unix permission denial and three need Unix symlink creation. Portable worktree tests run
-on every OS. In mixed file-scope cases, Unix-only symlink/permission assertions are cfg-gated;
-the portable path and write assertions still run. An ignored case is missing coverage, not a pass.
+Unix runs register 127 Rust behavior cases and 15 UI cases. Windows registers 105 active Rust
+cases plus ten explicitly ignored cases in `platform_skips`: four use Unix shell/process groups,
+one needs Unix permission denial, three need Unix symlink creation and two stand for the two
+worktree test files, which compare git's worktree paths with Unix-style temporary paths. In mixed
+file-scope cases, Unix-only symlink/permission assertions are cfg-gated; the portable path and
+write assertions still run. An ignored case is missing coverage, not a pass.
 
 These are source behavior tests. They do not prove packaged app startup, installation, native
 webview interaction, signatures on shipped installers, or a public release. The separate unsigned

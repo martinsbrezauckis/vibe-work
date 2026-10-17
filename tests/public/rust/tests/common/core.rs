@@ -58,6 +58,16 @@ pub async fn script_core_with(
     extra: &[&str],
     tweak: impl FnOnce(&mut CoreConfig),
 ) -> ScriptRig {
+    script_core_with_home(name, extra, None, tweak).await
+}
+
+/// Runs separate cores against the same test Vibe home while their app data folders differ.
+pub async fn script_core_with_home(
+    name: &str,
+    extra: &[&str],
+    home: Option<&Path>,
+    tweak: impl FnOnce(&mut CoreConfig),
+) -> ScriptRig {
     let dir = scratch(name);
     let log = dir.join("methods.log");
     let log_text = log.to_string_lossy().into_owned();
@@ -70,7 +80,7 @@ pub async fn script_core_with(
     args.extend_from_slice(extra);
     let mut config = fake_config(name, &args);
     config.cwd = dir.clone();
-    config.vibe_home = dir.join("vibe-home");
+    config.vibe_home = home.map_or_else(|| dir.join("vibe-home"), Path::to_path_buf);
     let confirmer = FakeConfirmer::new();
     let mut core_config = CoreConfig::default();
     tweak(&mut core_config);

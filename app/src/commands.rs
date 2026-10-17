@@ -183,6 +183,18 @@ pub async fn pick_folder(
     host.get().await.register_picked_folder(&path).map(Some)
 }
 
+/// Opens the native file picker for a company's certificate file (Rust owns the dialog) and returns the chosen path,
+/// or `None` when the user cancelled. The path is not a secret; the core checks the file when Settings > Network saves it.
+///
+/// # Errors
+/// None today; the signature allows the bridge's error type like its siblings.
+#[tauri::command]
+pub async fn pick_certificate(app: AppHandle) -> Result<Option<String>, CoreError> {
+    Ok(dialogs::pick_certificate(&app)
+        .await
+        .map(|path| path.to_string_lossy().into_owned()))
+}
+
 /// Opens the native file picker for documents (Rust owns it: the webview supplies no path) and adds
 /// the chosen files to the core. Returns the added documents' ids and facts and the files
 /// that were refused; never a path.

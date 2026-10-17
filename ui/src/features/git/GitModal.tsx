@@ -20,8 +20,9 @@ export function GitModal(props: {
   useModalFocus(true, dialog, onClose);
   return (
     <>
-      <div className="scrim" onClick={onClose} />
+      <div data-testid="git.git-modal-scrim" className="scrim" onClick={onClose} />
       <div
+        data-testid="git.git-modal-modal"
         className="modal git-modal"
         role="dialog"
         aria-modal="true"

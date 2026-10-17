@@ -1,0 +1,30 @@
+{
+  "method": "skills/catalog",
+  "params": {
+    "sessionId": "session-skills"
+  },
+  "result": {
+    "skills": [
+      {
+        "name": "review",
+        "skillId": "skill-project-review",
+        "description": "Catalog review",
+        "latestVersion": 4,
+        "sharingScope": ""
+      },
+      {
+        "name": "catalog-only",
+        "skillId": "skill-catalog",
+        "description": "Available to import",
+        "latestVersion": 1,
+        "sharingScope": ""
+      }
+    ],
+    "updates": {
+      "review": 4
+    },
+    "loaded": true,
+    "projectAvailable": true,
+    "authenticated": true
+  }
+}

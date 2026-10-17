@@ -8,8 +8,8 @@
  * Called by: settings/SettingsPage (Models and agent).
  * Invariants: a value another layer sets (environment, administrator) is shown with who sets it and is not editable;
  * nothing is written until the user changes a control; failures are shown as text.
- * Subagents is the exception to "written through the open chat": Vibe refuses to change it on a chat that exists
- * and then breaks that chat, so it is saved for new chats through the core's short-lived chat and the row says so.
+ * Subagents is the exception to "written through the open chat": Vibe applies it when a chat is created, so it is
+ * saved for new chats through the core's short-lived chat and the row says so.
  */
 import type { ReactElement } from "react";
 
@@ -97,7 +97,7 @@ export function AgentDefaultsSettings(): ReactElement | null {
             setBy={view.subagents.setBy}
             note={newChatsNote}
             onFlip={(on) => {
-              // Vibe refuses this change on a chat that exists and then breaks that chat: never through the open one.
+              // Vibe applies Subagents when a chat is created: saved for new chats, never through the open one.
               applyToNewChats(() => writeSubagentsForNewChats(core, on));
             }}
           />

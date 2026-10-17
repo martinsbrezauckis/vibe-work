@@ -47,6 +47,24 @@ pub(crate) fn interpret(answer: PageAnswer, action: &Action) -> Result<PageAnswe
     };
     match answer.status.as_str() {
         "done" => Ok(answer),
+        "unmet" => Err(ActError {
+            outcome: Outcome::Failed,
+            text: match action {
+                Action::Check { .. } => {
+                    let role = answer.target.as_ref().map(|target| target.role.as_str());
+                    let checked = answer.checked == Some(true);
+                    let (control, state) = match role {
+                        Some("radio") => ("radio button", if checked { "selected" } else { "unselected" }),
+                        Some("switch") => ("switch", if checked { "on" } else { "off" }),
+                        _ => ("box", if checked { "checked" } else { "unchecked" }),
+                    };
+                    format!("The {control} is still {state}; the page did not accept the change.")
+                }
+                Action::Select { .. } => "The selected option did not become the requested option; the page did not accept the change.".to_owned(),
+                Action::Type { .. } => "The field does not contain the requested text; the page did not accept the change.".to_owned(),
+                _ => "The page did not accept the requested change.".to_owned(),
+            },
+        }),
         "stale" | "ambiguous" => Err(refused(format!(
             "ref {reference} is not on the page any more (the page changed since your last browser_read): call \
              browser_read again and use a fresh ref"

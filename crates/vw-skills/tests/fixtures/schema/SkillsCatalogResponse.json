@@ -1,0 +1,39 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "authenticated": {
+      "default": true,
+      "title": "Authenticated",
+      "type": "boolean"
+    },
+    "loaded": {
+      "default": false,
+      "title": "Loaded",
+      "type": "boolean"
+    },
+    "projectAvailable": {
+      "default": false,
+      "title": "Projectavailable",
+      "type": "boolean"
+    },
+    "skills": {
+      "items": {
+        "$ref": "#/$defs/SkillCatalogEntry"
+      },
+      "title": "Skills",
+      "type": "array"
+    },
+    "updates": {
+      "additionalProperties": {
+        "type": "integer"
+      },
+      "title": "Updates",
+      "type": "object"
+    }
+  },
+  "required": [
+    "skills"
+  ],
+  "title": "SkillsCatalogResponse",
+  "type": "object"
+}

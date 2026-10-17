@@ -5,6 +5,7 @@
  * Invariants: renders only; output is text in a `<pre>` (never HTML); Stop never asks again (the click is the
  * decision, the window's own trusted surface).
  */
+import { TEXT } from "../../vocabulary";
 import type { ReactElement } from "react";
 
 import { Button } from "../../components/Controls";
@@ -32,7 +33,7 @@ function Row({
   const title = processTitle(item);
   const running = item.status === "running";
   return (
-    <li data-session-process={item.id} data-kind={item.kind}>
+    <li data-item-id={item.id} data-session-process={item.id} data-kind={item.kind}>
       <div className="proc-row">
         <span className="left-running-what">
           <span className="mono proc-cmd" title={title}>
@@ -48,6 +49,7 @@ function Row({
           </span>
         </span>
         <Button
+          data-testid="shell.session-processes-section-toggle-output"
           aria-expanded={output !== undefined}
           aria-label={`${output === undefined ? "Show" : "Hide"} the output of ${title}`}
           onClick={() => {
@@ -57,6 +59,7 @@ function Row({
           Output
         </Button>
         <Button
+          data-testid="shell.session-processes-section-stop"
           variant="danger"
           small
           disabled={stopping || !running}
@@ -82,7 +85,7 @@ export function SessionProcessesSection({ procs }: { procs: SessionProcesses }):
   const state = useStore(procs.store, (s) => s);
   return (
     <section className="proc-section" data-testid="session-processes">
-      <h3>This session</h3>
+      <h3>{TEXT.thisSession}</h3>
       {state.sessionId === null ? (
         <p className="d">Open a session to see its processes.</p>
       ) : state.items.length === 0 ? (

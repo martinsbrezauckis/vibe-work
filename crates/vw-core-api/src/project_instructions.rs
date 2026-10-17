@@ -1,8 +1,9 @@
 //! Project instruction files in saved main folders.
 //! Depends on the project store, document shape and session refresh, and the native confirmer;
 //! called by `Command::ProjectInstructions` from the Projects screen.
-//! Invariants: the client supplies only a project ID and an allowlisted relative name; links and
-//! stale folder or content snapshots are refused; deletion always asks the native confirmer.
+//! Invariants: the client (the window or the Debug API acting as the user) supplies only a project ID and an
+//! allowlisted relative name; links and stale folder or content snapshots are refused; deletion always goes through
+//! the confirmer.
 
 use std::path::{Path, PathBuf};
 
@@ -91,12 +92,9 @@ impl Core {
         origin: Origin,
         request: ProjectInstructionsRequest,
     ) -> Result<CommandResult, CoreError> {
-        if origin != Origin::Ui {
-            return Err(refuse(
-                "projectInstructionsUserOnly",
-                "project instruction files can only be managed in the app window",
-            ));
-        }
+        // The Debug API acts as the user here like everywhere outside the vault: the same project-id, name and
+        // snapshot checks apply to both origins, and a delete still goes through the confirmer, which answers
+        // the Debug API itself (confirmer.rs).
         let project_id = match &request {
             ProjectInstructionsRequest::List { project_id }
             | ProjectInstructionsRequest::Read { project_id, .. }

@@ -79,7 +79,7 @@ impl PagesService {
             return Ok(server.clone());
         }
         let name = project.file_name().map_or_else(
-            || "Project".to_owned(),
+            || vw_vocabulary::label("workNames", "projectTab").to_owned(),
             |n| n.to_string_lossy().into_owned(),
         );
         let server = Arc::new(

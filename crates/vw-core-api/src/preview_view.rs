@@ -153,16 +153,51 @@ pub enum PreviewRequest {
         port: u16,
     },
     /// "Point Vibe at this": lets the user point at an element of the session's preview (the
-    /// selection, else the next click; Escape cancels) and answers what it is (untrusted page data).
+    /// selection, else the next click; Escape cancels) and answers what it is (untrusted page data). With `target`
+    /// the element is named instead and the answer is immediate; a Debug API request must name it (`selector`, or
+    /// `x` and `y`): there is no person to click.
     Pick {
         /// The session.
         session_id: String,
+        /// The element to pick without a click.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[cfg_attr(feature = "ts", ts(optional))]
+        target: Option<PickTarget>,
     },
     /// Cancels a running pick in the session's preview.
     CancelPick {
         /// The session.
         session_id: String,
     },
+}
+
+/// What a pick points at when nobody clicks: a Debug API request names it (it has no pointer). Exactly one way:
+/// `selector` (the first match), `x` and `y` (the element at that point of the page's viewport, CSS pixels), for the
+/// agent browser's annotation also `ref` (an element ref of the last read) or, in box mode, `rect`.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PickTarget {
+    /// A CSS selector.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
+    pub selector: Option<String>,
+    /// An element ref from the agent browser's last read (annotation only).
+    #[serde(default, rename = "ref", skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional, rename = "ref"))]
+    pub reference: Option<String>,
+    /// Left of the point.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
+    pub x: Option<f64>,
+    /// Top of the point.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
+    pub y: Option<f64>,
+    /// The area of a box annotation (viewport CSS pixels).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
+    pub rect: Option<Rect>,
 }
 
 /// A server of the session the preview may open.

@@ -30,7 +30,13 @@ import {
   isDirty,
 } from "../../state/instructions";
 import { UiControlError } from "../../state/uiControl";
-import { ABOUT_AUTHOR, CONTACT_URL, HOMEPAGE_URL, SOURCE_URL } from "./AboutSettings";
+import {
+  ABOUT_AUTHOR,
+  CONTACT_URL,
+  HOMEPAGE_URL,
+  SOURCE_URL,
+  MISTRAL_DATA_POLICY_URL,
+} from "./AboutSettings";
 import { offeredCategories } from "./availability";
 import { SEARCH_INDEX, searchSettings, settingPath } from "./catalog";
 import { MISTRAL_LINKS } from "./mistralLinks";
@@ -111,6 +117,7 @@ function read(app: App, instructions: Instructions | null) {
       contact: CONTACT_URL,
       source: SOURCE_URL,
       homepage: HOMEPAGE_URL,
+      dataPolicy: MISTRAL_DATA_POLICY_URL,
     },
     instructions:
       state === undefined

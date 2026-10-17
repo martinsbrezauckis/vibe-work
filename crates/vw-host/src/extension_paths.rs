@@ -1,5 +1,6 @@
-//! Removes cwd-dependent extension paths from the app-owned config before launch. Depends on TOML and std;
-//! called by launch. Only relative string entries and their commas change; errors warn and never stop launch.
+//! Keeps only absolute folders in the extension path settings of the app-owned config before launch: Vibe Work
+//! passes Vibe every extension folder as an absolute path. Depends on TOML and std; called by launch. Only
+//! relative string entries and their commas change; errors warn and never stop launch.
 
 use std::io::{self, Write};
 use std::ops::Range;
@@ -31,7 +32,7 @@ fn update(config: &Path) -> Result<(), String> {
             tracing::warn!(
                 key,
                 count,
-                "extension paths: relative entries dropped to prevent discovery from a session's working directory"
+                "extension paths: relative entries are not used; only absolute folders are passed to Vibe"
             );
         }
     }

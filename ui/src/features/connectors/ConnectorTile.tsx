@@ -17,11 +17,13 @@ export function ConnectorTile({ tile, selected }: { tile: Tile; selected: boolea
   const keyBlocked = useKeyReadiness() !== null;
   return (
     <div
+      data-item-id={tile.alias}
       className={`ctile ${selected ? "sel" : ""}`}
       data-alias={tile.alias}
       data-status={tile.status}
     >
       <button
+        data-testid="connectors.connector-tile-select"
         type="button"
         className="ctile-main"
         aria-pressed={selected}
@@ -45,6 +47,7 @@ export function ConnectorTile({ tile, selected }: { tile: Tile; selected: boolea
         ) : null}
         {tile.status === "signin" ? (
           <button
+            data-testid="connectors.connector-tile-sign-in"
             type="button"
             className="tb-btn primary"
             disabled={keyBlocked}

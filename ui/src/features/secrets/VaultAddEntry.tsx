@@ -116,6 +116,7 @@ export function VaultAddEntry(props: {
       <div className="key-field">
         <span className="key-field-label">Type</span>
         <Selector
+          testId="secrets.vault-add-entry-set-value"
           label="Type"
           value={type}
           options={[
@@ -133,6 +134,7 @@ export function VaultAddEntry(props: {
         <label htmlFor="entry-name">Name</label>
         <div className="key-field-row">
           <input
+            data-testid="secrets.vault-add-entry-set-name"
             id="entry-name"
             autoFocus
             value={name}
@@ -150,6 +152,7 @@ export function VaultAddEntry(props: {
             <label htmlFor="entry-site">Site</label>
             <div className="key-field-row">
               <input
+                data-testid="secrets.vault-add-entry-set-site"
                 id="entry-site"
                 value={site}
                 maxLength={2000}
@@ -164,6 +167,7 @@ export function VaultAddEntry(props: {
             <label htmlFor="entry-user">User name</label>
             <div className="key-field-row">
               <input
+                data-testid="secrets.vault-add-entry-set-username"
                 id="entry-user"
                 value={username}
                 maxLength={200}
@@ -177,13 +181,14 @@ export function VaultAddEntry(props: {
         </>
       )}
       <SecretField
+        testId="secrets.vault-add-entry-secretfield"
         label={login ? "Password" : "Value"}
         value={value}
         onChange={setValue}
         autoComplete="off"
       />
       {duplicate && (
-        <p className="key-line" role="alert">
+        <p className="key-problem" role="alert">
           This entry already exists. Expand it and choose Replace.
         </p>
       )}
@@ -191,6 +196,7 @@ export function VaultAddEntry(props: {
         <div className="key-field">
           <span className="key-field-label">Project permission</span>
           <Selector
+            testId="secrets.vault-add-entry-selector"
             label="Project permission"
             value={permission}
             disabled={props.busy || !props.list.unlocked}
@@ -211,6 +217,7 @@ export function VaultAddEntry(props: {
         setOptions={generator.setOptions}
       >
         <button
+          data-testid="secrets.vault-add-entry-tb-btn"
           type="submit"
           className="tb-btn primary"
           disabled={props.busy || !valid || value === "" || (login && value.length < 8)}
@@ -218,6 +225,7 @@ export function VaultAddEntry(props: {
           Save entry
         </button>
         <button
+          data-testid="secrets.vault-add-entry-save"
           type="button"
           className="tb-btn"
           disabled={props.busy || !valid || !generator.valid}
@@ -228,6 +236,7 @@ export function VaultAddEntry(props: {
           Generate
         </button>
         <button
+          data-testid="secrets.vault-add-entry-set-value-2"
           type="button"
           className="tb-btn"
           disabled={props.busy}

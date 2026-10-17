@@ -45,8 +45,13 @@ export function TabHandoffDialog({
   }, []);
   return createPortal(
     <>
-      <div className="scrim" onClick={busy ? undefined : onClose} />
       <div
+        data-testid="preview.tab-handoff-dialog-scrim"
+        className="scrim"
+        onClick={busy ? undefined : onClose}
+      />
+      <div
+        data-testid="preview.tab-handoff-dialog-modal"
         className="modal browser-handoff-dialog"
         ref={dialog}
         role="dialog"
@@ -69,10 +74,17 @@ export function TabHandoffDialog({
           {error && <p role="alert">{error}</p>}
         </section>
         <footer className="modal-actions">
-          <button type="button" className="tb-btn" disabled={busy} onClick={onClose}>
+          <button
+            data-testid="preview.tab-handoff-dialog-tb-btn"
+            type="button"
+            className="tb-btn"
+            disabled={busy}
+            onClick={onClose}
+          >
             Cancel
           </button>
           <button
+            data-testid="preview.tab-handoff-dialog-btn-primary"
             type="button"
             className="btn-primary"
             data-dialog-initial-focus

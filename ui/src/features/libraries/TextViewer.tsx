@@ -20,7 +20,7 @@ export function TextViewer(): ReactElement | null {
   if (viewer === null) return null;
   return (
     <>
-      <div className="scrim" onClick={close} />
+      <div data-testid="libraries.text-viewer-scrim" className="scrim" onClick={close} />
       <div
         className="modal lib-viewer"
         role="dialog"
@@ -28,7 +28,7 @@ export function TextViewer(): ReactElement | null {
         aria-labelledby="lib-viewer-title"
         ref={dialog}
         tabIndex={-1}
-        data-testid="library-text"
+        data-testid="libraries.library-text"
       >
         <header>
           <h2 id="lib-viewer-title">
@@ -43,7 +43,13 @@ export function TextViewer(): ReactElement | null {
           ) : null}
         </section>
         <footer>
-          <button type="button" className="tb-btn" data-dialog-initial-focus="true" onClick={close}>
+          <button
+            data-testid="libraries.text-viewer-tb-btn"
+            type="button"
+            className="tb-btn"
+            data-dialog-initial-focus="true"
+            onClick={close}
+          >
             Close
           </button>
         </footer>

@@ -17,8 +17,9 @@ function Sources(): ReactElement | null {
   return (
     <ol className="lib-sources" aria-label="Sources">
       {answer.sources.map((s) => (
-        <li key={s.n} data-source={s.n}>
+        <li data-item-id={s.n} key={s.n} data-source={s.n}>
           <button
+            data-testid="libraries.ask-panel-open-text"
             type="button"
             className="lib-source"
             disabled={s.libraryId === null}
@@ -57,6 +58,7 @@ export function AskPanel(): ReactElement {
       <h3 id="lib-ask-title">Ask your libraries</h3>
       <form className="lib-ask-row" onSubmit={submit}>
         <input
+          data-testid="libraries.ask-panel-set-question"
           value={question}
           aria-label="Question"
           placeholder={
@@ -66,6 +68,7 @@ export function AskPanel(): ReactElement {
           onChange={(e) => actions?.setQuestion(e.target.value)}
         />
         <button
+          data-testid="libraries.ask-panel-tb-btn"
           type="submit"
           className="tb-btn primary"
           disabled={blocked || usable === 0 || busy === "ask" || question.trim() === ""}

@@ -9,6 +9,7 @@
  * The screen says so for the quota instead of leaving a blank. Context fill is "of N tokens until Vibe
  * compacts the conversation".
  */
+import { TEXT } from "../../vocabulary";
 import { useEffect, useState } from "react";
 
 import {
@@ -123,22 +124,24 @@ export function AccountSettings({ part }: { part: "account" | "usage" }) {
 
   return (
     <section aria-labelledby="usage-settings-title" data-setting="session-usage">
-      <h3 id="usage-settings-title">This conversation</h3>
+      <h3 id="usage-settings-title">{TEXT.thisSession}</h3>
       {selected === null ? (
         <p className="key-line">Open a session to see its usage.</p>
       ) : (
         <dl className="set-facts" data-testid="usage-facts">
           <div className="check">
             <dt>Tokens used</dt>
-            <dd className="mono">
-              {usage.totalTokens === null
-                ? "not reported yet"
-                : `${formatTokens(usage.totalTokens)} (${formatTokens(usage.inputTokens)} in, ${formatTokens(usage.outputTokens)} out)`}
-            </dd>
+            {usage.totalTokens === null ? (
+              <dd>Not reported yet</dd>
+            ) : (
+              <dd className="mono">
+                {`${formatTokens(usage.totalTokens)} (${formatTokens(usage.inputTokens)} in, ${formatTokens(usage.outputTokens)} out)`}
+              </dd>
+            )}
           </div>
           <div className="check">
             <dt>Context</dt>
-            <dd className="mono">{readout === null ? "not reported yet" : readout.explain}</dd>
+            <dd>{readout === null ? "Not reported yet" : readout.explain}</dd>
           </div>
         </dl>
       )}
@@ -159,9 +162,9 @@ export function AccountSettings({ part }: { part: "account" | "usage" }) {
           aria-label={`Context ${String(readout.percent)} percent full`}
         />
       )}
-      <p className="key-field-hint">
+      <p className="key-field-hint ui-help">
         Mistral shows how much of your plan is left on its website, not to apps (see the links
-        below). Vibe compacts the conversation on its own before the context is full.
+        below). Vibe compacts the session on its own before the context is full.
       </p>
     </section>
   );

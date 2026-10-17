@@ -13,8 +13,7 @@
 # Use: `vault-core` (the shared storage core) is a dependency of crates/vw-vault (product).
 # `vault-client` and `vault-server` are compiled only by the maintainers' integration tests, as the oracle that writes
 # and reads real vault data in the interop tests. Everything above the storage core (profiles,
-# grants, agent requests: upstream `vault-broker`) is not copied: Vibe Work's own client replaces it
-# (Martins, 2026-10-09).
+# grants, agent requests: upstream `vault-broker`) is not copied: Vibe Work's own client replaces it.
 # Never build this folder on its own; it is compiled as a path dependency of the root workspace and
 # of the private test crate, so it shares their lockfiles.
 [workspace]

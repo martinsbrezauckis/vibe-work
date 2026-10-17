@@ -692,6 +692,14 @@ impl Vault {
         self.with_session(|repo, master, _| items::list_items(repo, master))
     }
 
+    /// Every manifest-backed item, refusing any missing, corrupt or undecodable record. Use for authorization.
+    ///
+    /// # Errors
+    /// [`VaultError::Locked`], [`VaultError::Corrupt`], storage errors.
+    pub fn list_items_strict(&self) -> Result<Vec<VaultItem>, VaultError> {
+        self.with_session(|repo, master, _| items::list_items_strict(repo, master))
+    }
+
     /// Creates or replaces an item.
     ///
     /// # Errors

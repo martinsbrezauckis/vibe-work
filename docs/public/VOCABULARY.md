@@ -11,7 +11,7 @@ Models use Vibe's reported display name, falling back to the configured alias. D
 | ID | Name | Description | Tooltip |
 | --- | --- | --- | --- |
 | `auto-approve` | Full access | Vibe tools run without Vibe's approval card, including outside the folder. Vibe Work's protected actions still need your permission. | Use Full access access mode |
-| `smart-approve` | Smart approve | A model checks each tool call. Safe ones run, risky ones ask. | Use Smart approve access mode |
+| `smart-approve` | Smart approve | A model checks each tool call: the calls it judges low-risk run, the others ask. | Use Smart approve access mode |
 | `accept-edits` | Accept edits | File edits run. Commands and anything outside the folder ask. | Use Accept edits access mode |
 | `ask` | Ask | Asks before tool use. | Use Ask access mode |
 | `plan` | Plan first | Vibe plans before it changes files. Not read-only: shell commands can still change files. | Use Plan first access mode |
@@ -60,3 +60,13 @@ Models use Vibe's reported display name, falling back to the configured alias. D
 | `agentResume` | Resume agent access to secrets | Agent access to secrets is available. Sessions keep working. | Resume the agent's access to secrets. Sessions keep working. |
 | `vaultLock` | Lock vault | The vault is locked. Sessions stop until you unlock. | Lock the vault. Sessions stop until you unlock. |
 | `vaultUnlock` | Unlock vault | The vault is unlocked. Sessions can work again. | Unlock the vault. Sessions can work again. |
+
+## Projects and sessions
+
+| ID | Name | Description | Tooltip |
+| --- | --- | --- | --- |
+| `projectTab` | Project | The side panel tab for the project's handbook. | Open Project tab |
+| `handbook` | handbook | A project's documentation, shown in the Project tab. | Open the project handbook |
+| `page` | page | One document in a project's handbook. | Open handbook page |
+| `session` | Session | Existing work with its messages, history and settings, saved in the session list. | Open session |
+| `chat` | chat | Starting an interaction with Vibe, as in New chat or voice chat. | Start a chat |

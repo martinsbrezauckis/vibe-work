@@ -31,7 +31,7 @@
 //! - When a folder is configured, an id is on the list only if the record on disk names it too ([`TemporarySessions::add`]
 //!   rolls the id back when the write fails).
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
@@ -42,6 +42,7 @@ use tracing::{error, info, warn};
 use crate::command::Origin;
 use crate::core::{Core, Shared};
 use crate::error::CoreError;
+use crate::event::{AlertKind, CoreEvent};
 
 /// Longest one deletion may take at quit or start.
 const DELETE_WAIT: Duration = Duration::from_secs(10);
@@ -57,6 +58,7 @@ pub(crate) struct NotRecorded(String);
 #[derive(Default)]
 pub(crate) struct TemporarySessions {
     ids: Mutex<BTreeSet<String>>,
+    notices: Mutex<BTreeMap<String, CoreEvent>>,
     file: Option<PathBuf>,
     /// Set at load when the record on disk is damaged and could not be moved aside: it has to stay as it is, so no
     /// write is attempted and every [`TemporarySessions::add`] fails with this text.
@@ -72,7 +74,7 @@ pub(crate) fn spawn_sweep(shared: &Arc<Shared>) {
     let weak = Arc::downgrade(shared);
     tokio::spawn(async move {
         let Some(shared) = weak.upgrade() else { return };
-        Core { shared }.delete_temporary_all().await;
+        Core { shared }.delete_temporary_all(true).await;
     });
 }
 
@@ -144,6 +146,7 @@ impl TemporarySessions {
             .map_or_else(|| (BTreeSet::new(), None), read_record);
         let mut list = Self {
             ids: Mutex::new(ids),
+            notices: Mutex::default(),
             file,
             frozen: None,
         };
@@ -209,6 +212,39 @@ impl TemporarySessions {
             )),
             None => Ok(()),
         }
+    }
+
+    /// Notices retained for a UI that subscribes after the startup sweep finished.
+    pub(crate) fn notices(&self) -> Vec<CoreEvent> {
+        self.notices
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .values()
+            .cloned()
+            .collect()
+    }
+
+    /// Keeps the latest cleanup result for this session and publishes it to current subscribers.
+    fn notice(&self, shared: &Shared, id: &str, removed: bool) {
+        let (kind, message) = if removed {
+            (
+                AlertKind::TemporaryCleanupRecovered,
+                "A temporary chat was not deleted before the previous run ended. It has now been deleted.".to_owned(),
+            )
+        } else {
+            (AlertKind::TemporaryCleanupFailed,
+                "A temporary chat could not be deleted. It remains stored by Vibe. Vibe Work will retry at the next start; you can also delete it from the sessions list.".to_owned())
+        };
+        let event = CoreEvent::Alert {
+            session_id: Some(id.to_owned()),
+            kind,
+            message,
+        };
+        self.notices
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(id.to_owned(), event.clone());
+        shared.emit(event);
     }
 
     /// Adds a session and writes the record before returning (a crash right after still deletes it).
@@ -343,12 +379,16 @@ impl Core {
     }
 
     /// Deletes every temporary session (quit, or the start after a crash). Returns how many were deleted.
-    pub(crate) async fn delete_temporary_all(&self) -> usize {
+    pub(crate) async fn delete_temporary_all(&self, at_start: bool) -> usize {
         let ids = self.shared.temporary.ids();
         let mut deleted = 0;
         for id in &ids {
-            if self.delete_temporary(id).await {
+            let removed = self.delete_temporary(id).await;
+            if removed {
                 deleted += 1;
+            }
+            if at_start || !removed {
+                self.shared.temporary.notice(&self.shared, id, removed);
             }
         }
         if !ids.is_empty() {

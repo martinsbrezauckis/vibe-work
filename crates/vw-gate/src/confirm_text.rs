@@ -46,7 +46,7 @@ fn action_sentence<'a>(method: &str, params: &Value, base: &'a str) -> &'a str {
         "agents/install" => "Install an agent that can run code in Vibe Work?",
         "agents/uninstall" => "Uninstall an agent from Vibe Work?",
         "config/proxy/write" => {
-            "Change the proxy settings used by this session? These addresses may receive its network requests."
+            "Change how Vibe connects to the internet? Its requests may go through the proxy you entered, and a certificate you chose will be trusted."
         }
         "connector_catalog/auth/request" => "Open the sign-in page for this Mistral connector?",
         "mcp/add" | "mcp_catalog/add" => {
@@ -121,11 +121,46 @@ fn append_config_changes(params: &Value, parts: &mut Vec<String>) {
     }
 }
 
+/// One line of a `config/proxy/write` dialog: what the setting does, in plain words. A proxy address is shown as
+/// `scheme://host:port` only (the dialog and the logs must not carry a sign-in); the token still binds the real value.
+fn proxy_change(key: &str, value: Option<&str>) -> String {
+    let (label, action) = match key {
+        "HTTP_PROXY" => ("Web (HTTP) proxy", "send requests through"),
+        "HTTPS_PROXY" => ("Secure web (HTTPS) proxy", "send requests through"),
+        "ALL_PROXY" => ("Proxy for all other requests", "send requests through"),
+        "NO_PROXY" => ("Requests that skip the proxy", "skip the proxy for"),
+        "SSL_CERT_FILE" => (
+            "Certificate file",
+            "also trust the certificates in the file",
+        ),
+        "SSL_CERT_DIR" => (
+            "Certificate folder",
+            "also trust the certificates in the folder",
+        ),
+        _ => (key, "change to"),
+    };
+    match value {
+        None => format!("{label}: remove this setting"),
+        // An address is shown as the scheme, host and port the client will connect to, and nothing else (the sign-in
+        // is only named); the other settings are shown as they are.
+        Some(text) if matches!(key, "HTTP_PROXY" | "HTTPS_PROXY" | "ALL_PROXY") => format!(
+            "{label}: {action} {}{}",
+            dialog_quote(&vw_mistral::network::mask_proxy_url(text)),
+            if vw_mistral::network::has_sign_in(text) {
+                " with a user name and password"
+            } else {
+                ""
+            }
+        ),
+        Some(text) => format!("{label}: {action} {}", dialog_quote(text)),
+    }
+}
+
 /// The gate's complete visible sentence. Values are selected by meaning, never dumped as JSON.
 pub(crate) fn confirmation_summary(method: &str, params: &Value, base: &str) -> String {
     let mut parts = vec![action_sentence(method, params, base).to_owned()];
     for (key, label) in [
-        ("sessionId", "Session"),
+        ("sessionId", vw_vocabulary::label("workNames", "session")),
         (
             "agentName",
             if method == "session/agent/update" {
@@ -141,7 +176,7 @@ pub(crate) fn confirmation_summary(method: &str, params: &Value, base: &str) -> 
         ("rootPath", "Project folder"),
         ("cwd", "Folder"),
         ("skillId", "Skill"),
-        ("projectId", "Project"),
+        ("projectId", vw_vocabulary::label("workNames", "projectTab")),
         ("projectName", "Project name"),
         ("expectedGithubRepoUrl", "Expected GitHub repository"),
         ("pickerId", "Picker"),
@@ -153,6 +188,10 @@ pub(crate) fn confirmation_summary(method: &str, params: &Value, base: &str) -> 
         ("purpose", "Purpose"),
         ("prompt", "Prompt sent to Vibe Code"),
     ] {
+        // The session of a proxy change is a helper chat the user never saw: its id would only confuse.
+        if method == "config/proxy/write" && key == "sessionId" {
+            continue;
+        }
         if let Some(value) = named(
             params,
             key,
@@ -205,11 +244,10 @@ pub(crate) fn confirmation_summary(method: &str, params: &Value, base: &str) -> 
         && let Some(changes) = params.get("changes").and_then(Value::as_object)
     {
         for (key, value) in changes {
-            let change = value.as_str().map_or_else(
-                || "remove this proxy setting".to_owned(),
-                |address| format!("send traffic through {}", dialog_quote(address)),
-            );
-            parts.push(format!("{}: {change}", dialog_quote(key)));
+            parts.push(proxy_change(
+                key,
+                value.as_str().filter(|text| !text.is_empty()),
+            ));
         }
     }
     if method == "config/write" {
@@ -275,6 +313,50 @@ mod tests {
                 "{method} has no action sentence"
             );
         }
+    }
+
+    #[test]
+    fn proxy_dialog_hides_the_sign_in_and_says_what_each_setting_does() {
+        let summary = confirmation_summary(
+            "config/proxy/write",
+            &json!({"sessionId": "s1", "changes": {
+                "HTTPS_PROXY": "http://alice:s3cret@proxy.corp:8080",
+                "NO_PROXY": ".corp,10.0.0.0/8",
+                "SSL_CERT_FILE": "/etc/ssl/company-ca.pem",
+                "HTTP_PROXY": null
+            }}),
+            "generic",
+        );
+        assert!(
+            !summary.contains("s3cret") && !summary.contains("alice"),
+            "{summary}"
+        );
+        for line in [
+            "Secure web (HTTPS) proxy: send requests through \"http://proxy.corp:8080\" with a user name and password",
+            "Requests that skip the proxy: skip the proxy for \".corp,10.0.0.0/8\"",
+            "Certificate file: also trust the certificates in the file \"/etc/ssl/company-ca.pem\"",
+            "Web (HTTP) proxy: remove this setting",
+        ] {
+            assert!(summary.contains(line), "{line}\n{summary}");
+        }
+        assert!(!summary.contains("config/proxy/write") && !summary.contains('{'));
+    }
+
+    #[test]
+    fn the_dialog_shows_the_host_the_client_connects_to_whatever_the_text_looks_like() {
+        // `#@` makes a text that looks like it ends in proxy.corp; the client connects to evil.example. (The gate
+        // refuses such an address first; the dialog must still never be misleading.)
+        let summary = confirmation_summary(
+            "config/proxy/write",
+            &json!({"sessionId": "s1", "changes": {
+                "HTTPS_PROXY": "http://evil.example:3128#@proxy.corp:8080"}}),
+            "generic",
+        );
+        assert!(
+            summary.contains("\"http://evil.example:3128\""),
+            "{summary}"
+        );
+        assert!(!summary.contains("proxy.corp"), "{summary}");
     }
 
     #[test]

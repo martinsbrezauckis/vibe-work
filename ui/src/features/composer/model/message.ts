@@ -5,7 +5,7 @@
  * the `ui/composer` route, tests.
  * Invariants:
  * - **Sent context is never a command**: only the text the user typed in
- *   the composer is classified, and only when the message carries no context chips and no images. A
+ *   the composer is classified. App commands with attachments are held until the attachments are removed. A
  *   context item is always a `resource` block (`vw://context/<n>`, Vibe's `UserTextResource`);
  *   the model sees it and history keeps it, but it is never part of a text block, so Vibe never parses it as a
  *   skill or command either.
@@ -27,6 +27,7 @@ import type {
   UserDisplayContent,
 } from "../../../protocol/generated";
 import { VOICE_INSTRUCTION } from "../../voice/voiceChatText";
+import { parseLoopArgs } from "./loopArgs";
 import { isClientCommand } from "./slashNames";
 
 /** Text the user inserted with "Point Vibe at this", a quote or a page comment: data, never a command. */
@@ -86,20 +87,25 @@ export type Intent =
 /**
  * Classifies the composer content. `!cmd` runs a shell command; `/name args` is a GUI command when
  * `name` is one we handle (`slashNames.ts`), else a turn (skills and unknown commands go to Vibe as
- * text, like the CLI). With context or images attached, or when the text is `literal` (put back by
- * the app, not typed), it is always a turn.
+ * text, like the CLI; so does a `/loop` line that is not one of its strict forms, `loopArgs.ts`). App commands
+ * stay reserved with attachments or recovered text; the send path asks the user to remove attachments or
+ * explicitly use recovered text as a command.
  */
 export function classify(text: string, context: number, images: number, literal = false): Intent {
   const trimmed = text.trim();
   if (trimmed === "" && context === 0 && images === 0) return { kind: "empty" };
+  // App commands are reserved on every path, including recovered text and attachments.
+  const command = /^\/([A-Za-z][\w:.-]*)(?:\s+([\s\S]*))?$/.exec(trimmed);
+  if (command?.[1] !== undefined && isClientCommand(command[1])) {
+    const args = (command[2] ?? "").trim();
+    // `/loop` is ours only in its strict forms; "/loop every weekday at 9 ..." goes to Vibe's model like the CLI's.
+    if (command[1] === "loop" && parseLoopArgs(args) === null) return { kind: "turn" };
+    return { kind: "command", name: command[1], args };
+  }
   if (context > 0 || images > 0 || literal) return { kind: "turn" };
   if (trimmed.startsWith("!")) {
     const command = trimmed.slice(1).trim();
     return command === "" ? { kind: "turn" } : { kind: "shell", command };
-  }
-  const slash = /^\/([A-Za-z][\w:.-]*)(?:\s+([\s\S]*))?$/.exec(trimmed);
-  if (slash?.[1] !== undefined && isClientCommand(slash[1])) {
-    return { kind: "command", name: slash[1], args: (slash[2] ?? "").trim() };
   }
   return { kind: "turn" };
 }

@@ -10,14 +10,17 @@
  *   (the runtime in the reply, or the next `runtimeUpdated`, is what the chips show).
  * - Chips are initialized when a composer opens and before its first turn; menus never initialize picks.
  */
+import { TEXT } from "../vocabulary";
+import { PLUGIN_RELOAD_REFUSED } from "./composerStore";
 import type { JsonValue } from "../protocol/core";
 import { formatTokens } from "./account";
 import { toCallError } from "../protocol/client/types";
-import { modeOf } from "../features/composer/model/access";
+import { currentModeId, modeOf } from "../features/composer/model/access";
 import { currentPick, type CurrentPick } from "../features/composer/model/models";
 import { anchorProblem } from "../features/composer/model/session";
 import { type Obj, arr, obj, str } from "../features/transcript/model/entries";
 import type { ComposerStore } from "./composerStore";
+import { createLoopActions } from "./composerLoops";
 import type { SendActions, SendOutcome } from "./composerSend";
 import type { RewindActions } from "./composerRewind";
 import type { CoreController } from "./coreStore";
@@ -59,13 +62,29 @@ export function createSessionControls(deps: {
       params,
       ...(token === undefined ? {} : { confirmationToken: token }),
     });
-    return reply.type === "reply" ? reply.result : null;
+    if (reply.type !== "reply") throw new Error(`${method} did not return a usable reply.`);
+    return reply.result;
   };
-  const keepRuntime = (sessionId: string, result: JsonValue | null) => {
+  const keepRuntime = (sessionId: string, result: JsonValue | null, accessSwitch = false) => {
     const runtime = runtimeIn(result ?? undefined);
-    if (runtime !== undefined) core.setRuntime(sessionId, runtime);
+    if (runtime !== undefined)
+      core.setRuntime(
+        sessionId,
+        runtime,
+        accessSwitch ? (currentModeId(runtime, undefined) ?? undefined) : undefined,
+      );
   };
   const failed = (thrown: unknown): string => toCallError(thrown).error.message;
+  const loops = createLoopActions({
+    call: (method, params) => call(method, params),
+    composer,
+    toasts,
+    mode: (sessionId) => {
+      const entry = core.store.get().sessions[sessionId];
+      const id = currentModeId(entry?.runtime, entry?.session, entry?.accessMode);
+      return { id, label: modeOf(id)?.label ?? null };
+    },
+  });
   const compactionRuns = new Map<string, symbol>();
   const historyOf = (sessionId: string) =>
     arr(core.store.get().sessions[sessionId]?.state?.["history"]);
@@ -107,6 +126,12 @@ export function createSessionControls(deps: {
         composer.setSkills(sessionId, []);
       }
     },
+    /** Reads the session's loops (`loops/list`) for the Loops list and the session row's mark. */
+    loadLoops: (sessionId: string, force = false) => loops.loadLoops(sessionId, force),
+    /** Deletes one loop of the session (`loops/delete`). */
+    deleteLoop: (sessionId: string, loopId: string) => loops.deleteLoop(sessionId, loopId),
+    /** Deletes every loop of the session (`loops/clear`). */
+    clearLoops: (sessionId: string) => loops.clearLoops(sessionId),
     /** Pins a model and/or thinking level to the session (`config/model/write`). */
     async pickModel(
       sessionId: string,
@@ -164,7 +189,7 @@ export function createSessionControls(deps: {
           agentName,
           ...(token === undefined ? {} : { confirmationToken: token }),
         });
-        keepRuntime(sessionId, reply.type === "reply" ? reply.result : null);
+        keepRuntime(sessionId, reply.type === "reply" ? reply.result : null, true);
         if (runtimeIn(reply.type === "reply" ? reply.result : undefined) === undefined) {
           await controls.loadRuntime(sessionId);
         }
@@ -292,7 +317,7 @@ export function createSessionControls(deps: {
             const path = str(obj(obj(result)?.["log"] ?? null)?.["path"] ?? null);
             composer.note(
               sessionId,
-              path === null ? "This session has no log file." : `Log: ${path}`,
+              path === null ? `${TEXT.thisSession} has no log file.` : `Log: ${path}`,
             );
             return done();
           }
@@ -312,11 +337,20 @@ export function createSessionControls(deps: {
             shell.actions.setOverlay("palette");
             return done();
           case "plugins": {
-            const groups = pluginGroups(await call("plugin/info", { sessionId }));
+            const catalog = await call("plugin_catalog/read", { sessionId });
+            const groups = arr(obj(obj(catalog)?.["plugins"] ?? null)?.["plugins"])
+              .map(obj)
+              .map(
+                (plugin) =>
+                  [
+                    str(plugin?.["name"] ?? null) ?? "plugin",
+                    arr(plugin?.["components"]).length,
+                  ] as const,
+              );
             composer.note(
               sessionId,
               groups.length === 0
-                ? "This session runs no plugins."
+                ? `${TEXT.thisSession} runs no plugins.`
                 : `Plugins in this session: ${groups.map(([name, n]) => `${name} (${String(n)})`).join(", ")}.`,
             );
             return done();
@@ -324,7 +358,15 @@ export function createSessionControls(deps: {
           case "reload-plugins": {
             // Vibe answers `{}`; the change is read from the session's components before and after (like the CLI).
             const before = pluginComponents(await call("plugin/info", { sessionId }));
-            await call("plugin/reload", { sessionId });
+            try {
+              await call("plugin/reload", { sessionId });
+            } catch (thrown) {
+              // Vibe's own reason goes to the window console only; the user gets the plain note and the new-chat action.
+              console.warn("plugin/reload refused:", failed(thrown));
+              composer.pluginReloadRefused(sessionId);
+              return { ok: false, kind: "command", message: PLUGIN_RELOAD_REFUSED };
+            }
+            composer.pluginReloaded(sessionId);
             const after = pluginComponents(await call("plugin/info", { sessionId }));
             const added = after.filter((name) => !before.includes(name));
             const removed = before.filter((name) => !after.includes(name));
@@ -342,8 +384,13 @@ export function createSessionControls(deps: {
             );
             return done();
           }
+          case "loop":
+            return await loops.runLoopCommand(sessionId, args);
           case "config":
             shell.actions.openSettings();
+            return done();
+          case "data-retention":
+            shell.actions.openSettings("about", "data-retention");
             return done();
           case "mcp":
           case "connectors":

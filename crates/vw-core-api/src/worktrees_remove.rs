@@ -10,7 +10,7 @@
 //! tree) + the preflight + Vibe's side effect free probe (`{cwd, inspect: true}`, only after the preflight
 //! passed, because it runs git in the copy) for "not Vibe's", "gone", "held". Every
 //! origin gets the lists.
-//! Remove = the same inspection again; its fingerprint must equal the one the user saw (else `stale`); the
+//! Remove = the same inspection again, before and after confirmation; its fingerprint must equal the one the user saw (else `stale`); the
 //! session's channel is closed so its own hold goes; then `{cwd, force: true, deleteBranch, inspect: false}`
 //! behind the native dialog (the window; the Debug API acts as the user and is not asked) naming the folder, up to 8 files and the branch
 //! outcome. `force: true` because the user saw the list (no hidden `refs/vibe/reaped` ref of untracked files that
@@ -157,14 +157,27 @@ impl Core {
             .gate
             .call(
                 "session/read",
-                json!({"sessionId": id, "includeHistory": false, "includeTurns": false}),
+                json!({"sessionId": id, "history": {"limit": 1}, "turns": {"limit": 1}}),
                 None,
             )
             .await;
-        let archived_now = read
-            .ok()
-            .and_then(|r| r.result.pointer("/state/session").map(archived))
-            == Some(true);
+        let read = match read {
+            Ok(read) => read,
+            Err(error) => {
+                return Some(format!(
+                    "Its session could not be checked. Try again: {error}"
+                ));
+            }
+        };
+        let current = read.result.pointer("/state/session");
+        if current
+            .and_then(|s| s.pointer("/status/type"))
+            .and_then(Value::as_str)
+            .is_some_and(|status| matches!(status, "running" | "blocked"))
+        {
+            return Some("Its session is still working. Stop it first.".to_owned());
+        }
+        let archived_now = current.is_some_and(archived);
         (!archived_now).then(|| {
             "Its session still uses this copy. Archive or delete the session first.".to_owned()
         })
@@ -341,6 +354,19 @@ impl Core {
                 let _ = self.shared.dialog_texts.take(METHOD, &params);
                 CoreError::from_gate(METHOD, &e)
             })?;
+        // Consent may stay open while another process edits the copy. Re-resolve its placement and
+        // repeat the full inspection before sending the destructive call.
+        let current = self.worktree_target(session_id)?;
+        let (after, blocked, _) = self.inspect_target(origin, &current).await?;
+        if current.path != target.path || after.fingerprint != fingerprint {
+            return Err(CoreError::new(
+                ErrorCode::Stale,
+                "The copy changed since you looked: check it again before removing it.",
+            ));
+        }
+        if let Some(reason) = blocked {
+            return Err(CoreError::new(ErrorCode::Denied, reason));
+        }
         let reply = self
             .forward(origin, METHOD, params, Some(token.as_str().to_owned()))
             .await?;

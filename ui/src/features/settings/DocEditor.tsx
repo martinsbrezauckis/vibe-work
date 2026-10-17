@@ -6,6 +6,8 @@
  * the app may not edit (a link, a folder, not text) shows the reason and no editor; every failure is
  * shown as text; text a Debug API client wrote is labelled as such.
  */
+import { Button } from "../../components/Controls";
+import { PathLine } from "../../components/PathLine";
 import type { ReactNode } from "react";
 
 import { type DocView, isDirty, reviewDiff } from "../../state/instructions";
@@ -87,14 +89,15 @@ export function DocEditorView({
       <h4 id={`${id}-title`}>{title}</h4>
       <p className="key-line">{blurb}</p>
       {doc !== null && (
-        <p className="key-field-hint mono" data-testid={`${id}-path`}>
-          {doc.path}
-          {doc.exists ? "" : " (not created yet)"}
-        </p>
+        <div className="key-field-hint ui-help" data-testid={`${id}-path`}>
+          <PathLine path={doc.path} />
+          {doc.exists ? null : <span>Not created yet.</span>}
+        </div>
       )}
-      {doc?.note != null && <p className="key-field-hint">{doc.note}</p>}
+      {doc?.note != null && <p className="key-field-hint ui-help">{doc.note}</p>}
       {editable && !view.reviewing && (
         <textarea
+          data-testid="settings.doc-editor-set-draft"
           id={id}
           className="instr-text"
           aria-labelledby={`${id}-title`}
@@ -108,78 +111,85 @@ export function DocEditorView({
         />
       )}
       {view.draftBy === "debug-api" && (
-        <p className="key-field-hint" role="note" data-draft-by="debug-api">
+        <p className="key-field-hint ui-help" role="note" data-draft-by="debug-api">
           An external client (the Debug API) wrote text in this editor, not you. Read it before you
           save.
         </p>
       )}
       {view.reviewing && <DiffPreview lines={reviewDiff(view)} />}
-      <div className="key-actions wrap">
+      <div className="set-actions">
         {editable && !view.reviewing && (
           <>
-            <button
+            <Button
+              data-testid="settings.doc-editor-review"
               type="button"
-              className="tb-btn"
+              small
               disabled={!dirty || busy || view.stale}
               onClick={() => {
                 actions.review();
               }}
             >
               Review changes
-            </button>
+            </Button>
             {dirty && (
-              <button
+              <Button
+                variant="danger"
+                data-testid="settings.doc-editor-discard"
                 type="button"
-                className="tb-btn"
+                small
                 disabled={busy}
                 onClick={() => {
                   actions.discard();
                 }}
               >
                 Discard changes
-              </button>
+              </Button>
             )}
             {extra}
           </>
         )}
         {view.reviewing && (
           <>
-            <button
+            <Button
+              data-testid="settings.doc-editor-save"
               type="button"
-              className="tb-btn primary"
+              small
+              variant="primary"
               disabled={busy}
               onClick={() => {
                 void actions.save();
               }}
             >
               {view.busy === "saving" ? "Saving..." : "Save"}
-            </button>
-            <button
+            </Button>
+            <Button
+              data-testid="settings.doc-editor-back"
               type="button"
-              className="tb-btn"
+              small
               disabled={busy}
               onClick={() => {
                 actions.back();
               }}
             >
               Back to editing
-            </button>
+            </Button>
           </>
         )}
         {view.stale && (
-          <button
+          <Button
+            data-testid="settings.doc-editor-reload"
             type="button"
-            className="tb-btn"
+            small
             onClick={() => {
               void actions.reload();
             }}
           >
             Load the file again
-          </button>
+          </Button>
         )}
       </div>
       {view.notice !== null && (
-        <p className="key-field-hint" role="status">
+        <p className="key-field-hint ui-help" role="status">
           {view.notice}
         </p>
       )}

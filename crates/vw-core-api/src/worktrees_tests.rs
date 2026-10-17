@@ -42,7 +42,7 @@ fn git(cwd: &Path, args: &[&str]) {
 #[test]
 fn count_only_extant_recorded_linked_copies() {
     let scratch = std::env::temp_dir().join(format!(
-        "vw-fx30-count-{}-{}",
+        "vw-copy-count-{}-{}",
         std::process::id(),
         vw_changes::now_ms()
     ));

@@ -26,6 +26,7 @@ export function AppearanceSettings(): ReactElement {
           </span>
         </span>
         <Selector
+          testId="settings.appearance-settings-switch-theme"
           label="Theme"
           value={theme}
           options={[
@@ -41,11 +42,12 @@ export function AppearanceSettings(): ReactElement {
         <span>
           Show usage in the status bar
           <span className="d">
-            How full the open conversation&apos;s context is, as &quot;Context 42%&quot;. A click
-            opens Account and usage.
+            How full the open session&apos;s context is, as &quot;Context 42%&quot;. A click opens
+            Account and usage.
           </span>
         </span>
         <button
+          data-testid="settings.appearance-settings-set-show-usage"
           type="button"
           className="switch"
           role="switch"
@@ -61,10 +63,11 @@ export function AppearanceSettings(): ReactElement {
         <span>
           Show thinking expanded
           <span className="d">
-            Open thinking in the conversation by default. You can still close each block yourself.
+            Open thinking in the session by default. You can still close each block yourself.
           </span>
         </span>
         <button
+          data-testid="settings.appearance-settings-set-show-thinking-expanded"
           type="button"
           className="switch"
           role="switch"

@@ -29,8 +29,10 @@ compile_error!(
 
 mod commands;
 mod dialogs;
+mod instance;
 mod live_profile;
 mod startup;
+mod startup_market;
 mod updater;
 mod window_api;
 
@@ -115,7 +117,7 @@ fn report_native_window_visibility(window: &tauri::Window) {
     });
 }
 
-fn init_tracing() {
+fn initialize_process() {
     // Logs go to stderr; the filter comes from RUST_LOG. Secrets are never logged by the crates
     // underneath (they redact at the source), so no filtering is needed here.
     let _ = tracing_subscriber::fmt()
@@ -125,6 +127,10 @@ fn init_tracing() {
         )
         .with_writer(std::io::stderr)
         .try_init();
+    // The core will hold the Mistral key in memory: no core dumps, and on Linux
+    // no ptrace or /proc reads by other same-user processes.
+    let hardening = vw_platform::harden_process();
+    tracing::info!(?hardening, "process hardening");
 }
 
 /// Builds the Tauri application and runs it until the last window closes.
@@ -134,18 +140,15 @@ fn init_tracing() {
 /// Returns Tauri's error when the runtime cannot start (for example no display is available) or
 /// the embedded context is invalid. The caller reports it and exits non-zero.
 pub fn run() -> tauri::Result<()> {
-    init_tracing();
-    // The core will hold the Mistral key in memory: no core dumps, and on Linux
-    // no ptrace or /proc reads by other same-user processes.
-    let hardening = vw_platform::harden_process();
-    tracing::info!(?hardening, "process hardening");
+    initialize_process();
     #[cfg(feature = "e2e-script")]
     tracing::warn!(
         "test build: the Debug API's /e2e/script channel is compiled in; not for everyday use"
     );
     let handle = HostHandle::new();
-    let setup_handle = handle.clone();
-    let context = tauri::generate_context!();
+    let Some(context) = instance::context() else {
+        return Ok(());
+    };
     let updater = updater::plugin_if_configured(context.config());
     let update_checks = updater.is_some();
     let mut builder = tauri::Builder::default()
@@ -169,6 +172,7 @@ pub fn run() -> tauri::Result<()> {
             commands::host_subscribe,
             commands::pick_folder,
             commands::pick_documents,
+            commands::pick_certificate,
             commands::pick_library_files,
             commands::export_page,
             commands::export_session,
@@ -188,6 +192,9 @@ pub fn run() -> tauri::Result<()> {
         ])
         .on_window_event(on_window_event)
         .setup(move |app| {
+            if !instance::admit(app)? {
+                return Ok(());
+            }
             let live_root = live_profile::root()?;
             let confirmer = dialogs::native_confirmer(app.handle().clone());
             if update_checks && let Ok(data) = startup::data_dir(app.handle()) {
@@ -198,7 +205,7 @@ pub fn run() -> tauri::Result<()> {
                     startup::DEV_BUILD,
                 );
             }
-            setup_handle.start_in_background(
+            handle.start_in_background(
                 &tauri::async_runtime::handle().inner().clone(),
                 startup::host_config(app.handle(), confirmer),
             );

@@ -1,0 +1,17 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "skills": {
+      "items": {
+        "$ref": "#/$defs/SkillSummary"
+      },
+      "title": "Skills",
+      "type": "array"
+    }
+  },
+  "required": [
+    "skills"
+  ],
+  "title": "SkillsInstalledResponse",
+  "type": "object"
+}

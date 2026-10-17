@@ -64,6 +64,14 @@ export function createToasts() {
     panel,
     /** Retains full text without displaying an in-app toast (used for OS notifications). */
     record,
+    /** Updates retained metadata without changing the entry identity or focus. */
+    update(id: number, spec: ToastSpec): void {
+      history.set((list) =>
+        list.map((notice) =>
+          notice.id === id ? { ...notice, ...spec, read: panel.get().open } : notice,
+        ),
+      );
+    },
     /** Opens the full notifications panel, optionally at one retained notification. */
     open,
     /** Opens the most recent notification for a session after OS activation. */
@@ -85,6 +93,12 @@ export function createToasts() {
       store.set([]);
       history.set([]);
       panel.set((state) => ({ ...state, selectedId: null }));
+    },
+    /** Brief confirmation for a completed user action; never retained in Notifications. */
+    feedback(text: string): number {
+      const notice = make({ kind: "info", text });
+      store.set((list) => [...list, notice].slice(-MAX_TOASTS));
+      return notice.id;
     },
     /** Adds a toast and returns its id. */
     push(spec: ToastSpec): number {

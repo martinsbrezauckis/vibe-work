@@ -5,7 +5,9 @@
 import type { ButtonHTMLAttributes, HTMLAttributes } from "react";
 import { Icon, type IconName } from "./Icon";
 
-type ButtonProps = Omit<ButtonHTMLAttributes<HTMLButtonElement>, "className">;
+type ButtonProps = Omit<ButtonHTMLAttributes<HTMLButtonElement>, "className"> & {
+  "data-testid": string;
+};
 
 /** A secondary action by default, with the app's primary and danger variants. */
 export function Button({
@@ -20,6 +22,7 @@ export function Button({
     <button
       type="button"
       {...props}
+      data-testid={props["data-testid"]}
       className={`tb-btn${variant ? ` ${variant}` : ""}`}
       data-size={small ? "small" : "normal"}
     />
@@ -37,7 +40,14 @@ export function IconButton({
   state?: "locked" | "unlocked";
 }) {
   return (
-    <button type="button" {...props} className="ibtn" data-state={state} data-icon={icon}>
+    <button
+      type="button"
+      {...props}
+      data-testid={props["data-testid"]}
+      className="ibtn"
+      data-state={state}
+      data-icon={icon}
+    >
       <Icon key={icon} name={icon} size={16} />
       {children}
     </button>
@@ -46,7 +56,9 @@ export function IconButton({
 
 /** Navigation within the app uses the same link treatment as outbound Settings links. */
 export function LinkButton(props: ButtonProps) {
-  return <button type="button" {...props} className="ext-link" />;
+  return (
+    <button type="button" {...props} data-testid={props["data-testid"]} className="ext-link" />
+  );
 }
 
 /** Passive metadata; the same small type scale as shared selector text. */
@@ -56,5 +68,7 @@ export function Badge(props: Omit<HTMLAttributes<HTMLSpanElement>, "className">)
 
 /** A list-row disclosure; feature CSS may lay out its contents, never restyle the control. */
 export function RowDisclosure(props: ButtonProps) {
-  return <button type="button" {...props} className="ui-disclosure" />;
+  return (
+    <button type="button" {...props} data-testid={props["data-testid"]} className="ui-disclosure" />
+  );
 }

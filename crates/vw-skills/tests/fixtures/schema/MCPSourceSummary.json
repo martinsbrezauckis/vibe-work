@@ -1,0 +1,63 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "displayName": {
+      "default": "",
+      "title": "Displayname",
+      "type": "string"
+    },
+    "error": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Error"
+    },
+    "kind": {
+      "$ref": "#/$defs/MCPSourceKind"
+    },
+    "name": {
+      "title": "Name",
+      "type": "string"
+    },
+    "pluginName": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Pluginname"
+    },
+    "status": {
+      "$ref": "#/$defs/MCPSourceStatus"
+    },
+    "tools": {
+      "items": {
+        "$ref": "#/$defs/MCPToolSummary"
+      },
+      "title": "Tools",
+      "type": "array"
+    },
+    "transport": {
+      "title": "Transport",
+      "type": "string"
+    }
+  },
+  "required": [
+    "name",
+    "kind",
+    "transport",
+    "status"
+  ],
+  "title": "MCPSourceSummary",
+  "type": "object"
+}

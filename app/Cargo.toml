@@ -22,10 +22,12 @@ custom-protocol = ["tauri/custom-protocol"]
 # window where no WebDriver exists (macOS). Debug test builds only: refused in release builds (src/lib.rs and vw-debug-api).
 e2e-script = ["vw-debug-api/e2e-script", "vw-core-api/e2e-script"]
 # The vault test switch (private e2e debug builds only; refused in release builds by vw-core-api and
-# vw-debug-api).
+# vw-debug-api). Also enables the app startup's local marketplace fixture input.
 vault-e2e = ["vw-debug-api/vault-e2e"]
 
 [dependencies]
+# Tauri's standard data folder, resolved before a second launch initializes the GUI runtime.
+dirs = "7"
 tauri = { version = "2.12.1", features = [] }
 # Native dialogs (folder picker, delete confirmation), used from Rust only: the webview gets no plugin
 # permission (capabilities/main.json lists bridge commands only). Pinned exactly (checked 2026-10-08:

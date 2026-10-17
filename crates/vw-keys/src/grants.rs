@@ -18,7 +18,9 @@ impl KeyService {
     /// [`KeyError::Vault`] (locked, storage).
     pub async fn command_grants(&self) -> Result<Vec<CommandGrant>, KeyError> {
         let vault = self.vault();
-        let items = blocking(move || vault.list_items()).await??;
+        let items = blocking(move || vault.list_items_strict())
+            .await?
+            .map_err(KeyError::permissions_unreadable)?;
         let mut out: Vec<CommandGrant> =
             items.iter().filter_map(command_grant::from_item).collect();
         out.sort_by_key(|g| std::cmp::Reverse(g.granted_ms));

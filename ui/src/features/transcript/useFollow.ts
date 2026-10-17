@@ -25,14 +25,45 @@ const AT_BOTTOM_PX = 8;
 const AWAY_PX = 200;
 
 /** The follow state and the handlers to attach. */
-export function useFollow(list: RefObject<VListHandle | null>, count: number, version: unknown) {
+export function useFollow(
+  list: RefObject<VListHandle | null>,
+  count: number,
+  version: unknown,
+  { paused = false, attention = -1 }: { paused?: boolean; attention?: number } = {},
+) {
   const [pinned, setPinned] = useState(true);
   const userUp = useRef(false);
   const touchY = useRef(0);
+  const attentionFrame = useRef(0);
 
   const toEnd = useCallback(() => {
-    if (count > 0) list.current?.scrollToIndex(count - 1, { align: "end" });
-  }, [list, count]);
+    if (paused) return;
+    cancelAnimationFrame(attentionFrame.current);
+    if (attention >= 0) {
+      list.current?.scrollToIndex(attention, { align: "start" });
+      attentionFrame.current = requestAnimationFrame(() => {
+        const rows = document.querySelectorAll<HTMLElement>('.tx-list [data-row-kind="callback"]');
+        const row = rows[rows.length - 1];
+        const card = row?.querySelector<HTMLElement>(".approval, .qcard");
+        if (!row || !card) return;
+        // The virtual row includes spacing above the card; align the card's own heading with the viewport.
+        const offset = card.getBoundingClientRect().top - row.getBoundingClientRect().top;
+        if (offset > 0) list.current?.scrollToIndex(attention, { align: "start", offset });
+      });
+    } else if (count > 0) list.current?.scrollToIndex(count - 1, { align: "end" });
+  }, [list, count, paused, attention]);
+
+  // A new request needs its heading in view even when the user had scrolled away.
+  useLayoutEffect(() => {
+    if (attention >= 0) toEnd();
+  }, [attention, toEnd]);
+
+  useLayoutEffect(
+    () => () => {
+      cancelAnimationFrame(attentionFrame.current);
+    },
+    [],
+  );
 
   // Follow new rows and rows that changed while pinned.
   useLayoutEffect(() => {

@@ -52,3 +52,29 @@
   text-decoration: underline;
   cursor: pointer;
 }
+.local-plugin {
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  background: var(--bg);
+}
+.local-plugin h4 {
+  margin: 0 0 8px;
+}
+.local-plugin p {
+  margin: 8px 0;
+}
+/* A plugin's name and description come from its manifest: a long word wraps instead of running past the card. */
+.local-plugin h4,
+.local-plugin p {
+  overflow-wrap: anywhere;
+}
+.local-plugin-path {
+  margin: 8px 0;
+  font-size: 12px;
+}
+/* Plugin contents are a list; the composer also uses ctools for its horizontal toolbar. */
+.local-plugin > .ctools {
+  display: block;
+}

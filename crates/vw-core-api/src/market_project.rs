@@ -25,6 +25,8 @@ pub(crate) struct Inputs<'a> {
     pub(crate) skills: &'a Value,
     pub(crate) session_id: Option<String>,
     pub(crate) installing: Option<InstallProgress>,
+    pub(crate) discovered: Vec<crate::market_view::LocalPluginView>,
+    pub(crate) discovery_error: Option<String>,
 }
 
 fn categories() -> Vec<CategoryView> {
@@ -48,6 +50,8 @@ pub(crate) fn unavailable(error: &str) -> MarketView {
         installing: None,
         session_id: None,
         dropped: Vec::new(),
+        discovered: Vec::new(),
+        discovery_error: None,
     }
 }
 
@@ -60,19 +64,37 @@ pub(crate) fn view(inputs: Inputs<'_>) -> MarketView {
         .entries
         .iter()
         .map(|entry| {
-            let receipt = installed.get(&entry.id);
+            let off_folder = inputs
+                .store
+                .plugins_dir()
+                .with_file_name("plugins-off")
+                .join(&entry.id);
+            let off_receipt = crate::market_local::receipt(&off_folder);
+            let off = !installed.contains_key(&entry.id) && off_receipt.is_some();
+            let receipt = installed.get(&entry.id).or(off_receipt.as_ref());
             let foreign = entry.kind != Kind::Server
                 && receipt.is_none()
-                && inputs.store.plugin_dir(&entry.id).is_ok_and(|d| d.exists());
+                && (off_folder.exists()
+                    || inputs.store.plugin_dir(&entry.id).is_ok_and(|d| d.exists()));
             MarketEntryView {
                 installed: receipt.map(|r| InstalledView {
                     version: r.version.clone(),
                     catalog_version: r.catalog_version.clone(),
                     installed_at_ms: r.installed_at_ms,
                     update_available: r.version != entry_version(entry),
-                    changed: (entry.kind == Kind::Pack).then(|| inputs.store.changed(r)),
+                    changed: (entry.kind == Kind::Pack && !off).then(|| inputs.store.changed(r)),
                 }),
                 foreign,
+                off,
+                folder: receipt.map(|_| {
+                    if off {
+                        off_folder.clone()
+                    } else {
+                        inputs.store.plugins_dir().join(&entry.id)
+                    }
+                    .to_string_lossy()
+                    .into_owned()
+                }),
                 installable: crate::market::installable(entry),
                 in_session: (session_read && entry.kind != Kind::Server)
                     .then(|| session_plugin(&entry.id, inputs.plugins, inputs.skills)),
@@ -89,6 +111,8 @@ pub(crate) fn view(inputs: Inputs<'_>) -> MarketView {
         installing: inputs.installing,
         session_id: inputs.session_id,
         dropped: dropped(inputs.plugins),
+        discovered: inputs.discovered,
+        discovery_error: inputs.discovery_error,
     }
 }
 
@@ -112,7 +136,7 @@ fn text(value: &Value, key: &str) -> String {
 /// `PluginCatalogEntry`, components named `<namespace>:<skill>`; `skills/installed` -> `skills[]`, `SkillSummary`,
 /// same names). After `plugin/reload`, a new plugin and its skill components are in
 /// the catalog, but `skills/installed` lists its skills only in sessions started afterwards.
-fn session_plugin(name: &str, plugins: &Value, skills: &Value) -> SessionPluginView {
+pub(crate) fn session_plugin(name: &str, plugins: &Value, skills: &Value) -> SessionPluginView {
     let list = plugins
         .pointer("/plugins/plugins")
         .and_then(Value::as_array)
@@ -177,7 +201,7 @@ fn dropped_items(plugins: &Value) -> impl Iterator<Item = &Value> {
         .flatten()
 }
 
-fn dropped(plugins: &Value) -> Vec<DroppedView> {
+pub(crate) fn dropped(plugins: &Value) -> Vec<DroppedView> {
     let roots: Vec<(String, String)> = plugins
         .pointer("/plugins/plugins")
         .and_then(Value::as_array)

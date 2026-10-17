@@ -5,6 +5,7 @@
  * Invariants: an action reads the current state when it runs (never a stale closure); the same
  * combo string drives the shortcut and the label shown in the palette.
  */
+import { TEXT } from "../../vocabulary";
 import { computeLayout } from "../../state/panelLayout";
 import { TAB_META } from "../../state/shellState";
 import { switchTheme } from "../../state/themeSwitch";
@@ -40,7 +41,7 @@ export function shellActions(app: App): ShellAction[] {
       // one New chat everywhere (rail, this shortcut, the list's button): the new-chat view, composer
       // focused; the session starts on the first send. The id stays (palettes and tests know it).
       id: "new-session",
-      label: "New chat",
+      label: TEXT.newChat,
       keys: "Mod+N",
       // Its name before: someone typing "new session" still finds it.
       keywords: "new session start conversation",
@@ -67,21 +68,21 @@ export function shellActions(app: App): ShellAction[] {
     },
     {
       id: "open-browser",
-      label: `Open ${TAB_META.browser.label.toLowerCase()}`,
+      label: `Open the ${TAB_META.browser.label} tab`,
       run: () => {
         a.openTab("browser");
       },
     },
     {
       id: "open-changes",
-      label: `Open ${TAB_META.changes.label.toLowerCase()}`,
+      label: `Open the ${TAB_META.changes.label} tab`,
       run: () => {
         a.openTab("changes");
       },
     },
     {
       id: "open-terminal",
-      label: `Open ${TAB_META.terminal.label.toLowerCase()}`,
+      label: `Open the ${TAB_META.terminal.label} tab`,
       keys: "Mod+`",
       run: () => {
         a.openTab("terminal");

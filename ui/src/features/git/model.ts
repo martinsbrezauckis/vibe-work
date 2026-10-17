@@ -30,7 +30,8 @@ export function pushBlocked(status: GitStatusView): string | null {
   const state = status.state;
   if (state === null || branchOf(status) === null) return "Not on a branch.";
   if (state.commit === null) return "No commit yet.";
-  if (!state.remotes.some((r) => r.pushable)) return "No remote to push to.";
+  if (!state.remotes.some((r) => r.pushable))
+    return "Not connected to GitHub or another server yet.";
   if (state.upstream !== null && state.upstream.ahead === 0) return "Nothing new to push.";
   return null;
 }
@@ -40,9 +41,9 @@ export function prBlocked(status: GitStatusView): string | null {
   const state = status.state;
   if (state === null || branchOf(status) === null) return "Not on a branch.";
   if (state.commit === null) return "No commit yet.";
-  if (state.remotes.length === 0) return "No remote.";
+  if (state.remotes.length === 0) return "not connected to GitHub or another server yet.";
   if (!state.remotes.some((r) => r.pushable && r.forge !== null && r.forge.kind !== "unknown"))
-    return "Local remote";
+    return "needs a GitHub repository";
   if (status.pr !== null && status.pr.state === "open")
     return "A pull request is open for this branch.";
   return null;

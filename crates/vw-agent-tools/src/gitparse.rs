@@ -1,8 +1,8 @@
 //! Classifies literal Git and GitHub CLI command starts for the hook and core.
 //! Depends on `command_segments`, `killparse_shell` (quote-aware readings) and `gitparse_cmds`; called by the hook,
 //! core and tests.
-//! This is a guardrail: it does not interpret scripts or words in command data. Each command is read three ways (the
-//! literal words, Bash's dequoted words, Windows' dequoted words) and every operation any reading finds counts, so a
+//! This is a guardrail: it does not interpret scripts or words in command data. Each command is read as unquoted literal words and as Bash and Windows
+//! dequoted words and every operation any reading finds counts, so a
 //! quoted value with a space (`git -C "C:\work\git test" push`) or a quoted program name cannot hide a push
 //! (a literal reading could otherwise take `"C:\...\git` as the `-C` value).
 
@@ -42,6 +42,15 @@ pub struct GitOp {
     pub elsewhere: bool,
     /// Explicit branch target for a rewrite.
     pub name: Option<String>,
+    /// Destination of a branch rename; the source is `name` or the current branch.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rename_to: Option<String>,
+    /// Explicit Git directory, resolved by the core before an own-branch rewrite is released.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub git_dir: Option<String>,
+    /// Explicit worktree root, resolved by the core before an own-branch rewrite is released.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub work_tree: Option<String>,
 }
 
 /// Recognized literal command starts in one shell input.
@@ -87,7 +96,7 @@ impl GitScan {
     }
 }
 
-/// Read command starts after transparent wrappers and environment assignments, in each of the three readings
+/// Read command starts after transparent wrappers and environment assignments, in each of the shell readings
 /// (module doc); the result holds every operation any reading recognized, once.
 #[must_use]
 pub fn scan(command: &str) -> GitScan {
@@ -108,7 +117,7 @@ pub fn scan(command: &str) -> GitScan {
     out
 }
 
-/// The literal words (no quote handling) and the dequoted words as Bash and as Windows shells read them.
+/// Unquoted literal words, plus the dequoted words as Bash and Windows shells read them.
 pub(crate) fn readings(command: &str) -> [Vec<Vec<String>>; 3] {
     let dequoted = |parsed: Vec<crate::killparse_shell::Segment>| {
         parsed
@@ -119,6 +128,8 @@ pub(crate) fn readings(command: &str) -> [Vec<Vec<String>>; 3] {
     [
         segments(command)
             .into_iter()
+            // A literal reading cannot resolve quoted arguments; the shell readings below can.
+            .filter(|segment| !segment.iter().any(|word| word.contains(['"', '\''])))
             .map(|segment| segment.into_iter().map(str::to_owned).collect())
             .collect(),
         dequoted(crate::killparse_shell::segments(command)),
@@ -166,6 +177,9 @@ impl Sink<'_> {
             what: what.into(),
             elsewhere,
             name: None,
+            rename_to: None,
+            git_dir: None,
+            work_tree: None,
         });
     }
 
@@ -182,6 +196,32 @@ impl Sink<'_> {
             what: what.into(),
             elsewhere,
             name: Some(name.to_owned()),
+            rename_to: None,
+            git_dir: None,
+            work_tree: None,
         });
+    }
+
+    pub(crate) fn rename(&mut self, elsewhere: bool, from: Option<&str>, to: &str) {
+        self.0.ops.push(GitOp {
+            kind: GitKind::Own,
+            what: "git branch (move)".to_owned(),
+            elsewhere,
+            name: from.map(str::to_owned),
+            rename_to: Some(to.to_owned()),
+            git_dir: None,
+            work_tree: None,
+        });
+    }
+
+    pub(crate) fn len(&self) -> usize {
+        self.0.ops.len()
+    }
+
+    pub(crate) fn paths(&mut self, start: usize, git_dir: Option<&str>, work_tree: Option<&str>) {
+        for op in &mut self.0.ops[start..] {
+            op.git_dir = git_dir.map(str::to_owned);
+            op.work_tree = work_tree.map(str::to_owned);
+        }
     }
 }

@@ -67,15 +67,6 @@
   color: var(--text-2);
   overflow-wrap: anywhere;
 }
-.git-notice.error,
-.git-warn {
-  color: var(--red);
-}
-.git-warn {
-  margin: 0 0 10px;
-  font-size: 12.5px;
-  overflow-wrap: anywhere;
-}
 .git-note,
 .git-sub {
   margin: 0 0 10px;
@@ -251,4 +242,10 @@
   padding: 6px 8px;
   box-sizing: border-box;
   resize: vertical;
+}
+
+/* Author Name and Email (Settings, Commit, repository init): one even gap between the field groups. */
+.git-identity {
+  display: grid;
+  gap: 12px;
 }

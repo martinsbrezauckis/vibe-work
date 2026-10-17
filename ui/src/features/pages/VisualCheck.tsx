@@ -55,13 +55,17 @@ export function VisualCheck({
   const issues = report?.issues ?? [];
   return (
     <details className="pages-visual" data-tone={tone}>
-      <summary>
+      <summary data-testid="pages.visual-check-summary">
         <span className="pages-visual-badge" data-tone={tone}>
           {text}
         </span>
         <span className="pages-note">desktop and phone width, light and dark</span>
       </summary>
-      {report?.error != null && <p className="pages-note">{report.error}</p>}
+      {report?.error != null && (
+        <p className="key-problem" role="alert">
+          {report.error}
+        </p>
+      )}
       {issues.length > 0 && (
         <ul className="pages-visual-list">
           {issues.map((issue, i) => (
@@ -80,7 +84,13 @@ export function VisualCheck({
           {note}
         </p>
       ))}
-      <button type="button" className="pages-btn" disabled={checking} onClick={check}>
+      <button
+        data-testid="pages.visual-check-pages-btn"
+        type="button"
+        className="pages-btn"
+        disabled={checking}
+        onClick={check}
+      >
         Check again
       </button>
     </details>

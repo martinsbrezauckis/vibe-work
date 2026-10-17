@@ -1,0 +1,30 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "body": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Body"
+    },
+    "detail": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SkillDetailView"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    }
+  },
+  "title": "SkillsDetailResponse",
+  "type": "object"
+}

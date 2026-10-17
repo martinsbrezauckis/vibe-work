@@ -1,0 +1,47 @@
+{
+  "method": "skills/list",
+  "params": {
+    "sessionId": "session-skills"
+  },
+  "result": {
+    "skills": [
+      {
+        "name": "review",
+        "description": "Project review",
+        "prompt": "Review the changes.",
+        "userInvocable": true,
+        "source": "registry",
+        "scope": "project",
+        "registry": {
+          "skillId": "skill-project-review",
+          "version": 3,
+          "alias": null
+        },
+        "enabled": true,
+        "locked": false
+      },
+      {
+        "name": "vibe",
+        "description": "Vibe guidance",
+        "prompt": "Use Vibe.",
+        "userInvocable": true,
+        "source": "builtin",
+        "scope": "builtin",
+        "registry": null,
+        "enabled": true,
+        "locked": true
+      },
+      {
+        "name": "plugin:notes",
+        "description": "Plugin notes",
+        "prompt": "Read notes.",
+        "userInvocable": true,
+        "source": "plugin",
+        "scope": "global",
+        "registry": null,
+        "enabled": true,
+        "locked": true
+      }
+    ]
+  }
+}

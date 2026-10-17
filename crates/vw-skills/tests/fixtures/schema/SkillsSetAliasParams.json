@@ -1,0 +1,29 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "alias": {
+      "title": "Alias",
+      "type": "string"
+    },
+    "name": {
+      "title": "Name",
+      "type": "string"
+    },
+    "scope": {
+      "default": "global",
+      "title": "Scope",
+      "type": "string"
+    },
+    "sessionId": {
+      "title": "Sessionid",
+      "type": "string"
+    }
+  },
+  "required": [
+    "sessionId",
+    "name",
+    "alias"
+  ],
+  "title": "SkillsSetAliasParams",
+  "type": "object"
+}

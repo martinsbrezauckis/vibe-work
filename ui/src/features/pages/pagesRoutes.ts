@@ -6,9 +6,11 @@
  * - `state` (default): the view (hub or page), the hub's pages and flags, the page's steps, sections and comments,
  *   the viewer;
  * - `hub`, `open {path}`, `plan`, `back`, `forward`, `reload`;
- * - `pick`: the section pick (the user selects or clicks in the page);
+ * - `pick {section}`: the section pick; no person clicks for a Debug API request, so it names the section (as the page
+ *   file has it) and the answer is immediate, `{picked, ...state}`;
  * - `comment {path, section, text, quote?, send?}`, `send {id}`, `delete {id}`;
- * - `point {source: terminal|preview|page}`: "Point Vibe at this" (a context chip in the composer);
+ * - `point {source: terminal|preview|page, ...}`: "Point Vibe at this" (a context chip in the composer); `preview`
+ *   names its element with `target` (`selector`, or `x` and `y`), `page` names its `section`;
  * - `open {path, anchor}` scrolls to a section or step; `answers`, `answer`, `sendAnswers`, `check`, `export`
  *   (handbookRoutes.ts); the state also says `prototype`, `answers` and `visual` for the shown page.
  * Depends on: state/uiControl, store.ts, point.ts, model.ts, AppContext types. Called by: register.tsx.
@@ -16,6 +18,7 @@
  * Debug API origin (`uiControl` lowering; a label with no native confirmation); chips inserted
  * here use the composer's Debug API facade (marked, sent with the Debug API origin); nothing here can run a command.
  */
+import type { PickTarget } from "../../protocol/core";
 import { UiControlError } from "../../state/uiControl";
 import type { App } from "../shell/AppContext";
 import { handbookAction, isHandbookAction } from "./handbookRoutes";
@@ -33,6 +36,15 @@ function text(value: unknown, name: string): string {
   if (typeof value !== "string" || value === "")
     throw new UiControlError("invalidParams", `${name} must be a non-empty string`);
   return value;
+}
+
+/** The element a preview point names (no person clicks for a Debug API request); required, never waited for. */
+function pickTarget(value: unknown): PickTarget {
+  if (typeof value === "object" && value !== null && !Array.isArray(value)) return value;
+  throw new UiControlError(
+    "invalidParams",
+    "target is required: target.selector, or target.x and target.y",
+  );
 }
 
 /** What the tab shows for `sessionId`. */
@@ -137,8 +149,16 @@ async function route(app: App, pages: Pages, body: unknown): Promise<unknown> {
     case "reload":
       await pages.reload(sessionId);
       return state(pages, sessionId);
-    case "pick":
-      return { picked: await pages.pickSection(sessionId), ...state(pages, sessionId) };
+    case "pick": {
+      // No person clicks for a Debug API request: it names the section and the answer is immediate (never a wait).
+      const picked = await pages.pickSection(sessionId, text(input["section"], "section"));
+      if (picked === null)
+        throw new UiControlError(
+          "invalidParams",
+          pages.store.get().error[sessionId] ?? "nothing was picked",
+        );
+      return { picked, ...state(pages, sessionId) };
+    }
     case "comment": {
       const path = text(input["path"], "path");
       const quote = typeof input["quote"] === "string" ? input["quote"] : undefined;
@@ -167,9 +187,15 @@ async function route(app: App, pages: Pages, body: unknown): Promise<unknown> {
         source === "terminal"
           ? pointTerminal(app, sessionId, "debug-api")
           : source === "preview"
-            ? await pointPreview(app, sessionId, "debug-api")
+            ? await pointPreview(app, sessionId, "debug-api", pickTarget(input["target"]))
             : source === "page"
-              ? await pointSection(app, pages, sessionId, "debug-api")
+              ? await pointSection(
+                  app,
+                  pages,
+                  sessionId,
+                  "debug-api",
+                  text(input["section"], "section"),
+                )
               : null;
       if (outcome === null)
         throw new UiControlError("invalidParams", "source must be terminal, preview or page");

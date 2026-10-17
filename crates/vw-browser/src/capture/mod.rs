@@ -26,6 +26,7 @@ mod design_roles;
 pub mod files;
 pub mod media;
 pub mod page;
+mod restore;
 mod run;
 pub mod shot;
 pub mod structure;

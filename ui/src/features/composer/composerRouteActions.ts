@@ -101,7 +101,7 @@ export async function handleComposer(app: App, body: unknown): Promise<unknown> 
       queue: queuedTurns(state),
       mode: isNew
         ? (held.mode ?? configuredModeId(s.config ?? undefined))
-        : currentModeId(entry?.runtime, session),
+        : currentModeId(entry?.runtime, session, entry?.accessMode),
       model: pick.alias,
       effort: pick.effort,
       menu: s.menu?.sessionId === sessionId ? s.menu.kind : null,

@@ -127,14 +127,14 @@ fn candidates(text: &str, context: bool) -> Vec<&str> {
     found
 }
 
-// These fields come from browser state, capture file creation or fixed host wording, never page strings.
+// These fields come from browser state or fixed host wording, never page strings.
 // Design type levels contain our derived role names and parsed numbers; their values/fonts still filter.
 // Keep the exception narrow: page-supplied copies under untrustedPageContent still filter.
 fn host_metadata(path: &[String]) -> bool {
     match path {
         [field] => matches!(
             field.as_str(),
-            "snapshot" | "note" | "note2" | "typingTracker" | "Outcome" | "folder" | "path"
+            "snapshot" | "note" | "note2" | "typingTracker" | "Outcome"
         ),
         [parent, field] if parent == "files" => field == "name",
         [parent, field] if matches!(parent.as_str(), "tab" | "tabs") => field == "id",
@@ -149,12 +149,59 @@ fn host_metadata(path: &[String]) -> bool {
     }
 }
 
+// Only the generated timestamp and host path are metadata; the slug can contain page-title words.
+fn capture_slug(text: &str, path: &[String]) -> Option<std::ops::Range<usize>> {
+    let [field] = path else { return None };
+    if !matches!(field.as_str(), "folder" | "path") {
+        return None;
+    }
+    let (parent, leaf) = text.rsplit_once(['/', '\\'])?;
+    if parent.rsplit(['/', '\\']).next()? != "capture"
+        || (field == "folder" && parent != "capture")
+        || (field == "path" && !std::path::Path::new(text).is_absolute())
+    {
+        return None;
+    }
+    let mut dated = leaf;
+    let (_, last) = leaf.rsplit_once('-')?;
+    if last.len() < 6 {
+        let collision: u32 = last.parse().ok()?;
+        if !(2..1000).contains(&collision) || collision.to_string() != last {
+            return None;
+        }
+        dated = leaf.strip_suffix(&format!("-{last}"))?;
+    }
+    let (rest, time) = dated.rsplit_once('-')?;
+    let (slug, date) = rest.rsplit_once('-')?;
+    if time.len() != 6
+        || date.len() != 8
+        || !time
+            .bytes()
+            .chain(date.bytes())
+            .all(|byte| byte.is_ascii_digit())
+        || slug.is_empty()
+        || slug.len() > crate::capture::files::SLUG_MAX
+        || crate::capture::files::slug(slug) != slug
+    {
+        return None;
+    }
+    let start = text.len() - leaf.len();
+    Some(start..start + slug.len())
+}
+
 fn collect(value: &Value, found: &mut Vec<String>, context: bool, path: &mut Vec<String>) {
     if host_metadata(path) {
         return;
     }
     match value {
         Value::String(text) => {
+            let (text, context) = match capture_slug(text, path) {
+                Some(range) => {
+                    let slug = &text[range];
+                    (slug, key_context(slug))
+                }
+                None => (text.as_str(), context),
+            };
             found.extend(candidates(text, context).into_iter().map(str::to_owned));
         }
         Value::Array(items) => items
@@ -177,9 +224,12 @@ fn replace(value: &mut Value, tokens: &[String], path: &mut Vec<String>) {
     }
     match value {
         Value::String(text) => {
+            let range = capture_slug(text, path).unwrap_or(0..text.len());
+            let mut filtered = text[range.clone()].to_owned();
             for token in tokens {
-                *text = text.replace(token, HIDDEN);
+                filtered = filtered.replace(token, HIDDEN);
             }
+            text.replace_range(range, &filtered);
         }
         Value::Array(items) => items
             .iter_mut()

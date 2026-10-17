@@ -1,0 +1,15 @@
+{
+  "method": "skills/updates",
+  "params": {
+    "sessionId": "session-skills"
+  },
+  "result": {
+    "updates": [
+      {
+        "name": "review",
+        "currentVersion": 3,
+        "latestVersion": 4
+      }
+    ]
+  }
+}

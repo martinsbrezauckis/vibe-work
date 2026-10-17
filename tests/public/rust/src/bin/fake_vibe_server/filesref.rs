@@ -10,7 +10,8 @@ use crate::script::Script;
 /// The message text (Markdown).
 pub const MESSAGE: &str = "I looked at `src/main.rs` and docs/plan.md:3, and wrote [the report](site/page.html). \
 Also see site/doc.pdf, logo.png, big.log and notes.md. Not files: /etc/passwd, ../outside.txt, link-out.txt, \
-`npm run build`, e.g. and https://example.com/a.md. See /tmp/a and then read notes.md.";
+`npm run build`, e.g. and https://example.com/a.md. See /tmp/a and then read notes.md. \
+In the plugin I changed `test/discover-plugins.py`, `commands.py` and `shared.py`.";
 
 impl Script {
     /// Records the fixture message and step when the turn's text asks for them.

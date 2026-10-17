@@ -22,7 +22,7 @@ import { useApp } from "./AppContext";
 import { BOTTOM, type Corner, type Rect, placeToastsOver } from "./toastPlacement";
 
 const PROTECTED =
-  '[data-toast-avoid]:not([data-toast-avoid="native"]), input, textarea, select, button, a[href], label, summary, [contenteditable]:not([contenteditable="false"]), [role="button"], [role="link"], [role="tab"], [role="menuitem"], [role="checkbox"], [role="radio"], [role="switch"], [role="textbox"], [tabindex], h1, h2, h3, h4, h5, h6';
+  '.walkthrough-caption, [data-toast-avoid]:not([data-toast-avoid="native"]), input, textarea, select, button, a[href], label, summary, [contenteditable]:not([contenteditable="false"]), [role="button"], [role="link"], [role="tab"], [role="menuitem"], [role="checkbox"], [role="radio"], [role="switch"], [role="textbox"], [tabindex], h1, h2, h3, h4, h5, h6';
 
 function rectOf(element: Element): Rect {
   const r = element.getBoundingClientRect();
@@ -59,7 +59,10 @@ const RESERVATION = "toasts";
 /** Visible rectangles that must stay uncovered right now (native views apart: `nativeRects`). */
 function rectsToAvoid(): Rect[] {
   return Array.from(document.querySelectorAll(PROTECTED)).flatMap((element) => {
-    if (element.closest(".toasts, .toast-dialog, [hidden], [inert], [aria-hidden='true']"))
+    if (
+      !element.matches(".walkthrough-caption") &&
+      element.closest(".toasts, .toast-dialog, [hidden], [inert], [aria-hidden='true']")
+    )
       return [];
     const style = window.getComputedStyle(element);
     if (style.display === "none" || style.visibility === "hidden") return [];
@@ -108,7 +111,9 @@ export function Toasts() {
     const bump = () => {
       setTick((n) => n + 1);
     };
-    const events = ["focusin", "focusout", "resize", "scroll", NATIVE_LAYOUT_EVENT];
+    // Not on scroll: content scrolling under a toast is the user moving it, and re-placing on every scroll made
+    // the stack jump between corners. Focus, resize and layout changes still place it again.
+    const events = ["focusin", "focusout", "resize", NATIVE_LAYOUT_EVENT];
     for (const type of events) window.addEventListener(type, bump, true);
     return () => {
       for (const type of events) window.removeEventListener(type, bump, true);
@@ -258,6 +263,7 @@ export function Toasts() {
         >
           {docked && list.length > 1 && (
             <IconButton
+              data-testid="shell.toasts-set-selected-id"
               icon="arrow-left"
               aria-label="Previous notification"
               onClick={() => {
@@ -282,6 +288,7 @@ export function Toasts() {
           ))}
           {docked && list.length > 1 && (
             <IconButton
+              data-testid="shell.toasts-set-selected-id-2"
               icon="chevron-right"
               aria-label="Next notification"
               onClick={() => {

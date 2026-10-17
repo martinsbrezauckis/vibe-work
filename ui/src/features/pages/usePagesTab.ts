@@ -87,6 +87,12 @@ export function usePagesTab(pages: Pages, sessionId: string) {
     [pages, sessionId],
   );
   const shownPath = showingPage ? path : null;
+  const answer = useCallback(
+    (input: string, value: AnswerValue | null) => {
+      if (shownPath !== null) void pages.answer(sessionId, shownPath, input, value);
+    },
+    [pages, sessionId, shownPath],
+  );
   return {
     hub,
     page,
@@ -153,19 +159,20 @@ export function usePagesTab(pages: Pages, sessionId: string) {
       cancelPick: () => void pages.cancelPick(),
     },
     comments: {
-      save: (text: string, andSend: boolean) => {
-        if (draft === null) return;
+      save: async (text: string, andSend: boolean): Promise<boolean> => {
+        if (draft === null) return false;
         const target = {
           path: draft.page,
           section: draft.section,
           text,
           ...(draft.quote === null ? {} : { quote: draft.quote }),
         };
+        const id = await pages.addComment(sessionId, target);
+        if (id === null) return false;
         setDraft(null);
-        void pages.addComment(sessionId, target).then((id) => {
-          const stored = pages.store.get().pages[sessionId]?.attached.find((c) => c.id === id);
-          if (andSend && stored !== undefined) send(stored);
-        });
+        const stored = pages.store.get().pages[sessionId]?.attached.find((c) => c.id === id);
+        if (andSend && stored !== undefined) send(stored);
+        return true;
       },
       cancel: () => {
         setDraft(null);
@@ -174,9 +181,7 @@ export function usePagesTab(pages: Pages, sessionId: string) {
       remove: (comment: Comment) => void pages.deleteComment(sessionId, comment.page, comment.id),
     },
     /**: sets or clears the answer to one input of the shown page. */
-    answer: (input: string, value: AnswerValue | null) => {
-      if (shownPath !== null) void pages.answer(sessionId, shownPath, input, value);
-    },
+    answer,
     /**: every answer of the shown page into the composer as one chip, then marked sent. */
     sendAnswers: () => {
       if (answers === null || shownPath === null) return;

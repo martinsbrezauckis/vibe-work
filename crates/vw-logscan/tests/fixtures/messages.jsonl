@@ -1,0 +1,4 @@
+{"role":"user","content":"surrounding-context ghp_fixtureOnly012345"}
+{"role":"tool","content":"Z2hwX2ZpeHR1cmVPbmx5MDEyMzQ1"}
+{"role":"assistant","content":"fixture\"\\\nvalue+/?"}
+{"role":"tool","content":"fixture%22%5C%0Avalue%2B%2F%3F"}

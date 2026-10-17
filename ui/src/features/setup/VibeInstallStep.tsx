@@ -61,6 +61,7 @@ function Offer({ offer }: { offer: InstallOffer }) {
       <OfferDetails offer={offer} />
       <div className="key-actions">
         <button
+          data-testid="setup.vibe-install-step-confirm"
           type="button"
           className="btn-primary"
           disabled={busy}
@@ -69,6 +70,7 @@ function Offer({ offer }: { offer: InstallOffer }) {
           Install Vibe {offer.vibeVersion}
         </button>
         <button
+          data-testid="setup.vibe-install-step-cancel"
           type="button"
           className="tb-btn"
           disabled={busy}
@@ -89,7 +91,7 @@ function Existing({ found }: { found: readonly ExistingView[] }) {
   return (
     <ul className="vibe-existing">
       {found.map((item) => (
-        <li key={item.path}>
+        <li data-item-id={item.path} key={item.path}>
           <span>
             <code>{item.path}</code>{" "}
             {item.version === null ? "(did not answer)" : `version ${item.version}`}
@@ -100,6 +102,7 @@ function Existing({ found }: { found: readonly ExistingView[] }) {
               {item.warning !== null && (
                 <label className="key-check">
                   <input
+                    data-testid="setup.vibe-install-step-set-accepted"
                     type="checkbox"
                     checked={accepted === item.path}
                     onChange={(e) => {
@@ -110,6 +113,7 @@ function Existing({ found }: { found: readonly ExistingView[] }) {
                 </label>
               )}
               <button
+                data-testid="setup.vibe-install-step-use-existing"
                 type="button"
                 className="tb-btn"
                 disabled={busy || (item.warning !== null && accepted !== item.path)}
@@ -143,6 +147,7 @@ export function VibeInstallStep() {
           </p>
           <div className="key-actions">
             <button
+              data-testid="setup.vibe-install-step-prepare"
               type="button"
               className="btn-primary"
               disabled={busy}
@@ -151,6 +156,7 @@ export function VibeInstallStep() {
               Review the install
             </button>
             <button
+              data-testid="setup.vibe-install-step-check-existing"
               type="button"
               className="tb-btn"
               disabled={busy}
@@ -172,7 +178,12 @@ export function VibeInstallStep() {
           {phase.outputTail !== "" && (
             <pre className="vibe-tail">{phase.outputTail.split("\n").slice(-12).join("\n")}</pre>
           )}
-          <button type="button" className="tb-btn" onClick={() => void vibe?.cancel()}>
+          <button
+            data-testid="setup.vibe-install-step-cancel-2"
+            type="button"
+            className="tb-btn"
+            onClick={() => void vibe?.cancel()}
+          >
             Cancel
           </button>
         </>
@@ -183,12 +194,13 @@ export function VibeInstallStep() {
             {failText(phase)}
           </p>
           <details>
-            <summary>Details</summary>
+            <summary data-testid="setup.vibe-install-step-summary">Details</summary>
             <pre className="vibe-tail">
               {[phase.error, phase.outputTail].filter((t) => t !== "").join("\n")}
             </pre>
           </details>
           <button
+            data-testid="setup.vibe-install-step-prepare-2"
             type="button"
             className="btn-primary"
             disabled={busy}

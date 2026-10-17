@@ -48,6 +48,7 @@ export function installStatus(e: MarketEntryView, installing: InstallProgress | 
   if (installing !== null && installing.id === e.entry.id)
     return { text: progressText(installing), tone: "info" };
   if (e.foreign) return { text: "A folder of this name exists (not ours)", tone: "warn" };
+  if (e.off) return { text: "Turned off", tone: "off" };
   if (e.installed !== null) {
     if (e.installed.changed === true) return { text: "Changed on disk", tone: "warn" };
     if (e.installed.updateAvailable) return { text: "Update available", tone: "warn" };
@@ -183,8 +184,10 @@ export function marketCounts(
 ): Record<MarketFilter, number> {
   const all = view?.entries ?? [];
   return {
-    all: all.length,
-    installed: all.filter((e) => matches(e, "installed", "", servers)).length,
+    all: all.length + (view?.discovered.length ?? 0),
+    installed:
+      all.filter((e) => matches(e, "installed", "", servers)).length +
+      (view?.discovered.length ?? 0),
     updates: all.filter((e) => matches(e, "updates", "", servers)).length,
   };
 }

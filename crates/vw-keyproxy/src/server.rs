@@ -5,7 +5,9 @@
 //! 1. `Authorization: Bearer <token>` must be the current token → else 401 (`vibe_work_proxy_token`);
 //! 2. method + path must be on the allowlist → else 403 (`vibe_work_proxy_path`);
 //! 3. a key must be available, waiting up to `ProxyConfig::key_wait` (the owner is told once per
-//!    waiting request) → else 503 (`vibe_work_key_unavailable`) with a sentence saying what to do;
+//!    waiting request) → else 503 (`vibe_work_key_unavailable`) with a sentence saying what to do; the connector
+//!    catalog (`GET /v1/connectors/bootstrap`, fetched when a chat starts) never waits: no key → that 503 at once
+//!    (held, it outlasted Vibe's 30 s chat start);
 //! 4. the request goes upstream with hop-by-hop headers, `Host`, `Cookie` and `Authorization`
 //!    removed, `Authorization: Bearer <key>` (marked sensitive) added, the body streamed;
 //! 5. the answer's five `x-ratelimit-*` headers (exact names, numbers only, nothing else) are
@@ -43,7 +45,7 @@ use tokio::task::JoinHandle;
 use tracing::{debug, warn};
 
 use crate::compaction::{MAX_CHAT_BODY, prepare};
-use crate::key::{KeyCell, KeyNeed};
+use crate::key::{KeyCell, KeyNeed, KeyState};
 use crate::limits::{RateLimits, now_ms};
 use crate::mcp::{MCP_PREFIX, McpResolverSlot};
 use crate::routes::{RouteSpec, Upstream, match_route};
@@ -342,29 +344,51 @@ fn admit(
     })
 }
 
+/// The sentence a 503 `vibe_work_key_unavailable` carries: what the owner does to get a key in place.
+fn key_unavailable(need: KeyNeed) -> &'static str {
+    match need {
+        KeyNeed::Unlock => {
+            "Vibe Work's vault is locked. Unlock it in Vibe Work, then run the turn again."
+        }
+        KeyNeed::Setup => {
+            "No Mistral API key is set up in Vibe Work. Add one in Settings, then run the turn again."
+        }
+    }
+}
+
 /// Step 3: the key as a sensitive `Authorization` value, waiting for it when needed.
-async fn authorization(shared: &Shared) -> Result<HeaderValue, Refusal> {
-    let stats = Arc::clone(&shared.stats);
-    let hook = Arc::clone(&shared.config.on_wait);
-    let key = shared
-        .key
-        .wait_ready(shared.config.key_wait, move |need| {
-            stats.waited.fetch_add(1, Ordering::Relaxed);
-            hook(need);
-        })
-        .await
-        .map_err(|need| {
-            shared.stats.no_key.fetch_add(1, Ordering::Relaxed);
-            let message = match need {
-                KeyNeed::Unlock => {
-                    "Vibe Work's vault is locked. Unlock it in Vibe Work, then run the turn again."
-                }
-                KeyNeed::Setup => {
-                    "No Mistral API key is set up in Vibe Work. Add one in Settings, then run the turn again."
-                }
-            };
-            refuse(StatusCode::SERVICE_UNAVAILABLE, "vibe_work_key_unavailable", message)
-        })?;
+///
+/// `wait` false (the connector catalog): one snapshot of the key decides, never a wait and never the owner's
+/// hook. Vibe fetches the catalog when a chat starts and gives it 30 s; held for a key, it outlasted the chat start (a
+/// new chat with the vault locked or no key timed out and stuck). The 503 instead makes Vibe start the chat without
+/// connectors, and it caches only a successful catalog, so the next chat after an unlock loads them. One snapshot, not
+/// a check before a wait: a vault that locks between the two can no longer send the catalog into the wait.
+async fn authorization(shared: &Shared, wait: bool) -> Result<HeaderValue, Refusal> {
+    let unavailable = |need: KeyNeed| {
+        shared.stats.no_key.fetch_add(1, Ordering::Relaxed);
+        refuse(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "vibe_work_key_unavailable",
+            key_unavailable(need),
+        )
+    };
+    let key = if wait {
+        let stats = Arc::clone(&shared.stats);
+        let hook = Arc::clone(&shared.config.on_wait);
+        shared
+            .key
+            .wait_ready(shared.config.key_wait, move |need| {
+                stats.waited.fetch_add(1, Ordering::Relaxed);
+                hook(need);
+            })
+            .await
+            .map_err(unavailable)?
+    } else {
+        match shared.key.current() {
+            KeyState::Ready(key) => key,
+            KeyState::Missing(need) => return Err(unavailable(need)),
+        }
+    };
     let value = zeroize::Zeroizing::new(format!("Bearer {}", key.as_str()));
     let mut auth = HeaderValue::from_str(&value).map_err(|_| {
         refuse(
@@ -562,6 +586,8 @@ async fn handle(State(shared): State<Arc<Shared>>, request: Request) -> Response
         Ok(route) => route,
         Err(r) => return error(r.status, r.kind, r.message),
     };
+    // The connector catalog never waits for a key (`authorization`).
+    let wait = route.template != crate::connectors::BOOTSTRAP_TEMPLATE;
     // connector calls are checked before the key is used.
     let PreparedBody {
         body,
@@ -573,14 +599,16 @@ async fn handle(State(shared): State<Arc<Shared>>, request: Request) -> Response
         Err(answer) => return *answer,
     };
     let auth = match deadline {
-        Some(deadline) => match tokio::time::timeout_at(deadline, authorization(&shared)).await {
-            Ok(Ok(auth)) => auth,
-            Ok(Err(r)) => {
-                return error(StatusCode::UNPROCESSABLE_ENTITY, r.kind, r.message);
+        Some(deadline) => {
+            match tokio::time::timeout_at(deadline, authorization(&shared, wait)).await {
+                Ok(Ok(auth)) => auth,
+                Ok(Err(r)) => {
+                    return error(StatusCode::UNPROCESSABLE_ENTITY, r.kind, r.message);
+                }
+                Err(_) => return timed_out(compaction),
             }
-            Err(_) => return timed_out(compaction),
-        },
-        None => match authorization(&shared).await {
+        }
+        None => match authorization(&shared, wait).await {
             Ok(auth) => auth,
             Err(r) => return error(r.status, r.kind, r.message),
         },

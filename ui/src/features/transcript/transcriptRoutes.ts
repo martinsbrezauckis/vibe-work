@@ -20,6 +20,7 @@ import type { TranscriptUi } from "../../state/transcriptStore";
 import type { App } from "../shell/AppContext";
 import { type Row, rowEntries } from "./model/build";
 import { createTranscriptBuilder } from "./model/memo";
+import { subagentRows } from "./model/subagentRows";
 import {
   DECISIONS,
   type Decision,
@@ -90,6 +91,7 @@ function rowJson(row: Row, choices: TranscriptUi["open"], expanded: boolean): un
       return {
         ...base,
         callbackId: str(row.entry["callbackId"]),
+        ...(row.answerFor === undefined ? {} : { answerFor: row.answerFor }),
         callbackKind: str(detailOf(row.entry)["kind"]),
         status: statusOf(row.entry),
         choices: offeredDecisions(row.entry),
@@ -115,35 +117,67 @@ export function registerTranscriptRoutes(app: App): () => void {
       throw new UiControlError("notFound", `no session ${sessionId} in the UI`);
     return entry;
   };
-  const read = (sessionId: string) => {
+  const rowsOf = (sessionId: string) => {
     const entry = stateOf(sessionId);
-    const rows = createTranscriptBuilder().build(
+    const built = createTranscriptBuilder().build(
       list(entry.state?.["history"]),
       list(entry.state?.["turns"]),
     );
+    const children = subagentRows(
+      app.core?.store.get().subagentCards ?? {},
+      sessionId,
+      entry.state?.["childSessions"],
+    );
+    return [...built, ...children];
+  };
+  const read = (sessionId: string) => {
+    const entry = stateOf(sessionId);
+    const rows = rowsOf(sessionId);
     const choices = app.transcript.store.get().open;
     const expanded = app.shell.store.get().showThinkingExpanded;
     return {
       sessionId,
       loaded: entry.state !== null,
-      openCallbackIds: entry.openCallbackIds,
+      openCallbackIds: [
+        ...new Set([
+          ...entry.openCallbackIds,
+          ...rows.flatMap((row) =>
+            row.kind === "callback" &&
+            row.answerFor !== undefined &&
+            str(row.entry["callbackId"]) !== null
+              ? [str(row.entry["callbackId"])]
+              : [],
+          ),
+        ]),
+      ],
       answered: app.transcript.store.get().answered,
       problems: app.transcript.store.get().problems,
       rows: rows.map((row) => rowJson(row, choices, expanded)),
     };
   };
-  const callbackEntry = (sessionId: string, callbackId: string): Obj => {
+  const callbackEntry = (
+    sessionId: string,
+    callbackId: string,
+  ): { entry: Obj; answerFor: string } => {
     for (const raw of list(stateOf(sessionId).state?.["history"])) {
       const entry = obj(raw);
       if (entry !== null && entry["type"] === "callback" && entry["callbackId"] === callbackId)
-        return entry;
+        return { entry, answerFor: sessionId };
     }
+    const child = rowsOf(sessionId).find(
+      (row) =>
+        row.kind === "callback" &&
+        row.answerFor !== undefined &&
+        row.entry["callbackId"] === callbackId,
+    );
+    if (child?.kind === "callback" && child.answerFor !== undefined)
+      return { entry: child.entry, answerFor: child.answerFor };
     throw new UiControlError("notFound", `no callback ${callbackId} in this session's history`);
   };
   const answer = async (input: Record<string, unknown>) => {
     const sessionId = sessionOf(input);
     const callbackId = text(input["callbackId"], "callbackId");
-    const entry = callbackEntry(sessionId, callbackId);
+    const { entry, answerFor } = callbackEntry(sessionId, callbackId);
     let output: JsonValue | null;
     if (detailOf(entry)["kind"] === "user_input") {
       const { questions } = questionsOf(entry);
@@ -172,7 +206,7 @@ export function registerTranscriptRoutes(app: App): () => void {
         typeof input["feedback"] === "string" ? input["feedback"] : undefined,
       );
     }
-    const ok = await app.transcript.answer(sessionId, callbackId, output, "uiControl");
+    const ok = await app.transcript.answer(answerFor, callbackId, output, "uiControl");
     return {
       ok,
       problem: app.transcript.store.get().problems[callbackId] ?? null,

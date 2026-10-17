@@ -104,7 +104,11 @@ sessionId: string,
 /**
  * `RuntimeSnapshot`.
  */
-runtime: JsonValue, } | { "kind": "notice", 
+runtime: JsonValue, 
+/**
+ * The core's resolved access mode.
+ */
+accessMode?: string, } | { "kind": "notice", 
 /**
  * Session, when named.
  */
@@ -127,6 +131,10 @@ sessionId: string,
  * The full `PublicSessionState` as wire JSON.
  */
 state: JsonValue, 
+/**
+ * The resolved access mode for display, including the app's trusted record before attachment.
+ */
+accessMode?: string, 
 /**
  * Highest event id applied.
  */
@@ -153,6 +161,10 @@ export type SessionRowView = {
  * The `PublicSession` object.
  */
 session: JsonValue, 
+/**
+ * The resolved access mode for display before the session has a runtime.
+ */
+accessMode?: string, 
 /**
  * The server's listing does not contain it yet.
  */

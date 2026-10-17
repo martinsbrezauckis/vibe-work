@@ -19,12 +19,15 @@
 //!   for a user's action (a press, or the PR card's refresh while the session is shown).
 //! - No forge token is stored or read by this crate.
 
+pub mod browser;
+pub mod browser_status;
 pub mod checklog;
 pub mod commit;
 mod error;
 pub mod forge;
 pub mod gh;
 pub mod hooks;
+pub mod identity;
 pub mod merge;
 pub mod message;
 pub mod names;

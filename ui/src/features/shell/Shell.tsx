@@ -19,6 +19,7 @@ import { SidePanel } from "./SidePanel";
 import { StatusBar } from "./StatusBar";
 import { TitleBar } from "./TitleBar";
 import { Toasts } from "./Toasts";
+import { WalkthroughCaption } from "./WalkthroughCaption";
 import { useProjects } from "../projects/hooks";
 import { DeleteProjectDialog } from "../sessions/DeleteProjectDialog";
 import { UpdateNotice } from "../updates/UpdateNotice";
@@ -62,6 +63,7 @@ export function Shell() {
         </div>
         <StatusBar>
           <Toasts />
+          <WalkthroughCaption />
         </StatusBar>
       </div>
       <CommandPalette />

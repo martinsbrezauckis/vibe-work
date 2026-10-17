@@ -1,7 +1,8 @@
 //! Native confirmation for automated wider provider authorization in the built-in browser.
 //!
 //! Depends on: `vw-browser` consent callback, the core's native confirmer, and the preview hub. Called by: core
-//! startup. Invariant: the Debug API cannot answer this dialog on behalf of the user.
+//! startup. Invariant: the dialog is for the user and the agent; a Debug API action is answered by the core's
+//! confirmer like any other confirmation (`confirmer.rs`), because the Debug API acts as the user.
 
 use std::sync::{Arc, Weak};
 

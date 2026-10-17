@@ -60,6 +60,7 @@ export function ImageSettings(): ReactElement | null {
           </span>
           <span className="d">
             <a
+              data-testid="settings.image-settings-prevent-default"
               className="ext-link"
               href="https://mistral.ai/pricing/"
               onClick={(event) => {
@@ -75,7 +76,11 @@ export function ImageSettings(): ReactElement | null {
               <span role="status"> Open https://mistral.ai/pricing/ in your browser.</span>
             )}
           </span>
-          {blocked || error === null ? null : <span className="d cbad">{error}</span>}
+          {blocked || error === null ? null : (
+            <span className="key-problem" role="alert">
+              {error}
+            </span>
+          )}
         </span>
       </div>
     </section>

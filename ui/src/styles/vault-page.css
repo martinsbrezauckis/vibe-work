@@ -32,10 +32,6 @@
   cursor: pointer;
   color: var(--text-2);
 }
-.vault-default-label {
-  color: var(--text-2);
-  font-size: var(--text-12);
-}
 .vault-entry-line > .tb-btn {
   flex: none;
 }
@@ -78,13 +74,9 @@
 .vault-entry-line .ui-disclosure .secrets-name,
 .vault-model-key-row .ui-disclosure .secrets-name {
   flex: 1 1 12ch;
-  font-size: var(--text-13-5);
-  font-weight: var(--weight-regular);
 }
 .vault-entry-line .ui-disclosure .secrets-detail {
   flex: 0 1 16ch;
-  font-size: var(--text-13-5);
-  font-weight: var(--weight-regular);
 }
 .vault-entry-line > .ui-selector {
   flex: none;
@@ -119,9 +111,4 @@
 }
 .vault-add-entry > .generator-options {
   grid-column: 1 / -1;
-}
-.vault-model-key-row .vault-model-key-address {
-  color: var(--text-3);
-  font-size: var(--text-13-5);
-  font-weight: var(--weight-regular);
 }

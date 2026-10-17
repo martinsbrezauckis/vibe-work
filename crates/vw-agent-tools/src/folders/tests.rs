@@ -87,7 +87,7 @@ fn command_substitutions_are_not_literal_folder_paths() {
     let literal = &segments(r"cat './actual/file.txt'")[0].words[1];
     assert!(!computed_shell_word(literal, &literal.text));
     assert_eq!(
-        shell_path_part(&literal.text, Path::new("/unused-fx9-folder")),
+        shell_path_part(&literal.text, Path::new("/unused-folder")),
         Some("./actual/file.txt")
     );
 }
@@ -96,7 +96,7 @@ fn command_substitutions_are_not_literal_folder_paths() {
 #[test]
 fn windows_shell_assignment_with_find_does_not_hit_invalid_filename() -> std::io::Result<()> {
     let cwd = std::fs::canonicalize(std::env::temp_dir())?;
-    let layout = Layout::new(&cwd.join("fx9-absent-vibe-home"), &cwd)?;
+    let layout = Layout::new(&cwd.join("shell-find-absent-vibe-home"), &cwd)?;
     let no_copy_check = |_: &Path, _: bool| -> Result<(), String> {
         panic!("a command outside Vibe home asked for a copy permit")
     };
@@ -209,16 +209,16 @@ fn windows_prefix_question_mark_is_not_a_glob() {
 #[test]
 fn layout_and_path_resolution_errors_name_the_path() -> std::io::Result<()> {
     let root = std::fs::canonicalize(std::env::temp_dir())?;
-    let bad = root.join("fg3-invalid\0path");
+    let bad = root.join("folders-invalid\0path");
     let error = Layout::new(&root, &bad)
         .err()
         .ok_or_else(|| std::io::Error::other("invalid cwd was accepted"))?;
-    assert!(error.to_string().contains("fg3-invalid"), "{error}");
-    let layout = Layout::new(&root.join("fg3-absent-vibe-home"), &root)?;
+    assert!(error.to_string().contains("folders-invalid"), "{error}");
+    let layout = Layout::new(&root.join("folders-absent-vibe-home"), &root)?;
     let refusal = layout.check(&bad, &root, Access::Write, &|_, _| Ok(()));
     assert!(
         refusal.as_deref().is_some_and(|text| {
-            text.contains("fg3-invalid") && text.contains("could not be resolved")
+            text.contains("folders-invalid") && text.contains("could not be resolved")
         }),
         "{refusal:?}"
     );
@@ -228,8 +228,8 @@ fn layout_and_path_resolution_errors_name_the_path() -> std::io::Result<()> {
 #[test]
 fn missing_home_and_worktrees_do_not_block_an_outside_folder() -> std::io::Result<()> {
     let root = std::fs::canonicalize(std::env::temp_dir())?;
-    let home = root.join("fg3-absent-vibe-home");
-    let cwd = root.join("fg3-outside-project");
+    let home = root.join("folders-absent-vibe-home");
+    let cwd = root.join("folders-outside-project");
     let layout = Layout::new(&home, &cwd)?;
     assert!(layout.own.is_none());
     let no_copy_check = |_: &Path, _: bool| -> Result<(), String> {
@@ -287,4 +287,102 @@ fn long_quoted_commit_body_is_not_a_folder_but_real_other_copy_is_refused() -> s
     })();
     std::fs::remove_dir_all(root)?;
     result
+}
+
+#[test]
+fn quoted_home_and_project_spaces_keep_full_copy_paths() -> std::io::Result<()> {
+    let root = std::env::temp_dir().join(format!("vw-folder-spaces-{}", std::process::id()));
+    for home_name in ["vibe-home", "vibe home"] {
+        let home = root.join(home_name);
+        let own = home.join("worktrees/project name-123/own");
+        let other = home.join("worktrees/project name-123/other");
+        std::fs::create_dir_all(&own)?;
+        std::fs::create_dir_all(&other)?;
+        let layout = Layout::new(&home, &own)?;
+        let permits = |_: &Path, is_own: bool| {
+            if is_own {
+                Ok(())
+            } else {
+                Err("other copy busy".to_owned())
+            }
+        };
+        for quote in ['\'', '"'] {
+            for command in [
+                format!("cat {quote}{}/file.txt{quote}", own.display()),
+                format!(
+                    "cat {quote}{}{quote}/worktrees/{quote}project name-123/own{quote}/file.txt",
+                    home.display()
+                ),
+                format!("echo ok >{quote}{}/file.txt{quote}", own.display()),
+                format!("git -C {quote}{}{quote} status --short", own.display()),
+            ] {
+                assert_eq!(
+                    check_command(&layout, &command, None, &permits),
+                    None,
+                    "{command}"
+                );
+            }
+            for path in [&other, &home] {
+                let command = format!("echo ok >{quote}{}/file.txt{quote}", path.display());
+                assert!(
+                    check_command(&layout, &command, None, &permits).is_some(),
+                    "{command}"
+                );
+            }
+        }
+    }
+    std::fs::remove_dir_all(root)?;
+    Ok(())
+}
+
+#[test]
+fn raw_mentions_keep_spaces_and_quote_concatenations_in_every_path_form() {
+    for root in [
+        "/tmp/vibe home",
+        "/Users/test/Vibe home",
+        "C:/Vibe home",
+        r"C:\Vibe home",
+        r"C:\ Vibe home",
+        r"\\server\share\Vibe home",
+        r"\\?\C:\Vibe home",
+        r"\\?\UNC\server\share\Vibe home",
+    ] {
+        let sep = if root.contains('\\') { "\\" } else { "/" };
+        let path = format!("{root}{sep}worktrees{sep}project name{sep}own{sep}file.txt");
+        for quote in ['\'', '"'] {
+            assert_eq!(
+                raw_mentions(&format!("cat {quote}{path}{quote}"), root),
+                vec![path.clone()]
+            );
+            assert_eq!(
+                raw_mentions(
+                    &format!(
+                        "echo ok >{quote}{root}{quote}{sep}{quote}worktrees{sep}project name{sep}own{quote}{sep}file.txt"
+                    ),
+                    root
+                ),
+                vec![path.clone()]
+            );
+        }
+    }
+}
+
+#[test]
+fn approval_file_aliases_are_refused_before_the_file_exists() -> std::io::Result<()> {
+    let data = std::env::current_dir()?.join(".scratch/approval-file-aliases");
+    let layout = Layout::new(&data.join("vibe-home"), &data.join("project"))?;
+    for name in [
+        "plugin-approvals.json",
+        "PLUGIN-APPROVALS.JSON",
+        "plugin-approvals.json.",
+        "plugin-approvals.json::$DATA",
+    ] {
+        assert!(
+            layout
+                .check(&data.join(name), &data, Access::Write, &|_, _| Ok(()))
+                .is_some(),
+            "approval-file alias must be refused: {name}"
+        );
+    }
+    Ok(())
 }

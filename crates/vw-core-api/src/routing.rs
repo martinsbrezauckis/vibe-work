@@ -39,6 +39,9 @@ const NEEDS_CHANNEL: &[&str] = &[
     "config/write",
     "config/reload",
     "config/fields/read",
+    // The settings screen reads and writes the proxy and certificate settings through a session too.
+    "config/proxy/read",
+    "config/proxy/write",
     "account/read",
     "identity/read",
     // Vibe answers a connector sign-in only for the session its channel holds (`_target` in
@@ -118,6 +121,9 @@ mod tests {
         let sid = json!({"sessionId": "s"});
         assert_eq!(needs_channel("turn/start", &sid), Some("s"));
         assert_eq!(needs_channel("callback/result", &sid), Some("s"));
+        // Settings > Network reads and writes the proxy settings through a session like the other settings.
+        assert_eq!(needs_channel("config/proxy/read", &sid), Some("s"));
+        assert_eq!(needs_channel("config/proxy/write", &sid), Some("s"));
         assert_eq!(
             needs_channel("session/fork", &json!({"sourceSessionId": "f"})),
             Some("f")

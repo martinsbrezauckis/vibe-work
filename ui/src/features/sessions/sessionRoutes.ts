@@ -13,11 +13,14 @@
  * {sessionIds, projectId|null}`, `projectPlace {projectId, before|null}`, `projectStart {projectId}`, `projectFolder
  * {projectId, folder}` (a folder a session works in, or `null` to clear; `folder` is required because the native
  * picker cannot be answered remotely and would hold the window's request queue), `projectsRefresh` (reconcile with Vibe's list), `toggleGroup {key}`.
+ * `projectStart {projectId, folder?}` of a project without a main folder names the folder to run in (`folder`, a path;
+ * the picker cannot be answered remotely) or is `invalidParams` (or set the project's folder first).
  * Invariants: bodies are validated (`invalidParams` on a bad one); `notifications focus` changes
  * only whether a notification is shown; delete is the click's flow, without the native confirmation for the
  * Debug API (it acts as the user).
  */
 import { NOTIFY_LEVELS } from "../../state/osNotify";
+import { startFolderFor } from "../../state/projectStartFolder";
 import { summarize } from "../../state/sessionSummary";
 import { UiControlError } from "../../state/uiControl";
 import type { App } from "../shell/AppContext";
@@ -144,8 +147,11 @@ async function projectAction(
     case "projectPlace":
       await groups.place(project(), nullableText(input["before"] ?? null, "before"));
       return {};
-    case "projectStart":
-      return { sessionId: await groups.startIn(project()) };
+    case "projectStart": {
+      const id = project();
+      const folder = await startFolderFor(app.core, groups, id, input["folder"]);
+      return { sessionId: await groups.startIn(id, folder) };
+    }
     case "projectFolder":
       // Never the native picker for the Debug API: no remote caller can answer it, and it holds the UI's request
       // queue until a person does.

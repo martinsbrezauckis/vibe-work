@@ -37,7 +37,7 @@ export function registerTerminalRoute(app: App, terminals: Terminals): () => voi
             })),
       active: sessionId === null ? null : (activeOf(tabs, sessionId)?.terminalId ?? null),
       shown: shown === null ? null : { terminalId: shown.terminalId, ...shown.info() },
-      focused: shown?.hasFocus() ?? false,
+      focused: (shown?.hasFocus() ?? false) && document.hasFocus(),
       error: sessionId === null ? null : (tabs.error[sessionId] ?? null),
     };
   };
@@ -52,9 +52,25 @@ export function registerTerminalRoute(app: App, terminals: Terminals): () => voi
       case "selectAll":
         shownTerminal()?.selectAll();
         return { text: shownTerminal()?.selection() ?? "" };
-      case "focus":
-        shownTerminal()?.focus();
-        return state();
+      case "focus": {
+        const shown = shownTerminal();
+        shown?.focus();
+        // Native focus events can arrive after the call that requested them.
+        await new Promise<void>((resolve) => {
+          setTimeout(resolve, 0);
+        });
+        const result = state();
+        const focusReason = result.focused
+          ? null
+          : shown === null
+            ? "no terminal view is mounted; open the Terminal panel and select a running terminal"
+            : document.visibilityState === "hidden"
+              ? "the Vibe Work window is hidden; show it and retry"
+              : !document.hasFocus()
+                ? "the Vibe Work window does not have keyboard focus; activate it and retry"
+                : "the terminal input did not receive focus; another control may have taken it";
+        return { ...result, focusReason };
+      }
       case "open":
         if (sessionId === null) throw new UiControlError("invalidParams", "no session is shown");
         await terminals.open(sessionId);

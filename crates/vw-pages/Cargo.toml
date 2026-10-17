@@ -27,6 +27,8 @@ url = "2"
 sha2 = "0.10.9"
 # Random comment ids and pick accessor names (same version as the other crates).
 getrandom = "0.3"
+# Constant-time comparison of the viewer's path capability. subtle 2.6.1 (BSD-3-Clause), already in the lockfile.
+subtle = "2.6.1"
 # The loopback page server: same axum as vw-debug-api (0.8.9, MIT), HTTP/1.1 only.
 axum = { version = "0.8.9", default-features = false, features = ["http1", "tokio"] }
 # Markdown pages, rendered read-only. pulldown-cmark 0.13.4 (MIT); raw

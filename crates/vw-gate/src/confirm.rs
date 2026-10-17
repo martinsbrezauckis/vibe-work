@@ -29,7 +29,8 @@ pub enum Requester {
     /// A click in the app's own window.
     Window,
     /// An external client through the Debug API. It acts as the user: the core's confirmer
-    /// answers its requests without a dialog. Only the core sets it, from the command's origin.
+    /// answers its requests without a dialog, except the vault's dialogs (`vault_scope::DIALOG_METHODS`), which only
+    /// the user answers. Only the core sets it, from the command's origin.
     DebugApi,
     /// The agent of a session (a command it wants to run).
     Agent,

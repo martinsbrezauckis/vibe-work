@@ -9,7 +9,9 @@
  * loaded once (`ensureLoaded`); rows are rebuilt on every store change but unchanged rows keep their
  * identity, so `RowView` (memo) skips them.
  */
+import { term, TEXT } from "../../vocabulary";
 import { type ReactElement, useEffect, useMemo, useRef } from "react";
+import { useStore } from "../../state/createStore";
 import { useCoveredByPage } from "../shell/coverContext";
 import { Icon } from "../../components/Icon";
 import { VList, type VListHandle } from "virtua";
@@ -24,7 +26,7 @@ import { LinkDialog } from "./LinkDialog";
 import { SourcesPanel } from "./SourcesPanel";
 import type { Row } from "./model/build";
 import { createTranscriptBuilder } from "./model/memo";
-import { subagentCardsOf } from "../../state/coreModel";
+import { subagentRows } from "./model/subagentRows";
 import { latestTodos } from "./model/todos";
 import { RowView } from "./rows/RowView";
 import { TodoStrip } from "./TodoStrip";
@@ -46,7 +48,8 @@ function liveText(rows: readonly Row[]): string {
 /** Renders the transcript of `sessionId`. */
 export function Transcript({ sessionId }: { sessionId: string }): ReactElement {
   const covered = useCoveredByPage();
-  const { transcript } = useApp();
+  const { transcript, find } = useApp();
+  const finding = useStore(find.store, (s) => s.conversation?.sessionId === sessionId);
   const entry = useCoreState((s) => s.sessions[sessionId]);
   const loading = useTranscriptUi((s) => s.loading[sessionId] === true);
   const builder = useMemo(() => createTranscriptBuilder(), []);
@@ -56,30 +59,18 @@ export function Transcript({ sessionId }: { sessionId: string }): ReactElement {
   // transcript, under "Waiting for a subagent", and answered for the child.
   const cards = useCoreState((s) => s.subagentCards);
   const childSessions = entry?.state?.["childSessions"];
-  const subagentRows = useMemo(
-    () =>
-      subagentCardsOf(cards, sessionId, childSessions).flatMap((card): Row[] =>
-        card.entry !== null && typeof card.entry === "object" && !Array.isArray(card.entry)
-          ? [
-              {
-                kind: "callback",
-                key: `sub:${card.callbackId}`,
-                entry: card.entry,
-                related: null,
-                answerFor: card.sessionId,
-              },
-            ]
-          : [],
-      ),
+  const childRows = useMemo(
+    () => subagentRows(cards, sessionId, childSessions),
     [cards, sessionId, childSessions],
   );
   const rows = useMemo(
-    () => (subagentRows.length === 0 ? built : [...built, ...subagentRows]),
-    [built, subagentRows],
+    () => (childRows.length === 0 ? built : [...built, ...childRows]),
+    [built, childRows],
   );
   const todos = useMemo(() => latestTodos(history), [history]);
   const listRef = useRef<VListHandle>(null);
-  const follow = useFollow(listRef, rows.length, rows);
+  const attention = rows.reduce((last, row, index) => (row.kind === "callback" ? index : last), -1);
+  const follow = useFollow(listRef, rows.length, rows, { paused: finding, attention });
   const unloaded = entry !== undefined && entry.state === null && !entry.localOnly;
 
   useEffect(() => {
@@ -89,7 +80,7 @@ export function Transcript({ sessionId }: { sessionId: string }): ReactElement {
   if (entry === undefined || unloaded || loading) {
     return (
       <div className="tx tx-empty" role="status">
-        {entry === undefined ? "This session is not loaded." : "Loading the conversation…"}
+        {entry === undefined ? `${TEXT.thisSession} is not loaded.` : "Loading the session…"}
       </div>
     );
   }
@@ -108,7 +99,7 @@ export function Transcript({ sessionId }: { sessionId: string }): ReactElement {
             ref={listRef}
             data={rows}
             className="tx-list"
-            aria-label="Conversation"
+            aria-label={term("workNames", "session").name}
             role="log"
             tabIndex={0}
             onScroll={follow.onScroll}
@@ -119,6 +110,7 @@ export function Transcript({ sessionId }: { sessionId: string }): ReactElement {
         )}
         {follow.pinned ? null : (
           <button
+            data-testid="transcript.transcript-jump-latest"
             type="button"
             className="jump-latest"
             title="Jump to latest message"

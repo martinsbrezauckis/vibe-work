@@ -1,5 +1,5 @@
-//! Line diff of two byte buffers in Rust (git never reads working-tree content,
-//! so its clean filters and diff drivers can never run): hunks with three lines of context, and the splice
+//! Line diff of two byte buffers in Rust (git never reads working-tree content here, and no
+//! repository filter or diff driver runs): hunks with three lines of context, and the splice
 //! that applies one hunk forward (keep: into the baseline) or backward (revert: into the working file).
 //!
 //! Depends on: `similar` 3.2.0 (Apache-2.0; Myers diff with a deadline), `model`. Called by: `diff`,

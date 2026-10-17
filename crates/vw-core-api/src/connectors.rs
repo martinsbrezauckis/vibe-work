@@ -334,7 +334,7 @@ impl Core {
 
     /// The token for `method`: none needed from the window for a trusted method (`forward` mints it), else
     /// the native dialog's.
-    async fn token_for(
+    pub(crate) async fn token_for(
         &self,
         origin: Origin,
         method: &str,

@@ -1,178 +1,165 @@
 /**
- * Quick edits in the File tab: the
- * shown text file in a plain text area (monospace, the caret at the line the tab pointed to), Save (Ctrl S / Cmd S)
- * and Cancel (Esc).
- * Saving goes through the core's `files write` (conflict check: a file that changed on disk since it was read is
- * not overwritten; the box keeps the text and offers the new version). After a save the tab reloads, the Changes
- * tab shows the edit like any other change (revert per hunk there: the normal undo path), and a context chip with
- * the diff goes into the session's composer, so the agent learns about the edit with the next message.
- * Depends on: AppContext, state/files (`write`), saveEdit. Called by: FileTab.
- * Invariants: the text never leaves the window except through `files write`; the chip is data (a resource block),
- * never typed text; Cancel and a failed save write nothing. The edit's base (file, fingerprint, original text, names)
- * is pinned when the editor opens: the tab keeps polling and may load the agent's newer version or show another file,
- * but Save always targets the pinned file with the pinned fingerprint, so a newer disk version is refused as stale
- * instead of overwritten, and a draft is never saved into a different file.
+ * File-tab edit controls and conflict banner. Depends on the lazy CodeMirror engine, files drafts,
+ * and saveEditor; called by FileTab. Disk reads never replace a dirty buffer or its save fingerprint.
  */
-import { type ReactElement, useEffect, useRef, useState } from "react";
-
+import { Button } from "../../components/Controls";
+import { lazy, Suspense, type ReactElement, useRef } from "react";
 import type { FileContent } from "../../protocol/core";
+import { useStore } from "../../state/createStore";
 import type { Files } from "../../state/files";
 import { useApp } from "../shell/AppContext";
-import { saveEdit } from "./saveEdit";
+import { CodeEditor, type EditorHandle } from "../editor/CodeEditor";
+import { saveEditor } from "./saveEditor";
 
-/** Where line `line` (1-based) starts in `text`. */
-function offsetOfLine(text: string, line: number): number {
-  let at = 0;
-  for (let i = 1; i < line; i++) {
-    const next = text.indexOf("\n", at);
-    if (next === -1) return text.length;
-    at = next + 1;
-  }
-  return at;
-}
+const MergeCompare = lazy(() =>
+  import("../editor/MergeCompare").then((m) => ({ default: m.MergeCompare })),
+);
 
-/** The editor. `onDone` leaves edit mode (after a save or Cancel). */
+/** Save/Cancel use the same draft actions as the Debug API. */
 export function FileEditor({
   files,
   sessionId,
-  file,
-  display,
   content,
   line,
-  onDone,
-  onDirty,
-  initialText,
-  onText,
 }: {
   files: Files;
   sessionId: string;
-  /** The tab's handle of the file being edited (pinned with the rest of the base). */
-  file: string;
-  /** The file's path as the tab shows it. */
-  display: string;
   content: FileContent;
   line: number | null;
-  onDone: () => void;
-  /** Called when the draft starts or stops differing from the original (the tab guards file switching). */
-  onDirty?: (dirty: boolean) => void;
-  /** The draft to resume (an edit kept across a session switch); the original text when absent. */
-  initialText?: string | undefined;
-  /** Called with every draft change (the tab keeps it for a session switch). */
-  onText?: (text: string) => void;
 }): ReactElement {
   const app = useApp();
-  // Pinned once: later content updates (the poll, a reload, another shown file) never change what this edit is
-  // based on.
-  const [base] = useState(() => ({
-    file,
-    fingerprint: content.fingerprint,
-    original: content.text ?? "",
-    name: content.name,
-    display,
-  }));
-  const original = base.original;
-  const [text, setText] = useState(initialText ?? original);
-  useEffect(() => {
-    onDirty?.(text !== original);
-    onText?.(text);
-  }, [text, original, onDirty, onText]);
-  useEffect(() => () => onDirty?.(false), [onDirty]);
-  // `"stale"` (the file changed on disk) or a refusal's message.
-  const [problem, setProblem] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
-  const area = useRef<HTMLTextAreaElement>(null);
-
-  // Focus with the caret at the pointed line (the search hit's, else the start).
-  useEffect(() => {
-    const box = area.current;
-    if (box === null) return;
-    const at = offsetOfLine(original, line ?? 1);
-    box.focus();
-    box.setSelectionRange(at, at);
-    const lineHeight = parseFloat(getComputedStyle(box).lineHeight) || 18;
-    box.scrollTop = Math.max(0, ((line ?? 1) - 5) * lineHeight);
-    // Only when the editor opens: later content updates must not move the caret.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const save = async () => {
-    if (saving) return;
-    setSaving(true);
-    const result = await saveEdit(app, sessionId, original, text, "ui", base);
-    setSaving(false);
-    if (result.kind === "stale") setProblem("stale");
-    else if (result.kind === "error") setProblem(result.message);
-    else onDone();
+  const draft = useStore(files.store, (s) => s.edits[sessionId]);
+  const engine = useRef<EditorHandle | null>(null);
+  if (draft === undefined) return <div className="empty">The editor is closed.</div>;
+  const cancel = () => {
+    if (!draft.saving) files.edit.cancel(sessionId);
   };
-
+  const save = () => {
+    void saveEditor(app, sessionId);
+  };
+  const reload = async () => {
+    if (!(await files.actions.reloadEdit(sessionId)))
+      files.edit.update(sessionId, {
+        problem: "The new version could not be loaded as editable text.",
+      });
+  };
   return (
-    <div className="file-edit">
+    <div className="file-edit" data-dirty={draft.text !== draft.base.text}>
       <div className="file-edit-bar" role="toolbar" aria-label="Edit the file">
         <span className="file-edit-hint">
-          Editing {base.name}. <kbd>Ctrl</kbd> <kbd>S</kbd> saves, <kbd>Esc</kbd> cancels.
+          Editing {content.name}. <kbd>Ctrl</kbd> / <kbd>Cmd</kbd> <kbd>S</kbd> saves,{" "}
+          <kbd>Esc</kbd> cancels.
         </span>
         <button
+          data-testid="files.file-editor-find"
+          type="button"
+          className="mini"
+          onClick={() => engine.current?.find()}
+        >
+          Find
+        </button>
+        <button
+          data-testid="files.file-editor-soft-wrap"
+          type="button"
+          className="mini"
+          aria-pressed={draft.wrap}
+          onClick={() => {
+            files.edit.update(sessionId, { wrap: !draft.wrap });
+          }}
+        >
+          Soft wrap
+        </button>
+        <button
+          data-testid="files.file-editor-save"
           type="button"
           className="mini primary"
-          disabled={saving}
-          onClick={() => void save()}
+          disabled={draft.saving}
+          onClick={save}
         >
-          {saving ? "Saving…" : "Save"}
+          {draft.saving ? "Saving…" : "Save"}
         </button>
-        <button type="button" className="mini" disabled={saving} onClick={onDone}>
+        <button
+          data-testid="files.file-editor-mini"
+          type="button"
+          className="mini"
+          disabled={draft.saving}
+          onClick={cancel}
+        >
           Cancel
         </button>
       </div>
-      {problem !== null && (
-        <p className="file-note warn" role="alert">
-          {problem === "stale" ? (
-            <>
-              The file changed on disk since you opened it, so it was not saved. Your text is still
-              here.{" "}
-              <button
-                type="button"
-                className="mini"
-                onClick={() => {
-                  void files.actions.reload(sessionId).then(onDone);
-                }}
-              >
-                Load the new version (drops your edit)
-              </button>
-            </>
-          ) : (
-            problem
-          )}
+      {draft.conflict && (
+        <div className="server-note file-edit-conflict" role="alert">
+          <span>Changed on disk. Your edits are still here.</span>
+          <Button
+            data-testid="files.file-editor-reload"
+            type="button"
+            small
+            variant="danger"
+            disabled={draft.saving}
+            onClick={() => void reload()}
+          >
+            Reload (lose my edits)
+          </Button>
+          <button
+            data-testid="files.file-editor-keep-editing"
+            type="button"
+            className="mini"
+            onClick={() => {
+              files.edit.update(sessionId, { conflict: false });
+              engine.current?.focus();
+            }}
+          >
+            Keep editing
+          </button>
+          <button
+            data-testid="files.file-editor-compare"
+            type="button"
+            className="mini"
+            disabled={draft.disk.text === null || draft.disk.truncated}
+            onClick={() => {
+              files.edit.update(sessionId, { compare: true });
+            }}
+          >
+            Compare mine vs disk
+          </button>
+        </div>
+      )}
+      {draft.problem !== null && (
+        <p className="key-problem" role="alert">
+          {draft.problem}
         </p>
       )}
-      <textarea
-        ref={area}
-        className="file-edit-area"
-        aria-label={`Text of ${base.name}`}
-        spellCheck={false}
-        value={text}
-        onChange={(e) => {
-          setText(e.target.value);
-        }}
-        onKeyDown={(e) => {
-          if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === "s") {
-            e.preventDefault();
-            void save();
-          } else if (e.key === "Escape") {
-            e.preventDefault();
-            e.stopPropagation();
-            onDone();
-          } else if (e.key === "Tab" && !e.shiftKey) {
-            // Tab types a tab (code); Shift Tab still leaves the box.
-            e.preventDefault();
-            const box = e.currentTarget;
-            const { selectionStart: from, selectionEnd: to } = box;
-            setText(`${text.slice(0, from)}\t${text.slice(to)}`);
-            requestAnimationFrame(() => {
-              box.setSelectionRange(from + 1, from + 1);
-            });
-          }
-        }}
-      />
+      {draft.compare && draft.disk.text !== null ? (
+        <Suspense fallback={<div className="empty">Loading comparison…</div>}>
+          <MergeCompare
+            mine={draft.text}
+            disk={draft.disk.text}
+            filename={content.name}
+            onClose={() => {
+              files.edit.update(sessionId, { compare: false });
+            }}
+          />
+        </Suspense>
+      ) : null}
+      <div className={draft.compare ? "file-edit-engine hidden" : "file-edit-engine"}>
+        <CodeEditor
+          value={draft.text}
+          onChange={(text) => {
+            files.edit.update(sessionId, { text });
+          }}
+          label={`Text of ${content.name}`}
+          filename={content.name}
+          line={line}
+          readOnly={draft.saving}
+          wrap={draft.wrap}
+          onSave={save}
+          onCancel={cancel}
+          onReady={(handle) => {
+            engine.current = handle;
+          }}
+        />
+      </div>
     </div>
   );
 }

@@ -53,6 +53,7 @@ export function DictationStrip({ sessionId }: { sessionId: string }): ReactEleme
       </span>
       {phase === "recording" ? (
         <button
+          data-testid="voice.dictation-strip-stop"
           type="button"
           className="mini"
           title="Stop dictation and transcribe speech"
@@ -64,6 +65,7 @@ export function DictationStrip({ sessionId }: { sessionId: string }): ReactEleme
       ) : null}
       {phase === "recording" || phase === "starting" ? (
         <button
+          data-testid="voice.dictation-strip-cancel"
           type="button"
           className="mini"
           title="Cancel dictation (Escape)"
@@ -77,6 +79,7 @@ export function DictationStrip({ sessionId }: { sessionId: string }): ReactEleme
       ) : null}
       {!live ? (
         <button
+          data-testid="voice.dictation-strip-dismiss"
           type="button"
           className="mini"
           aria-label="Dismiss dictation notice"

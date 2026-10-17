@@ -10,7 +10,7 @@
 //!   finishes. Never a dev venv, never a binary from `PATH` the user did not choose.
 //! - **Own `VIBE_HOME`** under the app's data folder, its `.env` kept secret-free ([`ProductLaunch`]); its
 //!   `config.toml` names Mistral Medium 3.5 as the session-title model unless it names one already
-//!   ([`crate::title_model`]: Mistral Large 4 refuses Vibe's title request).
+//!   ([`crate::title_model`]).
 //! - **Key:** only through the key service (model proxy + per-start placeholder); the parent's
 //!   `MISTRAL_API_KEY` never reaches the server (the supervisor filters the parent environment, and the
 //!   key service's provider replaces any other). If the key store cannot be located the launch fails

@@ -38,7 +38,11 @@ pub(crate) async fn handed_off(shared: &Arc<Shared>, old: &str, new: &str) {
         return;
     }
     tracing::info!(old, new, "session handed off: moving its resources");
-    shared.channels.rebind(old, new);
+    if let Err(error) = shared.channels.rebind(old, new) {
+        tracing::warn!(%error, "session hand-off could not claim ownership");
+        shared.channels.close(old).await;
+        return;
+    }
     shared.supervisor.untrack_session(old);
     shared.supervisor.track_session(new);
     shared.access.hand_off(old, new);

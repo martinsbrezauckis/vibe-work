@@ -42,6 +42,11 @@ pub struct SubagentCard {
     rename_all_fields = "camelCase"
 )]
 pub enum CoreEvent {
+    /// Scan status and one retained security finding per chat; no values, paths or byte ranges.
+    SecretScan {
+        /// Complete value-free scanner view.
+        view: crate::SecretScanView,
+    },
     /// Full state of one session; replaces the client's copy.
     Snapshot {
         /// The session.
@@ -61,6 +66,11 @@ pub enum CoreEvent {
     },
     /// A session copy was started or removed; refresh the worktree count.
     WorktreesChanged {},
+    /// A project tree changed; clients request a fresh bounded snapshot.
+    GitBrowserChanged {
+        /// Saved project id.
+        project_id: String,
+    },
     /// The server asked for an answer (`callback/call`); answer with `answerCallback`.
     CallbackOpened {
         /// Session.
@@ -127,6 +137,10 @@ pub enum CoreEvent {
         session_id: String,
         /// The holding process's pid; `null`: free (or held by Vibe Work itself).
         holder_pid: Option<u32>,
+        /// `window` for an app lease, `terminal` for Vibe's native foreign holder.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[cfg_attr(feature = "ts", ts(optional))]
+        holder_kind: Option<String>,
     },
     /// The Debug API was switched on or off.
     DebugApi {
@@ -274,6 +288,18 @@ pub enum AlertKind {
     /// A session that had a channel could not be reopened after a server restart (the resume failed or
     /// timed out); its running turns were marked `interrupted`. The next command tries again.
     ReopenFailed,
+    /// A temporary chat could not be deleted; its retry record remains.
+    TemporaryCleanupFailed,
+    /// A temporary chat left by a previous run has now been deleted.
+    TemporaryCleanupRecovered,
+    /// A temporary Mistral source upload could not be deleted after retries.
+    RemoteFileCleanupFailed,
+    /// A Libraries listing returned completed pages with an explicit incompleteness warning.
+    LibraryListPartial,
+    /// Vibe refused to re-pin a chat after the installed plugins changed.
+    PluginReloadFailed,
+    /// Saved network settings could not be authenticated through the key service's vault.
+    NetworkSettingsRejected,
 }
 
 /// Serializable mirror of `vw_session::Change` (minus `Replaced`, which subscribers receive as a
@@ -366,6 +392,10 @@ pub enum SessionChange {
         session_id: String,
         /// `RuntimeSnapshot`.
         runtime: Value,
+        /// The core's resolved access mode.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[cfg_attr(feature = "ts", ts(optional))]
+        access_mode: Option<String>,
     },
     /// A transient notice (`turn/retrying`, `warning`, `error`, auth required).
     Notice {
@@ -474,6 +504,7 @@ impl SessionChange {
             } => Self::RuntimeUpdated {
                 session_id,
                 runtime,
+                access_mode: None,
             },
             Change::Notice {
                 session_id,
@@ -525,7 +556,8 @@ impl CoreEvent {
             | Self::BrowserChanged { session_id }
             | Self::PagesChanged { session_id }
             | Self::FilesChanged { session_id } => session_id.as_deref().is_none_or(|s| s == id),
-            Self::Lagged {}
+            Self::GitBrowserChanged { .. }
+            | Self::Lagged {}
             | Self::Server { .. }
             | Self::WorktreesChanged {}
             | Self::Refused { .. }
@@ -541,7 +573,8 @@ impl CoreEvent {
             | Self::DocumentChanged { .. }
             | Self::Dictation { .. }
             | Self::ConnectorSignIn { .. }
-            | Self::MarketInstall { .. } => true,
+            | Self::MarketInstall { .. }
+            | Self::SecretScan { .. } => true,
         }
     }
 }

@@ -35,12 +35,18 @@ export function SignInBanner(): ReactElement | null {
           </span>
           <span className="csignin-acts">
             {signIn.url !== null && signIn.phase === "waiting" ? (
-              <button type="button" className="tb-btn" onClick={() => actions?.openPage()}>
+              <button
+                data-testid="connectors.sign-in-banner-open-page"
+                type="button"
+                className="tb-btn"
+                onClick={() => actions?.openPage()}
+              >
                 Open the sign-in page
               </button>
             ) : null}
             {signIn.kind === "connector" && signIn.phase === "waiting" ? (
               <button
+                data-testid="connectors.sign-in-banner-check-now"
                 type="button"
                 className="tb-btn"
                 disabled={keyBlocked}
@@ -49,18 +55,24 @@ export function SignInBanner(): ReactElement | null {
                 Check now
               </button>
             ) : null}
-            <button type="button" className="tb-btn" onClick={() => void actions?.stopWaiting()}>
+            <button
+              data-testid="connectors.sign-in-banner-stop-waiting"
+              type="button"
+              className="tb-btn"
+              onClick={() => void actions?.stopWaiting()}
+            >
               {signIn.phase === "done" || signIn.phase === "failed" ? "Close" : "Stop waiting"}
             </button>
           </span>
         </div>
       )}
       {prompts.map((p) => (
-        <div key={p.id} className="csignin-row prompt" data-prompt={p.id}>
+        <div data-item-id={p.id} key={p.id} className="csignin-row prompt" data-prompt={p.id}>
           <b>{p.name}</b>
           <span> needs you to sign in (a session asked).</span>
           <span className="csignin-acts">
             <button
+              data-testid="connectors.sign-in-banner-open-prompt"
               type="button"
               className="tb-btn primary"
               onClick={() => actions?.openPrompt(p.id)}

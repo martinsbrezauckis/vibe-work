@@ -372,7 +372,11 @@ pub(crate) fn render(head: &ExportHead, entries: &[Value]) -> (String, ExportCou
         }
     }
     if body.trim().is_empty() {
-        out.push_str("\n*This session has no messages yet.*\n");
+        let _ = writeln!(
+            out,
+            "\n*{} has no messages yet.*",
+            vw_vocabulary::text("thisSession").unwrap_or_default()
+        );
     } else {
         out.push_str(&body);
     }

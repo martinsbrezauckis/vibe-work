@@ -89,6 +89,7 @@ export function PrivacySettings() {
           )}
         </span>
         <button
+          data-testid="settings.privacy-settings-flip"
           type="button"
           className="switch"
           role="switch"
@@ -128,7 +129,7 @@ export function PrivacySettings() {
             "Take part in Mistral's experiments",
             "Mistral switches features on for groups of accounts. It needs usage data to be on.",
           )}
-          <p className="key-field-hint" data-testid="privacy-consequence">
+          <p className="key-field-hint ui-help" data-testid="privacy-consequence">
             With usage data off, Mistral's experiments do not run, so features that are still being
             rolled out to accounts (smart approve and some extra models) are not offered in sessions
             you start afterwards; open sessions keep what they have. Turning it back on asks you

@@ -14,7 +14,7 @@
  *   leaves the channel with the source, `channels.rs`). A unified fork copies messages only, no steps
  *   and the new session shows them as plain messages.
  */
-import type { JsonValue } from "../protocol/core";
+import type { CommandResult, JsonValue } from "../protocol/core";
 import { toCallError } from "../protocol/client/types";
 import type { ComposerStore } from "./composerStore";
 import type { CoreController } from "./coreStore";
@@ -25,6 +25,26 @@ function field(value: JsonValue | undefined, key: string): JsonValue | undefined
   return typeof value === "object" && value !== null && !Array.isArray(value)
     ? value[key]
     : undefined;
+}
+
+/** Where a rewind restores the draft and reports incomplete file restores. */
+export type RewindDestination = { composer: Pick<ComposerStore, "putBack">; toasts: Toasts };
+
+/** Restores reply text literally, including messages originally written by another client. */
+export function restoreRewindReply(
+  result: CommandResult,
+  { composer, toasts }: RewindDestination,
+): void {
+  if (result.type !== "session") return;
+  const message = field(result.detail, "message");
+  const failed = field(result.detail, "restoreErrors");
+  if (typeof message === "string") composer.putBack(result.snapshot.sessionId, message);
+  if (Array.isArray(failed) && failed.length > 0)
+    toasts.push({
+      kind: "error",
+      bellKind: "failure",
+      text: `Rewound, but ${String(failed.length)} file(s) could not be restored.`,
+    });
 }
 
 /** The rewind and branch actions. */
@@ -96,24 +116,15 @@ export function createRewindActions(deps: {
           inplace: !intoNewSession,
         });
         const target = result.type === "session" ? result.snapshot.sessionId : dialog.sessionId;
-        const detail = result.type === "session" ? result.detail : null;
-        const message = field(detail, "message");
-        const failed = field(detail, "restoreErrors");
-        // Put back as text only (`literal`): the message may come from another client (CLI, Debug API)
-        // and must never become a `!cmd` or `/command` by pressing Enter.
-        if (typeof message === "string") composer.putBack(target, message);
+        restoreRewindReply(result, { composer, toasts });
         composer.setRewind(null);
         if (target !== dialog.sessionId) shell.actions.selectSession(target);
-        if (Array.isArray(failed) && failed.length > 0)
-          toasts.push({
-            kind: "error",
-            bellKind: "failure",
-            text: `Rewound, but ${String(failed.length)} file(s) could not be restored.`,
-          });
         return true;
       } catch (thrown) {
+        const message = error(thrown);
         const current = composer.store.get().rewind;
-        if (current !== null) composer.setRewind({ ...current, busy: false, error: error(thrown) });
+        if (current !== null) composer.setRewind({ ...current, busy: false, error: message });
+        toasts.push({ kind: "error", bellKind: "failure", text: `Could not rewind: ${message}` });
         return false;
       }
     },

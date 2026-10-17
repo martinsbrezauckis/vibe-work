@@ -27,6 +27,13 @@ pub enum ChangesRequest {
         /// Session id.
         session_id: String,
     },
+    /// Uncommitted files and diffs in a repository selected in the Git bar (read only).
+    ReadRepo {
+        /// Session id.
+        session_id: String,
+        /// A discovered repository root relative to the session folder.
+        repo: String,
+    },
     /// Accept a hunk, a file or everything: the review baseline moves; the working tree is not touched.
     Keep {
         /// Session id.
@@ -70,6 +77,10 @@ pub enum ChangesRequest {
         session_id: String,
         /// The user confirmed in the window.
         confirmed: bool,
+        /// Author details accepted in the init prompt, saved in app settings and this repository.
+        #[serde(default)]
+        #[cfg_attr(feature = "ts", ts(optional))]
+        identity: Option<vw_git::identity::CommitIdentity>,
     },
     /// "Don't ask again" for the version-history offer in the session's folder.
     DismissOffer {
@@ -90,6 +101,7 @@ impl ChangesRequest {
     pub fn name(&self) -> &'static str {
         match self {
             Self::Read { .. } => "read",
+            Self::ReadRepo { .. } => "readRepo",
             Self::Keep { .. } => "keep",
             Self::Revert { .. } => "revert",
             Self::PreviewUndo { .. } => "previewUndo",
@@ -132,6 +144,10 @@ pub enum ChangesResult {
     InitPlan {
         /// What the first commit would contain.
         plan: InitPlan,
+        /// App identity (or a global Git prefill); empty fields require the init prompt.
+        #[serde(default)]
+        #[cfg_attr(feature = "ts", ts(optional))]
+        identity: Option<vw_git::identity::CommitIdentity>,
     },
 }
 
@@ -144,6 +160,8 @@ pub enum ChangesMode {
     None,
     /// A git folder: diff against the session's baseline, keep/revert per hunk.
     Git,
+    /// A nested repository's working tree against its current HEAD, without a session review baseline.
+    Uncommitted,
     /// A folder without git: changes from Vibe's file edits, undo per turn.
     Effects,
     /// A git folder whose review cannot run (`reason` says why).
@@ -203,6 +221,21 @@ pub struct TurnChanges {
     pub anchor_entry_id: Option<String>,
     /// Files the turn wrote or edited through Vibe's file tools.
     pub files: Vec<TurnFile>,
+    /// The child session that owns these effects; absent for the shown session's own turns.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
+    pub subagent: Option<ChangesSubagent>,
+}
+
+/// A subagent whose effects are included in its ancestor's Changes view.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+pub struct ChangesSubagent {
+    /// The effect entries belong to this session's history.
+    pub session_id: String,
+    /// Vibe's child-session name, or a generic label when absent.
+    pub name: String,
 }
 
 /// One file a turn changed (folders without git).

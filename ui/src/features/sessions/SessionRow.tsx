@@ -1,5 +1,7 @@
 /**
- * One session in the list: badge, title, unread dot, voice chat state, "local" and "Last in CLI" tags, the folder chip (for a session outside its project's main folder), a "more" button and child fold controls.
+ * One session in the list: badge, title, unread dot, voice chat state, the mark for loops (recurring prompts),
+ * local and CLI continuation tags,
+ * the folder chip (for a session outside its project's main folder), a "more" button and child fold controls.
  * Right click, the context-menu key, Shift+F10 and the more button open the same action menu; F2 renames,
  * Delete asks for the native delete confirmation. The row can be dragged onto a project or "Not in a
  * project" (with its children), and "Move to project…" in the menu is the keyboard way to do the same.
@@ -18,11 +20,12 @@ import { useApp } from "../shell/AppContext";
 import { useCoreState, useShellState } from "../shell/hooks";
 import { VoiceChatTag } from "../voice/VoiceChatTag";
 import { Badge } from "./Badge";
+import { LoopsTag } from "./LoopsTag";
 import { dragSessions } from "./dnd";
 import { beginSessionDrag } from "./listDrop";
 import type { RowNode } from "./listModel";
 import { RenameField } from "./RenameField";
-import { type MenuItem, RowMenu } from "./RowMenu";
+import { type MenuItem, RowMenu } from "../../components/RowMenu";
 import { useGroupActions, useGroups } from "./useGroups";
 
 /** Stands in for the retry store when the app has no core (no session actions). */
@@ -132,8 +135,9 @@ export function SessionRow({
   const status = BADGE_LABEL[s.badge];
 
   return (
-    <div className="srow-wrap" hidden={hidden}>
+    <div data-item-id={s.id} className="srow-wrap" hidden={hidden}>
       <div
+        data-testid="sessions.session-row-div"
         className={`srow${s.unread ? " is-unread" : ""}${s.archived ? " is-archived" : ""}${dragging ? " is-dragging" : ""}`}
         data-depth={depth}
         style={depth > 0 ? { paddingLeft: depth * 14 } : undefined}
@@ -154,6 +158,7 @@ export function SessionRow({
       >
         {hasChildren ? (
           <button
+            data-testid="sessions.session-row-toggle-expanded"
             type="button"
             className="twist"
             aria-expanded={expanded}
@@ -184,6 +189,7 @@ export function SessionRow({
           </div>
         ) : (
           <button
+            data-testid="sessions.session-row-open"
             type="button"
             className="srow-main"
             aria-current={selected}
@@ -207,7 +213,7 @@ export function SessionRow({
             <Badge kind={s.badge} />
             <span className="t">{s.title}</span>
             {s.pinned && (
-              <span className="tag pin" role="img" aria-label="Pinned">
+              <span className="tag pin" role="img" aria-label="Pinned" title="Pinned">
                 <Icon name="pin" size={12} />
               </span>
             )}
@@ -220,22 +226,39 @@ export function SessionRow({
             {node.chip !== null && (
               <span className="tag folder-chip" title={`Works in ${s.cwd ?? ""}`}>
                 <Icon name="folder" size={12} />
-                {node.chip}
+                <span>{node.chip}</span>
               </span>
             )}
             <VoiceChatTag sessionId={s.id} />
-            {s.id === cliId && <span className="tag">Last in CLI</span>}
-            {s.localOnly && <span className="tag">local</span>}
+            <LoopsTag sessionId={s.id} />
+            {s.id === cliId && (
+              <span
+                className="tag cli-tag"
+                title="Continues in CLI: `vibe --continue` in a terminal resumes this session"
+              >
+                Continues in CLI
+              </span>
+            )}
+            {s.localOnly && (
+              <span className="tag" title="local">
+                local
+              </span>
+            )}
             {temporary && (
               <span className="tag" title="Temporary: deleted when you quit Vibe Work">
                 temporary
               </span>
             )}
-            {s.archived && <span className="tag">archived</span>}
+            {s.archived && (
+              <span className="tag" title="archived">
+                archived
+              </span>
+            )}
           </button>
         )}
         {s.unread ? <span className="unread" role="img" aria-label="Unread" /> : <span />}
         <button
+          data-testid="sessions.session-row-get-bounding-client-rect"
           type="button"
           className="srow-more"
           aria-label={`Actions for ${s.title}`}

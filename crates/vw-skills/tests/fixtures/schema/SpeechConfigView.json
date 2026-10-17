@@ -1,0 +1,17 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "model": {
+      "$ref": "#/$defs/TTSModelConfigView"
+    },
+    "provider": {
+      "$ref": "#/$defs/AudioProviderView"
+    }
+  },
+  "required": [
+    "model",
+    "provider"
+  ],
+  "title": "SpeechConfigView",
+  "type": "object"
+}

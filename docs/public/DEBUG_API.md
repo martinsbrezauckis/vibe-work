@@ -12,6 +12,9 @@ including the terminal and files, **except on your vault** (next section). Turn 
 use your account. Vibe Work hides known secrets in its answers and screenshots where it can; that is a convenience,
 not a guarantee.
 
+**Only the vault waits for you.** The Debug API acts as you: turning it on is your consent, so it answers
+the confirmations the window would ask you itself, and nothing but vault actions waits for you in the app.
+
 **The vault is yours.** On the vault, a Debug API client has exactly the rights the agent has in Vibe Work, nothing
 more. It can read what the agent can read: whether a vault exists and is unlocked, whether a key is set, the names of
 the secrets agents may use, the website logins (name, site, user name), the "always" grants and the use log (never a
@@ -44,8 +47,8 @@ changed on the way (reversed or hex-dumped in a terminal, for example) is not re
 
 ## Turning it on
 
-- **Settings > Developer > Debug API.** The switch says what it does: "Lets a local agent do what you can do in Vibe Work, terminal and files included; it hides known secrets where it can, but that is no guarantee." (On the vault it has the agent's rights only, above.) A "Debug API on"
-  badge shows in the window while it runs.
+- **Settings > Developer > Debug API.** The switch says what it does: "Lets a local agent do what you can do in Vibe Work, terminal and files included, and answers the app's confirmations for you; only your vault stays yours. It hides known secrets where it can, but that is no guarantee." (On the vault it has the agent's rights only, above.) While it runs, the
+  status bar says "Debug API" (developer builds also show a badge in the title bar).
 - Release builds start with it **off**; developer builds start with it on. Your choice in Settings is saved
   (`settings.json`, key `debugApi`) and wins over the build default. Off means no socket is open at all.
 - Turning it on needs no confirmation: the token below is the gate, and only your user account can read it.
@@ -81,10 +84,10 @@ Errors are `{"error": {"code", "message", ...}}` with a matching status (400 inv
 
 ## What "as you" means
 
-- Most Debug API requests count as your consent. <!-- vocabulary:fullAccess:start -->Full access<!-- vocabulary:fullAccess:end --> escalations still need your answer in the native
-  dialog, as do protected vault and provider sign-in flows. A trusted native access-menu click
-  is itself the decision to switch; `/ui/click` is synthetic and still asks. Actions are still labelled: logs, refusal events and the transcript say
-  when the Debug API acted, and text a Debug API client typed is marked in the composer.
+- The Debug API acts as you. Turning it on is your consent: it answers the confirmations the window would ask you
+  itself, <!-- vocabulary:fullAccess:start -->Full access<!-- vocabulary:fullAccess:end --> switches, proxy and certificate changes and the browser's provider permissions included. Only
+  vault actions wait for you in the app (the vault dialogs described above). Actions are still labelled: logs, refusal
+  events and the transcript say when the Debug API acted, and text a Debug API client typed is marked in the composer.
 - No answer is shortened for the Debug API: paths, names, branch lists and inspections are what the window shows.
 - The Debug API picks folders like **Choose folder** does (`pickFolder`).
 - Rules that are not about you stay: the agent in a session is still limited to its session, pages and previews
@@ -131,6 +134,42 @@ The session's processes and listening ports (owner, evidence, leases).
 
 The Changes tab's view of the session (diff against its review baseline, or its turns' file edits). A Markdown folder link in an agent handover, such as `[Changes](git%20test/)`, opens this tab with that folder selected only when Git status discovered the folder as a repository.
 
+### `GET /ui/trace`
+
+Reads the last 500 commands the window sent to the core. It does not perform an action or return command results.
+Use `?since=<sequence number>` to receive only newer entries; without it, the cursor is zero.
+
+The answer has `entries`, `latestSeq`, `oldestSeq` (null when empty), and `truncated`. Each entry has:
+
+| Field | Meaning |
+|---|---|
+| `seq` | Increasing sequence number within this window |
+| `time` | Dispatch time in UTC |
+| `type` | Command type |
+| `op`, `method` | The request's operation or method, when present |
+| `summary` | At most 200 characters of allowlisted ids and names |
+| `testId` | The triggering control's stable `data-testid`, or null when unknown |
+| `outcome` | `status` is `pending`, `succeeded` or `failed`; a failure also has its error `code` |
+
+The trace stores metadata only. It never stores file contents, messages, passwords, keys, tokens or raw request
+bodies or raw error text. A command appears as pending when sent. The same entry's outcome changes when
+that call completes, keeping its sequence and triggering hook. A refused command is failed, with only its error
+code. Read again with the cursor saved before the click to see updated outcomes; presence alone does not prove
+success.
+Host actions such as opening a native picker are outside the typed command trace.
+
+Save `latestSeq` before calling `POST /ui/click`, then read with that cursor to see the commands the click sent.
+A direct click is attributed during its dispatch; a Debug API click also keeps its attribution through pending
+work until its UI request finishes. Later unrelated work can have a null control id. No control id is guessed
+from visible or translated text. Repeated list controls carry the item in `data-item-id`; the trace records the
+control id and only allowlisted command metadata.
+
+`truncated: true` means entries newer than your cursor have already been discarded. Read again with a cursor one less than
+`oldestSeq` to include the oldest retained entry. The buffer is in memory, starts empty with a new window, and resets
+when that window reloads. An invalid or negative cursor answers 400. A missing UI handler answers 404; a window
+that does not answer uses the existing UI request timeout. The route has the same authentication and secret
+redaction as the other Debug API routes.
+
 ### `GET /events`
 
 Server-Sent Events: snapshots, then ordered changes and app events. `?session=<id>` for one session. Event
@@ -160,12 +199,14 @@ names:
 | `previewChanged` | a session's preview changed: read it with `preview` |
 | `previewShowRequested` | an explicit preview width asks the window to show that session's App preview in Browser; applies only to the selected session |
 | `browserChanged` | a session's agent browser changed (the agent started or ended an action, Stop, Resume, the action log): read it with `browser` `state` |
+| `secretScan` | session-log scan settings, state or findings changed: the whole scan view, with secret names, login ids and counts; never secret values or log contents |
 | `secretsChanged` | project secrets, their grants or the use log changed: read them with `secrets` `list`; never a value |
 | `pagesChanged` | a session's Project tab changed: read it with `pages` |
 | `filesChanged` | a session's File tab viewer changed: read it with `files` `viewer` |
 | `lineCommentsChanged` | a session's diff comments changed: read them with `lineComments` |
 | `projectsChanged` | your project groups changed: read them with `projects` `list` |
 | `worktreesChanged` | a session copy was created or removed: read the count with `worktrees` `count` |
+| `gitBrowserChanged` | a watched saved project's files or Git metadata changed: read `gitBrowser` for that `projectId` |
 | `dictation` | a running dictation's live text, or why it ended |
 | `connectorSignIn` | a server sign-in ended (never with a token) |
 | `marketInstall` | a marketplace install moved on (`download`, `unpack`, `setup`, `finish`) or ended (`installed`, `failed`, `cancelled`) |
@@ -314,10 +355,10 @@ Every command is `{"type": "<name>", ...}`. Requests with an `op` take `{"type":
 | `stopSession` | cancels compaction by closing this session's channel; preserves saved history and the next send reopens it | `{"type":"stopSession","sessionId":"<id>"}` |
 | `pickModel` | model and thinking level (`reasoningEffort` on the wire) | `{"type":"pickModel","sessionId":"<id>","modelAlias":"<model>"}` |
 | `setDefaultModel` | saves an offered model for future sessions without changing existing sessions; allowed through the Debug API as a user preference outside the vault | `{"type":"setDefaultModel","modelAlias":"<model>"}` |
-| `setAccessMode` | the access mode; <!-- vocabulary:fullAccess:start -->Full access<!-- vocabulary:fullAccess:end --> (`auto-approve`) needs native confirmation | `{"type":"setAccessMode","sessionId":"<id>","agentName":"accept-edits"}` |
+| `setAccessMode` | the access mode, <!-- vocabulary:fullAccess:start -->Full access<!-- vocabulary:fullAccess:end --> (`auto-approve`) included: the Debug API answers its own confirmation | `{"type":"setAccessMode","sessionId":"<id>","agentName":"accept-edits"}` |
 | `answerCallback` | answers an approval or question | `{"type":"answerCallback","sessionId":"<id>","callbackId":"<cb>","output":{"type":"approval","decision":{"type":"approve"}}}` |
 | `listCallbacks` | the open callbacks | `{"type":"listCallbacks"}` |
-| `requestConfirmation` | a single-use token for one exact call; <!-- vocabulary:fullAccess:start -->Full access<!-- vocabulary:fullAccess:end --> and protected consent flows show a native dialog | `{"type":"requestConfirmation","method":"session/delete","params":{"sessionId":"<id>"}}` |
+| `requestConfirmation` | a single-use token for one exact call; the Debug API gets it at once (only vault dialogs wait for you) | `{"type":"requestConfirmation","method":"session/delete","params":{"sessionId":"<id>"}}` |
 | `call` | any other Vibe method the app allows | `{"type":"call","method":"session/delete","params":{"sessionId":"<id>"}}` |
 | `viewSession` | which session this client shows | `{"type":"viewSession","sessionId":"<id>"}` |
 | `retryReopen` | tries a stuck session again | `{"type":"retryReopen","sessionId":"<id>"}` |
@@ -332,22 +373,25 @@ Every command is `{"type": "<name>", ...}`. Requests with an `op` take `{"type":
 | `documents` | documents in the composer: `list`, `read`, `save` (`id`, `sessionId`: saves original bytes under the project attachments folder and returns an absolute `path`), `extract` (optional OCR), `remove`, `takePicture`, `addDropped` (files dropped on a composer, base64) | `{"type":"documents","request":{"op":"list"}}` |
 | `files` | the File tab: `resolve` (paths as the chat wrote them, in the session folder or a picked folder), `read`, `stat`, `view`, `layout`, `reload`, `viewer`, `clearExternal`, `screenshot`, `open` (default app; never a program), `reveal`, `write` (a quick edit: the whole new text and the `fingerprint` it started from; `stale` when the file changed on disk) | `{"type":"files","request":{"op":"resolve","sessionId":"<id>","paths":["src/main.rs"]}}` |
 | `speech` | dictation and speech: `start`, `append`, `stop`, `cancel`, `speak`, `voices` | `{"type":"speech","request":{"op":"voices"}}` |
-| `changes` | the Changes tab: `read`, `keep`, `revert`, `restart`, `previewUndo`, `folderSessions`, `planHistory`, `enableHistory` (`confirmed: true`), `dismissOffer` | `{"type":"changes","request":{"op":"read","sessionId":"<id>"}}` |
+| `changes` | the Changes tab: `read`, `keep`, `revert`, `restart`, `previewUndo`, `folderSessions`, `planHistory`, `enableHistory` (`confirmed: true`), `dismissOffer`, `readRepo` (`sessionId`, `repo`: a nested repository's uncommitted files against its last commit, read only; `.` answers like `read`) | `{"type":"changes","request":{"op":"read","sessionId":"<id>"}}` |
 | `lineComments` | comments on diff lines: `list`, `add`, `remove`, `markSent` | `{"type":"lineComments","request":{"op":"list","sessionId":"<id>"}}` |
-| `preview` | the pinned App preview: `list`, `open` (this session's local servers only), `back`, `forward`, `reload`, `close`, `setWidth`, `layout`, `browserOverlay`, `screenshot`, `console`, `explain`, `pick`, `cancelPick`, `stopOwner` | `{"type":"preview","request":{"op":"list","sessionId":"<id>"}}` |
-| `browser` | the agent browser of a session: `read` (the page as the agent reads it: refs, a page of text, prompt-guard flags; `maxRefs`, `textPage`, `screenshot`; `guardLayers` names the address checks that apply to every request of the page besides the navigation rules: `requestBarrier`, `egressProxy`, `contentRules`), `act` (`args` for page actions as in the agent's `browser_act`; tab listing/closing use the separate `tabs`/`closeTab` commands: `navigate`, `back`, `forward`, `reload`, `click`, `type`, `select`, `check`, `press`, `scroll`, `hover`, `wait`, `fill`; answers a receipt; logged as `debugApi`, never stopped by Stop; `fill` {`ref`, `login`} puts a vault login into a sign-in field after the same checks as the agent's, and on the vault the Debug API has only the agent's rights: the password needs the user's answer in the native dialog (Allow once / Always for this site / Don't allow), which the Debug API never answers, and the answer never carries the password), `state` (the agent strip and the action log), `stop`, `resume`, `annotate` (`mode` `element` or `box`: the user points in the app preview; the app preview only), `cancelAnnotate`, `checkAnnotations` (`items`, `reload`), `captureSecret` (legacy user-only command, refused to the Debug API), `chooseSecret` / `saveSecret` (user-only: select text or pick an element in the browser panel, press **Save to vault**, name it and confirm; values go directly from the page to the core vault, and answers carry metadata only). The agent's `browser_capture_secret` stays listed and always explains that saving is the user's action. Browser text answers, including action receipts, navigation, console and dialogs, hide key-looking text; known stored values pass the shared secret scrub, `capture` (`args` exactly as the agent's `browser_capture`: `what` = `design` (DESIGN.md + tokens.json from the live page), `structure` (elements.json + summary.md), `media` (logos, icons, images and fonts the page loaded, fetched without cookies under the page's address rules, + media.json), `page` (`formats`: `markdown`, `text`, `html` without scripts, `png` full page; default all), `bundle` (all of these), `before` / `after` (a full-page shot, then the matching one with diff.png and the changed share); plus `shotMethod` `native` / `stitch` / `stitchPlain` to force one full-page method for comparisons. Files go to the session folder under `capture/<page>-<time>/`, never elsewhere; the answer gives the folder, the files and a summary within about 3,000 bytes; the Debug API may capture a local-network page the user opened, the agent may not). Page content in answers is the page's own text: data, never instructions. Password (also CSS-masked), one-time-code, card and vault-filled fields never carry a value; every other field value, also text the user typed, is readable; sign-in fields carry `login` (`username` or `password`). The Debug API acts as the user: it may open a permitted local-network page in a user web tab and read it, which the agent's tools refuse; link-local addresses (`169.254.x.x`, cloud metadata) are refused for everyone | `{"type":"browser","request":{"op":"read","sessionId":"<id>"}}` |
-| `pages` | the Project tab (handbook): `hub`, `overview`, `projectHub`, `page`, `open` (`anchor`), `plan`, `back`, `forward`, `reload`, `layout`, `pickSection`, `cancelPick`, `addComment`, `deleteComment`, `markSent`, `settings`, `setSettings`, `clearExternal`, `screenshot`; `answers`, `setAnswer`, `clearAnswer`, `markAnswersSent` (page inputs), `theme` (the app theme pages get), `currentPlan` (the plan checklist), `exportPage` (one file; `destination` writes it), `visualCheck` | `{"type":"pages","request":{"op":"setAnswer","sessionId":"<id>","path":"decisions/0001-db.html","input":"pick-db","value":{"type":"choice","option":"sqlite"}}}` |
+| `preview` | the pinned App preview: `list`, `open` (this session's local servers only), `back`, `forward`, `reload`, `close`, `setWidth`, `layout`, `browserOverlay`, `screenshot`, `console`, `explain`, `pick` (the Debug API names `target`: `{selector}` or `{x, y}`), `cancelPick`, `stopOwner` | `{"type":"preview","request":{"op":"list","sessionId":"<id>"}}` |
+| `browser` | the agent browser of a session: `read` (the page as the agent reads it: refs, a page of text, prompt-guard flags; `maxRefs`, `textPage`, `screenshot`; `guardLayers` names the address checks that apply to every request of the page besides the navigation rules: `requestBarrier`, `egressProxy`, `contentRules`), `act` (`args` for page actions as in the agent's `browser_act`; tab listing/closing use the separate `tabs`/`closeTab` commands: `navigate`, `back`, `forward`, `reload`, `click`, `type`, `select`, `check`, `press`, `scroll`, `hover`, `wait`, `fill`; answers a receipt; logged as `debugApi`, never stopped by Stop; `fill` {`ref`, `login`} puts a vault login into a sign-in field after the same checks as the agent's, and on the vault the Debug API has only the agent's rights: the password needs the user's answer in the native dialog (Allow once / Always for this site / Don't allow), which the Debug API never answers, and the answer never carries the password), `state` (the agent strip and the action log), `stop`, `resume`, `annotate` (`mode` `element` or `box`; the person points in the window, the Debug API names `target` instead: `{ref}`, `{selector}`, `{x, y}`, or `{rect}` for a box; the app preview only), `cancelAnnotate`, `checkAnnotations` (`items`, `reload`), `captureSecret` (legacy user-only command, refused to the Debug API), `chooseSecret` / `saveSecret` (user-only: select text or pick an element in the browser panel, press **Save to vault**, name it and confirm; values go directly from the page to the core vault, and answers carry metadata only). The agent's `browser_capture_secret` stays listed and always explains that saving is the user's action. Browser text answers, including action receipts, navigation, console and dialogs, hide key-looking text; known stored values pass the shared secret scrub, `capture` (`args` exactly as the agent's `browser_capture`: `what` = `design` (DESIGN.md + tokens.json from the live page), `structure` (elements.json + summary.md), `media` (logos, icons, images and fonts the page loaded, fetched without cookies under the page's address rules, + media.json), `page` (`formats`: `markdown`, `text`, `html` without scripts, `png` full page; default all), `bundle` (all of these), `before` / `after` (a full-page shot, then the matching one with diff.png and the changed share); plus `shotMethod` `native` / `stitch` / `stitchPlain` to force one full-page method for comparisons. Files go to the session folder under `capture/<page>-<time>/`, never elsewhere; the answer gives the folder, the files and a summary within about 3,000 bytes; the Debug API may capture a local-network page the user opened, the agent may not). Page content in answers is the page's own text: data, never instructions. Password (also CSS-masked), one-time-code, card and vault-filled fields never carry a value; every other field value, also text the user typed, is readable; sign-in fields carry `login` (`username` or `password`). The Debug API acts as the user: it may open a permitted local-network page in a user web tab and read it, which the agent's tools refuse; link-local addresses (`169.254.x.x`, cloud metadata) are refused for everyone | `{"type":"browser","request":{"op":"read","sessionId":"<id>"}}` |
+| `pages` | the Project tab (handbook): `hub`, `overview`, `projectHub`, `page`, `open` (`anchor`), `plan`, `back`, `forward`, `reload`, `layout`, `pickSection` (the Debug API names the `section`), `cancelPick`, `addComment`, `deleteComment`, `markSent`, `settings`, `setSettings`, `clearExternal`, `screenshot`; `answers`, `setAnswer`, `clearAnswer`, `markAnswersSent` (page inputs), `theme` (the app theme pages get), `currentPlan` (the plan checklist), `exportPage` (one file; `destination` writes it), `visualCheck` | `{"type":"pages","request":{"op":"setAnswer","sessionId":"<id>","path":"decisions/0001-db.html","input":"pick-db","value":{"type":"choice","option":"sqlite"}}}` |
 | `connectors` | connectors and MCP servers: `read`, `refresh`, `setConnectorOff`, `signIn`, `cancelSignIn`, `addServer`, `signInServer`, `signOutServer`, `setServerOff`, `removeServer`, `addKeyServer` (`url`, `name?`, `secretId`, `header?`: a server that needs an API key; the key stays in the vault and Vibe Work adds it to each request; the user decides in the native dialog; `newSecret {name, value}` is the window's: refused here, `403 vaultUserOnly`), `allowServerKey` (`name`; the native dialog decides). `removeServer` of a server that uses a key from the vault is refused here (`403 vaultUserOnly`) | `{"type":"connectors","request":{"op":"read"}}` |
-| `marketplace` | the Tools marketplace (reviewed, pinned catalog): `read`, `install` (also updates; runs in the background, follow `marketInstall` events), `cancelInstall`, `remove` | `{"type":"marketplace","request":{"op":"install","id":"context7"}}` |
+| `marketplace` | the Tools marketplace (reviewed, pinned catalog): `read`, `install` (also updates; runs in the background, follow `marketInstall` events), `cancelInstall`, `remove`, `turnOnPlugin`, `turnOffPlugin`, `removePlugin` (each takes a `path` from `read`'s `discovered` list, and optional `sessionId` or `cwd` for the opened project; only plugins in Vibe Work's own home or that project; the answer is the view after the change; Turn on and Remove ask in a native dialog, answered for the Debug API like every other confirmation) | `{"type":"marketplace","request":{"op":"install","id":"context7"}}` |
 | `libraries` | your Mistral document libraries: `list` (with scopes and use facts), `create` (`name`, optional `description`, and a `scope` object such as `{"kind":"off"}`, `{"kind":"global"}` or `{"kind":"project","projectId":"<id>"}`), `setScope` (`libraryId`, `scope`), `delete` (on Mistral, with its documents), `documents`, `upload` (files as base64; they go to Mistral), `deleteDocument`, `text` (the extracted text a source opens), `ask` (`question`, `libraryIds`, with an empty list meaning all enabled libraries) | `{"type":"libraries","request":{"op":"list"}}` |
 | `images` | `read` returns image generation costs, limits and the number of requests made this app run. There is no separate image approval switch or `allow` operation; the agent's image tool follows the normal tool approval flow. | `{"type":"images","request":{"op":"read"}}` |
 | `worktrees` | a session in its own copy: `options`, `suggestName`, `start`, `info`, `inspect`, `remove`, `keep`, `orphans`, `count` | `{"type":"worktrees","request":{"op":"count"}}` |
-| `git` | the Changes tab's git loop: `status`, `prepareCommit`, `draftMessage`, `commit`, `pushPlan`, `push`, `prPlan`, `createPr`, `prStatus` (`refresh` asks the forge), `prepareMessage` (`checks`, `review`, `updateFromBase`; the text, never sent), `bringPlan`, `bringIn`, `settings`, `setSettings`. Every request accepts `repo`, a repository root relative to the session folder (`.` for the session repository, e.g. `sub` for a nested repository). Status returns `repos` (name, root, branch) and the chosen `repo`; omitted `repo` selects the session repository when present, otherwise the first discovered repository. `push`, `createPr` and `bringIn` show no dialog for the Debug API (your request is the consent) and run only what the plan named | `{"type":"git","request":{"op":"status","sessionId":"<id>","repo":"sub"}}` |
+| `gitBrowser` | bounded saved-project discovery and state: `read`, `watch`, `unwatch`; actions use the existing `git` command through `ui/git-browser` | `{"type":"gitBrowser","request":{"op":"read","projectId":"<id>"}}` |
+| `git` | the commit name and email: `identity` (the name and email Vibe Work uses for commits, with `source` `app`, `global` (read from your global git settings, never written there) or `unset`), `setIdentity` (`identity` {`name`, `email`}; saved in Vibe Work's own data; both empty means you are asked when version history is turned on); these two take no `sessionId` or `repo`. The Changes tab's git loop: `status`, `prepareCommit`, `draftMessage`, `commit`, `pushPlan`, `push`, `prPlan`, `createPr`, `prStatus` (`refresh` asks the forge), `prepareMessage` (`checks`, `review`, `updateFromBase`; the text, never sent), `bringPlan`, `bringIn`, `settings`, `setSettings`; `commit` also takes an optional `identity` (the name and email entered in the Commit dialog), saved in that repository's own git settings before the commit when it has no name or email yet. Every request of the git loop accepts `repo`, a repository root relative to the session folder (`.` for the session repository, e.g. `sub` for a nested repository). Status returns `repos` (name, root, branch) and the chosen `repo`; omitted `repo` selects the session repository when present, otherwise the first discovered repository. `push`, `createPr` and `bringIn` show no dialog for the Debug API (your request is the consent) and run only what the plan named | `{"type":"git","request":{"op":"status","sessionId":"<id>","repo":"sub"}}` |
 | `projects` | your project groups: `list`, `refresh`, `create`, `rename`, `setFolder` (`folder: null` clears it), `delete` (sessions stay), `move`, `place`, `start` (requires `projectId` and `agentConfig`; starts a session in a project) | `{"type":"projects","request":{"op":"list"}}` |
 | `projectInstructions` | Project settings' instruction-file commands are user-only: every operation is refused to the Debug API. Use the desktop app to list, create, edit, link or delete these files. Agents can edit project files with their own filesystem tools. | unavailable through the Debug API |
 | `processes` | `leftRunning` (processes a deleted session left running), `afterDelete` (the window's question after a delete; the Debug API gets the list), `stop` (one listed `id`); `session` lists one active session's processes, `output` reads one process's recent output and `stopSession` stops one, each with `sessionId` and an `id` from that list where needed | `{"type":"processes","request":{"op":"session","sessionId":"<id>"}}` |
 | `secrets` | `list` returns secret, login, grant and use metadata without values; `listForProject` also returns each entry's permission for a `project` folder. All other operations, including `setEntryPermission` (`project`, `id`, `permission`), adding, generating, renaming, replacing, copying, removing, revoking and changing agent access, are refused to the Debug API (`403 vaultUserOnly`). Use the window for those choices. | `{"type":"secrets","request":{"op":"listForProject","project":"<folder>"}}` |
+| `secretScan` | `read` returns saved `settings` (`enabled`, `autoRedact`), scan status and retained findings. `write` saves the switches; disabling scanning saves automatic redaction off. `checkNow` requests a full background scan. `redact` takes a `findingId` from that view and redacts its closed chat; past findings remain actionable with scanning off. Website passwords always require manual Redact. `activity` resets the idle clock. No secret values, file contents or locations enter findings. Password findings include a metadata-only `loginId` so Change password opens that login in Settings; replacing its password remains a person’s Vault action in the window. | `{"type":"secretScan","request":{"op":"read"}}` |
 | `safety` | the safety reminders the agent's commands are checked against: `read`, `setRule` (`id`, `on`), `addCustom` (`text`: a command that contains it is stopped), `removeCustom` (`id`). Reminders against mistakes, not a sandbox | `{"type":"safety","request":{"op":"read"}}` |
+| `network` | the proxy and certificate settings Vibe keeps, as Settings > Network shows them: `read` (the values Vibe Work keeps in its own file, needing no Vibe; an address with a sign-in comes back as `http://***@host:8080`, never with the sign-in; also what this computer's environment overrides and whether a saved change waits for a restart), `test` (`changes`: one request to Mistral's model list, without a key, with the saved settings and these values laid over them; nothing is saved), `save` (`changes`; writes Vibe's settings and Vibe Work's own file, so it needs Vibe running; a value that fails a check comes back as `refused` with one sentence per field). `changes` holds any of `httpProxy`, `httpsProxy`, `allProxy`, `noProxy`, `certificateFile`, `certificateFolder`: an absent field is unchanged, an empty one removes the setting. A save from the Debug API needs no dialog: it is answered like every other confirmation | `{"type":"network","request":{"op":"read"}}` |
 | `pickFolder` | chooses a folder like Choose folder (Debug API only) | `{"type":"pickFolder","path":"<absolute folder>"}` |
 | `search` | search inside messages and files (the same results Ctrl K shows): `messages` (every conversation's messages, or one with `sessionId`; the first search fills the index from Vibe's stored history, `index.filling` says it is still running), `files` (names and lines in the sessions' folders, or one session's; ignored and build folders skipped), `status` | `{"type":"search","request":{"op":"messages","query":"rate limit"}}` |
 | `sessionTools` | a session as Markdown and temporary chats: `export` (the whole session as Markdown; tool steps summarised, file changes as diffs, known secret values replaced; `destination`, an absolute path, writes the file, else the text comes back), `startTemporary` (a chat Vibe Work deletes when it quits), `temporary` (their ids), `holder` (which other process holds a session now, Vibe 2.26.1), `setSubagents` (`enabled`: saves the Subagents setting for new chats through a short-lived empty chat that is deleted again; chats that are already open keep their value, and the answer's `leftoverSessionId` names that chat if it could not be deleted) | `{"type":"sessionTools","request":{"op":"export","sessionId":"<id>","destination":"<absolute path>.md"}}` |
@@ -362,6 +406,14 @@ without cookie values; `signIn` and `signOut` take a `provider`; `accountsLayout
 place or hide the sign-in page; `closeSignIn` closes that page without clearing its provider sessions. The
 sign-in page is reserved for direct user input, and normal browser `read` or `act` requests cannot target it.
 For a focused browser read, `read` accepts `find` and `maxBytes` as well as `maxRefs`, `textPage` and `screenshot`.
+
+Picks never wait for a person. A pick in the window is a person's click; over the Debug API there is no pointer, so
+the request names what a person would have clicked and the answer comes at once with the same shape:
+`browser.annotate` takes `target` (`{ref}` from a read of the page, `{selector}`, `{x, y}` in viewport pixels, or
+`{rect: {x, y, width, height}}` with `mode: box`), `preview.pick` takes `target` (`{selector}` or `{x, y}`) and
+`pages.pickSection` takes `section` (an id the shown page file has). A request without its target answers
+`400 invalidParams` naming the field, before the session is read. `ui/browser` → `annotate` and `ui/project` →
+`pick` and `point` take the same fields.
 
 ### Browser page tabs
 
@@ -414,7 +466,7 @@ no fixed choice expiry; finishing or cancelling releases its eviction guard.
 
 ### `POST /ui/browser`
 
-The Browser tab's agent browser: the agent strip (agent active, acting, stopped), the action log, the address bar, the notes on the app preview and the Capture menu, every action the tab has. Body: {action: state|tabs|openTab|switchTab|closeTab|stop|resume|annotate|cancel|note|remove|send|recheck|address|capture, sessionId?: string (default: the selected session), ...}: state = the open URL, the ordered tabs and selected tab, whether notes are offered (pages of the session's own local servers only), the strip, the log (who: agent|debugApi|user, action, target, outcome, detail), the notes (id, mode, role, name, route, note, status draft|sent|changed|unchanged|missing, source hint, whether a crop exists, by ui|debug-api: a note a Debug API request created or edited stays `debug-api`), a running pick and the last error; tabs refreshes the tab list; openTab {url?} creates a user-controlled web tab; switchTab {tabId} selects an owned tab; closeTab {tabId} closes a web tab (the pinned App preview is refused); stop / resume = the strip's buttons (Stop cancels the agent's browser action in flight and refuses more until Resume or the session's next message); annotate {mode: element|box} starts a pick in the preview (a person clicks an element or drags a box; a client can click with `POST /commands` `{"type":"browser","request":{"op":"act",...,"args":{"action":"click","ref":"<ref>"}}}`) and answers the new note; cancel stops a pick; note {id, text}; remove {id}; send puts every draft note into the composer (a context chip and a cropped picture each, never a command; marked as the Debug API's when the send or the note came from it, also when the user later sends such a note from the window) and answers how many; recheck {reload?: bool} reloads the preview and sets each sent note to changed / unchanged / missing; address {url} opens a URL in the selected web tab with the user's navigation rights; from App preview it opens a local server there or creates a web tab for a public URL; capture {kind: design|structure|media|page|markdown|text|html|png|bundle|before|after} does what the Capture menu's item does and answers `captured` (folder, path, outcome, files count, fileNames array of receipt filenames, skipped count) with the state, whose `capture` part says what is running, the last result and the last error.
+The Browser tab's agent browser: the agent strip (agent active, acting, stopped), the action log, the address bar, the notes on the app preview and the Capture menu, every action the tab has. Body: {action: state|tabs|openTab|switchTab|closeTab|stop|resume|annotate|cancel|note|remove|send|recheck|address|capture, sessionId?: string (default: the selected session), ...}: state = the open URL, the ordered tabs and selected tab, whether notes are offered (pages of the session's own local servers only), the strip, the log (who: agent|debugApi|user, action, target, outcome, detail), the notes (id, mode, role, name, route, note, status draft|sent|changed|unchanged|missing, source hint, whether a crop exists, by ui|debug-api: a note a Debug API request created or edited stays `debug-api`), a running pick and the last error; tabs refreshes the tab list; openTab {url?} creates a user-controlled web tab; switchTab {tabId} selects an owned tab; closeTab {tabId} closes a web tab (the pinned App preview is refused); stop / resume = the strip's buttons (Stop cancels the agent's browser action in flight and refuses more until Resume or the session's next message); annotate {mode: element|box, target} annotates the element or area `target` names and answers the new note at once: you have no pointer, so name it with `{ref}` (from a read of the page), `{selector}`, `{x, y}` (viewport CSS pixels), or in box mode `{rect: {x, y, width, height}}`; without `target` the answer is `400 invalidParams` naming the field; cancel stops a pick; note {id, text}; remove {id}; send puts every draft note into the composer (a context chip and a cropped picture each, never a command; marked as the Debug API's when the send or the note came from it, also when the user later sends such a note from the window) and answers how many; recheck {reload?: bool} reloads the preview and sets each sent note to changed / unchanged / missing; address {url} opens a URL in the selected web tab with the user's navigation rights; from App preview it opens a local server there or creates a web tab for a public URL; capture {kind: design|structure|media|page|markdown|text|html|png|bundle|before|after} does what the Capture menu's item does and answers `captured` (folder, path, outcome, files count, fileNames array of receipt filenames, skipped count) with the state, whose `capture` part says what is running, the last result and the last error.
 
 ### `POST /ui/changes`
 
@@ -436,12 +488,23 @@ Read or act on the Connectors page like clicks do. Body: {action: read|open|clos
 ### `POST /ui/marketplace`
 
 The Tools page's Marketplace tab (plugins, skill packs and MCP servers from the reviewed, version-pinned catalog). Body:
-{action: read|open|connectors|reload|filter|search|select|install|cancel|remove|addServer, id?, filter?:
+{action: read|open|connectors|reload|filter|search|select|install|cancel|remove|addServer|turnOnPlugin|turnOffPlugin|removePlugin, id?, path?, filter?:
 all|installed|updates, text?}: read (default) returns the tab, filter, selection, note, the install in progress, the
 platform and every shown entry with its status words, installed version, update flag, access class (servers) and its
 state in the viewed session (loaded, skills, Vibe's issues); open / connectors switch the tab; install {id} installs or
 updates a pack or plugin (in the background; progress arrives as `marketInstall` events); cancel stops it; remove {id}
 removes it; addServer {id} adds a catalog MCP server through the Connectors flow (its sign-in finishes in a browser).
+`discovered` lists plugins outside the catalog with their path, ownership, off state, components and current-session state.
+`turnOnPlugin`, `turnOffPlugin` and `removePlugin` take the exact `path` returned by that inventory. The core changes
+only owned plugin folders. Turn on records the folder and manifest name as approved; Turn off moves it to
+`plugins-off/` and revokes approval; Remove revokes approval and deletes the folder. The window asks before Turn on
+or Remove. The Debug API acts as the user without a native dialog.
+
+Approvals live in `plugin-approvals.json` in Vibe Work's data folder, outside `vibe-home`. Marketplace Install
+records approval. Before every server start and session start, resume/reopen or plugin reload, unapproved user
+plugin folders move to `plugins-off/`. Existing installations without an approval also start off. Approved plugins
+start with Vibe Work; project plugins retain Vibe's folder-trust flow.
+
 Example: `{"action":"install","id":"context7"}`.
 
 ### `POST /ui/documents`
@@ -450,11 +513,63 @@ Read or act on the document chips like clicks do. Body: {action: read|extract|re
 
 ### `POST /ui/files`
 
+Linked names also support `ref-menu {text, item?: open|edit|reveal|copy-path, line?, file?}`. With no item it
+returns the available actions, or `{choices: [{file, display, kind, size}], total}` for an ambiguous name.
+Choose a returned `file` handle and an item to act on that choice; no ambiguous file opens automatically.
+The chooser lists at most 50 files, with the full count in `total`. Relative names that miss are matched by
+path segments inside the session folder only. `refs` marks ambiguous names as `choices` and includes their
+choices. `edit` opens the File tab and starts its editor after reading complete editable text; images and binary
+files have no Edit action. If the read is too large or truncated, the preview remains with an `editNotice`
+explaining why the editor did not open. `reveal` uses Show in folder; `copy-path` copies the same display path
+shown in the File tab and shows the usual copy feedback. These are the same actions as the linked name's
+right-click, ContextMenu key or Shift+F10 menu. Each chooser row also offers Edit (or Shift+Enter).
+
 The File tab (files the agent mentions, previewed) of a session, every action a click has (the Debug API acts as the user, no native dialogs). Body: {action: state|refs|open|switch|close|reload|mode|external|edit|drop, sessionId?: string (default: the selected session), ...}: state = the shown file (name, path relative to the session folder), kind, size, status, mode, truncation, the text it shows (up to 65,536 characters), the viewer and the recent list, and the last drop report; refs {entryId?} = the file references the transcript shows (text, path, line, state ok|no|pending); open {text, line?} resolves a path as the transcript does (the window's scope: the session folder and picked folders), or open {file} a handle from refs or the recent list; switch {file}; close; reload; mode {mode: rendered|source}; external {what: open|reveal} opens with the default app or shows in the folder (a program is never opened); drop {files: [{name, data (base64), folder?}]} routes files like a drop on the composer and answers the drop report and the composer's pictures, context chips and document chips. Known secrets in a file's text are hidden like in every answer (see the top of this page). edit {text} saves the shown text file with that whole text like the editor's Save: refused with `stale` when the file changed on disk since the tab read it; line endings and a byte-order mark are kept; the agent gets a context chip with the diff.
+
+The code editor also supports `openEdit` (open the shown complete text file without saving), `setText {text}`
+(replace the editor buffer by a transaction, including an empty string), `saveEdit`, `cancelEdit`, `reloadEdit`
+(explicitly discard the buffer and load disk), `keepEditing` (dismiss the conflict banner; retain the original
+save fingerprint), and `compare` (open a read-only Mine/Disk comparison). These use the same draft and save actions
+as the window. `saveEdit` returns `outcome: saved|unchanged|stale`; a stale save keeps the draft and exposes the
+conflict in its state. It never overwrites the newer disk version.
+
+With an unsaved draft, `open` and `switch` select a pending preview while the editor keeps its original file,
+text and save fingerprint. The window explains which file is still being edited. Save or Cancel exposes the
+pending preview; `close` is refused until the draft is saved or cancelled. Session switches retain each session's
+draft. Comparison and `reloadEdit` read the edited file even when the pending preview names another file.
+
+`state` and action replies include `editor: null` when closed, or `{text, textCut, dirty, conflict, problem,
+saving, compare, wrap, baselineFingerprint, diskFingerprint}`. Buffer text is limited to 65,536 characters in
+replies. A clean buffer reloads in place when disk changes; a dirty buffer keeps its baseline and text. Saved user
+edits are protected from the session Changes view's agent revert. Ambiguous overlapping changes conservatively
+accept the saved file into that review baseline.
+
+Editor buffer text uses LF line endings, including `setText` input. Saving preserves the disk file's existing
+line-ending style and byte-order mark through the core's file-write path.
 
 ### `POST /ui/git`
 
 The branch bar at the top of the Changes tab, the Commit / Pull request / Bring into main dialogs and the PR card of the shown session, every action a click has. Body: {action: state|reload|selectRepo|openCommit|setMessage|toggleFile|runHooks|commit|push|openPr|setPr|createPr|refreshCard|sendChecks|sendReview|openBring|bringIn|askVibe|close, sessionId?, repo?, text?, path?, on?, then?: none|push|pr, remote?, title?, body?, base?, draft?}. `selectRepo` picks a root returned by status (for example `sub`). `state` (default) returns the selected `repo`, discovered `repos`, whether the bar shows, the status (branch, base, upstream, remotes, files to commit, why Commit is blocked), the PR card, the open dialog (commit: the message and where it came from, the files with `included`, the author, the repository's commit hooks and `runHooks`, `credit`; pr: the plan, title, body, base, draft; bring: the dry run), busy, the last notice and what the last commit printed. Every action uses the selected repository. `openCommit` drafts a message (Mistral with your key, else the session title); commit {then?} commits the included files and can continue with a push or the PR dialog; push, createPr and bringIn carry the Debug API origin, so the core's confirmation is answered as yours and only what it names runs; sendChecks, sendReview and askVibe put a prepared message into the composer as a chip, never sent.
+
+### `POST /ui/git-browser`
+
+The Git side panel browses the selected session's saved project, or the project chosen in the panel on the
+new-chat view. Body: `{action: "read"|"click", projectId?, nodeId?, target?, path?}`. `read` returns a fresh
+`snapshot` with the project folder, repository and copy nodes, branch, changed files, upstream counts, plain state
+words, restrictions and the existing session/repository action selectors. Discovery is bounded; `truncated` and
+`note` explain incomplete discovery or file watching. Outside-project copies are shown as locations only.
+
+`click` requires a `nodeId` from that project's current snapshot. `target` is `primary`, `commit`, `push`, `pr`,
+`bring`, `new-chat`, `new-task` or `file`. `primary` chooses the node's current next step. `file` also requires a
+changed `path` from that node and opens the existing File tab or Changes diff. Git actions reuse the existing
+dialogs and core guards with the Debug API origin; their confirmation behavior is the same as `ui/git`.
+An unavailable action returns its reason. Nodes without an admitted session explain that a chat must be started
+there before Git actions are available. New chat prepares that folder with the copy switch off; New task prepares
+the same composer with the copy switch on. Neither sends a message or creates a copy until the user submits.
+
+```json
+{"action":"click","nodeId":"<id returned by read>","target":"new-task"}
+```
 
 ### `POST /ui/key`
 
@@ -463,6 +578,26 @@ Presses a key like the keyboard does. Body: {key: e.g. Escape|Enter|k, selector?
 ### `POST /ui/layout`
 
 Automatic layout checks of what is shown (the visual pass). No body. Returns the viewport, every shown menu, listbox, dialog, tooltip and popover with whether it is fully inside the window, buttons and headings whose text is cut off, horizontal scroll, and a problems list.
+
+### Slow UI actions and `POST /ui/requests`
+
+UI actions that take more than 50 ms acknowledge with
+`{pendingId: "ui-…", state: "pending", poll: "/ui/requests"}`. Poll `POST /ui/requests` with
+`{pendingId}` to get `pending`, `completed` with the original `value`, or `failed` with the original typed
+`error`. Polling does not enter the UI queue. A request id is a correlation id, never an authorization capability.
+Pending authorization and completed results are retained for at most ten minutes; the host keeps at most 128
+results. An unknown or expired id answers `404 notFound`.
+
+`/ui/state` and `/ui/libraries` `read` remain available during work. Another UI action answers
+`{pendingId, state: "busy", poll: "/ui/requests"}` without starting it; collect the earlier result before retrying
+that action. This covers awaited handlers and commands started by clicks, including provider calls, downloads,
+file operations and native dialogs. Fast actions keep their usual result. Libraries `ask` can finish normally
+after the UI request's ten-second limit; its answer is available in the completed value and Libraries `read`.
+
+A slow action keeps that one busy slot for at most ten minutes, the same time the host keeps its result. If nobody
+ends the wait by then (for example a vault dialog that you do not answer), the window lets go: the next
+action runs again, the window's own commands are no longer marked as the Debug API's, the late answer is dropped
+and the id answers `404 notFound`.
 
 ### `POST /ui/libraries`
 
@@ -486,7 +621,7 @@ The command palette, like the keyboard uses it. Body: {action: list|open|close|r
 
 ### `POST /ui/panel`
 
-Open, close or toggle the side panel and pick its tab. Body: {action: open|close|toggle, tab?: project|plan|browser|changes|terminal|file} (pages = project, an alias for one release). Returns the panel state.
+Open, close or toggle the side panel and pick its tab. Body: {action: open|close|toggle, tab?: project|plan|browser|git|changes|terminal|file} (pages = project, an alias for one release). Returns the panel state.
 
 ### `POST /ui/plan`
 
@@ -498,11 +633,11 @@ The "Left running" list: processes the agent started that keep running after the
 
 ### `POST /ui/project`
 
-The Project tab (the project handbook) of the shown session. Body: {action: state|hub|open|plan|back|forward|reload|pick|comment|send|delete|point|answers|answer|sendAnswers|check|export, ...}: open {path, anchor?} (anchor: a section or step id to scroll to); comment {path, section, text, quote?, send?}; send {id}; delete {id}; point {source: terminal|preview|page} ("Point Vibe at this": a context chip in the composer, never a command); answers {path?} (the page's inputs with the user's answers; every page with inputs without path and no page shown); answer {path?, input, value} (value: {type: choice, option} | {type: checklist, checked: [...]} | {type: rank, order: [...]} | {type: text, text} | null to clear; checked against the page file); sendAnswers {path?} (every answer of the page into the composer as one chip, never a command); check {path?} (the visual check now: desktop 1280 and phone 390 px, light and dark); export {path?, destination?} (the page as one self-contained HTML file: its text, or written to the absolute destination like the save dialog). path defaults to the shown page. Calls carry the Debug API origin (a label: no native dialog). Returns the tab state (hub with manifest, findings counts and groups, or page with steps, sections, comments, answers, visual check, prototype; the viewer) and the action's result.
+The Project tab (the project handbook) of the shown session. Body: {action: state|hub|open|plan|back|forward|reload|pick|comment|send|delete|point|answers|answer|sendAnswers|check|export, ...}: open {path, anchor?} (anchor: a section or step id to scroll to); comment {path, section, text, quote?, send?}; send {id}; delete {id}; point {source: terminal|preview|page} ("Point Vibe at this": a context chip in the composer, never a command); answers {path?} (the page's inputs with the user's answers; every page with inputs without path and no page shown); answer {path?, input, value} (value: {type: choice, option} | {type: checklist, checked: [...]} | {type: rank, order: [...]} | {type: text, text} | null to clear; checked against the page file); sendAnswers {path?} (every answer of the page into the composer as one chip, never a command); check {path?} (the visual check now: desktop 1280 and phone 390 px, light and dark); export {path?, destination?} (the page as one self-contained HTML file: its text, or written to the absolute destination like the save dialog). path defaults to the shown page. `pick {section}` picks the named section of the shown page at once and answers `{picked, ...state}`; `point` names its element with `target` (`{selector}` or `{x, y}`, source `preview`) or its `section` (source `page`). Without them the answer is `400 invalidParams` naming the field: you have no pointer, so you name what a person would have clicked. Calls carry the Debug API origin (a label: no native dialog). Returns the tab state (hub with manifest, findings counts and groups, or page with steps, sections, comments, answers, visual check, prototype; the viewer) and the action's result.
 
 ### `POST /ui/projects`
 
-The Projects overview: every project's handbook manifest, active plans and health without opening a session. Body: {action: state|open|close|refresh|select|filter|query|openHandbook|start|migrate|newSession|reveal|chooseFolder|newProject, ...}: select {projectId|null}; filter {status: all|active|maintenance|paused|archived}; query {text}; openHandbook {projectId, path?} (a session's Project tab); start {projectId} reuses the project's current chat (or starts one) and sends the handbook prompt as a user message, leaving any composer draft untouched. While the chat is working, the handbook request is unavailable; migrate {projectId} starts a session and sends a fixed migration prompt (the agent writes the files); reveal {projectId} shows the project folder; chooseFolder {projectId, folder} sets a folder (a path, or null to clear; `folder` is required: the native picker cannot be answered remotely); newProject {name} creates a project. Returns the page state (cards with name, state, status, plans, health).
+The Projects overview: every project's handbook manifest, active plans and health without opening a session. Body: {action: state|open|close|refresh|select|filter|query|openHandbook|start|migrate|newSession|reveal|chooseFolder|newProject, ...}: select {projectId|null}; filter {status: all|active|maintenance|paused|archived}; query {text}; openHandbook {projectId, path?} (a session's Project tab); start {projectId} reuses the project's current chat (or starts one) and sends the handbook prompt as a user message, leaving any composer draft untouched. While the chat is working, the handbook request is unavailable; migrate {projectId} starts a session and sends a fixed migration prompt (the agent writes the files); reveal {projectId} shows the project folder; chooseFolder {projectId, folder} sets a folder (a path, or null to clear; `folder` is required: the native picker cannot be answered remotely); newProject {name} creates a project. `newSession` takes `folder` (a path) for a project without a main folder, else it answers `invalidParams`: give the folder, or set one with `chooseFolder` first. Returns the page state (cards with name, state, status, plans, health).
 
 `newSession {projectId}` acts like the sidebar's **New chat in this project**: creates a session in the project's
 main folder, files it directly into that project, expands the group, selects the session and focuses its composer.
@@ -544,7 +679,10 @@ Select a session, or the new-chat view (null). Body: {sessionId: string|null}. R
 Act on the session list like a click does. Body: {action: read|filter|archived|more|refresh|open|rename|pin|archive|delete|retryReopen|cancelReopen|continueNew|temporaryChat|toggleGroup|projectCreate|projectRename|projectDelete|projectMove|projectPlace|projectStart|projectFolder|projectsRefresh, ...}: filter {text}, archived {show: bool}, more (load the next page), refresh, open/pin/archive/delete/rename {sessionId, ...} (pin {pinned: bool}, archive {archived: bool}, rename {title}); retryReopen, cancelReopen and continueNew act on a stuck session; delete runs without the native confirmation (the Debug API acts as the user) and also answers leftRunning: the processes the deleted session left running (they are not stopped, use ui/processes stop). temporaryChat {on: bool} sets the new chat's "Temporary chat" switch. The project actions create, rename, remove, move or place groups and sessions, start a chat in a project, choose its folder and refresh groups; each uses the same project id or name fields as the matching action in the window. Returns the list model (groups, pinned, needs-you, unread flags, badges), the temporary session ids as `temporary` and the switch as `newChatTemporary`.
 
 `projectStart {projectId}` uses the same project chat action as `ui/projects` → `newSession` above and returns
-`sessionId` (null on cancellation/failure) with the updated list model.
+`sessionId` (null on cancellation/failure) with the updated list model. For a project without a main folder both take
+`folder`, the path the chat runs in (registered like **Choose folder**); without it they answer `invalidParams`, since
+the native folder picker cannot be answered through the Debug API (or set the project's folder first with
+`projectFolder` or `ui/projects` → `chooseFolder`).
 
 ### `POST /ui/settings`
 
@@ -565,7 +703,7 @@ selection). Vault kinds are `vibeWork` (private app-data vault), `shellx` and `d
 The window names them **Vibe Work vault**, **ShellX Vault** and **Vault app**. Its per-project entry
 permissions are **Ask each time**, **Allowed** and **Never** (`askEachTime`, `allowed`, `never` on the wire).
 **Pause agent access to secrets** pauses agents' use of secrets while sessions keep working;
-**Lock vault** protects the vault cryptographically and pauses model requests until unlock.
+**Lock vault** closes the vault (its contents stay encrypted) and pauses model requests until unlock.
 <!-- vocabulary:vault:end -->
 
 These fields contain only kind and folder metadata. Vault management commands remain user-only.
@@ -585,7 +723,7 @@ Read the shell state: theme, list visibility, selected session, panel, the overl
 
 ### `POST /ui/terminal`
 
-The Terminal tab of the shown session. Body: {action: state|selection|selectAll|focus|open|select, terminalId?}: state = its terminal tabs, the active one, whether a terminal has keyboard focus, font size and renderer; selection = the selected text of the active terminal (read only, for "Point Vibe at this"); selectAll selects the whole buffer; focus focuses the active terminal; open opens a new terminal tab (same as the + button); select makes terminalId the active tab.
+The Terminal tab of the shown session. Body: {action: state|selection|selectAll|focus|open|select, terminalId?}: state = its terminal tabs, the active one, whether a terminal has keyboard focus, font size and renderer; selection = the selected text of the active terminal (read only, for "Point Vibe at this"); selectAll selects the whole buffer; focus requests focus, waits one event tick, and returns `focusReason` (`null` when focused, otherwise a missing view, hidden window, unfocused window or input that did not receive focus); open opens a new terminal tab (same as the + button); select makes terminalId the active tab.
 
 ### `POST /ui/theme`
 
@@ -621,3 +759,14 @@ The transport a UI running in a browser (the developer UI) uses instead of the w
 2. `POST /ui/settle` with `{"quietMs": 300}`: it answers when the window stopped changing.
 3. `GET /screenshot` (and `POST /ui/layout` for automatic checks: menus inside the window, no cut-off text, no
    horizontal scroll).
+
+### `POST /ui/walkthrough`
+
+A caption for a Debug API walkthrough, above the status bar at the bottom-left. Normal use has no caption.
+Body: `{action: read|start|step|pause|finish|stop, total?, step?, label?}`. `start {total}` enables it;
+`step {step, label}` announces a control before the click, for example `Step 12 of 340 · Settings › General › Save`.
+`read` returns `{phase, step, total, label}`; phase is `off`, `running`, `paused` or `finished`.
+Esc or `pause` leaves `Walkthrough paused at step 12`; a runner must read the phase and stop its pacing.
+`finish` shows `Walkthrough finished · 340 steps` for three seconds. `stop` removes the caption immediately.
+Step results belong in the runner's timestamped log, never in the caption. The caption ignores pointer input and
+is hidden from assistive technology.

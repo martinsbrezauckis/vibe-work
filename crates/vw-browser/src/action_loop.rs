@@ -113,7 +113,10 @@ impl Browser {
                     if error.outcome == Outcome::Refused {
                         error.outcome = Outcome::Failed;
                     }
-                    "Stopped or failed after native mouse input was sent. Do not repeat the act; check the Browser tab.".clone_into(&mut error.text);
+                    error.text = format!(
+                        "{} Stopped or failed after native mouse input was sent. Do not repeat the act; check the Browser tab.",
+                        error.text
+                    );
                 }
             }
         }

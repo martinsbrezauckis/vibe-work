@@ -1,27 +1,44 @@
 /**
- * The session header's copy chip: the session's branch and the base it started from
- * ("vibe/fix-login · from main"), or that the copy is being made, missing or removed. Nothing for a session
- * that works in its folder.
- * Depends on: AppContext (`worktrees`), shell hooks (the session's folder, to re-ask when it moves), model.ts.
+ * The session header's location chip: project, named copy when present, and the working branch,
+ * or that the copy is being made, missing or removed. Full location and path on hover/expansion.
+ * Depends on: AppContext (worktrees, project groups), header Git facts, shell hooks, LocationChip.
  * Called by: shell/Content (header).
  * Invariants: read only; asks again when the session's folder changes (Vibe moves it into the copy) and while
  * the copy is still being made.
  */
 import { type ReactElement, useEffect, useState } from "react";
-import { Icon } from "../../components/Icon";
 
-import type { WorktreeInfo } from "../../protocol/core";
+import type { GitStatusView, WorktreeInfo } from "../../protocol/core";
 import { useApp } from "../shell/AppContext";
 import { useCoreState } from "../shell/hooks";
-import { chipText } from "./model";
+import { createStore, useStore } from "../../state/createStore";
+import type { GroupsState } from "../../state/projectGroups";
+import { locationText } from "./location";
+import { LocationChip } from "./LocationChip";
 
 /** How often a pending copy is asked about again (ms). */
 const PENDING_POLL = 1000;
+const NO_GROUPS = createStore<GroupsState>({
+  data: null,
+  error: null,
+  renaming: null,
+  creating: false,
+  mover: null,
+  deleting: null,
+});
 
 /** The chip for `sessionId`. */
-export function WorktreeChip({ sessionId }: { sessionId: string }): ReactElement | null {
-  const { worktrees } = useApp();
+export function WorktreeChip({
+  sessionId,
+  status,
+}: {
+  sessionId: string;
+  status: GitStatusView | undefined;
+}): ReactElement | null {
+  const { worktrees, projects } = useApp();
   const cwd = useCoreState((s) => s.sessions[sessionId]?.session["cwd"]);
+  const groups = useStore(projects?.groups.store ?? NO_GROUPS, (s) => s.data);
+  const project = groups?.projects.find((p) => p.id === groups.members[sessionId])?.name ?? null;
   const [found, setFound] = useState<{ id: string; info: WorktreeInfo | null } | null>(null);
   const [tick, setTick] = useState(0);
   useEffect(() => {
@@ -48,15 +65,14 @@ export function WorktreeChip({ sessionId }: { sessionId: string }): ReactElement
       clearTimeout(timer);
     };
   }, [pending, tick]);
-  if (info === null) return null;
+  const text = locationText(project, typeof cwd === "string" ? cwd : null, info, status);
+  if (text === null) return null;
   return (
-    <span
-      className={`chip wt-chip wt-${info.state}`}
-      title={info.path ?? undefined}
-      data-worktree="chip"
-    >
-      <Icon name="git-branch" size={12} />
-      {chipText(info)}
-    </span>
+    <LocationChip
+      key={sessionId}
+      text={text}
+      path={info?.path ?? (typeof cwd === "string" ? cwd : undefined)}
+      state={info?.state ?? "ready"}
+    />
   );
 }

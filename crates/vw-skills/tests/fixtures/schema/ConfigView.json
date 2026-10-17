@@ -1,0 +1,180 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "activeModel": {
+      "$ref": "#/$defs/ModelConfigView"
+    },
+    "activeModelPinned": {
+      "title": "Activemodelpinned",
+      "type": "boolean"
+    },
+    "askConfirmationOnExit": {
+      "title": "Askconfirmationonexit",
+      "type": "boolean"
+    },
+    "autocopyToClipboard": {
+      "title": "Autocopytoclipboard",
+      "type": "boolean"
+    },
+    "awaitingExperimentModel": {
+      "default": false,
+      "title": "Awaitingexperimentmodel",
+      "type": "boolean"
+    },
+    "cursorBlink": {
+      "default": true,
+      "title": "Cursorblink",
+      "type": "boolean"
+    },
+    "defaultAgent": {
+      "default": "accept-edits",
+      "title": "Defaultagent",
+      "type": "string"
+    },
+    "defaultModelAlias": {
+      "title": "Defaultmodelalias",
+      "type": "string"
+    },
+    "disableWelcomeBannerAnimation": {
+      "title": "Disablewelcomebanneranimation",
+      "type": "boolean"
+    },
+    "enableNotifications": {
+      "title": "Enablenotifications",
+      "type": "boolean"
+    },
+    "enableSystemTrustStore": {
+      "default": false,
+      "title": "Enablesystemtruststore",
+      "type": "boolean"
+    },
+    "enableTelemetry": {
+      "default": true,
+      "title": "Enabletelemetry",
+      "type": "boolean"
+    },
+    "enableUpdateChecks": {
+      "title": "Enableupdatechecks",
+      "type": "boolean"
+    },
+    "experimentalEnableRegistrySkills": {
+      "default": false,
+      "title": "Experimentalenableregistryskills",
+      "type": "boolean"
+    },
+    "experimentalEnableTabStatus": {
+      "title": "Experimentalenabletabstatus",
+      "type": "boolean"
+    },
+    "fileWatcherForAutocomplete": {
+      "title": "Filewatcherforautocomplete",
+      "type": "boolean"
+    },
+    "imagesSupported": {
+      "default": false,
+      "title": "Imagessupported",
+      "type": "boolean"
+    },
+    "logLevel": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Loglevel"
+    },
+    "models": {
+      "items": {
+        "$ref": "#/$defs/ModelConfigView"
+      },
+      "title": "Models",
+      "type": "array"
+    },
+    "narratorEnabled": {
+      "title": "Narratorenabled",
+      "type": "boolean"
+    },
+    "showGreeting": {
+      "title": "Showgreeting",
+      "type": "boolean"
+    },
+    "showSubagentStatusList": {
+      "title": "Showsubagentstatuslist",
+      "type": "boolean"
+    },
+    "showThinkingNodes": {
+      "title": "Showthinkingnodes",
+      "type": "boolean"
+    },
+    "speech": {
+      "$ref": "#/$defs/SpeechConfigView"
+    },
+    "theme": {
+      "title": "Theme",
+      "type": "string"
+    },
+    "transcribeModels": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Transcribemodels",
+      "type": "array"
+    },
+    "transcription": {
+      "$ref": "#/$defs/TranscriptionConfigView"
+    },
+    "ttsModels": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Ttsmodels",
+      "type": "array"
+    },
+    "validationWarnings": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Validationwarnings",
+      "type": "array"
+    },
+    "voiceModeEnabled": {
+      "title": "Voicemodeenabled",
+      "type": "boolean"
+    },
+    "worktreeLimit": {
+      "title": "Worktreelimit",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "activeModel",
+    "activeModelPinned",
+    "defaultModelAlias",
+    "theme",
+    "logLevel",
+    "disableWelcomeBannerAnimation",
+    "showGreeting",
+    "autocopyToClipboard",
+    "fileWatcherForAutocomplete",
+    "askConfirmationOnExit",
+    "voiceModeEnabled",
+    "narratorEnabled",
+    "showThinkingNodes",
+    "showSubagentStatusList",
+    "worktreeLimit",
+    "enableUpdateChecks",
+    "enableNotifications",
+    "experimentalEnableTabStatus",
+    "models",
+    "transcribeModels",
+    "ttsModels",
+    "transcription",
+    "speech",
+    "validationWarnings"
+  ],
+  "title": "ConfigView",
+  "type": "object"
+}

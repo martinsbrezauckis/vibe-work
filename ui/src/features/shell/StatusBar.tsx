@@ -85,7 +85,7 @@ function UsageReadout() {
     <button
       type="button"
       className="sb-usage"
-      data-testid="statusbar-usage"
+      data-testid="shell.statusbar-usage"
       title={explain}
       aria-label={`Context ${String(percent)}%: ${explain}`}
       onClick={() => {
@@ -122,7 +122,7 @@ function RateWarning() {
     <button
       type="button"
       className="sb-usage sb-rate"
-      data-testid="statusbar-rate"
+      data-testid="shell.statusbar-rate"
       title="Mistral's last answer said this much of the minute's allowance is left. It refills every minute."
       onClick={() => {
         shell.actions.openSettings("usage", "session-usage");

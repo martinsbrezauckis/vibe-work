@@ -147,8 +147,9 @@ export function createShortcuts(mac = detectMac()) {
     /** Runs the matching shortcut for a keydown. Returns true when one ran (the caller prevents default). */
     handle(event: KeyboardEvent): boolean {
       if (event.isComposing) return false;
-      const typing = isEditable(event.target);
-      const terminal = isInTerminal(event.target);
+      const target = event.composedPath()[0] ?? event.target;
+      const typing = isEditable(target);
+      const terminal = isInTerminal(target);
       for (const { def, combo } of defs.values()) {
         if (!matches(combo, event, mac)) continue;
         if (terminal && def.allowInTerminal !== true) continue;

@@ -103,12 +103,13 @@ export function BrowserPoolSettings(): ReactElement | null {
             </span>
           )}
           {error !== null && (
-            <span className="d cbad" role="alert">
+            <span className="key-problem" role="alert">
               {error}
             </span>
           )}
         </span>
         <Selector
+          testId="settings.browser-pool-settings-some"
           label="Live browser tabs"
           value={pool?.configuredParallelSessions ?? "auto"}
           disabled={pool === null || busy}

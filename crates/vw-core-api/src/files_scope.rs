@@ -17,6 +17,9 @@
 //! - Containment is compared on `path_key` forms (Windows: one spelling, no case), never on raw text.
 //! - Every refusal is the same `None`: no reason, no difference between "missing" and "not allowed".
 //! - Windows: UNC and device forms (`\\server\share`, `\\?\`, `\\.\`) are refused before any access.
+//! - After a miss, `files_lookup` may list the session folder for a plain relative name only (no traversal, root,
+//!   drive, home or file URL). Segment suffix matches pass resolve again with no picked folders; ambiguous hits
+//!   are choices, never an inferred file. Listing names are cached briefly; every returned hit is checked afresh.
 
 use std::io;
 use std::path::{Component, Path, PathBuf};

@@ -76,6 +76,7 @@ export function SettingsNav(): ReactElement {
         {/* The scope chip: a click (or Backspace in the empty field) widens the search to everything. No ×: Settings
             has no close or back controls at all ; leaving is Home, a rail item or Esc. */}
         <button
+          data-testid="settings.settings-nav-prevent-default"
           type="button"
           className="scope-chip"
           aria-label="In: Settings. Search everything instead"
@@ -91,6 +92,7 @@ export function SettingsNav(): ReactElement {
           </span>
         </button>
         <input
+          data-testid="settings.settings-nav-set-settings-query"
           id={SETTINGS_SEARCH_ID}
           type="text"
           role="searchbox"
@@ -106,6 +108,7 @@ export function SettingsNav(): ReactElement {
       </label>
       {searching ? (
         <div
+          data-testid="settings.settings-nav-set-results"
           className="set-results"
           ref={list}
           onKeyDown={onListKey}
@@ -117,6 +120,8 @@ export function SettingsNav(): ReactElement {
           ) : (
             results.map((r) => (
               <button
+                data-testid="settings.settings-nav-open-hit"
+                data-item-id={r.id}
                 key={r.id}
                 type="button"
                 className="set-result"
@@ -133,9 +138,17 @@ export function SettingsNav(): ReactElement {
           )}
         </div>
       ) : (
-        <nav className="set-cats" aria-label="Settings categories" ref={list} onKeyDown={onListKey}>
+        <nav
+          data-testid="settings.settings-nav-set-cats"
+          className="set-cats"
+          aria-label="Settings categories"
+          ref={list}
+          onKeyDown={onListKey}
+        >
           {offered.map((c) => (
             <button
+              data-testid="settings.settings-nav-set-settings-category"
+              data-item-id={c.id}
               key={c.id}
               type="button"
               className="set-cat"

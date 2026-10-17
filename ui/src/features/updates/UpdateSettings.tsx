@@ -10,6 +10,7 @@
  * restart" request as the notice's, so it is never offered before the download is verified. A package-manager
  * install (`linkOnly`) gets no download switch: nothing is downloaded there.
  */
+import { Button } from "../../components/Controls";
 import { useStore } from "../../state/createStore";
 import { statusLine } from "../../state/updates";
 import { vibeStatusLine } from "../../state/vibeUpdates";
@@ -49,28 +50,50 @@ function Section({ updates }: { updates: NonNullable<ReturnType<typeof useApp>["
             </span>
           )}
         </span>
-        <span className="key-actions">
+        <span className="set-actions">
           {phase.type === "available" && view.mode === "inApp" && (
-            <button type="button" className="tb-btn" onClick={run(updates.download)}>
+            <Button
+              data-testid="updates.update-settings-run"
+              type="button"
+              small
+              onClick={run(updates.download)}
+            >
               Download
-            </button>
+            </Button>
           )}
           {phase.type === "ready" && (
-            <button type="button" className="tb-btn primary" onClick={run(updates.install)}>
+            <Button
+              data-testid="updates.update-settings-run-2"
+              type="button"
+              small
+              variant="primary"
+              onClick={run(updates.install)}
+            >
               Install and restart
-            </button>
+            </Button>
           )}
           {phase.type === "available" && view.mode === "linkOnly" && view.releasePage !== null && (
             <>
-              <button type="button" className="tb-btn" onClick={run(updates.openReleasePage)}>
+              <Button
+                data-testid="updates.update-settings-run-3"
+                type="button"
+                small
+                onClick={run(updates.openReleasePage)}
+              >
                 Open release page
-              </button>
+              </Button>
               <ReleaseHost url={view.releasePage} />
             </>
           )}
-          <button type="button" className="tb-btn" disabled={busy} onClick={run(updates.check)}>
+          <Button
+            data-testid="updates.update-settings-run-4"
+            type="button"
+            small
+            disabled={busy}
+            onClick={run(updates.check)}
+          >
             Check now
-          </button>
+          </Button>
         </span>
       </div>
       <VibeRow />
@@ -85,6 +108,7 @@ function Section({ updates }: { updates: NonNullable<ReturnType<typeof useApp>["
             </span>
           </span>
           <button
+            data-testid="updates.update-settings-run-5"
             type="button"
             className="switch"
             role="switch"
@@ -115,15 +139,17 @@ function VibeRow() {
         </span>
       </span>
       {canUpdate && (
-        <span className="key-actions">
-          <button
+        <span className="set-actions">
+          <Button
+            data-testid="updates.update-settings-prepare-update"
             type="button"
-            className="tb-btn primary"
+            small
+            variant="primary"
             disabled={busy}
             onClick={() => void vibe.prepareUpdate()}
           >
             Update Vibe
-          </button>
+          </Button>
         </span>
       )}
     </div>

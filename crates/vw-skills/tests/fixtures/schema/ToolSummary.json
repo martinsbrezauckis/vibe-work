@@ -1,0 +1,19 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "isCustom": {
+      "default": false,
+      "title": "Iscustom",
+      "type": "boolean"
+    },
+    "name": {
+      "title": "Name",
+      "type": "string"
+    }
+  },
+  "required": [
+    "name"
+  ],
+  "title": "ToolSummary",
+  "type": "object"
+}

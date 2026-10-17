@@ -1,0 +1,21 @@
+{
+  "enum": [
+    "invalid_request",
+    "invalid_params",
+    "not_initialized",
+    "not_found",
+    "conflict",
+    "stale_turn",
+    "not_steerable",
+    "callback_closed",
+    "compaction_failed",
+    "unauthorized",
+    "forbidden",
+    "method_not_found",
+    "not_implemented",
+    "stale_cursor",
+    "internal_error"
+  ],
+  "title": "ProtocolErrorCode",
+  "type": "string"
+}

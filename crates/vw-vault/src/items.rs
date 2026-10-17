@@ -316,7 +316,8 @@ pub fn read_item(
     decode(&entry_bytes(repo, master, entry)?).map(Some)
 }
 
-/// Every decryptable item (damaged ones are skipped, as in upstream `list_items`), by title.
+/// Every decryptable item, by title, for display only. Damaged items are skipped; authorization must use
+/// [`list_items_strict`].
 ///
 /// # Errors
 /// [`VaultError::Corrupt`] when the head itself does not open, [`VaultError::Io`].
@@ -331,6 +332,36 @@ pub fn list_items(repo: &LocalRepo, master: &MasterKey) -> Result<Vec<VaultItem>
         .filter_map(|entry| entry_bytes(repo, master, entry).ok())
         .filter_map(|bytes| decode(&bytes).ok())
         .collect();
+    items.sort_by(|a, b| a.title.cmp(&b.title));
+    Ok(items)
+}
+
+/// Every item named by the authenticated manifest. Authorization must use this enumeration, never the
+/// tolerant display list: a missing blob, failed authentication, invalid JSON or mismatched id is an error.
+///
+/// # Errors
+/// [`VaultError::Corrupt`], [`VaultError::Io`].
+pub fn list_items_strict(
+    repo: &LocalRepo,
+    master: &MasterKey,
+) -> Result<Vec<VaultItem>, VaultError> {
+    let Some((_, snapshot)) = head_snapshot(repo, master)? else {
+        return Ok(Vec::new());
+    };
+    let mut items = Vec::new();
+    for entry in snapshot
+        .files
+        .iter()
+        .filter(|f| f.path.starts_with(VAULT_PREFIX))
+    {
+        let item = decode(&entry_bytes(repo, master, entry)?)?;
+        if entry.path != item_path(&item.id) {
+            return Err(VaultError::Corrupt(
+                "an item does not match its manifest path".to_owned(),
+            ));
+        }
+        items.push(item);
+    }
     items.sort_by(|a, b| a.title.cmp(&b.title));
     Ok(items)
 }

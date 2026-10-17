@@ -26,7 +26,11 @@ function asObject(body: unknown): Record<string, unknown> {
 
 function text(input: Record<string, unknown>, key: string): string {
   const value = input[key];
-  if (typeof value === "string" && value !== "") return value;
+  if (typeof value === "string" && value !== "") {
+    if ((key === "libraryId" || key === "documentId") && !/^[A-Za-z0-9-]{1,64}$/.test(value))
+      throw new UiControlError("invalidParams", "an id must be 1 to 64 letters, digits or dashes");
+    return value;
+  }
   throw new UiControlError("invalidParams", `${key} must be a non-empty string`);
 }
 
@@ -138,5 +142,14 @@ async function handle(app: App, body: unknown): Promise<unknown> {
 
 /** Registers the route; returns the function that removes it. */
 export function registerLibrariesRoutes(app: App): () => void {
-  return app.uiControl.register("libraries", (body) => handle(app, body));
+  return app.uiControl.register(
+    "libraries",
+    (body) => handle(app, body),
+    (body) => {
+      if (body === undefined || body === null) return true;
+      if (typeof body !== "object" || Array.isArray(body)) return false;
+      const action = (body as Record<string, unknown>)["action"];
+      return action === undefined || action === "read";
+    },
+  );
 }

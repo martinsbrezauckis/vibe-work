@@ -1,23 +1,21 @@
 //! The model Vibe writes session titles with: Vibe Work's own `VIBE_HOME/config.toml`
 //! gets `[utility_models] title = "mistral-medium-3.5"` unless it already names a title model.
 //!
-//! Why: Vibe 2.26.1 builds its title request with `temperature = 0` and no `top_p` (`app_server/_runtime.py`, the
-//! `title_model = local_model_route(temperature=0.0, thinking="off")` route; the harness's Mistral adapter sends
-//! `top_p` only when the route has one). Without a `[utility_models]` title model the route uses the session's
-//! active model. Mistral Large 4 refuses that request with HTTP 400 "`top_p` must be 1 when using greedy sampling"
-//! (code 3054; Medium 3.5 accepts it), so every session on Large 4 stays untitled.
+//! Why: Vibe Work names the title model, so session titles come from one known model whatever model a session
+//! runs: Mistral Medium 3.5, which answers Vibe's title request (greedy sampling, `temperature = 0`). Without a
+//! `[utility_models]` title model Vibe writes titles with the session's active model.
 //!
-//! Why this and not `top_p = 1.0` on the model entry: the title route never reads a model's `top_p` (only the
-//! session and compaction routes do), so that would not fix titles, and it would change the sampling of every normal
-//! answer on that model (Large 4's default is not 1, or the 400 would not happen). Settings' per-model
-//! "Sampling (top p)" row therefore stays what it says: it applies to answers, not to titles.
+//! Why this and not `top_p` on the model entry: a model's `top_p` applies to the session's answers, not to the
+//! title request, so it would not change titles, and it would change the sampling of every normal answer on that
+//! model. Settings' per-model "Sampling (top p)" row therefore stays what it says: it applies to answers, not to
+//! titles.
 //!
 //! What it changes: only which model writes titles. Medium 3.5 is Vibe's built-in default model (always listed
 //! unless the user's `allowed_models` hides it; then Vibe warns and falls back to the active model, as before) and
 //! is a Mistral model, so titles go to the same provider as any Mistral session. A user who wants titles from the
 //! session's own model writes `title = "active"`; any title model the user names is left as it is.
 //!
-//! WORKAROUND(vibe 2.26.1): remove (and stop adding) once Vibe sends `top_p = 1` with its greedy title request.
+//! Revisit this default on each Vibe update.
 //!
 //! Depends on: `toml` (parsing only; the file is edited as text so the user's comments and layout stay).
 //! Called by: [`crate::launch::ProductLaunch`] and [`crate::launch::DevLaunch`] before the server starts.
@@ -38,10 +36,9 @@ use toml::{Table, Value};
 pub const TITLE_MODEL_ALIAS: &str = "mistral-medium-3.5";
 
 /// The lines written above the added table (English, no paths; they ship into the user's config).
-const NOTE: [&str; 3] = [
-    "# Vibe Work: session titles are written by Mistral Medium 3.5. Vibe asks for a title with temperature 0 and no",
-    "# top_p, which Mistral Large 4 refuses, so sessions on Large 4 would get no title. Write title = \"active\" to",
-    "# title sessions with their own model instead.",
+const NOTE: [&str; 2] = [
+    "# Vibe Work: session titles are written by Mistral Medium 3.5, whatever model a session uses.",
+    "# Write title = \"active\" to title sessions with their own model instead.",
 ];
 
 /// What [`ensure`] did.
@@ -173,7 +170,7 @@ fn insert_after_header(existing: &str, key: &str, newline: &str) -> Option<Strin
                 out.push_str(newline);
             }
             out.push_str(key);
-            out.push_str("  # added by Vibe Work: Mistral Large 4 refuses Vibe's title request");
+            out.push_str("  # added by Vibe Work: session titles by Mistral Medium 3.5");
             out.push_str(newline);
             done = true;
         }

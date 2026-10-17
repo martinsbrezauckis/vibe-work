@@ -215,6 +215,8 @@ pub enum LibrariesResult {
     List {
         /// The libraries.
         libraries: Vec<LibraryView>,
+        /// Why this list is incomplete; `None` only after exhausting all API pages.
+        partial: Option<String>,
         /// What uploading and asking sends, and the limits.
         costs: WorkCosts,
     },

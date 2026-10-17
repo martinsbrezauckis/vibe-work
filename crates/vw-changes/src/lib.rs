@@ -56,10 +56,10 @@ pub use parse::{RawEntry, fnv_hex};
 pub use paths::{display, has_symlinked_parent, inside, inside_bytes, quote, unquote};
 pub use plain::{
     FALLBACK_EMAIL, FALLBACK_NAME, InitPlan, MANIFESTS, SOURCE_EXTENSIONS, dismiss_offer,
-    init_repository, looks_like_code, offer_dismissed, plan_init,
+    init_repository, init_repository_with_identity, looks_like_code, offer_dismissed, plan_init,
 };
 pub use repo::{MIN_GIT, Repo, discover, head_tree};
-pub use review::{keep, revert};
+pub use review::{UserSaveUndo, keep, record_user_save, revert, undo_user_save};
 pub use store::{BaselineState, STATE_VERSION, SessionDir, now_ms, prepare_root, valid_session_id};
 pub use watch::{Debounce, Watcher, watch};
 pub use worktree::{LARGE_UNTRACKED, LargeFile, MAX_UNTRACKED, ignored, watch_ignored};

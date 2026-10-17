@@ -76,6 +76,7 @@ function Page({ projects }: { projects: Projects }): ReactElement {
   const selected = items.find((i) => i.project.id === state.selected) ?? null;
   return (
     <div
+      data-testid="projects.projects-page-pj"
       className="pj"
       data-detail={selected !== null}
       data-settings={state.settings !== null}
@@ -99,6 +100,7 @@ function Page({ projects }: { projects: Projects }): ReactElement {
             <label className="pj-filter">
               <Icon name="search" size={16} />
               <input
+                data-testid="projects.projects-page-set-query"
                 value={state.query}
                 placeholder="Filter projects"
                 aria-label="Filter projects"
@@ -108,6 +110,7 @@ function Page({ projects }: { projects: Projects }): ReactElement {
               />
             </label>
             <Selector
+              testId="projects.projects-page-set-filter"
               label="Project status"
               value={state.filter}
               options={FILTERS.map(([key, label]) => ({
@@ -119,6 +122,7 @@ function Page({ projects }: { projects: Projects }): ReactElement {
               }}
             />
             <button
+              data-testid="projects.projects-page-pick-folder"
               type="button"
               className="pj-btn"
               title="Choose a folder and start a session in it; it then shows here"
@@ -132,6 +136,7 @@ function Page({ projects }: { projects: Projects }): ReactElement {
               Add project folder
             </button>
             <button
+              data-testid="projects.projects-page-close"
               type="button"
               className="pj-btn"
               title="A project of your own: a name now, a main folder later if you like"
@@ -144,6 +149,7 @@ function Page({ projects }: { projects: Projects }): ReactElement {
               New project
             </button>
             <button
+              data-testid="projects.projects-page-refresh"
               type="button"
               className="pj-btn"
               aria-label="Read the projects again"
@@ -157,7 +163,7 @@ function Page({ projects }: { projects: Projects }): ReactElement {
         </div>
         <KeyNotice message="Handbook requests use your Mistral key so the agent can write pages and plans." />
         {state.error !== null && (
-          <p className="pj-error" role="alert">
+          <p className="key-problem" role="alert">
             {state.error}
           </p>
         )}
@@ -168,8 +174,9 @@ function Page({ projects }: { projects: Projects }): ReactElement {
             </h3>
             <ul>
               {needs.map((n) => (
-                <li key={n.sessionId}>
+                <li data-item-id={n.sessionId} key={n.sessionId}>
                   <button
+                    data-testid="projects.projects-page-open-session"
                     type="button"
                     onClick={() => {
                       projects.openSession(n.sessionId);
@@ -189,7 +196,7 @@ function Page({ projects }: { projects: Projects }): ReactElement {
         )}
         {state.cards === null ? (
           // skeletons shaped like the cards (a slow shimmer) instead of a line of text.
-          <div className="pj-grid pj-skeleton" role="status" aria-label="Reading the projects…">
+          <div className="pj-grid pj-skeleton" role="status" aria-label="Loading your projects…">
             {[0, 1, 2].map((i) => (
               <div key={i} className="pj-card sk-card" aria-hidden="true">
                 <span className="sk" style={{ width: "55%" }} />
@@ -198,7 +205,7 @@ function Page({ projects }: { projects: Projects }): ReactElement {
                 <span className="sk" style={{ width: "70%" }} />
               </div>
             ))}
-            <span className="sr">Reading the projects…</span>
+            <span className="sr">Loading your projects…</span>
           </div>
         ) : groups.length === 0 ? (
           <EmptyState glyph="folder" className="empty">

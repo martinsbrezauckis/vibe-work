@@ -1,19 +1,18 @@
 //! Putting a resumed session back in its access mode, failing closed.
 //!
-//! Why: the core never relies on a resume to keep a session's profile (`access.rs`). Every resume names
-//! the resolved profile and the session is then switched
+//! Why: the core keeps each session's access mode and applies it itself on every reopen (`access.rs`).
+//! Every resume names the resolved profile and the session is then switched
 //! (`session/agent/update`) to the profile it should run in, before any of its commands is sent.
 //!
 //! Which profile, in order: the one this core last saw for the session (`access.rs`), else Vibe's own
-//! record of it (`PublicSession.agent`, from the store or a `session/read` before the resume; Vibe
-//! keeps it only after an explicit switch: a session started with `agentConfig.agent` has none,
-//! probe `p9`), else `ask`. There is no "nothing to restore" path.
+//! record of it (`PublicSession.agent`, from the store or a `session/read` before the resume; it may
+//! be empty), else `ask`. There is no "nothing to restore" path.
 //!
 //! Depends on: `core` (`Core`, `Shared`), `access`, `dispatch` (`check_bypass`), `sessions`, `channels`.
 //! Called by: `recovery::open_session` and `dispatch::forward` (a client's resume).
 //! Invariants:
 //! - While a restore runs the session counts as having no channel (`Channels::begin_restore`): a
-//!   concurrent command for it opens (re-attaches) and restores first.
+//!   concurrent command waits on the per-session restore lock and uses the verified channel.
 //! - The switch counts only when Vibe's answer reports the requested profile as active. Otherwise the
 //!   session's channel is closed (no usable channel is ever left in an unverified mode), the command
 //!   is refused with `accessModeUnverified`, an alert says so, and the next command tries again.
@@ -42,11 +41,14 @@ use crate::sessions;
 pub(crate) struct Restoring {
     shared: Arc<Shared>,
     session_id: String,
-    /// The profile to put back, resolved before the resume (right after one Vibe reports its default).
+    /// The profile to put back, resolved before the resume is sent.
     wanted: String,
     /// `wanted` came from this app's own record (`access.rs`: memory or `access.json` in the app's data
     /// folder), not from Vibe's session file or a caller. Only then is Full access put back without a dialog.
     ours: bool,
+    /// Held through verification; another open or runtime read cannot cross the restore.
+    _held: tokio::sync::OwnedMutexGuard<()>,
+    pub(crate) attached: bool,
 }
 
 impl Drop for Restoring {
@@ -80,10 +82,54 @@ fn recorded(state: &Value) -> Option<String> {
         .map(str::to_owned)
 }
 
+/// A session's resolved display mode, from the app's record first. This does not grant a usable
+/// channel: the same choice still has to pass the verified restore before commands can run.
+pub(crate) fn display_mode(shared: &Shared, id: &str, session: &Value) -> Option<String> {
+    let remembered = shared.access.remembered(id);
+    let ours = remembered.is_some();
+    let wanted = remembered.or_else(|| {
+        session
+            .pointer("/agent/name")
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+    })?;
+    let allowed = (ours && wanted == "auto-approve")
+        || shared
+            .gate
+            .check(
+                "session/agent/update",
+                &json!({"sessionId": id, "agentName": wanted}),
+                None,
+            )
+            .is_ok();
+    Some(if allowed {
+        wanted
+    } else {
+        FALLBACK_PROFILE.to_owned()
+    })
+}
+
 impl Core {
+    /// Runtime reads of a composer opened during restoration follow the verified switch.
+    pub(crate) async fn runtime_restore_lock(
+        &self,
+        method: &str,
+        params: &Value,
+    ) -> Option<tokio::sync::OwnedMutexGuard<()>> {
+        if method == "runtime/read"
+            && let Some(id) = params["sessionId"].as_str()
+        {
+            Some(self.shared.access.lock_restore(id).await)
+        } else {
+            None
+        }
+    }
+
     /// Marks `session_id` as being restored and resolves the profile to put back (see the module doc;
     /// `asked` is the profile the caller's resume names, which wins). Call before the resume.
     pub(crate) async fn begin_restore(&self, session_id: &str, asked: Option<String>) -> Restoring {
+        let held = self.shared.access.lock_restore(session_id).await;
+        let attached = self.shared.channels.has_channel(session_id);
         self.shared.channels.begin_restore(session_id);
         let remembered = self.shared.access.remembered(session_id);
         let (wanted, ours) = match (asked, remembered) {
@@ -101,6 +147,8 @@ impl Core {
             session_id: session_id.to_owned(),
             wanted,
             ours,
+            _held: held,
+            attached,
         }
     }
 
@@ -189,6 +237,12 @@ impl Core {
             return Err(self.fail_closed(restore, agent).await);
         }
         sessions::observe(&self.shared, method, &params, &reply.result).await?;
+        // Publish the verified runtime even when Vibe only returns it in the switch's reply.
+        let applied = self.shared.store.apply(vw_session::Notification::new(
+            "runtime/updated",
+            json!({"sessionId": id, "runtime": reply.result["runtime"]}),
+        ));
+        let _ = self.shared.loads.send(applied).await;
         if switches_profile(method, &params) {
             self.check_bypass(origin, &params).await;
         }
@@ -203,7 +257,8 @@ impl Core {
                 session_id: Some(id),
                 kind: AlertKind::AccessModeLowered,
                 message: format!(
-                    "This session was reopened and now asks before running tools again (it ran in {wanted}). Switch the access mode back if you want."
+                    "{} was reopened and now asks before running tools again (it ran in {wanted}). Switch the access mode back if you want.",
+                    vw_vocabulary::text("thisSession").unwrap_or_default()
                 ),
             });
         }

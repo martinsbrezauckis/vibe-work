@@ -25,10 +25,13 @@ import type { DocumentsRequest, DocumentsResult } from "./documents";
 import type { SpeechRequest, SpeechResult } from "./speech";
 import type { ConnectorsRequest, ConnectorsResult } from "./connectors";
 import type { MarketRequest, MarketResult } from "./market";
+import type { NetworkRequest, NetworkResult } from "./network";
 import type { ProjectsRequest, ProjectsResult } from "./projects";
 import type { VibeRequest, InstallView } from "./vibe";
 import type { GitResult } from "./git";
+import type { GitBrowserRequest, GitBrowserResult } from "./git_browser";
 import type { LibrariesRequest, LibrariesResult, ImagesRequest, ImagesResult } from "./work";
+import type { SecretScanRequest, SecretScanView } from "./secret_scan";
 export type * from "./sessions";
 export type * from "./status";
 export type * from "./changes";
@@ -48,10 +51,13 @@ export type * from "./documents";
 export type * from "./speech";
 export type * from "./connectors";
 export type * from "./market";
+export type * from "./network";
 export type * from "./projects";
 export type * from "./vibe";
 export type * from "./git";
+export type * from "./git_browser";
 export type * from "./work";
+export type * from "./secret_scan";
 
 export type Command = { "type": "listSessions",
 /**
@@ -313,7 +319,11 @@ request: MarketRequest, } | { "type": "worktrees",
 /**
  * What to do.
  */
-request: WorktreesRequest, } | { "type": "git",
+request: WorktreesRequest, } | { "type": "gitBrowser",
+/**
+ * Project browser request.
+ */
+request: GitBrowserRequest, } | { "type": "git",
 /**
  * What to do.
  */
@@ -325,11 +335,19 @@ request: ProcessesRequest, } | { "type": "secrets",
 /**
  * What to do.
  */
-request: SecretsRequest, } | { "type": "safety",
+request: SecretsRequest, } | { "type": "secretScan",
+/**
+ * Scanner operation.
+ */
+request: SecretScanRequest, } | { "type": "safety",
 /**
  * What to do.
  */
-request: SafetyRequest, } | { "type": "pickFolder",
+request: SafetyRequest, } | { "type": "network",
+/**
+ * What to do.
+ */
+request: NetworkRequest, } | { "type": "pickFolder",
 /**
  * An existing folder (absolute path).
  */
@@ -480,7 +498,11 @@ result: MarketResult, } | { "type": "worktrees",
 /**
  * The worktree request's answer.
  */
-result: WorktreesResult, } | { "type": "git",
+result: WorktreesResult, } | { "type": "gitBrowser",
+/**
+ * Project browser answer.
+ */
+result: GitBrowserResult, } | { "type": "git",
 /**
  * The git request's answer.
  */
@@ -492,11 +514,23 @@ result: ProcessesResult, } | { "type": "secrets",
 /**
  * The secrets request's answer.
  */
-result: SecretsResult, } | { "type": "safety",
+result: SecretsResult, } | { "type": "secretScan",
+/**
+ * Value-free scanner view.
+ */
+view: SecretScanView,
+/**
+ * File paths for Developer error detail only; absent from finding events and the bell.
+ */
+fileErrors: Array<string>, } | { "type": "safety",
 /**
  * The safety settings after the request.
  */
-result: SafetyResult, } | { "type": "sessionTools",
+result: SafetyResult, } | { "type": "network",
+/**
+ * The network settings, a test result or the problems found.
+ */
+result: NetworkResult, } | { "type": "sessionTools",
 /**
  * The session tools' answer.
  */
@@ -533,7 +567,7 @@ export type ErrorCode = "denied" | "invalidParams" | "confirmationRequired" | "c
 
 export type Origin = "ui" | "debug-api";
 
-export type AlertKind = "bypassToolPermissions" | "resyncPaused" | "accessModeLowered" | "accessModeUnverified" | "turnsInterrupted" | "reopenFailed";
+export type AlertKind = "bypassToolPermissions" | "resyncPaused" | "accessModeLowered" | "accessModeUnverified" | "turnsInterrupted" | "reopenFailed" | "temporaryCleanupFailed" | "temporaryCleanupRecovered" | "remoteFileCleanupFailed" | "libraryListPartial" | "pluginReloadFailed" | "networkSettingsRejected";
 
 export type CallbackInfo = { 
 /**

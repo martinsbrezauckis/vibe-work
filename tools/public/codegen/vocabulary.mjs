@@ -18,7 +18,7 @@ const permissions = source.vaultPermissions;
 const debugCopy = {
   fullAccess: source.accessModes["auto-approve"].name,
   browser: `\nThe window calls this choice **${browser.closeUserTabs.name}**.\nFor closing tabs you opened, **${browser.closeAsk.name}** asks **Close** or **Keep** each time; **${browser.closeAllow.name}** lets the agent close them during your task. These are \`closeUserTabs: false\` and \`true\` on the wire. App preview cannot be closed by the agent.\n`,
-  vault: `\nThe window names them **${kinds.vibeWork.name}**, **${kinds.shellx.name}** and **${kinds.desktop.name}**. Its per-project entry\npermissions are **${permissions.askEachTime.name}**, **${permissions.allowed.name}** and **${permissions.never.name}** (\`askEachTime\`, \`allowed\`, \`never\` on the wire).\n**${source.locks.agentPause.name}** pauses agents' use of secrets while sessions keep working;\n**${source.locks.vaultLock.name}** protects the vault cryptographically and pauses model requests until unlock.\n`,
+  vault: `\nThe window names them **${kinds.vibeWork.name}**, **${kinds.shellx.name}** and **${kinds.desktop.name}**. Its per-project entry\npermissions are **${permissions.askEachTime.name}**, **${permissions.allowed.name}** and **${permissions.never.name}** (\`askEachTime\`, \`allowed\`, \`never\` on the wire).\n**${source.locks.agentPause.name}** pauses agents' use of secrets while sessions keep working;\n**${source.locks.vaultLock.name}** closes the vault (its contents stay encrypted) and pauses model requests until unlock.\n`,
 };
 const found = new Set();
 const debugDocument = debugSource.replace(
@@ -41,6 +41,7 @@ const sections = {
   vaultPermissions: "Vault permissions",
   browserPermissions: "Browser delegation permissions",
   locks: "Agent access and vault lock",
+  workNames: "Projects and sessions",
 };
 const cell = (value) => value.replaceAll("|", "\\|").replaceAll("\n", " ");
 const tables = Object.entries(sections).map(([group, heading]) => {

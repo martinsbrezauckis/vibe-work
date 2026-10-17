@@ -37,19 +37,36 @@ export function UnlockStep({ choice }: { choice?: VaultChoice }) {
     >
       <p>Type the password to open your {vaultName(kind)} and continue.</p>
       <SecretField
+        testId="setup.unlock-step-secretfield"
         label="Vault password"
         value={password}
         onChange={setPassword}
         autoFocus
         invalid={problem?.reason === "wrongPassphrase"}
       />
-      {canRemember && <RememberChoice checked={remember} onChange={setRemember} />}
+      {canRemember && (
+        <RememberChoice
+          testId="setup.unlock-step-rememberchoice"
+          checked={remember}
+          onChange={setRemember}
+        />
+      )}
       <Problem text={problem?.text ?? null} />
       <div className="key-actions">
-        <button type="submit" className="btn-primary" disabled={busy || password === ""}>
+        <button
+          data-testid="setup.unlock-step-btn-primary"
+          type="submit"
+          className="btn-primary"
+          disabled={busy || password === ""}
+        >
           {busy ? "Unlocking..." : "Unlock"}
         </button>
-        <button type="button" className="tb-btn" onClick={() => keys?.dismiss()}>
+        <button
+          data-testid="setup.unlock-step-dismiss"
+          type="button"
+          className="tb-btn"
+          onClick={() => keys?.dismiss()}
+        >
           Not now
         </button>
       </div>

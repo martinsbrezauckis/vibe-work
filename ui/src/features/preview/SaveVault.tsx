@@ -195,9 +195,10 @@ export function SaveVault({
       <div className="preview-save-control">
         {compact && !collapsed ? (
           <IconButton
+            data-testid="preview.save-vault-choose"
             icon="key-round"
             label="Save to vault"
-            data-uc1-save="selection"
+            data-vault-save="selection"
             disabled={blocked || disabled || choosing || localChoice !== null}
             onClick={() => {
               choose("selection");
@@ -205,9 +206,10 @@ export function SaveVault({
           />
         ) : (
           <button
+            data-testid="preview.save-vault-choose-2"
             type="button"
             className="preview-btn"
-            data-uc1-save="selection"
+            data-vault-save="selection"
             disabled={blocked || disabled || choosing || localChoice !== null}
             title="Save to vault"
             role={collapsed ? "menuitem" : undefined}
@@ -219,9 +221,10 @@ export function SaveVault({
           </button>
         )}
         <button
+          data-testid="preview.save-vault-set-menu-open"
           type="button"
           className={compact ? "ibtn preview-save-more" : "preview-btn preview-save-more"}
-          data-uc1-save="more"
+          data-vault-save="more"
           ref={more}
           aria-label="More ways to save"
           title="More ways to save"
@@ -236,6 +239,7 @@ export function SaveVault({
         </button>
         {menuOpen && !blocked && (
           <div
+            data-testid="preview.save-vault-preview-save-menu"
             ref={menu}
             className="preview-save-menu"
             role="menu"
@@ -249,9 +253,10 @@ export function SaveVault({
             }}
           >
             <button
+              data-testid="preview.save-vault-choose-3"
               type="button"
               role="menuitem"
-              data-uc1-save="element"
+              data-vault-save="element"
               onClick={() => {
                 choose("element");
               }}

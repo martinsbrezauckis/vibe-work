@@ -56,6 +56,14 @@ const initial: GroupsState = {
   deleting: null,
 };
 
+/**
+ * What a Debug API route answers (`invalidParams`) for a new chat in a project without a main folder when it names no
+ * folder: the chat would open the native folder picker, which no remote caller can answer and which would keep the
+ * request waiting for a person. Same rule as `projectFolder` and `chooseFolder`, which require the folder.
+ */
+export const NEEDS_MAIN_FOLDER =
+  "this project has no main folder, so a new chat needs the folder to run in: give folder (a path), or set the project's folder first (projectFolder or chooseFolder with a path)";
+
 /** Creates the controller. */
 export function createProjectGroups(deps: { core: CoreController; shell: Shell; toasts: Toasts }) {
   const { core, shell, toasts } = deps;
@@ -138,6 +146,14 @@ export function createProjectGroups(deps: { core: CoreController; shell: Shell; 
   const controller = {
     store,
     refresh,
+    /**
+     * True when a new chat in project `id` would open the native folder picker (the project has no main folder).
+     * Debug API routes refuse that first (`NEEDS_MAIN_FOLDER`): no remote caller can answer the picker.
+     */
+    needsFolderPicker(id: string): boolean {
+      const project = projectOf(id);
+      return project !== null && project.mainFolder === null;
+    },
     /** Reconciles with Vibe's whole session list now (`refresh` op), then shows the result. */
     async reconcile(): Promise<void> {
       await fetchList("refresh");
@@ -206,12 +222,13 @@ export function createProjectGroups(deps: { core: CoreController; shell: Shell; 
     },
     /**
      * A new chat in the project's main folder (or a folder the user picks when it has none), filed by the core.
+     * With `folder` (a Debug API request, which cannot answer the picker, names where) the chat runs there.
      * Expands the project, selects the new chat and focuses its composer; returns its id, null on failure/cancel.
      */
-    async startIn(id: string): Promise<string | null> {
+    async startIn(id: string, folder?: string): Promise<string | null> {
       const project = projectOf(id);
       if (project === null) return null;
-      let cwd = project.mainFolder;
+      let cwd = folder ?? project.mainFolder;
       try {
         cwd ??= await core.client.pickFolder();
         if (cwd === null) return null;

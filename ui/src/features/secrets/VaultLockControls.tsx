@@ -62,7 +62,7 @@ export function VaultLockControls({
         aria-pressed={locked || recovery}
         aria-description={status}
         title={tip}
-        data-testid={`vault-${mode}-${display}`}
+        data-testid={`secrets.vault-${mode}-${display}`}
         disabled={
           access.busy || (mode === "vault" && !access.vaultAvailable) || (unavailable && !recovery)
         }
@@ -73,7 +73,10 @@ export function VaultLockControls({
     <button
       type="button"
       className={display === "status" ? "sb-vault" : "tb-btn"}
-      data-testid={display === "status" ? "statusbar-vault" : `vault-${mode}-${display}`}
+      data-size={display === "button" ? "small" : undefined}
+      data-testid={
+        display === "status" ? "secrets.statusbar-vault" : `secrets.vault-${mode}-${display}`
+      }
       aria-label={display === "status" ? status : label}
       title={tip}
       disabled={

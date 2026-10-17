@@ -43,6 +43,7 @@ function Panel({
           {outdated.length > 0 ? `, ${String(outdated.length)} outdated` : ""}
         </span>
         <button
+          data-testid="changes.line-comments-panel-send"
           type="button"
           className="mini"
           data-action="send-all-comments"
@@ -59,13 +60,13 @@ function Panel({
         <span className="lc-note">Kept in Vibe Work, not in the repo.</span>
       </div>
       {error !== null && (
-        <p className="changes-error" role="status">
+        <p className="key-problem" role="alert">
           {error}
         </p>
       )}
       {outdated.length > 0 && (
         <details className="lc-outdated" open>
-          <summary>Outdated comments</summary>
+          <summary data-testid="changes.line-comments-panel-summary">Outdated comments</summary>
           {outdated.map((c) => (
             <LineCommentThread
               key={c.comment.id}

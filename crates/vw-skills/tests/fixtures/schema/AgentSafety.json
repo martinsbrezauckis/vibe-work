@@ -1,0 +1,11 @@
+{
+  "enum": [
+    "safe",
+    "neutral",
+    "destructive",
+    "smart",
+    "yolo"
+  ],
+  "title": "AgentSafety",
+  "type": "string"
+}

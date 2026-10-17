@@ -8,6 +8,8 @@
 //! Invariants:
 //! - Binds `127.0.0.1:0` only; a request whose `Host` is not this server's own `127.0.0.1:<port>` or
 //!   `localhost:<port>` is refused (421): another site cannot reach it through DNS rebinding.
+//! - Every content route starts with a capability (32 random bytes per server, hex encoded); a missing or wrong
+//!   first segment is refused (404) before reading any file. Relative links and assets keep that segment.
 //! - Serves only regular files whose canonical path lies under the canonical pages folder, every segment of the
 //!   request and of the resolved path passing `paths::segment_allowed` (no hidden files, no `..`), with an
 //!   extension on the positive list (`paths::asset_allowed`; plus `.pdf` for the File tab's servers), at
@@ -19,10 +21,10 @@
 //!   (`sandbox allow-scripts`: an opaque origin, so no storage and no reading of other pages) with `connect-src
 //!   'none'` and `frame-src 'none'`; every other page, Markdown page and the live index get `script-src 'none'`.
 //!   The File tab's servers keep one policy for every HTML file ([`csp`], scripts on).
-//! - The visual check's route (`/.vw-check-<token>/...`, [`PagesServer::check_prefix`]) serves the same files to the
-//!   hidden checker webview only: a prototype page there runs WITHOUT the sandbox (the check document must measure
+//! - The visual check's route (`/<capability>/.vw-check-<token>/...`, [`PagesServer::check_prefix`]) serves the same
+//!   files to the hidden checker webview only: a prototype page there runs WITHOUT the sandbox (the check document must measure
 //!   it from the same origin) and with a small error-recording script put after its doctype ([`ERROR_PRELUDE`]);
-//!   still no network, and the checker webview has no IPC. `/.vw-check-<token>/` is an empty check document. The
+//!   still no network, and the checker webview has no IPC. Its route root is an empty check document. The
 //!   token (128 random bits per server) is known only to the core and the checker: a page in the viewer cannot name
 //!   the route (a normal page framing the unsandboxed check copy of a prototype would
 //!   have given that prototype same-origin access to other pages through its parent). Normal pages may not frame
@@ -39,6 +41,7 @@ use axum::body::Body;
 use axum::extract::State;
 use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, Uri, header};
 use axum::response::{IntoResponse, Response};
+use subtle::ConstantTimeEq;
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 
@@ -50,6 +53,7 @@ pub const MAX_FILE: u64 = 20 * 1024 * 1024;
 
 struct ServerState {
     root: PathBuf,
+    capability: String,
     /// `.vw-check-<128 random bits hex>`: the check route's first segment (see the module header).
     check: String,
     /// `.pdf` is served (the File tab's servers).
@@ -63,6 +67,7 @@ struct ServerState {
 pub struct PagesServer {
     port: u16,
     root: PathBuf,
+    capability: String,
     scripts: Arc<AtomicBool>,
     check: String,
     shutdown: Option<oneshot::Sender<()>>,
@@ -83,7 +88,7 @@ impl PagesServer {
     /// hub). `project` names the project in the generated hub. Must be called inside a Tokio runtime.
     ///
     /// # Errors
-    /// The bind error.
+    /// The bind or random-source error.
     pub async fn start(root: PathBuf, scripts: bool, project: String) -> std::io::Result<Self> {
         Self::start_inner(root, scripts, project, false).await
     }
@@ -92,7 +97,7 @@ impl PagesServer {
     /// own PDF viewer shows it in the isolated webview).
     ///
     /// # Errors
-    /// The bind error.
+    /// The bind or random-source error.
     pub async fn start_for_files(root: PathBuf, project: String) -> std::io::Result<Self> {
         Self::start_inner(root, true, project, true).await
     }
@@ -109,7 +114,11 @@ impl PagesServer {
         let mut token = [0u8; 16];
         getrandom::fill(&mut token).map_err(|e| std::io::Error::other(e.to_string()))?;
         let check = format!("{CHECK_PREFIX}{}", crate::comments::hex(&token));
+        let mut capability = [0u8; 32];
+        getrandom::fill(&mut capability).map_err(|e| std::io::Error::other(e.to_string()))?;
+        let capability = crate::comments::hex(&capability);
         let state = Arc::new(ServerState {
+            capability: capability.clone(),
             check: check.clone(),
             root: root.clone(),
             pdf,
@@ -132,6 +141,7 @@ impl PagesServer {
         Ok(Self {
             port,
             root,
+            capability,
             scripts,
             check,
             shutdown: Some(tx),
@@ -167,6 +177,12 @@ impl PagesServer {
     #[must_use]
     pub fn origin(&self) -> String {
         format!("http://127.0.0.1:{}", self.port)
+    }
+
+    /// The content base URL, including the capability and trailing slash. Only the core and its viewer need it.
+    #[must_use]
+    pub fn base_url(&self) -> String {
+        format!("{}/{}/", self.origin(), self.capability)
     }
 }
 
@@ -240,9 +256,26 @@ async fn handle(
     if !host_ok(&headers, state.port) {
         return plain(StatusCode::MISDIRECTED_REQUEST, &origin);
     }
-    let path = uri.path().to_owned();
+    let origin = if headers
+        .get(header::HOST)
+        .and_then(|h| h.to_str().ok())
+        .is_some_and(|h| h.starts_with("localhost:"))
+    {
+        format!("http://localhost:{}", state.port)
+    } else {
+        origin
+    };
+    let Some((capability, path)) = uri.path().strip_prefix('/').and_then(|p| p.split_once('/'))
+    else {
+        return plain(StatusCode::NOT_FOUND, &origin);
+    };
+    if !bool::from(capability.as_bytes().ct_eq(state.capability.as_bytes())) {
+        return plain(StatusCode::NOT_FOUND, &origin);
+    }
+    let path = format!("/{path}");
+    let inline_body = uri.query() == Some("hb-body");
     let worker = state.clone();
-    let answer = tokio::task::spawn_blocking(move || serve(&worker, &path)).await;
+    let answer = tokio::task::spawn_blocking(move || serve(&worker, &path, inline_body)).await;
     let (mime, body, policy) = match answer {
         Ok(Ok(served)) => served,
         Ok(Err(status)) => return plain(status, &origin),
@@ -253,13 +286,12 @@ async fn handle(
     } else {
         Body::from(body)
     };
-    with_headers(
-        Response::new(body),
-        StatusCode::OK,
-        mime,
-        &policy.header(&origin),
-    )
-    .into_response()
+    let policy = if policy == Policy::InlineHost {
+        crate::inline::host_policy(&origin, uri.path())
+    } else {
+        policy.header(&origin)
+    };
+    with_headers(Response::new(body), StatusCode::OK, mime, &policy).into_response()
 }
 
 /// The empty document the visual check lays pages out in (no script of its own: the engine's script measures).
@@ -271,6 +303,7 @@ check</title><style>html,body{margin:0;background:#808080}iframe{display:block;b
 fn serve(
     state: &ServerState,
     uri_path: &str,
+    inline_body: bool,
 ) -> Result<(&'static str, Vec<u8>, Policy), StatusCode> {
     let (check, uri_path) = match uri_path
         .strip_prefix('/')
@@ -342,6 +375,26 @@ fn serve(
     let facts = crate::page::parse_html(&String::from_utf8_lossy(&bytes));
     let prototype =
         !facts.generated && facts.kind.as_deref() == Some(crate::handbook::format::PROTOTYPE);
+    if prototype && !check && !facts.inputs.is_empty() {
+        if !scripts {
+            return Ok((mime, bytes, Policy::Document));
+        }
+        if inline_body {
+            return Ok((
+                mime,
+                with_script(&bytes, &crate::inline::prelude()),
+                Policy::Prototype { scripts },
+            ));
+        }
+        return Ok((
+            mime,
+            crate::inline::prototype_host(
+                &String::from_utf8_lossy(&bytes),
+                facts.title.as_deref().unwrap_or("Handbook prototype"),
+            ),
+            Policy::InlineHost,
+        ));
+    }
     Ok(match (prototype, check) {
         (false, _) => (mime, bytes, Policy::Document),
         (true, false) => (mime, bytes, Policy::Prototype { scripts }),
@@ -356,6 +409,10 @@ fn serve(
 /// `page` with [`ERROR_PRELUDE`] right after its doctype (before it would switch the page to quirks mode), else at
 /// the very start.
 fn with_prelude(page: &[u8]) -> Vec<u8> {
+    with_script(page, ERROR_PRELUDE)
+}
+
+fn with_script(page: &[u8], prelude: &str) -> Vec<u8> {
     let text = String::from_utf8_lossy(page);
     let trimmed = text.trim_start_matches(['\u{feff}', ' ', '\t', '\r', '\n']);
     let lead = text.len() - trimmed.len();
@@ -367,9 +424,9 @@ fn with_prelude(page: &[u8]) -> Vec<u8> {
     } else {
         lead
     };
-    let mut out = String::with_capacity(text.len() + ERROR_PRELUDE.len());
+    let mut out = String::with_capacity(text.len() + prelude.len());
     out.push_str(&text[..at]);
-    out.push_str(ERROR_PRELUDE);
+    out.push_str(prelude);
     out.push_str(&text[at..]);
     out.into_bytes()
 }

@@ -9,9 +9,11 @@ import { type ReactElement, useEffect, useRef, useState } from "react";
 /** Copies `text` when clicked. `label` names what is copied (for the accessible name). */
 export function CopyButton({
   text,
+  testId,
   label = "Copy",
 }: {
   text: string;
+  testId: string;
   label?: string;
 }): ReactElement {
   const [state, setState] = useState<"idle" | "copied" | "failed">("idle");
@@ -45,6 +47,7 @@ export function CopyButton({
         : `${label} (copy failed; try again)`;
   return (
     <button
+      data-testid={testId}
       type="button"
       className={`copy-btn${state === "idle" ? "" : ` ${state}`}`}
       aria-label={actionLabel}

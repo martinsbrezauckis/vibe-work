@@ -1,0 +1,10 @@
+{
+  "enum": [
+    "pcm",
+    "wav",
+    "mp3",
+    "flac",
+    "opus"
+  ],
+  "type": "string"
+}

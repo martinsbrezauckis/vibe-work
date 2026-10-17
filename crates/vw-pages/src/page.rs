@@ -132,7 +132,7 @@ pub struct PageFacts {
     pub relations: Vec<Relation>,
     /// Plan steps in page order.
     pub steps: Vec<Step>,
-    /// Inputs in page order (§6.6, Format 1.2; at most 50, each with at most 100 options).
+    /// Inputs in page order (§6.6, Format 1.2; at most 500, each with at most 100 options).
     #[serde(default)]
     pub inputs: Vec<Input>,
     /// Sections (elements with an id; steps by their step id) in page order.

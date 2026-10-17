@@ -34,6 +34,7 @@ export function TitleBar() {
     <header className="titlebar">
       {phone && (
         <IconButton
+          data-testid="shell.title-bar-panel-left"
           icon="panel-left"
           aria-label="Open menu"
           title="Open menu"
@@ -47,6 +48,7 @@ export function TitleBar() {
       <div className="spacer" />
       {phone ? (
         <IconButton
+          data-testid="shell.title-bar-set-overlay"
           icon="search"
           aria-label="Search sessions, messages, files and settings"
           title="Search"
@@ -56,6 +58,7 @@ export function TitleBar() {
         />
       ) : (
         <button
+          data-testid="shell.title-bar-set-overlay-2"
           type="button"
           className="search"
           // The visible label stays short enough for a 960 px window; the name says all it covers.
@@ -72,6 +75,7 @@ export function TitleBar() {
       <div className="spacer" />
       {phone && (
         <IconButton
+          data-testid="shell.title-bar-open-settings"
           icon="key-round"
           data-rail="vault-narrow"
           aria-label={TEXT.vault}
@@ -84,6 +88,7 @@ export function TitleBar() {
       )}
       {debugOn && devBuild && (
         <button
+          data-testid="shell.title-bar-open-settings-2"
           type="button"
           className="dbg"
           aria-label="Debug API on"
@@ -97,6 +102,7 @@ export function TitleBar() {
         </button>
       )}
       <IconButton
+        data-testid="shell.title-bar-close"
         id="notifications-trigger"
         icon="bell"
         aria-label="Notifications"
@@ -119,6 +125,7 @@ export function TitleBar() {
         )}
       </IconButton>
       <IconButton
+        data-testid="shell.title-bar-switch-theme"
         icon={theme === "dark" ? "sun" : "moon"}
         data-theme-switch="true"
         aria-label="Switch theme"

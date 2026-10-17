@@ -35,6 +35,7 @@ compile_error!("the e2e-script feature is for debug test builds only");
 mod access;
 mod agent_access;
 pub(crate) mod agent_tools;
+mod app_settings;
 mod attachment_save;
 mod background_output;
 mod browser;
@@ -50,8 +51,11 @@ mod browser_tab_tools;
 mod browser_tabs;
 mod browser_view;
 mod changes;
+mod changes_children;
+mod changes_effects;
 mod changes_facts;
 mod changes_ops;
+mod changes_repo;
 mod changes_slots;
 mod changes_view;
 mod channels;
@@ -63,6 +67,7 @@ mod connectors_config;
 mod connectors_project;
 mod connectors_view;
 mod core;
+mod core_viewers;
 mod default_model;
 mod dialog_texts;
 mod dictation;
@@ -77,23 +82,30 @@ mod error;
 mod event;
 mod export_md;
 mod files;
+mod files_lookup;
 mod files_read;
 pub mod files_scope;
 mod files_view;
 mod files_write;
 mod fill_grants;
 mod git_api;
+mod git_browser;
+mod git_browser_view;
+mod git_browser_watch;
 mod git_card;
 mod git_cmd;
 mod git_discovery;
 mod git_draft;
+mod git_identity;
 mod git_pr;
 mod git_publish;
 mod git_settings;
 mod git_view;
 mod handoff;
+mod helper_chat;
 mod instructions;
 mod instructions_view;
+mod key_events;
 mod key_replace;
 mod keys;
 mod left_running;
@@ -101,11 +113,17 @@ mod left_running_view;
 mod line_comments;
 mod line_comments_view;
 mod market;
+mod market_controls;
+mod market_discovery;
+mod market_local;
 mod market_project;
 mod market_view;
 mod mcp_keys;
 mod mcp_keys_config;
 mod names;
+mod network;
+mod network_test;
+mod network_view;
 mod one_ask;
 mod pages;
 mod pages_answers;
@@ -118,6 +136,8 @@ mod pages_share;
 mod pages_view;
 mod plan;
 mod plan_profile;
+mod plugin_approvals;
+mod plugin_identity;
 mod preview_pick;
 mod preview_ports;
 mod preview_view;
@@ -141,12 +161,20 @@ mod safety_view;
 mod save_file;
 mod search;
 mod search_files;
+mod search_html;
 mod search_index;
 mod search_text;
 mod search_view;
 mod secret_generate;
 mod secret_grants;
 mod secret_replace;
+mod secret_scan;
+mod secret_scan_cache;
+mod secret_scan_format;
+#[cfg(test)]
+mod secret_scan_tests;
+mod secret_scan_view;
+mod secret_scan_worker;
 mod secret_scrub;
 mod secrets;
 mod secrets_view;
@@ -154,7 +182,10 @@ mod session_end;
 mod session_export;
 mod session_folders;
 mod session_holder;
+mod session_lease;
+mod session_listing;
 mod session_processes;
+mod session_readonly;
 mod session_tools;
 mod session_tools_view;
 mod sessions;
@@ -183,12 +214,13 @@ mod worktrees_view;
 pub mod ts;
 
 pub use agent_tools::{AgentToolsConfig, BeforeStart};
+pub use app_settings::write_app_settings;
 pub use browser_view::{BrowserRequest, BrowserResult, BrowserShot};
 pub use changes_facts::path_key;
 pub use changes_slots::ChangesTestHooks;
 pub use changes_view::{
-    ChangesMode, ChangesRequest, ChangesResult, ChangesView, FolderSession, TurnChanges, TurnFile,
-    UndoPreview,
+    ChangesMode, ChangesRequest, ChangesResult, ChangesSubagent, ChangesView, FolderSession,
+    TurnChanges, TurnFile, UndoPreview,
 };
 pub use command::{Command, CommandResult, Origin};
 pub use connectors_view::{
@@ -206,12 +238,14 @@ pub use documents_view::{
 pub use error::{CoreError, ErrorCode};
 pub use event::{AlertKind, CoreEvent, SessionChange, SubagentCard};
 pub use files_read::{FileKind, FileRead, IMAGE_LIMIT, TEXT_LIMIT, fingerprint, read_file};
-pub use files_view::{FileContent, FileRefView, FilesRequest, FilesResult, MAX_RESOLVE};
+pub use files_view::{
+    FileChoice, FileContent, FileRefView, FilesRequest, FilesResult, MAX_RESOLVE,
+};
 pub use git_cmd::DEFAULT_COMMIT_MODEL;
 pub use git_view::{
-    BringPlanView, CommitPlanView, DraftSource, GitLocation, GitRepoView, GitRequest, GitResult,
-    GitSettings, GitStatusView, PrCreatedView, PrPlanView, PrSource, PrStatusView, PrVia,
-    PreparedKind, PushPlanView,
+    BringPlanView, CommitPlanView, DraftSource, GitIdentitySettings, GitIdentitySource,
+    GitLocation, GitRepoView, GitRequest, GitResult, GitSettings, GitStatusView, PrCreatedView,
+    PrPlanView, PrSource, PrStatusView, PrVia, PreparedKind, PushPlanView,
 };
 pub use instructions::InstructionsConfig;
 pub use instructions_view::{
@@ -229,14 +263,21 @@ pub use line_comments_view::{
 };
 pub use market::MarketConfig;
 pub use market_view::{
-    CategoryView, ComponentView, DroppedView, InstallProgress, InstalledView, MarketEntryView,
-    MarketRequest, MarketResult, MarketView, SessionPluginView, SkillStateView,
+    CategoryView, ComponentView, DroppedView, InstallProgress, InstalledView, LocalPluginView,
+    MarketEntryView, MarketRequest, MarketResult, MarketView, PluginServerView, SessionPluginView,
+    SkillStateView,
 };
 /// The native dialog's method name for giving an MCP server a vault secret (the host labels its buttons).
 pub use mcp_keys::METHOD as MCP_KEY_DIALOG_METHOD;
+pub use network_view::{
+    NetworkChanges, NetworkFieldView, NetworkProblem, NetworkRequest, NetworkResult,
+    NetworkTestKind, NetworkTestView, NetworkView,
+};
 pub use pages::PagesSetup;
 pub use pages_view::{PagesRequest, PagesResult, ProjectHub};
-pub use preview_view::{BusyOption, BusyPortView, PreviewRequest, PreviewResult, PreviewTarget};
+pub use preview_view::{
+    BusyOption, BusyPortView, PickTarget, PreviewRequest, PreviewResult, PreviewTarget,
+};
 pub use previews::PreviewSetup;
 pub use project_instructions_view::{
     ProjectInstructionFile, ProjectInstructionsRequest, ProjectInstructionsResult,
@@ -245,6 +286,10 @@ pub use projects_view::{ProjectView, ProjectsRequest, ProjectsResult};
 pub use resync_budget::{Budget, ResyncBudget};
 pub use safety_view::{CustomRuleView, SafetyRequest, SafetyResult, SafetyRuleView};
 pub use search_view::{FileHit, IndexStatus, MessageHit, SearchRequest, SearchResult};
+pub use secret_scan_view::{
+    SecretLeakFinding, SecretLeakName, SecretLeakState, SecretScanRequest, SecretScanSettings,
+    SecretScanStatus, SecretScanView,
+};
 pub use secrets_view::{
     EntryPermissionView, FillGrantView, GrantView, LoginPassword, LoginView, PasswordOptions,
     ProjectSecretView, SecretUseView, SecretsRequest, SecretsResult, ServerGrantView,
@@ -289,3 +334,7 @@ pub const CRATE_ROLE: &str = "core command API and its gated dispatcher";
 pub fn version() -> &'static str {
     env!("CARGO_PKG_VERSION")
 }
+
+pub use git_browser_view::{
+    GitBrowserNode, GitBrowserRequest, GitBrowserResult, GitBrowserSnapshot,
+};

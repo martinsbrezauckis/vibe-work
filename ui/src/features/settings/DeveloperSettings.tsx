@@ -5,6 +5,8 @@
  * click; in browser dev mode the switch is disabled with the reason; the token never crosses the bridge, only the
  * path of the file that holds it.
  */
+import { Button } from "../../components/Controls";
+import { PathLine } from "../../components/PathLine";
 import { type ReactElement, useEffect, useState } from "react";
 
 import { toCallError } from "../../protocol/client/types";
@@ -64,9 +66,10 @@ export function DeveloperSettings(): ReactElement {
         <span>
           Debug API
           <span className="d">
-            Lets a local agent do what you can do in Vibe Work, terminal and files included; it
-            hides known secrets where it can, but that is no guarantee. 127.0.0.1 only, with a token
-            in a file only you can read. Off by default; developer builds start with it on. While it
+            Lets a local agent do what you can do in Vibe Work, terminal and files included, and
+            answers the app&apos;s confirmations for you; only your vault stays yours. It hides
+            known secrets where it can, but that is no guarantee. 127.0.0.1 only, with a token in a
+            file only you can read. Off by default; developer builds start with it on. While it
             runs, the status bar says &quot;Debug API&quot; (developer builds also show a badge in
             the title bar).
             {debugOn && ` Now on (${reason}).`}
@@ -74,6 +77,7 @@ export function DeveloperSettings(): ReactElement {
           </span>
         </span>
         <button
+          data-testid="settings.developer-settings-switch"
           type="button"
           className="switch"
           role="switch"
@@ -87,17 +91,22 @@ export function DeveloperSettings(): ReactElement {
         <div className="check" data-setting="debug-token">
           <span>
             Token file
-            <span className="d mono" data-testid="token-file">
-              {tokenFile ?? "…"}
+            <span className="d" data-testid="token-file">
+              {tokenFile === null ? "…" : <PathLine path={tokenFile} />}
             </span>
             <span className="d">
               Agents read the token from this file. It stays the same across restarts until you
               regenerate it.
             </span>
           </span>
-          <button type="button" className="tb-btn" onClick={regenerate}>
+          <Button
+            data-testid="settings.developer-settings-tb-btn"
+            type="button"
+            small
+            onClick={regenerate}
+          >
             Regenerate token
-          </button>
+          </Button>
         </div>
       )}
     </section>

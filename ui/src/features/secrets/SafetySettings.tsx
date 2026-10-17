@@ -7,6 +7,7 @@
  * Invariants: every change goes through the core (which writes the settings file the hook reads), so the next
  * command is checked with it; the screen shows the core's answer, never its own guess.
  */
+import { Button } from "../../components/Controls";
 import { useEffect, useState } from "react";
 
 import type { SafetyResult } from "../../protocol/core";
@@ -56,7 +57,7 @@ export function SafetySettings() {
   return (
     <section aria-labelledby="safety-title">
       <h3 id="safety-title">Safety reminders</h3>
-      <p className="key-field-hint">
+      <p className="key-field-hint ui-help">
         Before an agent runs a command, Vibe Work stops these and tells the agent why and what to do
         instead. They are reminders against mistakes, not a sandbox: the agent works as you. Git
         (force push, reset --hard, clean, deleting branches in your own folder) is handled by the
@@ -68,9 +69,10 @@ export function SafetySettings() {
         </p>
       )}
       {view?.rules.map((r) => (
-        <div className="check" key={r.id} data-setting={`safety-${r.id}`}>
+        <div data-item-id={r.id} className="check" key={r.id} data-setting={`safety-${r.id}`}>
           <span>{r.label}</span>
           <button
+            data-testid="secrets.safety-settings-change"
             type="button"
             className="switch"
             role="switch"
@@ -90,18 +92,20 @@ export function SafetySettings() {
         </p>
       )}
       {view?.custom.map((c) => (
-        <div className="check" key={c.id} data-custom-rule={c.id}>
+        <div data-item-id={c.id} className="check" key={c.id} data-custom-rule={c.id}>
           <span>A command that contains “{c.text}”</span>
-          <button
+          <Button
+            variant="danger"
+            data-testid="secrets.safety-settings-change-2"
             type="button"
-            className="tb-btn"
+            small
             disabled={busy}
             onClick={() => {
               change({ op: "removeCustom", id: c.id });
             }}
           >
             Remove
-          </button>
+          </Button>
         </div>
       ))}
       <form
@@ -119,6 +123,7 @@ export function SafetySettings() {
           <label htmlFor="safety-text">Stop a command that contains</label>
           <div className="key-field-row">
             <input
+              data-testid="secrets.safety-settings-set-text"
               id="safety-text"
               value={text}
               maxLength={200}
@@ -130,9 +135,14 @@ export function SafetySettings() {
             />
           </div>
         </div>
-        <button type="submit" className="tb-btn" disabled={busy || text.trim() === ""}>
+        <Button
+          data-testid="secrets.safety-settings-tb-btn"
+          type="submit"
+          small
+          disabled={busy || text.trim() === ""}
+        >
           Add rule
-        </button>
+        </Button>
       </form>
       {error !== null && (
         <p className="key-problem" role="alert">

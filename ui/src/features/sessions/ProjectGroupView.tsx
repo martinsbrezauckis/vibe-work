@@ -11,6 +11,7 @@
  * the column (`listDrop.ts`), which reads `data-drop-key` / `data-drop-id`. The compact chat-plus action and menu
  * share the project start path, which selects the new chat, expands its group and focuses its composer.
  */
+import { TEXT } from "../../vocabulary";
 import { useState } from "react";
 
 import { Icon } from "../../components/Icon";
@@ -22,7 +23,7 @@ import { dragProject } from "./dnd";
 import { useDropMark } from "./listDrop";
 import type { ProjectGroup } from "./listModel";
 import { RenameField } from "./RenameField";
-import { type MenuItem, RowMenu } from "./RowMenu";
+import { type MenuItem, RowMenu } from "../../components/RowMenu";
 import { SessionRows } from "./SessionRows";
 import { TrustDialog } from "./TrustDialog";
 import { useGroupActions, useGroups } from "./useGroups";
@@ -90,7 +91,7 @@ export function ProjectGroupView({
   const items: MenuItem[] = [
     {
       id: "new",
-      label: id === null ? "New session here" : "New chat in this project",
+      label: id === null ? "New session here" : `${TEXT.newChat} in this project`,
       run: newHere,
       disabled: id === null && path === null,
     },
@@ -128,6 +129,7 @@ export function ProjectGroupView({
 
   return (
     <div
+      data-item-id={group.key}
       className="proj"
       hidden={shown === null}
       data-open={open}
@@ -138,6 +140,7 @@ export function ProjectGroupView({
       data-drop={drop}
     >
       <div
+        data-testid="sessions.project-group-view-proj-bar"
         className="proj-bar"
         draggable={id !== null && groups !== null && !renaming}
         onDragStart={(e) => {
@@ -167,6 +170,7 @@ export function ProjectGroupView({
           </div>
         ) : (
           <button
+            data-testid="sessions.project-group-view-toggle-project"
             type="button"
             className="proj-h"
             aria-expanded={open}
@@ -219,15 +223,17 @@ export function ProjectGroupView({
         )}
         {id !== null && (
           <IconButton
+            data-testid="sessions.project-group-view-proj-new-chat"
             icon="message-square-plus"
             iconSize={14}
-            label={`New chat in ${group.name}`}
+            label={`${TEXT.newChat} in ${group.name}`}
             className="proj-new-chat"
             disabled={groups === null}
             onClick={newHere}
           />
         )}
         <button
+          data-testid="sessions.project-group-view-get-bounding-client-rect"
           type="button"
           className="srow-more"
           title="Project actions"
@@ -258,13 +264,19 @@ export function ProjectGroupView({
           <div className="proj-empty">
             <span>
               No sessions here. Drag sessions here, or{" "}
-              <button type="button" className="link-btn" onClick={newHere}>
+              <button
+                data-testid="sessions.project-group-view-link-btn"
+                type="button"
+                className="link-btn"
+                onClick={newHere}
+              >
                 start one
               </button>
               .
             </span>
             {path === null && (
               <button
+                data-testid="sessions.project-group-view-choose-folder"
                 type="button"
                 className="link-btn"
                 onClick={() => void groups?.chooseFolder(id)}

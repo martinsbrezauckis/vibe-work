@@ -8,6 +8,8 @@
 //!   (10,000 entries / 256 MiB per plugin) never copies it;
 //! - `vw-market/.staging/<id>.<unique>/` – a plugin being built, one fresh folder per install (outside `plugins/`, so
 //!   Vibe never loads half a plugin);
+//! - `vw-market/.aside/<id>/` – the previous install until its replacement is in place; startup restores it if
+//!   `plugins/<id>/` is missing, otherwise deletes it;
 //! - `vw-market/.trash/` – a removed plugin on its way out (a rename first, so it disappears from `plugins/` at once).
 //!
 //! Depends on: `serde_json`, `std::fs`. Called by: `install`, vw-core-api.
@@ -86,6 +88,37 @@ impl Store {
 
     fn trash_dir(&self) -> PathBuf {
         self.home.join("vw-market").join(".trash")
+    }
+
+    fn aside_root(&self) -> PathBuf {
+        self.home.join("vw-market").join(".aside")
+    }
+
+    /// Finishes interrupted updates before Vibe starts: restore an aside when no install exists, otherwise delete it.
+    ///
+    /// # Errors
+    /// [`MarketError::InvalidId`] for an invalid aside name; I/O errors leave the aside for the next startup.
+    pub fn recover_updates(&self) -> Result<(), MarketError> {
+        let entries = match std::fs::read_dir(self.aside_root()) {
+            Ok(entries) => entries,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(error) => return Err(MarketError::io("read the previous installs", error)),
+        };
+        std::fs::create_dir_all(self.plugins_dir())
+            .map_err(|e| MarketError::io("create plugins/", e))?;
+        for entry in entries {
+            let entry = entry.map_err(|e| MarketError::io("read the previous installs", e))?;
+            let id = entry.file_name().to_string_lossy().into_owned();
+            let target = self.plugin_dir(&id)?;
+            if target.exists() || target.is_symlink() {
+                remove_tree(&entry.path())
+                    .map_err(|e| MarketError::io("delete the old plugin", e))?;
+            } else {
+                std::fs::rename(entry.path(), target)
+                    .map_err(|e| MarketError::io("restore the old plugin", e))?;
+            }
+        }
+        Ok(())
     }
 
     /// Creates a fresh, empty staging folder for one install of `id` (`vw-market/.staging/<id>.<unique>/`). The leaf
@@ -203,19 +236,34 @@ impl Store {
         })
     }
 
-    /// Moves the finished `staging` folder of `id` into `plugins/`, replacing an older install of ours.
+    /// Moves the finished `staging` folder of `id` into `plugins/`, keeping the previous install aside until success.
     ///
     /// # Errors
     /// [`MarketError::InvalidId`]; [`MarketError::Foreign`] when a folder of that name is not ours; I/O errors.
     pub fn commit(&self, id: &str, staging: &Path) -> Result<(), MarketError> {
-        self.receipt(id)?;
+        let replacing = self.receipt(id)?.is_some();
         std::fs::create_dir_all(self.plugins_dir())
             .map_err(|e| MarketError::io("create plugins/", e))?;
         let target = self.plugin_dir(id)?;
-        if target.exists() {
-            self.discard(id)?;
+        let aside = self.aside_root().join(id);
+        if replacing {
+            std::fs::create_dir_all(self.aside_root())
+                .map_err(|e| MarketError::io("create the previous installs folder", e))?;
+            std::fs::rename(&target, &aside)
+                .map_err(|e| MarketError::io("move the old plugin aside", e))?;
         }
-        std::fs::rename(staging, &target).map_err(|e| MarketError::io("move into plugins/", e))
+        if let Err(error) = std::fs::rename(staging, &target) {
+            if replacing {
+                std::fs::rename(&aside, &target)
+                    .map_err(|e| MarketError::io("restore the old plugin", e))?;
+            }
+            return Err(MarketError::io("move into plugins/", error));
+        }
+        if replacing && let Err(error) = remove_tree(&aside) {
+            // The new plugin is installed; a cleanup failure must not report a failed update. Startup retries it.
+            tracing::warn!(id, %error, "marketplace: installed; the old plugin remains aside");
+        }
+        Ok(())
     }
 
     /// Removes the installed plugin `id` (and its data folder when `with_data`).

@@ -17,12 +17,14 @@ impl KeyService {
     /// Vault read failures or malformed default records are refused.
     pub async fn entry_defaults(&self) -> Result<BTreeMap<String, EntryPermission>, KeyError> {
         let vault = self.vault();
-        let items = blocking(move || vault.list_items()).await??;
+        let items = blocking(move || vault.list_items_strict())
+            .await?
+            .map_err(KeyError::permissions_unreadable)?;
         let mut defaults = BTreeMap::new();
         for item in &items {
             if item.id.starts_with(entry_permission::DEFAULT_ID_PREFIX) {
                 let policy = entry_permission::default_from_item(item)
-                    .ok_or(KeyError::InvalidSecret("invalid entry default record"))?;
+                    .ok_or(KeyError::PermissionsUnreadable)?;
                 defaults.insert(policy.entry_id, policy.permission);
             }
         }
@@ -39,13 +41,15 @@ impl KeyService {
     ) -> Result<(EntryPermission, i64), KeyError> {
         let id = entry_permission::default_id_for(entry_id);
         let vault = self.vault();
-        let item = blocking(move || vault.read_item(&id)).await??;
+        let item = blocking(move || vault.read_item(&id))
+            .await?
+            .map_err(KeyError::permissions_unreadable)?;
         match item {
             None => Ok((EntryPermission::AskEachTime, 0)),
             Some(item) => entry_permission::default_from_item(&item)
                 .filter(|p| p.entry_id == entry_id)
                 .map(|p| (p.permission, p.changed_ms))
-                .ok_or(KeyError::InvalidSecret("invalid entry default record")),
+                .ok_or(KeyError::PermissionsUnreadable),
         }
     }
 

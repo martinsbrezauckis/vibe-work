@@ -130,6 +130,17 @@ macro_rules! p2_add {
         }
     };
 }
+/// A confirmed row whose check is the proxy-settings rule (`proxy_write`): the generated type plus the value
+/// rules, so a refused value never reaches the native dialog.
+macro_rules! p2_proxy {
+    ($m:literal, $t:ident) => {
+        Row {
+            method: $m,
+            class: Class::Confirmed,
+            check: Some(crate::proxy_write::check_write::<request::$t>),
+        }
+    };
+}
 macro_rules! deny {
     ($m:literal, $r:ident) => {
         Row {
@@ -170,7 +181,7 @@ static TABLE: &[Row] = &[
     deny!("config/effective/read", NoEvidence),
     fwd!("config/fields/read", ConfigFieldsRead),
     fwd!("config/proxy/read", ConfigProxyRead),
-    p2!("config/proxy/write", ConfigProxyWrite),
+    p2_proxy!("config/proxy/write", ConfigProxyWrite),
     p1!("config/model/write", ModelWrite),
     fwd!("config/read", ConfigRead),
     fwd!("config/reload", ConfigReload),

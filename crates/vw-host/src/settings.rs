@@ -86,12 +86,18 @@ impl HostSettings {
     /// # Errors
     /// The I/O error when the folder or file cannot be written.
     pub fn save(&self, path: &Path) -> std::io::Result<()> {
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)?;
+        let fields = serde_json::to_value(self).map_err(std::io::Error::other)?;
+        let serde_json::Value::Object(mut fields) = fields else {
+            return Err(std::io::Error::other("app settings must be an object"));
+        };
+        for key in [
+            "debugApi",
+            "terminalsPerSession",
+            "shareCliSessions",
+            "autoDownload",
+        ] {
+            fields.entry(key).or_insert(serde_json::Value::Null);
         }
-        let temp = path.with_extension("json.tmp");
-        let text = serde_json::to_vec_pretty(self).map_err(std::io::Error::other)?;
-        std::fs::write(&temp, text)?;
-        std::fs::rename(&temp, path)
+        vw_core_api::write_app_settings(path, fields)
     }
 }

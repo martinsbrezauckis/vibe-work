@@ -76,12 +76,13 @@ export function useCopyForm(
     on: boolean;
   } | null>(null);
   const newChatRequest = useStore(worktrees?.store ?? NO_WORKTREES, (s) => s.newChatRequest);
+  const requestedCopy = useStore(worktrees?.store ?? NO_WORKTREES, (s) => s.newChatCopy);
   const options = found !== null && found.folder === folder ? found.options : null;
   const existingBranch = options?.existingBranch ?? null;
   const on =
     choice?.folder === folder && choice.request === newChatRequest
       ? choice.on
-      : copyByDefault(othersLive, rememberedChoice(), existingBranch !== null);
+      : (requestedCopy ?? copyByDefault(othersLive, rememberedChoice(), existingBranch !== null));
   const [base, setBase] = useState("");
   const [message, setMessage] = useState("");
   const [branch, setBranchState] = useState("");

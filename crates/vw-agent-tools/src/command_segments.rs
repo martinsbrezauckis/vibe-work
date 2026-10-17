@@ -1,17 +1,35 @@
 //! Literal command segments shared by the Git and process guardrails.
 //! Depends on no shell parser. Called by `gitparse` and `killparse`.
 //!
-//! This intentionally knows only five separators. Quotes, substitutions, here-documents and
-//! scripts are ordinary bytes, not nested command languages.
+//! Separators inside quotes are data. Substitutions, here-documents and scripts are not interpreted
+//! as nested command languages; the other shell readings cover executable names and argument quoting.
 
-/// Split at literal `;`, `&&`, `||`, `|` and newlines, then split each piece on whitespace.
+/// Split at unquoted `;`, `&&`, `||`, `|` and newlines, then split each piece on whitespace.
 #[must_use]
 pub fn segments(command: &str) -> Vec<Vec<&str>> {
     let bytes = command.as_bytes();
     let mut start = 0;
     let mut parts = Vec::new();
     let mut at = 0;
+    let mut quote = None;
     while at < bytes.len() {
+        if matches!(bytes[at], b'\'' | b'"') && (quote.is_none() || quote == Some(bytes[at])) {
+            quote = if quote.is_none() {
+                Some(bytes[at])
+            } else {
+                None
+            };
+            at += 1;
+            continue;
+        }
+        if bytes[at] == b'\\' && quote != Some(b'\'') {
+            at += 2;
+            continue;
+        }
+        if quote.is_some() {
+            at += 1;
+            continue;
+        }
         let step = match bytes[at] {
             b';' | b'\n' | b'|' => {
                 if bytes[at] == b'|' && bytes.get(at + 1) == Some(&b'|') {

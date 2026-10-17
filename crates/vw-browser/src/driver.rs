@@ -454,16 +454,18 @@ impl Browser {
             console: console0,
             refused: refused0,
         };
-        self.receipt(session_id, base, result, page_target).await
+        self.receipt(session_id, action, base, result, page_target)
+            .await
     }
 
     /// Settles, observes again and builds the receipt of an action against `base` (the page before it).
     async fn receipt(
         &self,
         session_id: &str,
+        action: &Action,
         base: Baseline,
-        result: Value,
-        page_target: Value,
+        mut result: Value,
+        mut page_target: Value,
     ) -> Result<Value, ActError> {
         let Baseline {
             before,
@@ -472,6 +474,8 @@ impl Browser {
             refused: refused0,
         } = base;
         let dialogs = self.settle(session_id, loads_before).await;
+        self.prove_receipt(session_id, action, &mut result, &mut page_target)
+            .await?;
         let after = self
             .observe(
                 session_id,
@@ -581,6 +585,8 @@ impl Browser {
         let mut request = action
             .page_request(&page)
             .ok_or_else(|| failed("this action does not run in the page"))?;
+        // Submission is a separate authorized Enter after the settled field proves the requested text.
+        request["submit"] = json!(false);
         request["nativeUser"] = json!(by == Actor::User);
         request["nativeClick"] = json!(
             by != Actor::User
@@ -623,7 +629,16 @@ impl Browser {
                 tokio::time::sleep(POLL).await;
                 continue;
             }
-            let mut answer = crate::answers::interpret(answer, action)?;
+            // A controlled control may accept the change asynchronously; prove it after settling, without retrying input.
+            let mut answer = if answer.status == "unmet"
+                && matches!(
+                    action,
+                    Action::Check { .. } | Action::Select { .. } | Action::Type { .. }
+                ) {
+                answer
+            } else {
+                crate::answers::interpret(answer, action)?
+            };
             if request["nativeClick"] == true {
                 if let Some(point) = answer.native_point {
                     let mount = mount.as_ref().ok_or_else(|| refused(PAGE_CLOSED))?;
@@ -637,13 +652,18 @@ impl Browser {
                                 refused(crate::native_focus::FOCUS_REQUEST)
                             } else { refused(preview_text(&error)) }
                         })?;
-                    // A native check reports its post-input state in the ensuing observation/receipt.
+                    // The ensuing receipt proves a native check's post-input state after settling.
                     answer.checked = None;
                 } else if !matches!(action, Action::Check { .. }) {
                     return Err(refused(
                         "Not run: the page did not provide native click geometry",
                     ));
                 }
+            }
+            if matches!(action, Action::Type { submit: true, .. }) {
+                answer = self
+                    .submit_checked_text(session_id, action, &request, by)
+                    .await?;
             }
             return Ok(answer);
         }
@@ -652,6 +672,17 @@ impl Browser {
     /// Waits for the page to settle after an action: a load it started (bounded), else a quiet DOM. Returns the
     /// dialogs the page environment answered meanwhile.
     async fn settle(&self, session_id: &str, loads_before: u64) -> Vec<Value> {
+        self.wait_quiet(session_id, loads_before).await;
+        self.probe(session_id, None, None, true)
+            .await
+            .and_then(|p| p["dialogs"].as_array().cloned())
+            .unwrap_or_default()
+            .into_iter()
+            .take(5)
+            .collect()
+    }
+
+    pub(crate) async fn wait_quiet(&self, session_id: &str, loads_before: u64) {
         let start = tokio::time::Instant::now();
         let mut last = None;
         let mut quiet_since = tokio::time::Instant::now();
@@ -676,13 +707,6 @@ impl Browser {
             }
             tokio::time::sleep(POLL).await;
         }
-        self.probe(session_id, None, None, true)
-            .await
-            .and_then(|p| p["dialogs"].as_array().cloned())
-            .unwrap_or_default()
-            .into_iter()
-            .take(5)
-            .collect()
     }
 
     async fn probe(

@@ -159,7 +159,7 @@ pub fn fingerprint(files: &[CommitFile]) -> String {
 /// The author git would write (`git var GIT_AUTHOR_IDENT` without the date), or why there is none.
 ///
 /// # Errors
-/// `Blocked` when git has no name or email for the user (the text says how to set them).
+/// `Blocked` when git has no name or email for the user.
 pub fn author(root: &Path) -> Result<String, GitError> {
     let out = Call::new(root, Index::User)
         .profile(Profile::Worktree)
@@ -168,8 +168,7 @@ pub fn author(root: &Path) -> Result<String, GitError> {
         .output()?;
     if !out.ok() {
         return Err(GitError::Blocked(
-            "git does not know your name and email yet. Set them once in a terminal: git config --global \
-             user.name \"Your Name\" and git config --global user.email you@example.com"
+            "Enter your name and email in the Commit dialog. They are saved for this repository."
                 .to_owned(),
         ));
     }

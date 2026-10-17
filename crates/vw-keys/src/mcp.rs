@@ -20,8 +20,14 @@ impl KeyService {
     /// [`KeyError::Vault`] (locked, storage).
     pub async fn mcp_bindings(&self) -> Result<Vec<McpBinding>, KeyError> {
         let vault = self.vault();
-        let items = blocking(move || vault.list_items()).await??;
-        let mut out: Vec<McpBinding> = items.iter().filter_map(mcp_binding::from_item).collect();
+        let items = blocking(move || vault.list_items_strict())
+            .await?
+            .map_err(KeyError::permissions_unreadable)?;
+        let mut out: Vec<McpBinding> = items
+            .iter()
+            .filter(|item| item.id.starts_with(vw_vault::mcp_binding::ID_PREFIX))
+            .map(|item| mcp_binding::from_item(item).ok_or(KeyError::PermissionsUnreadable))
+            .collect::<Result<_, _>>()?;
         out.sort_by(|a, b| a.server.cmp(&b.server));
         Ok(out)
     }

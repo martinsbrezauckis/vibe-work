@@ -5,6 +5,7 @@
  * Invariants: process names, output lines, URLs and file names are untrusted text and only ever shown as text;
  * stopping a process is offered only where the core's explanation offers it (one of our sessions' processes).
  */
+import { TEXT } from "../../vocabulary";
 import type { ReactElement } from "react";
 
 import type { BusyOption, BusyPortView, PreviewTarget, PreviewView } from "../../protocol/core";
@@ -31,6 +32,7 @@ function TargetRow({
   const tip = target.pid === null ? undefined : `Process id ${String(target.pid)}`;
   return (
     <li
+      data-item-id={target.port}
       className="preview-target"
       data-port={target.port}
       data-listening={target.listening}
@@ -40,7 +42,13 @@ function TargetRow({
       <span className="preview-who" title={tip}>
         {who}
       </span>
-      <button type="button" className="preview-btn" disabled={busy} onClick={onOpen}>
+      <button
+        data-testid="preview.servers-preview-btn"
+        type="button"
+        className="preview-btn"
+        disabled={busy}
+        onClick={onOpen}
+      >
         {shown ? "Open again" : "Open"}
       </button>
     </li>
@@ -100,6 +108,8 @@ function BusyRow({
       <span className="preview-options">
         {item.options.map((option) => (
           <button
+            data-testid="preview.servers-act"
+            data-item-id={optionLabel(option)}
             key={optionLabel(option)}
             type="button"
             className="preview-btn"
@@ -179,7 +189,7 @@ export function Servers({
         </ul>
       )}
       {running.length > 0 ? (
-        <ul aria-label="This session's servers" className="preview-targets">
+        <ul aria-label={`${TEXT.thisSession}'s servers`} className="preview-targets">
           {running.map((t) => (
             <TargetRow
               key={t.port}
@@ -192,7 +202,7 @@ export function Servers({
         </ul>
       ) : emptyState && (list.preview?.url ?? null) === null ? (
         <p className="empty">
-          No server of this session is running. Ask the agent to start one; its ports are{" "}
+          No server of this session is running. Ask Vibe to start one; its ports are{" "}
           {free.map((t) => t.port).join(", ") || "not leased yet"}.
         </p>
       ) : null}

@@ -1,6 +1,6 @@
 /**
  * The end-of-session choice for a session's copy: after archive or delete (or from the startup
- * list), "Keep the worktree" or "Remove it", with what removing discards shown first: every item with unsaved
+ * list), "Keep the copy" or "Remove it", with what removing discards shown first: every item with unsaved
  * work (changed, new, ignored but not build output, nested repositories; scrollable), the build output count,
  * commits no other branch holds (they stay on the kept branch), stashes made on it, and what happens to the
  * branch. A copy that cannot be removed here says why and offers Keep only. Every origin gets the full lists, including Debug API requests.
@@ -9,6 +9,8 @@
  * Invariants: nothing is removed without a click on the remove button, whose label says how many items it
  * discards; the native dialog asks again with the names (the core). Names are text, never markup.
  */
+import { PathLine } from "../../components/PathLine";
+import { Button } from "../../components/Controls";
 import { type ReactElement, useRef } from "react";
 
 import { useModalFocus } from "../../hooks/useModalFocus";
@@ -25,7 +27,7 @@ function Body({ worktrees }: { worktrees: Worktrees }): ReactElement | null {
   const build = buildLine(inspection);
   return (
     <>
-      {inspection.path !== null && <p className="mono wt-path">{inspection.path}</p>}
+      {inspection.path !== null && <PathLine className="wt-path" path={inspection.path} />}
       {endSummary(inspection).map((line) => (
         <p key={line}>{line}</p>
       ))}
@@ -85,12 +87,12 @@ export function EndDialog(): ReactElement | null {
     files === 0
       ? "Remove it"
       : `Remove it and discard ${String(files)} unsaved item${files === 1 ? "" : "s"}`;
-  const title =
-    end.after === "startup" ? "A copy from a deleted session" : "Keep this session's copy?";
+  const title = end.after === "startup" ? "Review this copy" : "Keep this session's copy?";
   return (
     <>
       <div className="scrim" />
       <div
+        data-testid="worktrees.end-dialog-modal"
         className="modal"
         role="dialog"
         aria-modal="true"
@@ -107,23 +109,26 @@ export function EndDialog(): ReactElement | null {
         </section>
         <footer className="modal-actions">
           <button
+            data-testid="worktrees.end-dialog-keep"
             type="button"
             className="tb-btn"
             data-dialog-initial-focus="true"
             disabled={end.busy}
             onClick={() => void worktrees.keep()}
           >
-            Keep the worktree
+            Keep the copy
           </button>
-          <button
+          <Button
+            data-testid="worktrees.end-dialog-remove"
             type="button"
-            className="btn-danger"
+            small
+            variant="danger"
             data-action="remove"
             disabled={!canRemove}
             onClick={() => void worktrees.remove()}
           >
             {removeLabel}
-          </button>
+          </Button>
         </footer>
       </div>
     </>

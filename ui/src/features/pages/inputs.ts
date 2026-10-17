@@ -10,6 +10,26 @@
 import type { AnswerValue, InputAnswer, PageAnswers } from "../../protocol/core";
 import type { Chip } from "./model";
 
+/** Keeps unchanged input objects across native answer snapshots, so a large panel updates only changed controls. */
+export function reuseAnswers(previous: PageAnswers | null, next: PageAnswers): PageAnswers {
+  if (previous === null || previous.page !== next.page) return next;
+  const existing = new Map(previous.inputs.map((item) => [item.input.id, item]));
+  const inputs = next.inputs.map((item) => {
+    const old = existing.get(item.input.id);
+    return old !== undefined && JSON.stringify(old) === JSON.stringify(item) ? old : item;
+  });
+  if (
+    inputs.length === previous.inputs.length &&
+    inputs.every((item, i) => item === previous.inputs[i]) &&
+    next.title === previous.title &&
+    next.answered === previous.answered &&
+    next.unsent === previous.unsent &&
+    JSON.stringify(next.detached) === JSON.stringify(previous.detached)
+  )
+    return previous;
+  return { ...next, inputs };
+}
+
 /** The option ids a control shows as chosen, ticked or in rank order (rank: the page's order until answered). */
 export function chosen(item: InputAnswer): string[] {
   const value = item.answer?.value;

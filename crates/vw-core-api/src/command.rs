@@ -17,12 +17,14 @@ use crate::changes_view::{ChangesRequest, ChangesResult};
 use crate::connectors_view::{ConnectorsRequest, ConnectorsResult};
 use crate::documents_view::{DocumentsRequest, DocumentsResult};
 use crate::files_view::{FilesRequest, FilesResult};
+use crate::git_browser_view::{GitBrowserRequest, GitBrowserResult};
 use crate::git_view::{GitRequest, GitResult};
 use crate::instructions_view::{InstructionsRequest, InstructionsResult};
 use crate::keys::{KeyCandidateView, KeyRequest, KeyStatusView, VibeKeyView};
 use crate::left_running_view::{ProcessesRequest, ProcessesResult};
 use crate::line_comments_view::{LineCommentsRequest, LineCommentsResult};
 use crate::market_view::{MarketRequest, MarketResult};
+use crate::network_view::{NetworkRequest, NetworkResult};
 use crate::pages_view::{PagesRequest, PagesResult};
 use crate::preview_view::{PreviewRequest, PreviewResult};
 use crate::project_instructions_view::{ProjectInstructionsRequest, ProjectInstructionsResult};
@@ -249,8 +251,8 @@ pub enum Command {
         confirmation_token: Option<String>,
     },
     /// Tells the core which session this client's main view shows (`None`: none). A viewed session
-    /// keeps its channel open however long it is idle (`CoreConfig::channel_idle_close`).
-    /// No server call.
+    /// attaches and restores its access mode immediately, then keeps its channel open however long
+    /// it is idle (`CoreConfig::channel_idle_close`).
     ViewSession {
         /// The shown session.
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -396,6 +398,11 @@ pub enum Command {
         /// What to do.
         request: WorktreesRequest,
     },
+    /// Read or watch the saved project's repository tree.
+    GitBrowser {
+        /// Project browser request.
+        request: GitBrowserRequest,
+    },
     /// The outer git loop of the Changes tab: the branch bar, Commit, Push, pull requests, the PR
     /// card, "Bring into main", per-project settings. Push, a PR made with gh and Bring in ask the window's native
     /// dialog naming what happens (the Debug API is not asked).
@@ -417,11 +424,22 @@ pub enum Command {
         /// What to do.
         request: SecretsRequest,
     },
+    /// App-owned session log scan settings and actions, without secret values.
+    SecretScan {
+        /// Scanner operation.
+        request: crate::SecretScanRequest,
+    },
     /// Safety reminders: the rules the agent's commands are checked against, switched on
     /// or off, and the user's own rules.
     Safety {
         /// What to do.
         request: SafetyRequest,
+    },
+    /// Settings > Network: the proxy and certificate settings Vibe keeps (`config/proxy/read|write`), a test of the
+    /// way to Mistral with them, and saving a change (always with the native confirmation).
+    Network {
+        /// What to do.
+        request: NetworkRequest,
     },
     /// The Debug API's "Choose folder": records `path` as a folder the user chose, like a pick in
     /// the native dialog (only such folders can be trusted, hold extra workspace roots or get a worktree copy).
@@ -493,10 +511,13 @@ impl Command {
             Self::Connectors { .. } => "connectors",
             Self::Marketplace { .. } => "marketplace",
             Self::Worktrees { .. } => "worktrees",
+            Self::GitBrowser { .. } => "gitBrowser",
             Self::Git { .. } => "git",
             Self::Processes { .. } => "processes",
             Self::Secrets { .. } => "secrets",
+            Self::SecretScan { .. } => "secretScan",
             Self::Safety { .. } => "safety",
+            Self::Network { .. } => "network",
             Self::PickFolder { .. } => "pickFolder",
             Self::SessionTools { .. } => "sessionTools",
             Self::Search { .. } => "search",
@@ -671,6 +692,11 @@ pub enum CommandResult {
         /// The worktree request's answer.
         result: WorktreesResult,
     },
+    /// `gitBrowser`.
+    GitBrowser {
+        /// Project browser answer.
+        result: GitBrowserResult,
+    },
     /// `git`.
     Git {
         /// The git request's answer.
@@ -686,10 +712,22 @@ pub enum CommandResult {
         /// The secrets request's answer.
         result: SecretsResult,
     },
+    /// Session log settings, status and retained findings.
+    SecretScan {
+        /// Value-free scanner view.
+        view: crate::SecretScanView,
+        /// File paths for Developer error detail only; absent from finding events and the bell.
+        file_errors: Vec<String>,
+    },
     /// `safety`.
     Safety {
         /// The safety settings after the request.
         result: SafetyResult,
+    },
+    /// `network`.
+    Network {
+        /// The network settings, a test result or the problems found.
+        result: NetworkResult,
     },
     /// `sessionTools`.
     SessionTools {

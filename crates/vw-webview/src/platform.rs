@@ -515,7 +515,8 @@ pub(crate) async fn sign_out_provider(
 
 /// A PNG of what the webview shows, or (`full`: the CSS size, capped by the caller) of the whole document in one render
 /// only `WebView2`, through `DevTools` `captureBeyondViewport` with a clip of exactly that size, so the
-/// image is bounded on our side. Linux and macOS answer `Unsupported` (the caller stitches viewport shots):
+/// image is bounded on our side (at the preview's page zoom the clip is corrected so the page still fills the image
+/// one device pixel per CSS pixel: `vw_platform::webview::full_clip`). Linux and macOS answer `Unsupported` (the caller stitches viewport shots):
 /// `WebKitGTK`'s `FullDocument` snapshot sizes itself from the document whatever we ask (real app: a
 /// 32,000 x 32,000 px page raised the app's memory peak from 311 MB to 1.72 GB,
 /// `.scratch/b16b/falsifier-review-2-oneRender.log`).

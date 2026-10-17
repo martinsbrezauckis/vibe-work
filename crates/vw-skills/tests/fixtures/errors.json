@@ -1,0 +1,50 @@
+[
+  {
+    "method": "skills/import",
+    "error": {
+      "code": "invalid_params",
+      "message": "no authenticated Mistral endpoint available",
+      "data": null
+    }
+  },
+  {
+    "method": "skills/setEnabled",
+    "error": {
+      "code": "invalid_params",
+      "message": "'review' is fixed by configuration and cannot be toggled here",
+      "data": null
+    }
+  },
+  {
+    "method": "skills/remove",
+    "error": {
+      "code": "conflict",
+      "message": "Session is busy running turn turn-test",
+      "data": null
+    }
+  },
+  {
+    "method": "skills/import",
+    "error": {
+      "code": "forbidden",
+      "message": "Access denied",
+      "data": null
+    }
+  },
+  {
+    "method": "skills/list",
+    "error": {
+      "code": "method_not_found",
+      "message": "Unknown method",
+      "data": null
+    }
+  },
+  {
+    "method": "skills/list",
+    "error": {
+      "code": "internal_error",
+      "message": "Failed to read skills",
+      "data": null
+    }
+  }
+]

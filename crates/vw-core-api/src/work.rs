@@ -196,6 +196,9 @@ pub(crate) fn keys(shared: &Shared) -> Result<Arc<KeyService>, CoreError> {
 pub(crate) fn failure(error: &WorkFailure) -> CoreError {
     let (code, server) = match error {
         WorkFailure::KeyNeeded(_) => (ErrorCode::KeyService, "keyNeeded"),
+        WorkFailure::Work(vw_mistral::work::WorkError::InvalidParams(_)) => {
+            (ErrorCode::InvalidParams, "input")
+        }
         WorkFailure::Work(_) => (ErrorCode::ServerError, "work"),
     };
     let mut e = CoreError::new(code, error.to_string());
@@ -425,12 +428,21 @@ pub(crate) async fn libraries(
     shared: &Shared,
     request: LibrariesRequest,
 ) -> Result<CommandResult, CoreError> {
+    validate_library_ids(&request)?;
     let keys = keys(shared)?;
     let result = match request {
         LibrariesRequest::List {} => {
             let list = keys.libraries().await.map_err(|e| failure(&e))?;
+            if let Some(message) = &list.partial {
+                shared.emit(crate::event::CoreEvent::Alert {
+                    session_id: None,
+                    kind: crate::event::AlertKind::LibraryListPartial,
+                    message: message.clone(),
+                });
+            }
             LibrariesResult::List {
                 libraries: list
+                    .libraries
                     .into_iter()
                     .map(|l| {
                         let scope = shared.work.scope_of(&l.id);
@@ -438,6 +450,7 @@ pub(crate) async fn libraries(
                     })
                     .collect(),
                 costs: library_costs(),
+                partial: list.partial,
             }
         }
         LibrariesRequest::Upload { library_id, files } => {
@@ -470,6 +483,39 @@ pub(crate) async fn libraries(
         other => manage(shared, &keys, other).await?,
     };
     Ok(CommandResult::Libraries { result })
+}
+
+/// Caller ids are checked before reading keys, requesting grants, or sending provider work.
+fn validate_library_ids(request: &LibrariesRequest) -> Result<(), CoreError> {
+    let check = |id: &str| {
+        vw_mistral::work::libraries::id_segment(id)
+            .map(|_| ())
+            .map_err(|error| invalid(error.to_string()))
+    };
+    match request {
+        LibrariesRequest::SetScope { library_id, .. }
+        | LibrariesRequest::Delete { library_id }
+        | LibrariesRequest::Documents { library_id }
+        | LibrariesRequest::Upload { library_id, .. } => check(library_id),
+        LibrariesRequest::DeleteDocument {
+            library_id,
+            document_id,
+        }
+        | LibrariesRequest::Text {
+            library_id,
+            document_id,
+        } => {
+            check(library_id)?;
+            check(document_id)
+        }
+        LibrariesRequest::Ask { library_ids, .. } => {
+            for id in library_ids {
+                check(id)?;
+            }
+            Ok(())
+        }
+        LibrariesRequest::List {} | LibrariesRequest::Create { .. } => Ok(()),
+    }
 }
 
 /// `create`, `setScope`, `delete`.
@@ -507,10 +553,15 @@ async fn manage(
         LibrariesRequest::SetScope { library_id, scope } => {
             check_scope(shared, &scope)?;
             let list = keys.libraries().await.map_err(fail)?;
+            let partial = list.partial;
             let library = list
+                .libraries
                 .into_iter()
                 .find(|l| l.id == library_id)
-                .ok_or_else(|| CoreError::new(ErrorCode::NotFound, "no such library"))?;
+                .ok_or_else(|| match partial {
+                    Some(message) => CoreError::new(ErrorCode::ServerError, message),
+                    None => CoreError::new(ErrorCode::NotFound, "no such library"),
+                })?;
             work.change(|s| {
                 s.libraries.insert(library_id.clone(), scope.clone());
             })?;

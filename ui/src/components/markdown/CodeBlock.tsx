@@ -47,7 +47,7 @@ export function CodeBlock({ code, fence, streaming = false }: CodeBlockProps): R
     <div className="md-code">
       <div className="md-code-bar">
         <span className="md-code-lang">{fence ?? "text"}</span>
-        <CopyButton text={code} label="Copy code" />
+        <CopyButton testId="shared.code-block-copybutton" text={code} label="Copy code" />
       </div>
       <pre>
         <code data-lang={lang ?? undefined}>

@@ -8,6 +8,7 @@ members = [
     "crates/vw-protocol",
     "crates/vw-rpc",
     "crates/vw-session",
+    "crates/vw-session-stats",
     "crates/vw-supervisor",
     "crates/vw-gate",
     "crates/vw-vocabulary",
@@ -16,6 +17,7 @@ members = [
     "crates/vw-host",
     "crates/vw-platform",
     "crates/vw-secrets",
+    "crates/vw-logscan",
     "crates/vw-mistral",
     "crates/vw-vault",
     "crates/vw-keyproxy",
@@ -25,15 +27,19 @@ members = [
     "crates/vw-documents",
     "crates/vw-agent-tools",
     "crates/vw-changes",
+    "crates/vw-proposals",
     "crates/vw-worktrees",
     "crates/vw-git",
+    "crates/vw-gh-broker",
     "crates/vw-preview",
     "crates/vw-netguard",
     "crates/vw-browser",
+    "crates/vw-desktop",
     "crates/vw-pages",
     "crates/vw-projects",
     "crates/vw-vibe-install",
     "crates/vw-market",
+    "crates/vw-skills",
     "tools/public/vibe-support/sign",
     "tools/public/update-manifest",
     "tests/public/rust",
@@ -54,7 +60,7 @@ exclude = ["third_party/shellx-vault", "third_party/tauri-runtime-wry"]
 tauri-runtime-wry = { path = "third_party/tauri-runtime-wry" }
 
 [workspace.package]
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 license = "MIT"
 authors = ["Martins Brezauckis"]

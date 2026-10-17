@@ -29,6 +29,8 @@ export async function transcriptRig(
     openCallbackIds?: string[];
     persist?: boolean;
     shell?: Parameters<typeof renderShell>[0];
+    /** Extra fields of the session object (for example `title`). */
+    session?: Record<string, unknown>;
   } = {},
 ): Promise<TranscriptRig> {
   const rig = await renderShell({
@@ -38,6 +40,7 @@ export async function transcriptRig(
   const event = snapshot(
     "s1",
     options.status ?? { type: "idle" },
+    options.session ?? {},
   ) as CoreEvent & {
     snapshot: { state: Record<string, unknown> };
   };

@@ -40,7 +40,7 @@ pub enum DocumentsRequest {
         session_id: String,
     },
     /// Reads an OCR document with Mistral OCR (spends the user's OCR quota). From the Debug API origin
-    /// this needs the native confirmation (the file leaves the computer).
+    /// the window asks the native confirmation (the file leaves the computer); the Debug API's is answered by the core.
     Extract {
         /// The document.
         id: String,

@@ -296,7 +296,7 @@ pub(crate) async fn admit(
         Some(VaultAccess::UserOnlyForKeyServer) => match command {
             Command::Connectors {
                 request: ConnectorsRequest::RemoveServer { name },
-            } => is_key_server(shared, name).await,
+            } => is_key_server(shared, name).await?,
             // The table names this access for `removeServer` only; any other command with it is refused.
             _ => true,
         },
@@ -319,7 +319,7 @@ pub(crate) async fn admit(
 
 /// True when MCP server `name` gets a vault key: its configured address is Vibe Work's MCP forwarder, or a vault
 /// binding names it. A locked vault still finds a forwarder entry by its address.
-async fn is_key_server(shared: &Shared, name: &str) -> bool {
+async fn is_key_server(shared: &Shared, name: &str) -> Result<bool, CoreError> {
     let home = &shared.instructions.own_home;
     let forwarded = crate::connectors_config::configured_servers(home)
         .iter()
@@ -330,9 +330,11 @@ async fn is_key_server(shared: &Shared, name: &str) -> bool {
                     .is_some_and(|a| a.contains(vw_keyproxy::MCP_PREFIX))
         });
     if forwarded {
-        return true;
+        return Ok(true);
     }
-    crate::mcp_keys::bindings(shared)
+    Ok(crate::mcp_keys::bindings(shared)
         .await
-        .is_ok_and(|list| list.iter().any(|b| b.server == name))
+        .map_err(|e| crate::keys::key_error(&e))?
+        .iter()
+        .any(|b| b.server == name))
 }

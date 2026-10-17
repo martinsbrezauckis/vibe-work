@@ -126,7 +126,7 @@
   padding: 2px;
   z-index: 3;
 }
-.u:hover .acts2,
+.u:hover:where(:not(:disabled)) .acts2,
 .u:focus-within .acts2 {
   display: flex;
 }
@@ -205,7 +205,7 @@
   border-radius: 6px;
   cursor: pointer;
 }
-.copy-btn:hover {
+.copy-btn:hover:where(:not(:disabled)) {
   background: var(--hover);
   color: var(--text);
 }
@@ -230,9 +230,9 @@
   cursor: pointer;
   text-align: left;
 }
-.steps-h:hover,
-.thought:hover,
-.todo-h:hover {
+.steps-h:hover:where(:not(:disabled)),
+.thought:hover:where(:not(:disabled)),
+.todo-h:hover:where(:not(:disabled)) {
   color: var(--text-2);
   background: var(--hover);
 }
@@ -301,7 +301,7 @@
   cursor: pointer;
   text-align: left;
 }
-.step-h:hover {
+.step-h:hover:where(:not(:disabled)) {
   background: var(--hover);
 }
 .verb {
@@ -335,22 +335,11 @@
   overflow: hidden;
   background: var(--panel);
 }
-.step-err {
-  margin: 0;
-  padding: 8px 12px;
-  color: var(--red);
-  font-size: 13px;
-  border-bottom: 1px solid var(--line);
-}
-.step-warn,
 .step-note {
   margin: 0;
   padding: 6px 12px;
   font-size: 12.5px;
   color: var(--orange-3);
-}
-.step-warn {
-  padding-left: 28px;
 }
 pre.out,
 pre.cmd {

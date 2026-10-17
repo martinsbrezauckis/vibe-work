@@ -1,0 +1,9 @@
+{
+  "_fixture": "Timed tools and context messages; synthetic logger fields for scanner tests.",
+  "session_id": "tools",
+  "start_time": "2026-10-14T09:00:00+00:00",
+  "end_time": "2026-10-14T09:01:00+00:00",
+  "total_messages": 7,
+  "child_sessions": [],
+  "stats": {"steps": 2, "session_prompt_tokens": 800, "session_completion_tokens": 100, "session_cached_tokens": 0, "last_turn_duration": 1.0}
+}

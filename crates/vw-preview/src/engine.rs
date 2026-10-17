@@ -303,8 +303,9 @@ pub trait PreviewEngine: Send + Sync {
     }
     /// A PNG of what the page shows now.
     fn screenshot(&self, id: &MountId) -> EngineFuture<'_, Vec<u8>>;
-    /// A PNG of the whole document (`size`: its CSS width and height) in one render. Default:
-    /// unsupported (the caller then stitches viewport screenshots).
+    /// A PNG of the whole document (`size`: its CSS width and height) in one render, `size` times the screen's
+    /// device pixel ratio large with the page filling it, whatever zoom the preview is shown at (a device width wider
+    /// than the panel is shown zoomed out). Default: unsupported (the caller then stitches viewport screenshots).
     fn screenshot_full(&self, id: &MountId, size: (u32, u32)) -> EngineFuture<'_, Vec<u8>> {
         let _ = (id, size);
         Box::pin(async {

@@ -33,7 +33,7 @@ const NO_PROCS = createStore<SessionProcessesState>({
 export function LeftRunningButton(): ReactElement | null {
   const { leftRunning } = useApp();
   if (leftRunning === null) return null;
-  return <Button left={leftRunning} />;
+  return <Button data-testid="shell.left-running-button" left={leftRunning} />;
 }
 
 function Button({ left }: { left: NonNullable<ReturnType<typeof useApp>["leftRunning"]> }) {
@@ -53,7 +53,7 @@ function Button({ left }: { left: NonNullable<ReturnType<typeof useApp>["leftRun
         <button
           type="button"
           className="sb-usage sb-left"
-          data-testid="statusbar-left-running"
+          data-testid="shell.statusbar-left-running"
           title="Dev servers and long commands: this session's, and those deleted sessions left running. Click to see their output and stop them."
           aria-haspopup="dialog"
           onClick={() => {
@@ -85,13 +85,13 @@ function LeftRunningDialog({
   if (!state.open) return null;
   return (
     <>
-      <div className="scrim" onClick={close} />
+      <div data-testid="shell.left-running-scrim" className="scrim" onClick={close} />
       <div
         className="modal"
         role="dialog"
         aria-modal="true"
         aria-labelledby="left-running-title"
-        data-testid="left-running-dialog"
+        data-testid="shell.left-running-dialog"
         ref={dialog}
         tabIndex={-1}
       >
@@ -110,7 +110,7 @@ function LeftRunningDialog({
           ) : (
             <ul className="left-running-list">
               {state.items.map((item) => (
-                <li key={item.id} data-left-running={item.id}>
+                <li data-item-id={item.id} key={item.id} data-left-running={item.id}>
                   <span className="left-running-what">
                     <span>{processLabel(item)}</span>
                     <span className="d">
@@ -121,6 +121,7 @@ function LeftRunningDialog({
                     </span>
                   </span>
                   <ActionButton
+                    data-testid="shell.left-running-stop"
                     variant="danger"
                     small
                     disabled={state.stopping.includes(item.id)}
@@ -137,7 +138,11 @@ function LeftRunningDialog({
           )}
         </section>
         <footer className="modal-actions">
-          <ActionButton data-dialog-initial-focus="true" onClick={close}>
+          <ActionButton
+            data-testid="shell.left-running-close"
+            data-dialog-initial-focus="true"
+            onClick={close}
+          >
             Close
           </ActionButton>
         </footer>

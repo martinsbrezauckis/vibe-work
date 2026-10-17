@@ -16,6 +16,13 @@ export function useFindKeys(covered: boolean): void {
   useEffect(() => {
     if (covered) return;
     const onKey = (e: KeyboardEvent) => {
+      if (
+        e.defaultPrevented ||
+        e
+          .composedPath()
+          .some((target) => target instanceof Element && target.matches("[data-code-editor]"))
+      )
+        return;
       if (!(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey || e.key.toLowerCase() !== "f")
         return;
       const shell = app.shell.store.get();

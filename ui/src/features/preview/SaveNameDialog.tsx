@@ -63,8 +63,13 @@ export function SaveNameDialog({
   };
   return (
     <>
-      <div className="scrim" onClick={busy ? undefined : onClose} />
       <div
+        data-testid="preview.save-name-dialog-scrim"
+        className="scrim"
+        onClick={busy ? undefined : onClose}
+      />
+      <div
+        data-testid="preview.save-name-dialog-modal"
         className="modal preview-save-dialog"
         role="dialog"
         aria-modal="true"
@@ -81,7 +86,8 @@ export function SaveNameDialog({
             <label className="preview-save-name">
               <span>Name</span>
               <input
-                data-uc1-name
+                data-testid="preview.save-name-dialog-set-name"
+                data-vault-save-name
                 data-dialog-initial-focus="true"
                 value={name}
                 maxLength={80}
@@ -94,13 +100,20 @@ export function SaveNameDialog({
             <p className="preview-save-hint">The selected value goes straight to your vault.</p>
           </section>
           <footer className="modal-actions">
-            <button type="button" className="tb-btn" disabled={busy} onClick={onClose}>
+            <button
+              data-testid="preview.save-name-dialog-tb-btn"
+              type="button"
+              className="tb-btn"
+              disabled={busy}
+              onClick={onClose}
+            >
               Cancel
             </button>
             <button
+              data-testid="preview.save-name-dialog-btn-primary"
               type="submit"
               className="btn-primary"
-              data-uc1-confirm
+              data-vault-save-confirm
               disabled={busy || name.trim() === ""}
             >
               {busy ? "Saving…" : "Save to vault"}

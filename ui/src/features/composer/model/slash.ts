@@ -28,7 +28,7 @@ export const SLASH_COMMANDS: readonly SlashCommandRow[] = [
   },
   {
     name: "clear",
-    description: "Start a new conversation in this session",
+    description: "Start a new chat",
     runs: "session/history/clear",
   },
   { name: "rename", description: "Rename this session", runs: "session/rename" },
@@ -39,7 +39,7 @@ export const SLASH_COMMANDS: readonly SlashCommandRow[] = [
   },
   {
     name: "branch",
-    description: "Branch this conversation into a new session",
+    description: "Branch this session into a new session",
     runs: "session/fork",
   },
   {
@@ -65,12 +65,22 @@ export const SLASH_COMMANDS: readonly SlashCommandRow[] = [
     runs: "plugin/reload",
   },
   { name: "plugins", description: "The plugins this session runs", runs: "plugin/info" },
+  {
+    name: "loop",
+    description: "Run a prompt on a timer: /loop 5m <prompt>",
+    runs: "loops/create",
+  },
   { name: "config", description: "Open Settings", runs: "in the app" },
   { name: "mcp", description: "Open Tools: connectors and MCP servers", runs: "in the app" },
   { name: "connectors", description: "Same as /mcp", runs: "in the app" },
   { name: "resume", description: "Show the sessions list", runs: "in the app" },
   { name: "continue", description: "Same as /resume", runs: "in the app" },
   { name: "todo", description: "Open the Plan tab with the todo list", runs: "in the app" },
+  {
+    name: "data-retention",
+    description: "Where local data is kept and Mistral's data policy",
+    runs: "in the app",
+  },
   { name: "new", description: "Same as /clear", runs: "session/history/clear" },
 ];
 

@@ -9,7 +9,7 @@
 import { type ReactElement, useState } from "react";
 
 import { Icon } from "../../components/Icon";
-import { Badge } from "../../components/Controls";
+import { Badge, LinkButton } from "../../components/Controls";
 import { useApp } from "../shell/AppContext";
 import { linksOf } from "./mistralLinks";
 
@@ -23,7 +23,7 @@ export function MistralLinks({ category }: { category: string }): ReactElement |
     <section aria-labelledby={`links-${category}`} className="set-links">
       <h3 id={`links-${category}`}>On Mistral&apos;s website</h3>
       {links.map((link) => (
-        <div key={link.id} className="check" data-setting={link.id}>
+        <div data-item-id={link.id} key={link.id} className="check" data-setting={link.id}>
           <span>
             {link.label}
             {link.webOnly === true && (
@@ -34,9 +34,10 @@ export function MistralLinks({ category }: { category: string }): ReactElement |
             )}
             <span className="d">{link.note}</span>
           </span>
-          <button
+          <LinkButton
+            data-testid="settings.mistral-link-rows-open-link"
             type="button"
-            className="tb-btn ext-link"
+
             data-href={link.url}
             title={`Opens ${link.url} in your browser`}
             aria-label={`Open ${link.label} on Mistral's website`}
@@ -48,7 +49,7 @@ export function MistralLinks({ category }: { category: string }): ReactElement |
           >
             Open
             <Icon name="external-link" size={14} />
-          </button>
+          </LinkButton>
           {fallback === link.id && (
             <span className="d" role="status">
               Open {link.url} in your browser.

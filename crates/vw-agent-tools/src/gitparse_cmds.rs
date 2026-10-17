@@ -20,6 +20,8 @@ pub(crate) fn git(args: &[&str], elsewhere: bool, switched: &mut bool, mut sink:
     let mut away = elsewhere;
     let mut flagged = false;
     let mut i = 0;
+    let mut git_dir = None;
+    let mut work_tree = None;
     while let Some(a) = args.get(i) {
         match *a {
             // `-C .` is this folder, not another repository; holding it made an own-copy
@@ -30,7 +32,17 @@ pub(crate) fn git(args: &[&str], elsewhere: bool, switched: &mut bool, mut sink:
             {
                 i += 2;
             }
-            "-C" | "--git-dir" | "--work-tree" | "--namespace" => {
+            "--git-dir" | "--work-tree" => {
+                let value = args.get(i + 1).copied().unwrap_or("");
+                if *a == "--git-dir" {
+                    git_dir = Some(value);
+                } else {
+                    work_tree = Some(value);
+                }
+                flagged = true;
+                i += 2;
+            }
+            "-C" | "--namespace" => {
                 away = true;
                 flagged = true;
                 i += 2;
@@ -38,10 +50,17 @@ pub(crate) fn git(args: &[&str], elsewhere: bool, switched: &mut bool, mut sink:
             "-c" | "--config-env" => i += 2,
             _ if a.starts_with("-c") || a.starts_with("--config-env=") => i += 1,
             "--version" | "--help" | "-h" => return flagged,
-            _ if a.starts_with("-C")
-                || a.starts_with("--git-dir=")
-                || a.starts_with("--work-tree=") =>
-            {
+            _ if a.starts_with("--git-dir=") => {
+                git_dir = a.strip_prefix("--git-dir=");
+                flagged = true;
+                i += 1;
+            }
+            _ if a.starts_with("--work-tree=") => {
+                work_tree = a.strip_prefix("--work-tree=");
+                flagged = true;
+                i += 1;
+            }
+            _ if a.starts_with("-C") => {
                 away = true;
                 flagged = true;
                 i += 1;
@@ -59,7 +78,9 @@ pub(crate) fn git(args: &[&str], elsewhere: bool, switched: &mut bool, mut sink:
         return flagged;
     };
     let rest = &args[i + 1..];
+    let start = sink.len();
     subcommand(sub, rest, away, switched, &mut sink);
+    sink.paths(start, git_dir, work_tree);
     flagged
 }
 
@@ -118,9 +139,20 @@ fn subcommand(sub: &str, rest: &[&str], away: bool, switched: &mut bool, sink: &
                 || short_flag(rest, "dDmMcCf");
             if changes_others {
                 // Each branch it deletes, moves, copies onto or forces is
-                // named, so the core holds it unless it is the session's own branch (`git branch -m new` renames the
-                // current branch to `new`: a name that is not the own one is held).
+                // named, so the core holds it unless it is the session's own branch. A move names
+                // its source separately from its destination so the record can follow an own rename.
                 let all = positionals(rest, &["-u", "--set-upstream-to"]);
+                if (has(rest, &["--move"]) || short_flag(rest, "mM"))
+                    && !has(rest, &["--delete", "--copy"])
+                    && !short_flag(rest, "dDcC")
+                    && matches!(all.len(), 1 | 2)
+                {
+                    let from = (all.len() == 2).then(|| branch_name(all[0]));
+                    sink.rename(away, from, all[all.len() - 1]);
+                    // A later command must not use the ownership read taken before the rename.
+                    *switched = true;
+                    return;
+                }
                 // Delete and move change every name given; copy writes the last one (`-c old new`, `-c new`); force
                 // alone writes the first (`git branch -f <b> <start>`: the start point is not changed).
                 let names: Vec<&str> =

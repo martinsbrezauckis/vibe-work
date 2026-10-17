@@ -6,7 +6,7 @@
 //! start.
 
 use std::ffi::OsString;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -20,15 +20,14 @@ use crate::handshake::default_initialize_params;
 /// How the server multiplexes sessions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ServerMode {
-    /// One stdio connection per process. Vibe 2.26.0 then has ONE attached session for every
-    /// session it holds, so the app does not use it; kept for tests that
+    /// One stdio connection per process, with one attached session for the whole process. The app
+    /// uses a channel per session instead; kept for tests that
     /// need a plain connection (`Supervisor::current` is then that connection).
     Single,
     /// `--multiplex` (the default): many isolated channels in one process, each its own
     /// server with its own attached session, events and callbacks (Vibe `app_server/multiplex.py`). `Supervisor::current` is the "lobby" channel; `Supervisor::open_channel` opens more.
-    /// WORKAROUND(vibe 2.26.0): `--multiplex` alone exits with "Multiplexed stdio requires the
-    /// Unified Harness"; it needs `--experimental-harness` too (`stdio.py:49`). Remove
-    /// the extra flag when Vibe fixes the check.
+    /// Started as `--multiplex --experimental-harness`: multiplexed stdio runs on the unified
+    /// harness, which the second flag selects explicitly (`stdio.py:49`).
     #[default]
     Multiplex,
 }
@@ -43,6 +42,8 @@ impl ServerMode {
         }
     }
 }
+
+type LaunchCheck = dyn Fn(&Path) -> Result<(), String> + Send + Sync;
 
 /// Everything needed to run and restart one `vibe-app-server`.
 pub struct SupervisorConfig {
@@ -80,15 +81,17 @@ pub struct SupervisorConfig {
     /// process group. `None` disables it (the next start's ledger sweep remains). Default 5 s. Windows
     /// ignores it: the kill-on-close job ends the tree at once.
     pub watchdog_grace: Option<Duration>,
-    /// Bound for `session/resume` (the unified harness can hold the session lock ~31 s after a
-    /// kill; allow enough time for recovery).
+    /// Bound for `session/resume` (a reopen right after a restart can take tens of seconds; allow
+    /// enough time for recovery).
     pub resume_timeout: Duration,
-    /// The resume wait we expect after a crash, shown with the progress (~31 s).
+    /// The resume wait we expect after a crash, shown with the progress.
     pub resume_expected: Duration,
     /// How often resume progress is published.
     pub progress_interval: Duration,
     /// Server-request handlers, registered on every new connection (restarts included).
     pub handlers: Vec<(String, Arc<dyn ServerRequestHandler>)>,
+    /// Core-owned filesystem checks, completed before every first, deferred or restarted server spawn.
+    pub before_launch: Option<Arc<LaunchCheck>>,
 }
 
 impl SupervisorConfig {
@@ -115,6 +118,7 @@ impl SupervisorConfig {
             resume_expected: Duration::from_secs(31),
             progress_interval: Duration::from_secs(1),
             handlers: Vec::new(),
+            before_launch: None,
         }
     }
 }
@@ -126,7 +130,7 @@ pub struct Recovering {
     pub session_id: String,
     /// Time since the resume was sent.
     pub elapsed: Duration,
-    /// Expected wait (~31 s on the unified harness after a kill).
+    /// Expected wait, shown with the progress.
     pub expected: Duration,
 }
 
@@ -181,6 +185,9 @@ pub enum SupervisorState {
 /// Supervisor failure.
 #[derive(Debug, thiserror::Error)]
 pub enum SupervisorError {
+    /// A core-owned prelaunch check refused to start the server.
+    #[error("server startup check failed: {0}")]
+    BeforeLaunch(String),
     /// The requested feature is not available in this mode (e.g. channels on a single-connection
     /// server).
     #[error("not supported: {0}")]

@@ -23,7 +23,7 @@ export function ActionLog({
   const recent = [...log].reverse().slice(0, SHOWN);
   return (
     <details className="browser-log" open={expanded}>
-      <summary>
+      <summary data-testid="preview.action-log-summary">
         Browser actions ({String(log.length)}) · last: {recent[0]?.action}{" "}
         {recent[0] ? outcomeText(recent[0]) : ""}
       </summary>

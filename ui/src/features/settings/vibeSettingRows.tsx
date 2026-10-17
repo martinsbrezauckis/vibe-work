@@ -4,7 +4,7 @@
  * Depends on: AppContext, hooks, state/vibeSettings, state/modelChoice. Called by: AgentDefaultsSettings.
  * Invariants: a row a higher layer sets is disabled and says who sets it; the hook shows failures as text.
  * `apply` writes through the open chat and reloads it (Vibe takes these changes on a chat that exists).
- * `applyToNewChats` is for a setting Vibe refuses to change on a chat that exists (Subagents): the write never
+ * `applyToNewChats` is for a setting Vibe applies when a chat is created (Subagents): the write never
  * touches the open chat, the row says the change is for new chats, and a short-lived chat the core could not
  * delete again is shown as a notification.
  */
@@ -24,9 +24,9 @@ const SETTERS: Record<string, string> = {
 
 /** Shown under a setting that was saved for new chats only. */
 const NEW_CHATS_NOTE =
-  "Saved for new chats. Chats you already have open keep the setting they started with.";
+  "Saved for new chats. Sessions you already have open keep the setting they started with.";
 
-const LEFTOVER_TEXT =
+export const LEFTOVER_TEXT =
   "The change was saved, but a helper chat that Vibe Work used for it could not be deleted. " +
   "It is in your chat list as a temporary chat and is deleted when Vibe Work quits; you can also delete it yourself.";
 
@@ -153,6 +153,7 @@ export function SelectRow(props: {
         {lockLine(props.setBy)}
       </span>
       <Selector
+        testId={`settings.${props.id}`}
         label={props.label}
         title={
           props.options.find((option) => option.value === props.value)?.tooltip ?? props.detail
@@ -191,6 +192,7 @@ export function SwitchRow(props: {
         )}
       </span>
       <button
+        data-testid={`settings.${props.id}`}
         type="button"
         className="switch"
         role="switch"

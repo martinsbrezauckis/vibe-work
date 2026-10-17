@@ -1,0 +1,17 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "model": {
+      "$ref": "#/$defs/TranscribeModelConfigView"
+    },
+    "provider": {
+      "$ref": "#/$defs/AudioProviderView"
+    }
+  },
+  "required": [
+    "model",
+    "provider"
+  ],
+  "title": "TranscriptionConfigView",
+  "type": "object"
+}

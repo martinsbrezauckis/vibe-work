@@ -21,6 +21,7 @@ use std::time::Duration;
 use serde::Deserialize;
 use vw_preview::{self as shot, Rgba};
 
+use super::restore::{CapturePage, Restore};
 use crate::driver::Browser;
 use crate::scripts;
 
@@ -77,6 +78,7 @@ pub struct FullShot {
 pub(crate) struct Metrics {
     pub(crate) url: String,
     pub(crate) title: String,
+    pub(crate) error: Option<String>,
     width: f64,
     height: f64,
     viewport_width: f64,
@@ -108,8 +110,8 @@ pub(crate) async fn step(
 }
 
 /// The lazy pass: eager images, one scroll through the page, a bounded wait for pending images, back to the top.
-async fn lazy_pass(browser: &Browser, session_id: &str, first: &Metrics) -> Result<(), String> {
-    step(browser, session_id, "eager", 0.0).await?;
+async fn lazy_pass(page: &CapturePage, first: &Metrics) -> Result<(), String> {
+    page.step("eager", 0.0).await?;
     let view = first.viewport_height.max(200.0);
     let bottom = first.height.min(f64::from(MAX_CSS_HEIGHT));
     let mut y = 0.0;
@@ -117,17 +119,13 @@ async fn lazy_pass(browser: &Browser, session_id: &str, first: &Metrics) -> Resu
     while y < bottom && steps < 40 {
         y += view;
         steps += 1;
-        step(browser, session_id, "scroll", y).await?;
+        page.step("scroll", y).await?;
         tokio::time::sleep(Duration::from_millis(60)).await;
     }
-    step(browser, session_id, "scroll", 0.0).await?;
+    page.step("scroll", 0.0).await?;
     let start = tokio::time::Instant::now();
     while start.elapsed() < LAZY_WAIT {
-        if step(browser, session_id, "metrics", 0.0)
-            .await?
-            .pending_images
-            == 0
-        {
+        if page.step("metrics", 0.0).await?.pending_images == 0 {
             break;
         }
         tokio::time::sleep(Duration::from_millis(150)).await;
@@ -145,14 +143,15 @@ pub async fn full_page(
     session_id: &str,
     prefer: Option<Method>,
 ) -> Result<FullShot, String> {
-    let first = step(browser, session_id, "metrics", 0.0).await?;
-    let original_y = first.scroll_y;
+    let page = CapturePage::new(browser, session_id).await?;
+    let restore = Restore::start(page.clone());
+    let first = page.step("begin", 0.0).await?;
     let plain = prefer == Some(Method::StitchPlain);
     let result = async {
         if !plain {
-            lazy_pass(browser, session_id, &first).await?;
+            lazy_pass(&page, &first).await?;
         }
-        let m = step(browser, session_id, "metrics", 0.0).await?;
+        let m = page.step("metrics", 0.0).await?;
         let ((css_w, css_h), cut) = clip_size(m.width, m.height);
         let mut fallback = None;
         if prefer != Some(Method::Stitch) && !plain {
@@ -177,21 +176,11 @@ pub async fn full_page(
         // one-render clip's (which also divides by a page-reported width).
         let full_h = px(m.height).max(1);
         let stitch_h = full_h.min(MAX_CSS_HEIGHT);
-        stitch(
-            browser,
-            session_id,
-            &m,
-            stitch_h,
-            full_h > stitch_h,
-            fallback,
-            plain,
-        )
-        .await
+        stitch(&page, &m, stitch_h, full_h > stitch_h, fallback, plain).await
     }
     .await;
-    let _ = step(browser, session_id, "unpin", 0.0).await;
-    let _ = step(browser, session_id, "scroll", original_y).await;
-    result
+    let cleanup = restore.finish().await;
+    result.and_then(|full| cleanup.map(|()| full))
 }
 
 /// Cuts to the pixel cap and encodes the final PNG.
@@ -287,8 +276,7 @@ pub fn stitch_canvas(
 
 /// Scroll-and-stitch. `m`: metrics after the lazy pass; `css_h`: the height to cover.
 async fn stitch(
-    browser: &Browser,
-    session_id: &str,
+    page: &CapturePage,
     m: &Metrics,
     css_h: u32,
     cut: bool,
@@ -303,20 +291,16 @@ async fn stitch(
     let mut pinned = 0u32;
     let max_y = (f64::from(css_h) - view_h).max(0.0);
     loop {
-        let at = step(browser, session_id, "scroll", y).await?;
+        let at = page.step("scroll", y).await?;
         tokio::time::sleep(SLICE_SETTLE).await;
         // Fixed and sticky elements show in the first slice only: before every later slice, whatever is fixed or
         // sticky NOW is hidden (a cookie banner can appear mid-capture and repeat in later slices
         // when hidden only once after the first slice).
         if slices >= 1 && !plain {
-            let now = step(browser, session_id, "pin", 0.0).await?.pinned;
+            let now = page.step("pin", 0.0).await?.pinned;
             pinned = pinned.saturating_add(u32::try_from(now).unwrap_or(0));
         }
-        let png = browser
-            .service()
-            .screenshot_png(session_id)
-            .await
-            .map_err(|e| e.to_string())?;
+        let png = page.screenshot().await?;
         let slice = shot::decode(&png)?;
         if canvas.is_none() {
             // Device pixels per CSS pixel: the snapshot covers the viewport (scrollbar included on some engines).

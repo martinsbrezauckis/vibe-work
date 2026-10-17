@@ -48,6 +48,7 @@ export function Rail() {
     <nav className="rail" aria-label="Sections" data-toast-avoid="rail">
       {/* Home first: back to the work exactly as it was; the list column is its "chats". */}
       <button
+        data-testid="shell.rail-away-from-home"
         type="button"
         className="rbtn"
         aria-current={workCurrent && !onNewChat ? "true" : undefined}
@@ -64,11 +65,12 @@ export function Rail() {
         {needsYou && <span className="dot" role="img" aria-label="Something needs you" />}
       </button>
       <button
+        data-testid="shell.rail-open-new-chat"
         type="button"
         className="rbtn"
         aria-current={workCurrent && onNewChat ? "true" : undefined}
-        aria-label="New chat"
-        title={`New chat (${formatKeys("Mod+N")})`}
+        aria-label={TEXT.newChat}
+        title={`${TEXT.newChat} (${formatKeys("Mod+N")})`}
         data-rail="new-chat"
         onClick={() => {
           openNewChat(app);
@@ -78,6 +80,7 @@ export function Rail() {
       </button>
       {projects === null ? null : (
         <button
+          data-testid="shell.rail-close"
           type="button"
           className="rbtn"
           aria-current={projectsOpen && !settingsOpen ? "true" : undefined}
@@ -98,6 +101,7 @@ export function Rail() {
       )}
       {connectors === null ? null : (
         <button
+          data-testid="shell.rail-close-2"
           type="button"
           className="rbtn"
           aria-current={toolsOpen && !settingsOpen ? "true" : undefined}
@@ -119,6 +123,7 @@ export function Rail() {
       )}
       {libraries === null ? null : (
         <button
+          data-testid="shell.rail-close-3"
           type="button"
           className="rbtn"
           aria-current={librariesOpen && !settingsOpen ? "true" : undefined}
@@ -134,6 +139,7 @@ export function Rail() {
         </button>
       )}
       <button
+        data-testid="shell.rail-open-settings"
         type="button"
         className="rbtn"
         aria-current={vaultOpen ? "true" : undefined}
@@ -148,6 +154,7 @@ export function Rail() {
       </button>
       <div className="grow" />
       <button
+        data-testid="shell.rail-toggle-drawer"
         type="button"
         className="rbtn"
         aria-label="Hide or show the list"
@@ -163,6 +170,7 @@ export function Rail() {
         <Icon name="panel-left" size={20} />
       </button>
       <button
+        data-testid="shell.rail-close-settings"
         type="button"
         className="rbtn"
         aria-current={settingsOpen && !vaultOpen ? "true" : undefined}

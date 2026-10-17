@@ -27,6 +27,13 @@ use vw_git::state::{BranchState, RemoteInfo};
     deny_unknown_fields
 )]
 pub enum GitRequest {
+    /// App commit identity, falling back to a read-only global Git prefill until first saved.
+    Identity,
+    /// Saves the app commit identity in private app data. Both empty means ask during init.
+    SetIdentity {
+        /// The author details; never written to global Git config.
+        identity: vw_git::identity::CommitIdentity,
+    },
     /// The branch bar: branch, base, counts, the cached PR card. Reads only, no network.
     Status {
         /// Session id.
@@ -74,6 +81,10 @@ pub enum GitRequest {
         expected_head: Option<String>,
         /// Run the repository's commit hooks (the dialog's switch).
         run_hooks: bool,
+        /// Author details to save in this repository before committing (only when entered by the user).
+        #[serde(default)]
+        #[cfg_attr(feature = "ts", ts(optional))]
+        identity: Option<vw_git::identity::CommitIdentity>,
     },
     /// What a push would do (remote, address, branch, commits).
     PushPlan {
@@ -214,6 +225,30 @@ pub enum GitRequest {
     },
 }
 
+/// The identity prefill's origin.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+pub enum GitIdentitySource {
+    /// Explicitly saved in the app's private settings.
+    App,
+    /// Read from Git's global config; never written there.
+    Global,
+    /// Neither name nor email is configured.
+    Unset,
+}
+
+/// App-wide commit identity and where its current values came from.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+pub struct GitIdentitySettings {
+    /// Values for Settings, Commit and repository init (empty values need user input).
+    pub identity: vw_git::identity::CommitIdentity,
+    /// Origin of the values shown in Settings.
+    pub source: GitIdentitySource,
+}
+
 /// A prepared composer message.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
@@ -299,6 +334,10 @@ pub struct CommitPlanView {
     pub files: Vec<CommitFile>,
     /// The author git will write, when known.
     pub author: Option<String>,
+    /// Effective Git name, even if the email is missing.
+    pub author_name: Option<String>,
+    /// Effective Git email, even if the name is missing.
+    pub author_email: Option<String>,
     /// Why git has no author yet (how to set it).
     pub author_problem: Option<String>,
     /// The commit hooks that will run when the switch is on.
@@ -470,6 +509,11 @@ impl Default for GitSettings {
     rename_all_fields = "camelCase"
 )]
 pub enum GitResult {
+    /// App commit identity read or saved without a session.
+    Identity {
+        /// The values and their origin.
+        settings: GitIdentitySettings,
+    },
     /// `status`.
     Status {
         /// The bar.

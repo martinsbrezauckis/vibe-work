@@ -36,6 +36,10 @@ impl PagesService {
             }
             theme.clone_into(&mut current);
         }
+        let current = self.shared.lock().mount.clone();
+        if let Some(mount) = current {
+            self.flush_inline(&mount).await?;
+        }
         let mount = self.shared.lock().mount.take();
         if let Some(mount) = mount {
             let _ = bounded(

@@ -33,9 +33,10 @@ export function UseVibeKey(props: {
   onUse: (source: VibeKeySource) => void;
 }) {
   return (
-    <div className="key-offer">
+    <div data-item-id={props.found.source} className="key-offer">
       <VibeKeyNote found={props.found} />
       <button
+        data-testid="setup.vibe-key-offer-on-use"
         type="button"
         className="btn-primary"
         disabled={props.busy}

@@ -3,7 +3,7 @@
  */
 .composer-wrap {
   flex: none;
-  padding: 0 32px 14px;
+  padding: 0 var(--composer-inset, 32px) 14px;
   min-width: 0;
 }
 .composer-loading {
@@ -11,8 +11,7 @@
 }
 .composer {
   container-type: inline-size;
-  max-width: 760px;
-  margin: 0 auto;
+  margin-block: 0;
   border: 1px solid var(--line-2);
   border-radius: 16px;
   background: var(--panel);
@@ -61,10 +60,7 @@
   resize: none;
   padding: 14px 16px 6px;
   color: var(--text);
-  font:
-    15px/1.5 Inter,
-    system-ui,
-    sans-serif;
+  font: 15px/1.5 var(--font-ui);
   min-height: 54px;
   outline: none;
 }
@@ -107,7 +103,7 @@
   font: inherit;
   font-size: 12px;
 }
-.cchip:hover {
+.cchip:hover:where(:not(:disabled)) {
   background: var(--hover);
   color: var(--text);
 }
@@ -150,10 +146,6 @@
   color: var(--primary-fg);
   cursor: pointer;
   flex: none;
-}
-.send:disabled {
-  opacity: 0.35;
-  cursor: default;
 }
 .push-right {
   margin-left: auto;
@@ -221,19 +213,12 @@
   color: var(--text-2);
   border-radius: 7px;
   padding: 3px 9px;
-  font:
-    500 12px Inter,
-    system-ui,
-    sans-serif;
+  font: 500 12px var(--font-ui);
   cursor: pointer;
 }
 .mini:hover:not(:disabled) {
   color: var(--text);
   border-color: var(--line-3);
-}
-.mini:disabled {
-  opacity: 0.45;
-  cursor: default;
 }
 .mini[aria-checked="true"] {
   color: var(--text);
@@ -320,8 +305,8 @@
   flex: none;
   padding: 0;
 }
-.ctxchip button:hover,
-.att button:hover {
+.ctxchip button:hover:where(:not(:disabled)),
+.att button:hover:where(:not(:disabled)) {
   background: var(--hover);
   color: var(--text);
 }
@@ -427,7 +412,7 @@
 .cmenu-item .lv {
   margin-top: 5px;
 }
-.cmenu-item:hover,
+.cmenu-item:hover:where(:not(:disabled)),
 .cmenu-item:focus-visible,
 .cmenu-item[aria-checked="true"] {
   background: var(--active);
@@ -549,10 +534,6 @@
   font-size: 12px;
   overflow-wrap: anywhere;
 }
-.rewind-error {
-  color: var(--red);
-  margin: 0;
-}
 .rewind-acts {
   display: flex;
   justify-content: flex-end;
@@ -562,7 +543,7 @@
 
 @media (max-width: 600px) {
   .composer-wrap {
-    padding: 0 10px 10px;
+    padding: 0 var(--composer-inset, 10px) 10px;
   }
   .ctools > .cmenu-anchor {
     position: static;
@@ -575,4 +556,10 @@
   .hint {
     display: none;
   }
+}
+
+.composer-plugin-reload {
+  display: block;
+  margin-top: 8px;
+  text-align: center;
 }

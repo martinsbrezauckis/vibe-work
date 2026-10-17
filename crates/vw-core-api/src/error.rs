@@ -18,6 +18,15 @@ use vw_rpc::RpcError;
 /// Why a core could not start.
 #[derive(Debug, thiserror::Error)]
 pub enum CoreStartError {
+    /// User plugin approvals could not be prepared.
+    #[error("{0}")]
+    PluginApprovals(String),
+    /// An interrupted marketplace update could not be recovered.
+    #[error(transparent)]
+    Marketplace(#[from] vw_market::MarketError),
+    /// Session ownership could not be initialized.
+    #[error("{0}")]
+    SessionOwnership(String),
     /// The native clipboard worker could not start.
     #[error(transparent)]
     Clipboard(#[from] vw_platform::clipboard::ClipboardError),
@@ -226,7 +235,17 @@ impl CoreError {
             }
             RpcError::Timeout { .. } => (ErrorCode::Timeout, None),
             RpcError::Remote { error, .. } => {
-                (ErrorCode::ServerError, Some(error.code.as_str().to_owned()))
+                if error
+                    .data
+                    .as_option()
+                    .and_then(|data| data.get("harnessCode"))
+                    .and_then(serde_json::Value::as_str)
+                    == Some("session_busy")
+                {
+                    (ErrorCode::Denied, Some("sessionHeld".to_owned()))
+                } else {
+                    (ErrorCode::ServerError, Some(error.code.as_str().to_owned()))
+                }
             }
             RpcError::Encode { .. } | RpcError::Decode { .. } => (ErrorCode::Internal, None),
         };

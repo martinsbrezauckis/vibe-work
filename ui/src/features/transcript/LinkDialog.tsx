@@ -26,8 +26,9 @@ function OpenDialog({ url }: { url: string }): ReactElement {
   const check = checkLink(url);
   return (
     <>
-      <div className="scrim" onClick={close} />
+      <div data-testid="transcript.link-dialog-scrim" className="scrim" onClick={close} />
       <div
+        data-testid="transcript.link-dialog-modal"
         className="modal link-dialog"
         role="dialog"
         aria-modal="true"
@@ -54,8 +55,13 @@ function OpenDialog({ url }: { url: string }): ReactElement {
           )}
         </section>
         <footer className="modal-actions">
-          <CopyButton text={check.url} label="Copy link" />
+          <CopyButton
+            testId="transcript.link-dialog-copybutton"
+            text={check.url}
+            label="Copy link"
+          />
           <button
+            data-testid="transcript.link-dialog-tb-btn"
             type="button"
             className="tb-btn"
             data-dialog-initial-focus="true"
@@ -67,6 +73,7 @@ function OpenDialog({ url }: { url: string }): ReactElement {
           </button>
           {check.ok ? (
             <button
+              data-testid="transcript.link-dialog-open-link"
               type="button"
               className="btn-primary"
               aria-label="Open link in browser"

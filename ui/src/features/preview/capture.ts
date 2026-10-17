@@ -122,12 +122,18 @@ export function captureView(kind: string, answer: JsonValue): CaptureView {
   };
   const media = field(answer, "mediaFiles");
   const files = field(answer, "files");
+  const namedMedia = Array.isArray(files)
+    ? files.filter((file) => {
+        const name = field(file, "name");
+        return typeof name === "string" && name.startsWith("media/");
+      }).length
+    : 0;
   return {
     kind,
     folder: text("folder"),
     path: text("path"),
     outcome: text("Outcome"),
-    files: list("files") + (typeof media === "number" ? media : 0),
+    files: list("files") + Math.max(0, (typeof media === "number" ? media : 0) - namedMedia),
     fileNames: Array.isArray(files)
       ? files.flatMap((file) => {
           const name = field(file, "name");

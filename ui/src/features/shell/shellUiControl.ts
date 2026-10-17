@@ -136,35 +136,39 @@ export function registerShellRoutes(app: App): () => void {
       shell.actions.selectSession(sessionId);
       return { selected: shell.store.get().selected };
     }),
-    app.uiControl.register("state", () => {
-      const s = shell.store.get();
-      const stuck = core?.store.get().stuck ?? {};
-      const sessions = Object.values(core?.store.get().sessions ?? {}).map((entry) => ({
-        ...summarize(entry, stuck),
-        badge: badgeOf(entry, stuck),
-      }));
-      return {
-        theme: s.theme,
-        list: { visible: layout().listVisible || layout().listDrawerOpen },
-        selected: s.selected,
-        panel: panelState(),
-        server: core?.store.get().server.phase ?? "unavailable",
-        debugApi: core?.store.get().debugApi.enabled ?? false,
-        // what covers the content (settings, palette,...) and the toasts on screen.
-        overlay: s.overlay,
-        toasts: app.toasts.store.get().map(({ id, kind, text }) => ({ id, kind, text })),
-        // The version Settings > About shows (the core's `status`; `null` before it arrived).
-        appVersion: core?.store.get().appVersion ?? null,
-        sessions: sessions.map(({ id, title, badge, project, unread, pinned }) => ({
-          id,
-          title,
-          badge,
-          project,
-          unread,
-          pinned,
-        })),
-      };
-    }),
+    app.uiControl.register(
+      "state",
+      () => {
+        const s = shell.store.get();
+        const stuck = core?.store.get().stuck ?? {};
+        const sessions = Object.values(core?.store.get().sessions ?? {}).map((entry) => ({
+          ...summarize(entry, stuck),
+          badge: badgeOf(entry, stuck),
+        }));
+        return {
+          theme: s.theme,
+          list: { visible: layout().listVisible || layout().listDrawerOpen },
+          selected: s.selected,
+          panel: panelState(),
+          server: core?.store.get().server.phase ?? "unavailable",
+          debugApi: core?.store.get().debugApi.enabled ?? false,
+          // what covers the content (settings, palette,...) and the toasts on screen.
+          overlay: s.overlay,
+          toasts: app.toasts.store.get().map(({ id, kind, text }) => ({ id, kind, text })),
+          // The version Settings > About shows (the core's `status`; `null` before it arrived).
+          appVersion: core?.store.get().appVersion ?? null,
+          sessions: sessions.map(({ id, title, badge, project, unread, pinned }) => ({
+            id,
+            title,
+            badge,
+            project,
+            unread,
+            pinned,
+          })),
+        };
+      },
+      () => true,
+    ),
     // the command palette and the toasts, like the keyboard and a click use them.
     app.uiControl.register("palette", (body) => {
       const { action, query, id } = asObject(body ?? {});

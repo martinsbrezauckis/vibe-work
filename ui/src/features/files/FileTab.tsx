@@ -10,16 +10,17 @@
  * quick edits of a text file shown whole).
  * Invariants: renders only (decisions in state/files); file content is never HTML in this window.
  */
-import { type ReactElement, useEffect, useState } from "react";
+import { type ReactElement, lazy, Suspense, useEffect, useState } from "react";
 
 import { NativeViewport } from "../../components/NativeViewport";
 import { Selector } from "../../components/Selector";
 import type { FileContent, Rect } from "../../protocol/core";
 import { useStore } from "../../state/createStore";
+import { canEditContent } from "../../state/fileEdits";
 import { type FileTab as Tab, type Files, POLL_MS, tabOf, viewerKind } from "../../state/files";
 import { useApp } from "../shell/AppContext";
 import { useShellState } from "../shell/hooks";
-import { FileEditor } from "./FileEditor";
+const FileEditor = lazy(() => import("./FileEditor").then((m) => ({ default: m.FileEditor })));
 import { FileFindBar, useFileFindLine } from "./FileFindBar";
 import { BinaryView, ImageView, MarkdownView, TextView } from "./FileViews";
 import { sizeText } from "./model/kinds";
@@ -37,13 +38,13 @@ function Notices({ tab, content }: { tab: Tab; content: FileContent | null }): R
   return (
     <>
       {tab.status === "gone" && (
-        <p className="file-note warn" role="status">
+        <p className="server-note" role="status">
           This file is not there any more
           {content === null ? "." : ". Showing the last version read."}
         </p>
       )}
       {tab.status === "error" && tab.error !== null && (
-        <p className="file-note warn" role="alert">
+        <p className="key-problem" role="alert">
           {tab.error}
         </p>
       )}
@@ -51,6 +52,11 @@ function Notices({ tab, content }: { tab: Tab; content: FileContent | null }): R
         <p className="file-note" role="status">
           Showing the first 256 KB of {sizeText(content.size)}. Open with default app to see all of
           it.
+        </p>
+      )}
+      {tab.editNotice !== null && (
+        <p className="file-note" role="status">
+          {tab.editNotice}
         </p>
       )}
     </>
@@ -89,39 +95,13 @@ function Body({
   return <BinaryView content={content} />;
 }
 
-/** An unsaved edit: the file and content it started from, and the draft text so far. */
-type KeptEdit = { file: string; display: string; content: FileContent; text: string };
-
-/**
- * Unsaved edits per session, kept per app (its `files` instance) for as long as the window lives. The File tab is
- * remounted when another session is shown; without this its draft would be dropped by a session switch.
- * An entry is removed when the edit is saved or cancelled.
- */
-const keptByApp = new WeakMap<Files, Map<string, KeptEdit>>();
-
-function keptEditsOf(files: Files): Map<string, KeptEdit> {
-  let kept = keptByApp.get(files);
-  if (kept === undefined) {
-    kept = new Map();
-    keptByApp.set(files, kept);
-  }
-  return kept;
-}
-
 function SessionFile({ files, sessionId }: { files: Files; sessionId: string }): ReactElement {
   const app = useApp();
   const { transcript, toasts } = app;
   const tab = useStore(files.store, (s) => tabOf(s, sessionId));
-  const keptEdits = keptEditsOf(files);
   const [busy, setBusy] = useState(false);
-  // The edit in progress: the file and content it started from (the editor keeps its own draft and pinned base), and
-  // whether the draft differs. Kept here so a file switch, a reload or a loading tab never unmounts the editor and
-  // drops the draft: the editor stays on its own file until the user saves or cancels.
-  const [edit, setEdit] = useState<{ file: string; display: string; content: FileContent } | null>(
-    () => keptEdits.get(sessionId) ?? null,
-  );
-  const [dirty, setDirty] = useState(false);
-  const editing = edit !== null;
+  const draft = useStore(files.store, (s) => s.edits[sessionId]);
+  const editing = draft !== undefined;
   const content = tab.content;
   const findLine = useFileFindLine(sessionId, content?.text ?? null);
   const actions = files.actions;
@@ -133,7 +113,11 @@ function SessionFile({ files, sessionId }: { files: Files; sessionId: string }):
     };
   }, [files, sessionId]);
   if (tab.shown === null)
-    return <div className="empty">Click a file name in the chat to preview it here.</div>;
+    return (
+      <div data-item-id={sessionId} className="empty">
+        Click a file name in the chat to open it here. Right-click it to edit it.
+      </div>
+    );
   const external = async (what: "open" | "reveal") => {
     setBusy(true);
     const error = await actions.external(sessionId, what);
@@ -142,15 +126,14 @@ function SessionFile({ files, sessionId }: { files: Files; sessionId: string }):
   };
   const canSource = content !== null && content.text !== null && content.kind !== "text";
   // Quick edits: a text file the tab read whole and still has.
-  const canEdit =
-    content !== null &&
-    content.text !== null &&
-    !content.truncated &&
-    content.kind !== "image" &&
-    content.kind !== "binary" &&
-    tab.status === "ready";
+  const canEdit = content !== null && canEditContent(content) && tab.status === "ready";
   return (
-    <div className="file-tab" data-status={tab.status} data-kind={content?.kind ?? "loading"}>
+    <div
+      data-item-id={sessionId}
+      className="file-tab"
+      data-status={tab.status}
+      data-kind={content?.kind ?? "loading"}
+    >
       <div className="file-head">
         <div className="file-title">
           <span className="file-name">{content?.name ?? tab.shown.display}</span>
@@ -166,11 +149,11 @@ function SessionFile({ files, sessionId }: { files: Files; sessionId: string }):
         <div className="file-tools">
           {tab.recent.length > 1 && (
             <Selector
+              testId="files.file-tab-find"
               label="Recent files"
+              disabled={editing}
               value={tab.shown.file}
               options={tab.recent.map((recent) => ({ value: recent.file, label: recent.display }))}
-              disabled={dirty}
-              {...(dirty ? { title: "Save or cancel your edit first" } : {})}
               onChange={(value) => {
                 const next = tab.recent.find((r) => r.file === value);
                 if (next !== undefined) void actions.show(sessionId, next);
@@ -179,6 +162,7 @@ function SessionFile({ files, sessionId }: { files: Files; sessionId: string }):
           )}
           {canSource && (
             <button
+              data-testid="files.file-tab-set-mode"
               type="button"
               className="mini"
               aria-pressed={tab.mode === "source"}
@@ -191,22 +175,19 @@ function SessionFile({ files, sessionId }: { files: Files; sessionId: string }):
           )}
           {canEdit && !editing && (
             <button
+              data-testid="files.file-tab-set"
               type="button"
               className="mini"
               onClick={() => {
-                const shown = tab.shown;
-                if (shown !== null) {
-                  const started = { file: shown.file, display: shown.display, content };
-                  keptEdits.set(sessionId, { ...started, text: content.text ?? "" });
-                  setEdit(started);
-                }
+                files.edit.begin(sessionId);
               }}
             >
               Edit
             </button>
           )}
-          {content?.text != null && (
+          {content?.text != null && !editing && (
             <button
+              data-testid="files.file-tab-open-file"
               type="button"
               className="mini"
               aria-label="Find in this file"
@@ -217,10 +198,16 @@ function SessionFile({ files, sessionId }: { files: Files; sessionId: string }):
               Find
             </button>
           )}
-          <button type="button" className="mini" onClick={() => void actions.reload(sessionId)}>
+          <button
+            data-testid="files.file-tab-reload"
+            type="button"
+            className="mini"
+            onClick={() => void actions.reload(sessionId)}
+          >
             Reload
           </button>
           <button
+            data-testid="files.file-tab-external"
             type="button"
             className="mini"
             disabled={busy}
@@ -230,6 +217,7 @@ function SessionFile({ files, sessionId }: { files: Files; sessionId: string }):
           </button>
           {content !== null && content.openClass !== "refused" && (
             <button
+              data-testid="files.file-tab-external-2"
               type="button"
               className="mini"
               disabled={busy}
@@ -239,11 +227,14 @@ function SessionFile({ files, sessionId }: { files: Files; sessionId: string }):
             </button>
           )}
           <button
+            data-testid="files.file-tab-close"
             type="button"
             className="mini"
             aria-label="Close the file"
-            disabled={dirty}
-            {...(dirty ? { title: "Save or cancel your edit first" } : {})}
+            disabled={
+              draft?.saving === true || (draft !== undefined && draft.text !== draft.base.text)
+            }
+            title={editing ? "Save or Cancel your edit before closing the file" : undefined}
             onClick={() => {
               actions.close(sessionId);
             }}
@@ -257,6 +248,7 @@ function SessionFile({ files, sessionId }: { files: Files; sessionId: string }):
         <p className="file-note" role="status">
           The page tried to open <span className="file-url">{tab.viewer.external}</span>.{" "}
           <button
+            data-testid="files.file-tab-ask-link"
             type="button"
             className="mini"
             onClick={() => {
@@ -271,34 +263,21 @@ function SessionFile({ files, sessionId }: { files: Files; sessionId: string }):
         <FileFindBar sessionId={sessionId} name={content.name} text={content.text} />
       )}
       <div className="file-body">
-        {edit !== null ? (
-          <>
-            {edit.file !== tab.shown.file && (
-              <p className="file-note warn" role="status">
-                You are still editing {edit.content.name}. Save or cancel the edit to see{" "}
+        {draft !== undefined ? (
+          <Suspense fallback={<div className="empty">Loading editor…</div>}>
+            {draft.base.file !== tab.shown.file && (
+              <p className="server-note" role="status">
+                You are still editing {draft.base.name}. Save or cancel the edit to see{" "}
                 {tab.shown.display}.
               </p>
             )}
             <FileEditor
               files={files}
               sessionId={sessionId}
-              file={edit.file}
-              display={edit.display}
-              content={edit.content}
-              line={edit.file === tab.shown.file ? (findLine ?? tab.shown.line) : null}
-              initialText={keptEdits.get(sessionId)?.text}
-              onText={(text) => {
-                const kept = keptEdits.get(sessionId);
-                if (kept !== undefined) keptEdits.set(sessionId, { ...kept, text });
-              }}
-              onDone={() => {
-                keptEdits.delete(sessionId);
-                setEdit(null);
-                setDirty(false);
-              }}
-              onDirty={setDirty}
+              content={draft.base}
+              line={draft.base.file === tab.shown.file ? (findLine ?? tab.shown.line) : null}
             />
-          </>
+          </Suspense>
         ) : content === null ? (
           <div className="empty">{tab.status === "loading" ? "Reading the file…" : ""}</div>
         ) : (

@@ -86,13 +86,11 @@ impl SessionEntry {
     /// flag. Returns the logged events newer than the new watermark, sorted and de-duplicated,
     /// for the caller to replay. Mirrors `ClientProjection._replace_state`.
     ///
-    /// WORKAROUND(vibe 2.26.0): after `session/resume` the server numbers the session's events again
-    /// from the resumed state's `eventId`, so the new watermark can be LOWER than the old one. The
-    /// logged events then belong to an older numbering; replaying those "newer" than the new
-    /// watermark applied stale patches to the fresh state, failed, asked for a resync, and every
-    /// resync read replayed them again (5,000 reads in seconds, seen live 2026-10-08). A watermark
-    /// that goes backwards therefore discards the log. Remove when the server keeps one numbering
-    /// per session.
+    /// Event ids are compared within one numbering only. After `session/resume` the session's
+    /// events are numbered from the resumed state's `eventId`, so the new watermark can be LOWER
+    /// than the old one. The logged events then belong to an older numbering, and replaying them
+    /// would apply stale patches to the fresh state (and ask for a resync again and again), so a
+    /// watermark that goes backwards discards the log.
     pub(crate) fn replace_state(&mut self, state: Value) -> Vec<Notification> {
         let previous = self.last_event_id;
         self.last_event_id = watermark(&state);
@@ -139,7 +137,7 @@ impl SessionEntry {
     }
 
     /// Marks turns that were `in_progress` in `previous_turns` but are absent from the current
-    /// state as `interrupted` (a server crash can lose the in-flight turn silently).
+    /// state as `interrupted`, so a turn the user saw running never just disappears.
     /// A turn the server still reports in any status is left to the server. Returns the new
     /// turn objects so the caller can fan them out.
     pub(crate) fn mark_interrupted(&mut self, previous_turns: &[Value]) -> Vec<Value> {

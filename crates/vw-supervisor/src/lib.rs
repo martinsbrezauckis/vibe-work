@@ -10,7 +10,7 @@
 //! - A dead or wedged server is detected (vw-rpc rules), its whole process tree killed and
 //!   reaped, and a new one started with exponential backoff and a give-up limit.
 //! - After a restart, [`SupervisorState::Ready`] lists the sessions that need `session/resume`;
-//!   [`Supervisor::resume`] reports progress during the ~31 s unified-harness lock.
+//!   [`Supervisor::resume`] reports progress while a resume takes its time.
 //! - Clean shutdown closes stdin, waits, then kills; no zombies. On Windows the server lives in a
 //!   kill-on-close job object, so it dies with this process even on a hard kill.
 //! - One process per app, in [`ServerMode::Multiplex`] by default: many isolated
@@ -33,8 +33,8 @@ pub use discovery::{
     is_executable,
 };
 pub use env::{
-    API_KEY_VAR, ApiKey, EnvError, EnvPlan, EnvSecretProvider, INHERITED, MCP_TOKEN_VAR, NoSecret,
-    SecretError, SecretProvider, build_env, is_hijack_var,
+    API_KEY_VAR, ApiKey, EnvError, EnvPlan, EnvSecretProvider, INHERITED, LOOPBACK_NO_PROXY,
+    MCP_TOKEN_VAR, NoSecret, SecretError, SecretProvider, build_env, is_hijack_var,
 };
 pub use handshake::{default_initialize_params, handshake};
 pub use supervisor::{OpenedChannel, Supervisor};

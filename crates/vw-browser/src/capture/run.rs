@@ -3,8 +3,8 @@
 //! `untrustedPageContent` with the prompt guard's verdict; within the answer budget).
 //!
 //! Depends on: the capture modules, `driver`, `sessions`, `guard`, `observe`. Called by: vw-core-api.
-//! Invariant: every step is bounded; a step that fails is recorded under `skipped` with its reason and the others
-//! still run (a bundle on a page whose fonts cannot be fetched still has its design and structure).
+//! Invariant: every step is bounded; optional steps can be skipped while others run. The required manifest must
+//! commit before a capture succeeds or its Before state is published or consumed.
 
 use std::time::{Duration, SystemTime};
 
@@ -29,6 +29,8 @@ const TEXT_CAP: u64 = 16 * 1024 * 1024;
 const HTML_CAP: u64 = 48 * 1024 * 1024;
 const PNG_CAP: u64 = 40 * 1024 * 1024;
 const SMALL_CAP: u64 = 4 * 1024 * 1024;
+// Forty media filenames plus the fixed capture files need more room than a page-read receipt.
+const ANSWER_BUDGET: usize = 8_000;
 
 /// The smallest view (device pixels of our own snapshot) a layout-dependent capture runs in. A browser
 /// that is not on screen is parked at the size it would have when shown (or 1280 x 800), so a background session
@@ -43,6 +45,20 @@ fn needs_layout(request: &Request) -> bool {
         What::Media => false,
         What::Page => request.formats.contains(&PageFormat::Png),
         _ => true,
+    }
+}
+
+fn folder_name_source(title: &str, url: &str, host: &str) -> String {
+    // Filter before lowercasing/truncation can disguise a title key in the generated folder name.
+    let mut filtered = json!({"title": title, "url": url});
+    crate::output::filter_agent_output(&mut filtered);
+    if filtered["title"] != title
+        || vw_secrets::scrub(title.as_bytes()).is_some()
+        || slug(title) == "page"
+    {
+        host.to_owned()
+    } else {
+        title.to_owned()
     }
 }
 
@@ -68,12 +84,22 @@ struct Run {
     /// Page words for the prompt guard and the untrusted block: (channel, text).
     page_words: Vec<(String, String)>,
     fonts: Vec<String>,
+    /// Published only after its manifest commits.
+    before: Option<Before>,
 }
 
 impl Run {
     fn skip(&mut self, step: &str, reason: &str) {
         self.skipped
             .push(json!({"step": step, "reason": reason.chars().take(300).collect::<String>()}));
+    }
+
+    fn publish(&mut self, captures: &super::Captures, session_id: &str, what: What) {
+        if let Some(before) = self.before.take() {
+            captures.set_before(session_id, before);
+        } else if what == What::After {
+            captures.forget(session_id);
+        }
     }
 }
 
@@ -83,7 +109,9 @@ fn pretty(value: &Value) -> Vec<u8> {
 
 /// Reads only the fixed Before record and checks that it belongs to the held shot.
 fn before_record(folder: &Folder, url: &str) -> Result<(Vec<u8>, Value), ActError> {
-    let bytes = folder.read("capture.json", SMALL_CAP).map_err(failed)?;
+    let bytes = folder.read("capture.json", SMALL_CAP).map_err(|e| refused(format!(
+        "the Before capture record (capture.json) is missing or unreadable: {e}; capture Before again"
+    )))?;
     let record: Value = serde_json::from_slice(&bytes)
         .map_err(|_| failed("the Before capture record is invalid"))?;
     if record["schema"] != "vibe-work/capture@1"
@@ -132,10 +160,13 @@ fn save_record(
             .write("capture.json", &pretty(&record), SMALL_CAP)
             .map(|_| ())
     };
-    if let Err(e) = saved {
-        run.skip("record", &e);
-    }
-    Ok(())
+    saved.map_err(|e| {
+        failed(format!(
+            "the capture record (capture.json) could not be saved: {e}; the capture is incomplete; \
+         files already saved stay in {}",
+            run.folder.relative
+        ))
+    })
 }
 
 impl Browser {
@@ -220,11 +251,7 @@ impl Browser {
             .ok()
             .and_then(|u| u.host_str().map(str::to_owned))
             .unwrap_or_default();
-        let name_source = if slug(&head.title) == "page" {
-            host.clone()
-        } else {
-            head.title.clone()
-        };
+        let name_source = folder_name_source(&head.title, &head.url, &host);
         let mut previous = None;
         let folder = match request.what {
             What::After => {
@@ -265,6 +292,7 @@ impl Browser {
                 .unwrap_or_default(),
             page_words: vec![("title".to_owned(), head.title.clone())],
             fonts: Vec::new(),
+            before: None,
         };
         let what = request.what;
         let all = matches!(what, What::Bundle);
@@ -305,6 +333,7 @@ impl Browser {
             &head.title,
             &captured_at,
         )?;
+        run.publish(self.captures(), session_id, what);
         Ok(answer(&run, what))
     }
 
@@ -314,7 +343,10 @@ impl Browser {
             .service()
             .screenshot_png(session_id)
             .await
-            .map_err(|e| failed(e.to_string()))?;
+            .map_err(|error| match error {
+                vw_preview::PreviewError::ScreenshotHidden(_) => refused(error.to_string()),
+                other => failed(other.to_string()),
+            })?;
         let (width, height) = png_size(&png).unwrap_or((0, 0));
         if width < MIN_VIEW.0 || height < MIN_VIEW.1 {
             return Err(refused(format!(
@@ -478,14 +510,11 @@ impl Browser {
         if what == What::Before {
             let full = shot::full_page(self, session_id, method).await?;
             let w = run.folder.write("before.png", &full.png, PNG_CAP)?;
-            self.captures().set_before(
-                session_id,
-                Before {
-                    relative: run.folder.relative.clone(),
-                    url: run.source.url.clone(),
-                    method: full.method,
-                },
-            );
+            run.before = Some(Before {
+                relative: run.folder.relative.clone(),
+                url: run.source.url.clone(),
+                method: full.method,
+            });
             run.summary
                 .insert("before".to_owned(), shot_json(&full, &w.name));
             return Ok(());
@@ -510,7 +539,6 @@ impl Browser {
         });
         run.folder
             .write("compare.json", &pretty(&record), SMALL_CAP)?;
-        self.captures().forget(session_id);
         run.summary.insert(
             "compare".to_owned(),
             json!({"changedShare": comparison.changed_share, "regions": comparison.regions,
@@ -577,7 +605,6 @@ fn answer(run: &Run, what: What) -> Value {
         .folder
         .written()
         .iter()
-        .filter(|w| !w.name.starts_with("media/"))
         .map(|w| json!({"name": w.name, "bytes": w.bytes}))
         .collect();
     let media_files = run
@@ -614,6 +641,6 @@ fn answer(run: &Run, what: What) -> Value {
         out["skipped"] = json!(run.skipped);
     }
     out[OUTCOME_KEY] = json!(outcome(run, what));
-    observe::fit(&mut out, observe::READ_BUDGET);
+    observe::fit(&mut out, ANSWER_BUDGET);
     out
 }

@@ -19,17 +19,22 @@
  *   its own chunk (main bundle size): it starts loading with this module and a streaming
  *   message renders its plain text until it arrived (a few milliseconds after start).
  *
+ * - `lineBreaks`: chat text (the transcript's messages): a single newline is a line break, as in chat apps, instead
+ *   of the standard soft break shown as a space (`remarkLineBreaks.ts`). Off for Markdown files, which keep the
+ *   standard rules.
  * - `extension`: one extra remark plugin and the element it produces, so the transcript can mark file
  *   references (`features/files/remarkFileRefs.ts`) without this module knowing about files. The plugin may only
  *   add elements of its own tag; it never adds HTML.
  *
- * Depends on: react-markdown, remark-gfm, remend, CodeBlock. Called by: the transcript rows, previews.
+ * Depends on: react-markdown, remark-gfm, remend, CodeBlock, remarkLineBreaks.
+ * Called by: the transcript rows, previews.
  */
-import { type ReactElement, type ReactNode, useEffect, useState } from "react";
+import { type ReactElement, type ReactNode, useEffect, useId, useState } from "react";
 import ReactMarkdown, { type Options } from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 import { CodeBlock } from "./CodeBlock";
+import { remarkLineBreaks } from "./remarkLineBreaks";
 
 /** Props of [`Markdown`]. */
 export interface MarkdownProps {
@@ -39,6 +44,8 @@ export interface MarkdownProps {
   onOpenLink?: (url: string) => void;
   /** The text is still being generated (Vibe's `generationStatus: in_progress`). */
   streaming?: boolean;
+  /** Chat text: a single newline shows as a line break (see the module notes). */
+  lineBreaks?: boolean;
   /** An extra remark plugin and the renderer of the element it adds (for file references). */
   extension?: MarkdownExtension;
 }
@@ -56,6 +63,21 @@ export interface MarkdownExtension {
    * alt text. The extension resolves the path through the core; this module never loads a URL itself.
    */
   image?: (src: string, alt: string) => ReactElement | undefined;
+}
+
+/** GFM task inputs stay read-only; each carries its own item identity independently of visible text. */
+function TaskCheckbox({ checked }: { checked?: boolean | undefined }): ReactElement {
+  const id = useId();
+  return (
+    <input
+      data-testid="shared.markdown-task"
+      data-item-id={id}
+      type="checkbox"
+      checked={checked}
+      disabled
+      readOnly
+    />
+  );
 }
 
 const REL = "noopener noreferrer nofollow";
@@ -110,6 +132,7 @@ export function Markdown({
   source,
   onOpenLink,
   streaming = false,
+  lineBreaks = false,
   extension,
 }: MarkdownProps): ReactElement {
   const close = useRemend(streaming);
@@ -117,11 +140,16 @@ export function Markdown({
     streaming && close !== null
       ? close(source, { linkMode: "text-only", katex: false, inlineKatex: false, images: false })
       : source;
+  // Line breaks run before the extension, so file references see one line per text node.
+  const plugins: NonNullable<Options["remarkPlugins"]> = [remarkGfm];
+  if (lineBreaks) plugins.push(remarkLineBreaks as (typeof plugins)[number]);
+  if (extension !== undefined) plugins.push(extension.plugin);
   return (
     <ReactMarkdown
-      remarkPlugins={extension === undefined ? [remarkGfm] : [remarkGfm, extension.plugin]}
+      remarkPlugins={plugins}
       skipHtml
       components={{
+        input: ({ checked }) => <TaskCheckbox checked={checked} />,
         // Only present with an extension; react-markdown looks custom tags up by name.
         ...(extension === undefined
           ? {}
@@ -131,6 +159,8 @@ export function Markdown({
             }),
         a: ({ href, children }) => (
           <a
+            data-testid="shared.markdown-prevent-default"
+            data-item-id={href ?? "inert"}
             // The default urlTransform turns an unsafe URL into ""; an empty href would link to
             // the current page, so it is dropped (the anchor stays inert).
             {...(href === undefined || href === "" ? {} : { href })}

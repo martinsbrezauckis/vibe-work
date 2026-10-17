@@ -2,7 +2,7 @@
  * Which session changes deserve an OS notification, and the rules that decide whether one is shown.
  * Pure: `transitions` compares two core models, `shouldNotify` applies the user's level and the
  * focus rule, `textFor` words it. `notifyStore.ts` runs them and calls the host.
- * Depends on: coreModel types, sessionSummary. Called by: notifyStore, tests.
+ * Depends on: coreModel's live card projection, sessionSummary. Called by: notifyStore, tests.
  * Invariants:
  * - Levels nest: `errors` < `permissions` (errors + permission requests) < `all` (+ finished).
  *   The default is `permissions`.
@@ -13,7 +13,7 @@
  * - A session seen for the first time produces no transition (opening the app must not announce
  *   every old session), and a child (subagent) session never announces "finished".
  */
-import type { CoreState } from "./coreModel";
+import { type CoreState, subagentCardsOf } from "./coreModel";
 import { statusType } from "./sessionSummary";
 
 /** What the user chose to hear about. */
@@ -49,7 +49,7 @@ function object(value: unknown): Record<string, unknown> | null {
 
 /** Notifications `prev` -> `next` calls for (one per newly opened callback). */
 export function transitions(prev: CoreState, next: CoreState): Transition[] {
-  if (prev.sessions === next.sessions) return [];
+  if (prev.sessions === next.sessions && prev.subagentCards === next.subagentCards) return [];
   const found: Transition[] = [];
   for (const [id, entry] of Object.entries(next.sessions)) {
     const before = prev.sessions[id];
@@ -61,6 +61,21 @@ export function transitions(prev: CoreState, next: CoreState): Transition[] {
         ? entry.session["title"]
         : `Session ${id}`;
     const opened = entry.openCallbackIds.filter((c) => !before.openCallbackIds.includes(c));
+    const earlierChildren = new Set(
+      subagentCardsOf(prev.subagentCards, id, before.state?.["childSessions"]).map(
+        (card) => card.callbackId,
+      ),
+    );
+    for (const card of subagentCardsOf(next.subagentCards, id, entry.state?.["childSessions"])) {
+      if (earlierChildren.has(card.callbackId) || opened.includes(card.callbackId)) continue;
+      // The parent hosts this card; the child has no independently loaded transcript to open.
+      found.push({
+        sessionId: id,
+        kind: "permission",
+        title: `Subagent in ${title}`,
+        callbackId: card.callbackId,
+      });
+    }
     const isChild = typeof entry.session["parentSessionId"] === "string";
     const kinds: NotifyKind[] = [];
     if (now === "failed" && was !== "failed") kinds.push("error");

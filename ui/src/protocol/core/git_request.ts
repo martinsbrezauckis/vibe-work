@@ -5,8 +5,12 @@
  * scripts/public/check.sh fails when this file and the Rust types disagree.
  */
 
-import type { PreparedKind } from "./git";
-export type GitRequest = { "op": "status",
+import type { PreparedKind, CommitIdentity } from "./git";
+export type GitRequest = { "op": "identity" } | { "op": "setIdentity",
+/**
+ * The author details; never written to global Git config.
+ */
+identity: CommitIdentity, } | { "op": "status",
 /**
  * Session id.
  */
@@ -62,7 +66,11 @@ expectedHead: string | null,
 /**
  * Run the repository's commit hooks (the dialog's switch).
  */
-runHooks: boolean, } | { "op": "pushPlan",
+runHooks: boolean,
+/**
+ * Author details to save in this repository before committing (only when entered by the user).
+ */
+identity?: CommitIdentity, } | { "op": "pushPlan",
 /**
  * Session id.
  */

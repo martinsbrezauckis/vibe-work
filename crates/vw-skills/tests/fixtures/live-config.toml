@@ -1,0 +1,11 @@
+# Disposable Vibe configuration for the live test: no key, model turn, or network.
+active_model = "test-local"
+enable_telemetry = false
+enable_update_checks = false
+experimental_enable_registry_skills = true
+
+[models.test-local]
+name = "unused-local-model"
+alias = "test-local"
+provider = "llamacpp"
+max_context_length = 32768

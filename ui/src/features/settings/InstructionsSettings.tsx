@@ -5,6 +5,7 @@
  * here; the screen says so and offers a one-way copy (never a link, never an edit of the terminal's
  * files). Nothing is written until Save after reviewing the diff.
  */
+import { Button } from "../../components/Controls";
 import { useEffect } from "react";
 
 import { useCoreState } from "../shell/hooks";
@@ -42,15 +43,16 @@ export function InstructionsSettings() {
         }
         extra={
           cliAvailable ? (
-            <button
+            <Button
+              data-testid="settings.instructions-settings-load-cli"
               type="button"
-              className="tb-btn"
+              small
               onClick={() => {
                 void controller.loadCli();
               }}
             >
               Copy my CLI instructions
-            </button>
+            </Button>
           ) : null
         }
       />

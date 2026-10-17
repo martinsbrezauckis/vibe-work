@@ -26,3 +26,6 @@ thiserror = "2"
 tokio = { version = "1.53", features = ["rt", "sync"] }
 tracing = "0.1"
 zeroize = "1.8"
+# Encodes the vault's random network MAC key; both crates already occur in the workspace lock.
+base64 = "0.23"
+getrandom = "0.3"

@@ -37,6 +37,7 @@ function Chip({ git, sessionId }: { git: Git; sessionId: string }): ReactElement
     .join(" · ");
   return (
     <button
+      data-testid="git.pr-chip-open-tab"
       type="button"
       className={`chip pr-chip pr-${card.state}${card.checks.failed > 0 ? " bad" : ""}`}
       data-git="pr-chip"

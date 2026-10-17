@@ -1,0 +1,19 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "sessionId": {
+      "title": "Sessionid",
+      "type": "string"
+    },
+    "skillId": {
+      "title": "Skillid",
+      "type": "string"
+    }
+  },
+  "required": [
+    "sessionId",
+    "skillId"
+  ],
+  "title": "SkillsVersionsParams",
+  "type": "object"
+}

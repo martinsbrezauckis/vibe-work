@@ -19,7 +19,7 @@ const FIX: &str = "handbook_check({repair: \"stylesheet\"})";
 /// the rules without a new marker can make an earlier bundled stylesheet look like a user's edit (HB-E11).
 /// Keep earlier bundled text here so upgrades do not ask the user to resolve it as an edit.
 /// Add the previous text whenever `STYLE` changes without a new marker.
-const EARLIER: &[&str] = &[include_str!("handbook-1.2-hb2.css")];
+const EARLIER: &[&str] = &[include_str!("handbook-1.2-earlier-1.css")];
 const TOKENS: &[&str] = &[
     "--bg", "--panel", "--raised", "--line", "--text", "--text-2", "--text-3", "--accent",
     "--blue", "--green", "--red",
@@ -253,7 +253,7 @@ mod tests {
                 || std::path::PathBuf::from("target"),
                 std::path::PathBuf::from,
             )
-            .join(format!("vw-hb2-race-{}", std::process::id()));
+            .join(format!("vw-handbook-css-race-{}", std::process::id()));
         std::fs::create_dir_all(&root).unwrap();
         let dir = Dir::open_ambient_dir(&root, cap_std::ambient_authority()).unwrap();
         dir.write("new.tmp", STYLE).unwrap();
@@ -274,7 +274,7 @@ mod tests {
                 || std::path::PathBuf::from("target"),
                 std::path::PathBuf::from,
             )
-            .join(format!("vw-ci4f-repair-{}", std::process::id()));
+            .join(format!("vw-handbook-css-repair-{}", std::process::id()));
         std::fs::create_dir_all(&root).unwrap();
         let folder = "docs/handbook";
         let css = root.join(folder).join(STYLESHEET);

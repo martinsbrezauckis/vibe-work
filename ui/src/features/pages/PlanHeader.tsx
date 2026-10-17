@@ -72,6 +72,7 @@ export function PlanHeader({
             {mismatch.total} done, the page says {mismatch.pageDone} of {mismatch.total}.
           </span>
           <button
+            data-testid="pages.plan-header-ask-update"
             type="button"
             className="pages-btn"
             onClick={() => {

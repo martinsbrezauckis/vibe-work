@@ -121,7 +121,7 @@
   font: inherit;
   min-width: 0;
 }
-.source:hover,
+.source:hover:where(:not(:disabled)),
 .source:focus-visible {
   background: var(--hover);
 }

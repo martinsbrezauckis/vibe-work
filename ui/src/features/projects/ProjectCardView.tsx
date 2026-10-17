@@ -58,6 +58,8 @@ export function SessionChip({
     session.state === "waiting" ? " · needs you" : session.state === "idle" ? " · idle" : "";
   return (
     <button
+      data-item-id={session.id}
+      data-testid="projects.project-card-view-stop-propagation"
       type="button"
       className="pj-chip"
       data-state={session.state}
@@ -111,6 +113,8 @@ export function ProjectCardView({
   const last = Math.max(card.changedMs, ...sessions.map((s) => s.bumpedAt));
   return (
     <article
+      data-item-id={projectId}
+      data-testid="projects.project-card-view-pj-card"
       className="pj-card"
       data-project={card.project}
       data-project-id={projectId}
@@ -122,6 +126,7 @@ export function ProjectCardView({
         <div className="pj-heading">
           {management.renameField ?? (
             <button
+              data-testid="projects.project-card-view-stop-propagation-2"
               type="button"
               className="pj-name"
               aria-expanded={selected}
@@ -145,6 +150,7 @@ export function ProjectCardView({
           <Icon name="book-open" size={16} />
           <span className="pj-nohb-text">No handbook yet</span>
           <button
+            data-testid="projects.project-card-view-stop-propagation-3"
             type="button"
             className="pj-btn small"
             disabled={requestBusy}
@@ -154,7 +160,7 @@ export function ProjectCardView({
               start(e.nativeEvent.isTrusted);
             }}
           >
-            Ask the agent to create the handbook
+            Ask Vibe to create the handbook
           </button>
         </div>
       ) : card.plans.length === 0 ? (
@@ -208,6 +214,8 @@ export function NoFolderCard({
   const management = useProjectActions(projectId, title);
   return (
     <article
+      data-item-id={projectId}
+      data-testid="projects.project-card-view-pj-card-2"
       className="pj-card"
       data-project=""
       data-project-id={projectId}
@@ -219,6 +227,7 @@ export function NoFolderCard({
         <div className="pj-heading">
           {management.renameField ?? (
             <button
+              data-testid="projects.project-card-view-stop-propagation-4"
               type="button"
               className="pj-name"
               aria-expanded={selected}
@@ -238,6 +247,7 @@ export function NoFolderCard({
         <Icon name="folder" size={16} />
         <span className="pj-nohb-text">No main folder: no handbook to show</span>
         <button
+          data-testid="projects.project-card-view-stop-propagation-5"
           type="button"
           className="pj-btn small"
           onClick={(e) => {

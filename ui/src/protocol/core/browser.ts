@@ -7,7 +7,7 @@
 
 import type { JsonValue } from "./index";
 
-import type { PageTab, EnginePoolSnapshot, Rect } from "./preview";
+import type { PickTarget, PageTab, EnginePoolSnapshot, Rect } from "./preview";
 export type BrowserRequest = { "op": "tabs",
 /**
  * The loaded session.
@@ -156,7 +156,11 @@ sessionId: string,
 /**
  * `element` or `box`.
  */
-mode?: string, } | { "op": "captureSecret",
+mode?: string,
+/**
+ * The element or area to annotate without a pointer.
+ */
+target?: PickTarget, } | { "op": "captureSecret",
 /**
  * The session.
  */

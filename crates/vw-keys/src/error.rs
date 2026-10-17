@@ -23,6 +23,9 @@ pub enum KeyError {
     /// The chosen vault item is not a Mistral credential.
     #[error("that vault item does not hold a Mistral key")]
     NotACandidate,
+    /// Policy enumeration or a direct policy record could not be trusted.
+    #[error("the secret's permissions could not be read; access was refused")]
+    PermissionsUnreadable,
     /// Nothing was found at the import source.
     #[error("no Mistral key was found there")]
     NothingToImport,
@@ -47,4 +50,14 @@ pub enum KeyError {
     /// A worker thread failed (panic in a blocking task).
     #[error("internal error in the key service")]
     Internal,
+}
+
+impl KeyError {
+    pub(crate) fn permissions_unreadable(error: VaultError) -> Self {
+        if matches!(error, VaultError::Locked) {
+            Self::Vault(error)
+        } else {
+            Self::PermissionsUnreadable
+        }
+    }
 }

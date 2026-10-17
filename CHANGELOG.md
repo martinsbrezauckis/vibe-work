@@ -2,6 +2,32 @@
 
 All notable changes to Vibe Work. Versions follow [Semantic Versioning](https://semver.org/); dates are UTC.
 
+## 0.1.1 (2026-10-17)
+
+Built for Vibe 2.26.1. This release adds a code editor, a Git tab for the whole project and company-network settings.
+
+- Code editor: open a file from the chat and edit it next to the conversation, with find, undo and Save
+  (Ctrl/Cmd+S). If the agent changes the same file, your unsaved edits stay: Compare or Reload.
+- Git tab: the project folder, its subfolders and every session copy in one view, each with its branch, changed files
+  and next step (Commit, Publish branch, Bring into main).
+- File names in Vibe's answers open the file, also from subfolders. Right-click one to open, edit, show it in its
+  folder or copy its path.
+- Version history for beginners: a folder without git offers "Turn on version history"; set your commit name and email
+  in Settings > General or in the Commit dialog. Your global git settings stay as they are.
+- Company networks: Settings > Network sets a proxy, the addresses that skip it and a company certificate, with a
+  connection test.
+- Session logs: an optional check (Settings > Project secrets > Session logs) finds your stored secrets in saved chats
+  and offers to remove them.
+- Plugins you put in Vibe Work's plugins folder yourself stay off until you turn them on. The Tools page lists every
+  plugin Vibe finds, with Turn on, Turn off and Remove.
+- Recurring prompts: Vibe's /loop in the / menu; the chat's loops are listed and can be removed.
+- Handbook pages take your answers right in the page, and a page can re-sort itself from them.
+- Plainer screens: approval cards ask "Allow this edit?" or "Allow this command?"; git buttons use plain words and say
+  why they are disabled; long confirmations are shown part by part.
+- Windows: chats run without console windows; helper programs run hidden.
+- Many smaller improvements: the message box grows up to eight lines, subagents' edits and approvals show in the
+  parent chat, starting Vibe Work again brings its open window forward, and more.
+
 ## 0.1.0 (2026-10-14)
 
 First public release for Windows, macOS and Linux, built for Vibe 2.26.1.

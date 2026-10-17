@@ -1,8 +1,6 @@
-//! Stuck sessions: sessions Vibe could not reopen after a server restart.
+//! Stuck sessions: sessions whose reopen after a server restart failed or did not finish in time.
 //!
-//! A session waiting on a bash approval when its
-//! server was killed never answers a `session/resume` again, in any profile, in the same or a new
-//! process. Users must never get stuck mid-work, and there are no automatic retries.
+//! Users must never get stuck mid-work, and the core makes no automatic retries.
 //! So after the first failed reopen the session is marked stuck; its commands are refused at once
 //! (`sessionStuck`, nothing waits); its history stays readable through the lobby; and the user has two
 //! explicit actions: try again (one bounded attempt, cancellable) or continue in a new session (same
@@ -17,9 +15,10 @@
 //! - Cancelling drops the attempt: the request future, its channel (closed on the server when dropped) and
 //!   the per-session locks go with it.
 //! - Other sessions never wait for a stuck one (no lock is shared).
+//! - A retry's completion clears only its own cancellation switch; a replacement keeps its owner.
 
 use std::collections::{BTreeMap, HashMap};
-use std::sync::{Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use serde_json::{Value, json};
 use tokio::sync::oneshot;
@@ -45,7 +44,13 @@ pub(crate) struct StuckSessions {
     /// Stuck session -> the session `continueInNewSession` started for it.
     stuck: Mutex<BTreeMap<String, Option<String>>>,
     /// Running `retryReopen` attempts, each with its cancel switch.
-    retries: Mutex<HashMap<String, oneshot::Sender<()>>>,
+    retries: Mutex<HashMap<String, Retry>>,
+}
+
+/// The sender and the unique owner whose completion may remove it.
+struct Retry {
+    owner: Arc<()>,
+    cancel: oneshot::Sender<()>,
 }
 
 impl StuckSessions {
@@ -91,23 +96,34 @@ impl StuckSessions {
     }
 
     /// Registers a retry of `id`; a retry already running is cancelled (only one at a time).
-    fn begin_retry(&self, id: &str) -> oneshot::Receiver<()> {
+    fn begin_retry(&self, id: &str) -> (Arc<()>, oneshot::Receiver<()>) {
         let (tx, rx) = oneshot::channel();
-        if let Some(old) = locked(&self.retries).insert(id.to_owned(), tx) {
-            let _ = old.send(());
+        let owner = Arc::new(());
+        let retry = Retry {
+            owner: owner.clone(),
+            cancel: tx,
+        };
+        if let Some(old) = locked(&self.retries).insert(id.to_owned(), retry) {
+            let _ = old.cancel.send(());
         }
-        rx
+        (owner, rx)
     }
 
-    fn end_retry(&self, id: &str) {
-        locked(&self.retries).remove(id);
+    fn end_retry(&self, id: &str, owner: &Arc<()>) {
+        let mut retries = locked(&self.retries);
+        if retries
+            .get(id)
+            .is_some_and(|retry| Arc::ptr_eq(&retry.owner, owner))
+        {
+            retries.remove(id);
+        }
     }
 
     /// Cancels the running retry of `id`. Returns false when none runs.
     fn cancel(&self, id: &str) -> bool {
         locked(&self.retries)
             .remove(id)
-            .is_some_and(|tx| tx.send(()).is_ok())
+            .is_some_and(|retry| retry.cancel.send(()).is_ok())
     }
 }
 
@@ -175,14 +191,14 @@ impl Core {
         origin: Origin,
         id: &str,
     ) -> Result<CommandResult, CoreError> {
-        let mut cancel = self.shared.stuck.begin_retry(id);
+        let (owner, mut cancel) = self.shared.stuck.begin_retry(id);
         let bound = self.shared.config.retry_reopen_timeout;
         let attempt = tokio::time::timeout(bound, self.open_session(origin, id));
         let outcome = tokio::select! {
             done = attempt => Some(done),
             _ = &mut cancel => None,
         };
-        self.shared.stuck.end_retry(id);
+        self.shared.stuck.end_retry(id, &owner);
         match outcome {
             Some(Ok(Ok(()))) => {
                 if self.shared.stuck.clear(id) {
@@ -284,5 +300,56 @@ fn reply(result: Value) -> CommandResult {
         result,
         client_user_message_id: None,
         user_entry_ids: Vec::new(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::StuckSessions;
+    use tokio::sync::oneshot::error::TryRecvError;
+
+    #[test]
+    fn overlapping_retry_cleanup_keeps_the_newest_cancellable() {
+        let stuck = StuckSessions::default();
+        let (first_owner, mut first) = stuck.begin_retry("session");
+        let (second_owner, mut second) = stuck.begin_retry("session");
+        assert_eq!(
+            first.try_recv(),
+            Ok(()),
+            "replacement cancels the older attempt"
+        );
+        stuck.end_retry("session", &first_owner);
+        assert_eq!(
+            second.try_recv(),
+            Err(TryRecvError::Empty),
+            "older cleanup must keep the replacement active"
+        );
+        assert!(
+            stuck.cancel("session"),
+            "the replacement remains separately cancellable"
+        );
+        assert_eq!(second.try_recv(), Ok(()));
+        stuck.end_retry("session", &second_owner);
+    }
+
+    #[test]
+    fn delayed_cleanup_after_cancel_keeps_a_later_retry_and_other_sessions() {
+        let stuck = StuckSessions::default();
+        let (old_owner, mut old) = stuck.begin_retry("session");
+        assert!(stuck.cancel("session"));
+        assert_eq!(old.try_recv(), Ok(()));
+        let (new_owner, mut new) = stuck.begin_retry("session");
+        let (other_owner, mut other) = stuck.begin_retry("other");
+        stuck.end_retry("session", &old_owner);
+        assert_eq!(new.try_recv(), Err(TryRecvError::Empty));
+        assert_eq!(other.try_recv(), Err(TryRecvError::Empty));
+        stuck.end_retry("session", &new_owner);
+        assert!(
+            !stuck.cancel("session"),
+            "own completion removed its sender"
+        );
+        assert!(stuck.cancel("other"));
+        assert_eq!(other.try_recv(), Ok(()));
+        stuck.end_retry("other", &other_owner);
     }
 }

@@ -1,0 +1,48 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "alias": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Alias"
+    },
+    "scope": {
+      "default": "global",
+      "title": "Scope",
+      "type": "string"
+    },
+    "sessionId": {
+      "title": "Sessionid",
+      "type": "string"
+    },
+    "skillId": {
+      "title": "Skillid",
+      "type": "string"
+    },
+    "version": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Version"
+    }
+  },
+  "required": [
+    "sessionId",
+    "skillId"
+  ],
+  "title": "SkillsImportParams",
+  "type": "object"
+}

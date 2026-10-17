@@ -15,6 +15,7 @@ import type {
   ChangesRequest,
   ChangesResult,
   ChangesView,
+  CommitIdentity,
   FileChange,
   Hunk,
   InitPlan,
@@ -25,6 +26,8 @@ import type { CoreController } from "../../state/coreStore";
 import { createStore } from "../../state/createStore";
 import { pruneSessions } from "../../state/prune";
 import { bulkDeletes, deletedByRevert, shownInFull } from "./model";
+import { restoreRewindReply, type RewindDestination } from "../../state/composerRewind";
+import { validIdentity } from "../../state/gitIdentity";
 
 /** A confirmation waiting in the tab. */
 export type Confirm =
@@ -32,7 +35,13 @@ export type Confirm =
   | { kind: "revertFile"; sessionId: string; file: FileChange; deletes: string[] }
   | { kind: "revertAll"; sessionId: string; fingerprint: string; deletes: string[]; files: number }
   | { kind: "undoTurn"; sessionId: string; turnNumber: number; preview: UndoPreview }
-  | { kind: "history"; sessionId: string; plan: InitPlan };
+  | {
+      kind: "history";
+      sessionId: string;
+      plan: InitPlan;
+      identity: CommitIdentity;
+      needsIdentity: boolean;
+    };
 
 /** The tab's state. */
 export interface ChangesUi {
@@ -42,6 +51,7 @@ export interface ChangesUi {
   selected: Readonly<Record<string, string | null>>;
   layout: "split" | "unified";
   confirm: Confirm | null;
+  completion: Readonly<Record<string, "history" | "commit" | undefined>>;
 }
 
 const initial: ChangesUi = {
@@ -51,6 +61,7 @@ const initial: ChangesUi = {
   selected: {},
   layout: "unified",
   confirm: null,
+  completion: {},
 };
 
 function put<T>(map: Readonly<Record<string, T>>, key: string, value: T): Record<string, T> {
@@ -58,10 +69,20 @@ function put<T>(map: Readonly<Record<string, T>>, key: string, value: T): Record
 }
 
 /** Creates the controller for `core`. */
-export function createChanges(core: CoreController) {
+export function createChanges(core: CoreController, rewind: RewindDestination) {
   const store = createStore<ChangesUi>(initial);
+  const repositories: Record<string, string | undefined> = {};
+  const versions: Record<string, number> = {};
 
   const run = async (request: ChangesRequest): Promise<ChangesResult> => {
+    if (
+      "sessionId" in request &&
+      repositories[request.sessionId] !== undefined &&
+      repositories[request.sessionId] !== "." &&
+      request.op !== "readRepo" &&
+      request.op !== "read"
+    )
+      throw new Error("Keep and Revert are available in the session's review.");
     const result = await core.run({ type: "changes", request });
     if (result.type !== "changes") throw new Error(`unexpected ${result.type} result`);
     return result.result;
@@ -70,6 +91,8 @@ export function createChanges(core: CoreController) {
     store.set((s) => ({
       ...s,
       views: put(s.views, view.sessionId, view),
+      completion:
+        view.files.length > 0 ? put(s.completion, view.sessionId, undefined) : s.completion,
       error: put(s.error, view.sessionId, null),
     }));
   };
@@ -94,8 +117,8 @@ export function createChanges(core: CoreController) {
         }));
       return;
     }
-    // Vibe 2.26.0 refuses a rewind while its runtime still finishes work after a turn, also when the
-    // session already shows idle (`_runtime.py:1386-1391`); it passes a few seconds later.
+    // A rewind can come back with "Runtime work is pending" while Vibe finishes the last turn; the
+    // window then asks the user to try again in a few seconds.
     const pending = error.message.includes("Runtime work is pending");
     const message =
       error.code === "stale"
@@ -111,7 +134,11 @@ export function createChanges(core: CoreController) {
     setBusy(sessionId, true);
     try {
       const result = await run(request);
-      if (result.kind === "view") setView(result.view);
+      if (result.kind === "view") {
+        setView(result.view);
+        if (request.op === "enableHistory")
+          store.set((s) => ({ ...s, completion: put(s.completion, sessionId, "history") }));
+      }
     } catch (thrown) {
       await fail(sessionId, thrown);
     } finally {
@@ -132,7 +159,7 @@ export function createChanges(core: CoreController) {
 
   // a deleted session's entries go with it.
   core.onSessionsGone((ids) => {
-    store.set((s) => pruneSessions(s, ["views", "busy", "error", "selected"], ids));
+    store.set((s) => pruneSessions(s, ["views", "busy", "error", "selected", "completion"], ids));
   });
   const stopListening = core.listen((event) => {
     if (event.type === "changesUpdated" && store.get().views[event.sessionId] !== undefined)
@@ -144,17 +171,45 @@ export function createChanges(core: CoreController) {
 
   const controller = {
     store,
+    /** Records a successful commit only for an empty review. */
+    markSaved(sessionId: string): void {
+      if ((store.get().views[sessionId]?.files.length ?? 0) === 0)
+        store.set((s) => ({ ...s, completion: put(s.completion, sessionId, "commit") }));
+    },
     /** Reads (and refreshes) the session's changes. */
     async load(sessionId: string): Promise<void> {
+      const repo = repositories[sessionId];
+      const version = (versions[sessionId] ?? 0) + 1;
+      versions[sessionId] = version;
       try {
-        const result = await run({ op: "read", sessionId });
-        if (result.kind === "view") setView(result.view);
+        const result = await run(
+          repo === undefined || repo === "."
+            ? { op: "read", sessionId }
+            : { op: "readRepo", sessionId, repo },
+        );
+        if (versions[sessionId] === version && result.kind === "view") setView(result.view);
       } catch (thrown) {
+        if (versions[sessionId] === version)
+          store.set((s) => ({
+            ...s,
+            error: put(s.error, sessionId, toCallError(thrown).error.message),
+          }));
+      }
+    },
+    /** Follows the Git bar's confirmed repository; refreshes when its status is re-read. */
+    selectRepository(sessionId: string, repo: string | undefined): void {
+      if (repositories[sessionId] !== repo) {
+        const changedFolder = (repositories[sessionId] ?? ".") !== (repo ?? ".");
+        repositories[sessionId] = repo;
         store.set((s) => ({
           ...s,
-          error: put(s.error, sessionId, toCallError(thrown).error.message),
+          views: Object.fromEntries(Object.entries(s.views).filter(([id]) => id !== sessionId)),
+          selected: put(s.selected, sessionId, null),
+          completion: changedFolder ? put(s.completion, sessionId, undefined) : s.completion,
+          confirm: s.confirm?.sessionId === sessionId ? null : s.confirm,
         }));
       }
+      void controller.load(sessionId);
     },
     keepHunk: (sessionId: string, file: FileChange, hunk: Hunk) =>
       act(sessionId, { op: "keep", sessionId, target: hunkTarget(file, hunk) }),
@@ -224,8 +279,19 @@ export function createChanges(core: CoreController) {
     async askHistory(sessionId: string): Promise<void> {
       try {
         const result = await run({ op: "planHistory", sessionId });
-        if (result.kind === "initPlan")
-          store.set((s) => ({ ...s, confirm: { kind: "history", sessionId, plan: result.plan } }));
+        if (result.kind === "initPlan") {
+          const identity = result.identity ?? { name: "", email: "" };
+          store.set((s) => ({
+            ...s,
+            confirm: {
+              kind: "history",
+              sessionId,
+              plan: result.plan,
+              identity,
+              needsIdentity: !validIdentity(identity),
+            },
+          }));
+        }
       } catch (thrown) {
         await fail(sessionId, thrown);
       }
@@ -233,9 +299,16 @@ export function createChanges(core: CoreController) {
     dismissOffer: (sessionId: string) => act(sessionId, { op: "dismissOffer", sessionId }),
     /** "Start reviewing from now": a new baseline, only on the user's click (after one was lost). */
     restart: (sessionId: string) => act(sessionId, { op: "restart", sessionId }),
+    /** Edits only the pending init prompt; Cancel never saves an identity. */
+    editHistoryIdentity(identity: CommitIdentity): void {
+      store.set((s) =>
+        s.confirm?.kind === "history" ? { ...s, confirm: { ...s.confirm, identity } } : s,
+      );
+    },
     /** The user accepted the pending confirmation. */
     async accept(): Promise<void> {
       const pending = store.get().confirm;
+      if (pending?.kind === "history" && !validIdentity(pending.identity)) return;
       store.set((s) => ({ ...s, confirm: null }));
       if (pending === null) return;
       const id = pending.sessionId;
@@ -252,20 +325,31 @@ export function createChanges(core: CoreController) {
             deletePaths: pending.deletes,
           });
         case "history":
-          return act(id, { op: "enableHistory", sessionId: id, confirmed: true });
+          return act(id, {
+            op: "enableHistory",
+            sessionId: id,
+            confirmed: true,
+            identity: pending.identity,
+          });
         case "undoTurn":
           setBusy(id, true);
           try {
-            await core.run({
+            const result = await core.run({
               type: "rewindSession",
               sessionId: id,
               entryId: pending.preview.anchorEntryId,
               restoreFiles: true,
               inplace: true,
             });
+            restoreRewindReply(result, rewind);
             await controller.load(id);
           } catch (thrown) {
             await fail(id, thrown);
+            rewind.toasts.push({
+              kind: "error",
+              bellKind: "failure",
+              text: `Could not undo turn: ${store.get().error[id] ?? "Restoring files failed."}`,
+            });
           } finally {
             setBusy(id, false);
           }

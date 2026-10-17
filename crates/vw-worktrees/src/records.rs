@@ -9,15 +9,29 @@
 //! Depends on: serde, vw-platform (`ensure_private_dir`), vw-changes (`valid_session_id`, `now_ms`), `error`.
 //! Called by: vw-core-api.
 //! Invariants:
-//! - Writes are atomic (temp file + rename); a record that cannot be parsed is skipped (logged), never
+//! - Writes are atomic (temp file + rename); failed starts can retain a separate recovery record and
+//!   an in-memory copy shared by cloned handles. A record that cannot be parsed is skipped (logged), never
 //!   guessed.
 //! - A file name is a valid session id (no path tricks).
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use serde::{Deserialize, Serialize};
 
 use crate::error::WorktreeError;
+
+mod recovery;
+mod rename;
+
+// A read can finalize a rename. Serialize it with updates so readers do not reuse the same
+// temporary file or overwrite metadata that changed while the branch was being reconciled.
+static RECORDS_LOCK: Mutex<()> = Mutex::new(());
+
+fn lock_records() -> MutexGuard<'static, ()> {
+    RECORDS_LOCK.lock().unwrap_or_else(PoisonError::into_inner)
+}
 
 /// What the user decided about a copy at the end of its session.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -65,6 +79,7 @@ pub struct Record {
 #[derive(Debug, Clone)]
 pub struct Records {
     dir: PathBuf,
+    recovery: Arc<Mutex<BTreeMap<String, Record>>>,
 }
 
 impl Records {
@@ -82,6 +97,7 @@ impl Records {
         })?;
         Ok(Self {
             dir: dir.to_path_buf(),
+            recovery: Arc::default(),
         })
     }
 
@@ -93,9 +109,22 @@ impl Records {
     /// The record of `session_id`, if any.
     #[must_use]
     pub fn get(&self, session_id: &str) -> Option<Record> {
-        let bytes = std::fs::read(self.file(session_id)?).ok()?;
+        let _guard = lock_records();
+        self.get_unlocked(session_id)
+    }
+
+    fn get_unlocked(&self, session_id: &str) -> Option<Record> {
+        if let Some(record) = self.memory_recovery(session_id) {
+            return self.follow_rename(record).ok();
+        }
+        let recovery = self.recovery_file(session_id)?;
+        let bytes = if recovery.exists() {
+            std::fs::read(recovery).ok()?
+        } else {
+            std::fs::read(self.file(session_id)?).ok()?
+        };
         match serde_json::from_slice::<Record>(&bytes) {
-            Ok(record) if record.session_id == session_id => Some(record),
+            Ok(record) if record.session_id == session_id => self.follow_rename(record).ok(),
             Ok(_) | Err(_) => {
                 tracing::warn!(session_id, "worktrees: unreadable record skipped");
                 None
@@ -106,17 +135,19 @@ impl Records {
     /// Every readable record.
     #[must_use]
     pub fn all(&self) -> Vec<Record> {
-        let Ok(entries) = std::fs::read_dir(&self.dir) else {
-            return Vec::new();
-        };
-        let mut out: Vec<Record> = entries
-            .flatten()
-            .filter_map(|e| {
-                let name = e.file_name().to_string_lossy().into_owned();
-                let id = name.strip_suffix(".json")?;
-                self.get(id)
-            })
-            .collect();
+        let mut ids = self.recovery_ids();
+        if let Ok(entries) = std::fs::read_dir(&self.dir) {
+            ids.extend(entries.flatten().filter_map(|entry| {
+                entry
+                    .file_name()
+                    .to_string_lossy()
+                    .strip_suffix(".json")
+                    .map(str::to_owned)
+            }));
+        }
+        ids.sort();
+        ids.dedup();
+        let mut out: Vec<Record> = ids.iter().filter_map(|id| self.get(id)).collect();
         out.sort_by_key(|r| r.created_at_ms);
         out
     }
@@ -127,6 +158,7 @@ impl Records {
     /// # Errors
     /// A record directory entry cannot be read, or a named record cannot be read or parsed.
     pub fn all_for_guard(&self) -> Result<Vec<Record>, WorktreeError> {
+        let _guard = lock_records();
         let entries = std::fs::read_dir(&self.dir)
             .map_err(|e| WorktreeError::io("read records", &self.dir, e))?;
         let mut out = Vec::new();
@@ -150,8 +182,9 @@ impl Records {
                     path.display()
                 )));
             }
-            out.push(record);
+            out.push(self.follow_rename(record)?);
         }
+        self.add_recoveries_for_guard(&mut out)?;
         out.sort_by_key(|r| r.created_at_ms);
         Ok(out)
     }
@@ -161,6 +194,14 @@ impl Records {
     /// # Errors
     /// `InvalidName` for a session id that cannot name a file; `Io` on write failures.
     pub fn put(&self, record: &Record) -> Result<(), WorktreeError> {
+        let _guard = lock_records();
+        self.put_unlocked(record)
+    }
+
+    fn put_unlocked(&self, record: &Record) -> Result<(), WorktreeError> {
+        if self.is_recovery(&record.session_id) {
+            return self.recover_unlocked(record);
+        }
         let Some(path) = self.file(&record.session_id) else {
             return Err(WorktreeError::InvalidName(
                 "the session id cannot name a record file".into(),
@@ -182,11 +223,12 @@ impl Records {
         session_id: &str,
         change: impl FnOnce(&mut Record),
     ) -> Result<Option<Record>, WorktreeError> {
-        let Some(mut record) = self.get(session_id) else {
+        let _guard = lock_records();
+        let Some(mut record) = self.get_unlocked(session_id) else {
             return Ok(None);
         };
         change(&mut record);
-        self.put(&record)?;
+        self.put_unlocked(&record)?;
         Ok(Some(record))
     }
 
@@ -208,8 +250,14 @@ impl Records {
         record.session_deleted = false;
         record.session_archived = false;
         self.put(&record)?;
-        if let Some(path) = self.file(old) {
-            std::fs::remove_file(&path).map_err(|e| WorktreeError::io("remove", &path, e))?;
+        if self.is_recovery(old) {
+            self.remove_recovery(old)?;
+        }
+        if let Some(path) = self.file(old)
+            && let Err(error) = std::fs::remove_file(&path)
+            && error.kind() != std::io::ErrorKind::NotFound
+        {
+            return Err(WorktreeError::io("remove", &path, error));
         }
         Ok(true)
     }

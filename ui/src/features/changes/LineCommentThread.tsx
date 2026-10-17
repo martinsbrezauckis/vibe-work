@@ -5,6 +5,7 @@
  * Depends on: protocol types. Called by: HunkLines, LineCommentsPanel.
  * Invariants: comment and diff text are rendered as plain text only.
  */
+import { Button } from "../../components/Controls";
 import type { ReactElement } from "react";
 
 import type { LineCommentView } from "../../protocol/core";
@@ -26,6 +27,7 @@ export function LineCommentThread(props: {
   const outdated = view.state === "outdated";
   return (
     <div
+      data-item-id={props.view.comment.id}
       className="lc-thread"
       role="group"
       aria-label={`Comment on ${comment.path}, ${rangeText(comment.lines)}`}
@@ -48,6 +50,7 @@ export function LineCommentThread(props: {
       <span className="lc-text">{comment.text}</span>
       <span className="lc-acts">
         <button
+          data-testid="changes.line-comment-thread-send"
           type="button"
           className="mini"
           data-action="send-comment"
@@ -57,16 +60,18 @@ export function LineCommentThread(props: {
         >
           Send to Vibe
         </button>
-        <button
+        <Button
+          data-testid="changes.line-comment-thread-remove"
           type="button"
-          className="mini"
+          small
+          variant="danger"
           data-action="delete-comment"
           onClick={() => {
             remove(comment.id);
           }}
         >
           Delete
-        </button>
+        </Button>
       </span>
     </div>
   );

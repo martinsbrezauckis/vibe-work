@@ -16,10 +16,9 @@
 //! the proxy has not seen is judged as a forge (fails closed: only read-shaped tools pass), and so is an id whose
 //! entries disagree.
 //!
-//! The refusal is a JSON-RPC **success** result whose text is the sentence: Vibe 2.26.1's unified harness passes a
-//! successful connector result's text to the model, while an error result reaches it only as "The connector tool
-//! returned an error" (checked live with the real harness). The text starts with "Not run:", so it is never
-//! read as a done push.
+//! The refusal is a JSON-RPC **success** result whose text is the sentence, so the model reads the reason as the
+//! connector tool's answer (Vibe Work answers every refusal this way). The text starts with "Not run:", so it is
+//! never read as a done push.
 //!
 //! Depends on: vw-agent-tools (`forge`), `serde_json`. Called by: `server`.
 //! Invariants:

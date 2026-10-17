@@ -19,11 +19,13 @@
 //!   WebP by their own signature (the extension we save under comes from that, never from the server).
 //! - The prompt and the tool's texts are data; error texts quote a tool sentence only sanitized and capped.
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use serde_json::{Value, json};
 
 use super::conversations::{self, Outcome};
+use super::temporary_file::{CleanupNotice, TemporaryFile};
 use super::{ApiCall, WorkError, excerpt, json_call, multipart, read_capped};
 
 /// Largest image accepted from the download (25 MB; the probe's JPEG was 0.1-0.7 MB).
@@ -174,14 +176,15 @@ impl Default for Timeouts {
     }
 }
 
-/// Uploads the source image and returns `(file id, signed URL)`.
+/// Uploads the source image and returns its cleanup receipt and signed URL.
 async fn upload_source(
     client: &reqwest::Client,
     base: &str,
     key: &str,
     source: &SourceImage<'_>,
     timeout: Duration,
-) -> Result<(String, String), WorkError> {
+    notice: CleanupNotice,
+) -> Result<(TemporaryFile, String), WorkError> {
     let kind = sniff(source.bytes).ok_or_else(|| {
         WorkError::BadFile("the image to edit is not a PNG, JPEG or WebP".to_owned())
     })?;
@@ -197,24 +200,17 @@ async fn upload_source(
         kind.mime(),
         source.bytes,
     );
-    let answer = json_call(
+    let file = TemporaryFile::upload(
         client,
         base,
-        ApiCall {
-            method: reqwest::Method::POST,
-            path: "/v1/files".to_owned(),
-            body: Some((body, content_type)),
-            timeout,
-            key,
-        },
+        key,
+        (body, content_type),
+        source.name,
+        timeout,
+        notice,
     )
     .await?;
-    let id = answer
-        .get("id")
-        .and_then(Value::as_str)
-        .filter(|id| id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-'))
-        .ok_or(WorkError::Shape("no file id"))?
-        .to_owned();
+    let id = &file.id;
     let signed = json_call(
         client,
         base,
@@ -231,27 +227,11 @@ async fn upload_source(
         .ok()
         .and_then(|v| v.get("url").and_then(Value::as_str).map(str::to_owned))
     {
-        Ok((id, url))
+        Ok((file, url))
     } else {
-        delete_file(client, base, key, &id).await;
+        file.finish().await?;
         Err(WorkError::Shape("no signed URL for the uploaded image"))
     }
-}
-
-/// Deletes an uploaded file (best effort; a failure is logged by the caller's absence of a file, not retried).
-async fn delete_file(client: &reqwest::Client, base: &str, key: &str, id: &str) {
-    let _ = json_call(
-        client,
-        base,
-        ApiCall {
-            method: reqwest::Method::DELETE,
-            path: format!("/v1/files/{id}"),
-            body: None,
-            timeout: Duration::from_secs(10),
-            key,
-        },
-    )
-    .await;
 }
 
 /// The image URL the tool returned, or why there is none.
@@ -351,6 +331,21 @@ pub async fn make(
     key: &str,
     job: &ImageJob<'_>,
 ) -> Result<Made, WorkError> {
+    make_with_cleanup_notice(client, base, key, job, Arc::new(|_| {})).await
+}
+
+/// Makes an image and reports exhausted cleanup retries even if the requesting future is cancelled.
+/// The owner survives cancellation during upload, signed URL lookup, conversation and deletion.
+///
+/// # Errors
+/// As [`make`], including a plain cleanup error naming the source file when deletion is unconfirmed.
+pub async fn make_with_cleanup_notice(
+    client: &reqwest::Client,
+    base: &str,
+    key: &str,
+    job: &ImageJob<'_>,
+    notice: CleanupNotice,
+) -> Result<Made, WorkError> {
     let (model, policy, timeouts) = (job.model, job.policy, job.timeouts);
     let prompt = job.prompt.trim();
     if prompt.is_empty() || prompt.chars().count() > MAX_PROMPT_CHARS {
@@ -359,7 +354,9 @@ pub async fn make(
         )));
     }
     let uploaded = match &job.source {
-        Some(source) => Some(upload_source(client, base, key, source, timeouts.upload).await?),
+        Some(source) => {
+            Some(upload_source(client, base, key, source, timeouts.upload, notice).await?)
+        }
         None => None,
     };
     let input = match &uploaded {
@@ -373,8 +370,8 @@ pub async fn make(
         &json!([{"type": "image_generation"}]),
     );
     let outcome = conversations::run(client, base, key, &body, timeouts.conversation).await;
-    if let Some((id, _)) = &uploaded {
-        delete_file(client, base, key, id).await;
+    if let Some((file, _)) = uploaded {
+        file.finish().await?;
     }
     let outcome = outcome?;
     let (url, function, used) = image_url(&outcome)?;

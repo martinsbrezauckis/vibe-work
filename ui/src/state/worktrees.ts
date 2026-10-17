@@ -26,6 +26,7 @@ import type { CoreController } from "./coreStore";
 import { createStore } from "./createStore";
 import type { Shell } from "./shellStore";
 import type { Toasts } from "./toastStore";
+import { classify } from "../features/composer/model/message";
 import { createWorktreeNotifications } from "./worktreeNotifications";
 
 /** The open end-of-session choice. */
@@ -47,6 +48,8 @@ export interface WorktreesState {
   orphans: readonly OrphanWorktree[];
   /** A fresh "New chat here" choice resets the copy switch, even for the same folder. */
   newChatRequest: number;
+  /** Explicit choice from the Git tree, applied when its folder's composer opens. */
+  newChatCopy: boolean | null;
   /** What `.worktreeinclude` copied into each session's copy this run (not kept across restarts). */
   included: Readonly<Record<string, IncludeReport>>;
 }
@@ -56,6 +59,7 @@ export const NO_WORKTREES = createStore<WorktreesState>({
   end: null,
   orphans: [],
   newChatRequest: 0,
+  newChatCopy: null,
   included: {},
 });
 
@@ -74,12 +78,20 @@ export function createWorktrees(deps: {
   shell: Shell;
   toasts: Toasts;
   persist?: boolean;
+  /** App commands in the form's first-message field use the same handler as the composer. */
+  runCommand?: (
+    sessionId: string,
+    name: string,
+    args: string,
+    origin?: "debug-api",
+  ) => Promise<unknown>;
 }) {
   const { core, shell, toasts } = deps;
   const store = createStore<WorktreesState>({
     end: null,
     orphans: [],
     newChatRequest: 0,
+    newChatCopy: null,
     included: {},
   });
   const notices = createWorktreeNotifications(deps.persist ?? true);
@@ -156,9 +168,13 @@ export function createWorktrees(deps: {
     },
 
     /** Chooses an existing copy for the next chat, without creating another copy. */
-    newChatHere(path: string): void {
-      shell.actions.setNewFolder(path, "session");
-      store.set((s) => ({ ...s, newChatRequest: s.newChatRequest + 1 }));
+    newChatHere(
+      path: string,
+      copy: boolean | null = null,
+      origin: "ui" | "debug-api" = "ui",
+    ): void {
+      shell.actions.setNewFolder(path, origin === "debug-api" ? "debug-api" : "session");
+      store.set((s) => ({ ...s, newChatRequest: s.newChatRequest + 1, newChatCopy: copy }));
     },
 
     /**
@@ -188,7 +204,14 @@ export function createWorktrees(deps: {
         await actions.loadOrphans();
         const text = spec.firstMessage.trim();
         if (text !== "") {
-          await core.run({ type: "startTurn", sessionId: id, message: [{ type: "text", text }] });
+          const intent = classify(text, 0, 0);
+          if (intent.kind === "command") {
+            if (deps.runCommand === undefined)
+              throw new Error("Run this app command from the chat composer.");
+            await deps.runCommand(id, intent.name, intent.args, origin);
+          } else {
+            await core.run({ type: "startTurn", sessionId: id, message: [{ type: "text", text }] });
+          }
         }
         return id;
       } catch (thrown) {

@@ -1,7 +1,7 @@
 //! Reading the working tree into index entries without letting git read it: we
 //! list paths with `git ls-files` (names and `.gitignore` only), read files in Rust (a symlink's target, never
-//! through it), and store their bytes with `git hash-object --no-filters`. A repository's clean filters,
-//! fsmonitor and hooks therefore never run.
+//! through it), and store their bytes with `git hash-object --no-filters`. No repository filter,
+//! fsmonitor or hook runs.
 //!
 //! Depends on: `objects`, `statcache`, `git`, `paths`, `repo`, `error`. Called by: `baseline`, `diff`.
 //! Invariants:

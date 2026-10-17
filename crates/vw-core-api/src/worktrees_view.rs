@@ -39,7 +39,7 @@ pub enum WorktreesRequest {
         text: String,
     },
     /// Starts a session in its own copy: creates `branch` at `base`, then `session/start` with
-    /// `agentConfig.worktree = {kind: "create", branch, name}`. From the Debug API it asks the native dialog.
+    /// `agentConfig.worktree = {kind: "create", branch, name}`. The Debug API's confirmation is answered by the core (no dialog).
     Start {
         /// The session's `AgentConfig` (its `cwd` names the folder; it may not carry `worktree`).
         agent_config: Value,

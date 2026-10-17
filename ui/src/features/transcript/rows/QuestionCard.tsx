@@ -13,6 +13,7 @@ import { Selector } from "../../../components/Selector";
 
 import { useApp } from "../../shell/AppContext";
 import { useCoreState } from "../../shell/hooks";
+import { useHeldBy } from "../../sessions/SessionHeldNote";
 import { useTranscriptUi } from "../hooks";
 import {
   type Picked,
@@ -42,15 +43,16 @@ function QuestionField({
     else onChange({ ...picked, labels: [...picked.labels, label] });
   };
   return (
-    <fieldset className="q" disabled={disabled}>
+    <fieldset data-item-id={name} className="q" disabled={disabled}>
       <legend>
         {question.header !== "" ? <span className="q-tag">{question.header}</span> : null}
         {question.question}
       </legend>
       {question.multiSelect ? (
         question.options.map((option) => (
-          <label key={option.label} className="q-opt">
+          <label data-item-id={`${name}:${option.label}`} key={option.label} className="q-opt">
             <input
+              data-testid="transcript.question-card-toggle"
               type="checkbox"
               aria-label={option.label}
               title={option.label}
@@ -68,6 +70,8 @@ function QuestionField({
         ))
       ) : (
         <Selector
+          testId="transcript.question-card-on-change"
+          itemId={name}
           label={question.question}
           value={picked.labels[0] ?? ""}
           disabled={disabled}
@@ -92,6 +96,7 @@ function QuestionField({
         <label className="q-other">
           <span>Other</span>
           <input
+            data-testid="transcript.question-card-on-change-2"
             type="text"
             aria-label="Other"
             title="Other"
@@ -133,7 +138,8 @@ export function QuestionCard({
   );
   const sending = useTranscriptUi((s) => s.sending[callbackId] === true);
   const problem = useTranscriptUi((s) => s.problems[callbackId]);
-  const disabled = !offered || sending || problem?.kind === "refused";
+  const held = useHeldBy(sessionId) !== null;
+  const disabled = held || !offered || sending || problem?.kind === "refused";
   const output = questionOutput(questions, picks);
   const send = (value: typeof output) => {
     if (disabled || value === null) return;
@@ -168,6 +174,7 @@ export function QuestionCard({
       {footer !== null && footer !== "" ? <p className="q-footer">{footer}</p> : null}
       <div className="choices">
         <button
+          data-testid="transcript.question-card-send"
           type="button"
           className="cbtn go"
           aria-label="Submit answers"
@@ -180,6 +187,7 @@ export function QuestionCard({
           Submit
         </button>
         <button
+          data-testid="transcript.question-card-send-2"
           type="button"
           className="cbtn"
           aria-label="Skip questions"

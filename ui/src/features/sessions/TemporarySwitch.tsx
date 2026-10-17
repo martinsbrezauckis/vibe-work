@@ -7,6 +7,7 @@
  * Depends on: react. Called by: NewChatPanel.
  * Invariants: renders only; the caller owns the state (`sessionTools.newChatTemporary`).
  */
+import { term } from "../../vocabulary";
 import type { ReactElement } from "react";
 
 /** The switch (for the folder row). */
@@ -20,13 +21,14 @@ export function TemporarySwitch({
   return (
     <span className="temp-toggle" data-temporary={on ? "true" : "false"}>
       <button
+        data-testid="sessions.temporary-switch-on-change"
         type="button"
         className="switch"
         role="switch"
         aria-label="Temporary chat"
         aria-describedby={on ? "temp-chat-note" : undefined}
         aria-checked={on}
-        title="Start a chat that Vibe Work deletes when it quits"
+        title={`${term("workNames", "chat").tooltip} that Vibe Work deletes when it quits`}
         onClick={() => {
           onChange(!on);
         }}

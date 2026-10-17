@@ -1,0 +1,22 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "converted": {
+      "default": false,
+      "title": "Converted",
+      "type": "boolean"
+    },
+    "runtime": {
+      "$ref": "#/$defs/RuntimeSnapshot"
+    },
+    "status": {
+      "$ref": "#/$defs/RuntimeMutationStatus",
+      "default": "applied"
+    }
+  },
+  "required": [
+    "runtime"
+  ],
+  "title": "SkillsConvertResponse",
+  "type": "object"
+}

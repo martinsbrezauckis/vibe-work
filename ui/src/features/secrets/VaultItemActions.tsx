@@ -6,8 +6,9 @@
  */
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
-import { Button } from "../../components/Controls";
+import { Button, LinkButton } from "../../components/Controls";
 
+import { useApp } from "../shell/AppContext";
 import { SecretField } from "../setup/fields";
 import { GeneratorOptions, useGeneratorOptions, type GenerateOptions } from "./GeneratorOptions";
 
@@ -21,6 +22,8 @@ export function VaultItemActions(props: {
   busy: boolean;
   /** Show actions directly inside an expanded entry instead of a row-end menu. */
   inline?: boolean;
+  /** Site hint and generator when reached from a session-log finding. */
+  replaceFromFinding?: string;
   onRename: (name: string) => void;
   onReplace: (value: string) => void;
   onGenerate: (options: GenerateOptions) => void;
@@ -29,10 +32,13 @@ export function VaultItemActions(props: {
   onRemove: () => void;
   projectPermissions?: string[];
 }) {
-  const [mode, setMode] = useState<Mode>(props.inline === true ? "menu" : "closed");
+  const app = useApp();
+  const [mode, setMode] = useState<Mode>(
+    props.replaceFromFinding ? "replace" : props.inline === true ? "menu" : "closed",
+  );
   const [name, setName] = useState(props.name);
   const [value, setValue] = useState("");
-  const [generating, setGenerating] = useState(false);
+  const [generating, setGenerating] = useState(Boolean(props.replaceFromFinding));
   const generator = useGeneratorOptions();
   const [above, setAbove] = useState(false);
   const [editorPosition, setEditorPosition] = useState<{ top: number; left: number } | null>(null);
@@ -40,6 +46,13 @@ export function VaultItemActions(props: {
   const root = useRef<HTMLDivElement>(null);
   const panel = useRef<HTMLElement | null>(null);
   const copyUsername = props.onCopyUsername;
+  useLayoutEffect(() => {
+    if (!props.replaceFromFinding) return;
+    root.current?.closest(".vault-entry")?.scrollIntoView({ block: "center" });
+    root.current
+      ?.querySelector<HTMLButtonElement>("[data-testid='secrets.vault-item-actions-on-generate']")
+      ?.focus({ preventScroll: true });
+  }, [props.replaceFromFinding]);
 
   const close = useCallback(
     (returnFocus = true) => {
@@ -108,6 +121,7 @@ export function VaultItemActions(props: {
 
   return (
     <div
+      data-testid="secrets.vault-item-actions-div"
       ref={root}
       className={`vault-actions${props.inline === true ? " vault-actions-inline" : ""}`}
       onKeyDown={(event) => {
@@ -122,6 +136,7 @@ export function VaultItemActions(props: {
     >
       {props.inline !== true && (
         <button
+          data-testid="secrets.vault-item-actions-set-mode"
           ref={trigger}
           type="button"
           className="tb-btn vault-actions-trigger"
@@ -149,6 +164,7 @@ export function VaultItemActions(props: {
           {props.own && (
             <>
               <Button
+                data-testid="secrets.vault-item-actions-set-name"
                 small
                 type="button"
 
@@ -160,6 +176,7 @@ export function VaultItemActions(props: {
                 Rename
               </Button>
               <Button
+                data-testid="secrets.vault-item-actions-set-mode-2"
                 small
                 type="button"
 
@@ -173,6 +190,7 @@ export function VaultItemActions(props: {
           )}
           {props.kind === "login" && copyUsername !== undefined && (
             <Button
+              data-testid="secrets.vault-item-actions-choose"
               small
               type="button"
 
@@ -184,6 +202,7 @@ export function VaultItemActions(props: {
             </Button>
           )}
           <Button
+            data-testid="secrets.vault-item-actions-choose-2"
             small
             type="button"
 
@@ -195,6 +214,7 @@ export function VaultItemActions(props: {
           </Button>
           {props.own && (
             <Button
+              data-testid="secrets.vault-item-actions-set-value"
               small
               disabled={props.busy}
               onClick={() => {
@@ -208,6 +228,8 @@ export function VaultItemActions(props: {
           )}
           {props.own && (
             <Button
+              variant="danger"
+              data-testid="secrets.vault-item-actions-set-mode-3"
               small
               type="button"
 
@@ -229,6 +251,7 @@ export function VaultItemActions(props: {
           <p>Delete {props.name}? This cannot be undone.</p>
           <p>Project permissions: {props.projectPermissions?.join(", ") || "None"}</p>
           <Button
+            data-testid="secrets.vault-item-actions-choose-3"
             small
             type="button"
             variant="danger"
@@ -240,6 +263,7 @@ export function VaultItemActions(props: {
             Delete {props.name}
           </Button>
           <Button
+            data-testid="secrets.vault-item-actions-close"
             small
             type="button"
             autoFocus
@@ -263,6 +287,7 @@ export function VaultItemActions(props: {
           }}
         >
           <input
+            data-testid="secrets.vault-item-actions-set-name-2"
             aria-label="Name"
             autoFocus
             value={name}
@@ -273,6 +298,7 @@ export function VaultItemActions(props: {
             }}
           />
           <Button
+            data-testid="secrets.vault-item-actions-button"
             small
             type="submit"
             variant="primary"
@@ -281,6 +307,7 @@ export function VaultItemActions(props: {
             Save
           </Button>
           <Button
+            data-testid="secrets.vault-item-actions-close-2"
             small
             type="button"
 
@@ -309,8 +336,23 @@ export function VaultItemActions(props: {
             close();
           }}
         >
+          {props.replaceFromFinding && (
+            <p className="key-field-hint">
+              Change it on{" "}
+              <LinkButton
+                data-testid="secrets.finding-password-site"
+                onClick={() => {
+                  void app.core?.client.openLink(props.replaceFromFinding ?? "");
+                }}
+              >
+                {props.replaceFromFinding}
+              </LinkButton>{" "}
+              first, then save the new password here.
+            </p>
+          )}
           {!generating && (
             <SecretField
+              testId="secrets.vault-item-actions-secretfield"
               label={props.kind === "login" ? "New password" : "New value"}
               value={value}
               onChange={setValue}
@@ -330,6 +372,7 @@ export function VaultItemActions(props: {
                 aria-label="Generate replacement options"
               >
                 <Button
+                  data-testid="secrets.vault-item-actions-on-generate"
                   small
                   type="button"
                   variant="primary"
@@ -343,6 +386,7 @@ export function VaultItemActions(props: {
                   Generate replacement {props.kind === "login" ? "password" : "value"}
                 </Button>
                 <Button
+                  data-testid="secrets.vault-item-actions-close-3"
                   small
                   type="button"
 
@@ -358,6 +402,7 @@ export function VaultItemActions(props: {
           {!generating && (
             <>
               <Button
+                data-testid="secrets.vault-item-actions-button-2"
                 small
                 type="submit"
                 variant="primary"
@@ -366,6 +411,7 @@ export function VaultItemActions(props: {
                 Save
               </Button>
               <Button
+                data-testid="secrets.vault-item-actions-close-4"
                 small
                 type="button"
 

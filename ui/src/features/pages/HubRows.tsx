@@ -86,11 +86,12 @@ function PageRow({
     </>
   );
   return (
-    <li>
+    <li data-item-id={page.path}>
       {open === null ? (
         <div className="pages-hub-row">{body}</div>
       ) : (
         <button
+          data-testid="pages.hub-rows-open"
           type="button"
           className="pages-hub-row"
           data-path={page.path}
@@ -138,10 +139,15 @@ export function Groups({
           </ul>
         );
         return (
-          <section key={group.id} className="pages-hub-group" data-group={group.id}>
+          <section
+            data-item-id={group.id}
+            key={group.id}
+            className="pages-hub-group"
+            data-group={group.id}
+          >
             {group.id === "archive" ? (
               <details>
-                <summary>
+                <summary data-testid="pages.hub-rows-summary">
                   <span>{group.label}</span>
                   <span>{group.pages.length}</span>
                 </summary>

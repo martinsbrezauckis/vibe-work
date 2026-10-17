@@ -278,6 +278,19 @@ export function displayText(entry: Obj): string | null {
 }
 
 /**
+ * The id of the loop that sent this user message by itself (Vibe puts a `vibe.scheduled_loop` item in the display
+ * content of a turn a loop starts), or `null` for a message someone typed. The transcript marks such a message
+ * "Loop": the user did not write it.
+ */
+export function loopMessage(entry: Obj): string | null {
+  for (const item of arr(obj(entry["userDisplayContent"])?.["content"])) {
+    const part = obj(item);
+    if (part?.["type"] === "vibe.scheduled_loop") return str(part["loopId"]) ?? "";
+  }
+  return null;
+}
+
+/**
  * Names of context resources sent with a message (text and link resources, not images). The composer's
  * own chips carry their label in `userDisplayContent` as `{type: "vw.context", label}` items; those
  * win over the resource URIs (`vw://context/<n>`).

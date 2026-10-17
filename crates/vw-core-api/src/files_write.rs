@@ -13,13 +13,13 @@
 //!   refused by the handle's scope check (canonical path inside a canonical root), and checked again right
 //!   before the write (the canonical path must still be the same).
 //!
-//! The edit is an ordinary change of the working tree, so the Changes tab shows it and reverts it per hunk (the
-//! normal undo path); telling the agent is the window's part (a context chip with the diff, sent with the
-//! next message).
+//! A user save moves its edits into the session's Changes baseline before another review action can run.
+//! Telling the agent is the window's part (a context chip with the diff, sent with the next message).
 //!
 //! Depends on: `files` (`checked`), `files_read` (fingerprint, limit). Called by: `files` (`FilesRequest::Write`).
 //! Invariants: nothing is written unless every rule passed; a failed write leaves the old file and no temporary file.
 
+use crate::changes::Review;
 use crate::core::Core;
 use crate::error::{CoreError, ErrorCode};
 use crate::files_read::{TEXT_LIMIT, fingerprint};
@@ -73,7 +73,22 @@ impl Core {
         let hit = self.checked(session_id, file).await?;
         let path = hit.canonical.clone();
         let expected = expected.to_owned();
+        let folder = self
+            .shared
+            .names
+            .cwd_of(&self.shared.store, session_id)
+            .map(std::path::PathBuf::from);
+        let claim = if folder.is_some() && self.shared.changes.dir.is_some() {
+            Some(self.changes_claim(session_id).await?)
+        } else {
+            None
+        };
+        let hub = self.shared.clone();
+        let id = session_id.to_owned();
         blocking(move || {
+            let tracker = folder.as_deref().map(|folder| hub.changes.ensure(&id, folder, claim.as_ref()));
+            // The same lock serializes a save with Changes keep/revert and the watcher refresh.
+            let mut review = tracker.as_ref().map(|tracker| tracker.lock().unwrap_or_else(std::sync::PoisonError::into_inner));
             let meta = std::fs::metadata(&path).map_err(|_| refuse("the file is not there any more"))?;
             let stale = || {
                 CoreError::new(
@@ -106,9 +121,46 @@ impl Core {
             if std::fs::canonicalize(&path).ok().as_deref() != Some(path.as_path()) {
                 return Err(refuse("the file's folder changed since it was opened; reload it"));
             }
-            crate::save_file::replace_file(&path, &bytes, Some(&meta.permissions())).map_err(|e| {
-                CoreError::new(ErrorCode::Internal, format!("the file could not be saved: {e}"))
-            })?;
+            let undo = if let Some(guard) = review.as_mut()
+                && let Some(Review::Git { baseline, .. }) = &mut guard.review
+            {
+                // Persist attribution first. If it fails, keep the disk file untouched: a later Changes
+                // revert must never be able to erase a save that the review failed to record.
+                match vw_changes::record_user_save(baseline, &path, &old, &bytes) {
+                    Ok(undo) => undo,
+                    Err(error) => {
+                        // A baseline write may have failed after changing its index. Even if its
+                        // rollback failed too, no review action may use that uncertain baseline.
+                        guard.review = Some(Review::Lost {
+                            reason: format!("the editor save could not update the review: {error}"),
+                            against_head: None,
+                        });
+                        return Err(CoreError::new(
+                            ErrorCode::Internal,
+                            format!("the saved edit could not be recorded in Changes: {error}"),
+                        ));
+                    }
+                }
+            } else {
+                None
+            };
+            if let Err(error) = crate::save_file::replace_file(&path, &bytes, Some(&meta.permissions())) {
+                if let Some(undo) = undo
+                    && let Some(guard) = review.as_mut()
+                    && let Some(Review::Git { baseline, .. }) = &mut guard.review
+                    && let Err(rollback) = vw_changes::undo_user_save(baseline, undo)
+                {
+                    guard.review = Some(Review::Lost {
+                        reason: format!("the editor save failed and the review could not be restored: {rollback}"),
+                        against_head: None,
+                    });
+                    return Err(CoreError::new(
+                        ErrorCode::Internal,
+                        format!("the file could not be saved ({error}); Changes baseline rollback failed: {rollback}"),
+                    ));
+                }
+                return Err(CoreError::new(ErrorCode::Internal, format!("the file could not be saved: {error}")));
+            }
             let now = std::fs::metadata(&path).map_err(|e| {
                 CoreError::new(ErrorCode::Internal, format!("the saved file could not be read: {e}"))
             })?;

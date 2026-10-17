@@ -1,0 +1,12 @@
+{
+  "enum": [
+    "disabled",
+    "connected",
+    "enabled",
+    "needs_auth",
+    "needs_setup",
+    "unavailable"
+  ],
+  "title": "MCPSourceStatus",
+  "type": "string"
+}

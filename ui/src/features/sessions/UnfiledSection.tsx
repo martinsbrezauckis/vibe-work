@@ -43,6 +43,7 @@ export function UnfiledSection({
     >
       <div className="proj-bar">
         <button
+          data-testid="sessions.unfiled-section-toggle-project"
           type="button"
           className="proj-h"
           aria-expanded={open}

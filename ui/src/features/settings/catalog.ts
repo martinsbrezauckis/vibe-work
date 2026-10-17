@@ -33,6 +33,7 @@ export const SETTINGS_CATEGORIES: readonly SettingsCategory[] = [
   { id: "voice", label: "Voice", icon: "audio-lines" },
   { id: "notifications", label: "Notifications", icon: "bell" },
   { id: "privacy", label: "Privacy and data", icon: "shield" },
+  { id: "network", label: "Network", icon: "server" },
   { id: "updates", label: "Updates", icon: "refresh-cw" },
   { id: "developer", label: "Developer", icon: "code" },
   { id: "about", label: "About", icon: "info" },
@@ -57,12 +58,26 @@ export interface SettingEntry {
 /** Every setting, in page order. */
 export const SETTINGS_INDEX: readonly SettingEntry[] = [
   {
+    id: "git-identity",
+    category: "general",
+    label: "Git name and email",
+    description: "The author identity for commits and new repositories in Vibe Work.",
+    keywords: "git commit author identity name email repository version history",
+  },
+  {
     id: "cli-sharing",
     category: "general",
     label: "Keep sessions separate from the Vibe command line",
     description:
       "Whether sessions started here also show in the CLI's list, and the other way round.",
     keywords: "cli terminal command line share sharing vibe home",
+  },
+  {
+    id: "session-copies",
+    category: "general",
+    label: "Session copies",
+    description: "Review or remove session copies (git worktrees) no chat uses anymore.",
+    keywords: "git worktree worktrees leftover kept copies review remove cleanup",
   },
   {
     id: "error-detail",
@@ -82,14 +97,14 @@ export const SETTINGS_INDEX: readonly SettingEntry[] = [
     id: "status-usage",
     category: "appearance",
     label: "Show usage in the status bar",
-    description: 'How full the open conversation\'s context is, as "Context 42%".',
+    description: 'How full the open session\'s context is, as "Context 42%".',
     keywords: "usage context tokens footer status bar compaction",
   },
   {
     id: "show-thinking-expanded",
     category: "appearance",
     label: "Show thinking expanded",
-    description: "Open thinking blocks in the conversation by default.",
+    description: "Open thinking blocks in the session by default.",
     keywords: "transcript composer thinking reasoning expand collapse disclosure",
   },
   {
@@ -105,6 +120,13 @@ export const SETTINGS_INDEX: readonly SettingEntry[] = [
     label: "Mistral key",
     description: "Test, replace, remove or lock the key; remember this computer.",
     keywords: "api key vault password lock unlock remember forget token",
+  },
+  {
+    id: "secret-scan",
+    category: "secrets",
+    label: "Scan session logs for my secrets",
+    description: "Find Vault secrets that ended up in chat logs, and redact them",
+    keywords: "scan leak leaked log logs session redact remove secret token key find",
   },
   {
     id: "project-secrets",
@@ -255,8 +277,8 @@ export const SETTINGS_INDEX: readonly SettingEntry[] = [
   {
     id: "session-usage",
     category: "usage",
-    label: "This conversation",
-    description: "Tokens used and how full the context is, until Vibe compacts the conversation.",
+    label: TEXT.thisSession,
+    description: "Tokens used and how full the context is, until Vibe compacts the session.",
     keywords: "tokens context usage compaction session",
   },
   {
@@ -346,6 +368,31 @@ export const SETTINGS_INDEX: readonly SettingEntry[] = [
     keywords: "experiments features rollout privacy",
   },
   {
+    id: "network-proxy",
+    category: "network",
+    label: "Proxy for company networks",
+    description:
+      "Send Vibe Work's and Vibe's internet requests through your company's proxy; test the connection.",
+    keywords:
+      "proxy http https company corporate network firewall vpn address port sign in connection test offline cannot reach mistral",
+  },
+  {
+    id: "network-skip",
+    category: "network",
+    label: "Addresses that skip the proxy",
+    description: "Hosts, domains and ranges that are reached directly, not through the proxy.",
+    keywords: "no proxy no_proxy bypass skip exclude intranet direct localhost domain range cidr",
+  },
+  {
+    id: "network-certificate",
+    category: "network",
+    label: "Company certificate",
+    description:
+      "Trust your company's certificate file when its proxy checks web traffic with its own certificate.",
+    keywords:
+      "certificate ssl tls ca pem authority self-signed inspection trust cert ssl_cert_file untrusted",
+  },
+  {
     id: "update-status",
     category: "updates",
     label: "Check for updates",
@@ -373,6 +420,13 @@ export const SETTINGS_INDEX: readonly SettingEntry[] = [
     label: "Debug API token file",
     description: "Agents read the token from this file; regenerate it to lock old ones out.",
     keywords: "debug token secret regenerate file",
+  },
+  {
+    id: "data-retention",
+    category: "about",
+    label: "Data retention",
+    description: "Where Vibe Work keeps local data and Mistral's data policy.",
+    keywords: "privacy storage history sessions logs captures vault files folders retention policy",
   },
   {
     id: "about",

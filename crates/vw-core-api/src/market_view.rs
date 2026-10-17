@@ -6,7 +6,7 @@
 //! Invariants:
 //! - Wire form: `{"op": "<camelCase>", ...camelCase fields}`, unknown fields refused.
 //! - A view never carries a secret: entries are our reviewed catalog; Vibe's plugin and skill state is reduced to
-//!   names, statuses and its own issue sentences.
+//!   names, descriptions, installed folders, statuses and discovery issues.
 
 use serde::{Deserialize, Serialize};
 use vw_market::Entry;
@@ -28,6 +28,49 @@ pub enum MarketRequest {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[cfg_attr(feature = "ts", ts(optional))]
         session_id: Option<String>,
+        /// The new-chat folder selected through the native picker, when no chat is open.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[cfg_attr(feature = "ts", ts(optional))]
+        cwd: Option<String>,
+    },
+    /// Moves an owned plugin outside Vibe discovery.
+    TurnOffPlugin {
+        /// The installed folder shown by the board.
+        path: String,
+        /// The open chat determines the opened project.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[cfg_attr(feature = "ts", ts(optional))]
+        session_id: Option<String>,
+        /// The new-chat folder picked natively, when no chat is open.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[cfg_attr(feature = "ts", ts(optional))]
+        cwd: Option<String>,
+    },
+    /// Restores an owned plugin from the off folder.
+    TurnOnPlugin {
+        /// The installed folder shown by the board.
+        path: String,
+        /// The open chat determines the opened project.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[cfg_attr(feature = "ts", ts(optional))]
+        session_id: Option<String>,
+        /// The new-chat folder picked natively, when no chat is open.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[cfg_attr(feature = "ts", ts(optional))]
+        cwd: Option<String>,
+    },
+    /// Deletes an owned plugin after native confirmation.
+    RemovePlugin {
+        /// The installed folder shown by the board.
+        path: String,
+        /// The open chat determines the opened project.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[cfg_attr(feature = "ts", ts(optional))]
+        session_id: Option<String>,
+        /// The new-chat folder picked natively, when no chat is open.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[cfg_attr(feature = "ts", ts(optional))]
+        cwd: Option<String>,
     },
     /// Installs (or updates) a pack or plugin. Asks the native dialog from the window; runs in the background
     /// (progress and the outcome arrive as `marketInstall` events). One at a time.
@@ -90,6 +133,10 @@ pub struct MarketView {
     pub session_id: Option<String>,
     /// Plugin files Vibe could not load in that session (Vibe's sentences), ours or not.
     pub dropped: Vec<DroppedView>,
+    /// Every resolved plugin without a marketplace receipt, plus app-managed off plugins.
+    pub discovered: Vec<LocalPluginView>,
+    /// Why the current discovery could not be read (pinned chat state can still be shown).
+    pub discovery_error: Option<String>,
 }
 
 /// A category.
@@ -114,6 +161,10 @@ pub struct MarketEntryView {
     pub installed: Option<InstalledView>,
     /// A folder of this name exists that the marketplace did not install (left alone; install refused).
     pub foreign: bool,
+    /// The installed plugin folder (including the off folder), absent for uninstalled entries.
+    pub folder: Option<String>,
+    /// This catalog install is kept outside Vibe's discovery roots.
+    pub off: bool,
     /// Packs and plugins: false when this computer's platform has no runtime for it.
     pub installable: bool,
     /// The merged session's view of the plugin (`null`: no session state was read).
@@ -175,11 +226,11 @@ pub struct SkillStateView {
     pub name: String,
     /// Its description.
     pub description: String,
-    /// On; `null` when this session does not offer the skill yet (Vibe 2.26.0 offers the skills
-    /// of a plugin installed during a session only to new sessions; 2.26.1 after a reload).
+    /// On; `null` when this session does not offer the skill yet (the skills of a plugin installed
+    /// during a session are offered to new sessions, or after a plugin reload).
     pub enabled: Option<bool>,
-    /// Vibe does not let it be switched off (Vibe 2.26 marks every plugin skill `locked`,
-    /// `_unified_harness_backend_adapter.py:1303`): it is on while the plugin is installed.
+    /// Vibe reports the skill as `locked` (set by configuration, not per session): it is on while
+    /// the plugin is installed.
     pub locked: bool,
 }
 
@@ -215,4 +266,44 @@ pub struct InstallProgress {
     pub total: Option<u64>,
     /// The error sentence when it failed.
     pub message: Option<String>,
+}
+
+/// A plugin discovered by Vibe outside a marketplace install.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+pub struct LocalPluginView {
+    /// Vibe's plugin name.
+    pub name: String,
+    /// Vibe's description.
+    pub description: String,
+    /// Its installed folder, including for restored chats with a separate pinned checkout.
+    pub path: String,
+    /// Vibe's scope (`project`, `global`, `builtin`).
+    pub scope: String,
+    /// Only direct folders in the app's Vibe home or opened project may be changed.
+    pub managed: bool,
+    /// Kept in the app's off folder, outside Vibe discovery.
+    pub off: bool,
+    /// Vibe selected this installed folder for new chats (false for shadows and retained pins).
+    pub available: bool,
+    /// Current discovered components (skills, MCP servers and other kinds).
+    pub components: Vec<ComponentView>,
+    /// MCP servers with the chat's known tool count (`null`: not connected in this chat).
+    pub servers: Vec<PluginServerView>,
+    /// The open chat's pinned state; `null` when unavailable.
+    pub in_session: Option<SessionPluginView>,
+    /// Discovery issues and reasons Vibe selected another folder.
+    pub issues: Vec<String>,
+}
+
+/// One plugin MCP server and its live tool count.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+pub struct PluginServerView {
+    /// The source id Vibe gives it.
+    pub name: String,
+    /// Known tools in the chat; absent when no live catalog was read.
+    pub tools: Option<usize>,
 }

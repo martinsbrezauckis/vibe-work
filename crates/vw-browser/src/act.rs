@@ -332,7 +332,7 @@ pub fn parse(args: &Value) -> Result<Action, String> {
 #[derive(Clone, Debug, Default, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct PageAnswer {
-    /// `done`, `stale`, `ambiguous`, `secret`, `notActionable`, `noOption`, `error`.
+    /// `done`, `unmet`, `stale`, `ambiguous`, `secret`, `notActionable`, `noOption`, `error`.
     #[serde(default)]
     pub status: String,
     /// The address of the document that answered (checked against the mount's policy).

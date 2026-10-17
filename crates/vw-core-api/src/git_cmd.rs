@@ -18,6 +18,7 @@ use std::sync::{Mutex, PoisonError};
 
 use vw_git::GitError;
 use vw_git::commit::{self, Expected};
+use vw_git::identity::{self, CommitIdentity};
 use vw_git::pr::PrCard;
 use vw_git::state::{self, BranchState};
 
@@ -33,6 +34,14 @@ use crate::worktrees::blocking;
 /// The model that drafts commit messages unless the config names another: Mistral Large 4.
 /// The pinned `mistral-large-4` id avoids changes to a floating `latest` alias.
 pub const DEFAULT_COMMIT_MODEL: &str = "mistral-large-4";
+
+struct CommitInput {
+    paths: Vec<String>,
+    message: String,
+    expected: Expected,
+    run_hooks: bool,
+    identity: Option<CommitIdentity>,
+}
 
 /// The cached PR card of a session, and when the forge was last asked.
 #[derive(Debug, Clone, Default)]
@@ -143,6 +152,18 @@ impl Core {
     /// `confirmationDeclined`, `internal`.
     pub async fn git(&self, origin: Origin, request: GitRequest) -> Result<GitResult, CoreError> {
         match request {
+            GitRequest::Identity => {
+                let shared = self.shared.clone();
+                let settings = blocking(move || crate::git_identity::load(&shared.git)).await??;
+                Ok(GitResult::Identity { settings })
+            }
+            GitRequest::SetIdentity { identity } => {
+                let _guard = self.shared.git.lock.lock().await;
+                let shared = self.shared.clone();
+                let settings =
+                    blocking(move || crate::git_identity::save(&shared.git, &identity)).await??;
+                Ok(GitResult::Identity { settings })
+            }
             GitRequest::Status { session_id, repo } => {
                 self.git_status(&session_id, repo.as_deref()).await
             }
@@ -162,6 +183,7 @@ impl Core {
                 branch,
                 expected_head,
                 run_hooks,
+                identity,
             } => {
                 let expected = Expected {
                     head: expected_head,
@@ -170,10 +192,13 @@ impl Core {
                 self.git_commit(
                     &session_id,
                     repo.as_deref(),
-                    paths,
-                    message,
-                    expected,
-                    run_hooks,
+                    CommitInput {
+                        paths,
+                        message,
+                        expected,
+                        run_hooks,
+                        identity,
+                    },
                 )
                 .await
             }
@@ -264,7 +289,7 @@ impl Core {
         crate::git_settings::load(&self.shared.git, main_root)
     }
 
-    async fn git_status(
+    pub(crate) async fn git_status(
         &self,
         session_id: &str,
         repo: Option<&str>,
@@ -368,11 +393,12 @@ impl Core {
         let (_, place) = self.git_selected_place(session_id, repo)?;
         let settings = self.git_settings(&place.main_root);
         let p = place.clone();
-        let (state, listed, author, hooks) = blocking(move || {
+        let (state, listed, author, details, hooks) = blocking(move || {
             (
                 state::read_state(&p.root, &p.git_dir, None),
                 commit::list(&p.root),
                 commit::author(&p.root),
+                identity::read(&p.root),
                 vw_git::hooks::hooks(&p.root),
             )
         })
@@ -396,6 +422,23 @@ impl Core {
         let (author, author_problem) = match author {
             Ok(a) => (Some(a), None),
             Err(e) => (None, Some(e.to_string())),
+        };
+        let (author_name, author_email) = details.map_err(git_error)?;
+        let author_problem = if author_name.is_none() || author_email.is_none() {
+            Some("Enter your name and email. They are saved for this repository.".to_owned())
+        } else {
+            author_problem
+        };
+        let (author_name, author_email) = if author_name.is_none() || author_email.is_none() {
+            let shared = self.shared.clone();
+            let saved = blocking(move || crate::git_identity::load(&shared.git)).await??;
+            let present = |value: String| (!value.trim().is_empty()).then_some(value);
+            (
+                author_name.or_else(|| present(saved.identity.name)),
+                author_email.or_else(|| present(saved.identity.email)),
+            )
+        } else {
+            (author_name, author_email)
         };
         // A session folder inside a larger repository commits in that whole repository; say so.
         let enclosing = self.session_folder(session_id).is_some_and(|folder| {
@@ -428,6 +471,8 @@ impl Core {
                 head: state.commit.clone(),
                 files,
                 author,
+                author_name,
+                author_email,
                 author_problem,
                 hooks: hooks.map_err(git_error)?,
                 run_hooks: settings.run_hooks,
@@ -443,11 +488,15 @@ impl Core {
         &self,
         session_id: &str,
         repo: Option<&str>,
-        paths: Vec<String>,
-        message: String,
-        expected: Expected,
-        run_hooks: bool,
+        input: CommitInput,
     ) -> Result<GitResult, CoreError> {
+        let CommitInput {
+            paths,
+            message,
+            expected,
+            run_hooks,
+            identity,
+        } = input;
         let (selected, place) = self.git_selected_place(session_id, repo)?;
         if place.running {
             return Err(git_error(GitError::Blocked(
@@ -463,6 +512,12 @@ impl Core {
         let p = place.clone();
         let wanted = paths.clone();
         let done = blocking(move || {
+            let (name, email) = identity::read(&p.root)?;
+            if (name.is_none() || email.is_none())
+                && let Some(identity) = identity
+            {
+                identity::save(&p.root, &identity)?;
+            }
             commit::commit(
                 &p.root, &p.git_dir, &wanted, &message, &expected, &scratch, run_hooks,
             )

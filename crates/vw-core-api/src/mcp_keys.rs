@@ -71,7 +71,7 @@ pub(crate) struct McpKeysState {
     /// Binding id -> the record's `revokedMs` when the user gave the plain grant. The grant holds only while the
     /// record still carries that value: any revoke since (this window, another window or app on the same vault) moves
     /// it, so the decision never compares two wall-clock readings (a clock stepped back could otherwise let a plain
-    /// grant outlive a revoke: rc5 gate21, 10 parallel runs failing at one moment).
+    /// grant outlive a revoke; 10 parallel test runs once failed at the same moment this way).
     plain: Mutex<HashMap<String, i64>>,
     uses: Mutex<HashMap<String, u32>>,
 }
@@ -626,13 +626,13 @@ impl McpResolver for Resolver {
             if keys
                 .default_entry_permission(&binding.secret_id)
                 .await
-                .map_err(|_| McpRefusal::NotAllowed)?
+                .map_err(|_| McpRefusal::PermissionsUnreadable)?
                 .0
                 == vw_keys::EntryPermission::Never
                 || keys
                     .entry_permissions_for(&binding.secret_id)
                     .await
-                    .map_err(|_| McpRefusal::NotAllowed)?
+                    .map_err(|_| McpRefusal::PermissionsUnreadable)?
                     .iter()
                     .any(|p| p.permission == vw_keys::EntryPermission::Never)
             {
@@ -651,13 +651,13 @@ impl McpResolver for Resolver {
             if keys
                 .default_entry_permission(&binding.secret_id)
                 .await
-                .map_err(|_| McpRefusal::NotAllowed)?
+                .map_err(|_| McpRefusal::PermissionsUnreadable)?
                 .0
                 == vw_keys::EntryPermission::Never
                 || keys
                     .entry_permissions_for(&binding.secret_id)
                     .await
-                    .map_err(|_| McpRefusal::NotAllowed)?
+                    .map_err(|_| McpRefusal::PermissionsUnreadable)?
                     .iter()
                     .any(|p| p.permission == vw_keys::EntryPermission::Never)
             {

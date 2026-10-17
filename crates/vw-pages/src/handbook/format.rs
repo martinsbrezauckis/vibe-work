@@ -34,7 +34,7 @@ pub const STEP_FINISHED: &[&str] = &["done", "skipped"];
 /// Input types (§6.6, Format 1.2): pick one option, tick any options, put options in order, write a short answer.
 pub const INPUT_TYPES: &[&str] = &["choice", "checklist", "rank", "text"];
 /// Most inputs read per page (HB-W17 beyond it).
-pub const MAX_INPUTS: usize = 50;
+pub const MAX_INPUTS: usize = 500;
 /// Most options read per input (HB-W17 beyond it).
 pub const MAX_OPTIONS: usize = 100;
 

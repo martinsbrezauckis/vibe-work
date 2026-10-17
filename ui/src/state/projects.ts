@@ -278,9 +278,9 @@ export function createProjects(deps: {
       patch({ open: false });
       await startWith(project, MIGRATE_HANDBOOK_PROMPT);
     },
-    /** A new session in project `project` (its main folder, or a folder the user picks). */
-    async newSession(project: string): Promise<void> {
-      const id = await groups.startIn(project);
+    /** A new session in project `project` (its main folder, or a folder the user picks, or `folder` a route names). */
+    async newSession(project: string, folder?: string): Promise<void> {
+      const id = await groups.startIn(project, folder);
       if (id !== null) patch({ open: false });
     },
     /** Shows the project's main folder in the file manager. */

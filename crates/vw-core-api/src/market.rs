@@ -1,7 +1,7 @@
 //! The Tools marketplace in the core: the `marketplace`
-//! command. Reads the curated catalog with what is installed and what the viewed session runs; installs (in the
-//! background, one at a time) and removes. Vibe offers no per-skill or per-session switch for plugin skills (they are
-//! `locked`), so install/remove is the switch.
+//! command. Reads the curated catalog, Vibe's current discovery and what the viewed chat runs; installs in the
+//! background, one at a time, and changes owned plugin folders through `market_controls`. Plugin skills are locked
+//! by Vibe; moving the whole plugin outside discovery is the reversible switch.
 //!
 //! Depends on: vw-market (catalog, installer, store), `market_view` (wire types), `market_project` (Vibe's
 //! replies -> views), `channels`, the gate, `dispatch::forward`, `worktrees::ask_native` (the native dialog).
@@ -14,7 +14,7 @@
 //!   task holds the core while it runs and is aborted on cancel and at shutdown (its staging folder is removed by
 //!   the installer's guard).
 //! - After an install or removal every session with an open channel gets `plugin/reload` (Vibe re-pins plugins);
-//!   a failing reload is logged, never fatal. Reads never reopen a session.
+//!   a failing reload is reported to the composer, never fatal. Reads never reopen a session.
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, PoisonError};
@@ -34,6 +34,8 @@ use crate::market_view::{InstallProgress, MarketRequest, MarketResult, MarketVie
 /// The marketplace settings of a core.
 #[derive(Clone, Default)]
 pub struct MarketConfig {
+    /// Python from the installed Vibe environment; tests may point at their pinned Vibe.
+    pub resolver_python: Option<PathBuf>,
     /// A catalog file to use instead of the built-in one (tests and development only; the app leaves it `None`).
     pub index: Option<PathBuf>,
     /// Accept loopback `http://` addresses in that catalog (tests only).
@@ -44,6 +46,8 @@ pub struct MarketConfig {
 
 /// The catalog, the downloader and the running install.
 pub(crate) struct MarketState {
+    pub(crate) python: Option<PathBuf>,
+    pub(crate) builtin_roots: Vec<PathBuf>,
     catalog: Result<Arc<Catalog>, String>,
     fetcher: Result<Arc<dyn Fetcher>, String>,
     /// The install that holds the one slot: reserved (before its dialog is answered) or running (its task).
@@ -53,7 +57,7 @@ pub(crate) struct MarketState {
 
 impl MarketState {
     /// Loads the catalog named by `config` (the built-in one by default).
-    pub(crate) fn new(config: &MarketConfig) -> Self {
+    pub(crate) fn new(config: &MarketConfig, builtin_roots: Vec<PathBuf>) -> Self {
         let rules = Rules {
             allow_loopback_http: config.allow_loopback_http,
             require_all_targets: config.index.is_none(),
@@ -76,6 +80,8 @@ impl MarketState {
                 .map_err(|e| e.to_string()),
         };
         Self {
+            python: config.resolver_python.clone(),
+            builtin_roots,
             catalog,
             fetcher,
             running: Mutex::new(None),
@@ -210,10 +216,34 @@ impl Core {
         request: MarketRequest,
     ) -> Result<CommandResult, CoreError> {
         let result = match request {
-            MarketRequest::Read { session_id } => MarketResult::View {
-                view: Box::new(self.market_view(session_id).await),
+            MarketRequest::Read { session_id, cwd } => MarketResult::View {
+                view: Box::new(self.market_view(session_id, cwd).await),
                 notice: None,
             },
+            MarketRequest::TurnOffPlugin {
+                path,
+                session_id,
+                cwd,
+            } => {
+                self.change_plugin(origin, "turnOffPlugin", path, session_id, cwd)
+                    .await?
+            }
+            MarketRequest::TurnOnPlugin {
+                path,
+                session_id,
+                cwd,
+            } => {
+                self.change_plugin(origin, "turnOnPlugin", path, session_id, cwd)
+                    .await?
+            }
+            MarketRequest::RemovePlugin {
+                path,
+                session_id,
+                cwd,
+            } => {
+                self.change_plugin(origin, "removePlugin", path, session_id, cwd)
+                    .await?
+            }
             MarketRequest::Install { id } => self.start_install(origin, id).await?,
             MarketRequest::CancelInstall {} => {
                 let taken = self.shared.market.slot().take();
@@ -226,7 +256,7 @@ impl Core {
                     self.report(&slot.id, "cancelled", String::new(), None);
                 }
                 MarketResult::View {
-                    view: Box::new(self.market_view(None).await),
+                    view: Box::new(self.market_view(None, None).await),
                     notice: None,
                 }
             }
@@ -235,8 +265,31 @@ impl Core {
                     return Err(running_error(&id));
                 }
                 let store = self.store();
+                let folder = store.plugin_dir(&id).map_err(|e| from_market(&e))?;
                 let servers = store.mcp_server_names(&id).map_err(|e| from_market(&e))?;
+                let name = self
+                    .shared
+                    .market
+                    .catalog
+                    .as_ref()
+                    .ok()
+                    .and_then(|c| c.entry(&id))
+                    .map_or(id.as_str(), |e| e.name.as_str());
+                self.ask_native(
+                    crate::command::requester(origin),
+                    "vw/marketplace/remove",
+                    json!({"id": id}),
+                    format!(
+                        "Remove {} and delete its plugin folder {}?",
+                        vw_gate::dialog_quote(name),
+                        vw_gate::dialog_quote(&folder.to_string_lossy())
+                    ),
+                )
+                .await?;
+                let held = self.shared.plugin_approvals.mutations.lock().await;
+                self.shared.plugin_approvals.set(&folder, None)?;
                 store.remove(&id, false).map_err(|e| from_market(&e))?;
+                drop(held);
                 for name in servers {
                     self.shared.connectors.mark_removed(&name, true);
                 }
@@ -247,7 +300,7 @@ impl Core {
                     format!("Removed; could not delete data folder \"{id}\".")
                 });
                 MarketResult::View {
-                    view: Box::new(self.market_view(None).await),
+                    view: Box::new(self.market_view(None, None).await),
                     notice,
                 }
             }
@@ -255,11 +308,11 @@ impl Core {
         Ok(CommandResult::Marketplace { result })
     }
 
-    fn store(&self) -> Store {
+    pub(crate) fn store(&self) -> Store {
         Store::new(&self.shared.instructions.own_home)
     }
 
-    fn catalog(&self) -> Result<Arc<Catalog>, CoreError> {
+    pub(crate) fn catalog(&self) -> Result<Arc<Catalog>, CoreError> {
         self.shared
             .market
             .catalog
@@ -316,7 +369,12 @@ impl Core {
                 fetcher: fetcher.as_ref(),
                 target: vw_market::current_target(),
             };
-            let outcome = installer.install(&task_id, &on).await;
+            let commit = |id: &str, root: &std::path::Path| {
+                core.shared
+                    .plugin_approvals
+                    .commit_install(&store, id, root)
+            };
+            let outcome = installer.install_with_commit(&task_id, &on, &commit).await;
             match outcome {
                 Ok(receipt) => {
                     // These are the same names the installer wrote to mcp.json; clear only on success.
@@ -373,6 +431,17 @@ impl Core {
     ) -> Result<(Store, Arc<dyn Fetcher>), CoreError> {
         let store = self.store();
         store.receipt(id).map_err(|e| from_market(&e))?;
+        let off = store.plugins_dir().with_file_name("plugins-off").join(id);
+        if off.exists() && crate::market_local::receipt(&off).is_none() {
+            return Err(from_market(&MarketError::Foreign(id.to_owned())));
+        }
+        if crate::market_local::receipt(&off).is_some() {
+            return Err(CoreError::new(
+                ErrorCode::InvalidParams,
+                "This plugin is turned off. Turn it on before updating it.",
+            ));
+        }
+
         let fetcher = self
             .shared
             .market
@@ -431,20 +500,37 @@ impl Core {
     }
 
     /// `plugin/reload` for every session with an open channel.
-    async fn reload_sessions(&self) {
+    pub(crate) async fn reload_sessions(&self) {
         for open in self.shared.channels.open_channels() {
             let params = json!({"sessionId": open.session_id});
             if let Err(error) = self.shared.gate.call("plugin/reload", params, None).await {
                 warn!(%error, "marketplace: a session did not reload its plugins");
+                self.shared.emit(CoreEvent::Alert {
+                    session_id: Some(open.session_id),
+                    kind: crate::event::AlertKind::PluginReloadFailed,
+                    message: error.to_string(),
+                });
             }
         }
     }
 
     /// The view: the catalog, the receipts, and the state of `session_id` when it has an open channel.
-    async fn market_view(&self, session_id: Option<String>) -> MarketView {
-        let catalog = match &self.shared.market.catalog {
-            Ok(catalog) => catalog.clone(),
-            Err(error) => return crate::market_project::unavailable(error),
+    pub(crate) async fn market_view(
+        &self,
+        session_id: Option<String>,
+        cwd: Option<String>,
+    ) -> MarketView {
+        let project = self.plugin_project(session_id.as_deref(), cwd.as_deref());
+        let swept = {
+            let _held = self.shared.plugin_approvals.mutations.lock().await;
+            self.shared.plugin_approvals.sweep()
+        };
+        let discovery = match swept {
+            Ok(()) => {
+                self.discover_plugins(project.as_deref(), session_id.as_deref())
+                    .await
+            }
+            Err(error) => Err(error.to_string()),
         };
         let open = session_id.filter(|id| self.shared.channels.has_channel(id));
         let (plugins, skills) = match &open {
@@ -454,14 +540,54 @@ impl Core {
             ),
             None => (Value::Null, Value::Null),
         };
-        crate::market_project::view(crate::market_project::Inputs {
+        let mut discovered = crate::market_local::project(
+            discovery.as_ref().ok(),
+            &plugins,
+            &skills,
+            &self.store(),
+            &self.shared.instructions.own_home,
+            project.as_deref(),
+            self.shared.market.catalog.as_ref().ok().map(Arc::as_ref),
+        );
+        for plugin in &mut discovered {
+            plugin.managed = self.plugin_owned(
+                std::path::Path::new(&plugin.path),
+                project.as_deref(),
+                plugin.off,
+            );
+        }
+        let current_dropped = discovery
+            .as_ref()
+            .ok()
+            .map(|current| crate::market_project::dropped(&json!({"plugins": current})))
+            .unwrap_or_default();
+        let catalog = match &self.shared.market.catalog {
+            Ok(catalog) => catalog.clone(),
+            Err(error) => {
+                let mut view = crate::market_project::unavailable(error);
+                view.discovered = discovered;
+                view.discovery_error = discovery.err();
+                view.session_id = open;
+                view.dropped = current_dropped;
+                return view;
+            }
+        };
+        let mut view = crate::market_project::view(crate::market_project::Inputs {
             catalog: &catalog,
             store: &self.store(),
             plugins: &plugins,
             skills: &skills,
             session_id: open,
             installing: self.shared.market.progress(),
-        })
+            discovered,
+            discovery_error: discovery.err(),
+        });
+        for issue in current_dropped {
+            if !view.dropped.contains(&issue) {
+                view.dropped.push(issue);
+            }
+        }
+        view
     }
 
     async fn session_read(&self, method: &str, session_id: &str) -> Value {

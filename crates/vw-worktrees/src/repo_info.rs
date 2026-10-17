@@ -2,11 +2,10 @@
 //! checked out, the local branches (the base choices), the worktrees it has, and whether a copy may be made
 //! at all (the preflight).
 //!
-//! **The preflight**: making and checking a copy runs git commands in it (a checkout, a status),
-//! and those can start programs that a repository's own config names: filter drivers (clean, smudge,
-//! process) and an fsmonitor. Vibe Work makes copies only of repositories that name no such program in their
-//! own config (`local`/`worktree` scope; included files count as `local`), so a copy never starts a program
-//! the user did not install. The three canonical git-lfs commands are allowed: they run the user's own
+//! **The preflight**: Vibe Work makes copies only of repositories whose own config (`local`/`worktree`
+//! scope; included files count as `local`) names no program for git to run (a filter driver or an
+//! fsmonitor), so making and checking a copy never starts a program the user did not install. The
+//! three canonical git-lfs commands are allowed: they run the user's own
 //! installed `git-lfs`, exactly as the user's own `git` would. Hooks are not a reason: the copy is made with
 //! hooks turned off, and `git worktree remove` runs none.
 //!

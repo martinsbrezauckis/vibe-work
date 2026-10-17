@@ -9,7 +9,7 @@
  * - A value a higher layer sets (environment, administrator, this session's overrides) is shown as set there and not
  *   offered for editing (a write to the user's file would be shadowed).
  * - Full access as the default asks the native confirmation (the gate requires it), like switching to it.
- * - Subagents is never written through the open chat (Vibe refuses it there and breaks that chat): it is saved for
+ * - Subagents is never written through the open chat (Vibe applies it when a chat is created): it is saved for
  * new chats through the core's short-lived chat (`writeSubagentsForNewChats`).
  * - Parsing is defensive: Vibe's answer is untyped JSON; what is not recognised is `null`.
  */
@@ -202,10 +202,9 @@ export interface SubagentsSaved {
 }
 
 /**
- * Saves the Subagents setting for new chats. Vibe 2.26.1 refuses to change it through a chat that already exists
- * (and then that chat fails every later turn), so this never goes through the open chat: the core writes it through
- * a short-lived empty chat of its own and deletes that chat again (`sessionTools` op `setSubagents`). Chats that are
- * already open keep the value they started with.
+ * Saves the Subagents setting for new chats. Vibe applies it when a chat is created, so this never goes through the
+ * open chat: the core writes it through a short-lived empty chat of its own and deletes that chat again
+ * (`sessionTools` op `setSubagents`). Chats that are already open keep the value they started with.
  */
 export async function writeSubagentsForNewChats(
   core: CoreController,

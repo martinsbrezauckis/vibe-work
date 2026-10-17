@@ -3,6 +3,7 @@
  * are none: binary, too large, a submodule, a mode change).
  * Depends on: model.ts, store.ts, HunkBlock. Called by: GitReview.
  */
+import { Button } from "../../components/Controls";
 import type { ReactElement } from "react";
 
 import { Selector } from "../../components/Selector";
@@ -34,6 +35,7 @@ export function FileReview(props: {
         {fileActions(file) && !readOnly && (
           <>
             <button
+              data-testid="changes.file-review-keep-file"
               type="button"
               className="mini"
               disabled={busy}
@@ -42,20 +44,23 @@ export function FileReview(props: {
             >
               Keep file
             </button>
-            <button
+            <Button
+              data-testid="changes.file-review-revert-file"
               type="button"
-              className="mini"
+              small
+              variant="danger"
               disabled={busy}
               data-action="revert-file"
               onClick={() => void changes.revertFile(sessionId, file)}
             >
               Revert file
-            </button>
+            </Button>
           </>
         )}
       </div>
       <div className="dtool">
         <Selector
+          testId="changes.file-review-set-layout"
           label="Diff layout"
           value={layout}
           options={[
@@ -73,7 +78,10 @@ export function FileReview(props: {
       </div>
       <div className="review">
         {file.hunks.length === 0 ? (
-          <div className="review-note">{fileNote(file)}: keep or revert the whole file.</div>
+          <div className="review-note">
+            {fileNote(file)}
+            {readOnly ? "." : ": keep or revert the whole file."}
+          </div>
         ) : (
           file.hunks.map((hunk, i) => (
             <HunkBlock
@@ -90,10 +98,12 @@ export function FileReview(props: {
           ))
         )}
       </div>
-      <p className="bnote">
-        Revert puts the lines back the way they were when this session started. Keep accepts them
-        and leaves the file as it is.
-      </p>
+      {!readOnly && (
+        <p className="bnote">
+          Revert puts the lines back the way they were when this session started. Keep accepts them
+          and leaves the file as it is.
+        </p>
+      )}
     </div>
   );
 }

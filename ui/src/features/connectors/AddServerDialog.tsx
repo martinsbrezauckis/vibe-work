@@ -62,8 +62,9 @@ function Dialog(): ReactElement {
   };
   return (
     <>
-      <div className="scrim" onClick={close} />
+      <div data-testid="connectors.add-server-dialog-scrim" className="scrim" onClick={close} />
       <div
+        data-testid="connectors.add-server-dialog-modal"
         className="modal add-server"
         role="dialog"
         aria-modal="true"
@@ -78,6 +79,7 @@ function Dialog(): ReactElement {
           <label className="cfield">
             <span>Address</span>
             <input
+              data-testid="connectors.add-server-dialog-set-url"
               data-dialog-initial-focus="true"
               value={url}
               placeholder="https://example.com/mcp"
@@ -90,7 +92,11 @@ function Dialog(): ReactElement {
               }}
             />
           </label>
-          <p id="add-server-check" className={check !== null && !check.ok ? "cbad" : "cmuted"}>
+          <p
+            role={check !== null && !check.ok ? "alert" : "status"}
+            id="add-server-check"
+            className={check !== null && !check.ok ? "key-problem" : "cmuted"}
+          >
             {check === null
               ? "https:// for servers on the internet; http:// only for a server on this computer."
               : check.ok
@@ -98,7 +104,7 @@ function Dialog(): ReactElement {
                 : check.reason}
           </p>
           {check?.ok === true && check.gated !== null && !needsKey ? (
-            <p className="cwarn" data-gated={check.gated.vendor}>
+            <p className="server-note" role="status" data-gated={check.gated.vendor}>
               <b>{check.gated.vendor} needs approval.</b> “{check.gated.rule}” ({check.gated.source}
               ). Mistral Vibe, the client Vibe signs in as, is not on that list yet, so the sign-in
               will probably be refused.
@@ -107,6 +113,7 @@ function Dialog(): ReactElement {
           <label className="cfield">
             <span>Name (optional)</span>
             <input
+              data-testid="connectors.add-server-dialog-set-name"
               value={name}
               placeholder="Vibe picks one from the address"
               onChange={(e) => {
@@ -118,6 +125,7 @@ function Dialog(): ReactElement {
         <section>
           <label className="key-check">
             <input
+              data-testid="connectors.add-server-dialog-set-needs-key"
               type="checkbox"
               checked={needsKey}
               onChange={(e) => {
@@ -163,10 +171,21 @@ function Dialog(): ReactElement {
           {typeof key === "string" ? <p className="cmuted">{key}</p> : null}
         </section>
         <footer className="modal-actions">
-          <button type="button" className="tb-btn" onClick={close}>
+          <button
+            data-testid="connectors.add-server-dialog-tb-btn"
+            type="button"
+            className="tb-btn"
+            onClick={close}
+          >
             Cancel
           </button>
-          <button type="button" className="btn-primary" disabled={!ok} onClick={add}>
+          <button
+            data-testid="connectors.add-server-dialog-btn-primary"
+            type="button"
+            className="btn-primary"
+            disabled={!ok}
+            onClick={add}
+          >
             {needsKey ? "Add with key" : "Add and sign in"}
           </button>
         </footer>

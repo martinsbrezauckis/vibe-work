@@ -74,6 +74,7 @@ export function createSessionActions(deps: {
   };
 
   const markSeen = async (id: string): Promise<void> => {
+    if (core.store.get().held[id] !== undefined) return;
     const entry = entryOf(id);
     if (entry?.session["isUnseen"] !== true || seenInFlight.has(id) || seenFailed.has(id)) return;
     seenInFlight.add(id);
@@ -246,6 +247,75 @@ export function createSessionActions(deps: {
      * copy of the repository starts through `worktrees.start`, never here. `origin` lowers the
      * start to the Debug API origin when a Debug API client chose the folder.
      */
+    /** Starts a fresh chat with the current chat's project folder and access mode. */
+    async startWithPlugins(id: string): Promise<string | null> {
+      let entry = entryOf(id);
+      if (entry?.runtime === undefined) {
+        try {
+          const reply = await core.run(
+            { type: "call", method: "runtime/read", params: { sessionId: id } },
+            { origin: "window" },
+          );
+          const result = reply.type === "reply" ? reply.result : null;
+          const runtime =
+            typeof result === "object" && result !== null && !Array.isArray(result)
+              ? result["runtime"]
+              : null;
+          if (typeof runtime === "object" && runtime !== null && !Array.isArray(runtime))
+            core.setRuntime(id, runtime);
+          entry = entryOf(id);
+        } catch (thrown) {
+          fail(thrown);
+          return null;
+        }
+      }
+      const session = entry?.state?.["session"];
+      const stateSession =
+        typeof session === "object" && session !== null && !Array.isArray(session)
+          ? session
+          : entry?.session;
+      const cwd = stateSession?.["cwd"];
+      const workspace = stateSession?.["workspaceRoots"];
+      const workspaceRoots = Array.isArray(workspace)
+        ? workspace.filter((root): root is string => typeof root === "string")
+        : [];
+      const runtime = entry?.runtime;
+      const active =
+        typeof runtime === "object" && runtime !== null && !Array.isArray(runtime)
+          ? runtime["activeAgent"]
+          : null;
+      const profile =
+        typeof active === "object" && active !== null && !Array.isArray(active)
+          ? active["name"]
+          : null;
+      if (typeof cwd !== "string" || typeof profile !== "string") {
+        fail(
+          new Error(
+            "The chat's folder and access mode could not be read. Reopen it and try again.",
+          ),
+        );
+        return null;
+      }
+      try {
+        const result = await core.run(
+          {
+            type: "startSession",
+            agentConfig: {
+              cwd,
+              agent: profile,
+              ...(workspaceRoots.length === 0 ? {} : { workspaceRoots }),
+            },
+          },
+          { origin: "window" },
+        );
+        if (result.type !== "session") return null;
+        shell.actions.selectSession(result.snapshot.sessionId);
+        return result.snapshot.sessionId;
+      } catch (thrown) {
+        fail(thrown);
+        return null;
+      }
+    },
     async startIn(cwd: string, origin?: "debug-api"): Promise<string | null> {
       try {
         const result = await core.run(
@@ -305,9 +375,8 @@ export function createSessionActions(deps: {
 
     /**
      * Tells the core which session the main view shows whenever the selection changes, so the core
-     * keeps that session's channel open however long it is idle (`viewSession`). A hint:
-     * a failure is ignored (the worst case is a reopen when the session is used). Returns a stop
-     * function.
+     * attaches and verifies its access mode immediately (`viewSession`), then keeps its channel open
+     * however long it is idle. Failures use the usual toast. Returns a stop function.
      */
     watchViewed(): () => void {
       let last: string | null | undefined;
@@ -319,7 +388,7 @@ export function createSessionActions(deps: {
           selected === null
             ? { type: "viewSession" }
             : { type: "viewSession", sessionId: selected };
-        core.run(command).catch(() => undefined);
+        core.run(command).catch(fail);
       };
       send();
       return shell.store.subscribe(send);

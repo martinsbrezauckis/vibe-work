@@ -1,10 +1,11 @@
 //! The shared HTTPS client: on Linux rustls with the `ring` provider (installed once per process)
-//! and the OS trust store; on Windows and macOS the OS TLS stack (native-tls). System proxy
-//! settings honoured, a 10 s connect timeout and no overall timeout (model streams can run for
+//! and the OS trust store; on Windows and macOS the OS TLS stack (native-tls). The proxy and certificate settings of
+//! `network` (the ones saved in Settings > Network) are applied to every client built here; with none set, the system
+//! proxy settings are honoured as before. A 10 s connect timeout and no overall timeout (model streams can run for
 //! minutes; callers add their own). **Neither client follows redirects**: every caller sends
 //! the key, and a 3xx must never carry it, or the request, to another place.
 //!
-//! Depends on: reqwest, rustls. Called by: vw-keys (key test call, OCR, speech), vw-keyproxy.
+//! Depends on: reqwest, rustls, `network`. Called by: vw-keys (key test call, OCR, speech), vw-keyproxy.
 
 use std::time::Duration;
 
@@ -58,7 +59,10 @@ fn build(redirects: reqwest::redirect::Policy) -> Result<reqwest::Client, Client
     };
     #[cfg(not(target_os = "linux"))]
     let builder = reqwest::Client::builder().tls_backend_native();
-    builder
+    // The saved proxy and certificates (Settings > Network); read when the client is built, so a client keeps the
+    // settings of the moment it was made.
+    crate::network::current()
+        .apply(builder)
         .redirect(redirects)
         .connect_timeout(Duration::from_secs(10))
         .pool_idle_timeout(Duration::from_secs(90))

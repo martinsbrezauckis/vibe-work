@@ -40,7 +40,7 @@ impl KeyService {
         }
         let vault = self.vault();
         blocking(move || {
-            let items = vault.list_items()?;
+            let items = vault.list_items_strict()?;
             let current = items
                 .iter()
                 .find(|item| item.id == id)
@@ -123,7 +123,9 @@ impl KeyService {
     /// [`KeyError::Vault`] (locked, storage).
     pub async fn project_secrets(&self) -> Result<Vec<ProjectSecret>, KeyError> {
         let vault = self.vault();
-        let items = blocking(move || vault.list_items()).await??;
+        let items = blocking(move || vault.list_items_strict())
+            .await?
+            .map_err(KeyError::permissions_unreadable)?;
         let mut out: Vec<ProjectSecret> = items
             .iter()
             .filter_map(|item| {
@@ -205,7 +207,7 @@ impl KeyService {
         value.register_as(vw_secrets::SecretKind::VaultValue);
         let vault = self.vault();
         blocking(move || {
-            let items = vault.list_items()?;
+            let items = vault.list_items_strict()?;
             let wanted = name.trim().to_lowercase();
             let same = items.iter().find_map(|item| {
                 project_secret::agent_visible(item).filter(|m| m.name.to_lowercase() == wanted)

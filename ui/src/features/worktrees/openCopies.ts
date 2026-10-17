@@ -1,5 +1,6 @@
 /**
- * Opens the existing copies inventory in the welcome view, from the sessions footer or a bell action.
+ * Opens the existing copies inventory in the welcome view, from the sessions footer or Settings.
+ * The bell's Sessions action also reaches this list by returning to the welcome view.
  * Depends on: AppContext and home navigation. Keeps the new-chat draft and chosen folder.
  */
 import type { App } from "../shell/AppContext";

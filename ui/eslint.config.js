@@ -3,6 +3,7 @@
  * Run by `pnpm lint` (zero warnings allowed) and by scripts/public/check.sh.
  */
 import js from "@eslint/js";
+import controlTestId from "./control-test-id.js";
 import reactHooks from "eslint-plugin-react-hooks";
 import globals from "globals";
 import tseslint from "typescript-eslint";
@@ -30,6 +31,11 @@ export default tseslint.config(
       globals: { ...globals.browser },
       parserOptions: { projectService: true, tsconfigRootDir: import.meta.dirname },
     },
+  },
+  {
+    files: ["src/**/*.tsx"],
+    plugins: { controls: { rules: { "test-id": controlTestId } } },
+    rules: { "controls/test-id": "error" },
   },
   // Plain JS files (this config) are not part of the TypeScript project: lint them without type info.
   { files: ["**/*.js"], ...tseslint.configs.disableTypeChecked },

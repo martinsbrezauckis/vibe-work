@@ -18,7 +18,7 @@ Mistral. If you are not sure which side a problem is on, report it here and it w
 Vibe Work's own code in this repository: the Rust core and host, the Tauri app, the user interface, the Debug API,
 the local key proxy and vault handling, the installers and the update flow.
 
-## How Vibe Work is built to be safe
+## How Vibe Work is built
 
 - **The main window renders no untrusted active content.** Model output is shown as sanitized Markdown without raw
   HTML, under a strict content security policy. Web pages, app previews and handbook pages open in separate,
@@ -26,7 +26,7 @@ the local key proxy and vault handling, the installers and the update flow.
 - **Every request to Vibe goes through one method gate.** Unknown methods are refused; requests that install things,
   add servers or send data elsewhere need your confirmation in a native dialog, and a folder can be trusted only
   after you chose it yourself.
-- **Your Mistral key stays in Vibe Work.** It is kept in an encrypted vault. Vibe is given a placeholder, and the real
+- **Vibe never receives your Mistral key.** It is kept in an encrypted vault. Vibe is given a placeholder, and the real
   key is added to Mistral requests by a local proxy that only listens on this computer.
 - **The Debug API is off in release builds** until you turn it on in Settings. When on, it listens on 127.0.0.1
   only and needs a token from a file only your user can read. It can then do what you can do in the app, except on
@@ -46,9 +46,9 @@ the local key proxy and vault handling, the installers and the update flow.
   strips inherited Git and forge sign-in channels; the command guard refuses push, GitHub writes and Git/gh
   credential commands. Common branch rewrites outside the session's own worktree branch need a separate
   confirmation. These guardrails do not isolate other same-user credentials or interpret every shell expression.
-- The core process holds the Mistral key in memory. On Linux it is protected from other processes of the same user
-  (no core dumps, no debugger attach); on macOS only core dumps are turned off, and on Windows other processes of the
-  same user can read its memory.
+- The core process holds the Mistral key in memory. On Linux core dumps are off and other processes of the same user
+  cannot attach a debugger to it or read its memory; on macOS only core dumps are turned off, and on Windows other
+  processes of the same user can read its memory.
 - Browser web tabs are separate from the pinned App preview. The agent lists only its session's web tabs; closing a
   tab you opened asks you to Close or Keep unless you enable Close tabs you opened in Settings › Browser. The agent
   cannot change that permission or close App preview or another session's tab.

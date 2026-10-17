@@ -63,6 +63,8 @@ export interface SessionEntry {
   /** The full `PublicSessionState` once a snapshot arrived; `null` for listing-only rows. */
   state: Record<string, JsonValue | undefined> | null;
   localOnly: boolean;
+  /** The core's resolved access mode, available even before the session has a runtime. */
+  accessMode?: string;
   /** Callbacks (approvals, questions) currently open, from `callbacksChanged`. */
   openCallbackIds: readonly string[];
   /**
@@ -97,9 +99,8 @@ export function projectOf(cwd: string | null): string {
 export function badgeOf(entry: SessionEntry, stuck: StuckMap = {}): Badge {
   if (entry.id in stuck) return "stuck";
   const type = statusType(entry.session);
-  // An open callback only counts while the session is working: Vibe 2.26.0 does not always tell us
-  // that an answered callback was resolved (live, after a `session/resume`: the turn completed and the
-  // callback entry never got its update), and an idle session cannot be waiting for anything.
+  // An open callback only counts while the session is working: the session's status decides, and an
+  // idle session cannot be waiting for anything.
   const working = type !== "idle" && type !== "failed" && type !== "archived";
   if (type === "blocked" || (working && entry.openCallbackIds.length > 0)) return "input";
   if (type === "running") return "run";

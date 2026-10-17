@@ -1,0 +1,111 @@
+/* Project git explorer rows. Uses shared theme tokens; called by features/git-browser. */
+.git-browser {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  color: var(--text);
+}
+.gb-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+.gb-project-choice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  color: var(--text-2);
+  font-size: var(--text-11);
+  border-bottom: 1px solid var(--line);
+}
+.gb-tree {
+  flex: 1;
+  min-height: 0;
+}
+.gb-row {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--line);
+  font-size: var(--text-12);
+}
+.gb-row[aria-selected="true"] {
+  background: var(--active);
+}
+.gb-row:focus-visible {
+  outline: 2px solid var(--text-2);
+  outline-offset: -2px;
+}
+.gb-level-2 {
+  padding-left: 22px;
+}
+.gb-level-3 {
+  padding-left: 36px;
+}
+.gb-level-4 {
+  padding-left: 50px;
+}
+.gb-heading {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  cursor: pointer;
+  min-width: 0;
+}
+.gb-chevron {
+  flex: 0 0 10px;
+  color: var(--text-3);
+}
+.gb-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: var(--weight-medium);
+}
+.gb-file-state {
+  margin-left: auto;
+  color: var(--text-2);
+}
+.gb-state {
+  margin: 4px 0 5px 15px;
+  color: var(--text-2);
+  font-size: var(--text-11);
+  overflow-wrap: anywhere;
+}
+.gb-actions {
+  display: flex;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-left: 15px;
+}
+.gb-more {
+  min-width: 0;
+}
+.gb-more summary {
+  color: var(--text-2);
+  cursor: pointer;
+  padding: 3px 5px;
+  border-radius: 5px;
+}
+.gb-more summary:focus-visible {
+  outline: 2px solid var(--text-2);
+}
+.gb-more-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  padding: 5px 0;
+}
+.gb-reason {
+  flex-basis: 100%;
+  color: var(--text-3);
+  font-size: var(--text-11);
+  overflow-wrap: anywhere;
+}
+.gb-message {
+  padding: 12px;
+  color: var(--text-2);
+  font-size: var(--text-12);
+}

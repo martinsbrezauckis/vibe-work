@@ -44,6 +44,8 @@ pub struct PagesService {
     pub(crate) comments: Arc<CommentStore>,
     /// Answers to page inputs (Format 1.2 §6.6).
     pub(crate) answers: Arc<crate::answers::AnswerStore>,
+    /// Changes to answers invalidate the inline snapshot without re-scanning a page on every drain.
+    pub(crate) answer_revision: Arc<std::sync::atomic::AtomicU64>,
     pub(crate) settings: Arc<SettingsStore>,
     /// The visual checker, when the app gave it an engine.
     pub(crate) checker: Option<Arc<crate::checker::VisualChecker>>,
@@ -75,6 +77,7 @@ impl PagesService {
         });
         engine.attach(Arc::new(ViewerHooks(shared.clone())));
         Self {
+            answer_revision: Arc::new(std::sync::atomic::AtomicU64::new(0)),
             comments: Arc::new(CommentStore::new(config.data_dir.join("comments"))),
             answers: Arc::new(crate::answers::AnswerStore::new(
                 config.data_dir.join("answers"),
@@ -142,6 +145,7 @@ impl PagesService {
     async fn hide(&self) -> Result<(), PagesError> {
         let mount = self.shared.lock().mount.clone();
         if let Some(mount) = mount {
+            self.flush_inline(&mount).await?;
             let id = mount_id(&mount);
             bounded(
                 self.config.engine_timeout,
@@ -174,11 +178,15 @@ impl PagesService {
                     || mount.port != viewer.port
                     || mount.path != viewer.path
                     || mount.anchor != viewer.anchor;
+                if navigate {
+                    self.flush_inline(&mount).await?;
+                }
                 {
                     let mut state = self.shared.lock();
                     if let Some(m) = state.mount.as_mut() {
                         session.clone_into(&mut m.session);
                         m.port = viewer.port;
+                        m.project.clone_from(&viewer.project);
                         m.path.clone_from(&viewer.path);
                         m.anchor.clone_from(&viewer.anchor);
                     }
@@ -211,6 +219,7 @@ impl PagesService {
             let label = format!("{}{}", self.config.label_prefix, state.generation);
             state.mount = Some(Mount {
                 label: label.clone(),
+                project: viewer.project.clone(),
                 session: session.to_owned(),
                 port: viewer.port,
                 path: viewer.path.clone(),
@@ -230,7 +239,15 @@ impl PagesService {
             },
             // Format 1.2 §6.4: every page this webview loads gets the app's theme on `<html data-theme>` before it
             // paints (a document-start script, exempt from the page's CSP; it runs no page code).
-            console_script: crate::theme::theme_script(&self.theme()),
+            console_script: if self.config.pdf {
+                crate::theme::theme_script(&self.theme())
+            } else {
+                format!(
+                    "{}\n{}",
+                    crate::theme::theme_script(&self.theme()),
+                    crate::inline::bootstrap()
+                )
+            },
             console_drain: "'[]'".to_owned(),
             context_menu: false,
             placement: Some(placement),
@@ -242,6 +259,9 @@ impl PagesService {
         {
             self.shared.lock().mount = None;
             return Err(error.into());
+        }
+        if !self.config.pdf {
+            self.start_inline(label);
         }
         Ok(())
     }
@@ -262,6 +282,10 @@ impl PagesService {
     /// [`PagesError::NotShown`], engine failures.
     pub async fn history(&self, session: &str, step: HistoryStep) -> Result<(), PagesError> {
         let id = self.mount_of(session)?;
+        let mount = self.shared.lock().mount.clone();
+        if let Some(mount) = mount {
+            self.flush_inline(&mount).await?;
+        }
         bounded(
             self.config.engine_timeout,
             "history",
@@ -310,6 +334,41 @@ impl PagesService {
             .await
             .map_err(|e| PagesError::Other(e.to_string()))??;
         section_of(&facts, &page, &picked).ok_or(PagesError::NoSection)
+    }
+
+    /// The section `section` of the page shown for `session`, answered as a pick of it would (no pointer, no wait):
+    /// the section must exist in the page FILE; its label comes from the file and also stands for the picked text,
+    /// there being no element to read it from. For callers that name the section (the Debug API).
+    ///
+    /// # Errors
+    /// [`PagesError::NoPage`] (the hub is shown), [`PagesError::NoSection`], and path or page-read failures.
+    pub async fn section_named(
+        &self,
+        session: &str,
+        project: &Path,
+        section: &str,
+    ) -> Result<PickedSection, PagesError> {
+        let path = self
+            .view(session)
+            .and_then(|v| v.path)
+            .ok_or_else(|| PagesError::NoPage("(the hub)".to_owned()))?;
+        let page = PagePath::parse(&path)?;
+        let (service, project_owned, page_owned) =
+            (self.clone(), project.to_path_buf(), page.clone());
+        let facts = tokio::task::spawn_blocking(move || service.page(&project_owned, &page_owned))
+            .await
+            .map_err(|e| PagesError::Other(e.to_string()))??;
+        let label = facts
+            .section_label(section)
+            .ok_or(PagesError::NoSection)?
+            .to_owned();
+        Ok(PickedSection {
+            page: page.to_string(),
+            section: section.to_owned(),
+            label: label.clone(),
+            quote: None,
+            text: label,
+        })
     }
 
     /// Cancels a running pick (the overlay goes away).
@@ -397,6 +456,15 @@ impl PagesService {
 
     /// A session ended: its viewer is forgotten (and closed when it shows that session).
     pub async fn session_ended(&self, session: &str) {
+        let current = self
+            .shared
+            .lock()
+            .mount
+            .clone()
+            .filter(|m| m.session == session);
+        if let Some(mount) = current {
+            let _ = self.flush_inline(&mount).await;
+        }
         let mount = {
             let mut state = self.shared.lock();
             state.viewers.remove(session);
@@ -418,6 +486,10 @@ impl PagesService {
 
     /// Closes the viewer and stops every page server (quit).
     pub async fn shutdown(&self) {
+        let current = self.shared.lock().mount.clone();
+        if let Some(mount) = current {
+            let _ = self.flush_inline(&mount).await;
+        }
         let mount = self.shared.lock().mount.take();
         if let Some(mount) = mount {
             let _ = bounded(

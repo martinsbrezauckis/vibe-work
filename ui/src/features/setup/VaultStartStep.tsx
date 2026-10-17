@@ -28,6 +28,7 @@ export function VaultStartStep() {
     return (
       <div className="setup-step">
         <button
+          data-testid="setup.vault-start-step-choose"
           type="button"
           className="key-link"
           onClick={() => {
@@ -57,7 +58,7 @@ export function VaultStartStep() {
         <button
           type="button"
           className="vault-choice"
-          data-testid="setup-vault-start-create"
+          data-testid="setup.vault-start-create"
           aria-label={term("vaultKinds", "vibeWork").tooltip}
           title={term("vaultKinds", "vibeWork").tooltip}
           onClick={() => {
@@ -71,7 +72,7 @@ export function VaultStartStep() {
           <button
             type="button"
             className="vault-choice"
-            data-testid="setup-vault-start-shellx"
+            data-testid="setup.vault-start-shellx"
             aria-label={term("vaultKinds", "shellx").tooltip}
             title={term("vaultKinds", "shellx").tooltip}
             onClick={() => {
@@ -86,7 +87,7 @@ export function VaultStartStep() {
           <button
             type="button"
             className="vault-choice"
-            data-testid="setup-vault-start-desktop"
+            data-testid="setup.vault-start-desktop"
             aria-label={term("vaultKinds", "desktop").tooltip}
             title={term("vaultKinds", "desktop").tooltip}
             onClick={() => {
@@ -99,7 +100,12 @@ export function VaultStartStep() {
         )}
       </div>
       {available.length === 0 && <p className="key-field-hint">{TEXT.vaultChoiceEmpty}</p>}
-      <button type="button" className="key-link" onClick={() => keys?.dismiss()}>
+      <button
+        data-testid="setup.vault-start-step-dismiss"
+        type="button"
+        className="key-link"
+        onClick={() => keys?.dismiss()}
+      >
         Not now
       </button>
     </div>

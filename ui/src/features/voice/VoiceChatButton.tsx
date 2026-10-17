@@ -40,7 +40,13 @@ function label(phase: VoiceChatPhase, auto: boolean, error: string | null): stri
 }
 
 /** The button for `sessionId`'s composer. */
-export function VoiceChatButton({ sessionId }: { sessionId: string }): ReactElement | null {
+export function VoiceChatButton({
+  sessionId,
+  disabled = false,
+}: {
+  sessionId: string;
+  disabled?: boolean;
+}): ReactElement | null {
   const voice = useApp().voice;
   const keyBlocked = useKeyReadiness() !== null;
   const on = useVoiceChat((s) => s.on && s.owner === sessionId);
@@ -64,8 +70,8 @@ export function VoiceChatButton({ sessionId }: { sessionId: string }): ReactElem
       aria-label={text}
       title={text}
       aria-pressed={on}
-      disabled={blocked}
-      data-testid="voice-chat-button"
+      disabled={disabled || blocked}
+      data-testid="voice.chat-button"
       data-phase={phase}
       onClick={() => {
         if (keyBlocked) voice.voiceChat.turnOff();

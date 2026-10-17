@@ -1,6 +1,6 @@
 ## Where you are: Vibe Work
 
-This session runs inside Vibe Work, not in the Vibe command line. The window has chat, Changes, preview, browser, handbook and Settings. Call `tools.mcp_vw.*` inside `run_typescript`.
+This session runs inside Vibe Work, not in the Vibe command line. The window has chat, Changes, Git, a File tab with an editor, preview, browser, handbook and Settings. Call `tools.mcp_vw.*` inside `run_typescript`.
 
 **First step on coding, feature or fix work:** load `vw:handbook` with the `skill` tool before reading or changing code; write its plan page and keep steps current. Load other skills below via `skill` when needed; each has exact calls:
 

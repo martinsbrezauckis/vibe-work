@@ -42,6 +42,7 @@ mod server;
 mod sse;
 mod terminal_routes;
 mod token;
+mod trace_routes;
 /// Private test builds only (feature `vault-e2e`): the vault test switch's routes; the source is outside
 /// the exported tree.
 #[cfg(feature = "vault-e2e")]

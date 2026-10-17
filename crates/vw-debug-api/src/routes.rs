@@ -52,6 +52,7 @@ pub(crate) fn router() -> Router<ApiState> {
         .route("/callbacks/{id}", post(answer_callback))
         .route("/server", get(server))
         .route("/ui", get(list_ui))
+        .route("/ui/trace", get(crate::trace_routes::trace))
         .route("/ui/{*name}", post(ui_route))
         .merge(crate::terminal_routes::router())
         .merge(crate::window_routes::router())

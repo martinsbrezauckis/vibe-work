@@ -100,6 +100,7 @@ export function PageTabs({
   return (
     <div className="browser-page-tabbar">
       <div
+        data-testid="preview.page-tabs-browser-page-tabs"
         className="browser-page-tabs"
         role="tablist"
         aria-label="Browser pages"
@@ -110,6 +111,8 @@ export function PageTabs({
           const web = tab.kind === "web";
           return (
             <div
+              data-testid="preview.page-tabs-on-drag-start-surface-1"
+              data-item-id={tab.pageKey}
               key={tab.pageKey}
               className="browser-page-tab"
               data-kind={tab.kind}
@@ -142,6 +145,7 @@ export function PageTabs({
               }}
             >
               <button
+                data-testid="preview.page-tabs-switch-tab"
                 type="button"
                 role="tab"
                 className="browser-page-tab-select"
@@ -182,6 +186,7 @@ export function PageTabs({
               </button>
               {web && (
                 <button
+                  data-testid="preview.page-tabs-close-tab"
                   type="button"
                   className="browser-page-tab-close"
                   aria-label={`Close ${label}`}
@@ -197,6 +202,7 @@ export function PageTabs({
         })}
       </div>
       <button
+        data-testid="preview.page-tabs-open-tab"
         type="button"
         className="browser-page-new"
         aria-label="New web tab"
@@ -208,6 +214,7 @@ export function PageTabs({
       </button>
       {active?.kind === "web" && active.ownerKind === "user" && (
         <button
+          data-testid="preview.page-tabs-set-handoff-busy"
           type="button"
           className="browser-page-handoff"
           aria-label="Give tab to agent"
@@ -232,6 +239,7 @@ export function PageTabs({
       )}
       {active?.kind === "web" && active.ownerKind === "delegatedToAgent" && (
         <button
+          data-testid="preview.page-tabs-take-back-tab"
           type="button"
           className="browser-page-handoff"
           aria-label="Take tab back from agent"

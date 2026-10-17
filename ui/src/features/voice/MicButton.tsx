@@ -17,7 +17,13 @@ import { useKeyReadiness } from "../shell/KeyNotice";
 import { DICTATE_KEYS, HOLD_MS, clock, useDictation, useVoiceChat } from "./hooks";
 
 /** The button for `sessionId`'s composer. */
-export function MicButton({ sessionId }: { sessionId: string }): ReactElement | null {
+export function MicButton({
+  sessionId,
+  disabled = false,
+}: {
+  sessionId: string;
+  disabled?: boolean;
+}): ReactElement | null {
   const voice = useApp().voice;
   const keyBlocked = useKeyReadiness() !== null;
   const phase = useDictation((s) => s.phase);
@@ -59,9 +65,9 @@ export function MicButton({ sessionId }: { sessionId: string }): ReactElement | 
       aria-label={label}
       title={label}
       aria-pressed={active}
-      disabled={!mine || (keyBlocked && !active)}
+      disabled={disabled || !mine || (keyBlocked && !active)}
       data-queued={finishing && queued ? "true" : undefined}
-      data-testid="mic-button"
+      data-testid="voice.mic-button"
       onPointerDown={(e) => {
         if (e.button !== 0) return;
         if (phase === "transcribing") {

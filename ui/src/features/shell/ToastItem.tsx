@@ -8,6 +8,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import { Button, IconButton } from "../../components/Controls";
 import type { Toast } from "../../state/toastStore";
 import { initialToastPreview, measureToastPreview, toastLifetime } from "../../state/toastReading";
+import { PluginNoticeText } from "./PluginNoticeText";
 
 const EXIT_MS = 160;
 
@@ -90,6 +91,7 @@ export function ToastItem({
   const summary = kind === "error" ? "Error" : kind === "warn" ? "Warning" : "Notice";
   return (
     <div
+      data-item-id={toast.id}
       className={`toast${leaving ? " out" : ""}`}
       role="status"
       data-kind={kind}
@@ -115,10 +117,17 @@ export function ToastItem({
       />
       <div className="toast-content">
         <span ref={message} className="toast-text">
-          {docked ? summary : preview}
+          {toast.plugin ? (
+            <PluginNoticeText text={docked ? summary : preview} name={toast.plugin.name} />
+          ) : docked ? (
+            summary
+          ) : (
+            preview
+          )}
         </span>
         {(docked || preview !== text) && (
           <Button
+            data-testid="shell.toast-item-button"
             small
             data-toast-more="true"
             aria-label="Open notifications: Show all"
@@ -128,7 +137,7 @@ export function ToastItem({
           </Button>
         )}
       </div>
-      <IconButton icon="x" aria-label="Dismiss" onClick={leave} />
+      <IconButton data-testid="shell.toast-item-x" icon="x" aria-label="Dismiss" onClick={leave} />
       {life !== null && (
         <span
           className="toast-timer"

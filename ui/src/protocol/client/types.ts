@@ -50,7 +50,7 @@ export interface UiControlRequest {
 
 /** The answer to one UI-control request. */
 export type UiControlReply =
-  | { id: string; ok: true; value: unknown }
+  | { id: string; ok: true; value: unknown; pending?: true }
   | { id: string; ok: false; error: { code: CoreError["code"]; message: string } };
 
 /** How the UI receives and answers Debug API `ui/*` requests. */
@@ -186,6 +186,12 @@ export interface CoreClient {
    * webview) and adds the chosen files to the core. Unsupported in browser dev mode.
    */
   pickDocuments(): Promise<DocumentsPicked>;
+  /**
+   * Opens the native file picker for the company's certificate file (Settings > Network; Rust owns the dialog) and
+   * returns the chosen path, or `null` when cancelled. The path is not a secret; the core checks the file when the
+   * setting is saved. Unsupported in browser dev mode (type the path instead).
+   */
+  pickCertificate(): Promise<string | null>;
   /**
    * Opens the native file picker for a library (Rust owns it, the webview names only the library) and
    * uploads the chosen files to Mistral. Answers the `libraries` result (added, refused). Unsupported in browser dev

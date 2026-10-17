@@ -52,6 +52,7 @@ export function VaultEntryRow(props: {
   expanded: boolean;
   onExpandedChange: () => void;
   act: VaultAct;
+  replacement?: number | null;
 }) {
   const { entry, list, busy, act } = props;
   const { item } = entry;
@@ -75,6 +76,8 @@ export function VaultEntryRow(props: {
     entry.kind === "secret" ? list.serverGrants.filter((g) => g.secretId === item.id) : [];
   return (
     <div
+      data-item-id={props.entry.item.id}
+      data-setting={`vault-login-replace-${encodeURIComponent(item.id)}`}
       className="vault-entry"
       {...(entry.kind === "secret"
         ? { "data-secret-row": item.id }
@@ -82,26 +85,28 @@ export function VaultEntryRow(props: {
     >
       <div className="check secrets-row vault-entry-line">
         <RowDisclosure
+          data-testid="secrets.vault-entry-row-rowdisclosure"
           type="button"
           aria-label={`Show details for ${item.name}`}
           aria-expanded={props.expanded}
           aria-controls={props.expanded ? id : undefined}
           onClick={props.onExpandedChange}
         >
-          <span className="secrets-name" title={item.name}>
+          <span className="secrets-name ui-body" title={item.name}>
             {item.name}
           </span>
-          <span className="secrets-detail d vault-entry-address" title={address}>
+          <span className="secrets-detail ui-caption vault-entry-address" title={address}>
             {address ? originHost(address) : "—"}
           </span>
           {entry.kind === "login" && (
-            <span className="secrets-detail d" title={entry.item.username}>
+            <span className="secrets-detail ui-caption" title={entry.item.username}>
               {entry.item.username}
             </span>
           )}
         </RowDisclosure>
-        <span className="vault-default-label">Default permission</span>
+        <span className="ui-caption">Default permission</span>
         <Selector
+          testId="secrets.vault-entry-row-act"
           compact
           label={`Default permission for ${item.name}`}
           value={defaultPermission}
@@ -115,6 +120,7 @@ export function VaultEntryRow(props: {
           }}
         />
         <Button
+          data-testid="secrets.vault-entry-row-set-show-projects"
           small
           type="button"
           aria-expanded={showProjects}
@@ -135,6 +141,7 @@ export function VaultEntryRow(props: {
             <div className="vault-project-permission-row">
               <span title={project}>{project}</span>
               <Selector
+                testId="secrets.vault-entry-row-act-2"
                 compact
                 label={`Project permission for ${item.name}`}
                 value={projectPermission ?? "default"}
@@ -163,10 +170,15 @@ export function VaultEntryRow(props: {
           {projectPermissions
             .filter((p) => p.project !== project)
             .map((p) => (
-              <div className="vault-project-permission-row" key={p.project}>
+              <div
+                data-item-id={p.project}
+                className="vault-project-permission-row"
+                key={p.project}
+              >
                 <span title={p.project}>{p.project}</span>
                 <span>{term("vaultPermissions", p.permission).name}</span>
                 <Button
+                  data-testid="secrets.vault-entry-row-act-3"
                   small
                   type="button"
                   disabled={busy}
@@ -186,6 +198,10 @@ export function VaultEntryRow(props: {
       {props.expanded && (
         <div id={id} className="vault-entry-details">
           <VaultItemActions
+            key={props.replacement ?? "actions"}
+            {...(entry.kind === "login" && entry.item.own && props.replacement != null
+              ? { replaceFromFinding: entry.item.origin }
+              : {})}
             inline
             kind={entry.kind}
             name={item.name}
@@ -246,11 +262,12 @@ export function VaultEntryRow(props: {
             <h4>{entry.kind === "login" ? "Granted sign-ins" : "Granted commands"}</h4>
           )}
           {grants.map((g) => (
-            <div className="check secrets-row" key={g.id} data-grant={g.id}>
+            <div data-item-id={g.id} className="check secrets-row" key={g.id} data-grant={g.id}>
               <code className="secrets-name" title={`${g.label} · ${g.detail}`}>
                 {g.label}
               </code>
               <Button
+                data-testid="secrets.vault-entry-row-act-4"
                 small
                 type="button"
                 disabled={busy}
@@ -264,7 +281,12 @@ export function VaultEntryRow(props: {
           ))}
           {servers.length > 0 && <h4>MCP servers</h4>}
           {servers.map((g) => (
-            <div className="check secrets-row" key={g.id} data-server-grant={g.id}>
+            <div
+              data-item-id={g.id}
+              className="check secrets-row"
+              key={g.id}
+              data-server-grant={g.id}
+            >
               <span className="secrets-name" title={g.address}>
                 {g.server}
               </span>
@@ -276,6 +298,7 @@ export function VaultEntryRow(props: {
                     : "Until close"}
               </span>
               <Button
+                data-testid="secrets.vault-entry-row-act-5"
                 small
                 type="button"
                 disabled={busy || g.grant === "none"}

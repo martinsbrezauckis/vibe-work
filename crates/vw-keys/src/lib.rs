@@ -7,7 +7,7 @@
 //! vault item holds the key), `error`.
 //!
 //! Depends on: vw-vault, vw-keyproxy, vw-mistral, vw-supervisor. Called by: vw-core-api (commands),
-//! vw-host (construction). Invariant: no public function returns the key.
+//! vw-host (construction). Invariant: client-facing commands never return a key; the proxy and scanner read values only in Rust.
 
 mod entry_defaults;
 mod entry_permissions;
@@ -16,6 +16,8 @@ pub mod existing;
 mod grants;
 mod logins;
 mod mcp;
+mod network;
+mod scan_secrets;
 mod secrets;
 mod service;
 mod settings;
@@ -26,6 +28,7 @@ mod work;
 pub use error::KeyError;
 pub use existing::{ExistingKey, ExistingKeys, ExistingSource};
 pub use logins::{LoginCounts, StoredLogin};
+pub use scan_secrets::VaultScanSecret;
 pub use secrets::{Stored, is_locked};
 pub use service::{
     KeyEvent, KeyMetadata, KeyPresence, KeyService, KeyServiceConfig, KeySource, KeyStatus,

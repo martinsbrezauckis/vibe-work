@@ -160,3 +160,12 @@ export function splitRows(lines: readonly DiffLine[]): SplitRow[] {
 export function shownFile(view: ChangesView, selected: string | null): FileChange | null {
   return view.files.find((f) => f.path === selected) ?? view.files[0] ?? null;
 }
+
+/** Empty review wording after a confirmed local action. */
+export function completionText(completion: "history" | "commit" | undefined): string | null {
+  return completion === "history"
+    ? "Version history is on. The first version includes every file, also the changes Vibe just made."
+    : completion === "commit"
+      ? "Everything is saved. New changes appear here."
+      : null;
+}

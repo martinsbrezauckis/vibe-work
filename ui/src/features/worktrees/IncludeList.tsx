@@ -28,6 +28,7 @@ export function IncludeList({
       {hasList ? (
         <details>
           <summary
+            data-testid="worktrees.include-list-summary"
             title="Show or hide file copy details"
             aria-label="Show or hide file copy details"
           >

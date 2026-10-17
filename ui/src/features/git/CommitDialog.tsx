@@ -8,11 +8,13 @@
  * nothing is sent without a button press; hook output appears after the commit (and as the error when a hook
  * stops it).
  */
-import type { ReactElement } from "react";
+import { useId, type ReactElement } from "react";
 
 import type { CommitDialog as Dialog, Git } from "../../state/git";
 import { GitModal } from "./GitModal";
 import { KeyNotice } from "../shell/KeyNotice";
+import { GitIdentityFields } from "./GitIdentityFields";
+import { validIdentity } from "../../state/gitIdentity";
 
 const STATUS_WORD: Record<string, string> = {
   modified: "changed",
@@ -35,10 +37,19 @@ export function CommitDialog({
   busy: boolean;
   error: string | null;
 }): ReactElement {
-  const { plan, message, excluded, runHooks } = dialog;
+  const { plan, message, excluded, runHooks, authorName, authorEmail } = dialog;
+  const messageNoteId = useId();
+  const fallback = dialog.messageFrom === "fallback" && dialog.messageNote !== null;
   const chosen = plan.files.filter((f) => !excluded.includes(f.path));
-  const blocked = plan.blocker ?? plan.authorProblem;
-  const can = !busy && blocked === null && chosen.length > 0 && message.trim() !== "";
+  const blocked = plan.blocker;
+  const needsAuthor = plan.authorProblem !== null;
+  const validAuthor = validIdentity({ name: authorName, email: authorEmail });
+  const can =
+    !busy &&
+    blocked === null &&
+    (!needsAuthor || validAuthor) &&
+    chosen.length > 0 &&
+    message.trim() !== "";
   const toggle = (path: string) => {
     git.editCommit({
       excluded: excluded.includes(path) ? excluded.filter((p) => p !== path) : [...excluded, path],
@@ -57,6 +68,7 @@ export function CommitDialog({
       actions={
         <>
           <button
+            data-testid="git.commit-dialog-close"
             type="button"
             className="tb-btn"
             onClick={() => {
@@ -66,6 +78,7 @@ export function CommitDialog({
             Cancel
           </button>
           <button
+            data-testid="git.commit-dialog-commit"
             type="button"
             className="tb-btn"
             disabled={!can}
@@ -77,6 +90,7 @@ export function CommitDialog({
             Commit and create PR
           </button>
           <button
+            data-testid="git.commit-dialog-commit-2"
             type="button"
             className="tb-btn"
             disabled={!can}
@@ -88,6 +102,7 @@ export function CommitDialog({
             Commit and push
           </button>
           <button
+            data-testid="git.commit-dialog-commit-3"
             type="button"
             className="btn-primary"
             disabled={!can}
@@ -101,32 +116,43 @@ export function CommitDialog({
         </>
       }
     >
+      <p className="git-note">
+        Saves a version of the ticked files on {plan.branch}. The list shows every changed file in
+        this folder, also changes you made yourself; untick what should not be saved.
+      </p>
       {blocked !== null && (
-        <p className="git-warn" role="alert">
+        <p className="key-problem" role="alert">
           {blocked}
         </p>
       )}
-      {dialog.repo !== "." ? (
-        <p className="git-note">Repository: {dialog.repo}</p>
-      ) : plan.note !== null ? (
-        <p className="git-note">{plan.note}</p>
-      ) : null}
+      {dialog.repo !== "." && <p className="git-note">Repository: {dialog.repo}</p>}
       <KeyNotice message="Drafting a commit message uses your Mistral key; you can still write and commit a message yourself." />
+      {needsAuthor && (
+        <>
+          <p className="git-note">
+            Enter your name and email for this commit. They are saved only in this repository.
+          </p>
+          <GitIdentityFields
+            identity={{ name: authorName, email: authorEmail }}
+            onChange={(identity) => {
+              git.editCommit({ authorName: identity.name, authorEmail: identity.email });
+            }}
+          />
+        </>
+      )}
       <label className="git-field">
-        <span>
-          Message{" "}
-          <span className="git-from">
-            {dialog.messageFrom === "loading"
-              ? "(writing a draft…)"
-              : dialog.messageFrom === "model"
-                ? "(drafted by Mistral; edit freely)"
-                : dialog.messageFrom === "fallback"
-                  ? `(from the session title${dialog.messageNote === null ? "" : `. ${dialog.messageNote}`})`
-                  : ""}
+        <span>Message</span>
+        {fallback && (
+          <span className="git-from" id={messageNoteId}>
+            Written from the chat title. The automatic message is not available:{" "}
+            {(dialog.messageNote ?? "").replace(/[.\s]+$/, "")}.
           </span>
-        </span>
+        )}
         <textarea
+          data-testid="git.commit-dialog-edit-commit"
           rows={5}
+          aria-label="Message"
+          aria-describedby={fallback ? messageNoteId : undefined}
           value={message}
           data-dialog-initial-focus="true"
           data-git-field="message"
@@ -147,9 +173,10 @@ export function CommitDialog({
       </p>
       <ul className="git-files" aria-label="Files in this commit">
         {plan.files.map((f) => (
-          <li key={f.path}>
+          <li data-item-id={f.path} key={f.path}>
             <label>
               <input
+                data-testid="git.commit-dialog-toggle"
                 type="checkbox"
                 checked={!excluded.includes(f.path)}
                 onChange={() => {
@@ -168,6 +195,7 @@ export function CommitDialog({
       {plan.hooks.hooks.length > 0 ? (
         <label className="git-check">
           <input
+            data-testid="git.commit-dialog-edit-commit-2"
             type="checkbox"
             checked={runHooks}
             data-git-field="run-hooks"
@@ -181,14 +209,13 @@ export function CommitDialog({
             {plan.hooks.folder}). They run as you, as with git commit in a terminal.
           </span>
         </label>
-      ) : (
-        <p className="git-sub">This repository has no commit hooks.</p>
-      )}
+      ) : null}
       <details className="git-rule">
-        <summary>
+        <summary data-testid="git.commit-dialog-summary">
           Message rule for this project{plan.instruction.trim() !== "" ? " (set)" : ""}
         </summary>
         <textarea
+          data-testid="git.commit-dialog-textarea"
           rows={3}
           defaultValue={plan.instruction}
           data-git-field="instruction"
@@ -207,6 +234,7 @@ export function CommitDialog({
       </details>
       <label className="git-check">
         <input
+          data-testid="git.commit-dialog-save-setting"
           type="checkbox"
           checked={plan.credit}
           data-git-field="credit"
@@ -221,7 +249,7 @@ export function CommitDialog({
         </span>
       </label>
       {error !== null && (
-        <p className="git-warn" role="alert">
+        <p className="key-problem" role="alert">
           {error}
         </p>
       )}

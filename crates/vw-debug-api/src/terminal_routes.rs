@@ -1,7 +1,7 @@
 //! Terminal routes: thin REST adapters over `Command::Terminal`, so an external agent can
 //! open, list, read, type into, resize, restart and close a session's terminals. Everything goes
-//! through `Core::execute` with the Debug API origin, so typing needs the native confirmation exactly
-//! as `POST /commands` with `{"type": "terminal", "request": {"op": "write",...}}` does.
+//! through `Core::execute` with the Debug API origin, so typing is confirmed exactly (answered by the core, no
+//! dialog) as `POST /commands` with `{"type": "terminal", "request": {"op": "write",...}}` does.
 //!
 //! Depends on: axum, vw-core-api, `routes` (`run`, `decode`), `reply`. Called by: `routes` (merged).
 //! Routes: `GET|POST /sessions/{id}/terminals`, `GET /terminals/{tid}/output?from&maxBytes&plain`,

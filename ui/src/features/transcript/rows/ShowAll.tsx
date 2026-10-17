@@ -49,6 +49,7 @@ export function ShowAll({
       : `${String(text.length - cut.text.length)} more characters`;
   const more = (where: string) => (
     <button
+      data-testid="transcript.show-all-toggle"
       type="button"
       className="show-all-btn"
       aria-label="Show full text"
@@ -68,6 +69,7 @@ export function ShowAll({
       {cut.cut && !full && !tail ? more("") : null}
       {cut.cut && full ? (
         <button
+          data-testid="transcript.show-all-toggle-2"
           type="button"
           className="show-all-btn"
           aria-label="Show less text"

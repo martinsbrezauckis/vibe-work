@@ -85,13 +85,18 @@ pub(crate) fn command_name(word: &str) -> String {
     lower.strip_suffix(".exe").unwrap_or(&lower).to_owned()
 }
 
-/// Reads command starts after assignments and transparent wrappers in the literal, Bash and Windows readings
+/// Reads command starts after assignments and transparent wrappers in the unquoted literal, Bash and Windows readings
 /// (`gitparse::readings`): a quoted program name or a quoted argument with a space is read like the shell reads
 /// it, and every target or reason any reading finds counts.
 #[must_use]
 pub fn scan(command: &str) -> KillScan {
     let mut out = KillScan::default();
-    for reading in crate::gitparse::readings(command) {
+    // Process targets retain the conservative literal reading: a quoted PID still asks the user.
+    let literal = crate::command_segments::segments(command)
+        .into_iter()
+        .map(|segment| segment.into_iter().map(str::to_owned).collect::<Vec<_>>())
+        .collect::<Vec<_>>();
+    for reading in std::iter::once(literal).chain(crate::gitparse::readings(command)) {
         for segment in &reading {
             let segment: Vec<&str> = segment.iter().map(String::as_str).collect();
             scan_segment(&segment, &mut out);

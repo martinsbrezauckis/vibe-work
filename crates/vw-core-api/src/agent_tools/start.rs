@@ -123,6 +123,7 @@ pub(crate) fn process_start(
     check_command(command)?;
     let folders = folders(shared, request.session_id)?;
     let cwd = inside(&folders, request.cwd)?;
+    super::session::check_config_command(shared, &cwd, command)?;
     if let Some(running) = already_running(
         shared,
         tools,

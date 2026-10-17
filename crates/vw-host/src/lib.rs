@@ -53,6 +53,7 @@ mod extension_paths;
 mod forward;
 mod handle;
 mod host;
+pub mod instance;
 pub mod launch;
 pub mod media;
 pub mod navigation;

@@ -35,8 +35,9 @@ export function TrustDialog({ cwd, onClose }: { cwd: string; onClose: () => void
   const trusted = info?.status === "trusted";
   return (
     <>
-      <div className="scrim" onClick={onClose} />
+      <div data-testid="sessions.trust-dialog-scrim" className="scrim" onClick={onClose} />
       <div
+        data-testid="sessions.trust-dialog-modal"
         className="modal"
         role="dialog"
         aria-modal="true"
@@ -74,6 +75,7 @@ export function TrustDialog({ cwd, onClose }: { cwd: string; onClose: () => void
         </section>
         <footer className="modal-actions">
           <button
+            data-testid="sessions.trust-dialog-tb-btn"
             type="button"
             className="tb-btn"
             data-dialog-initial-focus="true"
@@ -82,6 +84,7 @@ export function TrustDialog({ cwd, onClose }: { cwd: string; onClose: () => void
             Cancel
           </button>
           <button
+            data-testid="sessions.trust-dialog-trust"
             type="button"
             className="btn-primary"
             disabled={trusted}

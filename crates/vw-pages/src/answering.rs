@@ -64,6 +64,8 @@ impl PagesService {
     ) -> Result<PageAnswers, PagesError> {
         let facts = self.page(project, page)?;
         self.answers.set(project, page, &facts, input, value)?;
+        self.answer_revision
+            .fetch_add(1, std::sync::atomic::Ordering::Release);
         self.answers_of(project, page)
     }
 
@@ -78,6 +80,8 @@ impl PagesService {
         input: &str,
     ) -> Result<PageAnswers, PagesError> {
         self.answers.clear(project, page, input)?;
+        self.answer_revision
+            .fetch_add(1, std::sync::atomic::Ordering::Release);
         self.answers_of(project, page)
     }
 
@@ -91,6 +95,8 @@ impl PagesService {
         page: &PagePath,
     ) -> Result<PageAnswers, PagesError> {
         self.answers.mark_sent(project, page)?;
+        self.answer_revision
+            .fetch_add(1, std::sync::atomic::Ordering::Release);
         self.answers_of(project, page)
     }
 }

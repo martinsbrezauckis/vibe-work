@@ -116,7 +116,7 @@ pub enum KeyRequest {
     CreateVault {
         /// The new passphrase.
         passphrase: SecretInput,
-        /// Remember this device (product default: on, decision M3).
+        /// Remember this device (product default: on).
         remember_device: bool,
     },
     /// Unlocks with the passphrase.
@@ -376,6 +376,7 @@ pub(crate) fn reason(error: &KeyError) -> &'static str {
         },
         KeyError::NoKey => "noKey",
         KeyError::InvalidKey => "invalidKey",
+        KeyError::PermissionsUnreadable => "permissionsUnreadable",
         KeyError::Test(t) => match t {
             vw_mistral::TestCallError::Unauthorized => "unauthorized",
             vw_mistral::TestCallError::Forbidden => "forbidden",

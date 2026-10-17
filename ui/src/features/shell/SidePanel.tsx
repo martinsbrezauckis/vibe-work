@@ -80,6 +80,7 @@ export function SidePanel({ onDragging }: { onDragging: (dragging: boolean) => v
       aria-hidden={!layout.panelOpen || covered}
     >
       <div
+        data-testid="shell.side-panel-grip"
         className="grip"
         role="separator"
         aria-orientation="vertical"
@@ -94,7 +95,13 @@ export function SidePanel({ onDragging }: { onDragging: (dragging: boolean) => v
         onPointerCancel={onUp}
         onKeyDown={onKey}
       />
-      <div className="ptabs" role="tablist" aria-label="Side panel tabs" ref={tabStrip}>
+      <div
+        data-testid="shell.side-panel-ptabs"
+        className="ptabs"
+        role="tablist"
+        aria-label="Side panel tabs"
+        ref={tabStrip}
+      >
         {/* the selected tab's pill slides to the new tab (200 ms) instead of jumping. */}
         {pill !== null && (
           <span
@@ -104,8 +111,14 @@ export function SidePanel({ onDragging }: { onDragging: (dragging: boolean) => v
           />
         )}
         {panel.tabs.map((kind) => (
-          <span key={kind} className="ptab-group" data-selected={kind === active}>
+          <span
+            data-item-id={kind}
+            key={kind}
+            className="ptab-group"
+            data-selected={kind === active}
+          >
             <button
+              data-testid="shell.side-panel-open-tab"
               type="button"
               role="tab"
               className="ptab"
@@ -121,6 +134,7 @@ export function SidePanel({ onDragging }: { onDragging: (dragging: boolean) => v
               {TAB_META[kind].label}
             </button>
             <button
+              data-testid="shell.side-panel-close-tab"
               type="button"
               className="ptab-x"
               aria-label={`Close ${TAB_META[kind].label} tab`}
@@ -136,6 +150,7 @@ export function SidePanel({ onDragging }: { onDragging: (dragging: boolean) => v
         <span className="end">
           {remaining !== undefined && (
             <IconButton
+              data-testid="shell.side-panel-open-tab-2"
               icon="plus"
               aria-label={`Open ${TAB_META[remaining].label} tab${remaining === "terminal" ? ` (${formatKeys("Mod+`")})` : ""}`}
               title={`Open ${TAB_META[remaining].label} tab${remaining === "terminal" ? ` (${formatKeys("Mod+`")})` : ""}`}
@@ -145,6 +160,7 @@ export function SidePanel({ onDragging }: { onDragging: (dragging: boolean) => v
             />
           )}
           <IconButton
+            data-testid="shell.side-panel-maximize-2"
             icon="maximize-2"
             aria-label={layout.maximized ? "Restore side panel" : "Maximize side panel"}
             title={layout.maximized ? "Restore side panel" : "Maximize side panel"}
@@ -152,6 +168,7 @@ export function SidePanel({ onDragging }: { onDragging: (dragging: boolean) => v
             onClick={shell.actions.toggleMaximized}
           />
           <IconButton
+            data-testid="shell.side-panel-x"
             icon="x"
             aria-label="Close the panel"
             title="Close the panel"
@@ -159,7 +176,7 @@ export function SidePanel({ onDragging }: { onDragging: (dragging: boolean) => v
           />
         </span>
       </div>
-      <div className="pbody" role="tabpanel">
+      <div data-testid="shell.side-panel-pbody" className="pbody" role="tabpanel">
         {body ?? <div className="empty">Nothing to show.</div>}
       </div>
     </section>

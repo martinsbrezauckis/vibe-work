@@ -55,7 +55,7 @@ pub use engine::{
     CheckDone, EngineError, EngineFuture, GuardCheck, GuardLayer, HistoryStep, LaterCheck, MountId,
     MountSpec, PageEvent, PreviewEngine, PreviewHooks, RequestCheck, Storage,
 };
-pub use engine_pool::{BrowserSaveGuard, EnginePoolSnapshot, effective_browser_cap};
+pub use engine_pool::{BrowserSaveGuard, EnginePoolSnapshot, MemoryProbe, effective_browser_cap};
 pub use ids::{LABEL_PREFIX, StorageKey, is_preview_label};
 pub use layout::{DeviceWidth, MIN_SIDE, PARKED_AREA, Placement, Rect, parked, place};
 pub use names::{

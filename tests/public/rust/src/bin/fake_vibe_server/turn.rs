@@ -16,7 +16,11 @@ impl Script {
     /// locked (`w`).
     fn target(&self, w: &crate::script::World, sid: &str) -> Option<Send> {
         let conn = if self.multiplex {
-            w.owner(sid)?
+            let owner = w.owner(sid);
+            #[cfg(feature = "fixture-extensions")]
+            let owner =
+                owner.or_else(|| w.child_parent.get(sid).and_then(|parent| w.owner(parent)));
+            owner?
         } else {
             if self.single_attached && w.attached.get(&0).map(String::as_str) != Some(sid) {
                 return None;
@@ -140,6 +144,10 @@ impl Script {
             .insert(sid.to_owned(), turn_id.to_owned());
         self.set_status(sid, json!({"type": "running", "activeTurnId": turn_id}));
         #[cfg(feature = "fixture-extensions")]
+        if self.maybe_workflow_stream(sid, turn_id, params) {
+            return;
+        }
+        #[cfg(feature = "fixture-extensions")]
         if self.extended_turn {
             self.run_extended_turn(sid, turn_id);
             return;
@@ -158,7 +166,15 @@ impl Script {
             return;
         }
         #[cfg(feature = "fixture-extensions")]
+        if self.maybe_child_edits_turn(sid, turn_id, params) {
+            return;
+        }
+        #[cfg(feature = "fixture-extensions")]
         if self.maybe_child_card_turn(sid, turn_id, params) {
+            return;
+        }
+        #[cfg(feature = "fixture-extensions")]
+        if self.maybe_mode_child_turn(sid, turn_id, params) {
             return;
         }
         // A profile that approves edits (switched to explicitly, or Vibe's resume default) runs the

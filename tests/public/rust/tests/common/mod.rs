@@ -10,6 +10,7 @@ pub mod gate;
 pub mod host_fakes;
 pub mod http;
 pub mod logs;
+pub mod revoke;
 pub mod subagents_rig;
 pub mod support_rig;
 pub mod update_rig;

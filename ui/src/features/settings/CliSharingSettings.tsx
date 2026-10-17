@@ -69,6 +69,7 @@ export function CliSharingSettings() {
           )}
         </span>
         <button
+          data-testid="settings.cli-sharing-settings-switch"
           type="button"
           className="switch"
           role="switch"
@@ -79,7 +80,7 @@ export function CliSharingSettings() {
         />
       </div>
       {view?.versionMismatch === true && (
-        <p className="key-field-hint" role="status" data-testid="cli-version-warning">
+        <p className="key-field-hint ui-help" role="status" data-testid="cli-version-warning">
           Your Vibe command line is {view.cliVersion}, Vibe Work uses {view.bundledVersion}.
           Sessions are shared, but a newer version may save them in a format the older one cannot
           open.

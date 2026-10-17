@@ -1,0 +1,62 @@
+{
+  "method": "skills/installed",
+  "params": {
+    "sessionId": "session-skills"
+  },
+  "result": {
+    "skills": [
+      {
+        "name": "review",
+        "description": "Review code",
+        "prompt": "Review the changes.",
+        "userInvocable": true,
+        "source": "registry",
+        "scope": "global",
+        "registry": {
+          "skillId": "skill-review",
+          "version": 2,
+          "alias": null
+        },
+        "enabled": true,
+        "locked": false
+      },
+      {
+        "name": "draft",
+        "description": "Write a draft",
+        "prompt": "Draft text.",
+        "userInvocable": true,
+        "source": "local",
+        "scope": "global",
+        "registry": null,
+        "enabled": false,
+        "locked": false
+      },
+      {
+        "name": "review",
+        "description": "Project review",
+        "prompt": "Review the changes.",
+        "userInvocable": true,
+        "source": "registry",
+        "scope": "project",
+        "registry": {
+          "skillId": "skill-project-review",
+          "version": 3,
+          "alias": null
+        },
+        "enabled": true,
+        "locked": false
+      },
+      {
+        "name": "plugin:notes",
+        "description": "Plugin notes",
+        "prompt": "Read notes.",
+        "userInvocable": true,
+        "source": "plugin",
+        "scope": "global",
+        "registry": null,
+        "enabled": true,
+        "locked": true
+      }
+    ]
+  }
+}

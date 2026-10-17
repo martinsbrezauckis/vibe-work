@@ -40,12 +40,19 @@ export function ProjectSecretsSettings() {
   const [query, setQuery] = useState("");
   const [adding, setAdding] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [replacement, setReplacement] = useState<{ id: string; serial: number } | null>(null);
   const [seenTarget, setSeenTarget] = useState<string | null>(null);
   // Navigation changes the view before rendering it; clearing the Settings flash keeps the disclosure open.
   if (target !== seenTarget) {
     setSeenTarget(target);
     if (target === "vault-mistral-key") {
       setExpanded("model");
+      setFilter("All");
+      setQuery("");
+    } else if (target?.startsWith("vault-login-replace-")) {
+      const id = decodeURIComponent(target.slice("vault-login-replace-".length));
+      setExpanded(id);
+      setReplacement({ id, serial: (replacement?.serial ?? 0) + 1 });
       setFilter("All");
       setQuery("");
     } else if (target === "add-entry") {
@@ -88,13 +95,14 @@ export function ProjectSecretsSettings() {
     ["Mistral key", "model", keyLabel].some((text) => text.toLocaleLowerCase().includes(needle));
   return (
     <section
-      className="set-group vault-page"
+      className="set-group ui-body vault-page"
       data-setting="project-secrets"
       data-toast-avoid="true"
       aria-label="Vault entries"
     >
       <div className="secrets-toolbar vault-toolbar">
         <Selector
+          testId="secrets.project-secrets-settings-selector"
           label="Entry type"
           value={filter}
           options={FILTERS.map((type) => ({ value: type, label: type }))}
@@ -102,6 +110,7 @@ export function ProjectSecretsSettings() {
         />
         <div className="set-search">
           <input
+            data-testid="secrets.project-secrets-settings-set-query"
             type="search"
             aria-label="Search entries"
             placeholder="Search entries"
@@ -119,6 +128,7 @@ export function ProjectSecretsSettings() {
           />
         </div>
         <Button
+          data-testid="secrets.project-secrets-settings-set-adding"
           type="button"
           variant="primary"
           disabled={busy || list?.unlocked !== true}
@@ -133,10 +143,11 @@ export function ProjectSecretsSettings() {
         <VaultLockControls mode="vault" display="icon" />
       </div>
       <details className="vault-permission-scope-disclosure">
-        <summary>Project exceptions</summary>
+        <summary data-testid="secrets.project-secrets-settings-summary">Project exceptions</summary>
         <div className="secrets-toolbar vault-permission-scope" aria-label="Permission scope">
           <span>Permission project</span>
           <Selector
+            testId="secrets.project-secrets-settings-selector-2"
             label="Permission project"
             value={project ?? ""}
             disabled={busy || blocked}
@@ -153,7 +164,13 @@ export function ProjectSecretsSettings() {
             onChange={setProject}
             title={project ?? TEXT.permissionNeedsProject}
           />
-          <Button type="button" small disabled={busy || blocked} onClick={chooseFolder}>
+          <Button
+            data-testid="secrets.project-secrets-settings-button"
+            type="button"
+            small
+            disabled={busy || blocked}
+            onClick={chooseFolder}
+          >
             Choose folder...
           </Button>
         </div>
@@ -202,6 +219,7 @@ export function ProjectSecretsSettings() {
                 setExpanded(expanded === entry.item.id ? null : entry.item.id);
               }}
               act={act}
+              replacement={replacement?.id === entry.item.id ? replacement.serial : null}
             />
           ))}
         {!showModel && shown.length === 0 && (

@@ -52,6 +52,7 @@ const Reasoning = memo(function Reasoning({ entry }: { entry: Obj }): ReactEleme
   return (
     <div className="think">
       <button
+        data-testid="transcript.steps-group-toggle"
         type="button"
         className="thought"
         aria-expanded={open}
@@ -77,6 +78,7 @@ const Narration = memo(function Narration({ entry }: { entry: Obj }): ReactEleme
       <Markdown
         source={text}
         streaming={inProgress(entry)}
+        lineBreaks
         onOpenLink={(url) => {
           transcript.askLink(url);
         }}
@@ -145,6 +147,7 @@ export function StepsGroup({ row }: { row: StepsRow }): ReactElement {
       data-row={row.key}
     >
       <button
+        data-testid="transcript.steps-group-toggle-2"
         type="button"
         className="steps-h"
         aria-expanded={open}

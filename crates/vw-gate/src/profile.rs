@@ -35,7 +35,8 @@ pub(crate) fn escalates(name: &str) -> bool {
 }
 
 /// Whether a confirmation request enables Full access. The gate validates the complete call before
-/// asking; this predicate also lets the core keep the native dialog for Debug API requests.
+/// asking; this predicate names the escalation for the dialog's wording (the window and the agent are asked; a Debug API
+/// request is answered by the core's confirmer like every other non-vault one).
 #[must_use]
 pub fn full_access_escalation(method: &str, params: &Value) -> bool {
     if method == "session/agent/update" {

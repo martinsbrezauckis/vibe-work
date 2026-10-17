@@ -10,6 +10,7 @@
  * Invariants: renders only; agent page content never renders in this window (only in the engine); every page text
  * shown here (titles, labels, comments, links) is plain text.
  */
+import { TEXT } from "../../vocabulary";
 import type { ReactElement } from "react";
 
 import { NativeViewport } from "../../components/NativeViewport";
@@ -32,7 +33,11 @@ function SessionPages({ pages, sessionId }: { pages: Pages; sessionId: string })
     facts.steps.length > 0 &&
     (facts.kind === "plan" || tab.path?.startsWith("plans/") === true);
   return (
-    <div className="pages-tab" data-view={tab.showingPage ? "page" : "hub"}>
+    <div
+      data-item-id={sessionId}
+      className="pages-tab"
+      data-view={tab.showingPage ? "page" : "hub"}
+    >
       <PagesToolbar
         path={tab.path}
         folder={tab.folder}
@@ -46,7 +51,7 @@ function SessionPages({ pages, sessionId }: { pages: Pages; sessionId: string })
         <VisualCheck report={tab.visual} checking={tab.checking} check={tab.check} />
       )}
       {tab.error !== null && (
-        <p className="pages-error" role="alert">
+        <p className="key-problem" role="alert">
           {tab.error}
         </p>
       )}
@@ -58,8 +63,8 @@ function SessionPages({ pages, sessionId }: { pages: Pages; sessionId: string })
       {tab.foreign !== null && (
         <p className="pages-note" role="note" data-foreign-handbook="true">
           This is the handbook of the project&apos;s main folder, {tab.foreign.name} (
-          <span className="pages-url">{tab.foreign.path}</span>). This session works in another
-          folder; what you point Vibe at names the main folder&apos;s files.
+          <span className="pages-url">{tab.foreign.path}</span>). {TEXT.thisSession} works in
+          another folder; what you point Vibe at names the main folder&apos;s files.
         </p>
       )}
       {tab.picking && (
@@ -74,6 +79,7 @@ function SessionPages({ pages, sessionId }: { pages: Pages; sessionId: string })
             only open pages of this folder.
           </span>
           <button
+            data-testid="pages.pages-tab-open-external"
             type="button"
             className="pages-btn"
             onClick={() => {
@@ -82,7 +88,12 @@ function SessionPages({ pages, sessionId }: { pages: Pages; sessionId: string })
           >
             Open in browser…
           </button>
-          <button type="button" className="pages-btn" onClick={tab.dismissExternal}>
+          <button
+            data-testid="pages.pages-tab-pages-btn"
+            type="button"
+            className="pages-btn"
+            onClick={tab.dismissExternal}
+          >
             Dismiss
           </button>
         </div>

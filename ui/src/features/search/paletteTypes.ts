@@ -2,6 +2,7 @@
  * The command palette's result types (block the grouped search, extended by with messages and files).
  * Depends on: components/Icon (names). Called by: CommandPalette, PalettePreview, coreRows, the `ui/search` route.
  */
+import { term } from "../../vocabulary";
 import type { IconName } from "../../components/Icon";
 
 /** Result types; paletteModel chooses the fixed order for content searches and explicit action searches. */
@@ -9,7 +10,12 @@ export type Kind = "session" | "message" | "file" | "setting" | "action";
 
 /** Group headings, icons and the preview's type name. */
 export const GROUPS: readonly { kind: Kind; label: string; icon: IconName; one: string }[] = [
-  { kind: "session", label: "Sessions", icon: "message-square", one: "Session" },
+  {
+    kind: "session",
+    label: "Sessions",
+    icon: "message-square",
+    one: term("workNames", "session").name,
+  },
   { kind: "message", label: "Messages", icon: "message-square-text", one: "Message" },
   { kind: "file", label: "Files", icon: "file-text", one: "File" },
   { kind: "setting", label: "Settings", icon: "settings", one: "Setting" },

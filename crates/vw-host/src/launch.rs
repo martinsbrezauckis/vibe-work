@@ -293,7 +293,7 @@ fn log_commit_signature(vibe_home: &Path) {
 }
 
 /// Sets the session-title model in `vibe_home/config.toml` ([`crate::title_model`]) and logs what
-/// happened. Never fails the launch: without it sessions on Mistral Large 4 only lose their automatic title.
+/// happened. Never fails the launch: without it sessions may only miss their automatic title.
 fn log_title_model(vibe_home: &Path) {
     match crate::title_model::ensure(vibe_home) {
         Ok(outcome @ crate::title_model::TitleModel::Skipped(_)) => {

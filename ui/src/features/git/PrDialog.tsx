@@ -42,6 +42,7 @@ export function PrDialog({
       actions={
         <>
           <button
+            data-testid="git.pr-dialog-close"
             type="button"
             className="tb-btn"
             onClick={() => {
@@ -51,6 +52,7 @@ export function PrDialog({
             Cancel
           </button>
           <button
+            data-testid="git.pr-dialog-create-pr"
             type="button"
             className="btn-primary"
             disabled={!can}
@@ -64,7 +66,7 @@ export function PrDialog({
     >
       {dialog.repo !== "." && <p className="git-note">Repository: {dialog.repo}</p>}
       {plan.existing !== null && (
-        <p className="git-warn">
+        <p className="server-note" role="status">
           Pull request #{plan.existing.number} already exists for this branch; a new push updates
           it.
         </p>
@@ -74,7 +76,7 @@ export function PrDialog({
           ? `Made with gh on ${where}.`
           : plan.via === "browser"
             ? `Opens ${where} in your browser, filled in; you create it there.`
-            : `Vibe Work has no page for ${where}: it pushes, then you open your forge.`}
+            : "This remote is not on GitHub or another site Vibe Work knows, so Vibe Work can push your branch but cannot open the pull request page. Open it on your server's site after pushing."}
         {plan.ghNote !== null && ` ${plan.ghNote}`}
       </p>
       {plan.push !== null && (
@@ -86,6 +88,7 @@ export function PrDialog({
       <label className="git-field">
         <span>Title</span>
         <input
+          data-testid="git.pr-dialog-edit-pr"
           value={dialog.title}
           data-dialog-initial-focus="true"
           data-git-field="title"
@@ -102,6 +105,7 @@ export function PrDialog({
           )}
         </span>
         <textarea
+          data-testid="git.pr-dialog-edit-pr-2"
           rows={8}
           value={dialog.body}
           data-git-field="body"
@@ -113,6 +117,7 @@ export function PrDialog({
       <label className="git-field git-inline">
         <span>Into</span>
         <input
+          data-testid="git.pr-dialog-edit-pr-3"
           value={dialog.base}
           data-git-field="base"
           onChange={(e) => {
@@ -122,6 +127,7 @@ export function PrDialog({
       </label>
       <label className="git-check">
         <input
+          data-testid="git.pr-dialog-edit-pr-4"
           type="checkbox"
           checked={dialog.draft}
           data-git-field="draft"
@@ -137,7 +143,7 @@ export function PrDialog({
         </span>
       </label>
       {error !== null && (
-        <p className="git-warn" role="alert">
+        <p className="key-problem" role="alert">
           {error}
         </p>
       )}

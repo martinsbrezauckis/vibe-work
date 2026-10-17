@@ -5,6 +5,7 @@
  * Invariants: nothing is sent until the confirm button is pressed; Escape and Cancel send nothing; file
  * names are text, never rendered markup.
  */
+import { Button } from "../../components/Controls";
 import { type ReactElement, type ReactNode, useRef } from "react";
 
 import { useModalFocus } from "../../hooks/useModalFocus";
@@ -12,6 +13,8 @@ import { useStore } from "../../state/createStore";
 import { fileNote } from "./model";
 import type { Confirm } from "./store";
 import type { Changes } from "./store";
+import { GitIdentityFields } from "../git/GitIdentityFields";
+import { validIdentity } from "../../state/gitIdentity";
 
 const SHOWN = 20;
 
@@ -27,6 +30,7 @@ function Paths({ paths }: { paths: readonly string[] }): ReactElement {
 }
 
 function size(bytes: number): string {
+  if (bytes === 0) return "0 KB";
   return bytes >= 1024 * 1024
     ? `${(bytes / (1024 * 1024)).toFixed(1)} MB`
     : `${String(Math.max(1, Math.round(bytes / 1024)))} KB`;
@@ -86,7 +90,7 @@ function content(confirm: Confirm): { title: string; action: string; body: React
         body: (
           <>
             <p>
-              The conversation goes back to before turn {confirm.turnNumber}
+              The session goes back to before turn {confirm.turnNumber}
               {p.turnsRemoved > 1 ? ` (${String(p.turnsRemoved)} turns are removed)` : ""}, and your
               message is put back in the box.
             </p>
@@ -111,13 +115,15 @@ function content(confirm: Confirm): { title: string; action: string; body: React
     case "history":
       return {
         title: "Turn on version history?",
-        action: "Run git init and commit",
+        action: "Turn on version history",
         body: (
           <>
             <p>
-              Runs <code>git init</code> in <span className="mono">{confirm.plan.folder}</span> and
-              commits every file in it as a first commit ({confirm.plan.files} files,{" "}
-              {size(confirm.plan.bytes)}).
+              Vibe Work starts keeping versions of{" "}
+              <span className="mono">{confirm.plan.folder}</span> and saves a first version of{" "}
+              {confirm.plan.files === 1 ? "its" : "all"} {confirm.plan.files}{" "}
+              {confirm.plan.files === 1 ? "file" : "files"} ({size(confirm.plan.bytes)}). This uses
+              git; nothing leaves this computer.
             </p>
             {confirm.plan.generated.length > 0 && (
               <>
@@ -131,9 +137,10 @@ function content(confirm: Confirm): { title: string; action: string; body: React
                 <Paths paths={confirm.plan.large} />
               </>
             )}
-            {confirm.plan.fallbackAuthor !== null && (
+            {!confirm.needsIdentity && (
               <p>
-                Git has no name set up, so the commit is authored as {confirm.plan.fallbackAuthor}.
+                Commit author: {confirm.identity.name} &lt;{confirm.identity.email}&gt;. These
+                details are saved locally in the new repository.
               </p>
             )}
           </>
@@ -154,12 +161,14 @@ export function ConfirmBox({ changes }: { changes: Changes }): ReactElement | nu
   return (
     <>
       <div
+        data-testid="changes.confirm-box-cancel"
         className="scrim"
         onClick={() => {
           changes.cancel();
         }}
       />
       <div
+        data-testid="changes.confirm-box-modal"
         className="modal"
         role="dialog"
         aria-modal="true"
@@ -171,9 +180,26 @@ export function ConfirmBox({ changes }: { changes: Changes }): ReactElement | nu
         <header>
           <h2>{title}</h2>
         </header>
-        <section>{body}</section>
+        <section>
+          {body}
+          {confirm.kind === "history" && confirm.needsIdentity && (
+            <>
+              <p>
+                Enter your name and email for commits. Saved in Vibe Work for future repositories
+                and locally in this new repository.
+              </p>
+              <GitIdentityFields
+                identity={confirm.identity}
+                onChange={(identity) => {
+                  changes.editHistoryIdentity(identity);
+                }}
+              />
+            </>
+          )}
+        </section>
         <footer className="modal-actions">
           <button
+            data-testid="changes.confirm-box-cancel-2"
             type="button"
             className="tb-btn"
             data-dialog-initial-focus="true"
@@ -183,14 +209,28 @@ export function ConfirmBox({ changes }: { changes: Changes }): ReactElement | nu
           >
             Cancel
           </button>
-          <button
-            type="button"
-            className="btn-primary"
-            data-action="confirm"
-            onClick={() => void changes.accept()}
-          >
-            {action}
-          </button>
+          {confirm.kind !== "keepUnseen" && confirm.kind !== "history" ? (
+            <Button
+              data-testid="changes.confirm-box-accept"
+              small
+              variant="danger"
+              data-action="confirm"
+              onClick={() => void changes.accept()}
+            >
+              {action}
+            </Button>
+          ) : (
+            <button
+              data-testid="changes.confirm-box-accept"
+              type="button"
+              className="btn-primary"
+              data-action="confirm"
+              disabled={confirm.kind === "history" && !validIdentity(confirm.identity)}
+              onClick={() => void changes.accept()}
+            >
+              {action}
+            </button>
+          )}
         </footer>
       </div>
     </>

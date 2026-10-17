@@ -125,9 +125,15 @@ impl Ctx {
 /// The answer frame for a script result (`{"__error": code}` becomes an error object).
 fn reply_frame(id: &Value, result: Value) -> Value {
     match result.get("__error").and_then(Value::as_str) {
-        Some(code) => json!({"jsonrpc": "2.0", "id": id,
+        Some(code) => {
+            let mut frame = json!({"jsonrpc": "2.0", "id": id,
             "error": {"code": code, "message": result.get("__message").and_then(Value::as_str)
-                .unwrap_or("fake: no such session")}}),
+                .unwrap_or("fake: no such session")}});
+            if let Some(data) = result.get("__data") {
+                frame["error"]["data"] = data.clone();
+            }
+            frame
+        }
         None => json!({"jsonrpc": "2.0", "id": id, "result": result}),
     }
 }
@@ -165,6 +171,7 @@ fn log_agent_config(method: &str, params: &Value) {
 }
 
 fn main() {
+    crate::market::record_load("server/start");
     let args: Vec<String> = std::env::args().collect();
     if let Some(path) = args
         .iter()
@@ -250,6 +257,7 @@ fn main() {
             #[cfg(feature = "fixture-extensions")]
             long_notification_error: args.iter().any(|a| a == "--long-notification-error"),
             unstored_metadata_miss: args.iter().any(|a| a == "--unstored-metadata-miss"),
+            archive_no_notify: args.iter().any(|a| a == "--archive-no-notify"),
             seed_path: arg_value(&args, "--seed"),
             single_attached: args.iter().any(|a| a == "--single-attached"),
             turn_delay_ms: arg_value(&args, "--turn-delay-ms")
@@ -265,6 +273,8 @@ fn main() {
             extended_turn: private_hook_turn_enabled(&args),
             subagents_rule: args.iter().any(|a| a == "--subagents-rule"),
             subagents_reject: args.iter().any(|a| a == "--subagents-reject"),
+            #[cfg(feature = "fixture-extensions")]
+            proxy_echo_error: args.iter().any(|a| a == "--proxy-echo-error"),
             delete_faults: arg_value(&args, "--delete-faults")
                 .map_or(0, |v| v.parse().unwrap_or(0)),
             context_log_path: arg_value(&args, "--log-context"),

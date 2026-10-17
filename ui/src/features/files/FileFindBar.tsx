@@ -86,6 +86,7 @@ export function FileFindBar({
     <div className="find-bar file-find" role="search" aria-label={`Find in ${name}`}>
       <span className="find-scope">In: {name}</span>
       <input
+        data-testid="files.file-find-bar-set-query"
         ref={input}
         type="search"
         aria-label={`Find in ${name}`}
@@ -113,6 +114,7 @@ export function FileFindBar({
             : `${String(at + 1)} of ${String(matches.length)}`}
       </span>
       <button
+        data-testid="files.file-find-bar-step"
         type="button"
         aria-label="Previous match"
         disabled={matches.length === 0}
@@ -123,6 +125,7 @@ export function FileFindBar({
         <Icon name="arrow-up" size={14} />
       </button>
       <button
+        data-testid="files.file-find-bar-step-2"
         type="button"
         aria-label="Next match"
         disabled={matches.length === 0}
@@ -132,7 +135,12 @@ export function FileFindBar({
       >
         <Icon name="arrow-down" size={14} />
       </button>
-      <button type="button" aria-label="Close find" onClick={close}>
+      <button
+        data-testid="files.file-find-bar-button"
+        type="button"
+        aria-label="Close find"
+        onClick={close}
+      >
         <Icon name="x" size={14} />
       </button>
     </div>

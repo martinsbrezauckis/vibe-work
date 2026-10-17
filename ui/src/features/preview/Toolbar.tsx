@@ -4,6 +4,7 @@
  * Depends on: shared IconButton/Selector, preview controller and browser overlay host. Called by: PreviewTab.
  * Invariant: external URLs still go through the link-review dialog; the native viewport stays mounted.
  */
+import { TEXT } from "../../vocabulary";
 import {
   useCallback,
   useEffect,
@@ -130,6 +131,7 @@ export function Toolbar({
     } else browserMenuKeys(event);
   };
   const item = (
+    testId: string,
     label: string,
     click: () => void,
     disabled = false,
@@ -137,6 +139,7 @@ export function Toolbar({
     needsPage = false,
   ) => (
     <button
+      data-testid={testId}
       type="button"
       className="browser-menu-item"
       role="menuitem"
@@ -165,6 +168,7 @@ export function Toolbar({
       >
         <span className="browser-navigation">
           <IconButton
+            data-testid="preview.toolbar-web-action"
             icon="arrow-left"
             label="Back"
             disabled={busy || !open}
@@ -175,6 +179,7 @@ export function Toolbar({
             }
           />
           <IconButton
+            data-testid="preview.toolbar-web-action-2"
             icon="arrow-right"
             label="Forward"
             disabled={busy || !open}
@@ -185,6 +190,7 @@ export function Toolbar({
             }
           />
           <IconButton
+            data-testid="preview.toolbar-web-action-3"
             icon="refresh-cw"
             label="Reload"
             disabled={busy || !open}
@@ -199,6 +205,7 @@ export function Toolbar({
         {activity}
         <div className="browser-controls">
           <div
+            data-testid="preview.toolbar-browser-controls-content"
             className="browser-controls-content"
             data-collapsed={collapsed}
             hidden={collapsed && panel !== "menu"}
@@ -211,6 +218,7 @@ export function Toolbar({
               {(!webTabId || browser) && (
                 <div className="browser-width-control">
                   <Selector
+                    testId="preview.toolbar-close-2"
                     label="Device width"
                     ariaDescription={`Current width: ${WIDTHS.find((w) => w.width === (preview?.width ?? "fit"))?.label ?? "Fit"}`}
                     value={preview?.width ?? "fit"}
@@ -246,6 +254,7 @@ export function Toolbar({
               )}
               {collapsed ? (
                 item(
+                  "preview.open-system-browser",
                   "Open in the system browser",
                   () => {
                     openExternal(url);
@@ -254,6 +263,7 @@ export function Toolbar({
                 )
               ) : (
                 <IconButton
+                  data-testid="preview.toolbar-open-external"
                   icon="external-link"
                   label="Open in the system browser"
                   disabled={!open}
@@ -264,9 +274,17 @@ export function Toolbar({
               )}
               {point !== null &&
                 (collapsed ? (
-                  item("Point Vibe at this", point, busy || !open, "Point Vibe at this", true)
+                  item(
+                    "preview.point",
+                    "Point Vibe at this",
+                    point,
+                    busy || !open,
+                    "Point Vibe at this",
+                    true,
+                  )
                 ) : (
                   <IconButton
+                    data-testid="preview.toolbar-crosshair"
                     icon="crosshair"
                     label="Point Vibe at this"
                     disabled={busy || !open}
@@ -277,6 +295,7 @@ export function Toolbar({
             </div>
             {panel === "menu" && (
               <div
+                data-testid="preview.toolbar-browser-overflow-items"
                 className="browser-overflow-items"
                 ref={collapsed ? undefined : popup}
                 role={collapsed ? undefined : "menu"}
@@ -287,6 +306,7 @@ export function Toolbar({
                 {annotate !== null && (
                   <>
                     {item(
+                      "preview.note-element",
                       "Note on an element",
                       () => {
                         annotate("element");
@@ -296,6 +316,7 @@ export function Toolbar({
                       true,
                     )}
                     {item(
+                      "preview.note-area",
                       "Note on an area",
                       () => {
                         annotate("box");
@@ -307,6 +328,7 @@ export function Toolbar({
                   </>
                 )}
                 <button
+                  data-testid="preview.toolbar-set-panel"
                   type="button"
                   role="menuitem"
                   className="browser-menu-item"
@@ -318,18 +340,20 @@ export function Toolbar({
                   Browser actions
                 </button>
                 <button
+                  data-testid="preview.toolbar-set-panel-2"
                   type="button"
                   role="menuitem"
                   className="browser-menu-item"
-                  title="This session's servers"
+                  title={`${TEXT.thisSession}'s servers`}
                   onClick={() => {
                     setPanel("servers");
                   }}
                 >
-                  This session&apos;s servers
+                  {TEXT.thisSession}'s servers
                 </button>
                 {webTabId && browser
                   ? item(
+                      "preview.close-web-tab",
                       "Close this tab",
                       () => void browser.closeTab(sessionId, webTabId),
                       busy,
@@ -337,6 +361,7 @@ export function Toolbar({
                       true,
                     )
                   : item(
+                      "preview.close-preview",
                       "Close the preview",
                       () => void previews.close(sessionId),
                       busy || !open,
@@ -347,6 +372,7 @@ export function Toolbar({
             )}
           </div>
           <IconButton
+            data-testid="preview.toolbar-set-panel-3"
             ref={trigger}
             icon="ellipsis"
             label="Browser options"
@@ -359,22 +385,26 @@ export function Toolbar({
         </div>
       </div>
       {error !== null && (
-        <p className="preview-error" role="alert">
+        <p className="key-problem preview-error" role="alert">
           {error}
         </p>
       )}
       {(panel === "actions" || panel === "servers") && (
         <div className="browser-chrome-menu-dock">
           <div
+            data-testid="preview.toolbar-browser-popover"
             ref={popup}
             className="browser-popover browser-activity"
             role="region"
-            aria-label={panel === "actions" ? "Browser actions" : "This session's servers"}
+            aria-label={panel === "actions" ? "Browser actions" : `${TEXT.thisSession}'s servers`}
             onKeyDown={keys}
           >
             <header>
-              <span>{panel === "actions" ? "Browser actions" : "This session's servers"}</span>
+              <span>
+                {panel === "actions" ? "Browser actions" : `${TEXT.thisSession}'s servers`}
+              </span>
               <IconButton
+                data-testid="preview.toolbar-close-3"
                 icon="x"
                 label={
                   panel === "actions" ? "Close browser actions" : "Close this session's servers"

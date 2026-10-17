@@ -23,8 +23,9 @@ export function SourcesList({
   return (
     <ol className="sources" aria-label={label}>
       {sources.map((source) => (
-        <li key={source.url}>
+        <li data-item-id={source.url} key={source.url}>
           <button
+            data-testid="transcript.sources-list-ask-link"
             type="button"
             className="source"
             title={`Review source: ${source.title} (${source.host ?? "cannot be opened"})`}

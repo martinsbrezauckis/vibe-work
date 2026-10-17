@@ -7,7 +7,7 @@
     },
     "smart-approve": {
       "name": "Smart approve",
-      "description": "A model checks each tool call. Safe ones run, risky ones ask.",
+      "description": "A model checks each tool call: the calls it judges low-risk run, the others ask.",
       "tooltip": "Use Smart approve access mode"
     },
     "accept-edits": {
@@ -156,7 +156,7 @@
     "modelThinkingSuffix": ", thinking {name}",
     "thinkingLevel": "Thinking level",
     "defaultThinkingLevel": "Default thinking level",
-    "defaultThinkingDescription": "New chats start with this level. You can change it in each chat.",
+    "defaultThinkingDescription": "New chats start with this level. You can change it in each session.",
     "modelDefaultThinking": "Model's own default",
     "modelDefaultThinkingDescription": "Follow the selected model's own thinking default.",
     "thinkingUse": "Use {name} thinking level",
@@ -185,6 +185,37 @@
     "secretPermissionsSummary": "Choose each Vault entry's permission in Vault. Browser delegation does not change secret access.",
     "secretPermissionsOpenVault": "Open Vault",
     "browserPermissionAuthority": "Permission: {name}",
-    "browserConfirmedAuthority": "Confirmed by you"
+    "browserConfirmedAuthority": "Confirmed by you",
+    "newChat": "New chat",
+    "handbookPlaceholder": "The project handbook will show here.",
+    "thisSession": "This session",
+    "findInSession": "Find in this session"
+  },
+  "workNames": {
+    "projectTab": {
+      "name": "Project",
+      "description": "The side panel tab for the project's handbook.",
+      "tooltip": "Open Project tab"
+    },
+    "handbook": {
+      "name": "handbook",
+      "description": "A project's documentation, shown in the Project tab.",
+      "tooltip": "Open the project handbook"
+    },
+    "page": {
+      "name": "page",
+      "description": "One document in a project's handbook.",
+      "tooltip": "Open handbook page"
+    },
+    "session": {
+      "name": "Session",
+      "description": "Existing work with its messages, history and settings, saved in the session list.",
+      "tooltip": "Open session"
+    },
+    "chat": {
+      "name": "chat",
+      "description": "Starting an interaction with Vibe, as in New chat or voice chat.",
+      "tooltip": "Start a chat"
+    }
   }
 }

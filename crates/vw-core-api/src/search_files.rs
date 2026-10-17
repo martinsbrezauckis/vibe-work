@@ -4,14 +4,14 @@
 //! Which files: in a git working tree, `git ls-files -co --exclude-standard -z` (tracked plus untracked files that are
 //! not ignored), through the app's one hardened git runner (`vw_changes::git`, read-only: git lists names and reads
 //! no file content, so no filter or driver runs; `GIT_OPTIONAL_LOCKS=0` keeps it from writing the index). Elsewhere,
-//! (and when git lists nothing: an empty repository, or a folder an enclosing repository ignores) a walk that skips
+//! and when an enclosing repository ignores the session folder itself, a walk that skips
 //! hidden folders and build/dependency folders ([`SKIP_DIRS`]). Either way: no hidden file or folder, no symbolic links
 //! and no file under a linked folder (a link could lead outside the folder), no file over [`MAX_FILE`], no file whose first 8 KiB hold a NUL byte.
 //!
 //! Budgets: [`MAX_FILES`] files read, [`MAX_BYTES`] read in all, [`DEADLINE`]; past one of them the answer says
 //! `truncated`. Hits: names first, then lines in folder and file order, [`COUNT_CAP`] counted.
 //!
-//! Depends on: `search_text`, vw-changes (`git`). Called by: `search` (`search files`).
+//! Depends on: `search_text`, vw-changes (`git`). Called by: `search` (`search files`), `files_lookup` (names only).
 //! Invariants: only paths under a searched folder are read (git's names are joined to the folder and checked to stay
 //! inside it lexically, with no `..` and no absolute part); nothing is written.
 
@@ -62,8 +62,8 @@ pub(crate) struct Found {
     pub truncated: bool,
 }
 
-/// The relative paths of the files to search in `folder`.
-fn candidates(folder: &Path) -> Vec<String> {
+/// Shared listing of visible file names in `folder`, with dependency/build folders omitted.
+pub(crate) fn candidates(folder: &Path) -> Vec<String> {
     let listed = vw_changes::git::Call::new(folder, vw_changes::git::Index::User)
         .args(["ls-files", "-co", "--exclude-standard", "-z"])
         .timeout(Duration::from_secs(3))
@@ -77,9 +77,17 @@ fn candidates(folder: &Path) -> Vec<String> {
                 .filter(|name| !name.is_empty())
                 .map(|name| String::from_utf8_lossy(name).into_owned())
                 .collect();
-            // Nothing listed: an empty repository, or a folder an enclosing repository ignores (a session folder
-            // inside a dotfiles home, say); its files are still the session's, so walk it.
-            if names.is_empty() {
+            // Keep standalone session folders that an enclosing repository ignores searchable. An empty
+            // list inside the session's repository must stay empty: walking would expose ignored files.
+            if names.is_empty()
+                && std::fs::symlink_metadata(folder.join(".git")).is_err()
+                && vw_changes::git::Call::new(folder, vw_changes::git::Index::User)
+                    .args(["check-ignore", "-q", "."])
+                    .timeout(Duration::from_secs(3))
+                    .max_output(1024)
+                    .output()
+                    .is_ok_and(|out| out.ok())
+            {
                 walk(folder)
             } else {
                 names
@@ -87,6 +95,14 @@ fn candidates(folder: &Path) -> Vec<String> {
         }
         _ => walk(folder),
     }
+    .into_iter()
+    .filter(|rel| {
+        plain_relative(rel)
+            && !rel
+                .split('/')
+                .any(|part| part.starts_with('.') || SKIP_DIRS.contains(&part))
+    })
+    .collect()
 }
 
 /// A plain walk (no git): every file under `folder`, hidden and [`SKIP_DIRS`] folders skipped, links not followed.
@@ -177,7 +193,21 @@ pub(crate) fn search(folders: &[Folder], query: &Query, limit: usize) -> Found {
                 continue;
             }
             let text = String::from_utf8_lossy(&content);
-            for (index, line) in text.lines().enumerate() {
+            let visible;
+            let source: Box<dyn Iterator<Item = &str>> = if Path::new(&rel)
+                .extension()
+                .and_then(|s| s.to_str())
+                .is_some_and(|ext| {
+                    ext.eq_ignore_ascii_case("html") || ext.eq_ignore_ascii_case("htm")
+                }) {
+                visible =
+                    crate::search_html::visible_lines(&text, || started.elapsed() >= DEADLINE);
+                found.truncated |= visible.truncated;
+                Box::new(visible.lines.iter().map(String::as_str))
+            } else {
+                Box::new(text.lines())
+            };
+            for (index, line) in source.enumerate() {
                 let Some((at, _)) = find(line, query) else {
                     continue;
                 };
@@ -193,4 +223,77 @@ pub(crate) fn search(folders: &[Folder], query: &Query, limit: usize) -> Found {
     }
     found.hits = names.into_iter().chain(lines).take(limit).collect();
     found
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn html_output_limit_marks_search_truncated() {
+        let root = std::env::temp_dir().join(format!("vw-search-limit-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("page.html"), "\n".repeat(1 << 19)).unwrap();
+        let found = search(
+            &[Folder {
+                path: root.clone(),
+                session_id: None,
+            }],
+            &Query::new("missing").unwrap(),
+            20,
+        );
+        assert!(found.truncated);
+        assert_eq!(found.scanned, 1);
+        assert_eq!(found.hits.len(), 0, "{:?}", found.hits);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn html_file_hits_show_visible_words_and_keep_source_lines() {
+        let root = std::env::temp_dir().join(format!("vw-search-visible-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let html = "<!doctype html><html><head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>Where forecasts are cached</title>\n<meta name=\"description\" content=\"Where forecasts are cached.\"><style>forecast { color: red }</style>\n<script>\nconst forecast = '<p>hidden</p>';\n</script></head><body><h1>Where forecasts are cached</h1>\n<p>The forecast should <b>still show</b> when the network drops &amp; returns.</p></body></html>";
+        std::fs::write(root.join("decision.html"), html).unwrap();
+        std::fs::write(root.join("decision.htm"), html).unwrap();
+        std::fs::write(root.join("notes.txt"), "<meta>forecast</meta>\n").unwrap();
+        let folders = [Folder {
+            path: root.clone(),
+            session_id: None,
+        }];
+        let found = search(&folders, &Query::new("forecast").unwrap(), 20);
+        for path in ["decision.html", "decision.htm"] {
+            let hits: Vec<_> = found.hits.iter().filter(|h| h.path == path).collect();
+            assert!(hits.len() >= 2, "{hits:?}");
+            assert!(
+                hits.iter().all(|h| !h.text.contains('<')
+                    && !h.text.contains("width=")
+                    && !h.text.contains("description")
+                    && !h.text.contains("const ")),
+                "{hits:?}"
+            );
+            assert!(
+                hits.iter()
+                    .any(|h| h.text.contains("Where forecasts are cached"))
+            );
+            assert!(
+                hits.iter()
+                    .any(|h| h.line == Some(6) && h.text.contains("& returns"))
+            );
+        }
+        assert!(
+            found
+                .hits
+                .iter()
+                .any(|h| h.path == "notes.txt" && h.text == "<meta>forecast</meta>")
+        );
+        for query in ["device-width", "color: red", "hidden"] {
+            assert!(
+                search(&folders, &Query::new(query).unwrap(), 20)
+                    .hits
+                    .is_empty(),
+                "{query}"
+            );
+        }
+        std::fs::remove_dir_all(root).unwrap();
+    }
 }

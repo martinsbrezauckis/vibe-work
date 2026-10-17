@@ -101,6 +101,7 @@
   border-bottom: 1px solid var(--line);
 }
 .modal header h2 {
+  font-weight: var(--weight-semibold);
   margin: 0;
   font-size: var(--text-16);
 }
@@ -161,10 +162,6 @@
 }
 .switch[aria-checked="true"]::after {
   left: 17px;
-}
-.switch:disabled {
-  opacity: 0.45;
-  cursor: default;
 }
 .legal {
   font-size: var(--text-12);
@@ -332,4 +329,25 @@
     transform: translateY(8px);
     opacity: 0;
   }
+}
+
+/* Debug walkthroughs identify a recording frame without catching pointer input. */
+.walkthrough-caption {
+  position: fixed;
+  left: 12px;
+  bottom: 38px;
+  z-index: 60;
+  max-width: min(60ch, calc(100vw - 24px));
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--raised);
+  color: var(--text);
+  box-shadow: var(--shadow);
+  font-size: var(--text-12-5);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
 }

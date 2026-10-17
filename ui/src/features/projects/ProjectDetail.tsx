@@ -24,6 +24,7 @@ function SettingsButton({ projectId }: { projectId: string }) {
   const { projects } = useApp();
   return (
     <button
+      data-testid="projects.project-detail-open-settings"
       type="button"
       className="pj-btn small"
       onClick={() => {
@@ -95,6 +96,7 @@ function NoFolderDetail({
   }, [projectId]);
   return (
     <aside
+      data-testid="projects.project-detail-pj-detail"
       className="pj-detail"
       aria-label="Project details"
       onContextMenu={management.onContextMenu}
@@ -105,6 +107,7 @@ function NoFolderDetail({
           {management.renameField ?? <h3>{title}</h3>}
           {management.button}
           <button
+            data-testid="projects.project-detail-pj-x"
             ref={closeRef}
             type="button"
             className="pj-x"
@@ -117,10 +120,20 @@ function NoFolderDetail({
         <p>This project has no main folder, so there is no handbook to show.</p>
         <div className="pj-acts">
           <SettingsButton projectId={projectId} />
-          <button type="button" className="pj-btn small primary" onClick={actions.chooseFolder}>
+          <button
+            data-testid="projects.project-detail-pj-btn"
+            type="button"
+            className="pj-btn small primary"
+            onClick={actions.chooseFolder}
+          >
             Choose main folder...
           </button>
-          <button type="button" className="pj-btn small" onClick={actions.newSession}>
+          <button
+            data-testid="projects.project-detail-pj-btn-2"
+            type="button"
+            className="pj-btn small"
+            onClick={actions.newSession}
+          >
             New session
           </button>
         </div>
@@ -205,6 +218,7 @@ function FolderDetail({
   const summary = card.manifest?.description ?? null;
   return (
     <aside
+      data-testid="projects.project-detail-pj-detail-2"
       className="pj-detail"
       aria-label="Project details"
       onContextMenu={management.onContextMenu}
@@ -215,6 +229,7 @@ function FolderDetail({
           {management.renameField ?? <h3>{title}</h3>}
           {management.button}
           <button
+            data-testid="projects.project-detail-pj-x-2"
             ref={closeRef}
             type="button"
             className="pj-x"
@@ -232,6 +247,7 @@ function FolderDetail({
           <SettingsButton projectId={projectId} />
           {card.state === "none" ? (
             <button
+              data-testid="projects.project-detail-start"
               type="button"
               className="pj-btn small primary"
               onClick={(event) => {
@@ -240,10 +256,11 @@ function FolderDetail({
               disabled={requestBusy}
               title={requestBusy ? HANDBOOK_BUSY_TOOLTIP : undefined}
             >
-              Ask the agent to create the handbook
+              Ask Vibe to create the handbook
             </button>
           ) : (
             <button
+              data-testid="projects.project-detail-open-handbook"
               type="button"
               className="pj-btn small primary"
               title="Opens Work in this folder with the Project tab on the handbook"
@@ -255,14 +272,29 @@ function FolderDetail({
             </button>
           )}
           {card.state === "preFormat" && (
-            <button type="button" className="pj-btn small" onClick={actions.migrate}>
+            <button
+              data-testid="projects.project-detail-pj-btn-3"
+              type="button"
+              className="pj-btn small"
+              onClick={actions.migrate}
+            >
               Migrate to Handbook 1.0
             </button>
           )}
-          <button type="button" className="pj-btn small" onClick={actions.newSession}>
+          <button
+            data-testid="projects.project-detail-pj-btn-4"
+            type="button"
+            className="pj-btn small"
+            onClick={actions.newSession}
+          >
             New session
           </button>
-          <button type="button" className="pj-btn small" onClick={actions.reveal}>
+          <button
+            data-testid="projects.project-detail-pj-btn-5"
+            type="button"
+            className="pj-btn small"
+            onClick={actions.reveal}
+          >
             <Icon name="folder" size={14} />
             Show folder
           </button>
@@ -291,6 +323,7 @@ function FolderDetail({
         !book.groups.some((g) => g.pages.some((p) => p.kind === "plan")) && (
           <div className="pj-dsec">
             <button
+              data-testid="projects.project-detail-ask-plan"
               type="button"
               className="pages-plan-link"
               onClick={(event) => {
@@ -299,7 +332,7 @@ function FolderDetail({
               disabled={requestBusy}
               title={requestBusy ? HANDBOOK_BUSY_TOOLTIP : undefined}
             >
-              Ask the agent to write a plan page
+              Ask Vibe to write a plan page
             </button>
           </div>
         )}

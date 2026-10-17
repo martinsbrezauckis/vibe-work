@@ -9,13 +9,15 @@
 //!
 //! Depends on: `core` (`Core`, `Shared`: gate, store, channels, config), `restore`, `sessions` (store
 //! effect of a resume). Called by: `dispatch` (a
-//! channel before a call, the profile after a client's resume), `pump` (after a new server
+//! channel on selection or before a call, the profile after a client's resume), `pump` (after a new server
 //! generation; on its idle tick).
 //! Invariants:
 //! - A session is quiet when Vibe reports it idle, failed or archived, it has no open callback (in
 //!   the store or the gate's book), no queued turn, no running background process, it is not being
 //!   restored, and it has run at least one turn (a never-run session is not stored by Vibe: closing
 //!   its channel would lose it).
+//! - A quiet session keeps its channel while Vibe lists scheduled loops for it: Vibe runs loops only on an open
+//!   channel (`close_idle`).
 //! - Every resume the core sends names the resolved session profile and is
 //!   followed by the profile restore (`restore.rs`, fail closed), so no turn ever runs in a mode the
 //!   user did not choose.
@@ -30,7 +32,7 @@ use std::sync::Arc;
 use serde_json::{Value, json};
 use tracing::{debug, info, warn};
 
-use crate::command::Origin;
+use crate::command::{CommandResult, Origin};
 use crate::core::{Core, Shared};
 use crate::error::CoreError;
 use crate::event::{AlertKind, CoreEvent};
@@ -38,19 +40,46 @@ use crate::sessions;
 
 impl Core {
     /// Gives `session_id` a channel (a new one on the current server) by resuming it through the gate,
-    /// loads the result, and restores its profile. Used before a call that needs a channel
-    /// (`channels::needs_channel`) and to reopen sessions after a restart. Two calls racing here both
-    /// resume; the transport serializes them per session and the second re-attaches on the channel the
-    /// first opened (cheap). Nothing is held across sessions.
+    /// loads the result, and restores its profile. A forced reopen for recovery and explicit retry;
+    /// selection and implicit sends use `attach_session`. Serialized through verification, without
+    /// holding anything across sessions.
     pub(crate) async fn open_session(
         &self,
         origin: Origin,
         session_id: &str,
     ) -> Result<(), CoreError> {
+        self.reattach_session(origin, session_id, true).await
+    }
+
+    /// Implicit opens coalesce: a send racing selection uses the already verified channel.
+    pub(crate) async fn attach_session(
+        &self,
+        origin: Origin,
+        session_id: &str,
+    ) -> Result<(), CoreError> {
+        self.reattach_session(origin, session_id, false).await
+    }
+
+    async fn reattach_session(
+        &self,
+        origin: Origin,
+        session_id: &str,
+        force: bool,
+    ) -> Result<(), CoreError> {
         debug!(session_id, "opening a channel for the session");
         let restore = self.begin_restore(session_id, None).await;
+        if restore.attached && !force {
+            return Ok(());
+        }
+        if !restore.attached
+            && let Ok(Some(pid)) = self.session_holder(session_id).await
+        {
+            return Err(crate::session_holder::held_refusal(pid));
+        }
+        let _lease = self.claim_session(session_id).await?;
         let method = "session/resume";
         let params = json!({"sessionId": session_id, "agentConfig": {"agent": restore.profile()}});
+        crate::plan_profile::before_open(&self.shared, method, &params);
         let entry_project = crate::entry_projects::before_open(&self.shared, method, &params).await;
         let reply = self
             .shared
@@ -64,13 +93,53 @@ impl Core {
         sessions::observe(&self.shared, method, &params, &reply.result).await?;
         self.restore_profile(origin, restore).await
     }
+
+    /// Selection keeps the channel alive and attaches immediately, using the same bounded,
+    /// verified restore as a send. The listing already carries its mode for instant display.
+    pub(crate) async fn view_session(
+        &self,
+        origin: Origin,
+        session_id: Option<String>,
+    ) -> Result<CommandResult, CoreError> {
+        self.shared
+            .channels
+            .set_viewed(origin.as_str(), session_id.clone());
+        let Some(id) = session_id else {
+            return Ok(CommandResult::Reply {
+                result: Value::Null,
+                client_user_message_id: None,
+                user_entry_ids: Vec::new(),
+            });
+        };
+        if self.shared.stuck.is_stuck(&id) {
+            return Err(crate::stuck::refusal(&id, "session/resume"));
+        }
+        if let Err(error) = self
+            .bounded_open(&id, self.attach_session(origin, &id))
+            .await
+        {
+            if error.server_code.as_deref() != Some("sessionHeld") {
+                return Err(error);
+            }
+            if self.session_holder(&id).await?.is_none() {
+                crate::session_holder::note_busy(&self.shared, &id);
+            }
+            return self
+                .session_call(origin, "session/read", json!({"sessionId": id}))
+                .await;
+        }
+        Ok(CommandResult::Session {
+            snapshot: sessions::snapshot(&self.shared, &id)?,
+            detail: Value::Null,
+        })
+    }
 }
 
 /// Resumes each session on a new channel of the new server (the old channels died with it), in the
 /// profile it ran with. `inflight` lists, per session, the turns that were `in_progress` in the store
-/// when the server died: Vibe 2.26.0 reports such a turn as `completed` after the resume (no stop
-/// reason, no error), so they are marked `interrupted` here
-/// ([`cut_off`]); turns missing from the resumed state are marked by the store itself.
+/// when the server died: the app knows they were cut off, so they are marked `interrupted` here
+/// whatever the resumed state reports ([`cut_off`]); turns missing from the resumed state are marked
+/// by the store itself.
 pub(crate) fn reopen(shared: &Arc<Shared>, inflight: Vec<(String, Vec<String>)>) {
     for (id, turns) in inflight {
         let core = Core {
@@ -98,6 +167,15 @@ pub(crate) fn reopen(shared: &Arc<Shared>, inflight: Vec<(String, Vec<String>)>)
                     );
                     let applied = core.shared.store.remove(&id);
                     let _ = core.shared.loads.send(applied).await;
+                    core.shared.leases.release(&id);
+                }
+                Err(error) if error.server_code.as_deref() == Some("sessionHeld") => {
+                    let applied = core.shared.store.mark_interrupted(&id, &turns);
+                    let _ = core.shared.loads.send(applied).await;
+                    info!(
+                        session_id = id,
+                        "session remains read-only until its other holder closes"
+                    );
                 }
                 Err(error) => {
                     warn!(
@@ -105,9 +183,8 @@ pub(crate) fn reopen(shared: &Arc<Shared>, inflight: Vec<(String, Vec<String>)>)
                         code = error.code.as_str(),
                         "reopening a session after a restart failed"
                     );
-                    // The turns that were running died with the server whether or not Vibe lets the
-                    // session be reopened (live: a session that was waiting on a bash approval at a
-                    // kill never answers a resume again).
+                    // The turns that were running died with the server, whether or not the session
+                    // can be reopened now.
                     let applied = core.shared.store.mark_interrupted(&id, &turns);
                     let _ = core.shared.loads.send(applied).await;
                     // No automatic retries (`stuck.rs`): the user decides.
@@ -123,10 +200,9 @@ pub(crate) fn reopen(shared: &Arc<Shared>, inflight: Vec<(String, Vec<String>)>)
     }
 }
 
-/// The turns of `state` among `inflight` that a crash cut off: Vibe reports them `completed` with no
-/// stop reason and no error. Output is no counter-sign: after a resume the model may still answer the
-/// step that was open, which is not the turn the
-/// user ran.
+/// The turns of `state` among `inflight` that a crash cut off, chosen from the app's own record of
+/// in-flight turns, whatever status the resumed state gives them. Output is no counter-sign: after a
+/// resume the model may still answer the step that was open, which is not the turn the user ran.
 pub(crate) fn cut_off(state: &Value, inflight: &[String]) -> Vec<String> {
     state["turns"]
         .as_array()
@@ -190,6 +266,10 @@ pub(crate) fn close_idle(shared: &Arc<Shared>) {
     for id in ids {
         let shared = shared.clone();
         tokio::spawn(async move {
+            // Vibe runs a session's loops only while its channel is open, so a session with loops stays open.
+            if has_loops(&shared, &id).await {
+                return;
+            }
             if shared.channels.close(&id).await {
                 info!(session_id = id, "closed the channel of a quiet session");
             }
@@ -197,13 +277,30 @@ pub(crate) fn close_idle(shared: &Arc<Shared>) {
     }
 }
 
-/// After the Mistral key changed: Vibe keeps the credential a provider refused per
-/// session runtime, keyed by the placeholder (which never changes while the server runs), so a
-/// session that got a 401 would refuse every later turn even with a good key behind the proxy
-/// (`app_server/_provider_credentials.py:120-132`, Vibe 2.26.0). Reopening gives the session a
-/// fresh runtime: quiet sessions are closed now (the next command reopens them), busy ones
-/// when they become quiet. Gap: a session that is busy and viewed keeps its channel until the
-/// client stops viewing it (`Channels::idle` skips viewed sessions).
+/// Whether Vibe holds scheduled loops for `id` (`loops/list`; Vibe sends no events for loops). An unanswered
+/// or malformed list counts as none: the session closes as it did before loops existed.
+async fn has_loops(shared: &Arc<Shared>, id: &str) -> bool {
+    let list = shared
+        .channels
+        .request("loops/list", serde_json::json!({ "sessionId": id }));
+    tokio::time::timeout(std::time::Duration::from_secs(5), list)
+        .await
+        .ok()
+        .and_then(Result::ok)
+        .and_then(|answer| {
+            answer
+                .get("loops")
+                .and_then(Value::as_array)
+                .map(|all| !all.is_empty())
+        })
+        .unwrap_or(false)
+}
+
+/// After the Mistral key changed: Vibe Work gives every open session a fresh session runtime, so
+/// each session starts over with the new key behind the proxy. Quiet sessions are closed now (the
+/// next command reopens them), busy ones when they become quiet. Gap: a session that is busy and
+/// viewed keeps its channel until the client stops viewing it (`Channels::idle` skips viewed
+/// sessions).
 pub(crate) async fn reopen_after_key_change(shared: &Arc<Shared>) {
     for open in shared.channels.open_channels() {
         let id = open.session_id;

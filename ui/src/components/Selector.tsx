@@ -26,6 +26,7 @@ export interface SelectorOption<T extends string> {
 export function Selector<T extends string>({
   label,
   value,
+  valueLabel,
   options,
   onChange,
   onOpen,
@@ -38,9 +39,12 @@ export function Selector<T extends string>({
   dataChip,
   ariaDescription,
   testId,
+  itemId,
 }: {
   label: string;
   value: T;
+  /** The remembered selection's label while that value is absent from the available options. */
+  valueLabel?: string;
   options: readonly SelectorOption<T>[];
   /** The trust bit comes from the option's own native click, never the trigger. */
   onChange: (value: T, trustedClick: boolean) => void;
@@ -55,7 +59,8 @@ export function Selector<T extends string>({
   dataChip?: string;
   /** Optional selected-state wording in addition to the visible value description. */
   ariaDescription?: string;
-  testId?: string;
+  testId: string;
+  itemId?: string;
 }) {
   const id = useId();
   const trigger = useRef<HTMLButtonElement>(null);
@@ -72,6 +77,7 @@ export function Selector<T extends string>({
   });
   const selectedIndex = options.findIndex((option) => option.value === value);
   const selected = options[selectedIndex];
+  const visibleLabel = selected?.label ?? valueLabel ?? value;
   const optionKeys = JSON.stringify(options.map((option) => [option.value, option.disabled]));
   const enabled = options.flatMap((option, i) => (option.disabled ? [] : [i]));
   const activeIndex = options.findIndex(
@@ -185,7 +191,8 @@ export function Selector<T extends string>({
         role="combobox"
         data-chip={dataChip}
         data-testid={testId}
-        aria-label={includeValueInName ? `${label}: ${selected?.label ?? value}` : label}
+        data-item-id={itemId}
+        aria-label={includeValueInName ? `${label}: ${visibleLabel}` : label}
         aria-description={ariaDescription}
         aria-describedby={`${id}-value${title === undefined ? "" : ` ${id}-hint`}`}
         aria-haspopup="listbox"
@@ -212,7 +219,7 @@ export function Selector<T extends string>({
           <span className="ui-selector-dot" data-tone={selected.tone} aria-hidden="true" />
         )}
         <span id={`${id}-value`} className="ui-selector-text">
-          {selected?.label ?? value}
+          {visibleLabel}
         </span>
         <Icon name="chevron-down" size={12} />
       </button>
@@ -225,6 +232,8 @@ export function Selector<T extends string>({
         !disabled &&
         createPortal(
           <div
+            data-testid={`${testId}.menu`}
+            data-item-id={itemId}
             ref={menu}
             id={id}
             data-selector-trigger={`${id}-trigger`}
@@ -273,7 +282,12 @@ export function Selector<T extends string>({
                 tabIndex={i === index ? 0 : -1}
                 data-index={i}
                 data-mode={option.dataMode}
-                data-testid={option.testId}
+                data-testid={option.testId ?? `${testId}.option`}
+                data-item-id={
+                  itemId === undefined
+                    ? option.value || "default"
+                    : `${itemId}:${option.value || "default"}`
+                }
                 className="ui-selector-option"
                 onClick={(event) => {
                   onChange(option.value, event.nativeEvent.isTrusted);

@@ -38,8 +38,8 @@
   color: var(--primary-fg);
   border-color: transparent;
 }
-.tb-btn.primary:hover,
-.set-cat-body .btn-primary:hover {
+.tb-btn.primary:hover:where(:not(:disabled)),
+.set-cat-body .btn-primary:hover:where(:not(:disabled)) {
   background: var(--primary-bg);
   color: var(--primary-fg);
   opacity: 0.9;

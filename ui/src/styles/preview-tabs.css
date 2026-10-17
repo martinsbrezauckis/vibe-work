@@ -108,8 +108,8 @@
   width: 36px;
   font-size: var(--text-22);
 }
-.browser-page-tab-close:hover,
-.browser-page-new:hover {
+.browser-page-tab-close:hover:where(:not(:disabled)),
+.browser-page-new:hover:where(:not(:disabled)) {
   background: var(--hover);
   color: var(--text);
 }
@@ -124,10 +124,6 @@
   color: var(--text);
   cursor: pointer;
   font-size: var(--text-11-5);
-}
-.browser-page-handoff:disabled {
-  opacity: 0.5;
-  cursor: default;
 }
 .browser-handoff-dialog {
   width: min(420px, 94vw);

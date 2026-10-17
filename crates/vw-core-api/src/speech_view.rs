@@ -20,8 +20,8 @@ use serde::{Deserialize, Serialize};
     deny_unknown_fields
 )]
 pub enum SpeechRequest {
-    /// Starts a dictation. From the Debug API origin this needs the native confirmation (the microphone
-    /// turns on and what it hears goes to Mistral); the UI opens the microphone only after this succeeded.
+    /// Starts a dictation. The window asks the native confirmation (the microphone turns on and what it hears
+    /// goes to Mistral); the Debug API's is answered by the core; the UI opens the microphone only after this succeeded.
     Start {
         /// The rate the webview captures at (16,000 preferred; 8,000 to 96,000 accepted).
         sample_rate: u32,
@@ -47,7 +47,7 @@ pub enum SpeechRequest {
         /// The stream.
         stream_id: String,
     },
-    /// Speaks a text with Voxtral TTS (WAV). From the Debug API origin this needs the native confirmation.
+    /// Speaks a text with Voxtral TTS (WAV). The window asks the native confirmation; the Debug API's is answered by the core.
     Speak {
         /// At most 2,000 characters.
         text: String,

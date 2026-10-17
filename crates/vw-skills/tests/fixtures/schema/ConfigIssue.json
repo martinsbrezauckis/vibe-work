@@ -1,0 +1,19 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "file": {
+      "title": "File",
+      "type": "string"
+    },
+    "message": {
+      "title": "Message",
+      "type": "string"
+    }
+  },
+  "required": [
+    "file",
+    "message"
+  ],
+  "title": "ConfigIssue",
+  "type": "object"
+}

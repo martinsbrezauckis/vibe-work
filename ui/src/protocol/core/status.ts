@@ -27,6 +27,10 @@ completedEntryUpdates: number,
  */
 patchFailures: number, 
 /**
+ * Failed patches covered by a clean session read; excluded from significant anomalies.
+ */
+recoveredPatchFailures: number, 
+/**
  * Notifications missing a field the reducer needs.
  */
 malformedPayloads: number, 

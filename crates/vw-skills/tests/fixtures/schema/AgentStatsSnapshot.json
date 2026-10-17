@@ -1,0 +1,111 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "cachedInputPricePerMillion": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Cachedinputpricepermillion"
+    },
+    "contextTokens": {
+      "default": 0,
+      "title": "Contexttokens",
+      "type": "integer"
+    },
+    "inputPricePerMillion": {
+      "default": 0.0,
+      "title": "Inputpricepermillion",
+      "type": "number"
+    },
+    "lastTurnCachedTokens": {
+      "default": 0,
+      "title": "Lastturncachedtokens",
+      "type": "integer"
+    },
+    "lastTurnCompletionTokens": {
+      "default": 0,
+      "title": "Lastturncompletiontokens",
+      "type": "integer"
+    },
+    "lastTurnDuration": {
+      "default": 0.0,
+      "title": "Lastturnduration",
+      "type": "number"
+    },
+    "lastTurnPromptTokens": {
+      "default": 0,
+      "title": "Lastturnprompttokens",
+      "type": "integer"
+    },
+    "modelCalls": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Modelcalls"
+    },
+    "outputPricePerMillion": {
+      "default": 0.0,
+      "title": "Outputpricepermillion",
+      "type": "number"
+    },
+    "sessionCachedTokens": {
+      "default": 0,
+      "title": "Sessioncachedtokens",
+      "type": "integer"
+    },
+    "sessionCompletionTokens": {
+      "default": 0,
+      "title": "Sessioncompletiontokens",
+      "type": "integer"
+    },
+    "sessionPromptTokens": {
+      "default": 0,
+      "title": "Sessionprompttokens",
+      "type": "integer"
+    },
+    "steps": {
+      "default": 0,
+      "title": "Steps",
+      "type": "integer"
+    },
+    "tokensPerSecond": {
+      "default": 0.0,
+      "title": "Tokenspersecond",
+      "type": "number"
+    },
+    "toolCallsAgreed": {
+      "default": 0,
+      "title": "Toolcallsagreed",
+      "type": "integer"
+    },
+    "toolCallsFailed": {
+      "default": 0,
+      "title": "Toolcallsfailed",
+      "type": "integer"
+    },
+    "toolCallsRejected": {
+      "default": 0,
+      "title": "Toolcallsrejected",
+      "type": "integer"
+    },
+    "toolCallsSucceeded": {
+      "default": 0,
+      "title": "Toolcallssucceeded",
+      "type": "integer"
+    }
+  },
+  "title": "AgentStatsSnapshot",
+  "type": "object"
+}

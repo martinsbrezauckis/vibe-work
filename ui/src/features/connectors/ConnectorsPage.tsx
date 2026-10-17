@@ -53,6 +53,7 @@ function Toolbar(): ReactElement {
     <div className="cbar">
       <label className="csearch">
         <input
+          data-testid="connectors.connectors-page-set-search"
           value={search}
           placeholder="Search connectors"
           aria-label="Search connectors"
@@ -60,6 +61,7 @@ function Toolbar(): ReactElement {
         />
       </label>
       <Selector
+        testId="connectors.connectors-page-set-filter"
         label="Filter connectors"
         value={filter}
         options={FILTERS.map((f) => ({ value: f.id, label: `${f.label} ${String(n[f.id])}` }))}
@@ -67,6 +69,7 @@ function Toolbar(): ReactElement {
         compact
       />
       <button
+        data-testid="connectors.connectors-page-refresh"
         type="button"
         className="tb-btn"
         disabled={keyBlocked}

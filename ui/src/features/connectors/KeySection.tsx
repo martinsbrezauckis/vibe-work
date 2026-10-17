@@ -106,10 +106,15 @@ export function KeySection(props: {
           message="MCP server keys use your vault to keep their values encrypted."
         />
       ) : null}
-      {vaultBlocked || error === null ? null : <p className="cbad">{error}</p>}
+      {vaultBlocked || error === null ? null : (
+        <p className="key-problem" role="alert">
+          {error}
+        </p>
+      )}
       <fieldset className="cchoice">
         <legend>The key</legend>
         <Selector
+          testId="connectors.key-section-set"
           label="Key source"
           value={draft.mode}
           options={[
@@ -126,6 +131,7 @@ export function KeySection(props: {
         />
         {draft.mode === "existing" ? (
           <Selector
+            testId="connectors.key-section-set-2"
             label="Secret"
             value={draft.secretId}
             onChange={(value) => {
@@ -148,6 +154,7 @@ export function KeySection(props: {
             <label className="cfield">
               <span>Its name</span>
               <input
+                data-testid="connectors.key-section-set-3"
                 value={draft.newName}
                 placeholder="GitHub token"
                 onChange={(e) => {
@@ -156,6 +163,7 @@ export function KeySection(props: {
               />
             </label>
             <SecretField
+              testId="connectors.key-section-set-4"
               label="The key or token"
               value={draft.newValue}
               onChange={(v) => {
@@ -169,6 +177,7 @@ export function KeySection(props: {
       <fieldset className="cchoice">
         <legend>How the server gets it</legend>
         <Selector
+          testId="connectors.key-section-set-5"
           label="How the server gets it"
           value={draft.headerMode}
           options={[
@@ -183,6 +192,7 @@ export function KeySection(props: {
           <label className="cfield">
             <span>Header name</span>
             <input
+              data-testid="connectors.key-section-set-6"
               value={draft.header}
               placeholder="X-Api-Key"
               spellCheck={false}
@@ -191,7 +201,11 @@ export function KeySection(props: {
                 set({ header: e.target.value });
               }}
             />
-            {headerCheck === null ? null : <span className="cbad">{headerCheck}</span>}
+            {headerCheck === null ? null : (
+              <span className="key-problem" role="alert">
+                {headerCheck}
+              </span>
+            )}
           </label>
         ) : null}
       </fieldset>

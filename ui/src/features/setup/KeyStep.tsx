@@ -46,9 +46,10 @@ export function KeyStep({
         <div className="key-offer">
           <p>Your vault already holds a Mistral key.</p>
           {candidates.map((c) => (
-            <div className="key-saved" key={c.itemId}>
+            <div data-item-id={c.itemId} className="key-saved" key={c.itemId}>
               <span>{c.label}</span>
               <button
+                data-testid="setup.key-step-use-saved"
                 type="button"
                 className="btn-primary"
                 disabled={busy}
@@ -81,7 +82,7 @@ export function KeyStep({
       >
         <SecretField
           label={label ?? "Paste your Mistral API key"}
-          testId="setup-key-input"
+          testId="setup.key-input"
           value={key}
           onChange={setKey}
           placeholder="Your key"
@@ -93,7 +94,7 @@ export function KeyStep({
           <button
             type="submit"
             className="btn-primary"
-            data-testid="setup-save"
+            data-testid="setup.save"
             disabled={busy || key.trim() === ""}
           >
             {busy ? "Saving..." : "Save and test the key"}

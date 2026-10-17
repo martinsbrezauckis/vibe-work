@@ -6,8 +6,8 @@
 //! credential ([`crate::wire::call`]); the
 //! core's JSON comes back as one text block plus `structuredContent` (a screenshot's image, under
 //! [`crate::wire::IMAGE_KEY`], as an MCP image block first), a refusal as a result whose text starts with
-//! "Not run:" and gives the reason; post-input failures preserve their sent-input wording. A refusal is a result,
-//! not `isError`, whose text Vibe 2.26.1's unified harness drops. The loop ends on stdin EOF: when
+//! "Not run:" and gives the reason; post-input failures preserve their sent-input wording. A refusal is an
+//! ordinary result, not `isError`, so the model reads its reason. The loop ends on stdin EOF: when
 //! `vibe-app-server` goes away its pipe closes, so this process never outlives its harness (it runs in its
 //! own session, outside the server's process group, `_mcp_transport.py` / MCP SDK `start_new_session`).
 //!
@@ -82,11 +82,9 @@ fn tool_result(outcome: Result<Value, String>) -> Value {
             }
             result
         }
-        // WORKAROUND(vibe 2.26.1): the unified harness hands an `isError` result to the model only as
-        // "mcp_tool_error: The MCP tool returned an error" (its text is dropped), so every
-        // refusal of ours ("port 28104 belongs to another session", "pid must be a process id from processes_list")
-        // was invisible and the model retried. A refusal is therefore a SUCCESS result whose text starts
-        // with "Not run:". Remove when Vibe passes an error result's text to the model (a Vibe issue).
+        // Vibe Work's rule for refusals: an ordinary (success) result whose text starts with "Not run:" and
+        // gives the reason, so the model reads why the call did not run ("port 28104 belongs to another
+        // session", "pid must be a process id from processes_list") and changes the call instead of repeating it.
         Err(reason) => {
             let text = if reason.starts_with("Not run")
                 || reason.starts_with(wire::UNKNOWN_OUTCOME)

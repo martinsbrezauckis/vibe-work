@@ -7,6 +7,7 @@
  * mounting happen in `main.tsx` / `useShellWiring`); a missing client gives an app without a core
  * and without session actions, which renders the "no connection" state.
  */
+import { createSecretScan } from "../../state/secretScan";
 import { createVibeInstall } from "../../state/vibeInstall";
 import type { CoreClient } from "../../protocol/client/types";
 import { createCommands } from "../../state/commands";
@@ -101,11 +102,23 @@ export function createApp(options: CreateAppOptions): App {
           (toast) => toasts.push(toast),
           () => uiControl.servingCapability(),
           (capability, promise) => uiControl.track(capability, promise),
+          (command) => uiControl.trace.record(command, uiControl.trigger()),
+          (capability, promise) => uiControl.track(capability, promise, true),
         );
   const worktrees =
     core === null
       ? null
-      : createWorktrees({ core, shell, toasts, persist: options.persist ?? true });
+      : createWorktrees({
+          core,
+          shell,
+          toasts,
+          persist: options.persist ?? true,
+          runCommand: (id, name, args, origin): Promise<unknown> => {
+            const actions = origin === "debug-api" ? composer.debugApi : composer.actions;
+            if (actions === null) throw new Error("The composer is unavailable.");
+            return actions.runCommand(id, name, args);
+          },
+        });
   const leftRunning = core === null ? null : createLeftRunning({ core, toasts });
   const sessions =
     core === null
@@ -161,6 +174,7 @@ export function createApp(options: CreateAppOptions): App {
   pagesExclusive(shell, projects, connectors, libraries);
   return {
     core,
+    secretScan: core === null ? null : createSecretScan(core, toasts),
     sessions,
     keys,
     vibe: core === null ? null : createVibeInstall(core),
@@ -175,7 +189,10 @@ export function createApp(options: CreateAppOptions): App {
     transcript,
     connectors,
     libraries,
-    market: core === null || connectors === null ? null : createMarket({ core, shell, connectors }),
+    market:
+      core === null || connectors === null
+        ? null
+        : createMarket({ core, shell, connectors, toasts, persist: options.persist ?? true }),
     worktrees,
     git,
     leftRunning,

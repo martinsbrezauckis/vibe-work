@@ -1,0 +1,22 @@
+{
+  "method": "skills/versions",
+  "params": {
+    "sessionId": "session-skills",
+    "skillId": "skill-project-review"
+  },
+  "result": {
+    "versions": [
+      {
+        "version": 4,
+        "aliases": [
+          "latest",
+          "stable"
+        ]
+      },
+      {
+        "version": 3,
+        "aliases": []
+      }
+    ]
+  }
+}

@@ -1,6 +1,6 @@
 /**
  * The composer of one session (voice parts include the narration bar,
- * dictation strip, mic button, caret reporting): queued turns above it, the run bar
+ * dictation strip, mic button, caret reporting): queued turns and the session's Loops above it, the run bar
  * while a turn runs, inserted context and image chips, the text box, the tool row and the hint line. The
  * top rule's colour shows the access mode. Loaded lazily (`LazyComposer.tsx`) so the main bundle does
  * not grow.
@@ -17,19 +17,24 @@
  * Invariants: render and event wiring only: every decision is in the model or the store.
  * A missing or failed Mistral key disables Send and submission shortcuts, while drafts stay editable.
  */
+import { term } from "../../vocabulary";
 import { type ReactElement, useEffect, useMemo, useRef } from "react";
 
+import { Button } from "../../components/Controls";
 import { droppedItems, runDrop } from "../files/drop";
 import { fileItems } from "../files/attachments";
 import { registerComposerFocus } from "../../state/composerFocus";
 import { NEW_CHAT } from "../../state/newChatKey";
 import { useApp } from "../shell/AppContext";
 import { useKeyReadiness } from "../shell/KeyNotice";
+import { useHeldBy } from "../sessions/SessionHeldNote";
 import { useCoreState, useShellState } from "../shell/hooks";
 import { ChipsRow, QueueList, RetryRow, RunBar } from "./ComposerParts";
 import { DocPreview } from "./DocPreview";
 import { DocumentChips } from "./DocumentChips";
 import { SlashMenu } from "./ComposerMenus";
+import { LoopsStrip } from "./LoopsStrip";
+import { useAutoHeight } from "./autoHeight";
 import { ComposerTools } from "./ComposerTools";
 import { NONE, useComposerState } from "./hooks";
 import { configuredModeId, currentModeId, modeOf, offeredModes } from "./model/access";
@@ -45,7 +50,7 @@ import { useDictationCaret, useVoiceChat } from "../voice/hooks";
 import { VoiceChatButton } from "../voice/VoiceChatButton";
 import { VoiceChatStrip } from "../voice/VoiceChatStrip";
 
-/** Most lines the text box grows to before it scrolls. */
+/** Most lines the text box grows to (wrapped lines count) before it scrolls. */
 const MAX_ROWS = 8;
 
 /** The composer for `sessionId`. */
@@ -53,6 +58,8 @@ export default function Composer({ sessionId }: { sessionId: string }): ReactEle
   const app = useApp();
   const { composer, core, documents } = app;
   const key = useKeyReadiness();
+  const readOnly = useHeldBy(sessionId) !== null;
+  const heldKind = useCoreState((s) => s.heldKind[sessionId]);
   const entry = useCoreState((s) => s.sessions[sessionId]);
   const draft = useComposerState((s) => s.drafts[sessionId] ?? "");
   const context = useComposerState((s) => s.context[sessionId] ?? NONE);
@@ -61,6 +68,7 @@ export default function Composer({ sessionId }: { sessionId: string }): ReactEle
   const lobbyStarting = useComposerState((s) => s.sending[NEW_CHAT] === true);
   const compacting = useComposerState((s) => s.compacting[sessionId] === true);
   const note = useComposerState((s) => s.notes[sessionId] ?? null);
+  const reloadFailed = useComposerState((s) => s.pluginReloadFailed[sessionId] === true);
   // Sticky provenance marks (composerStore): the Debug API's is a label; the rewind's has the way out.
   const mark = useComposerState((s) =>
     (s.drafts[sessionId] ?? "") === ""
@@ -83,6 +91,7 @@ export default function Composer({ sessionId }: { sessionId: string }): ReactEle
   const held = useComposerState((s) => s.newChat);
   const box = useRef<HTMLTextAreaElement>(null);
   const reportCaret = useDictationCaret(sessionId, box);
+  useAutoHeight(box, draft, MAX_ROWS);
   const voiceOn = useVoiceChat((s) => s.on && s.owner === sessionId);
 
   const state = entry?.state ?? null;
@@ -102,7 +111,9 @@ export default function Composer({ sessionId }: { sessionId: string }): ReactEle
     : currentPick(runtime, session);
   // New chat: the held pick, else the mode the configuration gives a new session (the chip said "Access").
   const mode = modeOf(
-    isNew ? (held.mode ?? configuredModeId(config ?? undefined)) : currentModeId(runtime, session),
+    isNew
+      ? (held.mode ?? configuredModeId(config ?? undefined))
+      : currentModeId(runtime, session, entry?.accessMode),
   );
 
   // Load the action code now, so the first Enter does not wait for its chunk.
@@ -160,7 +171,6 @@ export default function Composer({ sessionId }: { sessionId: string }): ReactEle
         onSave={() => {
           if (editing === null) return;
           void actions.replaceQueued(sessionId, editing.queueItemId, editing.text);
-          composer.setEditing(null);
         }}
         onCancel={() => {
           composer.setEditing(null);
@@ -174,7 +184,9 @@ export default function Composer({ sessionId }: { sessionId: string }): ReactEle
           onRetry={() => void actions.retry(sessionId, "")}
         />
       )}
+      {isNew ? null : <LoopsStrip sessionId={sessionId} running={running} mode={mode} />}
       <div
+        data-testid="composer.composer-on-drag-over-surface-1"
         className={`composer lvl-${mode?.level ?? "neutral"}${running ? " running" : ""}`}
         // the toast stack keeps the whole composer clear (Send, the mic, the tools row), not only the
         // focused text field: on the taller new-chat view a bottom-right toast covered Send.
@@ -222,19 +234,23 @@ export default function Composer({ sessionId }: { sessionId: string }): ReactEle
           Message
         </label>
         <textarea
+          data-testid="composer.composer-set-draft"
           ref={box}
           onSelect={reportCaret}
           id={`composer-input-${sessionId}`}
           title="Message"
           aria-label="Message"
           className="composer-input"
-          rows={Math.min(MAX_ROWS, Math.max(1, draft.split("\n").length))}
+          rows={1}
+          readOnly={readOnly}
           placeholder={
-            context.length > 0
-              ? "Tell Vibe what to do with this"
-              : isNew
-                ? "Start a chat: ask Vibe to build, fix, or explain something"
-                : "Ask Vibe to build, fix, or explain something"
+            readOnly && heldKind === "terminal"
+              ? "Read-only while this session is open in the terminal"
+              : context.length > 0
+                ? "Tell Vibe what to do with this"
+                : isNew
+                  ? `${term("workNames", "chat").tooltip}: ask Vibe to build, fix, or explain something`
+                  : "Ask Vibe to build, fix, or explain something"
           }
           value={draft}
           onChange={(e) => {
@@ -248,6 +264,7 @@ export default function Composer({ sessionId }: { sessionId: string }): ReactEle
             void runDrop(app, sessionId, fileItems(files), "ui");
           }}
           onKeyDown={(e) => {
+            if (readOnly) return;
             const action = keyAction(
               {
                 key: e.key,
@@ -291,7 +308,7 @@ export default function Composer({ sessionId }: { sessionId: string }): ReactEle
           models={models}
           menu={menu}
           canSend={hasContent}
-          blockedReason={key?.message ?? null}
+          blockedReason={readOnly ? "Read-only here." : (key?.message ?? null)}
           sending={sending}
           running={running}
           onMenu={(kind) => {
@@ -302,10 +319,10 @@ export default function Composer({ sessionId }: { sessionId: string }): ReactEle
           onEffort={(level) => void actions.pickModel(sessionId, undefined, level)}
           onFiles={(files) => void runDrop(app, sessionId, fileItems(files), "ui")}
           onSend={() => {
-            if (key === null) void actions.send(sessionId, "send");
+            if (!readOnly && key === null) void actions.send(sessionId, "send");
           }}
-          mic={<MicButton sessionId={sessionId} />}
-          voiceChat={<VoiceChatButton sessionId={sessionId} />}
+          mic={<MicButton sessionId={sessionId} disabled={readOnly} />}
+          voiceChat={<VoiceChatButton sessionId={sessionId} disabled={readOnly} />}
           voiceOn={voiceOn}
         />
       </div>
@@ -316,8 +333,9 @@ export default function Composer({ sessionId }: { sessionId: string }): ReactEle
       )}
       {mark === "back" && (
         <p className="hint composer-mark" role="status">
-          Put back by the rewind: Sent as text.{" "}
+          Put back in the message box: Sent as text.{" "}
           <button
+            data-testid="composer.composer-adopt"
             type="button"
             className="mini"
             title="Use the restored message as my command"
@@ -359,6 +377,17 @@ export default function Composer({ sessionId }: { sessionId: string }): ReactEle
       ) : (
         <p className="hint composer-note" role="status">
           {note}
+          {reloadFailed ? (
+            <span className="composer-plugin-reload">
+              <Button
+                small
+                data-testid="composer.start-with-new-plugins"
+                onClick={() => void app.sessions?.startWithPlugins(sessionId)}
+              >
+                Start a new chat with the new plugins
+              </Button>
+            </span>
+          ) : null}
         </p>
       )}
       <RewindDialog />

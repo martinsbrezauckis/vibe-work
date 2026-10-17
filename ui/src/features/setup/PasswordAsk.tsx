@@ -5,6 +5,7 @@
  * Invariants: the password is cleared the moment it is submitted; the failure text (for example a
  * wrong password) comes from the key controller's `problem`.
  */
+import { Button } from "../../components/Controls";
 import { useState } from "react";
 
 import { Problem, SecretField } from "./fields";
@@ -33,6 +34,7 @@ export function PasswordAsk(props: {
       }}
     >
       <SecretField
+        testId="setup.password-ask-secretfield"
         label={props.label ?? "Vault password"}
         value={password}
         onChange={setPassword}
@@ -40,14 +42,25 @@ export function PasswordAsk(props: {
         invalid={problem?.reason === "wrongPassphrase"}
       />
       <Problem text={problem?.text ?? null} />
-      <div className="key-actions">
-        <button type="submit" className="btn-primary" disabled={busy || password === ""}>
+      <div className="set-actions">
+        <Button
+          data-testid="setup.password-ask-btn-primary"
+          type="submit"
+          small
+          variant="primary"
+          disabled={busy || password === ""}
+        >
           {props.action}
-        </button>
+        </Button>
         {props.onCancel !== undefined && (
-          <button type="button" className="tb-btn" onClick={props.onCancel}>
+          <Button
+            data-testid="setup.password-ask-tb-btn"
+            type="button"
+            small
+            onClick={props.onCancel}
+          >
             Cancel
-          </button>
+          </Button>
         )}
       </div>
     </form>

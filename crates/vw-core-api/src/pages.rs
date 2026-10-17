@@ -315,14 +315,12 @@ impl Core {
                 service.layout(session_id.zip(rect)).await.map_err(err)?;
                 PagesResult::Done {}
             }
-            PagesRequest::PickSection { session_id } => {
-                let project = self.project_of(&session_id)?;
-                PagesResult::Picked {
-                    picked: service
-                        .pick_section(&session_id, &project)
-                        .await
-                        .map_err(err)?,
-                }
+            PagesRequest::PickSection {
+                session_id,
+                section,
+            } => {
+                self.pages_pick(&service, &session_id, section.as_deref())
+                    .await?
             }
             PagesRequest::CancelPick {} => {
                 service.cancel_pick().await;
@@ -345,6 +343,27 @@ impl Core {
             other => self.pages_more(&service, origin, other).await?,
         };
         Ok(CommandResult::Pages { result })
+    }
+
+    /// `pickSection`: waits for a person's click, or with `section` (the Debug API's way: nobody clicks) reads the
+    /// named section from the page file at once.
+    async fn pages_pick(
+        &self,
+        service: &PagesService,
+        session_id: &str,
+        section: Option<&str>,
+    ) -> Result<PagesResult, CoreError> {
+        let project = self.project_of(session_id)?;
+        let picked = match section {
+            Some(name) => {
+                let name = crate::preview_pick::section_name(Some(name))?;
+                service.section_named(session_id, &project, name).await
+            }
+            None => service.pick_section(session_id, &project).await,
+        };
+        Ok(PagesResult::Picked {
+            picked: picked.map_err(|e| core_error(&e))?,
+        })
     }
 
     async fn step(

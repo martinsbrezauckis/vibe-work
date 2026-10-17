@@ -1,0 +1,71 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "description": {
+      "title": "Description",
+      "type": "string"
+    },
+    "enabled": {
+      "default": true,
+      "title": "Enabled",
+      "type": "boolean"
+    },
+    "locked": {
+      "default": false,
+      "title": "Locked",
+      "type": "boolean"
+    },
+    "name": {
+      "title": "Name",
+      "type": "string"
+    },
+    "prompt": {
+      "title": "Prompt",
+      "type": "string"
+    },
+    "registry": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/RegistryRefView"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "scope": {
+      "default": "global",
+      "enum": [
+        "builtin",
+        "global",
+        "project"
+      ],
+      "title": "Scope",
+      "type": "string"
+    },
+    "source": {
+      "default": "local",
+      "enum": [
+        "builtin",
+        "local",
+        "registry",
+        "plugin"
+      ],
+      "title": "Source",
+      "type": "string"
+    },
+    "userInvocable": {
+      "default": true,
+      "title": "Userinvocable",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "name",
+    "description",
+    "prompt"
+  ],
+  "title": "SkillSummary",
+  "type": "object"
+}

@@ -178,7 +178,7 @@
   padding: 5px 6px;
   cursor: pointer;
 }
-.plan-checklist-steps button:hover {
+.plan-checklist-steps button:hover:where(:not(:disabled)) {
   background: var(--hover);
 }
 .plan-checklist-steps button:focus-visible {
@@ -211,6 +211,10 @@
   border: 1px solid var(--orange-soft);
   border-radius: 999px;
   padding: 0 6px;
+}
+.plan-checklist-source {
+  font-size: 10.5px;
+  color: var(--text-3);
 }
 @media (prefers-reduced-motion: reduce) {
   .plan-checklist-bar i {

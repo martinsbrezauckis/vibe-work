@@ -1,0 +1,26 @@
+# Standalone session-log scanning; uses standard encoding and file libraries, called by Rust clients.
+[package]
+name = "vw-logscan"
+description = "Find stored secret values in session logs and redact their reported locations"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+base64 = "0.22"
+form_urlencoded = "1"
+memchr = "2"
+percent-encoding = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+tempfile = "3"
+thiserror = "2"
+walkdir = "2"
+zeroize = "1"

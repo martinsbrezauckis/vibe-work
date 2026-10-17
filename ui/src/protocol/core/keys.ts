@@ -11,7 +11,7 @@ export type KeyRequest = { "op": "readStatus", } | { "op": "createVault",
  */
 passphrase: SecretInput, 
 /**
- * Remember this device (product default: on, decision M3).
+ * Remember this device (product default: on).
  */
 rememberDevice: boolean, } | { "op": "unlockVault", 
 /**

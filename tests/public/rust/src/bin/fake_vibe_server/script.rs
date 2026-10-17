@@ -67,6 +67,8 @@ pub use crate::meta::Options;
 #[derive(Default)]
 pub struct World {
     pub sessions: BTreeMap<String, Value>,
+    /// session id -> its scheduled loops (`loops/create` adds one; `loops/list` reads them).
+    pub loops: BTreeMap<String, Vec<Value>>,
     pub next_id: u64,
     /// callback id -> the output the client sent.
     pub answers: BTreeMap<String, Value>,
@@ -97,6 +99,9 @@ pub struct World {
     pub child_parent: BTreeMap<String, String>,
     /// `--subagents-rule` (`subagents.rs`): the saved `enable_subagents` value (`None`: the default, on).
     pub subagents: Option<bool>,
+    #[cfg(feature = "fixture-extensions")]
+    /// Saved values used only by the extended configuration fixture.
+    pub proxy: BTreeMap<String, String>,
     #[cfg(feature = "fixture-extensions")]
     pub extension_sessions: BTreeSet<String>,
 }
@@ -131,6 +136,7 @@ pub struct Script {
     #[cfg(feature = "fixture-extensions")]
     pub long_notification_error: bool,
     pub unstored_metadata_miss: bool,
+    pub archive_no_notify: bool,
     pub single_attached: bool,
     pub turn_delay_ms: u64,
     pub multiplex: bool,
@@ -143,6 +149,9 @@ pub struct Script {
     /// `--subagents-rule` (`subagents.rs`), and `--subagents-reject`.
     pub subagents_rule: bool,
     pub subagents_reject: bool,
+    #[cfg(feature = "fixture-extensions")]
+    /// Synthetic configuration write errors in the extended fixture.
+    pub proxy_echo_error: bool,
     /// `--delete-faults N`: how many more `session/delete` calls fail.
     pub delete_faults: Mutex<u32>,
     /// `--log-context PATH` (the fixture): queued items with context entries, one JSON line each.
@@ -217,6 +226,7 @@ impl Script {
             #[cfg(feature = "fixture-extensions")]
             long_notification_error: options.long_notification_error,
             unstored_metadata_miss: options.unstored_metadata_miss,
+            archive_no_notify: options.archive_no_notify,
             single_attached: options.single_attached,
             turn_delay_ms: options.turn_delay_ms,
             multiplex: options.multiplex,
@@ -226,6 +236,8 @@ impl Script {
             extended_turn: options.extended_turn,
             subagents_rule: options.subagents_rule,
             subagents_reject: options.subagents_reject,
+            #[cfg(feature = "fixture-extensions")]
+            proxy_echo_error: options.proxy_echo_error,
             delete_faults: Mutex::new(options.delete_faults),
             context_log: append_file(options.context_log_path),
             models: options.model_config_path.as_deref().map(|path| {
@@ -275,8 +287,13 @@ impl Script {
 
     pub fn next(&self, prefix: &str) -> String {
         let mut w = self.world.lock().unwrap();
-        w.next_id += 1;
-        format!("{prefix}-{}", w.next_id)
+        loop {
+            w.next_id += 1;
+            let id = format!("{prefix}-{}", w.next_id);
+            if !w.sessions.contains_key(&id) {
+                return id;
+            }
+        }
     }
 
     /// Records a received request method.
@@ -356,6 +373,7 @@ impl Script {
 
     /// Answers one request from `conn`; `None` means the answer is sent later (never in this script).
     pub fn handle(self: &Arc<Self>, conn: u64, method: &str, params: &Value) -> Option<Value> {
+        crate::market::record_load(method);
         let sid = params["sessionId"].as_str().unwrap_or_default().to_owned();
         let attached_only = matches!(
             method,
@@ -396,6 +414,14 @@ impl Script {
             // the fixture: stored history, paged backward (`history.rs`).
             "session/history/list" => {
                 return Some(crate::history::list(self.state(&sid).as_ref(), params));
+            }
+            "session/read"
+                if params.as_object().is_some_and(|p| {
+                    p.keys()
+                        .any(|k| !matches!(k.as_str(), "sessionId" | "history" | "turns"))
+                }) =>
+            {
+                return Some(json!({"__error": "invalid_params"}));
             }
             "session/resume" | "session/read" => {
                 return self.resume_or_read(conn, method, &sid, params);
@@ -442,6 +468,17 @@ impl Script {
                 None => return Some(json!({"__error": "not_found"})),
             },
             "session/list" => self.list(params),
+            "loops/create" => {
+                let mut world = self.world.lock().unwrap();
+                let all = world.loops.entry(sid.clone()).or_default();
+                let lp = json!({"id": format!("loop-{}", all.len() + 1), "prompt": params["prompt"], "interval": params["interval"]});
+                all.push(lp.clone());
+                json!({"loop": lp})
+            }
+            "loops/list" => {
+                let world = self.world.lock().unwrap();
+                json!({"loops": world.loops.get(&sid).cloned().unwrap_or_default()})
+            }
             "session/pin" => {
                 let pinned = params["pinned"].as_bool().unwrap_or(false);
                 let at = if pinned { json!(now_ms()) } else { Value::Null };
@@ -464,7 +501,7 @@ impl Script {
                 if archived {
                     fields.push(("pinnedAt", Value::Null));
                 }
-                self.patch_fields(&sid, &fields, notify);
+                self.patch_fields(&sid, &fields, notify && !self.archive_no_notify);
                 json!({"archivedAt": at})
             }
             "session/rename" => {
@@ -547,7 +584,12 @@ impl Script {
             }
             "config/write" if self.subagents_rule => self.config_write_subagents(&sid, params),
             "config/fields/read" if self.subagents_rule => self.config_fields_subagents(),
+            #[cfg(feature = "fixture-extensions")]
+            "config/proxy/read" | "config/proxy/write" => self.config_proxy(method, &sid, params),
             "config/reload" => json!({"runtime": self.runtime(&sid)}),
+            "config/fields/read" => {
+                json!({"fields":[{"name":"session_logging", "kind":"complex", "description":"Session logging", "path":"/session_logging", "value":{"save_dir":std::env::var("VIBE_SESSION_LOGGING__SAVE_DIR").unwrap_or_default()}}], "targets":[]})
+            }
             // Vibe's narrator summary (the fixture, `app_server/_narration.py`): one line that names what the
             // client sent, so a test sees the user text and the answer reached it.
             "narration/summarize" => json!({"summary": format!(
@@ -566,6 +608,9 @@ impl Script {
         let mut state = fresh_state(&id, 1_700_000_000_000);
         if let Some(cwd) = params.pointer("/agentConfig/cwd") {
             state["session"]["cwd"] = cwd.clone();
+        }
+        if let Some(roots) = params.pointer("/agentConfig/workspaceRoots") {
+            state["session"]["workspaceRoots"] = roots.clone();
         }
         crate::background::add_to(&mut state);
         let mut world = self.world.lock().unwrap();
@@ -609,6 +654,14 @@ impl Script {
             }
         }
         if method == "session/resume" {
+            if self
+                .state(sid)
+                .is_some_and(|state| state["session"]["busyOnResume"] == true)
+            {
+                return Some(
+                    json!({"__error": "conflict", "__data": {"harnessCode": "session_busy"}}),
+                );
+            }
             let pending = {
                 let mut world = self.world.lock().unwrap();
                 if self.multiplex && world.owner(sid).is_some_and(|o| o != conn) {

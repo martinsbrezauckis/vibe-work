@@ -23,6 +23,7 @@
   min-width: 0;
 }
 .shead h1 {
+  flex: 1 1 0;
   font-size: 15px;
   font-weight: 600;
   margin: 0;
@@ -62,7 +63,7 @@
   cursor: pointer;
   font-size: 12.5px;
 }
-.pbtn:hover {
+.pbtn:hover:where(:not(:disabled)) {
   background: var(--hover);
   color: var(--text);
 }
@@ -94,7 +95,7 @@
   margin: 0;
 }
 .server-note {
-  display: flex;
+  display: block;
   gap: 10px;
   align-items: flex-start;
   margin: 18px 0 0;
@@ -105,4 +106,18 @@
   background: var(--panel);
   font-size: 13px;
   color: var(--text-2);
+}
+
+/* Notices with an icon or an action keep their row layout; prose remains normal text flow. */
+.server-note:has(> .px),
+.server-note:has(> button) {
+  display: flex;
+  flex-wrap: wrap;
+}
+.server-note > span:not(.px) {
+  flex: 1 1 220px;
+  min-width: 0;
+}
+ul.server-note {
+  padding-left: 28px;
 }

@@ -28,6 +28,10 @@ export interface ToastSpec {
   sessionId?: string;
   /** Opens the existing sessions list and orphan copies from a worktree count notice. */
   action?: "sessions";
+  /** Discovered outside the catalog; the bell offers the same owned-folder controls as Tools. */
+  plugin?: { name: string; path: string; managed: boolean };
+  /** Rust-owned session-log finding; the bell action uses its opaque handle. */
+  secretLeak?: { findingId: string };
 }
 
 /** The toast for `event`, or `null` when it needs none. */
@@ -35,11 +39,12 @@ export function notificationFor(event: CoreEvent): ToastSpec | null {
   switch (event.type) {
     case "alert":
       return {
-        kind: "warn",
+        kind: event.kind === "temporaryCleanupRecovered" ? "info" : "warn",
         bellKind:
           event.kind === "bypassToolPermissions" ||
           event.kind === "accessModeLowered" ||
-          event.kind === "accessModeUnverified"
+          event.kind === "accessModeUnverified" ||
+          event.kind === "networkSettingsRejected"
             ? "security"
             : "failure",
         text: event.message,

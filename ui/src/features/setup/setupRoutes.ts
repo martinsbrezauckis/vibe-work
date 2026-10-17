@@ -39,7 +39,7 @@ function setupDom() {
       // Screenshot drivers attest the blank key field without retrieving a value.
       empty:
         element instanceof HTMLInputElement &&
-        element.getAttribute("data-testid") === "setup-key-input"
+        element.getAttribute("data-testid") === "setup.key-input"
           ? element.value === ""
           : null,
       ariaPressed: element.getAttribute("aria-pressed"),

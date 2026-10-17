@@ -18,7 +18,7 @@
 //! - A new registered copy's first `turn/start` receives one package setup fact after the user's text;
 //!   only a successful send marks that fact delivered for this run.
 
-use serde_json::{Map, Value, json};
+use serde_json::{Value, json};
 use tracing::warn;
 use vw_gate::{ConfirmationToken, GateError, Reply, TRUSTED_SURFACE_METHODS};
 
@@ -29,7 +29,7 @@ use crate::event::{AlertKind, CoreEvent};
 use crate::plan::{Planned, plan};
 use crate::routing::needs_channel;
 use crate::sessions;
-use crate::view::{AnomalyReport, CallbackInfo, SessionRowView};
+use crate::view::{AnomalyReport, CallbackInfo};
 
 impl Core {
     /// Executes one command for `origin`.
@@ -44,11 +44,19 @@ impl Core {
         command: Command,
     ) -> Result<CommandResult, CoreError> {
         let name = command.name();
+        crate::secret_scan::note_command(&self.shared, &command);
+        // A Debug API pick names its target or is refused by name, before the session lease or any native work.
+        let lease = match crate::preview_pick::admit(origin, &command) {
+            Ok(()) => self.session_change_lease(&command).await,
+            Err(error) => Err(error),
+        };
         // Boxed once per command (clippy large_futures): the dispatcher's future holds the state of every command
         // kind and was at the 16 KiB limit; filing hooks in `forward` crossed it.
-        let result = Box::pin(self.dispatch(origin, command))
-            .await
-            .map_err(|error| self.not_installed_reason(error));
+        let result = match lease {
+            Ok(_lease) => Box::pin(self.dispatch(origin, command)).await,
+            Err(error) => Err(error),
+        }
+        .map_err(|error| self.not_installed_reason(error));
         if let Err(error) = &result {
             self.note_failure(origin, name, error);
         }
@@ -204,6 +212,7 @@ impl Core {
     /// Commands the core answers itself, or with a dedicated gate entry point.
     async fn local(&self, origin: Origin, command: Command) -> Result<CommandResult, CoreError> {
         match command {
+            Command::SecretScan { request } => self.secret_scan(request).await,
             Command::ListSessions {
                 limit,
                 cursor,
@@ -272,14 +281,7 @@ impl Core {
                     token: token.as_str().to_owned(),
                 })
             }
-            Command::ViewSession { session_id } => {
-                self.shared.channels.set_viewed(origin.as_str(), session_id);
-                Ok(CommandResult::Reply {
-                    result: Value::Null,
-                    client_user_message_id: None,
-                    user_entry_ids: Vec::new(),
-                })
-            }
+            Command::ViewSession { session_id } => self.view_session(origin, session_id).await,
             Command::RetryReopen { session_id } => self.retry_reopen(origin, &session_id).await,
             Command::CancelReopen { session_id } => Ok(self.cancel_reopen(&session_id)),
             Command::ContinueInNewSession { session_id } => {
@@ -348,6 +350,9 @@ impl Core {
             Command::Worktrees { request } => Ok(CommandResult::Worktrees {
                 result: self.worktrees(origin, request).await?,
             }),
+            Command::GitBrowser { request } => Ok(CommandResult::GitBrowser {
+                result: self.git_browser(request).await?,
+            }),
             Command::Git { request } => Ok(CommandResult::Git {
                 result: self.git(origin, request).await?,
             }),
@@ -359,6 +364,9 @@ impl Core {
             }),
             Command::Safety { request } => Ok(CommandResult::Safety {
                 result: crate::safety::execute(&self.shared, request)?,
+            }),
+            Command::Network { request } => Ok(CommandResult::Network {
+                result: self.network(origin, request).await?,
             }),
             Command::PickFolder { path } => self.pick_folder(origin, &path),
             Command::SessionTools { request } => Ok(CommandResult::SessionTools {
@@ -409,51 +417,6 @@ impl Core {
                 significant: counts.significant(),
                 recent: anomalies.recent().into_iter().map(Into::into).collect(),
             },
-        })
-    }
-
-    /// `session/list` through the gate, merged with local-only sessions.
-    async fn list_sessions(
-        &self,
-        origin: Origin,
-        limit: Option<u32>,
-        cursor: Option<String>,
-        include_archived: Option<bool>,
-    ) -> Result<CommandResult, CoreError> {
-        let mut params = Map::new();
-        if let Some(include) = include_archived {
-            params.insert("includeArchived".to_owned(), Value::Bool(include));
-        }
-        if let Some(limit) = limit {
-            params.insert("limit".to_owned(), Value::from(limit));
-        }
-        if let Some(cursor) = cursor {
-            params.insert("cursor".to_owned(), Value::String(cursor));
-        }
-        let params = Value::Object(params);
-        let reply = self.forward(origin, "session/list", params, None).await?;
-        let items = reply
-            .result
-            .get("items")
-            .and_then(Value::as_array)
-            .cloned()
-            .unwrap_or_default();
-        self.shared.names.note_listing(&items);
-        crate::plan_profile::note_listing(&self.shared, &items);
-        // sessions seen for the first time are filed by their folder.
-        crate::projects_filing::listed(&self.shared, &items).await;
-        let rows = self.shared.store.reconcile_listing(&items);
-        let text = |key: &str| {
-            reply
-                .result
-                .get(key)
-                .and_then(Value::as_str)
-                .map(str::to_owned)
-        };
-        Ok(CommandResult::Sessions {
-            rows: rows.into_iter().map(SessionRowView::from).collect(),
-            next_cursor: text("nextCursor"),
-            continue_session_id: text("continueSessionId"),
         })
     }
 
@@ -535,6 +498,8 @@ impl Core {
         token: Option<String>,
         trusted_access_switch: bool,
     ) -> Result<Reply, CoreError> {
+        // A composer's runtime read must wait for the open's verified mode too.
+        let _runtime_restore = self.runtime_restore_lock(method, &params).await;
         // A stuck session is never opened implicitly (`stuck.rs`): refused at once, nothing sent.
         let opens = needs_channel(method, &params).or_else(|| {
             (method == "session/resume")
@@ -560,14 +525,6 @@ impl Core {
                 .own_token(origin, method, &params, trusted_access_switch)
                 .await?;
         }
-        // A session another process holds is read-only here; reopening it would only be refused by Vibe
-        // (`session_busy`) and leave it stuck. Refused with the holder named instead.
-        if let Some(id) = needs_channel(method, &params)
-            && !self.shared.channels.has_channel(id)
-            && let Ok(Some(pid)) = self.session_holder(id).await
-        {
-            return Err(crate::session_holder::held_refusal(pid));
-        }
         if let Some(id) = needs_channel(method, &params)
             && !self.shared.channels.has_channel(id)
         {
@@ -577,7 +534,7 @@ impl Core {
                 .check(method, &params, token.as_ref())
                 .map_err(|e| CoreError::from_gate(method, &e))?;
             let id = id.to_owned();
-            self.bounded_open(&id, self.open_session(origin, &id))
+            self.bounded_open(&id, self.attach_session(origin, &id))
                 .await?;
         }
         // The session's review baseline exists before Vibe starts working in its folder.

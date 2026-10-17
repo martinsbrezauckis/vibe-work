@@ -91,7 +91,7 @@
   cursor: pointer;
   border-radius: 12px 12px 0 0;
 }
-.ctile-main:hover {
+.ctile-main:hover:where(:not(:disabled)) {
   background: var(--hover);
 }
 .ctile-main:focus-visible,
@@ -287,9 +287,6 @@
   gap: 8px;
   margin: 12px 0 0;
 }
-.tb-btn.danger {
-  color: var(--red);
-}
 .add-server .cfield {
   display: flex;
   flex-direction: column;
@@ -308,17 +305,6 @@
 }
 .add-server input[aria-invalid="true"] {
   border-color: var(--red);
-}
-.cbad {
-  color: var(--red);
-  font-size: 12.5px;
-}
-.cwarn {
-  border-left: 3px solid var(--orange);
-  padding: 6px 10px;
-  background: var(--orange-soft);
-  border-radius: 6px;
-  font-size: 12.5px;
 }
 .csteps {
   margin: 0 0 10px;

@@ -48,6 +48,7 @@ export function AddressBar({
       }}
     >
       <input
+        data-testid="preview.address-bar-set-draft"
         className="preview-address"
         aria-label="Address"
         title={title ?? url}

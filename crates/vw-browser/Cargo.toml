@@ -36,3 +36,6 @@ futures-util = { version = "0.3", default-features = false, features = ["std"] }
 # Captured SVGs are re-serialised through an allowlist; 0.42.0 is already in the lock file.
 quick-xml = "0.42"
 ts-rs = { version = "12.0.1", optional = true, features = ["serde-json-impl", "no-serde-warnings"] }
+
+[dev-dependencies]
+tokio = { version = "1.53", features = ["rt-multi-thread", "test-util"] }

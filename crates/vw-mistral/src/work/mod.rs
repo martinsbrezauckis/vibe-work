@@ -17,6 +17,8 @@
 pub mod conversations;
 pub mod images;
 pub mod libraries;
+mod temporary_file;
+pub use temporary_file::CleanupNotice;
 
 use std::time::Duration;
 
@@ -63,6 +65,9 @@ pub enum WorkError {
     /// No answer, or an answer that could not be read.
     #[error("Could not reach Mistral: {0}.")]
     Network(String),
+    /// Caller input cannot be used; no provider request was sent.
+    #[error("{0}")]
+    InvalidParams(&'static str),
     /// The answer was readable JSON but not the expected shape.
     #[error("Mistral's answer was not in the expected form ({0}).")]
     Shape(&'static str),
@@ -72,6 +77,9 @@ pub enum WorkError {
     /// The image tool ran but made no image (its own reason, sanitized and capped).
     #[error("No image was made: {0}")]
     NoImage(String),
+    /// Temporary source deletion was not confirmed after retries.
+    #[error("{0}")]
+    CleanupFailed(String),
     /// A downloaded file is not what it should be (not an image, too large, a refused address).
     #[error("{0}")]
     BadFile(String),

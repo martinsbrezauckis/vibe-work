@@ -15,6 +15,7 @@ export function ConsoleLink() {
     <p className="key-field-hint">
       Need a key?{" "}
       <button
+        data-testid="setup.console-link-open-link"
         type="button"
         className="key-link"
         data-href={VIBE_KEY_URL}

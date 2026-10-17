@@ -29,6 +29,7 @@ export function CopySection({ form }: { form: CopyForm }): ReactElement | null {
     <fieldset className="copy-section" data-worktree="section">
       <label className="copy-toggle">
         <input
+          data-testid="worktrees.copy-section-set-on"
           type="checkbox"
           checked={form.on && form.offered}
           disabled={!form.offered}
@@ -48,6 +49,7 @@ export function CopySection({ form }: { form: CopyForm }): ReactElement | null {
           <label>
             Start from
             <Selector
+              testId="worktrees.copy-section-set-base"
               label="Start from"
               value={form.base}
               options={[
@@ -72,6 +74,7 @@ export function CopySection({ form }: { form: CopyForm }): ReactElement | null {
           <label>
             New branch
             <input
+              data-testid="worktrees.copy-section-set-branch"
               type="text"
               className="mono"
               spellCheck={false}

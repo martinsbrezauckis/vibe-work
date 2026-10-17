@@ -35,6 +35,7 @@ export function NotificationSettings() {
           </span>
         </span>
         <Selector
+          testId="shell.notification-settings-set-level"
           label="Notification level"
           value={level}
           options={NOTIFY_LEVELS.map((l) => ({
@@ -46,11 +47,12 @@ export function NotificationSettings() {
           }}
         />
       </div>
-      <p className="key-field-hint" aria-live="polite">
-        {LABEL[level]}.
-        {error !== null &&
-          " Off in system settings: allow notifications for Vibe Work in the system settings, then try again."}
-      </p>
+      {error !== null && (
+        <p className="key-field-hint ui-help" aria-live="polite">
+          Off in system settings: allow notifications for Vibe Work in the system settings, then try
+          again.
+        </p>
+      )}
     </section>
   );
 }

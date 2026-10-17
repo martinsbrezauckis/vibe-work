@@ -108,10 +108,6 @@
 .pj-btn:hover:not(:disabled) {
   background: var(--hover);
 }
-.pj-btn:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
 .pj-btn.primary {
   background: var(--primary-bg);
   color: var(--primary-fg);
@@ -121,10 +117,6 @@
   height: 26px;
   padding: 0 9px;
   font-size: var(--text-12);
-}
-.pj-error {
-  color: var(--red);
-  font-size: var(--text-13);
 }
 
 /* "Needs you": the one loud element of the page. */
@@ -177,7 +169,7 @@
   font: inherit;
   cursor: pointer;
 }
-.pj-needs li button:hover {
+.pj-needs li button:hover:where(:not(:disabled)) {
   background: color-mix(in srgb, var(--orange) 12%, transparent);
 }
 .pj-needs .what {
@@ -235,7 +227,7 @@
   cursor: pointer;
   min-width: 0;
 }
-.pj-card:hover {
+.pj-card:hover:where(:not(:disabled)) {
   border-color: var(--line-3);
   background: color-mix(in srgb, var(--panel) 70%, var(--raised));
 }
@@ -269,7 +261,7 @@
   color: var(--text-2);
   cursor: pointer;
 }
-.pj-actions:hover,
+.pj-actions:hover:where(:not(:disabled)),
 .pj-actions[aria-expanded="true"] {
   background: var(--hover);
   color: var(--text);
@@ -486,7 +478,9 @@
   max-width: 100%;
   height: auto;
   min-height: 26px;
+  padding-block: var(--space-control-gap);
   white-space: normal;
+  text-wrap: balance;
   line-height: 1.2;
   text-align: center;
 }
@@ -538,7 +532,7 @@
   border: 0;
   cursor: pointer;
 }
-.pj-x:hover {
+.pj-x:hover:where(:not(:disabled)) {
   background: var(--hover);
 }
 .pj-dh p {

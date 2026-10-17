@@ -15,207 +15,220 @@ import type { DocumentView, DocumentRefusal, DocumentSource } from "./documents"
 import type { DictationUpdate } from "./speech";
 import type { InstallProgress } from "./market";
 import type { InstallView } from "./vibe";
-export type CoreEvent = { "type": "snapshot", 
+import type { SecretScanView } from "./secret_scan";
+export type CoreEvent = { "type": "secretScan",
+/**
+ * Complete value-free scanner view.
+ */
+view: SecretScanView, } | { "type": "snapshot",
 /**
  * The session.
  */
-snapshot: SessionSnapshot, } | { "type": "change", 
+snapshot: SessionSnapshot, } | { "type": "change",
 /**
  * The change.
  */
-change: SessionChange, } | { "type": "lagged", } | { "type": "server", 
+change: SessionChange, } | { "type": "lagged", } | { "type": "server",
 /**
  * New state.
  */
-status: ServerStatus, } | { "type": "worktreesChanged", } | { "type": "callbackOpened", 
+status: ServerStatus, } | { "type": "worktreesChanged", } | { "type": "gitBrowserChanged",
+/**
+ * Saved project id.
+ */
+projectId: string, } | { "type": "callbackOpened",
 /**
  * Session.
  */
-sessionId: string, 
+sessionId: string,
 /**
  * Callback id.
  */
-callbackId: string, 
+callbackId: string,
 /**
  * `approval`, `user_input`, `connector_auth` or a newer kind.
  */
-kind: string, 
+kind: string,
 /**
  * Set only for a subagent's card (its child session has no channel; the card came on the
  * parent's channel and the child's own state is not loaded): the parent session and Vibe's callback entry,
  * so the parent's view can show the card. Answer it with `answerCallback` naming the CHILD session.
  */
-subagent?: SubagentCard, } | { "type": "callbackAnswered", 
+subagent?: SubagentCard, } | { "type": "callbackAnswered",
 /**
  * Session.
  */
-sessionId: string, 
+sessionId: string,
 /**
  * Callback id.
  */
-callbackId: string, 
+callbackId: string,
 /**
  * The client that answered.
  */
-origin: Origin, } | { "type": "refused", 
+origin: Origin, } | { "type": "refused",
 /**
  * Who sent it.
  */
-origin: Origin, 
+origin: Origin,
 /**
  * The command (`call`, `startTurn`, ...).
  */
-command: string, 
+command: string,
 /**
  * The JSON-RPC method involved, when there is one.
  */
-method: string | null, 
+method: string | null,
 /**
  * Stable error code (see `ErrorCode`).
  */
-code: string, 
+code: string,
 /**
  * Why, without params values.
  */
-reason: string, } | { "type": "alert", 
+reason: string, } | { "type": "alert",
 /**
  * Session concerned, when there is one.
  */
-sessionId: string | null, 
+sessionId: string | null,
 /**
  * What happened.
  */
-kind: AlertKind, 
+kind: AlertKind,
 /**
  * Text for the UI.
  */
-message: string, } | { "type": "sessionStuck", 
+message: string, } | { "type": "sessionStuck",
 /**
  * Session.
  */
-sessionId: string, 
+sessionId: string,
 /**
  * True while stuck.
  */
-stuck: boolean, 
+stuck: boolean,
 /**
  * The session `continueInNewSession` started for it, when there is one.
  */
-continuedIn: string | null, } | { "type": "sessionHolder", 
+continuedIn: string | null, } | { "type": "sessionHolder",
 /**
  * The session.
  */
-sessionId: string, 
+sessionId: string,
 /**
  * The holding process's pid; `null`: free (or held by Vibe Work itself).
  */
-holderPid: number | null, } | { "type": "debugApi", 
+holderPid: number | null,
+/**
+ * `window` for an app lease, `terminal` for Vibe's native foreign holder.
+ */
+holderKind?: string, } | { "type": "debugApi",
 /**
  * New flag.
  */
-flag: DebugApiFlag, } | { "type": "keyNeeded", 
+flag: DebugApiFlag, } | { "type": "keyNeeded",
 /**
  * `unlock` or `setup`.
  */
-reason: string, } | { "type": "keyStatusChanged", } | { "type": "vibeInstall", 
+reason: string, } | { "type": "keyStatusChanged", } | { "type": "vibeInstall",
 /**
  * The whole install view.
  */
-view: InstallView, } | { "type": "rateLimits", 
+view: InstallView, } | { "type": "rateLimits",
 /**
  * What that answer said.
  */
-limits: RateLimitsView, } | { "type": "terminal", 
+limits: RateLimitsView, } | { "type": "terminal",
 /**
  * What happened.
  */
-event: TerminalEventView, } | { "type": "documentsAdded", 
+event: TerminalEventView, } | { "type": "documentsAdded",
 /**
  * Picker or drop.
  */
-via: DocumentSource, 
+via: DocumentSource,
 /**
  * Documents added.
  */
-added: Array<DocumentView>, 
+added: Array<DocumentView>,
 /**
  * Files not added, with the reason.
  */
-refused: Array<DocumentRefusal>, } | { "type": "documentChanged", 
+refused: Array<DocumentRefusal>, } | { "type": "documentChanged",
 /**
  * Its facts now.
  */
-document: DocumentView, } | { "type": "changesUpdated", 
+document: DocumentView, } | { "type": "changesUpdated",
 /**
  * Session.
  */
-sessionId: string, 
+sessionId: string,
 /**
  * Which view the session has now.
  */
-mode: ChangesMode, 
+mode: ChangesMode,
 /**
  * Changed files (git mode) or changed file entries (effects mode).
  */
-files: number, 
+files: number,
 /**
  * The new fingerprint.
  */
-fingerprint: string, } | { "type": "previewChanged", 
+fingerprint: string, } | { "type": "previewChanged",
 /**
  * The session.
  */
-sessionId: string | null, } | { "type": "previewShowRequested", 
+sessionId: string | null, } | { "type": "previewShowRequested",
 /**
  * The requesting session.
  */
-sessionId: string, } | { "type": "browserChanged", 
+sessionId: string, } | { "type": "browserChanged",
 /**
  * The session.
  */
-sessionId: string | null, } | { "type": "pagesChanged", 
+sessionId: string | null, } | { "type": "pagesChanged",
 /**
  * The session.
  */
-sessionId: string | null, } | { "type": "projectsChanged", } | { "type": "secretsChanged", } | { "type": "filesChanged", 
+sessionId: string | null, } | { "type": "projectsChanged", } | { "type": "secretsChanged", } | { "type": "filesChanged",
 /**
  * The session.
  */
-sessionId: string | null, } | { "type": "lineCommentsChanged", 
+sessionId: string | null, } | { "type": "lineCommentsChanged",
 /**
  * The session.
  */
-sessionId: string, } | { "type": "dictation", 
+sessionId: string, } | { "type": "dictation",
 /**
  * The stream (`speech` `start`).
  */
-streamId: string, 
+streamId: string,
 /**
  * What happened.
  */
-update: DictationUpdate, } | { "type": "connectorSignIn", 
+update: DictationUpdate, } | { "type": "connectorSignIn",
 /**
  * The server.
  */
-name: string, 
+name: string,
 /**
  * `signedIn`, `failed` or `cancelled`.
  */
-outcome: string, 
+outcome: string,
 /**
  * Vibe's reason when it failed (plain text), else `null`.
  */
-message: string | null, } | { "type": "marketInstall", 
+message: string | null, } | { "type": "marketInstall",
 /**
  * Where it is.
  */
 progress: InstallProgress, };
 
-export type SubagentCard = { 
+export type SubagentCard = {
 /**
  * The session whose subagent asks (the channel the card arrived on).
  */
-parentSessionId: string, 
+parentSessionId: string,
 /**
  * Vibe's callback entry (`callback/call` params' `callback`: id, title, detail, choices, state).
  */

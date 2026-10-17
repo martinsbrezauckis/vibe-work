@@ -52,6 +52,7 @@ export function DiffView({ diff, id }: { diff: FileDiff; id: string }): ReactEle
     : `+${String(diff.added)} −${String(diff.removed)}`;
   return (
     <div
+      data-testid="transcript.diff-view-div-surface-1"
       className="diff"
       role="region"
       aria-label={`Changes to ${baseName(diff.path) || "the file"}`}
@@ -68,6 +69,7 @@ export function DiffView({ diff, id }: { diff: FileDiff; id: string }): ReactEle
       ))}
       {hidden > 0 ? (
         <button
+          data-testid="transcript.diff-view-toggle"
           type="button"
           className="show-all-btn"
           aria-label="Show full diff"

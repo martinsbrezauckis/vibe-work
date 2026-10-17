@@ -37,6 +37,7 @@ mod native_focus;
 pub mod observe;
 pub mod output;
 mod page;
+mod postconditions;
 pub mod receipt;
 mod refs;
 pub mod scripts;

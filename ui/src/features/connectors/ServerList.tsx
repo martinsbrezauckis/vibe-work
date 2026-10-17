@@ -20,7 +20,12 @@ export function ServerList(): ReactElement {
     <section className="cgroup cservers" aria-labelledby="cservers-h">
       <div className="cgroup-head">
         <h3 id="cservers-h">Your MCP servers</h3>
-        <button type="button" className="tb-btn primary" onClick={() => actions?.showAdd(true)}>
+        <button
+          data-testid="connectors.server-list-show-add"
+          type="button"
+          className="tb-btn primary"
+          onClick={() => actions?.showAdd(true)}
+        >
           Add MCP server
         </button>
       </div>
@@ -34,8 +39,9 @@ export function ServerList(): ReactElement {
             const id = `s:${s.name}`;
             const tone = serverTone(s);
             return (
-              <li key={s.name}>
+              <li data-item-id={s.name} key={s.name}>
                 <button
+                  data-testid="connectors.server-list-select"
                   type="button"
                   className={`srow ${selected === id ? "sel" : ""}`}
                   aria-pressed={selected === id}

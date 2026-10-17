@@ -523,13 +523,18 @@ impl Pump {
                 new_session_id,
             } = change
             {
-                shared.channels.rebind(old_session_id, new_session_id);
+                let rebound = shared.channels.rebind(old_session_id, new_session_id);
                 let (shared, old, new) = (
                     shared.clone(),
                     old_session_id.clone(),
                     new_session_id.clone(),
                 );
                 self.handoffs.spawn(async move {
+                    if let Err(error) = rebound {
+                        tracing::warn!(%error, "session hand-off could not claim ownership");
+                        shared.channels.close(&old).await;
+                        return;
+                    }
                     crate::handoff::handed_off(&shared, &old, &new).await;
                 });
             }

@@ -5,13 +5,16 @@
  * Route actions (body `{action,...}`): `state` (default: the page's projects with their cards and health, the cards
  * by folder as before, the filter, the selection), `open`, `close`, `refresh`, `select {projectId|null}`,
  * `filter {status}`, `query {text}`, `openHandbook {projectId, path?}`, `start {projectId}`, `migrate {projectId}`,
- * `newSession {projectId}`, `reveal {projectId}`, `chooseFolder {projectId, folder?}` (without `folder`
- * the native picker, `null` clears), `newProject {name}`. A project is named by `projectId`; `project`
+ * `newSession {projectId, folder?}` (for a project without a main folder `folder` names where to run, a path, or it is
+ * `invalidParams`: the native folder picker cannot be answered remotely), `reveal {projectId}`, `chooseFolder {projectId, folder}` (`folder` is required: a path, or
+ * `null` to clear), `newProject {name}`. A project is named by `projectId`; `project`
  * (a main folder, the key) is still accepted and means the first project with that main folder.
  * Depends on: state/projects, model.ts, state/uiControl, AppContext types. Called by: main.tsx, UI tests.
  * Invariants: bodies are validated (`invalidParams`); while a route request is served every core call carries the
  * Debug API origin (`uiControl` lowering); the route never writes a file.
  */
+import { term } from "../../vocabulary";
+import { startFolderFor } from "../../state/projectStartFolder";
 import type { StatusFilter } from "../../state/projects";
 import { UiControlError } from "../../state/uiControl";
 import type { App } from "../shell/AppContext";
@@ -91,7 +94,7 @@ export function registerProjects(app: App): () => void {
     app.commands.register({
       id: "projects.open",
       label: "Open the Projects overview",
-      section: "Project",
+      section: term("workNames", "projectTab").name,
       keywords: "projects overview handbook plans workspace",
       run: () => {
         app.connectors?.actions.close();
@@ -144,9 +147,14 @@ export function registerProjects(app: App): () => void {
         case "migrate":
           await projects.migrate(project());
           return { session: app.shell.store.get().selected, ...state() };
-        case "newSession":
-          await projects.newSession(project());
+        case "newSession": {
+          const id = project();
+          // A project without a main folder would open the native folder picker, which no remote caller can answer:
+          // the request names the folder instead (`folder`), or is refused by name.
+          const folder = await startFolderFor(app.core, projects.groups, id, input["folder"]);
+          await projects.newSession(id, folder);
           return { session: app.shell.store.get().selected, ...state() };
+        }
         case "reveal":
           await projects.reveal(project());
           return state();

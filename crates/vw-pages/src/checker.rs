@@ -247,7 +247,7 @@ impl VisualChecker {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .insert(server.port());
-        let host = Url::parse(&format!("{}/{}/", server.origin(), server.check_prefix()))
+        let host = Url::parse(&format!("{}{}/", server.base_url(), server.check_prefix()))
             .map_err(|e| PagesError::Other(e.to_string()))?;
         let before = *self.loads.borrow();
         let mut loads = self.loads.subscribe();

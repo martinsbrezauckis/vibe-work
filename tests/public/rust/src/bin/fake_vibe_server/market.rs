@@ -15,9 +15,15 @@ use serde_json::{Value, json};
 /// The methods this module answers.
 pub const HANDLES: &[&str] = &["plugin_catalog/read", "plugin/reload", "skills/installed"];
 
+#[derive(Clone)]
+struct Plugin {
+    name: String,
+    skills: Vec<String>,
+    servers: Vec<String>,
+}
 #[derive(Default)]
 struct World {
-    pinned: BTreeMap<String, Vec<(String, Vec<String>)>>,
+    pinned: BTreeMap<String, Vec<Plugin>>,
 }
 
 fn world() -> &'static Mutex<World> {
@@ -26,7 +32,7 @@ fn world() -> &'static Mutex<World> {
 }
 
 /// The user plugins on disk now: (name, skill names).
-fn scan() -> Vec<(String, Vec<String>)> {
+fn scan() -> Vec<Plugin> {
     let Some(home) = std::env::var_os("VIBE_HOME") else {
         return Vec::new();
     };
@@ -49,15 +55,25 @@ fn scan() -> Vec<(String, Vec<String>)> {
             .collect();
         skills.sort();
         let namespace = name.replace('-', "_");
-        out.push((
+        let servers = std::fs::read_to_string(item.path().join("mcp.json"))
+            .ok()
+            .and_then(|text| serde_json::from_str::<Value>(&text).ok())
+            .and_then(|config| {
+                config["mcpServers"]
+                    .as_object()
+                    .map(|servers| servers.keys().cloned().collect())
+            })
+            .unwrap_or_default();
+        out.push(Plugin {
             name,
-            skills
+            skills: skills
                 .into_iter()
                 .map(|s| format!("{namespace}:{s}"))
                 .collect(),
-        ));
+            servers,
+        });
     }
-    out.sort();
+    out.sort_by(|a, b| a.name.cmp(&b.name));
     out
 }
 
@@ -66,23 +82,75 @@ pub fn call(method: &str, params: &Value) -> Value {
     let sid = params["sessionId"].as_str().unwrap_or_default().to_owned();
     let mut w = world().lock().unwrap();
     if method == "plugin/reload" {
+        if std::env::var_os("VIBE_HOME").is_some_and(|home| {
+            std::path::Path::new(&home)
+                .join("refuse-plugin-reload")
+                .exists()
+        }) {
+            return json!({"__error":"invalid_request", "__message":"cannot re-pin the plugins of a non-quiescent session"});
+        }
         w.pinned.insert(sid, scan());
         return json!({});
     }
     let pinned = w.pinned.entry(sid).or_insert_with(scan).clone();
     match method {
         "plugin_catalog/read" => json!({"plugins": {
-            "plugins": pinned.iter().map(|(name, skills)| json!({
+            "plugins": pinned.iter().map(|plugin| { let name = &plugin.name; json!({
                 "name": name, "version": "1", "sourceFormat": "native", "manifestDigest": "fake",
                 "description": "", "scope": "global",
-                "components": skills.iter().map(|s| json!({"kind": "skill", "name": s, "status": null})).collect::<Vec<_>>(),
-                "drifted": 0})).collect::<Vec<_>>(),
+                "pinnedRoot": std::env::var_os("VIBE_HOME").map(|home| std::path::Path::new(&home).join("plugins").join(name)),
+                "installedRoot": std::env::var_os("VIBE_HOME").map(|home| std::path::Path::new(&home).join("plugins").join(name)),
+                "components": components(plugin),
+                "drifted": 0}) }).collect::<Vec<_>>(),
             "dropped": [{"file": "/home/x/.vibe-home/plugins/broken/plugin.json", "message": "Failed to load plugin manifest"}]}}),
         "skills/installed" => {
-            json!({"skills": pinned.iter().flat_map(|(_, skills)| skills.iter()).map(|s| json!({
+            json!({"skills": pinned.iter().flat_map(|plugin| plugin.skills.iter()).map(|s| json!({
             "name": s, "description": format!("{s} skill"), "prompt": "", "source": "plugin", "scope": "global",
             "enabled": true, "locked": true})).collect::<Vec<_>>()})
         }
         _ => json!({"__error": "method_not_found"}),
     }
+}
+
+fn components(plugin: &Plugin) -> Vec<Value> {
+    let mut components: Vec<_> = plugin
+        .skills
+        .iter()
+        .map(|s| json!({"kind":"skill", "name":s, "status":null}))
+        .collect();
+    for server in &plugin.servers {
+        components.push(json!({"kind":"mcp_server", "name":server, "status":null}));
+        for i in 0..2 {
+            components.push(json!({"kind":"tool", "name":format!("plugin_{}_{}.tool{i}", plugin.name.replace('-', "_"), server), "status":null}));
+        }
+    }
+    components
+}
+
+/// Records the actual folders at the instant the fake handles a loading request.
+pub fn record_load(method: &str) {
+    use std::io::Write as _;
+    if !matches!(
+        method,
+        "server/start" | "session/start" | "session/resume" | "plugin/reload" | "config/read"
+    ) {
+        return;
+    }
+    let Some(home) = std::env::var_os("VIBE_HOME") else {
+        return;
+    };
+    let home = std::path::Path::new(&home);
+    let folders: Vec<_> = std::fs::read_dir(home.join("plugins"))
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter(|entry| entry.path().is_dir())
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .collect();
+    let mut log = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(home.join("plugin-loads.jsonl"))
+        .unwrap();
+    writeln!(log, "{}", json!({"method": method, "folders": folders})).unwrap();
 }

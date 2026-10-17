@@ -42,6 +42,8 @@ export interface CommitDialog {
   /** Paths left out (unticked). */
   excluded: readonly string[];
   runHooks: boolean;
+  authorName: string;
+  authorEmail: string;
 }
 
 /** The pull request dialog. */
@@ -81,6 +83,7 @@ export interface GitUi {
   loadError: Readonly<Record<string, string | null>>;
   /** What the last commit printed (hook output). */
   output: Readonly<Record<string, string>>;
+  committed: Readonly<Record<string, { repo: string; commit: string }>>;
 }
 
 const initial: GitUi = {
@@ -92,6 +95,7 @@ const initial: GitUi = {
   notice: {},
   loadError: {},
   output: {},
+  committed: {},
 };
 
 function put<T>(map: Readonly<Record<string, T>>, key: string, value: T): Record<string, T> {
@@ -113,13 +117,17 @@ export function createGit(deps: {
     store.get().selected[id] ?? store.get().status[id]?.repo ?? undefined;
   const isCurrent = (id: string, repo: string) => currentRepo(id) === repo;
   async function run(
-    request: GitRequest,
+    request: Exclude<GitRequest, { op: "identity" | "setIdentity" }>,
     repo = currentRepo(request.sessionId),
+    origin?: "window",
   ): Promise<GitResult> {
-    const result: CommandResult = await core.run({
-      type: "git",
-      request: repo === undefined ? request : { ...request, repo },
-    });
+    const result: CommandResult = await core.run(
+      {
+        type: "git",
+        request: repo === undefined ? request : { ...request, repo },
+      },
+      origin === undefined ? undefined : { origin },
+    );
     if (result.type !== "git") throw new Error(`unexpected answer ${result.type}`);
     return result.result;
   }
@@ -155,7 +163,7 @@ export function createGit(deps: {
     store.set((s) => {
       const pruned = pruneSessions(
         s,
-        ["status", "selected", "cards", "busy", "notice", "loadError", "output"],
+        ["status", "selected", "cards", "busy", "notice", "loadError", "output", "committed"],
         ids,
       );
       return pruned.dialog !== null && ids.includes(pruned.dialog.sessionId)
@@ -165,6 +173,7 @@ export function createGit(deps: {
   });
   const pending: Record<string, ReturnType<typeof setTimeout>> = {};
   const loadVersion: Record<string, number> = {};
+  const appliedVersion: Record<string, number> = {};
   const pendingSelection: Record<string, string | undefined> = {};
   const selectionPromise: Record<string, Promise<void> | undefined> = {};
   const stopListening = core.listen((event) => {
@@ -206,6 +215,7 @@ export function createGit(deps: {
           if (result.kind !== "status" || result.status.repo !== repo)
             throw new Error("Repository status unavailable.");
           if (loadVersion[sessionId] !== version) return;
+          appliedVersion[sessionId] = version;
           store.set((s) => ({
             ...s,
             selected: put(s.selected, sessionId, repo),
@@ -229,16 +239,16 @@ export function createGit(deps: {
     },
 
     /** Reads the branch bar of `sessionId`. */
-    async load(sessionId: string): Promise<void> {
+    async load(sessionId: string, origin?: "window"): Promise<void> {
       if (pendingSelection[sessionId] !== undefined) return;
       const repo = currentRepo(sessionId);
       const version = (loadVersion[sessionId] ?? 0) + 1;
       loadVersion[sessionId] = version;
       try {
-        const result = await run({ op: "status", sessionId }, repo);
+        const result = await run({ op: "status", sessionId }, repo, origin);
         if (result.kind === "status")
           store.set((s) =>
-            loadVersion[sessionId] === version &&
+            version >= (appliedVersion[sessionId] ?? 0) &&
             (repo === undefined || s.selected[sessionId] === repo)
               ? {
                   ...s,
@@ -260,6 +270,8 @@ export function createGit(deps: {
                 }
               : s,
           );
+        if (result.kind === "status" && (repo === undefined || currentRepo(sessionId) === repo))
+          appliedVersion[sessionId] = Math.max(appliedVersion[sessionId] ?? 0, version);
       } catch (thrown) {
         if (loadVersion[sessionId] === version && store.get().status[sessionId] !== undefined) {
           const message = toCallError(thrown).error.message;
@@ -292,6 +304,8 @@ export function createGit(deps: {
             messageNote: null,
             excluded: [],
             runHooks: plan.runHooks,
+            authorName: plan.authorName ?? "",
+            authorEmail: plan.authorEmail ?? "",
           },
         }));
         await controller.draft();
@@ -330,7 +344,11 @@ export function createGit(deps: {
     },
 
     /** Edits the open Commit dialog. */
-    editCommit(change: Partial<Pick<CommitDialog, "message" | "excluded" | "runHooks">>): void {
+    editCommit(
+      change: Partial<
+        Pick<CommitDialog, "message" | "excluded" | "runHooks" | "authorName" | "authorEmail">
+      >,
+    ): void {
       store.set((s) => {
         if (s.dialog?.kind !== "commit") return s;
         const typed = change.message !== undefined ? { messageFrom: "user" as const } : {};
@@ -353,6 +371,11 @@ export function createGit(deps: {
             branch: d.plan.branch,
             expectedHead: d.plan.head,
             runHooks: d.runHooks,
+            ...(d.plan.authorProblem === null
+              ? {}
+              : {
+                  identity: { name: d.authorName, email: d.authorEmail },
+                }),
           },
           d.repo,
         );
@@ -362,6 +385,7 @@ export function createGit(deps: {
           ...s,
           dialog: null,
           output: put(s.output, d.sessionId, result.output),
+          committed: put(s.committed, d.sessionId, { repo: d.repo, commit: result.commit }),
         }));
         // The bar's counts first, then the result line: they never disagree.
         await controller.load(d.sessionId);

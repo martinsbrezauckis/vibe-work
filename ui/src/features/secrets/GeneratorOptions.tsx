@@ -63,6 +63,7 @@ export function GeneratorOptions(props: {
       <div className="key-actions">
         {props.children}
         <button
+          data-testid="secrets.generator-options-set-disclosure-expanded"
           type="button"
           className="tb-btn"
           aria-expanded={expanded}
@@ -80,6 +81,7 @@ export function GeneratorOptions(props: {
             <label htmlFor={lengthId}>Length</label>
             <div className="key-field-row">
               <input
+                data-testid="secrets.generator-options-set-options"
                 id={lengthId}
                 type="number"
                 min={8}
@@ -94,8 +96,9 @@ export function GeneratorOptions(props: {
           </div>
           <div className="key-actions">
             {(["uppercase", "digits", "symbols"] as const).map((key) => (
-              <label className="key-check" key={key}>
+              <label data-item-id={key} className="key-check" key={key}>
                 <input
+                  data-testid="secrets.generator-options-set-options-2"
                   type="checkbox"
                   checked={options[key]}
                   onChange={(event) => {

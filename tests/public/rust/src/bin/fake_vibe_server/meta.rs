@@ -23,6 +23,8 @@ pub struct Options {
     pub long_notification_error: bool,
     /// `--unstored-metadata-miss`: metadata calls acknowledge a never-run session without storing it.
     pub unstored_metadata_miss: bool,
+    /// Persist archive metadata without publishing it, exercising the removal fallback read.
+    pub archive_no_notify: bool,
     pub seed_path: Option<String>,
     pub single_attached: bool,
     pub turn_delay_ms: u64,
@@ -38,6 +40,10 @@ pub struct Options {
     pub subagents_rule: bool,
     /// `--subagents-reject`: with the rule on, `config/write` answers `rejected: true` and saves nothing.
     pub subagents_reject: bool,
+    #[cfg(feature = "fixture-extensions")]
+    /// `--proxy-echo-error`: `config/proxy/write` answers `invalid_params` with a text that repeats the first value sent
+    /// (as Vibe's own errors do), so a test sees the core scrub it.
+    pub proxy_echo_error: bool,
     /// `--delete-faults N`: the first N `session/delete` calls fail with `internal_error`.
     pub delete_faults: u32,
     /// `--log-context PATH` (the fixture): one JSON line per queued item that carries context entries.
@@ -120,6 +126,8 @@ impl Script {
             }
         }
         self.persist_now();
+        #[cfg(feature = "fixture-extensions")]
+        self.reconfigure_mode_children(sid, name);
         json!({"runtime": self.runtime(sid), "status": "applied"})
     }
 

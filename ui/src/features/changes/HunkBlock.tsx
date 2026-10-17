@@ -5,6 +5,7 @@
  * Invariants: buttons only call the store; while the session is busy they are disabled (one action at a
  * time, so a second click never acts on a diff that is about to change).
  */
+import { Button } from "../../components/Controls";
 import { type ReactElement, useState } from "react";
 
 import { Icon } from "../../components/Icon";
@@ -39,6 +40,7 @@ export function HunkBlock(props: {
   };
   return (
     <div
+      data-item-id={props.hunk.id}
       className={`hunk${leaving ? " leaving" : ""}`}
       data-hunk-id={hunk.id}
       role="region"
@@ -50,6 +52,7 @@ export function HunkBlock(props: {
         {hunkActions(file) && props.readOnly !== true && (
           <span className="hunk-acts">
             <button
+              data-testid="changes.hunk-block-act"
               type="button"
               className="mini"
               disabled={busy}
@@ -62,9 +65,11 @@ export function HunkBlock(props: {
               <Icon name="check" size={14} />
               Keep
             </button>
-            <button
+            <Button
+              data-testid="changes.hunk-block-act-2"
               type="button"
-              className="mini"
+              small
+              variant="danger"
               disabled={busy}
               data-action="revert-hunk"
               aria-label={`Revert ${label}`}
@@ -74,7 +79,7 @@ export function HunkBlock(props: {
             >
               <Icon name="undo-2" size={14} />
               Revert
-            </button>
+            </Button>
           </span>
         )}
       </div>

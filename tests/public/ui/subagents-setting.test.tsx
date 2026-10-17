@@ -203,7 +203,7 @@ describe("Settings: the Subagents switch", () => {
     );
     expect(
       within(row("subagents")).getByText(
-        "Saved for new chats. Chats you already have open keep the setting they started with.",
+        "Saved for new chats. Sessions you already have open keep the setting they started with.",
       ),
     ).toBeInTheDocument();
     expect(sw).toHaveAttribute("aria-checked", "false");

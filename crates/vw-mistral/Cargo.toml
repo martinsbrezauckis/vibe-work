@@ -24,9 +24,14 @@ base64 = "0.23"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
+# Warnings about a proxy or certificate setting that cannot be applied (never with a sign-in or key in them).
+tracing = "0.1"
 tokio = { version = "1.53", features = ["time", "net", "sync", "macros"] }
 # The key-bearing header is built in a zeroized string.
 zeroize = "1.8"
+# Authenticates the exact saved network record using a key held in the existing vault.
+hmac = "0.12.1"
+sha2 = "0.10.9"
 # Voxtral realtime transcription is a WebSocket. Only the handshake and framing: TLS is
 # opened by us with the TLS stack the rest of the crate already uses (below), so no second TLS stack and
 # no aws-lc. 0.30.0 checked on crates.io.

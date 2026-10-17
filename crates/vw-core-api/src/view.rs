@@ -27,6 +27,10 @@ pub struct SessionSnapshot {
     pub session_id: String,
     /// The full `PublicSessionState` as wire JSON.
     pub state: Value,
+    /// The resolved access mode for display, including the app's trusted record before attachment.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
+    pub access_mode: Option<String>,
     /// Highest event id applied.
     #[cfg_attr(feature = "ts", ts(type = "number"))]
     pub last_event_id: u64,
@@ -45,6 +49,7 @@ impl From<SessionView> for SessionSnapshot {
         Self {
             session_id: v.session_id,
             state: v.state,
+            access_mode: None,
             last_event_id: v.last_event_id,
             local_only: v.local_only,
             resync_pending: v.resync_pending,
@@ -74,6 +79,9 @@ pub struct AnomalyCountsView {
     /// Patches that could not be applied (a resync followed).
     #[cfg_attr(feature = "ts", ts(type = "number"))]
     pub patch_failures: u64,
+    /// Failed patches covered by a clean session read; excluded from significant anomalies.
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
+    pub recovered_patch_failures: u64,
     /// Notifications missing a field the reducer needs.
     #[cfg_attr(feature = "ts", ts(type = "number"))]
     pub malformed_payloads: u64,
@@ -93,6 +101,7 @@ impl From<AnomalyCounts> for AnomalyCountsView {
             reannounced_entries: c.reannounced_entries,
             completed_entry_updates: c.completed_entry_updates,
             patch_failures: c.patch_failures,
+            recovered_patch_failures: c.recovered_patch_failures,
             malformed_payloads: c.malformed_payloads,
             inconsistent_envelopes: c.inconsistent_envelopes,
             interrupted_turns: c.interrupted_turns,
@@ -121,6 +130,7 @@ fn kind_name(kind: AnomalyKind) -> &'static str {
         AnomalyKind::ReannouncedEntry => "reannouncedEntry",
         AnomalyKind::CompletedEntryUpdated => "completedEntryUpdated",
         AnomalyKind::PatchFailed => "patchFailed",
+        AnomalyKind::PatchRecovered => "patchRecovered",
         AnomalyKind::MalformedPayload => "malformedPayload",
         AnomalyKind::InconsistentEnvelope => "inconsistentEnvelope",
         AnomalyKind::InterruptedTurn => "interruptedTurn",
@@ -160,6 +170,10 @@ pub struct AnomalyReport {
 pub struct SessionRowView {
     /// The `PublicSession` object.
     pub session: Value,
+    /// The resolved access mode for display before the session has a runtime.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
+    pub access_mode: Option<String>,
     /// The server's listing does not contain it yet.
     pub local_only: bool,
 }
@@ -168,6 +182,7 @@ impl From<SessionRow> for SessionRowView {
     fn from(r: SessionRow) -> Self {
         Self {
             session: r.session,
+            access_mode: None,
             local_only: r.local_only,
         }
     }

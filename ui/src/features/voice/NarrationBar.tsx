@@ -34,6 +34,7 @@ export function NarrationBar(): ReactElement | null {
       {phase !== "idle" ? (
         <>
           <button
+            data-testid="voice.narration-bar-skip"
             type="button"
             className="ibtn"
             aria-label="Skip this narration"
@@ -45,6 +46,7 @@ export function NarrationBar(): ReactElement | null {
             <Icon name="skip-forward" size={14} />
           </button>
           <button
+            data-testid="voice.narration-bar-stop-all"
             type="button"
             className="ibtn"
             aria-label="Stop narration and clear queue"

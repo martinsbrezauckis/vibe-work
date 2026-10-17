@@ -1,0 +1,26 @@
+{
+  "method": "skills/detail",
+  "params": {
+    "sessionId": "session-skills",
+    "skillId": "skill-project-review",
+    "version": 4
+  },
+  "result": {
+    "detail": {
+      "name": "review",
+      "skillId": "skill-project-review",
+      "version": 4,
+      "body": "# Review",
+      "description": "",
+      "createdBy": "",
+      "createdAt": "",
+      "lastModifiedAt": "",
+      "sharingScope": "",
+      "latestVersion": 0,
+      "versionCreatedAt": "",
+      "aliases": [],
+      "notes": ""
+    },
+    "body": null
+  }
+}

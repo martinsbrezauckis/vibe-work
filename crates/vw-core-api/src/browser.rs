@@ -381,9 +381,11 @@ impl Core {
                     state: browser_state(shared, &session_id)?,
                 }
             }
-            BrowserRequest::Annotate { session_id, mode } => {
-                annotate_request(shared, &session_id, mode.as_deref()).await?
-            }
+            BrowserRequest::Annotate {
+                session_id,
+                mode,
+                target,
+            } => annotate_request(shared, &session_id, mode.as_deref(), target.as_ref()).await?,
             BrowserRequest::CheckAnnotations {
                 session_id,
                 items,
@@ -543,6 +545,7 @@ async fn annotate_request(
     shared: &Shared,
     session_id: &str,
     mode: Option<&str>,
+    target: Option<&crate::preview_view::PickTarget>,
 ) -> Result<BrowserResult, CoreError> {
     let denied = |text: String| CoreError::new(ErrorCode::Denied, text);
     let service = &hub(shared)?.service;
@@ -557,8 +560,18 @@ async fn annotate_request(
     let page = service
         .page_accessor(session_id)
         .ok_or_else(|| denied(vw_browser::NOTHING_OPEN.to_owned()))?;
-    let annotation = annotate::annotate(service, &page, session_id, mode == Some("box"))
-        .await
-        .map_err(|e| CoreError::new(ErrorCode::InvalidParams, e))?;
+    // A named target (the Debug API's way: nobody points) is checked here too; the window's pick has none.
+    let named = target
+        .map(|target| crate::preview_pick::annotate_target(mode, Some(target)))
+        .transpose()?;
+    let annotation = annotate::annotate(
+        service,
+        &page,
+        session_id,
+        mode == Some("box"),
+        named.as_ref(),
+    )
+    .await
+    .map_err(|e| CoreError::new(ErrorCode::InvalidParams, e))?;
     Ok(BrowserResult::Annotation { annotation })
 }

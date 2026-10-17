@@ -39,8 +39,8 @@ export const NoticeRow = memo(function NoticeRow({ entry }: { entry: Obj }): Rea
 const CHECKPOINT_TEXT: Record<string, string> = {
   compaction: "Context compacted",
   resume: "Session resumed",
-  clear: "New conversation started",
-  rewind: "Conversation rewound",
+  clear: "New session started",
+  rewind: "Session rewound",
   agent_change: `${TEXT.accessMode} changed`,
 };
 

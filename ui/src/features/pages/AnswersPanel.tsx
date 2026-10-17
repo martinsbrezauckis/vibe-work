@@ -7,7 +7,7 @@
  * Invariants: renders only; questions and option labels are page text shown as plain text; every change calls
  * `answer` (the core checks it against the page file); rank moves are buttons, so they work from the keyboard.
  */
-import { type ReactElement, useState } from "react";
+import { type ReactElement, memo, useState } from "react";
 
 import { Selector } from "../../components/Selector";
 import type { AnswerValue, InputAnswer, PageAnswers } from "../../protocol/core";
@@ -33,8 +33,9 @@ function TextAnswer({ item, answer }: { item: InputAnswer; answer: Answer }): Re
   const [text, setText] = useState(stored);
   const id = `hb-answer-${item.input.id}`;
   return (
-    <div className="pages-answer-text">
+    <div data-item-id={item.input.id} className="pages-answer-text">
       <textarea
+        data-testid="pages.answers-panel-set-text"
         id={id}
         aria-label={item.input.question || item.input.id}
         value={text}
@@ -44,6 +45,7 @@ function TextAnswer({ item, answer }: { item: InputAnswer; answer: Answer }): Re
         }}
       />
       <button
+        data-testid="pages.answers-panel-answer"
         type="button"
         className="pages-btn"
         disabled={text.trim() === stored.trim()}
@@ -70,9 +72,10 @@ function Options({ item, answer }: { item: InputAnswer; answer: Answer }): React
     return (
       <ol className="pages-rank" aria-label={`${input.question || input.id}: order`}>
         {on.map((id, index) => (
-          <li key={id} data-option={id}>
+          <li data-item-id={`${input.id}:${id}`} key={id} data-option={id}>
             <span>{labelOf(item, id)}</span>
             <button
+              data-testid="pages.answers-panel-send"
               type="button"
               className="ibtn"
               aria-label={`Move “${labelOf(item, id)}” up`}
@@ -90,6 +93,7 @@ function Options({ item, answer }: { item: InputAnswer; answer: Answer }): React
               ↑
             </button>
             <button
+              data-testid="pages.answers-panel-send-2"
               type="button"
               className="ibtn"
               aria-label={`Move “${labelOf(item, id)}” down`}
@@ -114,6 +118,8 @@ function Options({ item, answer }: { item: InputAnswer; answer: Answer }): React
   if (input.kind === "choice") {
     return (
       <Selector
+        testId="pages.answers-panel-send-3"
+        itemId={input.id}
         label={input.question || input.id}
         value={on[0] ?? ""}
         options={[
@@ -129,9 +135,10 @@ function Options({ item, answer }: { item: InputAnswer; answer: Answer }): React
   return (
     <ul className="pages-options" role="group" aria-label={input.question || input.id}>
       {input.options.map((option) => (
-        <li key={option.id}>
+        <li data-item-id={`${input.id}:${option.id}`} key={option.id}>
           <label>
             <input
+              data-testid="pages.answers-panel-send-4"
               type="checkbox"
               name={`hb-${input.id}`}
               data-option={option.id}
@@ -154,11 +161,22 @@ function Options({ item, answer }: { item: InputAnswer; answer: Answer }): React
   );
 }
 
-function InputBlock({ item, answer }: { item: InputAnswer; answer: Answer }): ReactElement {
+const InputBlock = memo(function InputBlock({
+  item,
+  answer,
+}: {
+  item: InputAnswer;
+  answer: Answer;
+}): ReactElement {
   const { input } = item;
   const known = ["choice", "checklist", "rank", "text"].includes(input.kind);
   return (
-    <li className="pages-input" data-input={input.id} data-kind={input.kind}>
+    <li
+      data-item-id={item.input.id}
+      className="pages-input"
+      data-input={input.id}
+      data-kind={input.kind}
+    >
       <span className="pages-input-q">{input.question || input.id}</span>
       {!known ? (
         <span className="pages-note">
@@ -175,6 +193,7 @@ function InputBlock({ item, answer }: { item: InputAnswer; answer: Answer }): Re
       )}
       {item.answer !== null && input.kind !== "text" && (
         <button
+          data-testid="pages.answers-panel-answer-2"
           type="button"
           className="pages-btn"
           onClick={() => {
@@ -186,7 +205,7 @@ function InputBlock({ item, answer }: { item: InputAnswer; answer: Answer }): Re
       )}
     </li>
   );
-}
+});
 
 /** The panel for `page` (the shown page's inputs and answers). */
 export function AnswersPanel({
@@ -202,7 +221,7 @@ export function AnswersPanel({
   return (
     <section className="pages-answers" aria-label="Your input on this page">
       <details open>
-        <summary>
+        <summary data-testid="pages.answers-panel-summary">
           This page asks for your input · {page.answered} of {total} answered
           {page.answered > 0 && page.unsent === 0 && " · sent to Vibe"}
         </summary>
@@ -219,6 +238,7 @@ export function AnswersPanel({
         )}
         <div className="pages-cbox-row">
           <button
+            data-testid="pages.answers-panel-pages-btn"
             type="button"
             className="pages-btn go"
             disabled={page.answered === 0 && page.detached.length === 0}

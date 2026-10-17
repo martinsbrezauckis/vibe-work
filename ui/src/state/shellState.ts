@@ -8,19 +8,21 @@
  * (`"new"` for the new-session view), closed by default; opening a tab adds it once and makes it
  * active; the list collapses for wide tabs unless the user pinned it (see `ListChoice`).
  */
+import { term } from "../vocabulary";
 
 /**
  * The side panel's tabs: Project (the project handbook), Plan (the plan checklist,
  * with steps beside the chat), Browser, Changes, Terminal, File (a file the chat mentions;
  * offered only once a file was opened).
  */
-export type TabKind = "project" | "plan" | "browser" | "changes" | "terminal" | "file";
+export type TabKind = "project" | "plan" | "browser" | "git" | "changes" | "terminal" | "file";
 
 /** Tab metadata: label and whether the tab wants room (collapses the list, compacts the chat). */
 export const TAB_META: Readonly<Record<TabKind, { label: string; size: "side" | "wide" }>> = {
-  project: { label: "Project", size: "side" },
+  project: { label: term("workNames", "projectTab").name, size: "side" },
   plan: { label: "Plan", size: "side" },
   browser: { label: "Browser", size: "wide" },
+  git: { label: "Git", size: "side" },
   changes: { label: "Changes", size: "wide" },
   terminal: { label: "Terminal", size: "wide" },
   file: { label: "File", size: "side" },
@@ -31,6 +33,7 @@ export const TAB_KINDS: readonly TabKind[] = [
   "project",
   "plan",
   "browser",
+  "git",
   "changes",
   "terminal",
   "file",

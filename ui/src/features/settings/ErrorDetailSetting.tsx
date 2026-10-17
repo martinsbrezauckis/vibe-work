@@ -22,6 +22,7 @@ export function ErrorDetailSetting() {
           </span>
         </span>
         <button
+          data-testid="settings.error-detail-setting-set-error-detail"
           type="button"
           className="switch"
           role="switch"

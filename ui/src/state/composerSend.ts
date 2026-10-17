@@ -11,8 +11,7 @@
  *   idempotency key when it is first sent. When the send fails in transport (`timeout`,
  *   `serverUnavailable`, `internal`), the keys are kept and reused if the SAME content is sent again.
  *   Vibe honours the key on `session/turn/enqueue` (a repeat answers the original
- *   item) but NOT on `turn/start` / `turn/steer` (unified 2.26.0: a repeat answers "a turn is already
- *   running" or starts a second turn), so before resending those the history is checked for our anchor
+ *   item). Before resending a `turn/start` / `turn/steer` the history is checked for our anchor
  *   id: if the message is there, the first send arrived and nothing is sent again. Any other failure
  *   drops the keys.
  * - `!cmd` runs only from text typed in the box, by the user or a Debug API client (`model/message`
@@ -180,8 +179,22 @@ export function createSendActions(deps: {
     if (intent.kind === "empty") return { ok: false, kind: "empty", message: "Nothing to send." };
     if (intent.kind === "shell") return shell(sessionId, intent.command, text, content.by);
     if (intent.kind === "command") {
+      if (
+        (content.literal && content.restoreOnFailure !== false) ||
+        context.length > 0 ||
+        images.length > 0
+      ) {
+        const message = content.literal
+          ? "This is an app command. Choose Use as my command before running it."
+          : "App commands cannot carry attachments. Remove the attachments before running it.";
+        if (content.restoreOnFailure !== false)
+          composer.restore(sessionId, text, context, images, content.literal, content.by);
+        composer.note(sessionId, message);
+        return { ok: false, kind: "command", message };
+      }
       const outcome = await runCommand(sessionId, intent.name, intent.args);
-      if (!outcome.ok) composer.restore(sessionId, text, [], [], false, content.by);
+      if (!outcome.ok && content.restoreOnFailure !== false)
+        composer.restore(sessionId, text, [], [], false, content.by);
       return outcome;
     }
     if (entry(sessionId)?.localOnly === true && !(await deps.beforeTurn(sessionId))) {
@@ -300,6 +313,8 @@ export function createSendActions(deps: {
      * the user's extra instructions.
      */
     async retry(sessionId: string, instructions: string): Promise<SendOutcome> {
+      const intent = classify(instructions, 0, 0);
+      if (intent.kind === "command") return runCommand(sessionId, intent.name, intent.args);
       const blocked = deps.keyGuard?.() ?? null;
       if (blocked !== null) return { ok: false, kind: "key", message: blocked };
       try {
@@ -315,6 +330,13 @@ export function createSendActions(deps: {
     },
     /** Saves an edited queued turn: its text blocks are replaced, everything else is kept. */
     async replaceQueued(sessionId: string, queueItemId: string, text: string): Promise<boolean> {
+      if (classify(text, 0, 0).kind === "command") {
+        composer.note(
+          sessionId,
+          "App commands run from the composer and cannot be queued. The queued message was kept.",
+        );
+        return false;
+      }
       const state = entry(sessionId)?.state;
       const queue = state?.["turnQueue"];
       const items =
@@ -329,7 +351,14 @@ export function createSendActions(deps: {
         : undefined;
       const old =
         typeof item === "object" && item !== null && !Array.isArray(item) ? item["entries"] : null;
-      if (!Array.isArray(old)) return false;
+      if (!Array.isArray(old)) {
+        composer.restoreQueueEdit(sessionId, text);
+        composer.note(
+          sessionId,
+          "This queued message is no longer waiting. Your edit is in the message box.",
+        );
+        return false;
+      }
       const entries = old.map((e) => {
         if (typeof e !== "object" || e === null || Array.isArray(e) || e["role"] !== "user")
           return e;
@@ -342,6 +371,7 @@ export function createSendActions(deps: {
       });
       try {
         await call("session/turn/queue/replace", { sessionId, queueItemId, entries });
+        composer.setEditing(null);
         return true;
       } catch (thrown) {
         fail(sessionId, "queue", toCallError(thrown));

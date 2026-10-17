@@ -6,7 +6,8 @@
 //! check the branch name and that neither the branch nor the folder name is taken; ask the native dialog when
 //! the window starts in a folder that was not picked (below); create the branch at the base (create-only,
 //! hardened runner); `session/start` with `agentConfig.worktree = {kind: "create", branch, name}` (Vibe
-//! checks the existing branch out and never fetches); write the record. A failed start deletes the branch
+//! checks the existing branch out and never fetches); write the record. A failed record retains recovery
+//! metadata and archives the session if possible, keeping its copy and branch. A failed start deletes the branch
 //! again (only while it is still at the base). Once the copy exists, inspect package file names at its root
 //! and return a one-line setup hint; the first turn gets a fresh hint through [`Core::first_turn_setup`].
 //!
@@ -203,6 +204,63 @@ impl Core {
         }
     }
 
+    /// A session already exists: retain ownership, attempt a non-destructive archive and report its
+    /// real ID/path. A record error never grants permission to delete the user's copy or branch.
+    async fn recover_failed_copy(
+        &self,
+        origin: Origin,
+        records: &vw_worktrees::Records,
+        record: &Record,
+        cause: vw_worktrees::WorktreeError,
+    ) -> CoreError {
+        let _ = records.recover(record);
+        let path = self.wait_for_copy(&record.session_id).await;
+        let archive = self
+            .session_call(
+                origin,
+                "session/archive",
+                json!({
+                    "sessionId": record.session_id, "archived": true
+                }),
+            )
+            .await;
+        // The archive updates recovery metadata as well. Check that its latest state is persisted,
+        // so a second write failure is never presented as durable recovery.
+        let durable = records
+            .get(&record.session_id)
+            .is_some_and(|current| records.recover(&current).is_ok());
+        let location = path.as_ref().map_or_else(
+            || {
+                format!(
+                    "pending copy on branch {:?} in {}",
+                    record.branch,
+                    record.repo_root.display()
+                )
+            },
+            |path| path.display().to_string(),
+        );
+        self.shared
+            .emit(crate::event::CoreEvent::WorktreesChanged {});
+        CoreError::new(
+            ErrorCode::Internal,
+            format!(
+                "The copy record could not be saved: {cause}. Session {} and copy {} were kept; review it in Leftover copies. {}{}",
+                record.session_id,
+                location,
+                if durable {
+                    "Recovery metadata was saved separately."
+                } else {
+                    "Recovery metadata is available only for this run; keep the session ID and copy path before quitting."
+                },
+                if archive.is_err() {
+                    " The archive did not finish; Review checks whether the session still uses the copy."
+                } else {
+                    ""
+                },
+            ),
+        )
+    }
+
     /// Copies the `.worktreeinclude` files of `main_root` into the new copy's folder. The folder is
     /// the one git lists for our branch (never a path from the repository).
     /// Every problem is in the returned report; nothing here fails the start.
@@ -351,14 +409,12 @@ impl Core {
             }
         };
         let main_root = planned.main_root.clone();
-        records
-            .put(&copy_record(
-                snapshot.session_id.clone(),
-                planned,
-                base,
-                new_branch,
-            ))
-            .map_err(core_error)?;
+        let record = copy_record(snapshot.session_id.clone(), planned, base, new_branch);
+        if let Err(error) = records.put(&record) {
+            return Err(self
+                .recover_failed_copy(origin, &records, &record, error)
+                .await);
+        }
         // Copy the `.worktreeinclude` files into the new folder before the window sends the first
         // message (waits for Vibe to make the folder). A failure never fails the start (it is in the report).
         let copy_path = self.wait_for_copy(&snapshot.session_id).await;

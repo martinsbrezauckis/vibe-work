@@ -1,0 +1,18 @@
+{
+  "additionalProperties": false,
+  "description": "What the mutation produced, and whether the session is running it yet.\n\n``runtime`` is always the configuration the mutation produced, so a client\ncan render what the user asked for. ``PENDING`` says the session is still\nrunning the previous one until the turn it is in ends: the Core reads its\nsettings when a turn starts, so what it holds cannot be replaced under it.",
+  "properties": {
+    "runtime": {
+      "$ref": "#/$defs/RuntimeSnapshot"
+    },
+    "status": {
+      "$ref": "#/$defs/RuntimeMutationStatus",
+      "default": "applied"
+    }
+  },
+  "required": [
+    "runtime"
+  ],
+  "title": "RuntimeMutationResponse",
+  "type": "object"
+}

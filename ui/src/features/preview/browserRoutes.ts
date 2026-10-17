@@ -137,8 +137,22 @@ export function registerBrowserRoute(
         return state(sessionId);
       case "annotate": {
         const mode = args["mode"] === "box" ? "box" : "element";
-        const added = await browser.annotate(sessionId, mode, "debug-api");
-        return { added: added?.id ?? null, ...state(sessionId) };
+        // No person points for a Debug API request: it names the target and the answer is immediate.
+        const target = args["target"];
+        if (typeof target !== "object" || target === null || Array.isArray(target))
+          throw new UiControlError(
+            "invalidParams",
+            mode === "box"
+              ? "target is required: target.rect (x, y, width, height)"
+              : "target is required: target.ref, target.selector, or target.x and target.y",
+          );
+        const added = await browser.annotate(sessionId, mode, "debug-api", target);
+        if (added === null)
+          throw new UiControlError(
+            "invalidParams",
+            browser.store.get().error[sessionId] ?? "nothing was annotated",
+          );
+        return { added: added.id, ...state(sessionId) };
       }
       case "cancel":
         await browser.cancelPick(sessionId);

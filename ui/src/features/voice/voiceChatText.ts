@@ -71,7 +71,8 @@ export function spokenReply(answer: string, max = MAX_SPOKEN_CHARS): string {
   t = stripEmphasis(t);
   t = t.replace(/[ \t]*\p{Extended_Pictographic}\u{FE0F}?/gu, "");
   // Repeated "code" sentences (several blocks in a row) are said once.
-  const escaped = CODE_SAID.replace(/[.]/g, "\\.");
+  // Every regular-expression character escaped, not only the period, so a reworded CODE_SAID stays literal.
+  const escaped = CODE_SAID.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   t = t.replace(new RegExp(`(?:${escaped}\\s*){2,}`, "g"), `${CODE_SAID} `);
   // Lines become sentences: a line without an end mark gets a period, so the voice pauses between items.
   const sentences = t

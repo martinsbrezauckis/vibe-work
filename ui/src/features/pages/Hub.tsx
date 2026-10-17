@@ -63,6 +63,7 @@ export function Hub({
         <div className="pages-empty">
           <p>This project has no handbook yet to keep its plans, decisions and reports together.</p>
           <button
+            data-testid="pages.hub-ask-create"
             type="button"
             className="pages-btn go"
             onClick={(event) => {
@@ -71,7 +72,7 @@ export function Hub({
             disabled={requestBusy}
             title={requestBusy ? requestTooltip : undefined}
           >
-            Ask the agent to create the handbook
+            Ask Vibe to create the handbook
           </button>
         </div>
       </div>
@@ -98,6 +99,7 @@ export function Hub({
       {manifest?.description != null && <p className="pages-summary">{manifest.description}</p>}
       {!hub.truncated && !hub.groups.some((g) => g.pages.some((p) => p.kind === "plan")) && (
         <button
+          data-testid="pages.hub-ask-plan"
           type="button"
           className="pages-plan-link"
           onClick={(event) => {
@@ -106,24 +108,34 @@ export function Hub({
           disabled={requestBusy}
           title={requestBusy ? requestTooltip : undefined}
         >
-          Ask the agent to write a plan page
+          Ask Vibe to write a plan page
         </button>
       )}
       {hub.legacy && (
-        <div className="pages-notice" role="status" data-notice="migrate">
+        <div className="server-note" role="status" data-notice="migrate">
           <span>
             This handbook uses the earlier format ({hub.folder}/, vw-* names). Vibe can move it to
             docs/handbook/ (Handbook Format 1.1) when you ask.
           </span>
-          <button type="button" className="pages-btn" onClick={askMigrate}>
+          <button
+            data-testid="pages.hub-pages-btn"
+            type="button"
+            className="pages-btn"
+            onClick={askMigrate}
+          >
             Ask Vibe to migrate it
           </button>
         </div>
       )}
       {indexText !== null && !hub.legacy && (
-        <div className="pages-notice" role="status" data-notice={hub.index}>
+        <div className="server-note" role="status" data-notice={hub.index}>
           <span>{indexText}</span>
-          <button type="button" className="pages-btn" onClick={askFix}>
+          <button
+            data-testid="pages.hub-pages-btn-2"
+            type="button"
+            className="pages-btn"
+            onClick={askFix}
+          >
             Ask Vibe to fix the handbook
           </button>
         </div>
@@ -136,6 +148,7 @@ export function Hub({
         </span>
         {v.findings.length > 0 && (
           <button
+            data-testid="pages.hub-set-show-findings"
             type="button"
             className="pages-btn"
             aria-expanded={showFindings}
@@ -147,7 +160,12 @@ export function Hub({
           </button>
         )}
         {(v.errors > 0 || v.warnings > 0) && indexText === null && !hub.legacy && (
-          <button type="button" className="pages-btn" onClick={askFix}>
+          <button
+            data-testid="pages.hub-pages-btn-3"
+            type="button"
+            className="pages-btn"
+            onClick={askFix}
+          >
             Ask Vibe to fix them
           </button>
         )}

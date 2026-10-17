@@ -91,13 +91,9 @@
   font: inherit;
   cursor: pointer;
 }
-.sb-vault:hover {
+.sb-vault:hover:where(:not(:disabled)) {
   background: var(--hover);
   color: var(--text);
-}
-.sb-vault:disabled {
-  opacity: 0.6;
-  cursor: default;
 }
 .titlebar [data-rail="vault-narrow"][aria-current="true"] {
   background: var(--active);

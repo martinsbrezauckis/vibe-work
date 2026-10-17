@@ -9,6 +9,7 @@
  * Invariants: without a core nothing is registered (the placeholder stays); the returned function undoes every
  * registration, hides the viewer and stops following events.
  */
+import { term } from "../../vocabulary";
 import type { App } from "../shell/AppContext";
 import { PagesTab } from "./PagesTab";
 import { PlanChecklist } from "./PlanChecklist";
@@ -53,7 +54,7 @@ export function registerPagesTab(app: App): () => void {
     app.commands.register({
       id: "project.plan",
       label: "Open the plan",
-      section: "Project",
+      section: term("workNames", "projectTab").name,
       keys: "Mod+Shift+P",
       keywords: "plan progress steps handbook",
       run: () => {
@@ -62,8 +63,8 @@ export function registerPagesTab(app: App): () => void {
     }),
     app.commands.register({
       id: "project.handbook",
-      label: "Open the project handbook",
-      section: "Project",
+      label: term("workNames", "handbook").tooltip,
+      section: term("workNames", "projectTab").name,
       keywords: "pages hub handbook plans decisions requests reports",
       run: () => {
         const sessionId = app.shell.store.get().selected;

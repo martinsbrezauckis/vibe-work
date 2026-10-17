@@ -6,8 +6,8 @@
  *
  * Depends on: AppContext (`files`, `shell`), state/files, remarkFileRefs, model/refs. Called by: the transcript
  * (provider, Markdown extension, tool output and file steps), tests.
- * Invariants: no reference is clickable without an `ok` answer for this session; a click only opens the File tab
- * (nothing navigates, nothing runs); the visible text is never changed.
+ * Invariants: only a resolved file or explicit choices are clickable for this session; the visible text never
+ * changes. A click opens the File tab or chooser; FileRefLink also offers the shared file actions.
  */
 import {
   type ReactElement,
@@ -25,6 +25,7 @@ import type { Git } from "../../state/git";
 import { useApp } from "../shell/AppContext";
 import { findPathRefs } from "./model/refs";
 import { FILE_REF_TAG, remarkFileRefs } from "./remarkFileRefs";
+import { FileRefLink } from "./FileRefLink";
 
 interface Refs {
   sessionId: string;
@@ -35,7 +36,7 @@ interface Refs {
 const Context = createContext<Refs | null>(null);
 
 /** A store that never changes, for references rendered without a provider (hooks need a store either way). */
-const NO_STORE = createStore<FilesState>({ refs: {}, tabs: {}, drops: {} });
+const NO_STORE = createStore<FilesState>({ refs: {}, tabs: {}, drops: {}, edits: {} });
 
 /** Makes file references inside `children` resolve against `sessionId` (no-op without a core). */
 export function FileRefsProvider({
@@ -45,11 +46,17 @@ export function FileRefsProvider({
   sessionId: string;
   children: ReactNode;
 }): ReactElement {
-  const { files, shell } = useApp();
+  const { files, shell, toasts } = useApp();
   if (files === null) return <>{children}</>;
   const open = (file: string, display: string, line: number | null) => {
     shell.actions.openTab("file");
-    void files.actions.show(sessionId, { file, display, line });
+    void files.actions.show(sessionId, { file, display, line }).catch((error: unknown) => {
+      toasts.push({
+        kind: "warn",
+        bellKind: "failure",
+        text: error instanceof Error ? error.message : "Could not open the file.",
+      });
+    });
   };
   return <Context.Provider value={{ sessionId, files, open }}>{children}</Context.Provider>;
 }
@@ -92,6 +99,7 @@ function KnownFolderRef({
   if (knownRoot === null) return <span data-repo-ref={path}>{children}</span>;
   return (
     <button
+      data-testid="files.file-ref-select-repo"
       type="button"
       className="fref"
       data-repo-ref={path}
@@ -140,7 +148,7 @@ function ResolvedFileRef({
     if (refs !== null && missing) refs.files.want(refs.sessionId, path);
   }, [refs, missing, path]);
   if (refs === null) return <>{children}</>;
-  if (state?.status !== "ok")
+  if (state?.status !== "ok" && state?.status !== "choices")
     // Marked (for the `ui/files refs` route) but plain: nothing about a refused path is shown.
     return (
       <span className="fref-text" data-file-ref={path} data-file-state={state?.status ?? "pending"}>
@@ -148,19 +156,9 @@ function ResolvedFileRef({
       </span>
     );
   return (
-    <button
-      type="button"
-      className="fref"
-      title={`Open ${state.display}${line === null ? "" : ` at line ${String(line)}`} in the File tab`}
-      aria-label={`Open ${state.display}${line === null ? "" : ` at line ${String(line)}`} in the File tab`}
-      data-file-ref={path}
-      data-file-state="ok"
-      onClick={() => {
-        refs.open(state.file, state.display, line);
-      }}
-    >
+    <FileRefLink sessionId={refs.sessionId} path={path} line={line} state={state}>
       {children}
-    </button>
+    </FileRefLink>
   );
 }
 
@@ -198,6 +196,7 @@ export function InlineImage({ src, alt }: { src: string; alt: string }): ReactEl
     return <span className="md-image-blocked">{alt}</span>;
   return (
     <button
+      data-testid="files.file-ref-open-2"
       type="button"
       className="md-image"
       title={`Open ${state?.status === "ok" ? state.display : alt} in the File tab`}

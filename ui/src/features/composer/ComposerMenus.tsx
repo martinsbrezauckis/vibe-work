@@ -34,6 +34,7 @@ export function AccessMenu({
 }): ReactElement {
   return (
     <Selector
+      testId="composer.composer-menus-selector"
       compact
       includeValueInName
       dataChip="access"
@@ -43,6 +44,7 @@ export function AccessMenu({
           currentLabel ?? modes.find((mode) => mode.id === current)?.label ?? TEXT.accessUnknown,
       })}
       value={current ?? TEXT.accessUnknown}
+      {...(currentLabel === undefined ? {} : { valueLabel: currentLabel })}
       options={modes.map((mode) => ({
         value: mode.id,
         label: mode.label,
@@ -84,6 +86,7 @@ export function ModelMenu({
   return (
     <>
       <Selector
+        testId="composer.composer-menus-on-model"
         compact
         label={wording(TEXT.modelChoose, { name: label })}
         title={
@@ -106,6 +109,7 @@ export function ModelMenu({
         }))}
       />
       <Selector
+        testId="composer.composer-menus-on-effort"
         compact
         label={wording(TEXT.thinkingChoose, {
           name: effort === null ? TEXT.modelDefaultThinking : thinkingTerm(effort).name,
@@ -180,7 +184,12 @@ export function SlashMenu({
   }, [index, items]);
   if (items.length === 0) {
     return (
-      <div className="slash" role="listbox" aria-label="Commands and skills">
+      <div
+        data-testid="composer.composer-menus-slash"
+        className="slash"
+        role="listbox"
+        aria-label="Commands and skills"
+      >
         <div className="slash-empty" role="status">
           No command matches
         </div>
@@ -189,7 +198,12 @@ export function SlashMenu({
   }
   const current = items[index];
   return (
-    <div className="slash" role="listbox" aria-label="Commands and skills">
+    <div
+      data-testid="composer.composer-menus-slash-2"
+      className="slash"
+      role="listbox"
+      aria-label="Commands and skills"
+    >
       {current === undefined ? null : (
         <div className="slash-tip" role="tooltip" data-slash-tip={itemName(current)}>
           {itemRuns(current)}
@@ -202,9 +216,10 @@ export function SlashMenu({
           const heading = first ? <div className="secl">{section}</div> : null;
           const name = itemName(item);
           return (
-            <div key={`${item.kind}:${name}`}>
+            <div data-item-id={`${item.kind}:${name}`} key={`${item.kind}:${name}`}>
               {heading}
               <div
+                data-testid="composer.composer-menus-it"
                 className="it"
                 role="option"
                 aria-selected={i === index}

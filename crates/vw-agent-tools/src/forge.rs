@@ -7,8 +7,7 @@
 //! - **The model proxy** (`vw-keyproxy`, the enforcement point): every connector call goes to
 //!   `<api base>/v1/connectors-gateway/<connector id>/mcp` with the proxy token, so it passes our loopback proxy,
 //!   which alone holds the key. A `tools/call` this module refuses is answered there, never forwarded, with
-//!   [`CONNECTOR_REASON`] as the tool's text (Vibe 2.26.1's unified harness hands only a success result's text to
-//!   the model: a refusal sent as an error, or a hook deny, reaches it as "skipped by Runtime policy").
+//!   [`CONNECTOR_REASON`] as the tool's text, in an ordinary result so the model reads the reason.
 //! - **The `pre_tool` hook** (`hook.rs`, fallback): when Vibe's provider is not our proxy, the hook denies the call.
 //!
 //! The rule, on the connector's alias (Vibe's normalized connector name, `github_app`) and the remote tool's name:

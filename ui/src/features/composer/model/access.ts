@@ -106,17 +106,20 @@ export function offeredModes(runtime: JsonValue | undefined): AccessMode[] {
 }
 
 /**
- * The session's current mode: the runtime's `activeAgent.name` when known, else the session's own
- * `agent` field (Vibe fills it after an explicit switch only, probe p9), else `null` (unknown).
+ * The core's resolved mode is available before attachment and stays visible during verification.
+ * Older clients fall back to the runtime, then Vibe's recorded agent (an object with a name).
  */
 export function currentModeId(
   runtime: JsonValue | undefined,
   session: Obj | undefined,
+  remembered?: string,
 ): string | null {
+  if (remembered !== undefined && remembered !== "") return remembered;
   const active = obj(obj(runtime)?.["activeAgent"] ?? null)?.["name"];
   if (typeof active === "string" && active !== "") return active;
   const agent = session?.["agent"];
-  return typeof agent === "string" && agent !== "" ? agent : null;
+  const name = typeof agent === "string" ? agent : obj(agent ?? null)?.["name"];
+  return typeof name === "string" && name !== "" ? name : null;
 }
 
 /**
@@ -128,7 +131,8 @@ export function configuredModeId(config: JsonValue | undefined): string | null {
   const o = obj(config ?? null);
   const view = obj(o?.["config"] ?? null) ?? o;
   const agent = view?.["defaultAgent"];
-  return typeof agent === "string" && agent !== "" ? agent : null;
+  const name = typeof agent === "string" ? agent : obj(agent ?? null)?.["name"];
+  return typeof name === "string" && name !== "" ? name : null;
 }
 
 /** The mode with `id`, or a generic entry for a profile we do not know (a custom TOML profile). */

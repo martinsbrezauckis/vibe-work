@@ -21,7 +21,7 @@ export class ViewBoundary extends Component<{ children: ReactNode }, State> {
   override render(): ReactNode {
     if (this.state.message === null) return this.props.children;
     return (
-      <div className="vw-term-error" role="alert">
+      <div className="key-problem" role="alert">
         {`The terminal view failed: ${this.state.message}`}
       </div>
     );

@@ -6,6 +6,7 @@
  * Invariants: names and summaries are file content shown as text; deleting asks first in the page (a second click),
  * since it deletes on Mistral and cannot be undone.
  */
+import { Button } from "../../components/Controls";
 import { type ReactElement, useState } from "react";
 
 import { Selector } from "../../components/Selector";
@@ -28,11 +29,13 @@ export function scopeOf(key: string): LibraryScope {
 
 /** The scope picker. */
 export function ScopePicker({
+  testId,
   value,
   label,
   onChange,
   disabled = false,
 }: {
+  testId: string;
   value: LibraryScope;
   label: string;
   onChange: (scope: LibraryScope) => void;
@@ -43,6 +46,7 @@ export function ScopePicker({
     <label className="lib-scope">
       <span>{label}</span>
       <Selector
+        testId={testId}
         label={label}
         value={scopeKey(value)}
         disabled={disabled}
@@ -87,12 +91,14 @@ export function LibraryDetail(): ReactElement | null {
       </header>
       <div className="lib-detail-bar">
         <ScopePicker
+          testId="libraries.detail-scope"
           value={library.scope}
           label="Used by"
           disabled={blocked}
           onChange={(scope) => void actions?.setScope(library.id, scope)}
         />
         <button
+          data-testid="libraries.library-detail-pick"
           type="button"
           className="tb-btn primary"
           disabled={blocked || busy === "upload"}
@@ -101,6 +107,7 @@ export function LibraryDetail(): ReactElement | null {
           {busy === "upload" ? "Uploading…" : "Add files"}
         </button>
         <button
+          data-testid="libraries.library-detail-delete-library"
           type="button"
           className="tb-btn"
           aria-pressed={confirm}
@@ -122,7 +129,7 @@ export function LibraryDetail(): ReactElement | null {
       ) : (
         <ul className="lib-docs">
           {docs.map((d) => (
-            <li key={d.id} className="lib-doc" data-status={d.status}>
+            <li data-item-id={d.id} key={d.id} className="lib-doc" data-status={d.status}>
               <div className="lib-doc-main">
                 <span className="lib-doc-name">{d.name}</span>
                 <span className={`cmuted ${processing(d) ? "lib-processing" : ""}`}>
@@ -136,6 +143,7 @@ export function LibraryDetail(): ReactElement | null {
               </div>
               <div className="lib-doc-actions">
                 <button
+                  data-testid="libraries.library-detail-open-text"
                   type="button"
                   className="tb-btn"
                   disabled={blocked || d.status !== "done"}
@@ -143,15 +151,17 @@ export function LibraryDetail(): ReactElement | null {
                 >
                   Open text
                 </button>
-                <button
+                <Button
+                  data-testid="libraries.library-detail-delete-document"
                   type="button"
-                  className="tb-btn"
+                  small
+                  variant="danger"
                   aria-label={`Delete ${d.name}`}
                   disabled={blocked}
                   onClick={() => void actions?.deleteDocument(library.id, d.id)}
                 >
                   Delete
-                </button>
+                </Button>
               </div>
             </li>
           ))}

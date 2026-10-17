@@ -73,6 +73,10 @@ export type LibrariesResult = { "kind": "list",
  */
 libraries: Array<LibraryView>, 
 /**
+ * Why this list is incomplete; `None` only after exhausting all API pages.
+ */
+partial: string | null, 
+/**
  * What uploading and asking sends, and the limits.
  */
 costs: WorkCosts, } | { "kind": "library", 

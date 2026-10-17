@@ -224,9 +224,42 @@ fn has_identity(folder: &Path) -> bool {
 /// # Errors
 /// `Refused` when the folder already has `.git`; git failures.
 pub fn init_repository(folder: &Path) -> Result<InitPlan, ChangesError> {
-    let plan = plan_init(folder)?;
+    init_with_author(folder, None)
+}
+
+/// Initializes a user repository with an explicit local author before adding files or committing.
+/// # Errors
+/// Empty or unsafe author details (before init), an existing repository, or Git failures.
+pub fn init_repository_with_identity(
+    folder: &Path,
+    name: &str,
+    email: &str,
+) -> Result<InitPlan, ChangesError> {
+    if [name, email].iter().any(|value| {
+        value.trim().is_empty()
+            || value
+                .chars()
+                .any(|c| c.is_control() || c == '<' || c == '>')
+    }) {
+        return Err(ChangesError::Refused(
+            "Enter your name and email without line breaks or angle brackets.".into(),
+        ));
+    }
+    init_with_author(folder, Some((name, email)))
+}
+
+fn init_with_author(folder: &Path, author: Option<(&str, &str)>) -> Result<InitPlan, ChangesError> {
+    let mut plan = plan_init(folder)?;
     let user = Index::User;
     Call::new(folder, user).args(["init", "-q"]).run()?;
+    if let Some((name, email)) = author {
+        for (key, value) in [("user.name", name), ("user.email", email)] {
+            Call::new(folder, user)
+                .args(["config", "--local", "--replace-all", key, value.trim()])
+                .run()?;
+        }
+        plan.fallback_author = None;
+    }
     let mut specs: Vec<u8> = b".\0".to_vec();
     for path in &plan.large {
         specs.extend_from_slice(

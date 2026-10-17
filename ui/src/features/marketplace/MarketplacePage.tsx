@@ -9,6 +9,7 @@ import type { ReactElement } from "react";
 import { Selector } from "../../components/Selector";
 import { LinkDialog } from "../transcript/LinkDialog";
 import { ToolsTabs } from "../connectors/ToolsTabs";
+import { LocalPlugins } from "./LocalPlugins";
 import { MarketCard } from "./MarketCard";
 import { MarketDetail } from "./MarketDetail";
 import { useMarket, useMarketActions, useServers } from "./hooks";
@@ -24,6 +25,7 @@ function Toolbar(): ReactElement {
     <div className="cbar">
       <label className="csearch">
         <input
+          data-testid="marketplace.marketplace-page-set-search"
           value={search}
           placeholder="Search the marketplace"
           aria-label="Search the marketplace"
@@ -31,6 +33,7 @@ function Toolbar(): ReactElement {
         />
       </label>
       <Selector
+        testId="marketplace.marketplace-page-set-filter"
         label="Filter marketplace"
         value={filter}
         options={MARKET_FILTERS.map((f) => ({
@@ -57,7 +60,12 @@ function Progress(): ReactElement | null {
           Installing {name}: {progressText(installing)}
         </span>
         <div className="csignin-acts">
-          <button type="button" className="tb-btn" onClick={() => void actions?.cancel()}>
+          <button
+            data-testid="marketplace.marketplace-page-cancel"
+            type="button"
+            className="tb-btn"
+            onClick={() => void actions?.cancel()}
+          >
             Stop
           </button>
         </div>
@@ -87,8 +95,8 @@ export function MarketplacePage(): ReactElement {
         <div className="chead">
           <ToolsTabs />
           <p className="cmuted">
-            Reviewed, version-pinned tools for Vibe. Each one is installed into Vibe Work's own
-            folders and can be removed again.
+            Install reviewed tools from the marketplace, and see the plugins Vibe finds on this
+            computer.
           </p>
         </div>
         <Toolbar />
@@ -105,6 +113,7 @@ export function MarketplacePage(): ReactElement {
             {note}
           </p>
         )}
+        <LocalPlugins />
         {shown.map((g) => (
           <section key={g.id} className="cgroup" aria-labelledby={`mg-${g.id}`} data-group={g.id}>
             <h3 id={`mg-${g.id}`}>{g.label}</h3>
@@ -116,7 +125,7 @@ export function MarketplacePage(): ReactElement {
             </div>
           </section>
         ))}
-        {view !== null && shown.length === 0 ? (
+        {view !== null && shown.length === 0 && view.discovered.length === 0 ? (
           <p className="cmuted">Nothing here matches.</p>
         ) : null}
       </div>

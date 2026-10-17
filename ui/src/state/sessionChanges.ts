@@ -9,6 +9,7 @@
  */
 import type { JsonValue, SessionChange } from "../protocol/core";
 import { applyPatch } from "./jsonPatch";
+import { currentModeId } from "../features/composer/model/access";
 import type { SessionEntry } from "./sessionSummary";
 
 type Obj = Record<string, JsonValue | undefined>;
@@ -102,8 +103,10 @@ function reduce(entry: SessionEntry, change: SessionChange): SessionEntry {
       }));
     case "callbacksChanged":
       return { ...entry, openCallbackIds: change.openCallbackIds };
-    case "runtimeUpdated":
-      return { ...entry, runtime: change.runtime };
+    case "runtimeUpdated": {
+      const accessMode = change.accessMode ?? currentModeId(change.runtime, undefined);
+      return { ...entry, runtime: change.runtime, ...(accessMode === null ? {} : { accessMode }) };
+    }
     case "notice":
     case "removed":
     case "handedOff":

@@ -8,7 +8,9 @@
  * - `open` (shows the Marketplace tab), `connectors` (shows the Connectors tab), `filter {filter}`, `search {text}`,
  *   `select {id|null}`, `reload`;
  * - `install {id}` (also updates), `cancel`, `remove {id}`, `addServer {id}` (a catalog server through the Connectors
- *   flow; its sign-in finishes only in a browser).
+ *   flow; its sign-in finishes only in a browser);
+ * - `turnOnPlugin {path}`, `turnOffPlugin {path}`, `removePlugin {path}`: a plugin Vibe found (`discovered` in `read`),
+ *   also one not installed from the catalog.
  * Depends on: AppContext, uiControl, model. Called by: useShellWiring.
  * Invariants: bodies are validated (`invalidParams`).
  */
@@ -45,6 +47,8 @@ function read(app: App): unknown {
     platform: s.view?.platform ?? null,
     sessionId: s.view?.sessionId ?? null,
     catalogVersion: s.view?.catalogVersion ?? null,
+    discovered: s.view?.discovered ?? [],
+    discoveryError: s.view?.discoveryError ?? null,
     groups: marketGroups(s.view, s.filter, s.search, servers).map((g) => ({
       group: g.id,
       label: g.label,
@@ -79,7 +83,8 @@ export async function handleMarket(app: App, body: unknown): Promise<unknown> {
   if (market === null) throw new UiControlError("serverUnavailable", "the app has no core");
   const a = market.debugApi;
   try {
-    switch (input["action"] ?? "read") {
+    const action = typeof input["action"] === "string" ? input["action"] : "read";
+    switch (action) {
       case "read":
         break;
       case "open":
@@ -116,6 +121,11 @@ export async function handleMarket(app: App, body: unknown): Promise<unknown> {
         break;
       case "remove":
         await a.remove(text(input, "id"));
+        break;
+      case "turnOffPlugin":
+      case "turnOnPlugin":
+      case "removePlugin":
+        await a.changePlugin(action, text(input, "path"));
         break;
       case "addServer":
         await a.addServer(text(input, "id"));

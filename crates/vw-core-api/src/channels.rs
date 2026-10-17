@@ -52,6 +52,15 @@ use vw_supervisor::{Supervisor, SupervisorError};
 
 use crate::routing::{Route, may_hand_off, route};
 
+// Pinned Vibe builds full plugin contexts for lifecycle requests and stored-session config reads.
+// A config read without a session uses the host's plugin-free context; reload explicitly rescans.
+fn loads_plugins(method: &str, params: &Value) -> bool {
+    matches!(
+        method,
+        "session/start" | "session/resume" | "session/continue" | "session/fork" | "plugin/reload"
+    ) || (method == "config/read" && params.get("sessionId").and_then(Value::as_str).is_some())
+}
+
 /// Identifies one channel across restarts: (server generation, channel id).
 pub(crate) type ChannelKey = (u64, u64);
 
@@ -111,6 +120,8 @@ pub(crate) struct Channels {
     /// adds the session's MCP server (with its credential) to every session-opening request,
     /// after the gate. `None` when the agent tools are off.
     agent_tools: Option<Arc<crate::agent_tools::AgentTools>>,
+    leases: Arc<crate::session_lease::Leases>,
+    plugin_approvals: Arc<crate::plugin_approvals::PluginApprovals>,
 }
 
 fn locked<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -136,12 +147,33 @@ fn to_rpc(method: &str, wait: Duration, error: SupervisorError) -> RpcError {
     }
 }
 
+fn lease_error(method: &str, error: crate::error::CoreError) -> RpcError {
+    RpcError::Remote {
+        method: method.to_owned(),
+        error: vw_protocol::ProtocolError {
+            code: if error.server_code.as_deref() == Some("sessionHeld") {
+                vw_protocol::ProtocolErrorCode::Conflict
+            } else {
+                vw_protocol::ProtocolErrorCode::InternalError
+            },
+            message: error.message,
+            data: if error.server_code.as_deref() == Some("sessionHeld") {
+                vw_protocol::Maybe::Value(serde_json::json!({"harnessCode": "session_busy"}))
+            } else {
+                vw_protocol::Maybe::Absent
+            },
+        },
+    }
+}
+
 impl Channels {
     pub(crate) fn new(
         supervisor: Arc<Supervisor>,
         wait: Duration,
         feeds: mpsc::UnboundedSender<Feed>,
         agent_tools: Option<Arc<crate::agent_tools::AgentTools>>,
+        leases: Arc<crate::session_lease::Leases>,
+        plugin_approvals: Arc<crate::plugin_approvals::PluginApprovals>,
     ) -> Self {
         Self {
             supervisor,
@@ -153,6 +185,8 @@ impl Channels {
             foreign: AtomicU64::new(0),
             guest_callbacks: Mutex::new(HashMap::new()),
             agent_tools,
+            leases,
+            plugin_approvals,
         }
     }
 
@@ -160,6 +194,12 @@ impl Channels {
     /// gets the session's MCP server first (the core adds it after the gate, which refuses a
     /// caller's own `mcpServers`), and its credential is bound to the session the answer names.
     pub(crate) async fn request(&self, method: &str, mut params: Value) -> Result<Value, RpcError> {
+        if loads_plugins(method, &params) {
+            let _held = self.plugin_approvals.mutations.lock().await;
+            self.plugin_approvals
+                .sweep()
+                .map_err(|e| lease_error(method, e))?;
+        }
         let ticket = self
             .agent_tools
             .as_ref()
@@ -194,8 +234,11 @@ impl Channels {
                 };
                 let hand_off = may_hand_off(method, &params);
                 let result = conn.request(method, params).await?;
-                if let Some(new_id) = result_session(&result).filter(|new| hand_off && *new != id) {
-                    self.rebind(&id, new_id);
+                if let Some(new_id) = result_session(&result).filter(|new| hand_off && *new != id)
+                    && let Err(error) = self.rebind(&id, new_id)
+                {
+                    self.close(&id).await;
+                    return Err(lease_error(method, error));
                 }
                 Ok(result)
             }
@@ -236,7 +279,17 @@ impl Channels {
         match conn.request(method, params).await {
             Ok(result) => {
                 match result_session(&result) {
-                    Some(id) => self.bind(id, conn, key),
+                    Some(id) => {
+                        let lease = match self.leases.claim(id) {
+                            Ok(lease) => lease,
+                            Err(error) => {
+                                conn.close_input().await;
+                                return Err(lease_error(method, error));
+                            }
+                        };
+                        self.leases.retain(id, lease);
+                        self.bind(id, conn, key);
+                    }
                     None => conn.close_input().await,
                 }
                 Ok(result)
@@ -249,11 +302,15 @@ impl Channels {
     }
 
     /// `session/resume`: on the session's channel, or on a new one bound on success. Uses the
-    /// supervisor's resume (progress while the harness holds the session lock after a crash).
+    /// supervisor's resume (it publishes progress while a slow resume runs).
     async fn resume(&self, id: &str, params: Value) -> Result<Value, RpcError> {
         let lock = self.session_lock(id);
         let _held = lock.lock().await;
         let method = "session/resume";
+        let lease = self
+            .leases
+            .claim(id)
+            .map_err(|error| lease_error(method, error))?;
         if let Some(conn) = self.bound(id) {
             return self
                 .supervisor
@@ -264,6 +321,7 @@ impl Channels {
         let (conn, key) = self.open(method).await?;
         match self.supervisor.resume_on(&conn, id, params).await {
             Ok(result) => {
+                self.leases.retain(id, lease);
                 self.bind(id, conn, key);
                 Ok(result)
             }
@@ -315,6 +373,7 @@ impl Channels {
             );
         }
         debug!(channel_id = slot.key.1, "session channel closed");
+        self.leases.release(id);
         drop(held);
         self.forget_lock(id, &lock);
         true
@@ -358,15 +417,25 @@ impl Channels {
 
     /// Moves a channel from `from` to `to` (the server handed the channel's session to a new id). A no-op when
     /// `from` has no channel (already moved: `handoff` calls it again for every hand-off).
-    pub(crate) fn rebind(&self, from: &str, to: &str) {
+    pub(crate) fn rebind(&self, from: &str, to: &str) -> Result<(), crate::error::CoreError> {
+        if from == to {
+            return Ok(());
+        }
         let mut inner = locked(&self.inner);
+        if !inner.slots.contains_key(from) {
+            return Ok(());
+        }
+        let lease = self.leases.claim(to)?;
         if let Some(slot) = inner.slots.remove(from) {
             debug!(
                 channel_id = slot.key.1,
                 "channel now carries a new session id"
             );
             inner.slots.insert(to.to_owned(), slot);
+            self.leases.retain(to, lease);
+            self.leases.release(from);
         }
+        Ok(())
     }
 
     /// The session's live channel, marked as used now. A binding whose channel is dead (its server
@@ -461,6 +530,7 @@ impl Channels {
         }
         let id = id.clone();
         inner.slots.remove(&id);
+        self.leases.release(&id);
         Some(id)
     }
 
@@ -602,14 +672,23 @@ mod tests {
     #[tokio::test]
     async fn late_failure_cannot_close_replacement_channel() {
         let path = std::env::current_exe().unwrap();
-        let config = SupervisorConfig::new(path.clone(), path.clone(), path);
+        let config = SupervisorConfig::new(path.clone(), path.clone(), path.clone());
         let supervisor = Arc::new(Supervisor::start_pending(
             config,
             Arc::new(NoSecret),
             "unit test".to_owned(),
         ));
         let (feeds, _received) = mpsc::unbounded_channel();
-        let channels = Channels::new(supervisor, Duration::from_millis(10), feeds, None);
+        let leases = Arc::new(crate::session_lease::Leases::new(&path, None).unwrap());
+        let approvals = Arc::new(crate::plugin_approvals::PluginApprovals::new(&path).unwrap());
+        let channels = Channels::new(
+            supervisor,
+            Duration::from_millis(10),
+            feeds,
+            None,
+            leases,
+            approvals,
+        );
         let (stdout, _stdout_peer) = tokio::io::duplex(1024);
         let (stdin, _stdin_peer) = tokio::io::duplex(1024);
         let conn = ConnectionBuilder::new(ConnectionConfig::default()).start(stdout, stdin);

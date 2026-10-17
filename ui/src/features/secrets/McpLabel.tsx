@@ -45,6 +45,7 @@ export function McpInfo(): ReactElement {
   return (
     <span className="mcp-info">
       <button
+        data-testid="secrets.mcp-label-set-open"
         type="button"
         className="tb-btn mcp-info-btn"
         aria-label="About MCP keys"

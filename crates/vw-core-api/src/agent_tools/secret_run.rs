@@ -57,7 +57,7 @@ pub(crate) const METHOD: &str = "vibe-work/secretRun";
 pub(crate) const ALWAYS_LABEL: &str = "Always for this command";
 /// The refusal when this command's grant was revoked while its dialog was open.
 const REVOKED_MEANWHILE: &str = "Not run: the user revoked this command's permission while the dialog was open; ask again with secret_run";
-/// Longest params text the native dialog shows in full (`vw_host::DIALOG_PARAMS_MAX_CHARS`; a private test keeps
+/// Longest summary the native dialog shows in full (`vw_host::DIALOG_PARAMS_MAX_CHARS`; a private test keeps
 /// the two equal).
 pub(crate) const DIALOG_MAX: usize = 1200;
 
@@ -357,12 +357,13 @@ async fn start(
         )
     });
     let asked = crate::one_ask::Asked::Card(card);
+    super::session::check_config_command(shared, &cwd, &command)?;
     let found = vw_agent_tools::killparse::scan(&command);
     super::killcheck::guard(shared, session_id, &command, &found, asked).await??;
     super::gitcheck::guard(shared, session_id, &cwd, &command, asked).await?;
     crate::safety::guard(shared, &command, Some(&cwd))?;
-    let params = dialog_params(&program_text, &spec, &bound, &cwd, &project, &pinned);
-    if format!("{params:#}").chars().count() > DIALOG_MAX {
+    let dialog = dialog_request(shared, session_id, &spec, &bound, &cwd, &project, &pinned);
+    if dialog.summary.chars().count() > DIALOG_MAX {
         return Err(format!(
             "this request is too long to show the user in full (over {DIALOG_MAX} characters); put the \
              arguments into a script file and run that"
@@ -391,7 +392,7 @@ async fn start(
         cwd,
         project,
         policy_project,
-        params,
+        dialog,
     };
     tokio::spawn(async move {
         let outcome = job.consent_and_run(&sender).await;
@@ -422,6 +423,55 @@ fn dialog_params(
         "project": project,
         "stopsAfterSeconds": spec.timeout_s,
     })
+}
+
+fn dialog_request(
+    shared: &Shared,
+    session_id: &str,
+    spec: &RunSpec,
+    bound: &[Bound],
+    cwd: &Path,
+    project: &str,
+    pinned: &super::secret_pin::Pinned,
+) -> ConfirmationRequest {
+    let title = shared
+        .names
+        .title_of(&shared.store, session_id)
+        .unwrap_or_else(|| session_id.to_owned());
+    let names: Vec<String> = bound
+        .iter()
+        .map(|b| {
+            format!(
+                "{} into {}",
+                vw_gate::dialog_quote(&b.secret.name),
+                vw_gate::dialog_quote(&b.env),
+            )
+        })
+        .collect();
+    let summary = super::secret_dialog::summary(&super::secret_dialog::Dialog {
+        title: &title,
+        project,
+        cwd,
+        purpose: &spec.purpose,
+        timeout_s: spec.timeout_s,
+        names: &names,
+        pinned,
+    });
+    let params = dialog_params(
+        &pinned.program.to_string_lossy(),
+        spec,
+        bound,
+        cwd,
+        project,
+        pinned,
+    );
+    ConfirmationRequest {
+        method: METHOD.to_owned(),
+        requester: Requester::Agent,
+        summary,
+        params,
+        always: Some(ALWAYS_LABEL.to_owned()),
+    }
 }
 
 /// Waits up to [`WAIT`] for request `id` of `session_id`.
@@ -498,7 +548,7 @@ struct Job {
     cwd: PathBuf,
     project: String,
     policy_project: crate::entry_permissions::Identity,
-    params: Value,
+    dialog: ConfirmationRequest,
 }
 
 impl Job {
@@ -539,61 +589,10 @@ impl Job {
         {
             return Ok(Approval::Grant(id));
         }
-        let title = self
-            .shared
-            .names
-            .title_of(&self.shared.store, &self.session_id)
-            .unwrap_or_else(|| self.session_id.clone());
-        let names: Vec<String> = self
-            .bound
-            .iter()
-            .map(|b| {
-                format!(
-                    "{} into {}",
-                    vw_gate::dialog_quote(&b.secret.name),
-                    vw_gate::dialog_quote(&b.env),
-                )
-            })
-            .collect();
-        let request = ConfirmationRequest {
-            method: METHOD.to_owned(),
-            requester: Requester::Agent,
-            summary: format!(
-                "The agent of session {} wants to run a program with your secret {}. The program gets the value and can \
-                 do anything with it. Vibe invokes the program directly, without a shell. The agent never sees the value; output containing it is withheld. \
-                 \"{}\" lets this project's agents run exactly this command again (same program, arguments, folder \
-                 and files) without asking; any other command asks (revoke in Settings > Project secrets).\n\n\
-                 Project: {}\nFolder: {}\nPurpose given by agent: {}\nStop after: {} seconds\nFiles checked: {}\n\nCommand:\n{}\n\nProgram: {}\nArguments (exact): {}",
-                vw_gate::dialog_quote(&title),
-                names.join(", "),
-                ALWAYS_LABEL,
-                vw_gate::dialog_quote(&self.project),
-                vw_gate::dialog_quote(&self.cwd.to_string_lossy()),
-                vw_gate::dialog_quote(&self.spec.purpose),
-                self.spec.timeout_s,
-                self.pinned
-                    .files
-                    .iter()
-                    .skip(1)
-                    .map(|(path, _)| vw_gate::dialog_quote(&path.to_string_lossy()))
-                    .collect::<Vec<_>>()
-                    .join(", "),
-                command_text(&self.program.to_string_lossy(), &self.pinned.args),
-                vw_gate::dialog_quote(&self.program.to_string_lossy()),
-                self.pinned
-                    .args
-                    .iter()
-                    .map(|arg| vw_gate::dialog_quote(arg))
-                    .collect::<Vec<_>>()
-                    .join(", "),
-            ),
-            params: self.params.clone(),
-            always: Some(ALWAYS_LABEL.to_owned()),
-        };
         // A revoke of this command made while the dialog is open (its `revokedMs` at or after
         // this moment) wins over the answer.
         let asked = now_ms();
-        match self.shared.confirmer.confirm(&request).await {
+        match self.shared.confirmer.confirm(&self.dialog).await {
             Confirmation::Approved => Ok(Approval::Once(asked)),
             Confirmation::ApprovedAlways => {
                 let new = crate::secret_grants::NewGrant {

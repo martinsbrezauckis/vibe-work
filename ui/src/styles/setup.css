@@ -32,7 +32,7 @@
   flex-shrink: 0;
 }
 .view-tx > .key-notice {
-  margin: 12px 24px 0;
+  margin-block: 12px 0;
 }
 .setup h2 {
   font-size: var(--text-28);
@@ -104,6 +104,7 @@
   color: var(--green);
 }
 .key-problem {
+  display: block;
   margin: 0;
   padding: 10px 12px;
   border: 1px solid var(--line-2);
@@ -165,11 +166,6 @@ fieldset.key-offer {
   align-items: center;
   font-size: var(--text-13-5);
   color: var(--text);
-}
-.key-check input {
-  accent-color: var(--orange);
-  width: 16px;
-  height: 16px;
 }
 .key-link {
   all: unset;

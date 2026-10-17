@@ -31,8 +31,8 @@
 //! Connector guard: a removed MCP server's stale tools are refused even while an open turn cannot refresh. A
 //! forge-writing connector call (`connector_github_app.push_files`) is refused here only when Vibe's provider is
 //! not our model proxy; with the proxy (every Vibe Work build that holds the key) the call is let through to the
-//! proxy, which answers it with the Push-button sentence the model can read (Vibe 2.26.1 hands a
-//! hook's deny reason for a `run_typescript` tool call to the model only as "skipped by Runtime policy").
+//! proxy, which answers it with the Push-button sentence as an ordinary tool result, so the model reads it
+//! wherever the call was made.
 //!
 //! Hook protocol (Vibe 2.26.0 `_foreign_hooks.py`): stdin = `{session_id, parent_session_id, cwd, tool_name,
 //! tool_call_id, tool_input: {command, ...}, ...}`; stdout empty = allow; `{"decision": "deny", "reason": "..."}` = the call

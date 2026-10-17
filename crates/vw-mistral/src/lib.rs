@@ -5,7 +5,8 @@
 //!
 //! adds `work`: document Libraries and image generation through Mistral's built-in tools.
 //!
-//! Modules: `client` (HTTPS clients, no redirects), `auth` (the zeroized key header), `test_call`, `ocr`,
+//! Modules: `client` (HTTPS clients, no redirects), `network` (the proxy and certificate settings every client is
+//! built with), `auth` (the zeroized key header), `test_call`, `ocr`,
 //! `audio` (PCM checks, resampling, WAV), `tts` (speech, voices, the shared speech error), `stt_batch`,
 //! `realtime` (protocol) over `ws` (WebSocket over our own TLS).
 //!
@@ -19,6 +20,7 @@ pub mod audio;
 mod auth;
 pub mod chat;
 mod client;
+pub mod network;
 mod ocr;
 pub mod realtime;
 pub mod stt_batch;

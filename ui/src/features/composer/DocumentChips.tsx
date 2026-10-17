@@ -26,6 +26,7 @@ function DocChip({ doc, sessionId }: { doc: DocumentView; sessionId: string }): 
   const failed = doc.status === "failed";
   return (
     <div
+      data-item-id={doc.id}
       className={`docchip${failed ? " failed" : ""}`}
       data-doc-id={doc.id}
       data-status={doc.status}
@@ -48,6 +49,7 @@ function DocChip({ doc, sessionId }: { doc: DocumentView; sessionId: string }): 
       </p>
       <div className="docchip-acts">
         <button
+          data-testid="composer.document-chips-extract"
           type="button"
           className="mini"
           disabled={busy || keyBlocked}
@@ -59,6 +61,7 @@ function DocChip({ doc, sessionId }: { doc: DocumentView; sessionId: string }): 
         </button>
         {doc.canAttachAsPicture ? (
           <button
+            data-testid="composer.document-chips-as-picture"
             type="button"
             className="mini"
             disabled={busy}
@@ -70,6 +73,7 @@ function DocChip({ doc, sessionId }: { doc: DocumentView; sessionId: string }): 
           </button>
         ) : null}
         <button
+          data-testid="composer.document-chips-remove"
           type="button"
           className="ibtn sm"
           aria-label={`Remove ${doc.name}`}

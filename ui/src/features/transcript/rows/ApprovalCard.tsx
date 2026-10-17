@@ -13,10 +13,12 @@
  */
 import { type KeyboardEvent, type ReactElement, useState } from "react";
 import { useFirstSight } from "../../../hooks/useFirstSight";
+import { Button } from "../../../components/Controls";
 import { Selector } from "../../../components/Selector";
 
 import { useApp } from "../../shell/AppContext";
 import { useCoreState } from "../../shell/hooks";
+import { useHeldBy } from "../../sessions/SessionHeldNote";
 import { useTranscriptUi } from "../hooks";
 import {
   DECISION_LABEL,
@@ -76,6 +78,14 @@ export function ApprovalCard({
   const effect = approvalEffect(entry);
   const display = obj(effect["display"]);
   const detail = detailOf(entry);
+  const kind = str(effect["kind"]);
+  const title = str(entry["title"]) ?? "";
+  const plainTitle =
+    kind === "file_edit" || kind === "file_write"
+      ? "Allow this edit?"
+      : kind === "shell"
+        ? "Allow this command?"
+        : title;
   const choices = offeredDecisions(entry);
   const scopes = offeredScopes(entry);
   const [scope, setScope] = useState<string | undefined>(scopes[0]);
@@ -88,7 +98,8 @@ export function ApprovalCard({
   );
   const sending = useTranscriptUi((s) => s.sending[callbackId] === true);
   const problem = useTranscriptUi((s) => s.problems[callbackId]);
-  const disabled = !offered || sending || problem?.kind === "refused";
+  const held = useHeldBy(sessionId) !== null;
+  const disabled = held || !offered || sending || problem?.kind === "refused";
   const permissions = arr(detail["requiredPermissions"])
     .map((p) => str(obj(p)?.["label"]))
     .filter((p): p is string => p !== null && p !== "");
@@ -124,6 +135,7 @@ export function ApprovalCard({
   const fresh = useFirstSight(`card:${callbackId}`);
   return (
     <div
+      data-testid="transcript.approval-card-div"
       className={`approval${fresh ? " arrive" : ""}`}
       role="group"
       aria-label={`Approval needed: ${str(display?.["summary"]) ?? str(entry["title"]) ?? ""}`}
@@ -134,7 +146,9 @@ export function ApprovalCard({
       <div className="ah">
         <span className="px needs" aria-hidden="true" />
         <b>Approval needed</b>
-        <span className="sub">{str(entry["title"]) ?? ""}</span>
+        <span className="sub" title={title}>
+          {plainTitle}
+        </span>
       </div>
       <div className="why">
         <span className="summary">{str(display?.["summary"]) ?? ""}</span>
@@ -148,6 +162,7 @@ export function ApprovalCard({
         <fieldset className="scopes">
           <legend>When allowing</legend>
           <Selector
+            testId="transcript.approval-card-selector"
             label="When allowing"
             value={scope ?? scopes[0] ?? ""}
             options={scopes.map((offeredScope) => ({
@@ -159,27 +174,54 @@ export function ApprovalCard({
         </fieldset>
       ) : null}
       <div className="choices">
-        {choices.map((decision, i) => (
-          <button
-            key={decision}
-            type="button"
-            className={`cbtn${decision === "approve" ? " go" : decision === "deny" ? " no" : ""}`}
-            disabled={disabled}
-            data-decision={decision}
-            aria-label={`${DECISION_LABEL[decision]} (press ${String(i + 1)})`}
-            title={`${DECISION_LABEL[decision]} (press ${String(i + 1)})`}
-            onClick={() => {
-              choose(decision);
-            }}
-          >
-            {DECISION_LABEL[decision]} <kbd>{String(i + 1)}</kbd>
-          </button>
-        ))}
+        {choices.map((decision, i) => {
+          const props = {
+            "data-decision": decision,
+            disabled,
+            "aria-label": `${DECISION_LABEL[decision]} (press ${String(i + 1)})`,
+            title: `${DECISION_LABEL[decision]} (press ${String(i + 1)})`,
+          };
+          const label = (
+            <>
+              {DECISION_LABEL[decision]} <kbd>{String(i + 1)}</kbd>
+            </>
+          );
+          return decision === "deny" ? (
+            <Button
+              key={decision}
+              data-testid="transcript.approval-card-choose"
+              data-item-id={decision}
+              {...props}
+              onClick={() => {
+                choose(decision);
+              }}
+              variant="danger"
+              small
+            >
+              {label}
+            </Button>
+          ) : (
+            <button
+              key={decision}
+              type="button"
+              data-testid="transcript.approval-card-choose"
+              data-item-id={decision}
+              {...props}
+              onClick={() => {
+                choose(decision);
+              }}
+              className={`cbtn${decision === "approve" ? " go" : ""}`}
+            >
+              {label}
+            </button>
+          );
+        })}
       </div>
       {choices.includes("deny") ? (
         <label className="feedback">
           <span>Note for Vibe if you deny (optional)</span>
           <input
+            data-testid="transcript.approval-card-set-feedback"
             type="text"
             aria-label="Note for Vibe if you deny (optional)"
             title="Note for Vibe if you deny (optional)"

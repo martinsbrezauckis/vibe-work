@@ -5,24 +5,28 @@
  * Depends on: components/Icon, protocol types. Called by: PagesTab.
  * Invariants: renders only; every button calls a prop; the path is plain text (never markup).
  */
+import { term } from "../../vocabulary";
 import { formatKeys } from "../../state/shortcuts";
 import type { ReactElement } from "react";
 
 import { Icon, type IconName } from "../../components/Icon";
 
 function Tool({
+  testId,
   icon,
   label,
   onClick,
   disabled,
 }: {
   icon: IconName;
+  testId: string;
   label: string;
   onClick: () => void;
   disabled: boolean;
 }): ReactElement {
   return (
     <button
+      data-testid={testId}
       type="button"
       className="ibtn"
       aria-label={label}
@@ -68,8 +72,9 @@ export function PagesToolbar({
 }): ReactElement {
   const onPage = path !== null;
   return (
-    <div className="pages-toolbar" role="toolbar" aria-label="Project">
+    <div className="pages-toolbar" role="toolbar" aria-label={term("workNames", "projectTab").name}>
       <button
+        data-testid="pages.pages-toolbar-pages-btn"
         type="button"
         className="pages-btn"
         aria-pressed={!onPage}
@@ -79,14 +84,27 @@ export function PagesToolbar({
         <Icon name="book-open" size={14} />
         Handbook
       </button>
-      <Tool icon="arrow-left" label="Back" disabled={!onPage || busy} onClick={actions.back} />
       <Tool
+        testId="pages.toolbar-back"
+        icon="arrow-left"
+        label="Back"
+        disabled={!onPage || busy}
+        onClick={actions.back}
+      />
+      <Tool
+        testId="pages.toolbar-forward"
         icon="arrow-right"
         label="Forward"
         disabled={!onPage || busy}
         onClick={actions.forward}
       />
-      <Tool icon="refresh-cw" label="Reload" disabled={!onPage || busy} onClick={actions.reload} />
+      <Tool
+        testId="pages.toolbar-reload"
+        icon="refresh-cw"
+        label="Reload"
+        disabled={!onPage || busy}
+        onClick={actions.reload}
+      />
       <span className="pages-path" title={path === null ? folder : `${folder}/${path}`}>
         {path === null ? `${folder}/` : `${folder}/${path}`}
       </span>
@@ -102,6 +120,7 @@ export function PagesToolbar({
       </span>
       <span className="pages-actions">
         <button
+          data-testid="pages.pages-toolbar-pages-btn-2"
           type="button"
           className="pages-btn"
           title={`Open the current plan (${formatKeys("Mod+Shift+P")})`}
@@ -111,12 +130,18 @@ export function PagesToolbar({
           Plan page
         </button>
         {picking ? (
-          <button type="button" className="pages-btn" onClick={actions.cancelPick}>
+          <button
+            data-testid="pages.pages-toolbar-pages-btn-3"
+            type="button"
+            className="pages-btn"
+            onClick={actions.cancelPick}
+          >
             Cancel pick
           </button>
         ) : (
           <>
             <button
+              data-testid="pages.pages-toolbar-pages-btn-4"
               type="button"
               className="pages-btn"
               title="Select text or click a section of the page, then write a comment for Vibe"
@@ -126,6 +151,7 @@ export function PagesToolbar({
               Comment
             </button>
             <button
+              data-testid="pages.pages-toolbar-pages-btn-5"
               type="button"
               className="pages-btn"
               title="Select text or click a section: it is added to your next message"
@@ -135,6 +161,7 @@ export function PagesToolbar({
               Point Vibe at this
             </button>
             <Tool
+              testId="pages.toolbar-share"
               icon="download"
               label="Share as one file (styles, images and your answers in one HTML file)"
               disabled={!onPage || busy}

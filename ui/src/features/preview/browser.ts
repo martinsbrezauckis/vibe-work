@@ -21,6 +21,7 @@ import type {
   BrowserState,
   DeviceWidth,
   PageTab,
+  PickTarget,
 } from "../../protocol/core";
 import type { CoreController } from "../../state/coreStore";
 import { createStore } from "../../state/createStore";
@@ -302,15 +303,25 @@ export function createBrowser(
       });
       if (result.type !== "done") throw new Error("The page did not cancel the choice.");
     },
-    /** Lets the user point at an element (or draw a box) in the app preview; adds it as a draft annotation. */
+    /**
+     * Lets the user point at an element (or draw a box) in the app preview; adds it as a draft annotation. With
+     * `target` (a Debug API request, which has no pointer) the element or area is named instead and the answer is
+     * immediate.
+     */
     async annotate(
       sessionId: string,
       mode: "element" | "box",
       origin: NoteOrigin = "ui",
+      target?: PickTarget,
     ): Promise<NoteItem | null> {
       store.set((s) => ({ ...s, picking: put(s.picking, sessionId, mode) }));
       try {
-        const result = await run({ op: "annotate", sessionId, mode });
+        const result = await run({
+          op: "annotate",
+          sessionId,
+          mode,
+          ...(target === undefined ? {} : { target }),
+        });
         if (result.type !== "annotation") return null;
         counter += 1;
         const item: NoteItem = {

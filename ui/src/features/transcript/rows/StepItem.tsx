@@ -44,6 +44,7 @@ export const StepItem = memo(function StepItem({ entry }: { entry: Obj }): React
   return (
     <div className={`step ${state}`} data-kind={view.kind || "generic"} data-entry-id={id}>
       <button
+        data-testid="transcript.step-item-toggle"
         type="button"
         className="step-h"
         aria-expanded={open}

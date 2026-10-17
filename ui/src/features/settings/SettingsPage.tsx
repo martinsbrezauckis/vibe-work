@@ -30,12 +30,16 @@ import { AgentDefaultsSettings } from "./AgentDefaultsSettings";
 import { AccountSettings } from "./AccountSettings";
 import { AppearanceSettings } from "./AppearanceSettings";
 import { CliSharingSettings } from "./CliSharingSettings";
+import { CopiesSettings } from "./CopiesSettings";
+import { GitSettings } from "./GitSettings";
 import { DeveloperSettings } from "./DeveloperSettings";
 import { ErrorDetailSetting } from "./ErrorDetailSetting";
 import { InstructionsSettings } from "./InstructionsSettings";
 import { MistralLinks } from "./MistralLinkRows";
+import { NetworkSettings } from "./NetworkSettings";
 import { PrivacySettings } from "./PrivacySettings";
 import { SignedInAccounts } from "./SignedInAccounts";
+import { SecretScanSettings } from "../secrets/SecretScanSettings";
 import { ProjectSecretsSettings } from "../secrets/ProjectSecretsSettings";
 import { SafetySettings } from "../secrets/SafetySettings";
 import { ImageSettings } from "./ImageSettings";
@@ -52,6 +56,9 @@ function sections(category: string): ReactElement {
         <>
           <CliSharingSettings />
           <ErrorDetailSetting />
+          {/* The two Git cards stay together: author details, then session copies. */}
+          <GitSettings />
+          <CopiesSettings />
         </>
       );
     case "appearance":
@@ -73,7 +80,12 @@ function sections(category: string): ReactElement {
         </>
       );
     case "secrets":
-      return <ProjectSecretsSettings />;
+      return (
+        <>
+          <ProjectSecretsSettings />
+          <SecretScanSettings />
+        </>
+      );
     case "models":
       return (
         <>
@@ -110,6 +122,8 @@ function sections(category: string): ReactElement {
           <MistralLinks category="privacy" />
         </>
       );
+    case "network":
+      return <NetworkSettings />;
     case "updates":
       return <UpdateSettings />;
     case "developer":
@@ -205,7 +219,7 @@ export function SettingsPage(): ReactElement {
     offered.some((c) => c.id === r.category),
   );
   return (
-    <div className="settings-page" role="region" aria-label="Settings" ref={root}>
+    <div className="settings-page ui-body" role="region" aria-label="Settings" ref={root}>
       <div className="set-body">
         {searching ? (
           <>
@@ -221,12 +235,14 @@ export function SettingsPage(): ReactElement {
             {offered
               .filter((c) => results.some((r) => r.category === c.id))
               .map((c) => (
-                <div key={c.id} className="set-group">
+                <div data-item-id={c.id} key={c.id} className="set-group">
                   <h3>{c.label}</h3>
                   {results
                     .filter((r) => r.category === c.id)
                     .map((r) => (
                       <button
+                        data-testid="settings.settings-page-open-hit"
+                        data-item-id={r.id}
                         key={r.id}
                         type="button"
                         className="set-hit"

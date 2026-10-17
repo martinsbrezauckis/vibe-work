@@ -1,0 +1,17 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "versions": {
+      "items": {
+        "$ref": "#/$defs/SkillVersionView"
+      },
+      "title": "Versions",
+      "type": "array"
+    }
+  },
+  "required": [
+    "versions"
+  ],
+  "title": "SkillsVersionsResponse",
+  "type": "object"
+}

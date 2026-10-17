@@ -1,0 +1,22 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "code": {
+      "$ref": "#/$defs/ProtocolErrorCode"
+    },
+    "data": {
+      "$ref": "#/$defs/JsonValue",
+      "default": null
+    },
+    "message": {
+      "title": "Message",
+      "type": "string"
+    }
+  },
+  "required": [
+    "code",
+    "message"
+  ],
+  "title": "ProtocolError",
+  "type": "object"
+}

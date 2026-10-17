@@ -53,6 +53,23 @@ pub const DEV_BUILD: bool = cfg!(debug_assertions);
 /// # Errors
 /// The text shown instead of starting Vibe.
 pub fn data_dir(app: &AppHandle) -> Result<PathBuf, String> {
+    data_dir_from(app.path().app_data_dir().map_err(|error| error.to_string()))
+}
+
+/// Resolves the standard desktop folder without initializing a GUI. Tauri directory overrides
+/// still resolve in setup; live profiles and development data overrides work before setup too.
+pub(crate) fn early_data_dir(config: &tauri::Config) -> Option<PathBuf> {
+    let resolved = if config.app.app_directories_override.is_some() {
+        Err("the app directory is resolved by Tauri".to_owned())
+    } else {
+        dirs::data_dir()
+            .map(|path| path.join(&config.identifier))
+            .ok_or_else(|| "the desktop data folder is unavailable".to_owned())
+    };
+    data_dir_from(resolved).ok()
+}
+
+fn data_dir_from(resolved: Result<PathBuf, String>) -> Result<PathBuf, String> {
     if let Some(root) = crate::live_profile::root()? {
         return vw_host::product::private_data_dir(Ok(root.join("data")), None);
     }
@@ -61,10 +78,7 @@ pub fn data_dir(app: &AppHandle) -> Result<PathBuf, String> {
     } else {
         None
     };
-    vw_host::product::private_data_dir(
-        app.path().app_data_dir().map_err(|e| e.to_string()),
-        dev_override,
-    )
+    vw_host::product::private_data_dir(resolved, dev_override)
 }
 
 /// The folder the Vibe install goes into: Tauri's local app data folder, user-only like the data
@@ -420,6 +434,13 @@ pub fn host_config(app: &AppHandle, confirmer: SharedConfirmer) -> HostConfig {
         vw_vault::location::forbid_canonical_profile();
     }
     let mut core = CoreConfig::default();
+    if let Some(index) = crate::startup_market::index() {
+        core.market = vw_core_api::MarketConfig {
+            index: Some(index),
+            allow_loopback_http: true,
+            ..Default::default()
+        };
+    }
     // About, `/health` and `ui/state` report the version the updater compares (the Tauri
     // config's, which the release scripts set), not the Cargo workspace's `0.0.0`.
     core.app_version = Some(app.package_info().version.to_string());
@@ -441,6 +462,8 @@ pub fn host_config(app: &AppHandle, confirmer: SharedConfirmer) -> HostConfig {
     }
     // The temporary sessions' record (deleted at quit, or at the next start after a crash).
     core.sessions_dir = Some(data.join("sessions"));
+    // The key service verifies this agent-writable record through its vault before building any HTTPS client.
+    core.network_file = Some(vw_mistral::network::settings_file(&data));
     // Preview pane: child webviews of the main window, website data per session under `preview/`.
     core.preview = Some(preview_setup(app, &data));
     // Project Pages: the page viewer, comments and per-project settings.

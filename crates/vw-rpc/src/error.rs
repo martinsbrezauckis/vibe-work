@@ -44,7 +44,7 @@ pub enum DeathCause {
         after: Duration,
     },
     /// A request whose silence means the server is wedged got no answer in time (for example,
-    /// `callback/result` unanswered, after which Vibe 2.26.0 also exits with code 1).
+    /// an unanswered `callback/result`).
     Wedged {
         /// Method that went unanswered.
         method: String,

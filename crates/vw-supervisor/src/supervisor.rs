@@ -317,9 +317,8 @@ impl Supervisor {
     }
 
     /// Sends `session/resume` for `session_id` with the caller's params and publishes progress
-    /// (`Ready.recovering`) every `progress_interval` until it answers. After a kill the unified
-    /// harness can hold the session lock for ~31 s: callers see "recovering, 12 s of ~31 s"
-    /// instead of a hang. On success the session leaves `needs_resume`.
+    /// (`Ready.recovering`) every `progress_interval` until it answers, so a slow resume shows as
+    /// "recovering, 12 s of ~31 s" instead of a hang. On success the session leaves `needs_resume`.
     ///
     /// # Errors
     /// [`SupervisorError::NotReady`] when no server is ready within `resume_timeout`;

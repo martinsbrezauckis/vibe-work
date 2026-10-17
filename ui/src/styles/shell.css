@@ -124,14 +124,8 @@ kbd {
   cursor: pointer;
   font-size: var(--text-12-5);
 }
-/* a disabled toolbar button looks disabled everywhere (a disabled "primary" one kept its full fill). */
-.tb-btn:disabled,
-.set-cat-body .btn-primary:disabled {
-  opacity: 0.45;
-  cursor: default;
-}
-.tb-btn:hover,
-.set-cat-body .btn-primary:hover {
+.tb-btn:hover:where(:not(:disabled)),
+.set-cat-body .btn-primary:hover:where(:not(:disabled)) {
   background: var(--hover);
   color: var(--text);
 }
@@ -214,7 +208,7 @@ kbd {
   place-items: center;
   position: relative;
 }
-.rbtn:hover {
+.rbtn:hover:where(:not(:disabled)) {
   background: var(--hover);
   color: var(--text);
 }
@@ -272,7 +266,7 @@ kbd {
   cursor: pointer;
   padding: 0 14px;
 }
-.btn-primary:hover {
+.btn-primary:hover:where(:not(:disabled)) {
   filter: brightness(0.94);
 }
 .filter {
@@ -358,7 +352,7 @@ kbd {
   font-weight: var(--weight-medium);
   font-size: var(--text-13-5);
 }
-.proj-h:hover {
+.proj-h:hover:where(:not(:disabled)) {
   background: var(--hover);
 }
 .proj-h .caret,
@@ -523,7 +517,7 @@ kbd {
   cursor: pointer;
   font-size: var(--text-13-5);
 }
-.rbtn-wide:hover {
+.rbtn-wide:hover:where(:not(:disabled)) {
   background: var(--hover);
   color: var(--text);
 }

@@ -1,0 +1,31 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "sessionId": {
+      "title": "Sessionid",
+      "type": "string"
+    },
+    "skillId": {
+      "title": "Skillid",
+      "type": "string"
+    },
+    "version": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Version"
+    }
+  },
+  "required": [
+    "sessionId",
+    "skillId"
+  ],
+  "title": "SkillsDetailParams",
+  "type": "object"
+}

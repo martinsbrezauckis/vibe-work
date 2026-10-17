@@ -7,6 +7,9 @@
 //! - The child starts from an empty environment (`env_clear`); only [`INHERITED`] names are
 //!   copied from the parent, so a hostile parent env (`LD_PRELOAD`, `BASH_ENV`,...) never reaches the
 //!   server or the agent tools it runs. The shared agent credential policy runs after explicit additions.
+//! - A proxy in the child's environment (inherited or explicit) always comes with this computer's addresses on its
+//!   `NO_PROXY` ([`LOOPBACK_NO_PROXY`]): Vibe reaches Vibe Work's model proxy at `127.0.0.1` and would otherwise send
+//!   that request to the company proxy.
 //! - Loader and runtime hijack variables ([`is_hijack_var`]) are refused in explicit inputs. The
 //!   builder alone sets `BASH_ENV` to the app-owned startup file, prepared at each server launch.
 //! - The key travels only as `MISTRAL_API_KEY` in the child env, never in argv, logs or `Debug`. The MCP forwarder
@@ -294,8 +297,63 @@ pub fn build_env(plan: &EnvPlan<'_>) -> Result<Vec<(OsString, OsString)>, EnvErr
     if let Some(token) = plan.mcp_token {
         set(MCP_TOKEN_VAR, OsString::from(token.expose()));
     }
+    keep_loopback_off_the_proxy(&mut env);
     crate::isolate_credentials(&mut env);
     Ok(env)
+}
+
+/// Addresses of this computer, in the no-proxy list Vibe gets when it has a proxy. Vibe reaches Vibe Work's model proxy
+/// at `127.0.0.1` and its HTTP client has no implicit loopback bypass (probed on Vibe 2.26.1: with `HTTP_PROXY` set and
+/// no `NO_PROXY`, a request to `http://127.0.0.1:<port>` went to the proxy), so a proxy in the environment without these
+/// entries would send every model request of Vibe to the company proxy. Same list as `vw_mistral::network::LOOPBACK`
+/// (a private test keeps the two equal; this crate does not depend on the HTTP stack).
+pub const LOOPBACK_NO_PROXY: [&str; 3] = ["localhost", "127.0.0.1", "::1"];
+
+/// When the child environment names a proxy (`HTTP_PROXY`, `HTTPS_PROXY` or `ALL_PROXY`, either case), makes both
+/// spellings of `NO_PROXY` hold the list it already has (Python reads the lower-case one first) plus this computer's
+/// addresses. Without a proxy nothing is touched.
+fn keep_loopback_off_the_proxy(env: &mut Vec<(OsString, OsString)>) {
+    let value = |env: &[(OsString, OsString)], name: &str| {
+        env.iter()
+            .find(|(existing, _)| same_name(existing, OsStr::new(name)))
+            .and_then(|(_, value)| value.to_str())
+            .filter(|value| !value.trim().is_empty())
+            .map(str::to_owned)
+    };
+    let proxied = [
+        "http_proxy",
+        "https_proxy",
+        "all_proxy",
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "ALL_PROXY",
+    ]
+    .iter()
+    .any(|name| value(env, name).is_some());
+    if !proxied {
+        return;
+    }
+    let current = value(env, "no_proxy")
+        .or_else(|| value(env, "NO_PROXY"))
+        .unwrap_or_default();
+    let mut entries: Vec<&str> = current
+        .split(',')
+        .map(str::trim)
+        .filter(|entry| !entry.is_empty())
+        .collect();
+    for local in LOOPBACK_NO_PROXY {
+        if !entries
+            .iter()
+            .any(|entry| entry.eq_ignore_ascii_case(local))
+        {
+            entries.push(local);
+        }
+    }
+    let merged = OsString::from(entries.join(","));
+    for name in ["NO_PROXY", "no_proxy"] {
+        env.retain(|(existing, _)| !same_name(existing, OsStr::new(name)));
+        env.push((OsString::from(name), merged.clone()));
+    }
 }
 
 fn inherited(name: &OsStr) -> bool {

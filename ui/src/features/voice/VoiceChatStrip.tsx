@@ -58,6 +58,7 @@ export function VoiceChatStrip({ sessionId }: { sessionId: string }): ReactEleme
         {extra === null ? null : <span className="vchat-note"> {extra}</span>}
       </span>
       <button
+        data-testid="voice.voice-chat-strip-turn-off"
         type="button"
         className="mini"
         title="End voice chat"

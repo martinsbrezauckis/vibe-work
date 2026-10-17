@@ -37,7 +37,7 @@ export function mainAction(
     if (e.entry.server?.access === "key") return "addKey";
     return e.entry.server?.access === "signIn" ? "add" : null;
   }
-  if (e.foreign || !e.installable) return null;
+  if (e.off || e.foreign || !e.installable) return null;
   if (e.installed === null) return "install";
   return e.installed.updateAvailable ? "update" : null;
 }
@@ -60,11 +60,13 @@ export function MarketCard({
   const busy = installing !== null;
   return (
     <div
+      data-item-id={e.entry.id}
       className={`ctile mcard ${selected ? "sel" : ""}`}
       data-entry={e.entry.id}
       data-kind={e.entry.kind}
     >
       <button
+        data-testid="marketplace.market-card-select"
         type="button"
         className="ctile-main"
         aria-pressed={selected}
@@ -87,6 +89,7 @@ export function MarketCard({
         </span>
         {action === null ? null : (
           <button
+            data-testid="marketplace.market-card-add-server"
             type="button"
             className="tb-btn primary"
             disabled={busy && action !== "add" && action !== "addKey"}

@@ -34,7 +34,9 @@ export function DelegationReceipts({
   if (receipts.length === 0) return null;
   return (
     <details className="browser-log browser-receipts" open={expanded}>
-      <summary>Browser permissions activity ({String(receipts.length)})</summary>
+      <summary data-testid="preview.delegation-receipts-summary">
+        Browser permissions activity ({String(receipts.length)})
+      </summary>
       <ol className="browser-log-list">
         {[...receipts].reverse().map((receipt, index) => (
           <li

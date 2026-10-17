@@ -94,6 +94,8 @@ export function mountTerminal(host: HTMLElement, options: MountOptions): Mounted
   // OSC 52 asks the terminal to write the clipboard: swallowed, the program cannot reach it.
   const osc52 = term.parser.registerOscHandler(52, () => true);
   term.open(host);
+  term.textarea?.setAttribute("data-testid", "terminal.input");
+  term.textarea?.setAttribute("data-item-id", terminalId);
 
   const mac = detectMac();
   const queue = createInputQueue(

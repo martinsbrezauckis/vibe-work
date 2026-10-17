@@ -37,6 +37,7 @@ export function RenameField({
   };
   return (
     <input
+      data-testid="sessions.rename-field-stop-propagation"
       ref={input}
       className="rename"
       aria-label={label}

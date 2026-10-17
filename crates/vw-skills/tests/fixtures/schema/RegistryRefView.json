@@ -1,0 +1,31 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "alias": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Alias"
+    },
+    "skillId": {
+      "title": "Skillid",
+      "type": "string"
+    },
+    "version": {
+      "title": "Version",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "skillId",
+    "version"
+  ],
+  "title": "RegistryRefView",
+  "type": "object"
+}

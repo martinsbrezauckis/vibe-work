@@ -1,7 +1,7 @@
 //! The repository's commit hooks: the user's own Commit runs them as `git commit`
 //! in a terminal does (per-project switch "Run this repository's commit hooks", on by default), and the dialog
 //! names which ones will run. Every implicit git call keeps the private empty hooks folder; Push never runs
-//! `pre-push`. A hook the agent edited is not checked separately (Martins: with full access the agent can run
+//! `pre-push`. A hook the agent edited is not checked separately (with full access the agent can run
 //! any command anyway; in ask mode the edit comes through an approval and shows in Changes).
 //!
 //! Depends on: vw-changes (runner), vw-platform (`plain_path`). Called by: vw-core-api.

@@ -42,6 +42,7 @@ export function KeyNotice({
         <p>{visibleMessage}</p>
       )}
       <button
+        data-testid="shell.key-notice-go-home"
         type="button"
         className={inSettings ? "tb-btn primary" : "btn-primary"}
         onClick={() => {

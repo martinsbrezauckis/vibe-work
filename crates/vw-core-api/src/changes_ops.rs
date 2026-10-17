@@ -56,6 +56,9 @@ impl Core {
     ) -> Result<ChangesResult, CoreError> {
         match request {
             ChangesRequest::Read { session_id } => self.changes_read(&session_id).await,
+            ChangesRequest::ReadRepo { session_id, repo } => {
+                self.changes_repo(&session_id, &repo).await
+            }
             ChangesRequest::Keep { session_id, target } => {
                 self.changes_act(&session_id, move |tracker| {
                     let Some(Review::Git { baseline, .. }) = &mut tracker.review else {
@@ -89,37 +92,15 @@ impl Core {
             } => self.undo_preview(origin, &session_id, &turn_id).await,
             ChangesRequest::FolderSessions { cwd } => self.folder_sessions(&cwd).await,
             ChangesRequest::PlanHistory { session_id } => {
-                self.refuse_history_over_nested_repo(&session_id)?;
-                let folder = self.plain_folder(&session_id)?;
-                let plan =
-                    blocking(move || vw_changes::plan_init(&folder).map_err(core_error)).await??;
-                Ok(ChangesResult::InitPlan { plan })
+                self.changes_plan_history(&session_id).await
             }
             ChangesRequest::EnableHistory {
                 session_id,
                 confirmed,
+                identity,
             } => {
-                // `confirmed: true` is the consent, from the window's own confirmation or from a Debug API client,
-                // which acts as the user.
-                if !confirmed {
-                    return Err(CoreError::new(
-                        ErrorCode::InvalidParams,
-                        "enableHistory needs the user's confirmation (confirmed: true)",
-                    ));
-                }
-                self.refuse_history_over_nested_repo(&session_id)?;
-                let folder = self.plain_folder(&session_id)?;
-                let claim = self.changes_claim(&session_id).await?;
-                let hub_owner = self.shared.clone();
-                let id = session_id.clone();
-                blocking(move || {
-                    vw_changes::init_repository(&folder).map_err(core_error)?;
-                    hub_owner.changes.forget(&id, false);
-                    hub_owner.changes.ensure(&id, &folder, Some(&claim));
-                    Ok::<(), CoreError>(())
-                })
-                .await??;
-                self.changes_read(&session_id).await
+                self.changes_enable_history(&session_id, confirmed, identity)
+                    .await
             }
             ChangesRequest::Restart { session_id } => {
                 let folder = self.session_facts(&session_id)?.1;
@@ -142,6 +123,61 @@ impl Core {
                 self.changes_read(&session_id).await
             }
         }
+    }
+
+    async fn changes_plan_history(&self, session_id: &str) -> Result<ChangesResult, CoreError> {
+        self.refuse_history_over_nested_repo(session_id)?;
+        let folder = self.plain_folder(session_id)?;
+        let shared = self.shared.clone();
+        let (mut plan, identity) = blocking(move || {
+            let plan = vw_changes::plan_init(&folder).map_err(core_error)?;
+            let settings = crate::git_identity::load(&shared.git)?;
+            Ok::<_, CoreError>((plan, settings.identity))
+        })
+        .await??;
+        plan.fallback_author = None;
+        Ok(ChangesResult::InitPlan {
+            plan,
+            identity: Some(identity),
+        })
+    }
+
+    async fn changes_enable_history(
+        &self,
+        session_id: &str,
+        confirmed: bool,
+        identity: Option<vw_git::identity::CommitIdentity>,
+    ) -> Result<ChangesResult, CoreError> {
+        if !confirmed {
+            return Err(CoreError::new(
+                ErrorCode::InvalidParams,
+                "enableHistory needs the user's confirmation (confirmed: true)",
+            ));
+        }
+        let _guard = self.shared.git.lock.lock().await;
+        self.refuse_history_over_nested_repo(session_id)?;
+        let folder = self.plain_folder(session_id)?;
+        let claim = self.changes_claim(session_id).await?;
+        let hub_owner = self.shared.clone();
+        let id = session_id.to_owned();
+        blocking(move || {
+            let remember = identity.is_some();
+            let author = match identity {
+                Some(identity) => identity,
+                None => crate::git_identity::load(&hub_owner.git)?.identity,
+            };
+            vw_git::identity::validate(&author).map_err(crate::git_cmd::git_error)?;
+            vw_changes::init_repository_with_identity(&folder, &author.name, &author.email)
+                .map_err(core_error)?;
+            if remember {
+                crate::git_identity::save(&hub_owner.git, &author)?;
+            }
+            hub_owner.changes.forget(&id, false);
+            hub_owner.changes.ensure(&id, &folder, Some(&claim));
+            Ok::<(), CoreError>(())
+        })
+        .await??;
+        self.changes_read(session_id).await
     }
 
     /// Takes the session's baseline if it has none, before `method` reaches Vibe (`dispatch::forward`).
@@ -236,7 +272,7 @@ impl Core {
     }
 
     /// The session's claim on its baseline folder, waiting for any holder (`changes_slots`).
-    async fn changes_claim(&self, session_id: &str) -> Result<Claim, CoreError> {
+    pub(crate) async fn changes_claim(&self, session_id: &str) -> Result<Claim, CoreError> {
         self.shared
             .changes
             .claim_wait(session_id, None)
@@ -281,7 +317,8 @@ impl Core {
         if self.shared.changes.dir.is_none() {
             return Err(changes_off());
         }
-        let (session, folder) = self.session_facts(session_id)?;
+        let (mut session, folder) = self.session_facts(session_id)?;
+        crate::changes_children::include_children(&self.shared, session_id, &mut session).await;
         let hub_owner = self.shared.clone();
         let id = session_id.to_owned();
         let view = blocking(move || {

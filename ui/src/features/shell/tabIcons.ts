@@ -11,6 +11,7 @@ export const TAB_ICON: Readonly<Record<TabKind, IconName>> = {
   project: "book-open",
   plan: "list-todo",
   browser: "globe",
+  git: "git-branch",
   changes: "file-diff",
   terminal: "square-terminal",
   file: "file",

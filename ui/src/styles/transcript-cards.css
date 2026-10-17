@@ -73,18 +73,11 @@
 .cbtn:hover:not(:disabled) {
   border-color: var(--line-3);
 }
-.cbtn:disabled {
-  opacity: 0.45;
-  cursor: default;
-}
 .cbtn.go {
   background: var(--primary-bg);
   color: var(--primary-fg);
   border-color: transparent;
   font-weight: 600;
-}
-.cbtn.no {
-  color: var(--red);
 }
 .feedback,
 .q-other {

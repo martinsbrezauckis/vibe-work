@@ -26,16 +26,19 @@ const MAC = detectMac();
 
 /** A toolbar button. */
 function Tool({
+  testId,
   label,
   onClick,
   children,
 }: {
+  testId: string;
   label: string;
   onClick: () => void;
   children: string;
 }) {
   return (
     <button
+      data-testid={testId}
       type="button"
       className="vw-term-tool"
       title={label}
@@ -87,9 +90,17 @@ export function TerminalPanel({ terminals }: { terminals: Terminals }) {
   return (
     <div className="vw-term-panel" data-session-id={sessionId}>
       <div className="vw-term-bar">
-        <div className="vw-term-tabs" role="tablist" aria-label="Terminals" ref={tabsRef}>
+        <div
+          data-testid="terminal.terminal-panel-vw-term-tabs"
+          className="vw-term-tabs"
+          role="tablist"
+          aria-label="Terminals"
+          ref={tabsRef}
+        >
           {tabs.map((t, index) => (
             <button
+              data-testid="terminal.terminal-panel-select"
+              data-item-id={t.terminalId}
               key={t.terminalId}
               type="button"
               role="tab"
@@ -105,6 +116,7 @@ export function TerminalPanel({ terminals }: { terminals: Terminals }) {
             </button>
           ))}
           <button
+            data-testid="terminal.terminal-panel-open"
             type="button"
             className="ibtn vw-term-new"
             aria-label="New terminal"
@@ -117,21 +129,28 @@ export function TerminalPanel({ terminals }: { terminals: Terminals }) {
         {active !== null && (
           <div className="vw-term-tools">
             <Tool
+              testId="terminal.toolbar-copy"
               label={`Copy the selection (${MAC ? "Cmd+C" : "Ctrl+Shift+C"})`}
               onClick={() => void mounted.current?.copy()}
             >
               Copy
             </Tool>
             <Tool
+              testId="terminal.toolbar-paste"
               label={`Paste (${MAC ? "Cmd+V" : "Ctrl+Shift+V"})`}
               onClick={() => void mounted.current?.paste()}
             >
               Paste
             </Tool>
-            <Tool label="Clear the view" onClick={() => mounted.current?.clear()}>
+            <Tool
+              testId="terminal.toolbar-clear"
+              label="Clear the view"
+              onClick={() => mounted.current?.clear()}
+            >
               Clear
             </Tool>
             <Tool
+              testId="terminal.toolbar-action-1"
               label="Point Vibe at this: add the selected text to your next message"
               onClick={() => {
                 const outcome = pointTerminal(app, sessionId);
@@ -143,12 +162,14 @@ export function TerminalPanel({ terminals }: { terminals: Terminals }) {
               Point Vibe at this
             </Tool>
             <Tool
+              testId="terminal.toolbar-restart"
               label="Restart the shell (stops its processes)"
               onClick={() => void terminals.restart(sessionId, active.terminalId)}
             >
               Restart
             </Tool>
             <Tool
+              testId="terminal.toolbar-close"
               label="Close the terminal (stops its processes)"
               onClick={() => void terminals.close(sessionId, active.terminalId)}
             >
@@ -158,7 +179,7 @@ export function TerminalPanel({ terminals }: { terminals: Terminals }) {
         )}
       </div>
       {error !== undefined && (
-        <div className="vw-term-error" role="alert">
+        <div className="key-problem" role="alert">
           {error}
         </div>
       )}
@@ -171,6 +192,7 @@ export function TerminalPanel({ terminals }: { terminals: Terminals }) {
         <div className="vw-term-exited" role="status">
           {`The shell exited${exited.exitCode === null ? "" : ` with code ${String(exited.exitCode)}`}${exited.signal === null ? "" : ` (${exited.signal})`}.`}
           <button
+            data-testid="terminal.terminal-panel-restart"
             type="button"
             className="vw-term-tool"
             onClick={() => void terminals.restart(sessionId, active.terminalId)}

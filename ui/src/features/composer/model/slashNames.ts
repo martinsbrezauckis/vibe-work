@@ -5,7 +5,8 @@
  * Depends on: nothing. Called by: model/message (`classify`), model/slash.
  * Invariant: every name here has exactly one row in `slash.ts` (test `composer-model`). Anything else
  * typed after `/` is sent to Vibe as text: skills run server-side from a leading `/name`, and
- * unknown commands reach the model like in the CLI.
+ * unknown commands reach the model like in the CLI. `/loop` is ours only in its strict forms
+ * (`model/loopArgs.ts`); its model-driven forms ("every weekday at 9 ...") are text for Vibe too.
  */
 
 /** GUI commands (Vibe's pass-through commands that make sense in a window). */
@@ -26,6 +27,7 @@ export const CLIENT_COMMANDS = [
   // the rest of Vibe 2.26.1's commands that make sense in a window, and its aliases.
   "reload-plugins",
   "plugins",
+  "loop",
   "new",
   "config",
   "mcp",
@@ -33,6 +35,7 @@ export const CLIENT_COMMANDS = [
   "resume",
   "continue",
   "todo",
+  "data-retention",
 ] as const;
 
 /** One GUI command name. */

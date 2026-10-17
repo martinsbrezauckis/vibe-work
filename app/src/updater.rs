@@ -174,6 +174,9 @@ fn offer_of(update: &Update) -> Offer {
 fn build_updater<R: Runtime>(app: &AppHandle<R>) -> Result<tauri_plugin_updater::Updater, String> {
     let exit_app = app.clone();
     app.updater_builder()
+        // The proxy and certificates saved in Settings > Network (the same reqwest as vw-mistral's, one version in the
+        // lock file); with none saved the plugin keeps the system proxy settings it was built with.
+        .configure_client(|builder| vw_mistral::network::current().apply(builder))
         .on_before_exit(move || {
             shut_down_core(&exit_app);
             exit_app.cleanup_before_exit();

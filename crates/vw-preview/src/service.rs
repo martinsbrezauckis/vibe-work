@@ -53,6 +53,8 @@ pub struct PreviewConfig {
     pub storage_root: PathBuf,
     /// Previews mounted at once. Default 4.
     pub live_cap: usize,
+    /// Memory admission probe. None uses live system and cgroup memory.
+    pub memory_probe: Option<crate::MemoryProbe>,
     /// Fixed URL rules (the app's dev origin).
     pub policy: UrlPolicy,
     /// Longest wait for a page load after `open` (the answer still returns, with `loading: true`). Default 8 s.
@@ -80,6 +82,7 @@ impl std::fmt::Debug for PreviewConfig {
         debug
             .field("storage_root", &self.storage_root)
             .field("live_cap", &self.live_cap)
+            .field("memory_probe", &self.memory_probe.is_some())
             .field("policy", &self.policy)
             .field("load_wait", &self.load_wait)
             .field("engine_timeout", &self.engine_timeout)
@@ -101,6 +104,7 @@ impl PreviewConfig {
         Self {
             storage_root,
             live_cap: 4,
+            memory_probe: None,
             policy: UrlPolicy::default(),
             load_wait: Duration::from_secs(8),
             engine_timeout: Duration::from_secs(10),
@@ -220,7 +224,7 @@ impl PreviewService {
             inner.names.set_resolver(resolver.clone());
         }
         engine.attach(Arc::new(Hooks(inner.clone())));
-        let pool = PoolState::load(&config.storage_root);
+        let pool = PoolState::load(&config.storage_root, config.memory_probe.clone());
         Self {
             inner,
             engine,

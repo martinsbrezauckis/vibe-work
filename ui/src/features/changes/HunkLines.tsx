@@ -108,6 +108,7 @@ function Commentable({
     return (
       <>
         <button
+          data-testid="changes.hunk-lines-begin"
           type="button"
           className="lc-add"
           data-line-index={i}

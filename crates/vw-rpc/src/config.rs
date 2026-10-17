@@ -10,9 +10,8 @@ use crate::stderr_ring::{Redactions, StderrLimits};
 
 /// Methods whose unanswered request means the server is wedged, not just slow.
 ///
-/// `callback/result`: a malformed
-/// answer gets no response within 30 s and Vibe 2.26.0 later exits with code 1. Treating the
-/// silence as death lets the supervisor restart instead of hanging the turn.
+/// `callback/result`: Vibe Work treats a callback answer that gets no response in time as a
+/// stopped server, so the supervisor restarts it and the turn does not wait without end.
 pub const DEFAULT_WEDGE_METHODS: &[&str] = &["callback/result"];
 
 /// Methods that need more than the ordinary 30 s request timeout.

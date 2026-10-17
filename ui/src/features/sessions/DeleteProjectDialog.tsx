@@ -6,6 +6,7 @@
  * Mounted outside the session column so the Projects page can ask while that column is hidden.
  * Invariants: Cancel has the initial focus (Enter does not delete by accident); Escape and the scrim cancel.
  */
+import { Button } from "../../components/Controls";
 import { useRef } from "react";
 
 import { useModalFocus } from "../../hooks/useModalFocus";
@@ -26,8 +27,9 @@ export function DeleteProjectDialog() {
   const n = project.sessions;
   return (
     <>
-      <div className="scrim" onClick={close} />
+      <div data-testid="sessions.delete-project-dialog-scrim" className="scrim" onClick={close} />
       <div
+        data-testid="sessions.delete-project-dialog-modal"
         className="modal"
         role="dialog"
         aria-modal="true"
@@ -47,19 +49,27 @@ export function DeleteProjectDialog() {
           </p>
         </section>
         <footer className="modal-actions">
-          <button type="button" className="tb-btn" data-dialog-initial-focus="true" onClick={close}>
+          <button
+            data-testid="sessions.delete-project-dialog-tb-btn"
+            type="button"
+            className="tb-btn"
+            data-dialog-initial-focus="true"
+            onClick={close}
+          >
             Cancel
           </button>
-          <button
+          <Button
+            data-testid="sessions.delete-project-dialog-close"
             type="button"
-            className="btn-danger"
+            small
+            variant="danger"
             onClick={() => {
               close();
               void groups.remove(project.id);
             }}
           >
             Delete project
-          </button>
+          </Button>
         </footer>
       </div>
     </>

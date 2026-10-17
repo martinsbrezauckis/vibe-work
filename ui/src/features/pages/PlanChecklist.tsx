@@ -47,11 +47,21 @@ function Checklist({
     void pages.loadPlan(sessionId);
   }, [pages, sessionId]);
   // a core without Project Pages says so once, here, instead of a refusal on every view.
-  if (unavailable !== null) return <div className="empty">{unavailable}.</div>;
-  if (plan === undefined) return <div className="empty">Reading the plan…</div>;
+  if (unavailable !== null)
+    return (
+      <div data-item-id={sessionId} className="empty">
+        {unavailable}.
+      </div>
+    );
+  if (plan === undefined)
+    return (
+      <div data-item-id={sessionId} className="empty">
+        Reading the plan…
+      </div>
+    );
   if (plan.path === null || plan.facts === null)
     return (
-      <div className="empty">
+      <div data-item-id={sessionId} className="empty">
         This project has no plan page yet. Ask Vibe to plan the work as a handbook page.
       </div>
     );
@@ -62,7 +72,7 @@ function Checklist({
   const path = plan.path;
   const percent = progress.total === 0 ? 0 : Math.round((progress.done / progress.total) * 100);
   return (
-    <section className="plan-checklist" aria-label="Plan checklist">
+    <section data-item-id={sessionId} className="plan-checklist" aria-label="Plan checklist">
       <header className="plan-checklist-head">
         <b title={path}>{plan.facts.title ?? path}</b>
         <span data-progress={`${String(progress.done)}/${String(progress.total)}`}>
@@ -84,8 +94,9 @@ function Checklist({
       ) : (
         <ol className="plan-checklist-steps">
           {steps.map((step, i) => (
-            <li key={step.id}>
+            <li data-item-id={step.id} key={step.id}>
               <button
+                data-testid="pages.plan-checklist-open-step"
                 type="button"
                 data-step={step.id}
                 data-status={step.status}
@@ -93,7 +104,7 @@ function Checklist({
                 aria-current={step.status === "doing" || i === live ? "step" : undefined}
                 title={
                   step.fromTodo
-                    ? `Done in Vibe's todo list; the plan page is updated at the end of the turn. Open step ${step.id}`
+                    ? `${step.status === "skipped" ? "Skipped" : "Done"} in Vibe's todo list; the plan page is updated at the end of the turn. Open step ${step.id}`
                     : `Open step ${step.id} of the plan page`
                 }
                 data-from-todo={step.fromTodo}
@@ -108,6 +119,7 @@ function Checklist({
                   {step.text}
                 </span>
                 {i === live && <span className="plan-checklist-live">live</span>}
+                {step.fromTodo && <span className="plan-checklist-source">from todo list</span>}
               </button>
             </li>
           ))}

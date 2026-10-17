@@ -8,6 +8,7 @@
  * the Debug API is the transport itself.
  */
 import { useEffect } from "react";
+import { attachSecretScanActivity } from "../../state/secretScanActivity";
 
 import { runUiControl } from "../../state/uiControl";
 import { useApp } from "./AppContext";
@@ -16,6 +17,7 @@ import { useSessionWiring } from "../sessions/useSessionWiring";
 import { useShellState } from "./hooks";
 import { registerShellRoutes } from "./shellUiControl";
 import { registerInputRoutes } from "./inputRoutes";
+import { registerWalkthroughRoutes } from "./walkthroughRoutes";
 import { registerInspectRoutes } from "./inspectRoutes";
 import { registerTranscriptRoutes } from "../transcript/transcriptRoutes";
 import { registerComposerRoutes } from "../composer/composerRoutes";
@@ -36,7 +38,9 @@ import { keyReadiness, vaultReadiness } from "../../state/keyReadiness";
 /** Installs the shell's wiring for the lifetime of the component. */
 export function useShellWiring(): void {
   const app = useApp();
+  useEffect(() => app.secretScan?.start(), [app]);
   const theme = useShellState((s) => s.theme);
+  useEffect(() => (app.core === null ? undefined : attachSecretScanActivity(app.core)), [app.core]);
 
   useEffect(() => {
     document.documentElement.dataset["theme"] = theme;
@@ -44,6 +48,26 @@ export function useShellWiring(): void {
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && app.uiControl.walkthrough.store.get().phase === "running") {
+        app.uiControl.walkthrough.pause();
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        return;
+      }
+      // CodeMirror owns search, save, history and Escape inside its shadow root. Use the composed
+      // path: event.target is the host at this capture-phase listener.
+      const editor = event
+        .composedPath()
+        .some((target) => target instanceof Element && target.matches("[data-code-editor]"));
+      const mod = event.ctrlKey || event.metaKey;
+      if (
+        editor &&
+        (event.key === "Escape" ||
+          event.key === "F3" ||
+          (mod && ["f", "s", "g", "z", "y"].includes(event.key.toLowerCase())) ||
+          (mod && event.altKey && ["[", "]"].includes(event.key)))
+      )
+        return;
       // Dismiss the frontmost notification popover before Escape reaches background navigation.
       if (event.key === "Escape" && app.toasts.panel.get().open) {
         event.preventDefault();
@@ -88,6 +112,7 @@ export function useShellWiring(): void {
   useEffect(() => registerShellRoutes(app), [app]);
   useEffect(() => registerInspectRoutes(app), [app]);
   useEffect(() => registerInputRoutes(app), [app]);
+  useEffect(() => registerWalkthroughRoutes(app), [app]);
   useEffect(() => registerTranscriptRoutes(app), [app]);
   useEffect(() => registerComposerRoutes(app), [app]);
   useEffect(() => registerDocumentRoutes(app), [app]);
@@ -106,6 +131,7 @@ export function useShellWiring(): void {
   }, [app]);
   // processes deleted sessions left running (status bar list, `ui/processes`).
   useEffect(() => app.leftRunning?.start(), [app]);
+  useEffect(() => app.market?.watch(), [app]);
   // the open session's processes (the button's count; live output while the dialog shows).
   useEffect(
     () => app.sessionProcesses?.start(() => app.leftRunning?.store.get().open === true),

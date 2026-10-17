@@ -1,0 +1,111 @@
+/* Handbook inline controls. Uses app theme tokens passed by the viewer; page CSS can override the documented hooks. */
+.hb-inline-control {
+  box-sizing: border-box;
+  color: var(--text);
+  font: 13px/1.4 var(--font-ui, system-ui, sans-serif);
+  min-width: 0;
+}
+.hb-inline-control *,
+.hb-inline-control *::before,
+.hb-inline-control *::after {
+  box-sizing: border-box;
+}
+.hb-inline-control[hidden],
+.hb-inline-control [hidden] {
+  display: none !important;
+}
+.hb-inline-question {
+  margin: 0 0 6px;
+  font-weight: 600;
+}
+.hb-inline-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.hb-inline-option,
+.hb-inline-move,
+.hb-inline-clear {
+  font: inherit;
+  color: var(--text);
+  background: var(--raised, var(--panel));
+  border: 1px solid var(--line-2, var(--line));
+  border-radius: 5px;
+  padding: 4px 9px;
+  cursor: pointer;
+}
+.hb-inline-option[aria-pressed="true"] {
+  background: var(--primary-bg, var(--text));
+  color: var(--primary-fg, var(--bg));
+  border-color: var(--primary-bg, var(--text));
+}
+.hb-inline-option:hover,
+.hb-inline-move:hover {
+  box-shadow: inset 0 0 0 1px var(--text-2);
+}
+.hb-inline-control :focus-visible {
+  outline: 2px solid var(--focus, var(--blue));
+  outline-offset: 2px;
+}
+.hb-inline-rank-list {
+  list-style: decimal;
+  margin: 0;
+  padding-left: 24px;
+}
+.hb-inline-rank-row {
+  margin: 4px 0;
+}
+.hb-inline-label {
+  display: inline-block;
+  min-width: 100px;
+  margin-right: 8px;
+}
+.hb-inline-move {
+  margin-left: 4px;
+  padding: 2px 7px;
+}
+.hb-inline-move:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.hb-inline-note {
+  display: block;
+  width: 100%;
+  min-height: 30px;
+  resize: none;
+  overflow: hidden;
+  padding: 5px 8px;
+  border: 1px solid var(--line-2, var(--line));
+  border-radius: 5px;
+  background: var(--raised, var(--panel));
+  color: var(--text);
+  font: inherit;
+}
+.hb-inline-note::placeholder {
+  color: var(--text-2);
+}
+.hb-inline-clear {
+  margin-top: 5px;
+  padding: 2px 6px;
+  font-size: 11px;
+  color: var(--text-2);
+  background: transparent;
+}
+:where(body:has(> iframe[data-hb-prototype])) > .hb-inline-control {
+  z-index: 1;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+}
+.hb-inline-status {
+  position: fixed;
+  bottom: 8px;
+  left: 8px;
+  right: 8px;
+  z-index: 2;
+  padding: 8px;
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--line);
+}

@@ -40,8 +40,8 @@
   opacity: 0;
   z-index: 2;
 }
-.lc-row:hover > .lc-add,
-.split .sl:hover > .lc-add,
+.lc-row:hover:where(:not(:disabled)) > .lc-add,
+.split .sl:hover:where(:not(:disabled)) > .lc-add,
 .lc-add:focus-visible {
   opacity: 1;
 }

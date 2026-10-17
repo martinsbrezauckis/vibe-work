@@ -3,6 +3,14 @@
  * shell button styles; consumed by shared Button, Badge, Selector and row disclosures.
  * Control state and size come from attributes, so feature pages need no visual overrides.
  */
+/* Native disabled state outranks contextual control styles, including form fields. */
+button:disabled,
+input:disabled,
+textarea:disabled,
+select:disabled {
+  opacity: 0.45 !important;
+  cursor: default !important;
+}
 .tb-btn[data-size="small"] {
   min-height: var(--control-height-small);
   padding: 0 10px;
@@ -33,14 +41,10 @@
   font-weight: var(--weight-medium);
   text-decoration: none;
 }
-.ext-link:hover {
+.ext-link:hover:where(:not(:disabled)) {
   background: var(--hover);
   color: var(--blue);
   text-decoration: underline;
-}
-.ext-link:disabled {
-  cursor: default;
-  opacity: 0.45;
 }
 .ibtn[data-state="locked"],
 .ibtn[data-state="unlocked"] {
@@ -64,8 +68,8 @@
 .ibtn[data-state="unlocked"]::after {
   background: var(--green);
 }
-.ibtn[data-state="locked"]:hover,
-.ibtn[data-state="unlocked"]:hover {
+.ibtn[data-state="locked"]:hover:where(:not(:disabled)),
+.ibtn[data-state="unlocked"]:hover:where(:not(:disabled)) {
   background: var(--hover);
 }
 .ui-badge {
@@ -118,10 +122,6 @@
 .ui-selector-trigger:hover:not(:disabled) {
   background: var(--hover);
 }
-.ui-selector-trigger:disabled {
-  opacity: 0.55;
-  cursor: default;
-}
 .ui-selector-text {
   min-width: 0;
   overflow: hidden;
@@ -171,7 +171,7 @@
   font-weight: var(--weight-medium);
   text-align: left;
 }
-.ui-selector-option:hover,
+.ui-selector-option:hover:where(:not(:disabled)),
 .ui-selector-option[aria-selected="true"] {
   background: var(--hover);
 }
@@ -179,10 +179,6 @@
   flex: 1;
   min-width: 0;
   overflow-wrap: anywhere;
-}
-.ui-selector-option:disabled {
-  opacity: 0.55;
-  cursor: default;
 }
 .ui-selector-description {
   display: block;
@@ -210,7 +206,7 @@
   font: inherit;
   text-align: left;
 }
-.ui-disclosure:hover .secrets-name {
+.ui-disclosure:hover:where(:not(:disabled)) .secrets-name {
   color: var(--text);
 }
 
@@ -233,6 +229,36 @@
   font-weight: var(--weight-regular);
   color: var(--text-2);
 }
+.ui-help {
+  margin: 0;
+  font-size: var(--text-12);
+  font-weight: var(--weight-regular);
+  line-height: var(--leading-helper);
+  color: var(--text-3);
+}
+/* Settings can put several actions beside one label and stack them when space runs out. */
+.set-actions,
+.set-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-control-gap);
+}
+.set-row {
+  min-height: var(--settings-row-min-height);
+}
+.set-actions {
+  margin-block: var(--space-control-gap);
+}
+.check > .set-actions {
+  margin-block: 0;
+}
+.set-row > span {
+  flex: 1 1 24ch;
+}
+.set-actions > .tb-btn {
+  flex: none;
+}
 .ui-list-row {
   display: flex;
   flex-direction: column;
@@ -241,4 +267,128 @@
   padding: var(--space-row-block) 0;
   border-top: 1px solid var(--line);
   overflow-wrap: anywhere;
+}
+/* Destructive actions keep the same red text and tint in every feature. */
+.tb-btn.danger,
+.tb-btn.danger:hover:not(:disabled) {
+  background: var(--red-soft);
+  color: var(--red);
+}
+
+/* The message box and every note above it share the same centred column. */
+.view-tx {
+  --composer-inset: 32px;
+}
+.composer,
+.loops,
+.view-tx > .server-note,
+.view-tx > .key-notice {
+  max-width: 760px;
+  margin-inline: auto;
+}
+.view-tx > .server-note,
+.view-tx > .key-notice {
+  width: calc(100% - var(--composer-inset) - var(--composer-inset));
+  flex-shrink: 0;
+}
+
+@media (max-width: 600px) {
+  .view-tx {
+    --composer-inset: 10px;
+  }
+}
+/* Error banners with recovery actions keep their existing row, using the shared notice surface. */
+.key-problem:has(> button) {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-control-gap);
+}
+.key-problem > p {
+  flex: 1 1 260px;
+  margin: 0;
+}
+
+/* Paths keep their punctuation in order and leave room for the copy action. */
+.path-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.path-line > .path-start {
+  flex: 1;
+  min-width: 0;
+}
+.path-line > .ibtn {
+  flex: none;
+}
+
+/* Shared pointer and keyboard action menus. */
+.menu {
+  position: fixed;
+  z-index: 60;
+  min-width: 190px;
+  display: grid;
+  padding: 4px;
+  background: var(--raised);
+  border-radius: 10px;
+  box-shadow: var(--shadow);
+}
+.menu button {
+  all: unset;
+  box-sizing: border-box;
+  padding: 7px 10px;
+  border-radius: 6px;
+  font-size: var(--text-13);
+  cursor: pointer;
+  color: var(--text-2);
+}
+.menu button:hover:where(:not(:disabled)),
+.menu button:focus-visible {
+  background: var(--active);
+  color: var(--text);
+}
+.menu button.danger {
+  color: var(--red);
+}
+.menu button.sep {
+  margin-top: 4px;
+  border-top: 1px solid var(--line);
+  border-radius: 0 0 6px 6px;
+  padding-top: 9px;
+}
+
+.menu {
+  max-width: min(560px, calc(100vw - 8px));
+  max-height: calc(100vh - 8px);
+  overflow: auto;
+}
+.menu-row {
+  display: flex;
+}
+.menu-row > button:first-child {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.menu button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.menu-heading,
+.menu-note {
+  padding: 7px 10px;
+  font-size: var(--text-12);
+  color: var(--text-2);
+}
+.menu-heading {
+  font-weight: 600;
+}
+.menu-note {
+  max-width: 340px;
+  margin: 0;
+}
+.file-choice-folder {
+  color: var(--text-3);
 }

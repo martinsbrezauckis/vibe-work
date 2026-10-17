@@ -1,0 +1,24 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "connected": {
+      "default": 0,
+      "title": "Connected",
+      "type": "integer"
+    },
+    "total": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Total"
+    }
+  },
+  "title": "ConnectorCounts",
+  "type": "object"
+}

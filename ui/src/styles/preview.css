@@ -25,13 +25,8 @@
   position: absolute;
   bottom: 100%;
   inset-inline: 0;
-  max-height: 36px;
+  max-height: 48px;
   overflow: auto;
-  padding: 4px 8px;
-  background: var(--raised);
-  margin: 0;
-  color: var(--red);
-  font-size: var(--text-12-5);
 }
 .preview-focus {
   margin: 0;
@@ -77,10 +72,6 @@
 }
 .preview-btn:hover:not(:disabled) {
   background: var(--hover);
-}
-.preview-btn:disabled {
-  opacity: 0.5;
-  cursor: default;
 }
 .preview-target .preview-btn {
   grid-row: span 2;
@@ -169,7 +160,7 @@
   background: transparent;
   cursor: pointer;
 }
-.preview-save-menu button:hover,
+.preview-save-menu button:hover:where(:not(:disabled)),
 .preview-save-menu button:focus-visible {
   background: var(--hover);
 }
@@ -439,7 +430,7 @@
   border-top-right-radius: 0;
   padding-top: 8px;
 }
-.preview-capture-item:hover,
+.preview-capture-item:hover:where(:not(:disabled)),
 .preview-capture-item:focus-visible {
   background: var(--hover);
   outline: none;

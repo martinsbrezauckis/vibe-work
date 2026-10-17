@@ -63,10 +63,10 @@ pub(crate) async fn observe(
         if method == "session/agent/update" {
             shared.access.observe_request(method, id, params);
         }
-        // Not while the core restores the profile (Vibe still reports the default then).
+        // Only an attached, verified runtime can replace the record.
         if let Some(runtime) = result
             .get("runtime")
-            .filter(|_| !shared.channels.is_restoring(id))
+            .filter(|_| shared.channels.has_channel(id))
         {
             shared.access.observe_runtime(id, runtime);
         }
@@ -153,7 +153,12 @@ pub(crate) fn snapshot(shared: &Shared, id: &str) -> Result<SessionSnapshot, Cor
     shared
         .store
         .view(id)
-        .map(SessionSnapshot::from)
+        .map(|view| {
+            let mut snapshot = SessionSnapshot::from(view);
+            snapshot.access_mode =
+                crate::restore::display_mode(shared, id, &snapshot.state["session"]);
+            snapshot
+        })
         .ok_or_else(|| CoreError::not_loaded(id))
 }
 

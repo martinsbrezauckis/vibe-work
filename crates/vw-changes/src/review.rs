@@ -12,6 +12,10 @@
 //!   equal the set it would delete. A folder is never deleted.
 
 use std::collections::BTreeSet;
+use std::path::Path;
+use std::time::{Duration, Instant};
+
+use similar::{Algorithm, DiffTag};
 
 use crate::baseline::Baseline;
 use crate::diff::{compute, refresh};
@@ -20,6 +24,162 @@ use crate::files;
 use crate::linediff::{splice, split_lines};
 use crate::model::{ContentKind, Diff, FileChange, FileStatus, Hunk, Target};
 use crate::objects::{Entry, hash_bytes, read_blobs, update_index};
+
+/// Attributes an editor save to the user by moving only its edits into the review baseline.
+/// When a user edit overlaps an agent edit, the saved file becomes the baseline: this protects
+/// the user's bytes from a later whole-file revert, at the cost of hiding that file's agent edits.
+/// The caller holds the session tracker lock across the disk write and this operation.
+///
+/// # Errors
+/// Object or baseline persistence failures; the caller must leave the disk file untouched.
+pub fn record_user_save(
+    baseline: &mut Baseline,
+    path: &Path,
+    before: &[u8],
+    after: &[u8],
+) -> Result<Option<UserSaveUndo>, ChangesError> {
+    if before == after {
+        return Ok(None);
+    }
+    let repo = baseline.repo();
+    let Ok(relative) = path.strip_prefix(&repo.root) else {
+        return Ok(None);
+    };
+    let raw = crate::paths::os_bytes(relative.as_os_str());
+    if !repo.scope.is_empty() && !raw.starts_with(format!("{}/", repo.scope).as_bytes()) {
+        return Ok(None);
+    }
+    let entries = baseline.entries();
+    let base = entries.get(&raw);
+    if base.is_none() {
+        // A picked or ignored file must not become part of review just because the editor saved it.
+        let (fresh, _) = compute(baseline, false)?;
+        if !fresh.files.iter().any(|file| file.raw_path == raw) {
+            return Ok(None);
+        }
+    }
+    let old = if let Some(entry) = base {
+        let blobs = read_blobs(repo, &baseline.dir().current_index(), &[entry.id.as_str()])?;
+        blobs
+            .get(&entry.id)
+            .cloned()
+            .ok_or_else(|| ChangesError::BaselineLost(format!("blob {} is missing", entry.id)))?
+    } else {
+        Vec::new()
+    };
+    let attributed = merge_user_save(&old, before, after).unwrap_or_else(|| after.to_vec());
+    let mode = base.map_or_else(|| "100644".to_owned(), |entry| entry.mode.clone());
+    let id = hash_bytes(repo, &baseline.dir().base_index(), &attributed)?;
+    let undo = UserSaveUndo {
+        path: raw.clone(),
+        previous: base.cloned(),
+    };
+    let recorded = update_index(
+        repo,
+        &baseline.dir().base_index(),
+        &[],
+        &[(raw, Entry { mode, id })],
+    )
+    .and_then(|()| baseline.commit_index());
+    if let Err(error) = recorded {
+        // `commit_index` can fail after updating both the index and the in-memory baseline.
+        // Restore the previous entry before returning the failed save to the caller.
+        if let Err(rollback) = undo_user_save(baseline, undo) {
+            return Err(ChangesError::BaselineLost(format!(
+                "the user save could not be recorded ({error}); baseline rollback failed ({rollback})"
+            )));
+        }
+        return Err(error);
+    }
+    Ok(Some(undo))
+}
+
+/// The previous baseline entry of one editor save, for rollback if the disk replacement fails.
+#[derive(Debug)]
+pub struct UserSaveUndo {
+    path: Vec<u8>,
+    previous: Option<Entry>,
+}
+
+/// Restores the baseline after the editor's disk replacement failed.
+///
+/// # Errors
+/// Git object or baseline persistence failures.
+pub fn undo_user_save(baseline: &mut Baseline, undo: UserSaveUndo) -> Result<(), ChangesError> {
+    let (removals, upserts) = match undo.previous {
+        Some(entry) => (Vec::new(), vec![(undo.path, entry)]),
+        None => (vec![undo.path], Vec::new()),
+    };
+    update_index(
+        baseline.repo(),
+        &baseline.dir().base_index(),
+        &removals,
+        &upserts,
+    )?;
+    baseline.commit_index()
+}
+
+/// Replay user changes from `before` to `after` onto the pre-agent baseline. Return None when
+/// their line ranges overlap agent changes or the bounded diff cannot map them unambiguously.
+fn merge_user_save(base: &[u8], before: &[u8], after: &[u8]) -> Option<Vec<u8>> {
+    let merged = replay_edits(base, before, after)?;
+    // A repeated-line match may place a user edit at the wrong identical block. Require that
+    // replaying the agent's changes onto the candidate recovers the exact saved bytes.
+    (replay_edits(&merged, base, before).as_deref() == Some(after)).then_some(merged)
+}
+
+fn replay_edits(base: &[u8], before: &[u8], after: &[u8]) -> Option<Vec<u8>> {
+    let (base, before, after) = (split_lines(base), split_lines(before), split_lines(after));
+    let deadline = Instant::now() + Duration::from_millis(250);
+    let agent =
+        similar::capture_diff_slices_deadline(Algorithm::Myers, &base, &before, Some(deadline));
+    let user =
+        similar::capture_diff_slices_deadline(Algorithm::Myers, &before, &after, Some(deadline));
+    let mut mapped = vec![None; before.len()];
+    for op in agent {
+        if op.tag() == DiffTag::Equal {
+            for (b, a) in op.old_range().zip(op.new_range()) {
+                mapped[a] = Some(b);
+            }
+        }
+    }
+    let mut edits = Vec::new();
+    for op in user {
+        if op.tag() == DiffTag::Equal {
+            continue;
+        }
+        let a = op.old_range();
+        let b = op.new_range();
+        let at = if a.is_empty() {
+            match (
+                a.start.checked_sub(1).and_then(|i| mapped[i]),
+                mapped.get(a.start).copied().flatten(),
+            ) {
+                (Some(left), Some(right)) if left + 1 == right => right,
+                (None, Some(right)) if a.start == 0 => right,
+                (Some(left), None) if a.start == before.len() => left + 1,
+                (None, None) if base.is_empty() && before.is_empty() => 0,
+                _ => return None,
+            }
+        } else {
+            let first = mapped[a.start]?;
+            if !a
+                .clone()
+                .enumerate()
+                .all(|(offset, i)| mapped[i] == Some(first + offset))
+            {
+                return None;
+            }
+            first
+        };
+        edits.push((at, a.len(), b));
+    }
+    let mut out = base;
+    for (at, len, replacement) in edits.into_iter().rev() {
+        out.splice(at..at + len, after[replacement].iter().copied());
+    }
+    Some(out.into_iter().flatten().copied().collect())
+}
 
 /// Accepts the target: the baseline moves so it no longer shows as a change. Returns the fresh diff.
 ///
@@ -327,4 +487,118 @@ fn modified_ms(baseline: &Baseline, path: &[u8]) -> u64 {
         .and_then(|m| m.modified().ok())
         .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
         .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX))
+}
+
+#[cfg(test)]
+mod user_save_tests {
+    use super::*;
+    use std::process::Command;
+
+    #[test]
+    fn disjoint_user_edit_survives_agent_file_revert() {
+        let root = std::env::temp_dir().join(format!(
+            "vw-save-review-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let git = Command::new("git")
+            .arg("init")
+            .arg("-q")
+            .arg(&root)
+            .status()
+            .unwrap();
+        assert!(git.success());
+        let file = root.join("note.txt");
+        let original = b"agent line\nunchanged 1\nunchanged 2\nuser line\n";
+        let agent = b"agent edit\nunchanged 1\nunchanged 2\nuser line\n";
+        let saved = b"agent edit\nunchanged 1\nunchanged 2\nuser edit\n";
+        std::fs::write(&file, original).unwrap();
+        let changes = root.join("review-data");
+        crate::store::prepare_root(&changes).unwrap();
+        let repo = crate::repo::discover(&root).unwrap().unwrap();
+        let dir = crate::store::SessionDir::open(&changes, "session").unwrap();
+        let mut baseline = Baseline::take(repo, dir).unwrap();
+        std::fs::write(&file, agent).unwrap();
+        std::fs::write(&file, saved).unwrap();
+        let _ = record_user_save(&mut baseline, &file, agent, saved).unwrap();
+        let repo = baseline.repo().clone();
+        let dir = baseline.dir().clone();
+        drop(baseline);
+        let baseline = Baseline::load(repo, dir).unwrap();
+        let diff = refresh(&baseline).unwrap();
+        let change = diff.file("note.txt").unwrap();
+        assert_eq!(change.added, 1);
+        assert_eq!(change.removed, 1);
+        revert(
+            &baseline,
+            &Target::File {
+                path: "note.txt".into(),
+                blob: change.blob.clone(),
+            },
+            &[],
+        )
+        .unwrap();
+        assert_eq!(
+            std::fs::read(&file).unwrap(),
+            b"agent line\nunchanged 1\nunchanged 2\nuser edit\n"
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn overlapping_user_edit_becomes_protected_baseline() {
+        let base = b"one\ntwo\n";
+        let agent = b"agent\ntwo\n";
+        let saved = b"user\ntwo\n";
+        assert_eq!(merge_user_save(base, agent, saved), None);
+
+        let root = std::env::temp_dir().join(format!(
+            "vw-overlap-review-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        assert!(
+            Command::new("git")
+                .arg("init")
+                .arg("-q")
+                .arg(&root)
+                .status()
+                .unwrap()
+                .success()
+        );
+        let file = root.join("note.txt");
+        std::fs::write(&file, base).unwrap();
+        let changes = root.join("review-data");
+        crate::store::prepare_root(&changes).unwrap();
+        let repo = crate::repo::discover(&root).unwrap().unwrap();
+        let dir = crate::store::SessionDir::open(&changes, "session").unwrap();
+        let mut baseline = Baseline::take(repo, dir).unwrap();
+        std::fs::write(&file, agent).unwrap();
+        let before_view = refresh(&baseline).unwrap();
+        let old_target = Target::File {
+            path: "note.txt".into(),
+            blob: before_view.file("note.txt").unwrap().blob.clone(),
+        };
+        std::fs::write(&file, saved).unwrap();
+        let _ = record_user_save(&mut baseline, &file, agent, saved).unwrap();
+        let repo = baseline.repo().clone();
+        let dir = baseline.dir().clone();
+        drop(baseline);
+        let baseline = Baseline::load(repo, dir).unwrap();
+        assert!(refresh(&baseline).unwrap().file("note.txt").is_none());
+        assert!(matches!(
+            revert(&baseline, &old_target, &[]),
+            Err(ChangesError::Stale { .. })
+        ));
+        assert_eq!(std::fs::read(&file).unwrap(), saved);
+        std::fs::remove_dir_all(root).unwrap();
+    }
 }

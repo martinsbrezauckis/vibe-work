@@ -1,16 +1,16 @@
-//! The access mode (Vibe agent profile) each session runs with, so that a resume never silently
-//! changes it.
+//! The access mode (Vibe agent profile) each session runs with, kept by the core so that a reopened
+//! session runs in the mode the user chose.
 //!
-//! Design: the core never relies on a resume to keep a session's profile. Every resume it sends names
-//! the session's selected profile, and the core then switches the
-//! session to the profile it should run in (`session/agent/update`, `restore.rs`) before any command of
-//! that session is sent. A reopened session therefore never runs with an access mode the user did not
-//! choose; app commands wait for the verified restore. The core resumes sessions
-//! on its own (a new channel before a turn, reopening after a crash or after an idle close), so this
-//! matters on every reopen.
+//! Design: Vibe Work keeps each session's access mode in the core and applies it itself on every
+//! reopen. Every resume the core sends names the session's selected profile, and the core then
+//! switches the session to the profile it should run in (`session/agent/update`, `restore.rs`) and
+//! checks Vibe's answer before any command of that session is sent. A reopened session therefore
+//! runs with the access mode the user chose; app commands wait for the verified restore. The core
+//! resumes sessions on its own (a new channel before a turn, reopening after a crash or after an
+//! idle close), so this applies to every reopen.
 //!
-//! Depends on: `serde_json`, vw-platform (user-only file). Called by: `pump` (`runtime/updated`), `sessions` (results and start
-//! params), `dispatch` (after every resume that named no profile).
+//! Depends on: `serde_json`, tokio (restore ordering), vw-platform (user-only file). Called by: `pump` (`runtime/updated`), `sessions` (results and start
+//! params), `dispatch` (the profile a client's resume names).
 //! Invariants:
 //! - The remembered profile is the last one Vibe reported for the session (`runtime.activeAgent.name`
 //!   in `runtime/updated` or any result carrying a runtime), else the `agentConfig.agent` it was
@@ -24,7 +24,7 @@
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
-use std::sync::{Mutex, PoisonError};
+use std::sync::{Arc, Mutex, PoisonError, Weak};
 
 use serde_json::Value;
 use tracing::warn;
@@ -54,10 +54,28 @@ pub(crate) fn set_resume_profile(params: &mut Value, profile: &str) {
 #[derive(Default)]
 pub(crate) struct Access {
     agents: Mutex<HashMap<String, String>>,
+    restores: Mutex<HashMap<String, Weak<tokio::sync::Mutex<()>>>>,
     file: Option<PathBuf>,
 }
 
 impl Access {
+    /// Orders attachment, verification and runtime reads for one session. Idle locks are pruned;
+    /// the channel transport has its own lock for the individual resume/close calls.
+    pub(crate) async fn lock_restore(&self, session_id: &str) -> tokio::sync::OwnedMutexGuard<()> {
+        let lock = {
+            let mut restores = self.restores.lock().unwrap_or_else(PoisonError::into_inner);
+            restores.retain(|_, lock| lock.strong_count() > 0);
+            if let Some(lock) = restores.get(session_id).and_then(Weak::upgrade) {
+                lock
+            } else {
+                let lock = Arc::new(tokio::sync::Mutex::new(()));
+                restores.insert(session_id.to_owned(), Arc::downgrade(&lock));
+                lock
+            }
+        };
+        lock.lock_owned().await
+    }
+
     /// The record for `sessions_dir` (`None`: memory only), with the profiles an earlier run left in its file.
     /// An unreadable or malformed file counts as empty: those sessions then resolve as before (Vibe's record,
     /// else `ask`), never to a mode nobody chose.
@@ -70,6 +88,7 @@ impl Access {
             .unwrap_or_default();
         Self {
             agents: Mutex::new(agents),
+            restores: Mutex::new(HashMap::new()),
             file,
         }
     }

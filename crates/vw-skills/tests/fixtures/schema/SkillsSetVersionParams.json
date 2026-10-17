@@ -1,0 +1,29 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "name": {
+      "title": "Name",
+      "type": "string"
+    },
+    "scope": {
+      "default": "global",
+      "title": "Scope",
+      "type": "string"
+    },
+    "sessionId": {
+      "title": "Sessionid",
+      "type": "string"
+    },
+    "version": {
+      "title": "Version",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "sessionId",
+    "name",
+    "version"
+  ],
+  "title": "SkillsSetVersionParams",
+  "type": "object"
+}

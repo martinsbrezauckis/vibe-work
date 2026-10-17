@@ -1,6 +1,6 @@
 # Project Handbook Format, version 1.2
 
-**Status:** draft for review · **Date:** 2026-10-10 · **License:** MIT
+**Status:** draft for review · **Date:** 2026-10-17 · **License:** MIT
 
 A *project handbook* is a small set of linked HTML pages kept inside a repository: the project's plans,
 decisions, requests, research, reports, roadmap, changelog and guides. A coding agent writes and maintains
@@ -241,6 +241,19 @@ and click them:
   its event handlers in its script (`addEventListener`), not as `on*` attributes: a reader that shares a page as one
   file (Vibe Work's "Share as one file") keeps the page's scripts but no inline handlers. Every other page has no
   `<script>`, no `on*` attributes and no `javascript:` URLs (HB-W11): a reader never runs them.
+- **Read-only answers in prototypes (1.2 addition).** A reader MAY send a prototype its own declared inputs'
+  answers on load and whenever they change, using `postMessage` with
+  `{type: "hb-answers", answers: {inputId: value}}`. Each value is `null` (unanswered),
+  `{type: "choice", option: "id"}`, `{type: "checklist", checked: ["id"]}`,
+  `{type: "rank", order: ["id"]}` or `{type: "text", text: "..."}`. Detached answers and other pages' answers
+  are excluded. The prototype checks `event.source === parent` and `event.data.type === "hb-answers"`.
+  It MAY re-group or re-render its content from this snapshot; stable input ids keep controls attached when
+  their boxes move. The reader sends a user's selection immediately, before persistence finishes, so a prototype
+  can re-sort before the next frame; a refused save is followed by the stored snapshot. This is a copy: changing
+  it, sending messages back, or creating buttons in the prototype never writes an answer. There is no write API.
+  The channel MUST stay bound to the owning page. Vibe Work's trusted host confines its frame to that page's
+  URL with `frame-src`, so navigating the frame to another page cannot inherit the original answers.
+  Without this optional channel (including when opened from disk), the page MUST remain readable.
 - **One shared stylesheet:** pages link `handbook.css` with a relative path. Page-specific `<style>` is
   kept small. Without the stylesheet the page still reads correctly.
 - **Light and dark (1.2).** `handbook.css` defines its colours as custom properties (tokens) on `:root` for the
@@ -300,11 +313,59 @@ the agent read them back. Answers are never written into the page.
   as "detached").
 - `.hb-question` inside the input holds the question. `data-option` values are unique within their input; the
   option's text is its label.
-- Inputs do not nest; options live inside an input; at most 50 inputs per page and 100 options per input are read.
+- Inputs do not nest; options live inside an input; at most 500 inputs per page and 100 options per input are read.
 - The agent writes the question and options; the person answers in the reader; the agent reads the answers back
   (Vibe Work: the `handbook_answers` tool) and records the outcome in the page itself (a decision's `outcome`, a
   plan's steps), because answers stay outside the repository.
 - Exported or printed pages MAY show the answers as text under each input (`p.hb-answer`).
+
+**Inline controls (Format 1.2 addition).** In Vibe Work's Project page view, controls occupy each
+`div.hb-input` box: a compact segmented row for `choice`, pressed/unpressed toggle buttons for `checklist`,
+ordered rows with up/down buttons for `rank`, and a one-line note field that grows for `text`. A note saves
+on blur or Enter after a short debounce, never on each keystroke; Shift+Enter adds a line. Clear removes an
+answer. The Answers panel continues to list and edit the same answers; either view updates the other.
+Comments continue to use handbook sections and input ids, with the existing app comment storage.
+
+Controls use the app's light/dark tokens by default. Pages MAY size and place them with the following hooks;
+the reader retains page stylesheets and `<style>` rules for these hooks even when prototype controls live
+outside the sandbox. Page CSS follows the default control styles, so ordinary hook rules can override them.
+
+| Hook | Element / purpose |
+|---|---|
+| `.hb-inline-control` | root group, also `[data-hb-input="input-id"]` for a particular input |
+| `.hb-inline-choice`, `.hb-inline-checklist`, `.hb-inline-rank`, `.hb-inline-text` | root by kind |
+| `.hb-inline-question` | question text |
+| `.hb-inline-options` | wrapping segmented / toggle row |
+| `.hb-inline-option` | option button, `[data-option="option-id"]`; `[aria-pressed="true"]` means selected |
+| `.hb-inline-rank-list`, `.hb-inline-rank-row`, `.hb-inline-label` | rank list, row and option label |
+| `.hb-inline-move` | up/down button (standard `disabled` at the ends) |
+| `.hb-inline-note` | growing note textarea |
+| `.hb-inline-clear` | clear button |
+| `.hb-inline-status` | save error notice |
+
+For example, `.hb-inline-options { gap: 2px }` and
+`[data-hb-input="release"] .hb-inline-option { font-size: 12px; padding: 3px 7px }` make a compact card.
+Style the input box itself to place it in a grid. For prototypes, hook selectors MUST NOT depend on ancestors
+inside the page (such as `.card .hb-inline-option`): the app's controls are in a trusted parent, over the
+sandboxed page's boxes. The prototype cannot click, inspect or alter those controls, including unsaved note
+drafts. It can read only the answer snapshots above. Geometry messages position controls; they never set
+answers. The reader accepts writes only from user gestures on its own controls, validated against the page file.
+
+An example prototype that moves a card into the group named by its Release answer:
+
+```js
+addEventListener("message", (event) => {
+  if (event.source !== parent || event.data?.type !== "hb-answers") return;
+  const release = event.data.answers["item-release"]?.option ?? "now";
+  const group = document.getElementById(release);
+  const card = document.getElementById("item-card");
+  if (group && card && card.parentElement !== group) group.append(card);
+});
+```
+
+These additions need no new format version: the input markup and answer meanings are unchanged, the larger
+bounded input limit accepts existing markup, and the read-only channel is optional. Older readers still show
+plain lists or panel controls, and prototypes keep their text fallback.
 
 ## 7. Markdown pages (lite)
 
@@ -449,7 +510,7 @@ A validator (Vibe Work runs one in its core; it reads files only and never edits
 | HB-W14 | warning | page over 256 KB, over 500 sections or over 200 steps (the rest is not read) |
 | HB-W15 | warning | `handbook.format` major newer than 1 |
 | HB-W16 | warning | pre-1.0 page (`vw-kind`/`vw-status`/`vw-date`): needs migration (§11); other checks skipped |
-| HB-W17 | warning | an input without a question (`.hb-question`), a `text` input with options, or over 50 inputs / 100 options (the rest is not read) |
+| HB-W17 | warning | an input without a question (`.hb-question`), a `text` input with options, or over 500 inputs / 100 options (the rest is not read) |
 | HB-I01 | info | field, kind or status from a newer minor version |
 | HB-I02 | info | more than one step `doing` |
 | HB-I03 | info | a file other than `.html`, `.md`, `handbook.css` or a file under `assets/` |
@@ -599,6 +660,12 @@ created / modified`) and these `<main>` sections:
 ```
 
 ## 13. Changes
+
+### [1.2] additions – 2026-10-17
+- Added: inline controls in each input box and styling hooks for them (§6.6); a read-only `hb-answers` snapshot a
+  reader MAY send a prototype (§6.4). Changed: at most 500 inputs per page are read, up from 50 (§6.6, HB-W17).
+- No version change (§9): the input markup and answer meanings are unchanged, the channel is optional, and the larger
+  limit accepts existing pages.
 
 ### [1.2] – 2026-10-10
 - Added: kind `prototype` (`prototypes/<slug>.html`, index section `prototypes`): the only kind whose script runs in

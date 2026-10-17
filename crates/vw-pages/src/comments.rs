@@ -59,7 +59,7 @@ pub enum CommentError {
     /// No comment with this id.
     #[error("no comment with this id")]
     NotFound,
-    /// The store file could not be written.
+    /// The store file could not be read or written.
     #[error("the comments could not be saved: {0}")]
     Io(String),
 }
@@ -127,17 +127,23 @@ impl CommentStore {
         self.dir.join(format!("{}.json", project_key(project)))
     }
 
-    fn load(&self, project: &Path) -> File {
+    fn load(&self, project: &Path) -> Result<File, CommentError> {
         let path = self.file(project);
-        let Ok(text) = std::fs::read_to_string(&path) else {
-            return File::default();
+        let text = match std::fs::read_to_string(&path) {
+            Ok(text) => text,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                return Ok(File::default());
+            }
+            Err(error) => return Err(CommentError::Io(error.to_string())),
         };
         if let Ok(file) = serde_json::from_str::<File>(&text) {
-            return file;
+            return Ok(file);
         }
-        let aside = vw_platform::set_aside(&path, now_ms());
+        let aside = vw_platform::set_aside(&path, now_ms()).ok_or_else(|| {
+            CommentError::Io("the unreadable comments file could not be moved aside".to_owned())
+        })?;
         tracing::warn!(file = ?aside, "page comments file did not parse: moved aside");
-        File::default()
+        Ok(File::default())
     }
 
     fn save(&self, project: &Path, file: &File) -> Result<(), CommentError> {
@@ -157,7 +163,7 @@ impl CommentStore {
         sections: Option<&[String]>,
     ) -> (Vec<Comment>, Vec<Comment>) {
         let _guard = self.lock.lock();
-        let file = self.load(project);
+        let file = self.load(project).unwrap_or_default();
         file.comments
             .into_iter()
             .filter(|c| c.page == page.as_str())
@@ -169,7 +175,7 @@ impl CommentStore {
     pub fn counts(&self, project: &Path) -> std::collections::HashMap<String, u32> {
         let _guard = self.lock.lock();
         let mut counts = std::collections::HashMap::new();
-        for comment in self.load(project).comments {
+        for comment in self.load(project).unwrap_or_default().comments {
             *counts.entry(comment.page).or_insert(0) += 1;
         }
         counts
@@ -197,7 +203,7 @@ impl CommentStore {
             )));
         }
         let _guard = self.lock.lock();
-        let mut file = self.load(project);
+        let mut file = self.load(project)?;
         if file.comments.len() >= MAX_PER_PROJECT {
             return Err(CommentError::Invalid(
                 "this project has too many comments; delete some first".to_owned(),
@@ -227,7 +233,7 @@ impl CommentStore {
     /// [`CommentError::NotFound`], [`CommentError::Io`].
     pub fn delete(&self, project: &Path, id: &str) -> Result<(), CommentError> {
         let _guard = self.lock.lock();
-        let mut file = self.load(project);
+        let mut file = self.load(project)?;
         let before = file.comments.len();
         file.comments.retain(|c| c.id != id);
         if file.comments.len() == before {
@@ -242,7 +248,7 @@ impl CommentStore {
     /// [`CommentError::NotFound`] when none of `ids` exists; [`CommentError::Io`].
     pub fn mark_sent(&self, project: &Path, ids: &[String]) -> Result<Vec<Comment>, CommentError> {
         let _guard = self.lock.lock();
-        let mut file = self.load(project);
+        let mut file = self.load(project)?;
         let now = now_ms();
         let mut marked = Vec::new();
         for comment in &mut file.comments {
@@ -262,6 +268,10 @@ impl CommentStore {
     #[must_use]
     pub fn get(&self, project: &Path, id: &str) -> Option<Comment> {
         let _guard = self.lock.lock();
-        self.load(project).comments.into_iter().find(|c| c.id == id)
+        self.load(project)
+            .unwrap_or_default()
+            .comments
+            .into_iter()
+            .find(|c| c.id == id)
     }
 }

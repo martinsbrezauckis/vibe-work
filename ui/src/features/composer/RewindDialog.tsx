@@ -6,6 +6,7 @@
  * Invariants: render only; the file list is Vibe's answer, never a guess; while loading or busy the
  * buttons are disabled; Escape or the scrim closes without rewinding.
  */
+import { Button } from "../../components/Controls";
 import { type ReactElement, useRef } from "react";
 
 import { useModalFocus } from "../../hooks/useModalFocus";
@@ -24,8 +25,9 @@ export function RewindDialog(): ReactElement | null {
   const blocked = dialog.loading || dialog.busy;
   return (
     <>
-      <div className="scrim" onClick={close} />
+      <div data-testid="composer.rewind-dialog-scrim" className="scrim" onClick={close} />
       <div
+        data-testid="composer.rewind-dialog-modal"
         ref={ref}
         className="modal rewind-dialog"
         role="dialog"
@@ -39,8 +41,8 @@ export function RewindDialog(): ReactElement | null {
         <section>
           <p className="rewind-msg">{dialog.text || "(this message)"}</p>
           <p className="d">
-            Everything after it leaves the conversation. Your message goes back into the composer so
-            you can change it and send it again.
+            Everything after it leaves the session. Your message goes back into the composer so you
+            can change it and send it again.
           </p>
         </section>
         <section aria-live="polite">
@@ -48,7 +50,7 @@ export function RewindDialog(): ReactElement | null {
           {dialog.loading ? (
             <p className="d">Asking Vibe which files changed…</p>
           ) : dialog.error !== null ? (
-            <p className="rewind-error" role="alert">
+            <p className="key-problem" role="alert">
               {dialog.error}
             </p>
           ) : dialog.paths.length === 0 ? (
@@ -65,6 +67,7 @@ export function RewindDialog(): ReactElement | null {
         </section>
         <section className="rewind-acts">
           <button
+            data-testid="composer.rewind-dialog-mini"
             type="button"
             className="mini"
             title="Cancel rewind (Escape)"
@@ -73,9 +76,11 @@ export function RewindDialog(): ReactElement | null {
           >
             Cancel
           </button>
-          <button
+          <Button
+            data-testid="composer.rewind-dialog-confirm-rewind"
             type="button"
-            className="mini"
+            small
+            variant="danger"
             title="Rewind into a new session and restore files"
             aria-label="Rewind into a new session and restore files"
             disabled={blocked}
@@ -84,10 +89,12 @@ export function RewindDialog(): ReactElement | null {
             }}
           >
             Rewind into a new session
-          </button>
-          <button
+          </Button>
+          <Button
+            data-testid="composer.rewind-dialog-confirm-rewind-2"
             type="button"
-            className="btn-primary"
+            small
+            variant="danger"
             title="Rewind here and restore files"
             aria-label="Rewind here and restore files"
             data-dialog-initial-focus="true"
@@ -97,7 +104,7 @@ export function RewindDialog(): ReactElement | null {
             }}
           >
             Rewind here
-          </button>
+          </Button>
         </section>
       </div>
     </>

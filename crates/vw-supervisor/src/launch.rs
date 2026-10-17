@@ -56,6 +56,9 @@ pub(crate) async fn launch(
     secrets: &dyn SecretProvider,
     pid_slot: &std::sync::Mutex<Option<u32>>,
 ) -> Result<Running, SupervisorError> {
+    if let Some(check) = &config.before_launch {
+        check(program).map_err(SupervisorError::BeforeLaunch)?;
+    }
     let key = secrets.mistral_api_key()?;
     let mcp_token = secrets.mcp_forward_token();
     let parent = config

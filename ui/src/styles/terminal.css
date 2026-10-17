@@ -48,7 +48,7 @@ vw-xterm-style {
   white-space: nowrap;
   cursor: pointer;
 }
-.vw-term-tab:hover {
+.vw-term-tab:hover:where(:not(:disabled)) {
   background: var(--hover);
   color: var(--text-2);
 }
@@ -76,11 +76,10 @@ vw-xterm-style {
   border-radius: 6px;
   cursor: pointer;
 }
-.vw-term-tool:hover {
+.vw-term-tool:hover:where(:not(:disabled)) {
   background: var(--hover);
   color: var(--text);
 }
-.vw-term-error,
 .vw-term-exited {
   display: flex;
   align-items: center;
@@ -88,10 +87,6 @@ vw-xterm-style {
   padding: 6px 12px;
   font-size: 12px;
   border-bottom: 1px solid var(--line);
-}
-.vw-term-error {
-  color: var(--red);
-  background: var(--red-soft);
 }
 .vw-term-exited {
   color: var(--text-2);
@@ -111,4 +106,9 @@ vw-xterm-style {
 }
 .vw-terminal .xterm {
   height: 100%;
+}
+
+/* The character grid can end above the viewport when its height is rounded to whole rows. */
+.vw-terminal .xterm .xterm-viewport {
+  background-color: var(--term-bg);
 }

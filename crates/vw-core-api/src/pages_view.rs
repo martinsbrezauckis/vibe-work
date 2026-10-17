@@ -97,10 +97,16 @@ pub enum PagesRequest {
         #[cfg_attr(feature = "ts", ts(optional))]
         rect: Option<Rect>,
     },
-    /// Lets the user point at a section of the shown page (the selection, else the next click).
+    /// Lets the user point at a section of the shown page (the selection, else the next click). With `section` the
+    /// section is named instead and the answer is immediate; a Debug API request must name it (it must exist in the
+    /// page file): there is no person to click.
     PickSection {
         /// The session.
         session_id: String,
+        /// The section (or step) id to pick without a click.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[cfg_attr(feature = "ts", ts(optional))]
+        section: Option<String>,
     },
     /// Cancels a running pick.
     CancelPick {},

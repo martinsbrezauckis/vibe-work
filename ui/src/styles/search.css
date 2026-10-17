@@ -43,10 +43,6 @@
 .find-bar button:hover:not(:disabled) {
   background: var(--hover);
 }
-.find-bar button:disabled {
-  opacity: 0.45;
-  cursor: default;
-}
 .find-scope {
   font-size: var(--text-12);
   color: var(--text-2);

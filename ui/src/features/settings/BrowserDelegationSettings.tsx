@@ -3,6 +3,7 @@
  * Depends on: the typed browser command and AppContext. Called by: SettingsPage.
  * Invariant: controls show only permissions confirmed by the core; a failed save leaves them unchanged.
  */
+import { Button } from "../../components/Controls";
 import { type ReactElement, useEffect, useState } from "react";
 
 import { Selector } from "../../components/Selector";
@@ -64,9 +65,13 @@ export function BrowserDelegationSettings(): ReactElement | null {
   return (
     <section aria-labelledby="browser-delegation-title">
       <h3 id="browser-delegation-title">{TEXT.browserDelegationTitle}</h3>
-      {permissions === null && error === null && <p role="status">Reading browser permissions…</p>}
+      {permissions === null && error === null && (
+        <p className="key-line" role="status">
+          Reading browser permissions…
+        </p>
+      )}
       {error !== null && (
-        <p className="cbad" role="alert">
+        <p className="key-problem" role="alert">
           {error}
         </p>
       )}
@@ -75,6 +80,7 @@ export function BrowserDelegationSettings(): ReactElement | null {
           {term("browserPermissions", "closeUserTabs").name}
         </span>
         <Selector<"ask" | "allow">
+          testId="settings.browser-delegation-settings-save"
           label={term("browserPermissions", "closeUserTabs").name}
           title={
             term("browserPermissions", confirmed.closeUserTabs ? "closeAllow" : "closeAsk").tooltip
@@ -98,21 +104,22 @@ export function BrowserDelegationSettings(): ReactElement | null {
           }}
         />
       </div>
-      <p className="browser-delegation-hint">{TEXT.browserDelegationHint}</p>
-      <div className="browser-secret-permissions" data-setting="browser-secret-permissions">
-        <div>
-          <h4>{TEXT.secretPermissionsTitle}</h4>
-          <p>{TEXT.secretPermissionsSummary}</p>
-        </div>
-        <button
+      <p className="key-field-hint ui-help">{TEXT.browserDelegationHint}</p>
+      <div className="check set-row" data-setting="browser-secret-permissions">
+        <span>
+          {TEXT.secretPermissionsTitle}
+          <span className="d">{TEXT.secretPermissionsSummary}</span>
+        </span>
+        <Button
+          data-testid="settings.browser-delegation-settings-open-settings"
           type="button"
-          className="tb-btn"
+          small
           onClick={() => {
             shell.actions.openSettings("secrets");
           }}
         >
           {TEXT.secretPermissionsOpenVault}
-        </button>
+        </Button>
       </div>
     </section>
   );

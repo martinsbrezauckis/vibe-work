@@ -14,6 +14,7 @@
  *   happen at start, after a server (re)start, after `lagged`, when the window regains focus
  *   (`refreshIfStale`, at most every `FOCUS_REFRESH_MIN_MS`), and after the app's own actions.
  */
+import type { TraceOutcome } from "./commandTrace";
 import type { Command, CommandResult, CoreEvent, JsonValue } from "../protocol/core";
 import {
   CoreCallError,
@@ -71,8 +72,8 @@ export interface CoreController {
   patchSession(id: string, fields: Parameters<typeof patchSessionFields>[2]): void;
   /** Drops a deleted session from the model. */
   forget(id: string): void;
-  /** Keeps a `RuntimeSnapshot` a reply carried for a session (`runtime/read`, model pick). */
-  setRuntime(id: string, runtime: JsonValue): void;
+  /** Keeps a reply's runtime. Only an accepted access switch supplies a new display mode. */
+  setRuntime(id: string, runtime: JsonValue, accessMode?: string): void;
   /**
    * Sends a command; the result is folded into the model. Rejects with `CoreCallError`. `options.origin`
    * lowers this one call to the Debug API origin, decided by the caller at call time (content and
@@ -100,6 +101,7 @@ export interface CoreController {
  * Creates the controller. `notify` receives the toasts the events call for. `serving` (the UI-control
  * registry's `servingCapability`) gives the capability of the Debug API request being served, `null` when none is;
  * `track` (the registry's `track`) records each command sent with one, so the request's reply waits for it.
+ * `observe` captures dispatch metadata and returns the callback that records this call's completion.
  */
 export function createCore(
   rawClient: CoreClient,
@@ -107,6 +109,11 @@ export function createCore(
   serving: () => string | null = () => null,
   track: <T>(capability: string, promise: Promise<T>) => Promise<T> = (_capability, promise) =>
     promise,
+  observe: (
+    command: Command,
+  ) => ((outcome: Exclude<TraceOutcome, { status: "pending" }>) => void) | undefined = () =>
+    undefined,
+  trackAction: <T>(capability: string, promise: Promise<T>) => Promise<T> = track,
 ): CoreController {
   // Every command, including those features send through `core.client` directly (the terminal store),
   // goes out with the Debug API origin while a UI-control request is served, and every
@@ -117,7 +124,7 @@ export function createCore(
   // A view of the client that differs only in `execute` (everything else is looked up on the client
   // itself at call time, so a later change to it is seen).
   const client = Object.create(rawClient) as CoreClient & { execute: CoreClient["execute"] };
-  client.execute = (command, options) => {
+  const dispatch: CoreClient["execute"] = (command, options) => {
     // What the view sends by itself (a terminal's focus report when a Debug API request moves focus) stays the
     // window's: it is not the client's input.
     if (options?.origin === "window") return rawClient.execute(command);
@@ -133,6 +140,17 @@ export function createCore(
     if (options === undefined && capability !== null)
       return track(capability, rawClient.execute(command, { origin: "debug-api", capability }));
     return rawClient.execute(command, options);
+  };
+  client.execute = async (command, options) => {
+    const complete = observe(command);
+    try {
+      const result = await dispatch(command, options);
+      complete?.({ status: "succeeded" });
+      return result;
+    } catch (thrown) {
+      complete?.({ status: "failed", code: toCallError(thrown).error.code });
+      throw thrown;
+    }
   };
   const store = createStore<CoreState>(initialCore);
   const listeners = new Set<(event: CoreEvent) => void>();
@@ -237,7 +255,7 @@ export function createCore(
     client,
     trackAction<T>(action: Promise<T>): Promise<T> {
       const capability = serving();
-      return capability === null ? action : track(capability, action);
+      return capability === null ? action : trackAction(capability, action);
     },
     async start() {
       try {
@@ -268,12 +286,18 @@ export function createCore(
     forget(id) {
       store.set((state) => removeSession(state, id));
     },
-    setRuntime(id, runtime) {
+    setRuntime(id, runtime, accessMode) {
       store.set((state) => {
         const entry = state.sessions[id];
         return entry === undefined
           ? state
-          : { ...state, sessions: { ...state.sessions, [id]: { ...entry, runtime } } };
+          : {
+              ...state,
+              sessions: {
+                ...state.sessions,
+                [id]: { ...entry, runtime, ...(accessMode === undefined ? {} : { accessMode }) },
+              },
+            };
       });
     },
     async run(command, options) {

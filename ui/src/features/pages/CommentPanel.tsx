@@ -7,6 +7,7 @@
  * Invariants: renders only; comment and page text are plain text; comments live in Vibe Work's data, never in the
  * repository (the panel says so).
  */
+import { Button } from "../../components/Controls";
 import { type ReactElement, useState } from "react";
 
 import type { Comment, PickedSection } from "../../protocol/core";
@@ -38,6 +39,7 @@ function Row({
       <span className="pages-comment-text">{comment.text}</span>
       <span className="pages-comment-acts">
         <button
+          data-testid="pages.comment-panel-send"
           type="button"
           className="pages-btn"
           onClick={() => {
@@ -46,15 +48,17 @@ function Row({
         >
           Send to Vibe
         </button>
-        <button
+        <Button
+          data-testid="pages.comment-panel-remove"
           type="button"
-          className="pages-btn"
+          small
+          variant="danger"
           onClick={() => {
             remove(comment);
           }}
         >
           Delete
-        </button>
+        </Button>
       </span>
     </li>
   );
@@ -73,12 +77,15 @@ export function CommentPanel({
   attached: readonly Comment[];
   detached: readonly Comment[];
   draft: PickedSection | null;
-  save: (text: string, andSend: boolean) => void;
+  save: (text: string, andSend: boolean) => Promise<boolean>;
   cancel: () => void;
   send: (c: Comment) => void;
   remove: (c: Comment) => void;
 }): ReactElement {
   const [text, setText] = useState("");
+  const saveText = async (andSend: boolean) => {
+    if (await save(text, andSend)) setText("");
+  };
   const total = attached.length + detached.length;
   return (
     <section className="pages-comments" aria-label="Comments on this page">
@@ -96,6 +103,7 @@ export function CommentPanel({
             )}
           </label>
           <textarea
+            data-testid="pages.comment-panel-set-text"
             id="pages-comment-text"
             value={text}
             placeholder="Vibe gets it with the page and section."
@@ -105,28 +113,29 @@ export function CommentPanel({
           />
           <div className="pages-cbox-row">
             <button
+              data-testid="pages.comment-panel-save"
               type="button"
               className="pages-btn go"
               disabled={text.trim() === ""}
               onClick={() => {
-                save(text, true);
-                setText("");
+                void saveText(true);
               }}
             >
               Send to Vibe
             </button>
             <button
+              data-testid="pages.comment-panel-save-2"
               type="button"
               className="pages-btn"
               disabled={text.trim() === ""}
               onClick={() => {
-                save(text, false);
-                setText("");
+                void saveText(false);
               }}
             >
               Save
             </button>
             <button
+              data-testid="pages.comment-panel-set-text-2"
               type="button"
               className="pages-btn"
               onClick={() => {
@@ -142,7 +151,7 @@ export function CommentPanel({
       )}
       {total > 0 && (
         <details open={draft === null}>
-          <summary>
+          <summary data-testid="pages.comment-panel-summary">
             {total} comment{total === 1 ? "" : "s"} on this page
           </summary>
           <ul className="pages-comment-list">

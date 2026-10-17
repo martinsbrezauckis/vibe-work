@@ -9,6 +9,9 @@
 
 use ts_rs::{Config, TS};
 
+mod git;
+use git::git_decls;
+
 mod preview;
 use preview::{browser_decls, preview_decls};
 
@@ -29,8 +32,8 @@ use crate::{
     ToolView,
 };
 use crate::{
-    ChangesMode, ChangesRequest, ChangesResult, ChangesView, FolderSession, TurnChanges, TurnFile,
-    UndoPreview,
+    ChangesMode, ChangesRequest, ChangesResult, ChangesSubagent, ChangesView, FolderSession,
+    TurnChanges, TurnFile, UndoPreview,
 };
 use crate::{DictationMode, DictationUpdate, SpeechRequest, SpeechResult, VoiceView};
 
@@ -49,12 +52,28 @@ fn connectors_decls(cfg: &Config) -> Vec<String> {
     ]
 }
 
+/// Settings > Network types, in their own module.
+fn network_decls(cfg: &Config) -> Vec<String> {
+    vec![
+        crate::NetworkRequest::decl(cfg),
+        crate::NetworkChanges::decl(cfg),
+        crate::NetworkResult::decl(cfg),
+        crate::NetworkView::decl(cfg),
+        crate::NetworkFieldView::decl(cfg),
+        crate::NetworkProblem::decl(cfg),
+        crate::NetworkTestKind::decl(cfg),
+        crate::NetworkTestView::decl(cfg),
+    ]
+}
+
 /// Marketplace types, in their own module.
 fn market_decls(cfg: &Config) -> Vec<String> {
     vec![
         crate::MarketRequest::decl(cfg),
         crate::MarketResult::decl(cfg),
         crate::MarketView::decl(cfg),
+        crate::LocalPluginView::decl(cfg),
+        crate::PluginServerView::decl(cfg),
         crate::CategoryView::decl(cfg),
         crate::MarketEntryView::decl(cfg),
         crate::InstalledView::decl(cfg),
@@ -241,43 +260,15 @@ fn secrets_decls(cfg: &Config) -> Vec<String> {
     .collect()
 }
 
-fn git_decls(cfg: &Config) -> Vec<String> {
+/// Project git browser types, separate from the existing Git action contract.
+fn git_browser_decls(cfg: &Config) -> Vec<String> {
     vec![
-        crate::GitResult::decl(cfg),
-        crate::PreparedKind::decl(cfg),
-        crate::GitLocation::decl(cfg),
-        crate::GitRepoView::decl(cfg),
-        crate::GitStatusView::decl(cfg),
-        crate::CommitPlanView::decl(cfg),
-        crate::DraftSource::decl(cfg),
-        crate::PushPlanView::decl(cfg),
-        crate::PrVia::decl(cfg),
-        crate::PrPlanView::decl(cfg),
-        crate::PrCreatedView::decl(cfg),
-        crate::PrSource::decl(cfg),
-        crate::PrStatusView::decl(cfg),
-        crate::BringPlanView::decl(cfg),
-        crate::GitSettings::decl(cfg),
-        vw_git::state::BranchState::decl(cfg),
-        vw_git::state::HeadState::decl(cfg),
-        vw_git::state::InProgress::decl(cfg),
-        vw_git::state::RemoteInfo::decl(cfg),
-        vw_git::state::Upstream::decl(cfg),
-        vw_git::state::BaseInfo::decl(cfg),
-        vw_git::forge::Forge::decl(cfg),
-        vw_git::forge::ForgeKind::decl(cfg),
-        vw_git::commit::CommitFile::decl(cfg),
-        vw_git::commit::CommitStatus::decl(cfg),
-        vw_git::hooks::HookInfo::decl(cfg),
-        vw_git::push::PushPlan::decl(cfg),
-        vw_git::merge::BringPlan::decl(cfg),
-        vw_git::merge::BringKind::decl(cfg),
-        vw_git::pr::PrCard::decl(cfg),
-        vw_git::pr::PrState::decl(cfg),
-        vw_git::pr::Review::decl(cfg),
-        vw_git::pr::Mergeable::decl(cfg),
-        vw_git::pr::Checks::decl(cfg),
-        vw_git::pr::CheckItem::decl(cfg),
+        crate::GitBrowserRequest::decl(cfg),
+        crate::GitBrowserResult::decl(cfg),
+        crate::GitBrowserSnapshot::decl(cfg),
+        crate::GitBrowserNode::decl(cfg),
+        vw_git::browser_status::BrowserStatus::decl(cfg),
+        vw_git::browser_status::BrowserFile::decl(cfg),
     ]
     .into_iter()
     .map(|decl| trim_decl_lines(&decl))
@@ -299,11 +290,12 @@ fn trim_decl_lines(decl: &str) -> String {
 /// Changes tab types, in their own module for the same size reason.
 fn changes_decls(cfg: &Config) -> Vec<String> {
     vec![
-        ChangesRequest::decl(cfg),
-        ChangesResult::decl(cfg),
+        trim_decl_lines(&ChangesRequest::decl(cfg)),
+        trim_decl_lines(&ChangesResult::decl(cfg)),
         ChangesView::decl(cfg),
         ChangesMode::decl(cfg),
         TurnChanges::decl(cfg),
+        ChangesSubagent::decl(cfg),
         TurnFile::decl(cfg),
         UndoPreview::decl(cfg),
         FolderSession::decl(cfg),
@@ -442,6 +434,9 @@ fn status_decls(cfg: &Config) -> Vec<String> {
 /// was at 793 of 800 lines).
 fn events_decls(cfg: &Config) -> Vec<String> {
     vec![CoreEvent::decl(cfg), SubagentCard::decl(cfg)]
+        .into_iter()
+        .map(|decl| trim_decl_lines(&decl))
+        .collect()
 }
 
 fn core_decls(cfg: &Config) -> Vec<String> {
@@ -570,6 +565,7 @@ fn files_decls(cfg: &Config) -> Vec<String> {
         crate::FilesRequest::decl(cfg),
         crate::FilesResult::decl(cfg),
         crate::FileRefView::decl(cfg),
+        crate::FileChoice::decl(cfg),
         crate::FileContent::decl(cfg),
         crate::FileKind::decl(cfg),
     ]
@@ -646,7 +642,7 @@ fn index_module(header: &str, core: &[String], siblings: &[(&[String], &str)]) -
 /// The generated modules as `(file name, text)`: `index.ts` (the command API, `JsonValue`, and
 /// re-exports of the other modules), `status.ts` (status and diagnostics views) and `terminal.ts`
 /// (terminal types), `keys.ts`, `vibe.ts`, `instructions.ts`, `changes.ts`, `documents.ts`,
-/// `speech.ts`, `preview.ts`, `projects.ts`, `files.ts`, `handbook.ts`, `git.ts`,
+/// `speech.ts`, `preview.ts`, `projects.ts`, `files.ts`, `handbook.ts`, `git.ts`, `network.ts`,
 /// `git_request.ts`, `market.ts`, `work.ts`, `sessions.ts` (session list and tools),
 /// `events.ts` (`CoreEvent`), and `secrets.ts` (project secrets and safety reminders).
 /// Each file stays under the 800-line limit.
@@ -677,10 +673,27 @@ pub fn typescript_modules(header: &str) -> Vec<(String, String)> {
         (speech_decls(&cfg), "speech"),
         (connectors_decls(&cfg), "connectors"),
         (market_decls(&cfg), "market"),
+        (network_decls(&cfg), "network"),
         (projects_decls(&cfg), "projects"),
         (vibe_decls(&cfg), "vibe"),
         (git.clone(), "git"),
+        (git_browser_decls(&cfg), "git_browser"),
         (work_decls(&cfg), "work"),
+        (
+            vec![
+                crate::SecretScanSettings::decl(&cfg),
+                crate::SecretScanRequest::decl(&cfg),
+                crate::SecretScanStatus::decl(&cfg),
+                crate::SecretLeakName::decl(&cfg),
+                crate::SecretLeakState::decl(&cfg),
+                crate::SecretLeakFinding::decl(&cfg),
+                crate::SecretScanView::decl(&cfg),
+            ]
+            .into_iter()
+            .map(|decl| trim_decl_lines(&decl))
+            .collect(),
+            "secret_scan",
+        ),
     ];
     let mut siblings: Vec<(&[String], &str)> = vec![
         (&sessions, "sessions"),
@@ -704,6 +717,10 @@ pub fn typescript_modules(header: &str) -> Vec<(String, String)> {
     // Modules that also import from a sibling module are built by hand; every other sibling is a plain submodule
     // that imports only from `index`, keeping this function within clippy's line limit as modules are added.
     let mut modules = vec![
+        (
+            "changes.ts".to_owned(),
+            submodule_with(header, &changes, &core, &git, "git"),
+        ),
         (
             "index.ts".to_owned(),
             index_module(header, &core, &siblings),
@@ -758,6 +775,10 @@ pub fn typescript_modules(header: &str) -> Vec<(String, String)> {
         (
             "git_request.ts".to_owned(),
             submodule_with(header, &git_request, &core, &git, "git"),
+        ),
+        (
+            "git_browser.ts".to_owned(),
+            submodule_with(header, &git_browser_decls(&cfg), &core, &git, "git"),
         ),
     ];
     modules.extend(keys_importing_modules(header, &secrets, &core, &cfg));

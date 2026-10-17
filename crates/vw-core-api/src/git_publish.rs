@@ -9,6 +9,8 @@
 //! Depends on: vw-git, `git_cmd` (place, errors), `git_pr`. Called by: `git_cmd::Core::git`.
 //! Invariant: no network without a user's action.
 
+use std::path::Path;
+
 use serde_json::json;
 use vw_git::merge::{self, BringKind};
 use vw_git::push::{self, PushPlan};
@@ -260,34 +262,34 @@ impl Core {
         let plan = blocking(move || merge::plan(&main, &base, &branch))
             .await?
             .map_err(git_error)?;
-        let base = vw_gate::dialog_quote(&plan.base);
-        let branch = vw_gate::dialog_quote(&plan.branch);
-        let sentence = match plan.kind {
-            BringKind::UpToDate => {
-                format!("{base} already has every commit of {branch}.")
-            }
-            BringKind::FastForward => {
-                format!("Move {base} forward to {branch} ({})?", where_(&plan))
-            }
-            BringKind::MergeCommit => format!(
-                "Merge {branch} into {base} with a merge commit ({})?",
-                where_(&plan)
-            ),
-            BringKind::Conflicts => format!(
-                "{base} and {branch} change the same lines in {}. Nothing was changed. Ask Vibe to update the copy from {base} first.",
-                plan.conflicts
-                    .iter()
-                    .map(|file| vw_gate::dialog_quote(file))
-                    .collect::<Vec<_>>()
-                    .join(", "),
-            ),
-        };
-        let sentence = format!(
-            "{sentence}\n\nBase commit: {}\nCopy commit: {}",
-            vw_gate::dialog_quote(&plan.base_commit),
-            vw_gate::dialog_quote(&plan.branch_commit),
-        );
+        let sentence = bring_sentence(&plan, &place.main_root);
         Ok(BringPlanView { plan, sentence })
+    }
+}
+
+fn bring_sentence(plan: &vw_git::merge::BringPlan, folder: &Path) -> String {
+    let base = vw_gate::dialog_quote(&plan.base);
+    let base = &base[1..base.len() - 1];
+    let branch = vw_gate::dialog_quote(&plan.branch);
+    let folder = vw_gate::dialog_quote(&folder.display().to_string());
+    let folder = &folder[1..folder.len() - 1];
+    let sentence = format!(
+        "Bring the work from the copy {branch} into {base} in {folder}?\nIf you have unsaved changes there that would be overwritten, nothing is changed."
+    );
+    match plan.kind {
+        BringKind::UpToDate => format!("{sentence}\n{base} already has every commit of {branch}."),
+        BringKind::Conflicts => format!(
+            "{sentence}\n{base} and {branch} change the same lines in {}. Nothing was changed. Ask Vibe to update the copy from {base} first.",
+            plan.conflicts
+                .iter()
+                .map(|file| vw_gate::dialog_quote(file))
+                .collect::<Vec<_>>()
+                .join(", "),
+        ),
+        _ if plan.checked_out_elsewhere || plan.checked_out.is_none() => {
+            format!("{sentence}\n{}.", where_(plan))
+        }
+        _ => sentence,
     }
 }
 
@@ -326,7 +328,26 @@ pub(crate) fn stale_unless(now: &str, seen: &str) -> Result<(), CoreError> {
 
 #[cfg(test)]
 mod kg1_tests {
-    use super::{PushPlan, push_consent};
+    use super::{PushPlan, bring_sentence, push_consent};
+
+    #[test]
+    fn bring_prompt_names_work_and_folder_without_commit_ids() {
+        let plan = vw_git::merge::BringPlan {
+            base: "main".into(),
+            base_commit: "a".repeat(40),
+            branch: "vibe/fix".into(),
+            branch_commit: "b".repeat(40),
+            kind: vw_git::merge::BringKind::FastForward,
+            conflicts: vec![],
+            checked_out: Some("/work/project".into()),
+            checked_out_elsewhere: false,
+            tree: None,
+        };
+        assert_eq!(
+            bring_sentence(&plan, std::path::Path::new("/work/project")),
+            "Bring the work from the copy \"vibe/fix\" into main in /work/project?\nIf you have unsaved changes there that would be overwritten, nothing is changed."
+        );
+    }
 
     #[test]
     fn push_summary_names_full_sanitized_target_and_commit() {

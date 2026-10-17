@@ -40,8 +40,9 @@ export function DocPreview(): ReactElement | null {
   const kept = doc === undefined ? null : keptText(doc.kept);
   return (
     <>
-      <div className="scrim" onClick={close} />
+      <div data-testid="composer.doc-preview-scrim" className="scrim" onClick={close} />
       <div
+        data-testid="composer.doc-preview-modal"
         ref={ref}
         className="modal doc-preview"
         role="dialog"
@@ -69,6 +70,7 @@ export function DocPreview(): ReactElement | null {
           </pre>
           {long && !all ? (
             <button
+              data-testid="composer.doc-preview-set-all"
               type="button"
               className="show-all-btn"
               title="Show all document text"
@@ -84,6 +86,7 @@ export function DocPreview(): ReactElement | null {
         </section>
         <footer className="modal-actions">
           <button
+            data-testid="composer.doc-preview-btn-primary"
             type="button"
             className="btn-primary"
             title="Close document preview (Escape)"

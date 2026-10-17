@@ -33,7 +33,7 @@ export function VoiceChatSettings(): ReactElement | null {
   return (
     <>
       <h4 id="voice-chat-title">Voice chat</h4>
-      <p className="key-field-hint">
+      <p className="key-field-hint ui-help">
         The Voice chat button next to the microphone: you talk, Vibe answers briefly and the answer
         is read aloud with the voice above, then it listens again. What you say goes to Mistral
         speech-to-text and the answers to Mistral text-to-speech, with your key and on your usage.
@@ -52,6 +52,7 @@ export function VoiceChatSettings(): ReactElement | null {
           </span>
         </span>
         <button
+          data-testid="settings.voice-chat-settings-update"
           type="button"
           className="switch"
           role="switch"
@@ -70,6 +71,7 @@ export function VoiceChatSettings(): ReactElement | null {
           </span>
         </span>
         <Selector
+          testId="settings.voice-chat-settings-update-2"
           label="Pause before sending"
           value={String(pause)}
           disabled={!auto}

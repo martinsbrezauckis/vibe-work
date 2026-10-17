@@ -149,10 +149,7 @@ impl Core {
 
     async fn pr_via(&self, forge: Option<&forge::Forge>) -> (PrVia, Option<String>) {
         let Some(forge) = forge else {
-            return (
-                PrVia::None,
-                Some("The remote is not on a forge Vibe Work knows.".to_owned()),
-            );
+            return (PrVia::None, None);
         };
         match forge.kind {
             ForgeKind::GitHub => match self.gh() {
@@ -175,10 +172,7 @@ impl Core {
                 ),
             },
             ForgeKind::GitLab | ForgeKind::Forgejo => (PrVia::Browser, None),
-            ForgeKind::Unknown => (
-                PrVia::None,
-                Some("Vibe Work knows GitHub, GitLab.com and Codeberg pages.".to_owned()),
-            ),
+            ForgeKind::Unknown => (PrVia::None, None),
         }
     }
 

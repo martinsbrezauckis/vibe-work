@@ -26,6 +26,7 @@ import type {
 import type { CoreController } from "../../state/coreStore";
 import { createStore } from "../../state/createStore";
 import { pruneSessions } from "../../state/prune";
+import { reuseAnswers } from "./inputs";
 
 /** A session's hub answer. */
 export type HubAnswer = Extract<PagesResult, { type: "hub" }>;
@@ -111,6 +112,11 @@ export function createPages(core: CoreController) {
   const set = (key: PerSession, sessionId: string, value: unknown) => {
     store.set((s) => ({ ...s, [key]: put(s[key] as Record<string, unknown>, sessionId, value) }));
   };
+  const setAnswers = (sessionId: string, next: PageAnswers | null) => {
+    const old = store.get().answers[sessionId] ?? null;
+    const value = next === null ? null : reuseAnswers(old, next);
+    if (value !== old) set("answers", sessionId, value);
+  };
   const fail = (sessionId: string, thrown: unknown) => {
     const error = toCallError(thrown).error;
     if (error.serverCode === "notInThisBuild")
@@ -181,11 +187,11 @@ export function createPages(core: CoreController) {
         if (result.type !== "page") return;
         set("pages", sessionId, result);
         if (result.facts.inputs.length === 0) {
-          set("answers", sessionId, null);
+          setAnswers(sessionId, null);
           return;
         }
         const answers = await run({ op: "answers", sessionId, path });
-        set("answers", sessionId, answers.type === "answers" ? (answers.pages[0] ?? null) : null);
+        setAnswers(sessionId, answers.type === "answers" ? (answers.pages[0] ?? null) : null);
       } catch (thrown) {
         fail(sessionId, thrown);
       }
@@ -203,12 +209,12 @@ export function createPages(core: CoreController) {
           ? { op: "clearAnswer", sessionId, path, input }
           : { op: "setAnswer", sessionId, path, input, value },
       );
-      if (result?.type === "answers") set("answers", sessionId, result.pages[0] ?? null);
+      if (result?.type === "answers") setAnswers(sessionId, result.pages[0] ?? null);
     },
     /** Marks every answer of the page as put into the composer. */
     async markAnswersSent(sessionId: string, path: string): Promise<void> {
       const result = await act(sessionId, { op: "markAnswersSent", sessionId, path });
-      if (result?.type === "answers") set("answers", sessionId, result.pages[0] ?? null);
+      if (result?.type === "answers") setAnswers(sessionId, result.pages[0] ?? null);
     },
     /** Runs the visual check of a page now; the hub's badges follow from `pagesChanged`. */
     async visualCheck(sessionId: string, path: string): Promise<PagesResult | null> {
@@ -293,11 +299,18 @@ export function createPages(core: CoreController) {
     reload: (sessionId: string) => act(sessionId, { op: "reload", sessionId }),
     /** Forgets the external link the page tried to open. */
     clearExternal: (sessionId: string) => act(sessionId, { op: "clearExternal", sessionId }),
-    /** Lets the user point at a section of the shown page; `null` when nothing was picked. */
-    async pickSection(sessionId: string): Promise<PickedSection | null> {
+    /**
+     * Lets the user point at a section of the shown page; `null` when nothing was picked. With `section` the section
+     * is named instead (a Debug API request has no pointer) and the answer is immediate.
+     */
+    async pickSection(sessionId: string, section?: string): Promise<PickedSection | null> {
       set("picking", sessionId, true);
       try {
-        const result = await act(sessionId, { op: "pickSection", sessionId });
+        const result = await act(sessionId, {
+          op: "pickSection",
+          sessionId,
+          ...(section === undefined ? {} : { section }),
+        });
         return result?.type === "picked" ? result.picked : null;
       } finally {
         set("picking", sessionId, false);

@@ -57,8 +57,10 @@ impl PagesService {
             let mut state = self.shared.lock();
             let viewer = state.viewers.entry(session.to_owned()).or_default();
             *viewer = Viewer {
+                project: project.to_path_buf(),
                 pages_dir: server.root().to_path_buf(),
                 port: server.port(),
+                base_url: server.base_url(),
                 path,
                 anchor,
                 ..Viewer::default()

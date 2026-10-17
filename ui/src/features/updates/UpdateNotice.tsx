@@ -124,6 +124,8 @@ function Shown({
           {notice.actions.map((action) => (
             <Fragment key={action}>
               <button
+                data-testid="updates.update-notice-act"
+                data-item-id={action}
                 type="button"
                 className={
                   action === "install" || action === "download" ? "tb-btn primary" : "tb-btn"

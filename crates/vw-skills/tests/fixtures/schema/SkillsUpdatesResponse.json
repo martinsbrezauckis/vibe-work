@@ -1,0 +1,17 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "updates": {
+      "items": {
+        "$ref": "#/$defs/SkillUpdateView"
+      },
+      "title": "Updates",
+      "type": "array"
+    }
+  },
+  "required": [
+    "updates"
+  ],
+  "title": "SkillsUpdatesResponse",
+  "type": "object"
+}

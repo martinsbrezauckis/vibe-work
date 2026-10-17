@@ -63,6 +63,7 @@ export function createTauriClient(): CoreClient {
     },
     pickFolder: () => call<string | null>("pick_folder", {}),
     pickDocuments: () => call<DocumentsPicked>("pick_documents", {}),
+    pickCertificate: () => call<string | null>("pick_certificate", {}),
     pickLibraryFiles: (libraryId: string) =>
       call<CommandResult>("pick_library_files", { libraryId }),
     exportPage: (sessionId: string, path: string) =>

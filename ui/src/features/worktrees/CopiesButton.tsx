@@ -1,5 +1,5 @@
 /**
- * Stable sessions-footer entry to the existing copies inventory, refreshed on session/folder changes.
+ * Sessions-footer entry for leftover copies, refreshed on session/folder changes and hidden when empty.
  * Depends on: core and worktrees stores, openCopies. Called by: shell/SessionList; no polling.
  */
 import { useEffect } from "react";
@@ -8,6 +8,8 @@ import { NO_WORKTREES } from "../../state/worktrees";
 import { useApp } from "../shell/AppContext";
 import { useCoreState, useSessionSummaries } from "../shell/hooks";
 import { openCopies } from "./openCopies";
+
+const DESCRIPTION = "Session copies (git worktrees) no chat uses anymore: review or remove them";
 
 /** The count includes leftover and kept copies, excluding those used by live sessions. */
 export function CopiesButton() {
@@ -22,10 +24,17 @@ export function CopiesButton() {
   useEffect(() => {
     if (phase === "running") void worktrees?.loadOrphans();
   }, [phase, sessions, worktrees]);
-  if (worktrees === null) return null;
+  if (worktrees === null || copies.length === 0) return null;
   return (
-    <button type="button" className="rbtn-wide" onClick={() => void openCopies(app)}>
-      Copies {copies.length}
+    <button
+      data-testid="worktrees.copies-button-open-copies"
+      type="button"
+      className="rbtn-wide"
+      title={DESCRIPTION}
+      aria-description={DESCRIPTION}
+      onClick={() => void openCopies(app)}
+    >
+      Leftover copies {copies.length}
     </button>
   );
 }

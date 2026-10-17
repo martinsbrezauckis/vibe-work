@@ -66,6 +66,8 @@ pub enum McpRefusal {
     Unknown,
     /// The user has not allowed the key for this server (or revoked it).
     NotAllowed,
+    /// A policy record is missing, corrupt or undecodable.
+    PermissionsUnreadable,
     /// The vault is locked.
     Locked,
     /// The user paused agent access while the model key proxy remains available.
@@ -139,6 +141,11 @@ fn refusal_response(refusal: McpRefusal) -> Response {
             StatusCode::FORBIDDEN,
             "vibe_work_mcp_not_allowed",
             "This MCP server's key is not allowed now. In Vibe Work, open Tools and choose Allow key.",
+        ),
+        McpRefusal::PermissionsUnreadable => error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "vibe_work_mcp_permissions_unreadable",
+            "The secret's permissions could not be read; forwarding was refused. Check the vault in Vibe Work.",
         ),
         McpRefusal::Locked => error(
             StatusCode::SERVICE_UNAVAILABLE,

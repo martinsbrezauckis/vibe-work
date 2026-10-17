@@ -45,10 +45,14 @@ pub struct ViewerView {
 /// One session's viewer.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct Viewer {
+    /// The owning project; inline writes use the same answer path as the app panel.
+    pub(crate) project: PathBuf,
     /// The pages folder it shows.
     pub(crate) pages_dir: PathBuf,
     /// The page server port.
     pub(crate) port: u16,
+    /// Content base URL with the server's capability; never sent to the UI as the origin.
+    pub(crate) base_url: String,
     pub(crate) path: Option<PagePath>,
     /// A section or step id to scroll to (`#anchor`; a click in the plan checklist), checked by the caller
     /// against the section-id pattern.
@@ -74,7 +78,7 @@ impl Viewer {
             .anchor
             .as_ref()
             .map_or_else(String::new, |a| format!("#{a}"));
-        Url::parse(&format!("http://127.0.0.1:{}/{path}{fragment}", self.port)).ok()
+        Url::parse(&format!("{}{path}{fragment}", self.base_url)).ok()
     }
 
     /// The page file, when a page (not the hub) is shown.
@@ -100,6 +104,8 @@ fn encode_segment(segment: &str) -> String {
 #[derive(Clone, Debug)]
 pub(crate) struct Mount {
     pub(crate) label: String,
+    /// Project of the loaded document, retained while a new viewer target is prepared.
+    pub(crate) project: PathBuf,
     /// The session whose page it shows.
     pub(crate) session: String,
     pub(crate) port: u16,
@@ -178,7 +184,9 @@ pub fn allowed(url: &Url, port: u16) -> bool {
 
 /// The page path of a URL on the page server (`None`: the root, i.e. the hub, or not a page).
 fn path_of(url: &Url, pdf: bool) -> Option<PagePath> {
-    let decoded = crate::links::percent_decode(url.path());
+    // The router checks the first segment; viewer state tracks only the document's relative path.
+    let (_, path) = url.path().strip_prefix('/')?.split_once('/')?;
+    let decoded = crate::links::percent_decode(path);
     if pdf {
         PagePath::viewable(&decoded).ok()
     } else {

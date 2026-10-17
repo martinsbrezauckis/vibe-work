@@ -83,7 +83,8 @@ export function TextView({
   );
 }
 
-/** A Markdown file, rendered like the transcript renders the agent's text. */
+/** A Markdown file, rendered like the transcript renders the agent's text, but with the standard line rules (a
+ * single newline inside a paragraph is a space, not a line break as in chat). */
 export function MarkdownView({
   content,
   onOpenLink,

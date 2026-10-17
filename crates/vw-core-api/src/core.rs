@@ -19,14 +19,6 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, PoisonError, Weak};
 use std::time::{Duration, Instant};
 
-use tokio::sync::{broadcast, mpsc, watch};
-use tokio::task::JoinHandle;
-use tracing::info;
-use vw_gate::{Confirmer, Gate, GateConfig, GateError};
-use vw_session::{Applied, SessionStore};
-use vw_supervisor::{SecretProvider, Supervisor, SupervisorConfig, SupervisorError};
-use vw_terminal::{PortLeaseSource, TerminalConfig, TerminalManager};
-
 use crate::access::Access;
 use crate::channels::Channels;
 use crate::confirmer::DynConfirmer;
@@ -39,11 +31,19 @@ use crate::transport::SupervisedTransport;
 use crate::view::{
     ChannelView, ChannelsReport, CoreStatus, DebugApiFlag, ServerReport, ServerStatus, duration_ms,
 };
-
+use tokio::sync::{broadcast, mpsc, watch};
+use tokio::task::JoinHandle;
+use tracing::info;
+use vw_gate::{Confirmer, Gate, GateConfig, GateError};
+use vw_session::{Applied, SessionStore};
+use vw_supervisor::{SecretProvider, Supervisor, SupervisorConfig, SupervisorError};
+use vw_terminal::{PortLeaseSource, TerminalConfig, TerminalManager};
 /// Tuning of a core. `Default` gives production values.
 #[derive(Clone)]
 #[non_exhaustive]
 pub struct CoreConfig {
+    /// App data folder for scan settings and incremental state. No UI or Vault values are stored here.
+    pub secret_scan_data: Option<std::path::PathBuf>,
     /// The gate's tuning (token lifetime, limits, clock).
     pub gate: GateConfig,
     /// How long a command waits for a ready server before failing with `serverUnavailable`.
@@ -57,28 +57,26 @@ pub struct CoreConfig {
     pub stderr_lines: usize,
     /// Commands the user types in the app's own window (`session/shellCommand` from
     /// [`Origin::Ui`](crate::Origin)) and the typed composer Full access switch run without the native dialog,
-    /// because the main window is a
-    /// trusted surface that never renders untrusted active content. Trusted-surface tests
-    /// cover this requirement. Default `true`. Other methods keep the
-    /// window's dialog regardless. The Debug API still asks natively for Full access.
+    /// because the main window is a trusted surface that never renders untrusted active content.
+    /// Trusted-surface tests cover this requirement. Default `true`. Other methods keep the window's dialog
+    /// regardless. The Debug API is not the window: the core's confirmer answers its confirmations itself
+    /// (every one but the vault's), Full access included.
     pub trusted_ui_shell: bool,
     /// How long a session's channel stays open after its last use when the session is quiet and no
     /// client views it (`recovery.rs`). Closing releases the session's lease in Vibe, so the
     /// Vibe CLI can take the session, and frees the channel's memory in the server; the next command
-    /// for the session reopens it (`session/resume`, well under a second when no crash lock is held).
-    /// Default 5 minutes: long enough that switching between a few sessions never reopens them,
-    /// short enough that a session left alone is free for the CLI soon.
+    /// for the session reopens it (`session/resume`, usually well under a second).
+    /// Default 5 minutes: long enough that switching between a few sessions never reopens them, short
+    /// enough that a session left alone is free for the CLI soon.
     pub channel_idle_close: Duration,
     /// Longest wait for reopening a session after a server restart; past it (or on an error) the
-    /// session is stuck: its commands are refused until the user acts (no automatic
-    /// retries, a user must never wait 150 s mid-work). Default 60 s (an observed resume took ~31 s after a
-    /// kill during a running tool).
+    /// session is stuck: its commands are refused until the user acts (no automatic retries, a user must
+    /// never wait minutes mid-work). Default 60 s: room for a slow reopen right after a restart.
     pub reopen_timeout: Duration,
     /// Longest wait for one `retryReopen` attempt. Default 60 s.
     pub retry_reopen_timeout: Duration,
-    /// The key service: answers `keys` commands, and its events become
-    /// `keyNeeded` / `keyStatusChanged` core events. `None` (tests, development runs with the key
-    /// in the environment): `keys` commands fail with `keyService` / `notConfigured`.
+    /// The key service: answers `keys` commands; its events become `keyNeeded` / `keyStatusChanged` core events.
+    /// `None` (tests, runs with the key in the environment): `keys` commands fail with `keyService` / `notConfigured`.
     pub keys: Option<Arc<vw_keys::KeyService>>,
     /// Native clipboard owner for user-only vault copy commands. The core shuts it down.
     pub clipboard: Option<Arc<vw_platform::clipboard::ClipboardService>>,
@@ -144,8 +142,17 @@ pub struct CoreConfig {
     /// The shortest time between two forge reads of one PR card. `None` (the default): 30 s with gh,
     /// 120 s with GitHub's public API. Tests set it to zero.
     pub pr_card_floor: Option<Duration>,
-    /// The Tools marketplace: a test catalog and downloader; the default is the built-in catalog over
-    /// HTTPS.
+    /// Where the core keeps the proxy and certificate settings saved in Settings > Network (vw-mistral
+    /// `network::settings_file` in app data; authenticated with the key service's vault after confirmed Save).
+    /// Launch verifies this agent-writable file, never Vibe's `.env`. `None` (tests, runs without a data
+    /// folder): Settings shows nothing saved and a save is refused.
+    pub network_file: Option<std::path::PathBuf>,
+    /// Launch rejected the network record; replay its security notice to the window.
+    pub network_settings_rejected: bool,
+    /// The address the Settings > Network test requests once (no key is sent). Default Mistral's model list, which
+    /// answers 401 without a key: that answer proves the way through works. Tests point it at a local fake.
+    pub network_test_url: String,
+    /// The Tools marketplace: a test catalog and downloader; the default is the built-in catalog over HTTPS.
     pub market: crate::market::MarketConfig,
     /// Libraries and image generation: `work.json`'s folder, the models, the image download policy.
     pub work: crate::work::WorkConfig,
@@ -162,6 +169,7 @@ impl CoreConfig {
 impl Default for CoreConfig {
     fn default() -> Self {
         Self {
+            secret_scan_data: None,
             gate: GateConfig::default(),
             connection_wait: Duration::from_secs(10),
             subscriber_capacity: 1024,
@@ -194,30 +202,19 @@ impl Default for CoreConfig {
             github_api_base: "https://api.github.com".to_owned(),
             commit_model: crate::git_cmd::DEFAULT_COMMIT_MODEL.to_owned(),
             pr_card_floor: None,
+            network_file: None,
+            network_settings_rejected: false,
+            network_test_url: format!("{}/v1/models", vw_mistral::DEFAULT_API_BASE),
             market: crate::market::MarketConfig::default(),
             work: crate::work::WorkConfig::default(),
         }
     }
 }
 
-/// The native-view features the app configured: previews, the Project tab's viewer and the File tab's
-/// viewer.
-fn viewers(
-    config: &CoreConfig,
-) -> (
-    Option<Arc<crate::previews::PreviewHub>>,
-    Option<Arc<crate::pages::PagesHub>>,
-    crate::files::FilesState,
-) {
-    (
-        crate::previews::open(config.preview.clone()),
-        crate::pages::open(config.pages.clone()),
-        crate::files::FilesState::new(crate::pages::open(config.files_viewer.clone())),
-    )
-}
-
 /// State shared by every handle, the pump and the server-request handler.
 pub(crate) struct Shared {
+    pub(crate) network_notice: std::sync::atomic::AtomicBool,
+    pub(crate) secret_scan: crate::secret_scan::ScanState,
     /// User-controlled agent access pause; separate from cryptographic vault lock.
     pub(crate) agent_access_locked: std::sync::atomic::AtomicBool,
     pub(crate) supervisor: Arc<Supervisor>,
@@ -262,6 +259,7 @@ pub(crate) struct Shared {
     pub(crate) connectors: crate::connectors::ConnectorsState,
     /// The marketplace's catalog, downloader and running install (`market.rs`).
     pub(crate) market: crate::market::MarketState,
+    pub(crate) plugin_approvals: Arc<crate::plugin_approvals::PluginApprovals>,
     /// The session-scoped agent tools (`agent_tools`), when configured and started.
     pub(crate) agent_tools: Option<Arc<crate::agent_tools::AgentTools>>,
     /// The previews (`previews`), when the app gave an engine.
@@ -286,6 +284,10 @@ pub(crate) struct Shared {
     pub(crate) search: crate::search_index::MessageIndex,
     /// Sessions another process holds (`session_holder.rs`), and the task that checks the viewed ones.
     pub(crate) holders: crate::session_holder::Holders,
+    /// App session claims shared by every command and channel.
+    pub(crate) leases: Arc<crate::session_lease::Leases>,
+    /// The saved-project repository tree watches (`git_browser_watch.rs`).
+    pub(crate) git_browser: crate::git_browser_watch::BrowserWatches,
     /// The outer git loop (`git_cmd.rs`): data folders, the one-at-a-time lock, PR cards.
     pub(crate) git: crate::git_cmd::GitHub,
     /// The secret broker's "always" grants and use log (`secret_grants.rs`).
@@ -310,6 +312,7 @@ impl Shared {
 
 impl Drop for Shared {
     fn drop(&mut self) {
+        self.secret_scan.stop();
         if let Some(tick) = self
             .procmon_tick
             .lock()
@@ -323,43 +326,6 @@ impl Drop for Shared {
                 task.abort();
             }
         }
-    }
-}
-
-/// Re-emits the key service's events as core events until the core goes away.
-async fn forward_key_events(
-    shared: Weak<Shared>,
-    mut events: tokio::sync::broadcast::Receiver<vw_keys::KeyEvent>,
-) {
-    loop {
-        let event = match events.recv().await {
-            Ok(event) => event,
-            Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
-                vw_keys::KeyEvent::StatusChanged
-            }
-            Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
-        };
-        let Some(shared) = shared.upgrade() else {
-            return;
-        };
-        if event == vw_keys::KeyEvent::KeyChanged {
-            crate::recovery::reopen_after_key_change(&shared).await;
-        }
-        shared.emit(match event {
-            vw_keys::KeyEvent::KeyNeeded(need) => CoreEvent::KeyNeeded {
-                reason: match need {
-                    vw_keyproxy::KeyNeed::Unlock => "unlock",
-                    vw_keyproxy::KeyNeed::Setup => "setup",
-                }
-                .to_owned(),
-            },
-            vw_keys::KeyEvent::RateLimits(limits) => CoreEvent::RateLimits {
-                limits: limits.into(),
-            },
-            vw_keys::KeyEvent::StatusChanged | vw_keys::KeyEvent::KeyChanged => {
-                CoreEvent::KeyStatusChanged {}
-            }
-        });
     }
 }
 
@@ -429,7 +395,10 @@ fn connect_vibe_install(shared: &Arc<Shared>) {
 /// Starts the owned task that re-emits the key service's events (when the core has a key service).
 fn spawn_key_forwarder(shared: &Arc<Shared>) {
     if let Some(keys) = &shared.config.keys {
-        let forwarder = tokio::spawn(forward_key_events(Arc::downgrade(shared), keys.subscribe()));
+        let forwarder = tokio::spawn(crate::key_events::forward(
+            Arc::downgrade(shared),
+            keys.subscribe(),
+        ));
         *shared
             .key_events
             .lock()
@@ -514,7 +483,9 @@ impl Core {
     ///
     /// # Errors
     /// [`CoreStartError::Supervisor`] when the first server start fails; [`CoreStartError::Procmon`] when
-    /// the ledger folder cannot be prepared.
+    /// the ledger folder cannot be prepared; [`CoreStartError::Marketplace`] when an interrupted plugin update
+    /// cannot be recovered.
+    #[allow(clippy::too_many_lines)]
     pub async fn start(
         mut supervisor: SupervisorConfig,
         secrets: Arc<dyn SecretProvider>,
@@ -528,6 +499,24 @@ impl Core {
             own_home: supervisor.vibe_home.clone(),
             cli_home: config.instructions.cli_home.clone(),
         };
+        let leases = Arc::new(
+            crate::session_lease::Leases::new(
+                &instructions.own_home,
+                config.sessions_dir.as_deref(),
+            )
+            .map_err(|error| CoreStartError::SessionOwnership(error.to_string()))?,
+        );
+        vw_market::Store::new(&instructions.own_home).recover_updates()?;
+        let plugin_approvals = Arc::new(
+            crate::plugin_approvals::PluginApprovals::configured(&supervisor, &config)
+                .map_err(|e| CoreStartError::PluginApprovals(e.to_string()))?,
+        );
+        let approvals = plugin_approvals.clone();
+        supervisor.before_launch = Some(Arc::new(move |program| {
+            let _held = approvals.mutations.try_lock().map_err(|e| e.to_string())?;
+            approvals.before_launch(program).map_err(|e| e.to_string())
+        }));
+        let plugin_roots = crate::market_discovery::builtin_roots(&supervisor);
         let slot = own_callbacks(&mut supervisor);
         let supervisor = start_supervisor(supervisor, secrets, &config).await?;
         let first = supervisor.current().map(|conn| conn.subscribe());
@@ -538,6 +527,8 @@ impl Core {
             config.connection_wait,
             feeds,
             agent_tools.clone(),
+            leases.clone(),
+            plugin_approvals.clone(),
         ));
         let transport = SupervisedTransport {
             channels: channels.clone(),
@@ -549,9 +540,11 @@ impl Core {
         let (events, _) = broadcast::channel(config.event_capacity.max(1));
         let terminals = crate::terminals::manager(&config, &procmon, &events);
         let (loads, loads_rx) = mpsc::channel(256);
-        let (preview, pages, files) = viewers(&config);
+        let (preview, pages, files) = crate::core_viewers::open(&config);
         let plan_profile = crate::plan_profile::PlanProfile::new(instructions.own_home.clone());
         let shared = Arc::new(Shared {
+            network_notice: std::sync::atomic::AtomicBool::new(config.network_settings_rejected),
+            secret_scan: crate::secret_scan::ScanState::new(config.secret_scan_data.as_deref()),
             agent_access_locked: std::sync::atomic::AtomicBool::new(false),
             supervisor,
             store,
@@ -566,9 +559,11 @@ impl Core {
             dictations: crate::dictation::Dictations::new(events.clone(), config.speech.clone()),
             changes: crate::changes::Hub::from_config(&config),
             worktrees: crate::worktrees::WorktreesState::of(&config, &instructions),
+            git_browser: crate::git_browser_watch::BrowserWatches::default(),
             git: crate::git_cmd::GitHub::new(config.changes_dir.as_deref()),
             projects: crate::projects_filing::ProjectsState::new(config.projects_dir.clone()),
-            market: crate::market::MarketState::new(&config.market),
+            market: crate::market::MarketState::new(&config.market, plugin_roots),
+            plugin_approvals,
             // The grants sit in the agent tools' data folder (opened private above), memory only without.
             secret_grants: crate::secret_grants::SecretGrants::open(
                 agent_tools.as_ref().map(|t| t.config.data_dir.as_path()),
@@ -577,6 +572,7 @@ impl Core {
             temporary: crate::temporary::TemporarySessions::load(config.sessions_dir.clone()),
             search: crate::search_index::MessageIndex::default(),
             holders: crate::session_holder::Holders::default(),
+            leases,
             events,
             config,
             loads,
@@ -618,6 +614,7 @@ impl Core {
         crate::processes::note_vibe_server(&shared);
         crate::processes::record_server(&shared).await;
         spawn_owned_tasks(&shared);
+        crate::secret_scan::start(&shared);
         crate::temporary::spawn_sweep(&shared);
         info!("core started");
         Ok(Self { shared })
@@ -737,10 +734,11 @@ impl Core {
         }
     }
 
-    /// Stops the pump, stops every session's `owned` processes (the monitor; `agent` processes keep
-    /// running and stay in the ledger), returns the leases, then shuts the server down cleanly (stdin
-    /// closed, grace, then kill).
+    /// Stops the pump and owned processes, returns leases, then shuts the server down cleanly.
+    /// Agent processes stay in the ledger; stdin closes before the grace period and kill.
     pub async fn shutdown(&self) {
+        self.shared.secret_scan.shutdown().await;
+        self.shared.git_browser.stop_all();
         if let Some(clipboard) = &self.shared.config.clipboard {
             clipboard.shutdown().await;
         }
@@ -786,8 +784,9 @@ impl Core {
         crate::pages::shutdown(&self.shared).await;
         crate::files::shutdown(&self.shared).await;
         // temporary sessions are deleted while Vibe still runs (bounded per session).
-        self.delete_temporary_all().await;
+        self.delete_temporary_all(false).await;
         let exit = self.shared.supervisor.stop().await;
+        self.shared.leases.release_all();
         // The stopped server leaves the ledger (agent processes stay recorded for the next start).
         crate::processes::record_server(&self.shared).await;
         self.shared.emit(CoreEvent::Server {

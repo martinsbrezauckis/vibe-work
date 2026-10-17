@@ -6,6 +6,7 @@
  * Invariants: the list is made visible first (the Projects overview closes, a narrow window opens its drawer); the
  * move entry acts on the selected session only and does nothing without one.
  */
+import { term } from "../../vocabulary";
 import { computeLayout } from "../../state/panelLayout";
 import type { App } from "../shell/AppContext";
 
@@ -33,7 +34,7 @@ export function registerProjectCommands(app: App): () => void {
     app.commands.register({
       id: "projects.new",
       label: "New project",
-      section: "Project",
+      section: term("workNames", "projectTab").name,
       keywords: "create project group folder",
       run: () => {
         showList();
@@ -43,7 +44,7 @@ export function registerProjectCommands(app: App): () => void {
     app.commands.register({
       id: "projects.moveSession",
       label: "Move the open session to a project...",
-      section: "Project",
+      section: term("workNames", "projectTab").name,
       keywords: "file group project move session",
       run: () => {
         const selected = app.shell.store.get().selected;

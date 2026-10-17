@@ -85,11 +85,11 @@
   opacity: 0;
   color: var(--blue);
 }
-.scope-chip:hover .scope-in,
+.scope-chip:hover:where(:not(:disabled)) .scope-in,
 .scope-chip:focus-visible .scope-in {
   opacity: 0;
 }
-.scope-chip:hover .scope-all,
+.scope-chip:hover:where(:not(:disabled)) .scope-all,
 .scope-chip:focus-visible .scope-all {
   opacity: 1;
 }
@@ -117,7 +117,7 @@
 .set-cat svg.i {
   color: var(--text-3);
 }
-.set-cat:hover {
+.set-cat:hover:where(:not(:disabled)) {
   background: var(--hover);
   color: var(--text);
 }
@@ -126,7 +126,7 @@
   color: var(--text);
 }
 .set-cat[aria-current="page"] svg.i,
-.set-cat:hover svg.i {
+.set-cat:hover:where(:not(:disabled)) svg.i {
   color: var(--text);
 }
 /* The selected category carries the same orange bar as the rail's current item. */
@@ -151,7 +151,7 @@
   color: var(--text);
   font-size: var(--text-13);
 }
-.set-result:hover,
+.set-result:hover:where(:not(:disabled)),
 .set-result:focus-visible {
   background: var(--active);
 }
@@ -237,26 +237,6 @@
 .set-cat-body .check .d {
   font-weight: var(--weight-regular);
 }
-.browser-secret-permissions {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-card-inline);
-  border-top: 1px solid var(--line);
-  margin-top: var(--space-row-block);
-  padding-top: var(--space-row-block);
-}
-.set-cat-body .browser-secret-permissions h4 {
-  margin: 0;
-}
-.browser-secret-permissions p {
-  margin: 4px 0 0;
-  color: var(--text-3);
-  font-size: var(--text-12-5);
-}
-.browser-secret-permissions .tb-btn {
-  flex: none;
-}
 /* Only Settings normalizes setup-derived primary controls to the shared inline button geometry. */
 .set-cat-body .btn-primary {
   height: auto;
@@ -306,7 +286,7 @@
 .set-hit svg.i {
   color: var(--text-3);
 }
-.set-hit:hover svg.i {
+.set-hit:hover:where(:not(:disabled)) svg.i {
   color: var(--text);
 }
 /* Definition-list facts use shared .check rows; values wrap without squeezing their labels. */
@@ -335,6 +315,11 @@
 .about-sep {
   margin: 0 8px;
   color: var(--text-3);
+}
+/* Paths in the data rows: the app's mono face, sized with the detail text around them. */
+.about-data code {
+  font-family: var(--font-mono);
+  font-size: var(--text-11-5);
 }
 
 @media (max-width: 640px) {
@@ -429,7 +414,7 @@
   padding: 2px 12px 6px;
   cursor: pointer;
 }
-.pal-more button:hover {
+.pal-more button:hover:where(:not(:disabled)) {
   color: var(--text);
 }
 .pal-empty {
@@ -506,7 +491,7 @@
   cursor: pointer;
   white-space: nowrap;
 }
-.sb-usage:hover {
+.sb-usage:hover:where(:not(:disabled)) {
   color: var(--text);
   background: var(--hover);
 }
@@ -603,7 +588,7 @@
   align-items: center;
   white-space: nowrap;
 }
-.set-cat-body .secrets-row:hover,
+.set-cat-body .secrets-row:hover:where(:not(:disabled)),
 .set-cat-body .secrets-row:focus-within {
   background: var(--hover);
 }
@@ -640,20 +625,18 @@
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
-.account-provider {
-  grid-template-columns: minmax(0, 1fr) auto auto;
-}
-@media (max-width: 640px) {
-  .account-provider {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-  .account-provider > span {
-    grid-column: 1 / -1;
-  }
-}
 .account-sign-in-viewport {
   height: min(560px, 55vh);
   min-height: 320px;
   margin-top: 12px;
   border: 1px solid var(--line-2);
+}
+
+/* Settings > Network: the intro, the notes and the fields (each group of fields too) stack with the gap the Vault
+   add forms use, so a field helper line never touches the next field label. */
+.set-cat-body .net-section,
+.set-cat-body .net-section > div[data-setting] {
+  display: grid;
+  gap: var(--space-row-block);
+  min-width: 0;
 }

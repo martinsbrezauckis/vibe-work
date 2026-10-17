@@ -9,6 +9,7 @@
  * a send goes out with that origin); the UI origin uses the window's own facade.
  */
 import { toCallError } from "../../protocol/client/types";
+import type { PickTarget } from "../../protocol/core";
 import type { App } from "../shell/AppContext";
 import { readTerminalSelection } from "../terminal/selection";
 import { type Chip, chipFolder, elementChip, sectionChip, terminalChip } from "./model";
@@ -47,15 +48,22 @@ export function pointTerminal(
   return insertChip(app, sessionId, terminalChip(selection), origin);
 }
 
-/** An element of the session's preview (the user selects text or clicks it in the preview). */
+/**
+ * An element of the session's preview (the user selects text or clicks it in the preview). With `target` the element
+ * is named instead, which is how a Debug API request points: it has no pointer, and the answer is immediate.
+ */
 export async function pointPreview(
   app: App,
   sessionId: string,
   origin: "ui" | "debug-api" = "ui",
+  target?: PickTarget,
 ): Promise<PointOutcome> {
   if (app.core === null) return { ok: false, reason: "Vibe Work is not connected." };
   try {
-    const result = await app.core.run({ type: "preview", request: { op: "pick", sessionId } });
+    const result = await app.core.run({
+      type: "preview",
+      request: { op: "pick", sessionId, ...(target === undefined ? {} : { target }) },
+    });
     if (result.type !== "preview" || result.result.type !== "picked") {
       return { ok: false, reason: "Nothing was picked." };
     }
@@ -65,14 +73,18 @@ export async function pointPreview(
   }
 }
 
-/** A section of the shown page. */
+/**
+ * A section of the shown page. With `section` the section is named instead (as the page file has it), which is how a
+ * Debug API request points: it has no pointer, and the answer is immediate.
+ */
 export async function pointSection(
   app: App,
   pages: Pages,
   sessionId: string,
   origin: "ui" | "debug-api" = "ui",
+  section?: string,
 ): Promise<PointOutcome> {
-  const picked = await pages.pickSection(sessionId);
+  const picked = await pages.pickSection(sessionId, section);
   if (picked === null) {
     return { ok: false, reason: pages.store.get().error[sessionId] ?? "Nothing was picked." };
   }

@@ -1,0 +1,81 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "activeAgent": {
+      "$ref": "#/$defs/AgentSummary"
+    },
+    "agents": {
+      "items": {
+        "$ref": "#/$defs/AgentSummary"
+      },
+      "title": "Agents",
+      "type": "array"
+    },
+    "bypassToolPermissions": {
+      "default": false,
+      "title": "Bypasstoolpermissions",
+      "type": "boolean"
+    },
+    "config": {
+      "$ref": "#/$defs/ConfigView"
+    },
+    "connectors": {
+      "$ref": "#/$defs/ConnectorCounts"
+    },
+    "contextWindow": {
+      "title": "Contextwindow",
+      "type": "integer"
+    },
+    "experimentalHarness": {
+      "default": false,
+      "title": "Experimentalharness",
+      "type": "boolean"
+    },
+    "hooksCount": {
+      "title": "Hookscount",
+      "type": "integer"
+    },
+    "issues": {
+      "items": {
+        "$ref": "#/$defs/ConfigIssue"
+      },
+      "title": "Issues",
+      "type": "array"
+    },
+    "mcp": {
+      "$ref": "#/$defs/MCPState"
+    },
+    "skills": {
+      "items": {
+        "$ref": "#/$defs/SkillSummary"
+      },
+      "title": "Skills",
+      "type": "array"
+    },
+    "stats": {
+      "$ref": "#/$defs/AgentStatsSnapshot"
+    },
+    "tools": {
+      "items": {
+        "$ref": "#/$defs/ToolSummary"
+      },
+      "title": "Tools",
+      "type": "array"
+    }
+  },
+  "required": [
+    "config",
+    "activeAgent",
+    "agents",
+    "skills",
+    "tools",
+    "stats",
+    "contextWindow",
+    "issues",
+    "hooksCount",
+    "connectors",
+    "mcp"
+  ],
+  "title": "RuntimeSnapshot",
+  "type": "object"
+}

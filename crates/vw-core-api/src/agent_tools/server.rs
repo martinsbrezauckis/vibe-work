@@ -88,10 +88,19 @@ async fn serve_one(stream: TcpStream, shared: Weak<Shared>) {
                         // also drops a pending native permission wait and its action guard.
                         let Some(answer) = browser_answer_while_connected(
                             &mut reader,
-                            answer(&shared, request),
+                            Box::pin(answer(&shared, request)),
                             BROWSER_CALL_TIMEOUT,
                         )
                         .await
+                        else {
+                            return;
+                        };
+                        answer
+                    } else if request.tool == names::GIT_CHECK {
+                        // A hook that has exited can no longer use this approval. Release its
+                        // confirmation future and listener slot as soon as the client goes away.
+                        let Some(answer) =
+                            answer_while_connected(&mut reader, answer(&shared, request)).await
                         else {
                             return;
                         };
@@ -151,14 +160,24 @@ where
     R: AsyncRead + Unpin,
     F: Future<Output = Answer>,
 {
+    answer_while_connected(reader, async {
+        tokio::time::timeout(deadline, answer).await.unwrap_or_else(|_| {
+            Answer::Error("Outcome unknown: the browser request timed out and was canceled. Do not repeat an act; inspect the Browser tab. An unanswered native confirmation can no longer send input.".to_owned())
+        })
+    }).await
+}
+
+async fn answer_while_connected<R, F>(reader: &mut R, answer: F) -> Option<Answer>
+where
+    R: AsyncRead + Unpin,
+    F: Future<Output = Answer>,
+{
     let mut extra = [0_u8; 1];
     tokio::select! {
         biased;
         // Any further input violates the one-request protocol; EOF means the caller has gone.
         _ = reader.read(&mut extra) => None,
-        result = tokio::time::timeout(deadline, answer) => Some(result.unwrap_or_else(|_| {
-            Answer::Error("Outcome unknown: the browser request timed out and was canceled. Do not repeat an act; inspect the Browser tab. An unanswered native confirmation can no longer send input.".to_owned())
-        })),
+        result = answer => Some(result),
     }
 }
 

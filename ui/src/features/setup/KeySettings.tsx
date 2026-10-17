@@ -6,6 +6,7 @@
  * Invariants: removing a key asks first; forgetting or remembering this computer needs the password
  * (the core re-wraps the vault key), asked inline; secrets are only ever passed to the controller.
  */
+import { Button } from "../../components/Controls";
 import { useState } from "react";
 
 import { VAULT_LOCKED_NOTICE, vaultName } from "../../state/keyText";
@@ -69,7 +70,7 @@ export function KeySettings() {
         </p>
       )}
       {ready && <MistralKeyDetails location="account" />}
-      {notice !== null && <p className="key-field-hint">{notice}</p>}
+      {notice !== null && <p className="key-field-hint ui-help">{notice}</p>}
 
       {locked && mode === "none" && (
         <PasswordAsk
@@ -80,9 +81,10 @@ export function KeySettings() {
         />
       )}
       {!unlocked && !locked && (
-        <button
+        <Button
+          data-testid="setup.key-settings-reopen"
           type="button"
-          className="tb-btn"
+          small
           onClick={() => {
             keys.reopen();
             // The setup screen covers the work view: go there (Settings is a page over it).
@@ -90,56 +92,61 @@ export function KeySettings() {
           }}
         >
           Set up the key
-        </button>
+        </Button>
       )}
       {unlocked && !ready && mode === "none" && <KeyStep />}
 
       {ready && mode === "none" && (
-        <div className="key-actions wrap">
-          <button
+        <div className="set-actions">
+          <Button
+            variant="danger"
+            data-testid="setup.key-settings-set-mode"
             type="button"
-            className="tb-btn"
+            small
             onClick={() => {
               setMode("remove");
             }}
           >
             Remove key
-          </button>
+          </Button>
           <VaultLockControls mode="vault" display="button" />
           {canRemember && (
-            <button
+            <Button
+              data-testid="setup.key-settings-set-mode-2"
               type="button"
-              className="tb-btn"
+              small
               onClick={() => {
                 setMode(status.rememberedDevice ? "forget" : "remember");
               }}
             >
               {status.rememberedDevice ? "Forget this computer" : "Remember this computer"}
-            </button>
+            </Button>
           )}
         </div>
       )}
-      {ready && mode === "none" && <p className="key-field-hint">{VAULT_LOCK_TIP}</p>}
+      {ready && mode === "none" && <p className="key-field-hint ui-help">{VAULT_LOCK_TIP}</p>}
       {mode === "remove" && (
         <div className="key-offer">
           <p>
             Remove the key from Vibe Work? Sessions will ask for a key again. Nothing else in your
             vault changes.
           </p>
-          <div className="key-actions">
-            <button
+          <div className="set-actions">
+            <Button
+              data-testid="setup.key-settings-remove-key"
               type="button"
-              className="btn-primary"
+              small
+              variant="danger"
               disabled={busy}
               onClick={() => {
                 void keys.removeKey().then(back);
               }}
             >
               Remove key
-            </button>
-            <button type="button" className="tb-btn" onClick={back}>
+            </Button>
+            <Button data-testid="setup.key-settings-tb-btn" type="button" small onClick={back}>
               Cancel
-            </button>
+            </Button>
           </div>
         </div>
       )}

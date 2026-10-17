@@ -1,0 +1,23 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "apiBase": {
+      "title": "Apibase",
+      "type": "string"
+    },
+    "apiKeyEnvVar": {
+      "title": "Apikeyenvvar",
+      "type": "string"
+    },
+    "client": {
+      "$ref": "#/$defs/AudioClient"
+    }
+  },
+  "required": [
+    "apiBase",
+    "apiKeyEnvVar",
+    "client"
+  ],
+  "title": "AudioProviderView",
+  "type": "object"
+}

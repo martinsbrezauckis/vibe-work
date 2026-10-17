@@ -58,6 +58,8 @@ pub(crate) struct Facts {
     pub(crate) turns: Vec<TurnFact>,
     /// Completed file writes and edits in history order.
     pub(crate) touches: Vec<FileTouch>,
+    /// Loaded descendants, kept separate so their turns never become parent rewind anchors.
+    pub(crate) subagents: Vec<(crate::changes_view::ChangesSubagent, Facts)>,
 }
 
 impl Facts {
@@ -144,6 +146,7 @@ pub(crate) fn facts(state: &Value) -> Facts {
         running,
         turns,
         touches,
+        subagents: Vec::new(),
     }
 }
 

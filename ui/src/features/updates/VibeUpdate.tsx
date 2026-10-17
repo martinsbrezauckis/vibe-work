@@ -47,6 +47,8 @@ export function VibeUpdateCard(): ReactElement | null {
         <div className="update-notice-actions">
           {notice.actions.map((action) => (
             <button
+              data-testid="updates.vibe-update-prepare-update"
+              data-item-id={action}
               key={action}
               type="button"
               className={action === "update" ? "tb-btn primary" : "tb-btn"}
@@ -83,13 +85,13 @@ export function VibeUpdateDialog(): ReactElement | null {
   const offer = phase.offer;
   return (
     <>
-      <div className="scrim" onClick={cancel} />
+      <div data-testid="updates.vibe-update-scrim" className="scrim" onClick={cancel} />
       <div
         className="modal vibe-update-dialog"
         role="dialog"
         aria-modal="true"
         aria-labelledby="vibe-update-title"
-        data-testid="vibe-update-dialog"
+        data-testid="updates.vibe-update-dialog"
         ref={dialog}
         tabIndex={-1}
       >
@@ -107,6 +109,7 @@ export function VibeUpdateDialog(): ReactElement | null {
         </section>
         <footer className="modal-actions">
           <button
+            data-testid="updates.vibe-update-tb-btn"
             type="button"
             className="tb-btn"
             data-dialog-initial-focus="true"
@@ -115,6 +118,7 @@ export function VibeUpdateDialog(): ReactElement | null {
             Cancel
           </button>
           <button
+            data-testid="updates.vibe-update-confirm-update"
             type="button"
             className="tb-btn primary"
             disabled={busy}

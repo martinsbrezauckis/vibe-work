@@ -22,6 +22,8 @@ import type { Connectors } from "./connectors";
 import { contextSession } from "./connectors";
 import type { CoreController } from "./coreStore";
 import { createStore } from "./createStore";
+import { createPluginNotices } from "./pluginNotices";
+import type { Toasts } from "./toastStore";
 import type { Shell } from "./shellStore";
 
 /** Which tab of the Tools page shows. */
@@ -56,9 +58,16 @@ export const MARKET_INITIAL: MarketState = {
 };
 
 /** Creates the marketplace controller. */
-export function createMarket(deps: { core: CoreController; shell: Shell; connectors: Connectors }) {
+export function createMarket(deps: {
+  core: CoreController;
+  shell: Shell;
+  connectors: Connectors;
+  toasts: Toasts;
+  persist: boolean;
+}) {
   const { core, shell, connectors } = deps;
   const store = createStore<MarketState>(MARKET_INITIAL);
+  const notify = createPluginNotices(deps.toasts, deps.persist);
   const patch = (p: Partial<MarketState>) => {
     store.set((s) => ({ ...s, ...p }));
   };
@@ -68,7 +77,7 @@ export function createMarket(deps: { core: CoreController; shell: Shell; connect
   const request = async (origin: "ui" | "debug-api", req: MarketRequest): Promise<MarketResult> => {
     const result = await core.run(
       { type: "marketplace", request: req },
-      origin === "debug-api" ? { origin } : undefined,
+      origin === "debug-api" ? { origin } : req.op === "read" ? undefined : { origin: "window" },
     );
     if (result.type !== "marketplace")
       throw new Error("unexpected answer to a marketplace request");
@@ -86,13 +95,17 @@ export function createMarket(deps: { core: CoreController; shell: Shell; connect
   const reload = async (origin: "ui" | "debug-api"): Promise<void> => {
     patch({ loading: true });
     const sessionId = contextSession(core, shell);
+    const cwd = shell.store.get().newFolder;
     try {
       const result = await request(origin, {
         op: "read",
+        ...(sessionId === null && cwd !== null ? { cwd } : {}),
         ...(sessionId === null ? {} : { sessionId }),
       });
-      if (result.kind === "view")
+      if (result.kind === "view") {
+        notify(result.view.discovered);
         patch({ view: result.view, error: null, installing: result.view.installing });
+      }
     } catch (thrown) {
       patch({ error: toCallError(thrown).error.message });
     } finally {
@@ -139,6 +152,20 @@ export function createMarket(deps: { core: CoreController; shell: Shell; connect
     select(id: string | null): void {
       patch({ selected: id, note: null });
     },
+    /** Opens Tools at a discovered plugin card without changing its state. */
+    async showPlugin(path: string): Promise<void> {
+      patch({ tab: "marketplace", filter: "all", search: "", selected: null });
+      const a = origin === "ui" ? connectors.actions : connectors.debugApi;
+      if (!connectors.store.get().open) await a.open();
+      await reload(origin);
+      requestAnimationFrame(() => {
+        const row = [...document.querySelectorAll<HTMLElement>(".local-plugin")].find(
+          (node) => node.dataset.itemId === path,
+        );
+        row?.scrollIntoView({ block: "center" });
+        row?.querySelector<HTMLButtonElement>("button")?.focus();
+      });
+    },
     /** Installs or updates a pack or plugin (the window asks the native dialog first). */
     async install(id: string): Promise<boolean> {
       try {
@@ -179,6 +206,38 @@ export function createMarket(deps: { core: CoreController; shell: Shell; connect
         return false;
       }
     },
+    /** Changes only the owned plugin folder the core resolved; Remove asks a native dialog. */
+    async changePlugin(
+      op: "turnOffPlugin" | "turnOnPlugin" | "removePlugin",
+      path: string,
+    ): Promise<boolean> {
+      const sessionId = contextSession(core, shell);
+      const cwd = shell.store.get().newFolder;
+      const name = store.get().view?.discovered.find((p) => p.path === path)?.name ?? path;
+      try {
+        const result = await request(origin, {
+          op,
+          path,
+          ...(sessionId === null ? {} : { sessionId }),
+          ...(sessionId === null && cwd !== null ? { cwd } : {}),
+        });
+        if (result.kind === "view")
+          patch({
+            view: result.view,
+            note:
+              result.notice ??
+              `${name} is ${op === "turnOffPlugin" ? "turned off" : op === "turnOnPlugin" ? "turned on" : "removed"}. New chats use the current plugins.`,
+          });
+        await reload(origin);
+        return true;
+      } catch (thrown) {
+        fail(thrown);
+        const error = toCallError(thrown).error;
+        if (error.code !== "confirmationDeclined")
+          deps.toasts.push({ kind: "error", bellKind: "failure", text: error.message });
+        return false;
+      }
+    },
     /** Adds a catalog server through the Connectors flow (address check, dialog, sign-in in the browser). */
     async addServer(id: string): Promise<string | null> {
       const entry = store.get().view?.entries.find((e) => e.entry.id === id)?.entry;
@@ -205,8 +264,74 @@ export function createMarket(deps: { core: CoreController; shell: Shell; connect
     },
   });
 
-  return { store, actions: actions("ui"), debugApi: actions("debug-api") } as const;
+  return {
+    store,
+    actions: actions("ui"),
+    debugApi: actions("debug-api"),
+    /** Discovery remains active while Tools is closed; every listener is released on unmount. */
+    watch(): () => void {
+      let busy = false;
+      let queued: ReturnType<typeof setTimeout> | null = null;
+      let queuedDeadline = 0;
+      let lastRead = 0;
+      // A read asked for while another runs: the running one may have looked before the change that asked.
+      let again = false;
+      let stopped = false;
+      const read = async () => {
+        if (busy) {
+          again = true;
+          return;
+        }
+        busy = true;
+        lastRead = Date.now();
+        try {
+          await reload("ui");
+        } finally {
+          busy = false;
+          if (again && !stopped) {
+            again = false;
+            void read();
+          }
+        }
+      };
+      // Each read starts Vibe's plugin resolver (a Python process), so a working chat's stream of session
+      // changes may trigger at most one read every few seconds; navigation and Vibe restarts stay prompt.
+      const schedule = (delay = 300) => {
+        const deadline = Date.now() + delay;
+        if (queued !== null) {
+          if (deadline >= queuedDeadline) return;
+          clearTimeout(queued);
+        }
+        queuedDeadline = deadline;
+        queued = setTimeout(() => {
+          queued = null;
+          queuedDeadline = 0;
+          void read();
+        }, delay);
+      };
+      const stopShell = shell.store.subscribe(() => {
+        schedule();
+      });
+      const stopCore = core.listen((event) => {
+        if (event.type === "server") schedule();
+        else if (event.type === "change")
+          schedule(Math.max(300, CHANGE_READ_GAP_MS - (Date.now() - lastRead)));
+      });
+      const interval = setInterval(() => void read(), 15_000);
+      void read();
+      return () => {
+        stopped = true;
+        clearInterval(interval);
+        if (queued !== null) clearTimeout(queued);
+        stopShell();
+        stopCore();
+      };
+    },
+  } as const;
 }
+
+/** Smallest gap between plugin reads caused by session changes (a turn emits many). */
+const CHANGE_READ_GAP_MS = 5_000;
 
 /** The marketplace controller. */
 export type Market = ReturnType<typeof createMarket>;

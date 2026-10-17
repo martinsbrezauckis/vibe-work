@@ -7,6 +7,7 @@
  * Invariants: links (Mistral's console) open only through the link dialog; plugin servers are shown, not
  * changed here (their plugin owns them).
  */
+import { Button } from "../../components/Controls";
 import type { ReactElement } from "react";
 
 import type { ServerView, ToolView } from "../../protocol/core";
@@ -73,6 +74,7 @@ function ConnectorPart({
       <div className="cactions">
         {tile.status === "signin" ? (
           <button
+            data-testid="connectors.connector-detail-sign-in"
             type="button"
             className="btn-primary"
             disabled={keyBlocked}
@@ -82,6 +84,7 @@ function ConnectorPart({
           </button>
         ) : null}
         <button
+          data-testid="connectors.connector-detail-turn-off"
           type="button"
           className="tb-btn"
           disabled={keyBlocked}
@@ -91,6 +94,7 @@ function ConnectorPart({
         </button>
         {manageUrl === null ? null : (
           <button
+            data-testid="connectors.connector-detail-ask-link"
             type="button"
             className="tb-btn"
             onClick={() => {
@@ -141,6 +145,7 @@ function KeyLine({ server }: { server: ServerView }): ReactElement {
       {key.grant === "none" ? (
         <div className="cactions">
           <button
+            data-testid="connectors.connector-detail-allow-server-key"
             type="button"
             className="btn-primary"
             disabled={vaultBlocked}
@@ -196,6 +201,7 @@ function ServerPart({ server }: { server: ServerView }): ReactElement {
         <div className="cactions">
           {server.signIn === "oauth" && tone !== "connected" ? (
             <button
+              data-testid="connectors.connector-detail-sign-in-server"
               type="button"
               className="btn-primary"
               onClick={() => void actions?.signInServer(server.name)}
@@ -205,6 +211,7 @@ function ServerPart({ server }: { server: ServerView }): ReactElement {
           ) : null}
           {server.signIn === "oauth" && tone === "connected" ? (
             <button
+              data-testid="connectors.connector-detail-sign-out-server"
               type="button"
               className="tb-btn"
               onClick={() => void actions?.signOutServer(server.name)}
@@ -213,19 +220,22 @@ function ServerPart({ server }: { server: ServerView }): ReactElement {
             </button>
           ) : null}
           <button
+            data-testid="connectors.connector-detail-set-server-off"
             type="button"
             className="tb-btn"
             onClick={() => void actions?.setServerOff(server.name, !server.off)}
           >
             {server.off ? "Turn on" : "Turn off"}
           </button>
-          <button
+          <Button
+            data-testid="connectors.connector-detail-remove-server"
             type="button"
-            className="tb-btn danger"
+            small
+            variant="danger"
             onClick={() => void actions?.removeServer(server.name)}
           >
             Remove
-          </button>
+          </Button>
         </div>
       )}
     </>
@@ -245,7 +255,12 @@ export function ConnectorDetail(): ReactElement | null {
   if (connector === undefined && server === undefined) return null;
   return (
     <aside className="cdetail" aria-label="Details">
-      <button type="button" className="tb-btn cdetail-close" onClick={() => actions?.select(null)}>
+      <button
+        data-testid="connectors.connector-detail-select"
+        type="button"
+        className="tb-btn cdetail-close"
+        onClick={() => actions?.select(null)}
+      >
         Close
       </button>
       {connector !== undefined ? (

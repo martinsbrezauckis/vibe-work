@@ -212,8 +212,7 @@ async fn a_planted_forged_replayed_or_revoked_grant_never_skips_the_dialog() {
     // Another window revokes: the next run asks.
     let other = key_handle(&s.kdir, &s.pass, false).await;
     revoke_elsewhere(&other, &id).await;
-    // Grants are whole ms; a revoke in the same ms as the next dialog's start voids its answer.
-    tokio::time::sleep(Duration::from_millis(5)).await;
+    common::revoke::after_revoke(&s.service, &id).await;
     rig.confirmer.then(Confirmation::Declined);
     let asked = call(&who, "secret_run", run_args("sh", &["deploy.sh"])).await;
     assert!(
@@ -270,6 +269,7 @@ async fn a_planted_forged_replayed_or_revoked_grant_never_skips_the_dialog() {
     let n = head_generation(&m);
     let active_version = std::fs::read(m.join(format!("{n:08}"))).unwrap();
     secrets(&rig, json!({"op": "revoke", "grantId": id})).await;
+    common::revoke::after_revoke(&s.service, &id).await;
     let revoked_at = head_generation(&m);
     assert!(revoked_at > n);
     let replay = m.join(format!("{:08}", revoked_at + 1));
@@ -457,6 +457,7 @@ async fn a_revoke_while_the_dialog_is_open_wins() {
     let listed = secrets(&rig, json!({"op": "list"})).await;
     let id = listed["grants"][0]["id"].as_str().unwrap().to_owned();
     secrets(&rig, json!({"op": "revoke", "grantId": id})).await;
+    common::revoke::after_revoke(&s.service, &id).await;
 
     for answer in [Confirmation::ApprovedAlways, Confirmation::Approved] {
         let before = dialogs(&rig);
@@ -467,11 +468,9 @@ async fn a_revoke_while_the_dialog_is_open_wins() {
             tokio::spawn(
                 async move { call(&who2, "secret_run", run_args("sh", &["deploy.sh"])).await },
             );
-        while dialogs(&rig) == before {
-            tokio::time::sleep(Duration::from_millis(20)).await;
-        }
-        tokio::time::sleep(Duration::from_millis(5)).await;
+        common::revoke::dialog_after(|| dialogs(&rig), before).await;
         revoke_elsewhere(&other, &id).await;
+        common::revoke::after_revoke(&s.service, &id).await;
         hold.notify_one();
         let out = pending.await.unwrap();
         eprintln!("{answer:?}: {out:?}");
@@ -495,8 +494,7 @@ async fn a_revoke_while_the_dialog_is_open_wins() {
     assert_eq!(refused, 2, "the log says refused: {uses}");
 
     // Without a revoke in between, "always" re-activates the record.
-    // Grants are whole ms; a revoke in the same ms as the next dialog's start voids its answer.
-    tokio::time::sleep(Duration::from_millis(5)).await;
+    common::revoke::after_revoke(&s.service, &id).await;
     rig.confirmer.then(Confirmation::ApprovedAlways);
     let regranted = call(&who, "secret_run", run_args("sh", &["deploy.sh"]))
         .await
@@ -510,4 +508,12 @@ async fn a_revoke_while_the_dialog_is_open_wins() {
     assert!(ran(&s));
     rig.core.shutdown().await;
     other.shutdown().await;
+}
+
+#[tokio::test]
+async fn next_dialog_waits_until_wall_clock_passes_revoke() {
+    // A revoke can be ahead of the local clock after an adjustment or a monotonic grant timestamp.
+    let revoked = common::revoke::now_ms() + 1000;
+    common::revoke::clock_after(revoked).await;
+    assert!(common::revoke::now_ms() > revoked);
 }
