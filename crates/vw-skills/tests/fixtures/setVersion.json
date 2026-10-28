@@ -16,6 +16,7 @@
           "supportsImages": false,
           "displayName": "example",
           "maxContextLength": null,
+          "autoCompactThreshold": null,
           "thinkingLevels": [
             "off",
             "low",
@@ -23,7 +24,8 @@
             "high",
             "max"
           ],
-          "imageDelivery": null
+          "imageDelivery": null,
+          "source": null
         },
         "activeModelPinned": false,
         "imagesSupported": false,
@@ -36,6 +38,7 @@
         "cursorBlink": true,
         "showGreeting": false,
         "autocopyToClipboard": false,
+        "enableMouseCapture": true,
         "fileWatcherForAutocomplete": false,
         "askConfirmationOnExit": false,
         "voiceModeEnabled": false,
@@ -164,10 +167,10 @@
         "sources": [],
         "discoveryErrors": {},
         "connectorError": null,
-        "manageConnectorsUrl": null
+        "manageConnectorsUrl": null,
+        "privateConnectorsHidden": false
       },
-      "bypassToolPermissions": false,
-      "experimentalHarness": false
+      "bypassToolPermissions": false
     },
     "status": "applied"
   }

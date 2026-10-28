@@ -28,7 +28,7 @@ export interface VibeNotice {
 }
 
 /** The running Vibe's version, when Vibe is set up. */
-export function runningVibe(view: InstallView): string | null {
+function runningVibe(view: InstallView): string | null {
   return view.phase.state === "installed" ? view.phase.version : null;
 }
 

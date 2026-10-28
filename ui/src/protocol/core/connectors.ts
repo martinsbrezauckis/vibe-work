@@ -128,6 +128,10 @@ catalog: CatalogLoad,
  */
 catalogError: string | null, 
 /**
+ * The current key can use shared connectors only; private sign-ins are unavailable.
+ */
+privateConnectorsHidden?: boolean, 
+/**
  * Mistral-hosted connectors, in Vibe's order.
  */
 connectors: Array<ConnectorView>, 
@@ -229,6 +233,10 @@ error: string | null,
  * The plugin that provides it (`null`: Vibe's config).
  */
 plugin: string | null, 
+/**
+ * Origin: built-in for app-injected tools or a built-in plugin; otherwise the pinned plugin’s scope, when known.
+ */
+source?: string, 
 /**
  * True when it is in Vibe Work's own config (it can be signed out, turned off and removed here).
  */

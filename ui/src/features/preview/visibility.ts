@@ -3,7 +3,7 @@
  * Depends on: shell state, browser tabs, typed preview command. Called by: register.tsx.
  */
 import type { CoreController } from "../../state/coreStore";
-import { panelOf, type ShellState } from "../../state/shellState";
+import { panelOf, panelOwner, type ShellState } from "../../state/shellState";
 import type { App } from "../shell/AppContext";
 import { awayFromHome } from "../shell/home";
 import type { Browser } from "./browser";
@@ -42,7 +42,7 @@ export function previewVisibility(
   browserPanelOpen: boolean;
   selectedPageKey: string | null;
 } {
-  const sessionId = covered || shell.settings.open ? null : shell.selected;
+  const sessionId = covered || shell.settings.open ? null : panelOwner(shell);
   const panel = panelOf(shell);
   const browserPanelOpen =
     panel.open && panel.active === "browser" && !covered && !shell.settings.open;

@@ -95,7 +95,7 @@ impl PreviewService {
         state
             .entries
             .get(session_id)
-            .and_then(|e| e.mount.as_ref())
+            .and_then(crate::state::Entry::ready_mount)
             .map(|m| m.page.clone())
     }
 
@@ -106,7 +106,7 @@ impl PreviewService {
         state
             .entries
             .get(session_id)
-            .and_then(|entry| entry.mount.as_ref())
+            .and_then(crate::state::Entry::ready_mount)
             .map(|mount| MountId {
                 session_id: session_id.to_owned(),
                 label: mount.label.clone(),
@@ -135,6 +135,34 @@ impl PreviewService {
             .unwrap_or_default()
     }
 
+    /// A lifetime mark for navigation refusals, including repeated URLs.
+    #[must_use]
+    pub fn refusal_mark(&self, session_id: &str) -> u64 {
+        self.inner
+            .lock()
+            .entries
+            .get(session_id)
+            .map_or(0, |e| e.refusals_seen)
+    }
+
+    /// Retained refusals recorded after `mark`, oldest first.
+    #[must_use]
+    pub fn refusals_since(&self, session_id: &str, mark: u64) -> Vec<(String, String)> {
+        let state = self.inner.lock();
+        let Some(entry) = state.entries.get(session_id) else {
+            return Vec::new();
+        };
+        let count = usize::try_from(entry.refusals_seen.saturating_sub(mark))
+            .unwrap_or(usize::MAX)
+            .min(entry.refused_why.len());
+        entry
+            .refused_why
+            .iter()
+            .skip(entry.refused_why.len() - count)
+            .cloned()
+            .collect()
+    }
+
     /// True when the network guard is proven active for the session's current mount.
     #[must_use]
     pub fn guarded(&self, session_id: &str) -> bool {
@@ -142,7 +170,7 @@ impl PreviewService {
             .lock()
             .entries
             .get(session_id)
-            .is_some_and(|e| e.guarded && e.mount.is_some())
+            .is_some_and(|e| e.guarded && e.ready_mount().is_some())
     }
 
     /// The protection layers of the session's current mount besides the navigation policy, as wire
@@ -154,12 +182,28 @@ impl PreviewService {
             .lock()
             .entries
             .get(session_id)
-            .filter(|e| e.mount.is_some())
+            .filter(|e| e.ready_mount().is_some())
             .map(|e| e.layers.iter().map(|l| l.name()).collect())
             .unwrap_or_default()
     }
 
-    /// The labels of every live mount (the app-wide guard listener applies the union of their rights).
+    /// Page key owning this live native mount, for guard refusal attribution.
+    #[must_use]
+    pub fn page_for_mount(&self, label: &str) -> Option<String> {
+        self.inner.lock().session_of(label).map(str::to_owned)
+    }
+
+    /// Reports final native navigation refusals to the core without copying URLs or request values.
+    pub fn on_guard_refused(&self, listener: impl Fn(&str, &str) + Send + Sync + 'static) {
+        *self
+            .inner
+            .guard_refused
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) =
+            Some(std::sync::Arc::new(listener));
+    }
+
+    /// The labels of every live mount.
     #[must_use]
     pub fn mount_labels(&self) -> Vec<String> {
         self.inner
@@ -205,7 +249,7 @@ impl PreviewService {
         let class = state
             .entries
             .get(session)
-            .and_then(|e| e.mount.as_ref())
+            .and_then(|entry| entry.mount.as_ref())
             .filter(|m| m.label == label)
             .map(|m| m.class);
         match class {
@@ -239,8 +283,7 @@ impl PreviewService {
             .get(session_id)
             .ok_or_else(|| "this session has no preview open".to_owned())?;
         let mount = entry
-            .mount
-            .as_ref()
+            .ready_mount()
             .filter(|m| m.page == accessor)
             .ok_or_else(|| {
                 "the page was replaced while it was read: call browser_read again".to_owned()
@@ -266,6 +309,69 @@ impl PreviewService {
             })
     }
 
+    /// Where a capture may fetch `url` when it is on the local-network page the USER opened in `session_id` by NAME:
+    /// `None` when `url`'s host is not that page's own host name (the ordinary public-only fetch applies; a literal address already goes that way); else that name's addresses from the lookup the
+    /// navigation uses, accepted only when every answer is a private-network, carrier-grade NAT or public address
+    /// (never this computer, link-local or reserved: the same rule as the network guard for the user's Lan page).
+    /// The fetcher connects to exactly these addresses (no second lookup).
+    pub async fn lan_media_addresses(
+        &self,
+        session_id: &str,
+        url: &url::Url,
+    ) -> Option<Result<Vec<std::net::SocketAddr>, String>> {
+        use vw_netguard::ip::{IpClass, classify};
+        let host = url.host_str()?.trim_end_matches('.').to_ascii_lowercase();
+        if host
+            .trim_matches(['[', ']'])
+            .parse::<std::net::IpAddr>()
+            .is_ok()
+        {
+            return None;
+        }
+        let own = {
+            let state = self.inner.lock();
+            let entry = state.entries.get(session_id)?;
+            entry
+                .mount_lan_host()?
+                .trim_end_matches('.')
+                .to_ascii_lowercase()
+        };
+        if own != host {
+            return None;
+        }
+        let port = url.port_or_known_default()?;
+        let resolver = self.inner.names.resolver();
+        let name = host.clone();
+        let lookup = tokio::time::timeout(
+            std::time::Duration::from_secs(3),
+            tokio::task::spawn_blocking(move || resolver(&name)),
+        )
+        .await;
+        let answers = match lookup {
+            Ok(Ok(Ok(answers))) if !answers.is_empty() => answers,
+            Ok(Ok(Ok(_))) => return Some(Err(format!("{host} has no address"))),
+            Ok(Ok(Err(error))) => {
+                return Some(Err(format!("{host} could not be resolved ({error})")));
+            }
+            Ok(Err(_)) | Err(_) => return Some(Err(format!("{host} did not resolve in time"))),
+        };
+        if let Some(bad) = answers.iter().find(|ip| {
+            !matches!(
+                classify(**ip),
+                IpClass::Public | IpClass::Private | IpClass::SharedCgnat
+            )
+        }) {
+            return Some(Err(format!(
+                "{host} resolves to {bad}, {}",
+                classify(*bad).describe()
+            )));
+        }
+        Some(Ok(answers
+            .into_iter()
+            .map(|ip| std::net::SocketAddr::new(ip, port))
+            .collect()))
+    }
+
     /// Whether a capture of the session's current page may fetch `url` (media): a public host for every
     /// page (the fetcher checks the DNS answers again when it connects and pins them), anything else only as the
     /// mount's own navigation policy allows (the session's own ports for a page of its local server, the Lan page's
@@ -288,8 +394,7 @@ impl PreviewService {
             .get(session_id)
             .ok_or_else(|| "this session has no preview open".to_owned())?;
         let mount = entry
-            .mount
-            .as_ref()
+            .ready_mount()
             .ok_or_else(|| "this session's page is not shown".to_owned())?;
         self.inner
             .policy

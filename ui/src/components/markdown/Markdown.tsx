@@ -1,6 +1,6 @@
 /**
  * The one Markdown renderer for untrusted text (model output, tool output, file previews).
- * Trusted-surface rule (decided 2026-10-08): the main window never renders untrusted
+ * Main-window rendering rule: the main window never renders untrusted
  * active content, so this renderer has NO path to raw HTML.
  *
  * - `react-markdown` 10.1.0 builds React elements (it never sets inner HTML); `remark-gfm`

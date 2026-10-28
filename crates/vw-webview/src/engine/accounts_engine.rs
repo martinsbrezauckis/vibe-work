@@ -13,7 +13,7 @@ use vw_preview::{EngineError, Storage};
 
 use super::TauriEngine;
 #[cfg(windows)]
-use super::with_proxy;
+use super::builder::with_proxy;
 #[cfg(any(windows, target_os = "linux"))]
 use crate::platform;
 
@@ -46,12 +46,17 @@ impl TauriEngine {
             .on_permission_request(|_, _| PermissionResponse::Deny);
         let builder = crate::storage::with_storage(builder, storage);
         #[cfg(windows)]
-        let builder = if self.proxy_args_usable() {
+        // No forced single folder: the anchor takes the web folder's arguments, as the web previews on it will.
+        let builder = if self.one_folder().is_none() {
             match self
                 .guard
                 .as_ref()
-                .and_then(|guard| guard.proxy_url_all().ok())
-            {
+                // The shared web folder's listener, without making the anchor a member (it never loads a page).
+                .and_then(|guard| {
+                    guard
+                        .store_proxy_url(&super::folder_guard::store_key(&storage.dir))
+                        .ok()
+                }) {
                 Some(proxy) => with_proxy(builder, &proxy)?,
                 None => builder,
             }

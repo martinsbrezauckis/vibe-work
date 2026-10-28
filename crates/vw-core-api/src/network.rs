@@ -4,7 +4,8 @@
 //! Why the core and not the window: Vibe's model traffic leaves through the core's own model proxy, so a setting
 //! only Vibe knew would not move one request. The core's clients carry the real Mistral key, so what they connect
 //! through must be authenticated: the agent can write app data, so the core verifies its file with a random MAC
-//! key in the Mistral key's vault. It never reads Vibe's `.env`. A save writes both: Vibe's `.env` through
+//! key in the Mistral key's vault (a copy in the computer's credential store checks it while the vault is locked).
+//! It never reads Vibe's `.env`. A save writes both: Vibe's `.env` through
 //! `config/proxy/write` (for Vibe's own traffic, which holds only the
 //! placeholder key) and the core's file. What Settings shows, and what the core's clients use at the next start, is the
 //! core's file; the window never sees a sign-in.
@@ -58,11 +59,25 @@ const FIELDS: [(&str, &str, &str); 6] = [
 /// What a hidden sign-in looks like in a field (`http://***@host:port`).
 const MASK: &str = "***@";
 
-pub(crate) fn rejection_notice() -> crate::event::CoreEvent {
+/// The notice for a saved record that is not in use. A record that waits for the vault (no copy of its check key:
+/// "Lock the vault when Vibe Work quits" is on, or an install from before the copy) asks for an unlock instead of a
+/// new Save; the unlock checks and applies it.
+pub(crate) fn rejection_notice(keys: Option<&vw_keys::KeyService>) -> crate::event::CoreEvent {
+    let message = match keys.and_then(vw_keys::KeyService::network_settings_wait) {
+        Some(vw_keys::NetworkWait::LockAtQuit) => {
+            "Saved network settings are used after you unlock the vault (\"Lock the vault when Vibe Work quits\" is on)."
+        }
+        Some(vw_keys::NetworkWait::NoCopyYet) => {
+            "Saved network settings are used after you unlock the vault (it was locked when Vibe Work started)."
+        }
+        None => {
+            "Network settings changed outside Vibe Work were not used. Open Settings > Network and save them again."
+        }
+    };
     crate::event::CoreEvent::Alert {
         session_id: None,
         kind: crate::event::AlertKind::NetworkSettingsRejected,
-        message: "Network settings changed outside Vibe Work were not used. Open Settings > Network and save them again.".to_owned(),
+        message: message.to_owned(),
     }
 }
 
@@ -297,7 +312,8 @@ impl Core {
                 .network_notice
                 .swap(true, std::sync::atomic::Ordering::Relaxed)
         {
-            self.shared.emit(rejection_notice());
+            self.shared
+                .emit(rejection_notice(self.shared.config.keys.as_deref()));
         }
         loaded.settings
     }
@@ -315,10 +331,16 @@ impl Core {
             .seal_network_settings(prepared.clone())
             .await
             .map_err(|error| CoreError::new(ErrorCode::KeyService, error.to_string()))?;
-        let result = file
-            .parent()
-            .map_or(Ok(()), vw_platform::ensure_private_dir)
-            .and_then(|()| vw_platform::replace_private(file, text.as_bytes()));
+        // A disk-confirmed write (the file is synced): on the blocking pool, never on an async worker.
+        let file = file.to_path_buf();
+        let result = tokio::task::spawn_blocking(move || {
+            file.parent()
+                .map_or(Ok(()), vw_platform::ensure_private_dir)
+                .and_then(|()| vw_platform::replace_private(&file, text.as_bytes()))
+        })
+        .await
+        .map_err(|join| join.to_string())
+        .and_then(|written| written.map_err(|why| why.to_string()));
         result.map_err(|why| {
             CoreError::new(
                 ErrorCode::Internal,
@@ -352,9 +374,10 @@ impl Core {
         let environment = NetworkSettings::from_environment();
         let used = NetworkSettings::effective(tried, &environment);
         let probe = net::probe(&used, &self.shared.config.network_test_url).await;
-        NetworkResult::Tested {
-            outcome: crate::network_test::describe(probe, &used, overridden(tried, &environment)),
-        }
+        let mut outcome =
+            crate::network_test::describe(probe, &used, overridden(tried, &environment));
+        crate::network_python::verify(&self.shared, &used, &mut outcome).await;
+        NetworkResult::Tested { outcome }
     }
 
     async fn network_save(

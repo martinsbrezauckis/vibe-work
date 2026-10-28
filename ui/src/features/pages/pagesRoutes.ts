@@ -11,18 +11,20 @@
  * - `comment {path, section, text, quote?, send?}`, `send {id}`, `delete {id}`;
  * - `point {source: terminal|preview|page, ...}`: "Point Vibe at this" (a context chip in the composer); `preview`
  *   names its element with `target` (`selector`, or `x` and `y`), `page` names its `section`;
- * - `open {path, anchor}` scrolls to a section or step; `answers`, `answer`, `sendAnswers`, `check`, `export`
- *   (handbookRoutes.ts); the state also says `prototype`, `answers` and `visual` for the shown page.
+ * - `open {path, anchor}` scrolls to a section or step; `answers`, `answer`, `sendAnswers`, `showAnswers`, `check`,
+ *   `export` (handbookRoutes.ts); the state also says `prototype`, `answers`, `answersShown` (the Answers panel shows
+ *   every control, not only its one line) and `visual` for the shown page.
  * Depends on: state/uiControl, store.ts, point.ts, model.ts, AppContext types. Called by: register.tsx.
  * Invariants: bodies are validated (`invalidParams`); while a route request is served every core call carries the
  * Debug API origin (`uiControl` lowering; a label with no native confirmation); chips inserted
  * here use the composer's Debug API facade (marked, sent with the Debug API origin); nothing here can run a command.
  */
+import { writeClipboard } from "../../state/clipboard";
 import type { PickTarget } from "../../protocol/core";
 import { UiControlError } from "../../state/uiControl";
 import type { App } from "../shell/AppContext";
 import { handbookAction, isHandbookAction } from "./handbookRoutes";
-import { commentChip } from "./model";
+import { commentChip, sectionChip } from "./model";
 import { insertChip, pointPreview, pointSection, pointTerminal, sessionChipFolder } from "./point";
 import type { Pages } from "./store";
 
@@ -48,7 +50,7 @@ function pickTarget(value: unknown): PickTarget {
 }
 
 /** What the tab shows for `sessionId`. */
-function state(pages: Pages, sessionId: string) {
+function state(app: App, pages: Pages, sessionId: string) {
   const s = pages.store.get();
   const hub = s.hubs[sessionId];
   const page = s.pages[sessionId] ?? null;
@@ -58,7 +60,6 @@ function state(pages: Pages, sessionId: string) {
     view: viewer?.path != null && s.hubView[sessionId] !== true ? "page" : "hub",
     folder: hub?.settings.folder ?? null,
     index: hub?.hub?.index ?? null,
-    legacy: hub?.hub?.legacy ?? null,
     manifest: hub?.hub?.manifest ?? null,
     counts:
       hub?.hub == null
@@ -97,6 +98,7 @@ function state(pages: Pages, sessionId: string) {
 
     prototype: page?.facts.kind === "prototype",
     answers: s.answers[sessionId] ?? null,
+    answersShown: app.shell.store.get().answersShown,
     visual: page === null ? null : (hub?.visual[page.path] ?? null),
   };
 }
@@ -119,36 +121,69 @@ export function registerPagesRoute(app: App, pages: Pages): () => void {
 /** One `ui/project` request (see the file header). */
 async function route(app: App, pages: Pages, body: unknown): Promise<unknown> {
   const input = asObject(body);
-  const sessionId = app.shell.store.get().selected;
+  const sessionId =
+    typeof input["sessionId"] === "string" ? input["sessionId"] : app.shell.store.get().selected;
   if (sessionId === null) throw new UiControlError("invalidParams", "no session is shown");
   const action = input["action"] ?? "state";
   switch (action) {
     case "state":
       await pages.load(sessionId);
-      return state(pages, sessionId);
+      return state(app, pages, sessionId);
     case "hub":
       pages.showHub(sessionId);
       await pages.load(sessionId);
-      return state(pages, sessionId);
+      return state(app, pages, sessionId);
     case "open": {
       const anchor = input["anchor"];
       if (typeof anchor === "string" && anchor !== "")
         await pages.openAt(sessionId, text(input["path"], "path"), anchor);
       else await pages.open(sessionId, text(input["path"], "path"));
-      return state(pages, sessionId);
+      return state(app, pages, sessionId);
     }
     case "plan":
       await pages.openPlan(sessionId);
-      return state(pages, sessionId);
+      return state(app, pages, sessionId);
     case "back":
       await pages.back(sessionId);
-      return state(pages, sessionId);
+      return state(app, pages, sessionId);
     case "forward":
       await pages.forward(sessionId);
-      return state(pages, sessionId);
+      return state(app, pages, sessionId);
     case "reload":
       await pages.reload(sessionId);
-      return state(pages, sessionId);
+      return state(app, pages, sessionId);
+    case "pointAt": {
+      const picked = await pages.menuSection(
+        sessionId,
+        text(input["section"], "section"),
+        typeof input["quote"] === "string" ? input["quote"] : undefined,
+      );
+      if (picked === null)
+        throw new UiControlError(
+          "invalidParams",
+          pages.store.get().error[sessionId] ?? "nothing was picked",
+        );
+      return insertChip(
+        app,
+        sessionId,
+        sectionChip(sessionChipFolder(app, pages, sessionId), picked),
+        "debug-api",
+      );
+    }
+    case "copy": {
+      const copied = await pages.menuCopy(
+        sessionId,
+        text(input["section"], "section"),
+        typeof input["quote"] === "string" ? input["quote"] : undefined,
+      );
+      if (copied === null)
+        throw new UiControlError(
+          "invalidParams",
+          pages.store.get().error[sessionId] ?? "nothing was copied",
+        );
+      await writeClipboard(copied);
+      return { copied };
+    }
     case "pick": {
       // No person clicks for a Debug API request: it names the section and the answer is immediate (never a wait).
       const picked = await pages.pickSection(sessionId, text(input["section"], "section"));
@@ -157,7 +192,7 @@ async function route(app: App, pages: Pages, body: unknown): Promise<unknown> {
           "invalidParams",
           pages.store.get().error[sessionId] ?? "nothing was picked",
         );
-      return { picked, ...state(pages, sessionId) };
+      return { picked, ...state(app, pages, sessionId) };
     }
     case "comment": {
       const path = text(input["path"], "path");
@@ -169,17 +204,17 @@ async function route(app: App, pages: Pages, body: unknown): Promise<unknown> {
         ...(quote === undefined ? {} : { quote }),
       });
       if (id !== null && input["send"] === true) await sendComment(app, pages, sessionId, id);
-      return { commentId: id, ...state(pages, sessionId) };
+      return { commentId: id, ...state(app, pages, sessionId) };
     }
     case "send": {
       await sendComment(app, pages, sessionId, text(input["id"], "id"));
-      return state(pages, sessionId);
+      return state(app, pages, sessionId);
     }
     case "delete": {
       const page = pages.store.get().pages[sessionId];
       if (page == null) throw new UiControlError("invalidParams", "no page is shown");
       await pages.deleteComment(sessionId, page.path, text(input["id"], "id"));
-      return state(pages, sessionId);
+      return state(app, pages, sessionId);
     }
     case "point": {
       const source = input["source"];
@@ -205,12 +240,12 @@ async function route(app: App, pages: Pages, body: unknown): Promise<unknown> {
       if (isHandbookAction(action)) {
         return {
           result: await handbookAction(app, pages, sessionId, action, input),
-          ...state(pages, sessionId),
+          ...state(app, pages, sessionId),
         };
       }
       throw new UiControlError(
         "invalidParams",
-        "action must be state, hub, open, plan, back, forward, reload, pick, comment, send, delete, point, answers, answer, sendAnswers, check or export",
+        "action must be state, hub, open, plan, back, forward, reload, pick, comment, send, delete, point, answers, answer, sendAnswers, showAnswers, check or export",
       );
   }
 }

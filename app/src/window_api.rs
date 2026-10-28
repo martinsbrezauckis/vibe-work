@@ -12,11 +12,10 @@
 //!   main webview (Tauri `eval_with_callback`) and waits at most 30 s for the engine's answer; `e2e_windows` lists
 //!   the webview windows' labels.
 
-use tauri::{AppHandle, LogicalSize, Manager, Size};
+#[cfg(feature = "e2e-script")]
+use tauri::Manager;
+use tauri::{AppHandle, LogicalSize, Size};
 use vw_debug_api::{AppWindow, BoxFuture, WindowRequest, WindowState, WindowView};
-
-/// The main window's label.
-const MAIN: &str = "main";
 
 /// The [`AppWindow`] of the running app.
 pub struct TauriWindow {
@@ -31,9 +30,7 @@ impl TauriWindow {
     }
 
     fn window(&self) -> Result<tauri::Window, String> {
-        self.app
-            .get_window(MAIN)
-            .ok_or_else(|| "the main window is not open".to_owned())
+        crate::main_window(&self.app).ok_or_else(|| "the main window is not open".to_owned())
     }
 
     fn min_size(&self) -> (f64, f64) {
@@ -43,7 +40,7 @@ impl TauriWindow {
             .app
             .windows
             .iter()
-            .find(|w| w.label == MAIN)
+            .find(|w| w.label == crate::MAIN_WINDOW)
             .map_or((0.0, 0.0), |w| {
                 (w.min_width.unwrap_or(0.0), w.min_height.unwrap_or(0.0))
             });
@@ -145,7 +142,7 @@ impl AppWindow for TauriWindow {
         Box::pin(async move {
             let webview = self
                 .app
-                .get_webview(MAIN)
+                .get_webview(crate::MAIN_WINDOW)
                 .ok_or_else(|| "the main webview is not open".to_owned())?;
             let (sender, answer) = tokio::sync::oneshot::channel::<String>();
             // The engine calls back once (WebKitGTK `FnOnce`); the API takes an `Fn`, so the sender sits in a slot.

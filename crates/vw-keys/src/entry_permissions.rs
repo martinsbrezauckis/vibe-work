@@ -8,6 +8,13 @@ use vw_vault::{login, project_secret};
 use crate::error::KeyError;
 use crate::service::{KeyService, blocking, now_ms};
 
+/// Settings writes the person's current choice; a native answer must match the record it asked about.
+#[derive(Clone, Copy)]
+enum WriteCondition {
+    UserChoice,
+    Unchanged(Option<(EntryPermission, i64)>),
+}
+
 impl KeyService {
     /// All valid project records for one entry. Used only where an MCP forward request has no project identity:
     /// any Never blocks forwarding, without treating a project's Allowed as a global grant.
@@ -59,10 +66,13 @@ impl KeyService {
         project: &str,
         entry_id: &str,
     ) -> Result<(EntryPermission, i64), KeyError> {
-        Ok(self
-            .own_entry_permission(project, entry_id)
-            .await?
-            .unwrap_or(self.default_entry_permission(entry_id).await?))
+        let default = self.default_entry_permission(entry_id).await?;
+        let project = self.own_entry_permission(project, entry_id).await?;
+        Ok(if default.0 == EntryPermission::Never {
+            default
+        } else {
+            project.unwrap_or(default)
+        })
     }
 
     /// Reads an explicit project record, if present, without applying the default.
@@ -101,6 +111,37 @@ impl KeyService {
         entry_id: String,
         permission: EntryPermission,
     ) -> Result<(), KeyError> {
+        self.write_entry_permission(project, entry_id, permission, WriteCondition::UserChoice)
+            .await
+            .map(|_| ())
+    }
+
+    /// Stores a native Always answer only if the project choice has not changed since the request.
+    ///
+    /// # Errors
+    /// Concurrent edits, malformed records, missing entries and vault write failures refuse the answer.
+    pub async fn allow_entry_if_unchanged(
+        &self,
+        project: String,
+        entry_id: String,
+        expected: Option<(EntryPermission, i64)>,
+    ) -> Result<(EntryPermission, i64), KeyError> {
+        self.write_entry_permission(
+            project,
+            entry_id,
+            EntryPermission::Allowed,
+            WriteCondition::Unchanged(expected),
+        )
+        .await
+    }
+
+    async fn write_entry_permission(
+        &self,
+        project: String,
+        entry_id: String,
+        permission: EntryPermission,
+        expected: WriteCondition,
+    ) -> Result<(EntryPermission, i64), KeyError> {
         if project.trim().is_empty() || entry_id.is_empty() {
             return Err(KeyError::InvalidSecret("project and entry are required"));
         }
@@ -113,7 +154,9 @@ impl KeyService {
             }
             let id = entry_permission::id_for(&project, &entry_id);
             let key = id.clone();
-            let item = vault.update_item(&id, move |current| {
+            let written = std::cell::Cell::new(None);
+            vault.update_item(&id, |current| {
+                written.set(None);
                 // A malformed occupied slot is never overwritten automatically.
                 if current.is_some()
                     && current
@@ -124,6 +167,11 @@ impl KeyService {
                     return None;
                 }
                 let previous = current.as_ref().and_then(entry_permission::from_item);
+                if let WriteCondition::Unchanged(wanted) = expected
+                    && wanted != previous.as_ref().map(|p| (p.permission, p.changed_ms))
+                {
+                    return None;
+                }
                 let changed_ms = now_ms().max(
                     previous
                         .as_ref()
@@ -137,17 +185,13 @@ impl KeyService {
                     changed_ms,
                     created_ms: previous.map_or(changed_ms, |p| p.created_ms),
                 };
-                entry_permission::resource(&policy).to_item().ok()
+                let item = entry_permission::resource(&policy).to_item().ok()?;
+                written.set(Some((permission, changed_ms)));
+                Some(item)
             })?;
-            if item
-                .as_ref()
-                .and_then(entry_permission::from_item)
-                .is_some_and(|p| p.permission == permission)
-            {
-                Ok(())
-            } else {
-                Err(KeyError::InvalidSecret("entry permission was not stored"))
-            }
+            written.get().ok_or(KeyError::InvalidSecret(
+                "entry permission changed or was not stored",
+            ))
         })
         .await?
     }

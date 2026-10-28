@@ -4,6 +4,7 @@
  * again), "Check now" (Mistral connectors) and "Stop waiting".
  * Depends on: hooks. Called by: ConnectorsPage.
  */
+import { Button } from "../../components/Controls";
 import type { ReactElement } from "react";
 
 import { useKeyReadiness } from "../shell/KeyNotice";
@@ -35,34 +36,34 @@ export function SignInBanner(): ReactElement | null {
           </span>
           <span className="csignin-acts">
             {signIn.url !== null && signIn.phase === "waiting" ? (
-              <button
+              <Button
                 data-testid="connectors.sign-in-banner-open-page"
                 type="button"
-                className="tb-btn"
+
                 onClick={() => actions?.openPage()}
               >
                 Open the sign-in page
-              </button>
+              </Button>
             ) : null}
             {signIn.kind === "connector" && signIn.phase === "waiting" ? (
-              <button
+              <Button
                 data-testid="connectors.sign-in-banner-check-now"
                 type="button"
-                className="tb-btn"
+
                 disabled={keyBlocked}
                 onClick={() => void actions?.checkNow()}
               >
                 Check now
-              </button>
+              </Button>
             ) : null}
-            <button
+            <Button
               data-testid="connectors.sign-in-banner-stop-waiting"
               type="button"
-              className="tb-btn"
+
               onClick={() => void actions?.stopWaiting()}
             >
               {signIn.phase === "done" || signIn.phase === "failed" ? "Close" : "Stop waiting"}
-            </button>
+            </Button>
           </span>
         </div>
       )}
@@ -71,14 +72,14 @@ export function SignInBanner(): ReactElement | null {
           <b>{p.name}</b>
           <span> needs you to sign in (a session asked).</span>
           <span className="csignin-acts">
-            <button
+            <Button
               data-testid="connectors.sign-in-banner-open-prompt"
               type="button"
-              className="tb-btn primary"
+              variant="primary"
               onClick={() => actions?.openPrompt(p.id)}
             >
               Sign in
-            </button>
+            </Button>
           </span>
         </div>
       ))}

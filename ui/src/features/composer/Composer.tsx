@@ -1,23 +1,26 @@
 /**
  * The composer of one session (voice parts include the narration bar,
  * dictation strip, mic button, caret reporting): queued turns and the session's Loops above it, the run bar
- * while a turn runs, inserted context and image chips, the text box, the tool row and the hint line. The
+ * while a turn runs, inserted context and image chips, the text box, the tool row and the hint line (the shortcut to
+ * a waiting prompt while a card waits). The
  * top rule's colour shows the access mode. Loaded lazily (`LazyComposer.tsx`) so the main bundle does
  * not grow.
  * Keys (`model/keys.ts`): Enter sends (steers while a turn runs), Shift+Enter adds a line, Tab queues
  * while a turn runs, the `/` menu takes arrows / Enter / Tab / Escape. Picker, paste and drop route files
- * through the picture/document matrix.
+ * through the picture/document matrix. A very long text paste becomes a chip (`PasteChips.tsx`); Backspace
+ * right after it removes it, and the full text is sent.
  * Depends on: AppContext, the composer store and its actions, the composer model, the parts and menus.
  * Called by: LazyComposer (the content area).
  * The same composer serves the new-chat view (`sessionId` = `NEW_CHAT`, no session yet): its picks are held
- * until the first send, there is no `/` menu, run bar or queue until the chat has started, documents explain that
- * a chat must start first, and
+ * until the first send, there is no `/` menu, run bar or queue until the chat has started, documents wait in the draft, and
  * Send starts the session (`state/composer.ts`). Any composer takes the keyboard when asked (`state/composerFocus`).
  * The right corner: the mic, then Send only while there is something to send; Voice chat while the box is empty, and always while the session is in voice chat (its strip sits above the text box).
  * Invariants: render and event wiring only: every decision is in the model or the store.
  * A missing or failed Mistral key disables Send and submission shortcuts, while drafts stay editable.
  */
-import { term } from "../../vocabulary";
+import { TEXT, term, wording } from "../../vocabulary";
+import { formatKeys } from "../../state/shortcuts";
+import { GO_TO_PROMPT_KEYS, goToWaitingPrompt, promptsOf, waitingPrompts } from "../ask/waiting";
 import { type ReactElement, useEffect, useMemo, useRef } from "react";
 
 import { Button } from "../../components/Controls";
@@ -30,9 +33,13 @@ import { useKeyReadiness } from "../shell/KeyNotice";
 import { useHeldBy } from "../sessions/SessionHeldNote";
 import { useCoreState, useShellState } from "../shell/hooks";
 import { ChipsRow, QueueList, RetryRow, RunBar } from "./ComposerParts";
+import { openCodeRef } from "../files/openCodeRef";
 import { DocPreview } from "./DocPreview";
 import { DocumentChips } from "./DocumentChips";
+import { PasteChips, usePasteFold } from "./PasteChips";
 import { SlashMenu } from "./ComposerMenus";
+import { FileMentionMenu } from "./FileMentionMenu";
+import { useFileMention } from "./useFileMention";
 import { LoopsStrip } from "./LoopsStrip";
 import { useAutoHeight } from "./autoHeight";
 import { ComposerTools } from "./ComposerTools";
@@ -40,7 +47,8 @@ import { NONE, useComposerState } from "./hooks";
 import { configuredModeId, currentModeId, modeOf, offeredModes } from "./model/access";
 import { keyAction } from "./model/keys";
 import { currentPick, modelChoices, modelLabel, newChatPick } from "./model/models";
-import { lastTurnProblem, queuedTurns, runningTurnId } from "./model/session";
+import { pendingProtectedChanges } from "../transcript/model/protectedChange";
+import { lastTurnProblem, queuedTurns, runningTurnId, waitingForInput } from "./model/session";
 import { type MenuItem, menuItems } from "./model/slash";
 import { RewindDialog } from "./RewindDialog";
 import { DictationStrip } from "../voice/DictationStrip";
@@ -56,11 +64,14 @@ const MAX_ROWS = 8;
 /** The composer for `sessionId`. */
 export default function Composer({ sessionId }: { sessionId: string }): ReactElement | null {
   const app = useApp();
-  const { composer, core, documents } = app;
+  const { composer, core, documents, market } = app;
   const key = useKeyReadiness();
   const readOnly = useHeldBy(sessionId) !== null;
   const heldKind = useCoreState((s) => s.heldKind[sessionId]);
   const entry = useCoreState((s) => s.sessions[sessionId]);
+  const promptWaiting = useCoreState((s) => waitingPrompts(s).length > 0);
+  const sessionPrompts = useCoreState((s) => promptsOf(s, sessionId).length);
+  const sessionWaiting = sessionPrompts > 0;
   const draft = useComposerState((s) => s.drafts[sessionId] ?? "");
   const context = useComposerState((s) => s.context[sessionId] ?? NONE);
   const images = useComposerState((s) => s.images[sessionId] ?? NONE);
@@ -91,12 +102,18 @@ export default function Composer({ sessionId }: { sessionId: string }): ReactEle
   const held = useComposerState((s) => s.newChat);
   const box = useRef<HTMLTextAreaElement>(null);
   const reportCaret = useDictationCaret(sessionId, box);
+  const cwd = entry?.session["cwd"];
+  const project = isNew ? newFolder : typeof cwd === "string" ? cwd : null;
+  const mention = useFileMention(sessionId, draft, project, box);
   useAutoHeight(box, draft, MAX_ROWS);
+  const paste = usePasteFold(sessionId, box);
   const voiceOn = useVoiceChat((s) => s.on && s.owner === sessionId);
 
   const state = entry?.state ?? null;
   const session = entry?.session;
-  const running = runningTurnId(state, session) !== null;
+  const activeTurnId = runningTurnId(state, session);
+  const running = activeTurnId !== null;
+  const inputWaiting = waitingForInput(state, activeTurnId);
   const queued = useMemo(() => queuedTurns(state), [state]);
   // The `/` menu lists the session's commands and skills: the new-chat view has none until its chat starts.
   const items = useMemo(
@@ -104,7 +121,10 @@ export default function Composer({ sessionId }: { sessionId: string }): ReactEle
     [isNew, draft, skills],
   );
   const runtime = entry?.runtime;
-  const models = useMemo(() => modelChoices(runtime ?? config ?? undefined), [runtime, config]);
+  const models = useMemo(
+    () => modelChoices(isNew ? (config ?? undefined) : runtime),
+    [isNew, runtime, config],
+  );
   // New chat: the held picks, else what the configuration says a new session gets.
   const pick = isNew
     ? newChatPick(config ?? undefined, held, defaultReasoning)
@@ -126,11 +146,14 @@ export default function Composer({ sessionId }: { sessionId: string }): ReactEle
   useEffect(
     () =>
       registerComposerFocus(sessionId, () => {
-        box.current?.focus();
+        const input = box.current;
+        if (input === null) return;
+        input.focus();
+        input.setSelectionRange(input.value.length, input.value.length);
       }),
     [sessionId],
   );
-  // Every composer resolves all three chips at entry. Opening/closing a selector only changes its visibility.
+  // Every composer resolves all three chips at entry; model menus also refresh their available choices.
   useEffect(() => {
     // The first-send action owns admission of held picks. Its newly selected composer must not
     // apply the global preference in parallel; unrelated fresh chats initialize when it finishes.
@@ -140,13 +163,23 @@ export default function Composer({ sessionId }: { sessionId: string }): ReactEle
 
   if (actions === null || core === null) return null;
   const hasContent = draft.trim() !== "" || context.length > 0 || images.length > 0;
-  const status = compacting
-    ? "Compacting context…"
-    : queued.length > 0
-      ? `${String(queued.length)} queued.`
-      : "";
+  const status =
+    pendingProtectedChanges(state?.["history"]).length > 0
+      ? "Waiting for you."
+      : inputWaiting
+        ? "Vibe is waiting for input."
+        : compacting
+          ? "Compacting context…"
+          : queued.length > 0
+            ? `${String(queued.length)} queued.`
+            : "";
   const problem = running ? null : lastTurnProblem(state);
   const pickSlash = (item: MenuItem) => {
+    if (item.kind === "manage") {
+      composer.setDraft(sessionId, "");
+      void market?.actions.showTab("skills");
+      return;
+    }
     if (item.kind === "skill") {
       composer.setDraft(sessionId, `/${item.skill.name} `);
       return;
@@ -202,7 +235,18 @@ export default function Composer({ sessionId }: { sessionId: string }): ReactEle
           void runDrop(app, sessionId, items, "ui");
         }}
       >
-        {items === null ? null : (
+        {mention.mention !== null ? (
+          <FileMentionMenu
+            rows={mention.rows}
+            index={mention.index}
+            query={mention.mention.query}
+            project={project}
+            loading={mention.loading}
+            error={mention.error}
+            onPick={mention.pick}
+            onHover={mention.hover}
+          />
+        ) : items === null ? null : (
           <SlashMenu
             items={items}
             index={Math.min(slashIndex, items.length - 1)}
@@ -211,11 +255,27 @@ export default function Composer({ sessionId }: { sessionId: string }): ReactEle
             onHover={composer.setSlashIndex}
           />
         )}
-        {running || compacting ? (
-          <RunBar status={status} onStop={() => void actions.stop(sessionId)} />
+        {running || compacting || sessionWaiting ? (
+          <RunBar
+            status={
+              sessionWaiting
+                ? wording(sessionPrompts > 1 ? TEXT.askWaitingMany : TEXT.askWaitingHint, {
+                    count: String(sessionPrompts),
+                    shortcut: formatKeys(GO_TO_PROMPT_KEYS),
+                  })
+                : status
+            }
+            waiting={sessionWaiting}
+            onShowPrompt={() => {
+              goToWaitingPrompt(app, sessionId);
+            }}
+            inputWaiting={inputWaiting}
+            onStop={() => void actions.stop(sessionId)}
+          />
         ) : null}
         <DocumentChips sessionId={sessionId} />
         <ChipsRow
+          onOpenRef={(ref) => void openCodeRef(app, sessionId, ref)}
           context={context}
           images={images}
           onRemoveContext={(id) => {
@@ -228,6 +288,7 @@ export default function Composer({ sessionId }: { sessionId: string }): ReactEle
             documents?.actions.preview({ sessionId, contextId });
           }}
         />
+        <PasteChips sessionId={sessionId} onSwap={paste.swap} />
         <DictationStrip sessionId={sessionId} />
         <VoiceChatStrip sessionId={sessionId} />
         <label className="sr" htmlFor={`composer-input-${sessionId}`}>
@@ -236,7 +297,10 @@ export default function Composer({ sessionId }: { sessionId: string }): ReactEle
         <textarea
           data-testid="composer.composer-set-draft"
           ref={box}
-          onSelect={reportCaret}
+          onSelect={() => {
+            reportCaret();
+            mention.reportCaret();
+          }}
           id={`composer-input-${sessionId}`}
           title="Message"
           aria-label="Message"
@@ -256,15 +320,33 @@ export default function Composer({ sessionId }: { sessionId: string }): ReactEle
           onChange={(e) => {
             composer.setDraft(sessionId, e.target.value);
             reportCaret();
+            mention.reportCaret();
           }}
           onPaste={(e) => {
             const files = [...e.clipboardData.files];
-            if (files.length === 0) return;
+            if (files.length === 0) {
+              if (!readOnly) paste.onPaste(e);
+              return;
+            }
             e.preventDefault();
             void runDrop(app, sessionId, fileItems(files), "ui");
           }}
           onKeyDown={(e) => {
             if (readOnly) return;
+            if (paste.onKey(e)) return;
+            if (
+              mention.key({
+                key: e.key,
+                shiftKey: e.shiftKey,
+                ctrlKey: e.ctrlKey,
+                altKey: e.altKey,
+                metaKey: e.metaKey,
+                isComposing: e.nativeEvent.isComposing,
+              })
+            ) {
+              e.preventDefault();
+              return;
+            }
             const action = keyAction(
               {
                 key: e.key,
@@ -300,6 +382,11 @@ export default function Composer({ sessionId }: { sessionId: string }): ReactEle
           }}
         />
         <ComposerTools
+          {...(config === null
+            ? {}
+            : {
+                defaultAccessLabel: modeOf(configuredModeId(config))?.label ?? TEXT.accessUnknown,
+              })}
           mode={mode}
           modes={offeredModes(runtime)}
           modelLabel={modelLabel(models, pick.alias)}
@@ -312,7 +399,7 @@ export default function Composer({ sessionId }: { sessionId: string }): ReactEle
           sending={sending}
           running={running}
           onMenu={(kind) => {
-            composer.setMenu(kind === null ? null : { sessionId, kind });
+            void actions.openMenu(sessionId, kind);
           }}
           onAccess={(id, trustedClick) => void actions.setAccess(sessionId, id, trustedClick)}
           onModel={(alias) => void actions.pickModel(sessionId, alias)}
@@ -334,10 +421,10 @@ export default function Composer({ sessionId }: { sessionId: string }): ReactEle
       {mark === "back" && (
         <p className="hint composer-mark" role="status">
           Put back in the message box: Sent as text.{" "}
-          <button
+          <Button
             data-testid="composer.composer-adopt"
             type="button"
-            className="mini"
+            appearance="compact"
             title="Use the restored message as my command"
             aria-label="Use the restored message as my command"
             onClick={() => {
@@ -345,13 +432,16 @@ export default function Composer({ sessionId }: { sessionId: string }): ReactEle
             }}
           >
             Use as my command
-          </button>
+          </Button>
         </p>
       )}
       {note === null || key !== null ? (
         <p className="hint">
           {key !== null ? (
             "You can keep typing · Shift+Enter for a new line"
+          ) : promptWaiting ? (
+            // Learnable by sight while a card waits.
+            wording(TEXT.askWaitingHint, { shortcut: formatKeys(GO_TO_PROMPT_KEYS) })
           ) : isNew ? (
             "Enter to send: the chat starts in the folder above · Shift+Enter for a new line"
           ) : (
@@ -380,7 +470,15 @@ export default function Composer({ sessionId }: { sessionId: string }): ReactEle
           {reloadFailed ? (
             <span className="composer-plugin-reload">
               <Button
-                small
+                shape="outlined"
+                data-testid="composer.retry-plugin-refresh"
+                disabled={sending || compacting || running || sessionWaiting}
+                onClick={() => void actions.retryPluginRefresh(sessionId)}
+              >
+                Retry plugin refresh
+              </Button>
+              <Button
+                shape="outlined"
                 data-testid="composer.start-with-new-plugins"
                 onClick={() => void app.sessions?.startWithPlugins(sessionId)}
               >

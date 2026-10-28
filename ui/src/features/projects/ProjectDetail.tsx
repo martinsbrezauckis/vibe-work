@@ -1,6 +1,6 @@
 /**
  * The Projects overview's detail pane (the selected project's handbook): the project's handbook without opening a session: name, summary, actions (open the handbook,
- * new session, show the folder, start a handbook or migrate), the active plans with every step, the sessions, the
+ * new session, show the folder, start a handbook), the active plans with every step, the sessions, the
  * handbook's findings and its pages by kind. Opening a page goes to a session's Project tab.
  * Depends on: model.ts, useProjectActions, ProjectCardView (chips), pages/HubRows, Icon, protocol types.
  * Called by: ProjectsPage.
@@ -9,6 +9,7 @@
  * Invariants: renders only; page text is plain text; handbook requests send user messages;
  * the agent writes the files, the app never does.
  */
+import { Button } from "../../components/Controls";
 import { type ReactElement, useEffect, useRef } from "react";
 
 import { Icon } from "../../components/Icon";
@@ -23,16 +24,17 @@ import { useApp } from "../shell/AppContext";
 function SettingsButton({ projectId }: { projectId: string }) {
   const { projects } = useApp();
   return (
-    <button
+    <Button
       data-testid="projects.project-detail-open-settings"
       type="button"
-      className="pj-btn small"
+      appearance="project"
+      shape="outlined"
       onClick={() => {
         projects?.openSettings(projectId);
       }}
     >
       Project settings
-    </button>
+    </Button>
   );
 }
 
@@ -40,12 +42,15 @@ function SettingsButton({ projectId }: { projectId: string }) {
 export interface DetailActions {
   close: () => void;
   openHandbook: (path: string | null) => void;
+  /** Opens Files without starting a session. */
+  openFiles?: () => void;
+  /** Opens a terminal in the project's folder without starting a session. */
+  openTerminal?: () => void;
   newSession: () => void;
   reveal: () => void;
   start: (trustedClick: boolean) => void;
   /** Sends the first plan request in the project's chat. */
   askPlan: (trustedClick: boolean) => void;
-  migrate: () => void;
   openSession: (id: string) => void;
   /** "Choose main folder…". */
   chooseFolder: () => void;
@@ -120,22 +125,25 @@ function NoFolderDetail({
         <p>This project has no main folder, so there is no handbook to show.</p>
         <div className="pj-acts">
           <SettingsButton projectId={projectId} />
-          <button
+          <Button
             data-testid="projects.project-detail-pj-btn"
             type="button"
-            className="pj-btn small primary"
+            appearance="project"
+            shape="outlined"
+            variant="primary"
             onClick={actions.chooseFolder}
           >
-            Choose main folder...
-          </button>
-          <button
+            Choose main folder…
+          </Button>
+          <Button
             data-testid="projects.project-detail-pj-btn-2"
             type="button"
-            className="pj-btn small"
+            appearance="project"
+            shape="outlined"
             onClick={actions.newSession}
           >
             New session
-          </button>
+          </Button>
         </div>
       </div>
       {sessions.length > 0 && (
@@ -245,11 +253,33 @@ function FolderDetail({
         </p>
         <div className="pj-acts">
           <SettingsButton projectId={projectId} />
+          {actions.openFiles && (
+            <Button
+              data-testid="projects.open-files"
+              appearance="project"
+              shape="outlined"
+              onClick={actions.openFiles}
+            >
+              Open Files
+            </Button>
+          )}
+          {actions.openTerminal && (
+            <Button
+              data-testid="projects.open-terminal"
+              appearance="project"
+              shape="outlined"
+              onClick={actions.openTerminal}
+            >
+              Open terminal
+            </Button>
+          )}
           {card.state === "none" ? (
-            <button
+            <Button
               data-testid="projects.project-detail-start"
               type="button"
-              className="pj-btn small primary"
+              appearance="project"
+              shape="outlined"
+              variant="primary"
               onClick={(event) => {
                 actions.start(event.nativeEvent.isTrusted);
               }}
@@ -257,61 +287,47 @@ function FolderDetail({
               title={requestBusy ? HANDBOOK_BUSY_TOOLTIP : undefined}
             >
               Ask Vibe to create the handbook
-            </button>
+            </Button>
           ) : (
-            <button
+            <Button
               data-testid="projects.project-detail-open-handbook"
               type="button"
-              className="pj-btn small primary"
+              appearance="project"
+              shape="outlined"
+              variant="primary"
               title="Opens Work in this folder with the Project tab on the handbook"
               onClick={() => {
                 actions.openHandbook(null);
               }}
             >
               {sessions.length > 0 ? "Open handbook" : "Open in a new session"}
-            </button>
+            </Button>
           )}
-          {card.state === "preFormat" && (
-            <button
-              data-testid="projects.project-detail-pj-btn-3"
-              type="button"
-              className="pj-btn small"
-              onClick={actions.migrate}
-            >
-              Migrate to Handbook 1.0
-            </button>
-          )}
-          <button
+          <Button
             data-testid="projects.project-detail-pj-btn-4"
             type="button"
-            className="pj-btn small"
+            appearance="project"
+            shape="outlined"
             onClick={actions.newSession}
           >
             New session
-          </button>
-          <button
+          </Button>
+          <Button
             data-testid="projects.project-detail-pj-btn-5"
             type="button"
-            className="pj-btn small"
+            appearance="project"
+            shape="outlined"
             onClick={actions.reveal}
           >
             <Icon name="folder" size={14} />
             Show folder
-          </button>
+          </Button>
         </div>
       </div>
       {card.state === "none" && (
         <div className="pj-dsec">
           <div className="pj-nohb">
             This project has no handbook yet to keep its plans, decisions and reports together.
-          </div>
-        </div>
-      )}
-      {card.state === "preFormat" && (
-        <div className="pj-dsec">
-          <div className="pj-nohb">
-            This handbook is in the earlier format ({card.folder}/). Migrate asks Vibe to move it to
-            docs/handbook/; Vibe Work itself never changes the files.
           </div>
         </div>
       )}

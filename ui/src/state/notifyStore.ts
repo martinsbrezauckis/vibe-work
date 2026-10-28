@@ -12,11 +12,21 @@
  *   means real. It only changes whether a notification is shown, never what it says.
  * - The log is bounded (`LOG_MAX`).
  */
+import { statusType } from "./sessionSummary";
+import { pendingHistoryAsks } from "../features/transcript/model/protectedChange";
 import type { CoreClient, OsNotification } from "../protocol/client/types";
 import { toCallError } from "../protocol/client/types";
 import { type CoreState, subagentCardsOf } from "./coreModel";
 import { type Store, createStore } from "./createStore";
 import type { ToastSpec } from "./notifications";
+import {
+  callbackEntry,
+  stoppedWaitingText,
+  toolTransport,
+  waitingCardOpen,
+  waitingFate,
+} from "./askBell";
+import type { AskRecord } from "../protocol/core";
 import {
   DEFAULT_NOTIFY_LEVEL,
   fullTextFor,
@@ -28,6 +38,8 @@ import {
 } from "./osNotify";
 
 const LEVEL_KEY = "vw.notifyLevel";
+/** How long a closed ask's waiting entry waits for the core's record before it says the session stopped waiting (ms). */
+const WAIT_MS = 5000;
 const LOG_MAX = 50;
 
 /** Notification settings and what happened. */
@@ -48,6 +60,13 @@ function loadLevel(): NotifyLevel {
   } catch {
     return DEFAULT_NOTIFY_LEVEL;
   }
+}
+
+/** The core's record for a waiting entry's id: a native ask's own id, a card's `callback:{id}` or `proposal:{id}`. */
+function recordOf(core: CoreState, id: string): AskRecord | undefined {
+  return (
+    core.askRecords[id] ?? core.askRecords[`callback:${id}`] ?? core.askRecords[`proposal:${id}`]
+  );
 }
 
 /** The real focus signal: the document is visible and has focus. */
@@ -81,7 +100,8 @@ export function createNotifier(options: { persist?: boolean } = {}) {
     },
     /**
      * Watches `core` and notifies through its client. `openSession` returns the session open in the
-     * window. `record` saves full text for the in-app notification panel, when available.
+     * window. `record` saves full text for the in-app notification panel, when available; `forget` removes a
+     * waiting entry after your own answer, `update` rewrites it when the ask ran out.
      * Returns the function that stops watching.
      */
     watch(
@@ -89,26 +109,89 @@ export function createNotifier(options: { persist?: boolean } = {}) {
       openSession: () => string | null,
       record?: (spec: ToastSpec) => number,
       forget?: (id: number) => void,
+      update?: (id: number, spec: ToastSpec) => void,
     ): () => void {
       let last = core.store.get();
       const seenCallbacks = new Set<string>();
       const retainedCallbacks = new Map<
         string,
-        { id: number; sessionId: string; callbackId: string }
+        {
+          id: number;
+          sessionId: string;
+          callbackId: string;
+          closedAt?: number;
+          stopped?: true;
+          ended?: true;
+        }
       >();
       return core.store.subscribe(() => {
         const next = core.store.get();
         const found = transitions(last, next);
         for (const [key, retained] of retainedCallbacks) {
+          // Metadata may arrive after callbacksChanged. A transport callback never asks the person.
+          if (toolTransport(next, retained.sessionId, retained.callbackId)) {
+            forget?.(retained.id);
+            retainedCallbacks.delete(key);
+            continue;
+          }
+          const was = last.sessions[retained.sessionId];
+          const now = next.sessions[retained.sessionId];
           if (
+            statusType(was?.session ?? {}) === "running" &&
+            ["idle", "failed"].includes(statusType(now?.session ?? {}))
+          )
+            retained.ended = true;
+          const ended =
+            retained.ended === true &&
+            callbackEntry(next, retained.sessionId, retained.callbackId)?.["vwToolAsk"] === true;
+          if (
+            ended ||
+            recordOf(next, retained.callbackId) !== undefined ||
             next.answeredBy[retained.callbackId] !== undefined ||
-            (!next.sessions[retained.sessionId]?.openCallbackIds.includes(retained.callbackId) &&
+            (next.asks[retained.callbackId] === undefined &&
+              !next.sessions[retained.sessionId]?.openCallbackIds.includes(retained.callbackId) &&
+              !pendingHistoryAsks(next.sessions[retained.sessionId]?.state?.["history"]).includes(
+                retained.callbackId,
+              ) &&
               !subagentCardsOf(
                 next.subagentCards,
                 retained.sessionId,
                 next.sessions[retained.sessionId]?.state?.["childSessions"],
               ).some((card) => card.callbackId === retained.callbackId))
           ) {
+            // A recorded answer removes the waiting entry.
+            const fate = waitingFate(
+              recordOf(next, retained.callbackId),
+              next.answeredBy[retained.callbackId],
+            );
+            // The record normally arrives with the close. One that is late cannot keep a stale "needs your answer"
+            // entry, and the entry is not deleted either (it may have run out): after WAIT_MS it says the session
+            // stopped waiting, stays until dismissed, and a record that comes later still decides.
+            retained.closedAt ??= Date.now();
+            if (fate.kind === "wait") {
+              // A waiting receipt can end the transport callback while its card still waits for the person.
+              if (
+                !ended &&
+                (next.asks[`callback:${retained.callbackId}`] !== undefined ||
+                  waitingCardOpen(next, retained.sessionId, retained.callbackId))
+              ) {
+                delete retained.closedAt;
+                continue;
+              }
+              if (
+                retained.stopped === undefined &&
+                (ended || Date.now() - retained.closedAt >= WAIT_MS)
+              ) {
+                retained.stopped = true;
+                update?.(retained.id, {
+                  kind: "info",
+                  bellKind: "approval",
+                  text: stoppedWaitingText(next, retained.sessionId, retained.callbackId),
+                  sessionId: retained.sessionId,
+                });
+              }
+              continue;
+            }
             forget?.(retained.id);
             retainedCallbacks.delete(key);
           }

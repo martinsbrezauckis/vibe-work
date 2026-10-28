@@ -9,6 +9,7 @@
  * only (data, never a command).
  */
 import { insertChip } from "../pages/point";
+import { panelOwner } from "../../state/shellState";
 import type { App } from "../shell/AppContext";
 import { createBrowser } from "./browser";
 import { createCapture } from "./capture";
@@ -16,11 +17,12 @@ import { registerBrowserRoute } from "./browserRoutes";
 import { PreviewTab } from "./PreviewTab";
 import { createPreviews } from "./store";
 import { reportPreviewVisibility } from "./visibility";
+import { registerReloadKeys } from "./reloadKeys";
 
 /** Registers the Browser tab body and route on `app`; returns the function that removes them. */
 export function registerPreviewTab(app: App): () => void {
   const core = app.core;
-  if (core === null) return () => undefined;
+  if (core === null) return registerReloadKeys(app, null, null);
   const previews = createPreviews(core);
   let pictures = 0;
   const browser = createBrowser(
@@ -41,10 +43,11 @@ export function registerPreviewTab(app: App): () => void {
     },
     (sessionId) => {
       // The user sees it: the agent started using this session's browser.
-      if (app.shell.store.get().selected === sessionId) app.shell.actions.openTab("browser");
+      if (panelOwner(app.shell.store.get()) === sessionId) app.shell.actions.openTab("browser");
     },
   );
   const capture = createCapture(core);
+  const removeReloadKeys = registerReloadKeys(app, previews, browser);
   const stopVisibility = reportPreviewVisibility(core, app, browser);
   const removeBody = app.panelTabs.register("browser", () => (
     <PreviewTab previews={previews} browser={browser} capture={capture} />
@@ -52,7 +55,7 @@ export function registerPreviewTab(app: App): () => void {
   const stopPreviewRequests = core.listen((event) => {
     if (
       event.type === "previewShowRequested" &&
-      app.shell.store.get().selected === event.sessionId
+      panelOwner(app.shell.store.get()) === event.sessionId
     ) {
       // can leave a web tab selected. An explicit preview width asks to show the
       // pinned App preview, so select it before the tool waits for a live view.
@@ -61,7 +64,24 @@ export function registerPreviewTab(app: App): () => void {
     }
   });
   const removeRoute = registerBrowserRoute(app, browser, previews, capture);
+  // The New chat screen's pages, counted for its status line: the App preview with an address and web tabs.
+  const count = () => {
+    const owner = app.shell.store.get().newChatOwner;
+    if (owner === null) return;
+    const webTabs = (browser.store.get().tabs[owner] ?? []).filter((t) => t.kind === "web");
+    const web = webTabs.length;
+    app.newChat?.reportAddresses(webTabs.flatMap((t) => (t.preview?.url ? [t.preview.url] : [])));
+    const appPreview = previews.store.get().lists[owner]?.preview?.url ? 1 : 0;
+    app.newChat?.report("pages", web + appPreview);
+  };
+  const stopCount = [
+    browser.store.subscribe(count),
+    previews.store.subscribe(count),
+    app.shell.store.subscribe(count),
+  ];
   return () => {
+    removeReloadKeys();
+    for (const stop of stopCount) stop();
     stopPreviewRequests();
     stopVisibility();
     removeRoute();

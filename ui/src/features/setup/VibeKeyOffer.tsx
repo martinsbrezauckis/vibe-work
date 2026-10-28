@@ -5,6 +5,7 @@
  * is only removed when the user presses the button, never silently.
  * Depends on: protocol/core types. Called by: CreateStep, KeyStep.
  */
+import { Button } from "../../components/Controls";
 import type { VibeKeySource, VibeKeyView } from "../../protocol/core";
 
 /** Plain name of where Vibe keeps it. */
@@ -35,17 +36,17 @@ export function UseVibeKey(props: {
   return (
     <div data-item-id={props.found.source} className="key-offer">
       <VibeKeyNote found={props.found} />
-      <button
+      <Button
         data-testid="setup.vibe-key-offer-on-use"
         type="button"
-        className="btn-primary"
+        appearance="dialog"
         disabled={props.busy}
         onClick={() => {
           props.onUse(props.found.source);
         }}
       >
         Use Vibe&apos;s key
-      </button>
+      </Button>
     </div>
   );
 }

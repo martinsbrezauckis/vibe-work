@@ -48,6 +48,7 @@ pub struct PageEngine {
     pub pinned: Notify,
     pub release: Semaphore,
     pub on_pin: Mutex<Option<Box<dyn FnOnce() + Send>>>,
+    pub on_click: Mutex<Option<Box<dyn FnOnce() + Send>>>,
     pub native_clicks: AtomicU64,
     pub after_verify: Mutex<Option<String>>,
 }
@@ -83,6 +84,7 @@ impl PageEngine {
             pinned: Notify::new(),
             release: Semaphore::new(0),
             on_pin: Mutex::new(None),
+            on_click: Mutex::new(None),
             native_clicks: AtomicU64::new(0),
             after_verify: Mutex::new(None),
         })
@@ -115,6 +117,10 @@ impl PageEngine {
         self.rpc(json!({"op":"evaluate", "script":script}))
             .await
             .unwrap()
+    }
+
+    pub fn hooks(&self) -> Arc<dyn PreviewHooks> {
+        self.hooks.get().unwrap().clone()
     }
 
     pub async fn snapshot(&self) -> Value {
@@ -200,6 +206,15 @@ impl PreviewEngine for PageEngine {
             });
             let pin = request.as_ref().is_some_and(|req| req["op"] == "pin");
             let value = self.rpc(json!({"op":"evaluate", "script":script})).await?;
+            if request.as_ref().is_some_and(|r| r["action"] == "click")
+                && value
+                    .as_str()
+                    .and_then(|s| serde_json::from_str::<Value>(s).ok())
+                    .is_some_and(|v| v["status"] == "done")
+                && let Some(action) = self.on_click.lock().unwrap().take()
+            {
+                action();
+            }
             if request
                 .as_ref()
                 .is_some_and(|req| req["postconditionOnly"] == true)

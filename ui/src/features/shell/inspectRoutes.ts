@@ -2,7 +2,8 @@
  * The `ui/*` routes for evidence and layout checks: `revision` and `settle` (the mutation counter a
  * driver waits on before a screenshot, ShellX `debug_api.rs:443-452` @ e38c2b5c `uiRevision`), `rect` (an
  * element's rectangle, used by `/screenshot?crop=`) and `layout` (cheap automatic checks of what is shown: menus,
- * popovers and dialogs inside the window, no horizontal scroll, no cut-off button or heading text). The Rust side
+ * popovers and dialogs inside the window, no horizontal scroll, no cut-off button/heading text or card content).
+ * The Rust side
  * lists the same names (`crates/vw-host/src/host.rs` SHELL_ROUTES). `secrets` reports where secret fields are, so
  * window screenshots blank them; `rect` refuses selectors that test a value (`secretSafety.ts`).
  * Depends on: state/uiControl, AppContext types. Called by: useShellWiring.
@@ -10,8 +11,11 @@
  * answers within its timeout (default 5 s, at most 30 s) and says whether the UI really went quiet.
  */
 import { UiControlError } from "../../state/uiControl";
-import { captureLock, queryNeutral, secretRects, setCaptureLock } from "./secretSafety";
+import { queryNeutral } from "./secretSafety";
+import { screenshotSecrets } from "./screenshotSecrets";
 import type { App } from "./AppContext";
+import { elementVisible } from "./elementVisibility";
+import { clippedCardParts } from "./inspectCardLayout";
 
 /** Overlay-like elements the layout check looks at. */
 const OVERLAYS =
@@ -76,16 +80,33 @@ function rowTitleEllipsizes(el: Element): boolean {
   );
 }
 
-/**
- * True when an ancestor that clips its content (overflow other than visible) leaves nothing of `el` showing: the
- * element sits in a collapsed column, a closed drawer or a zero-size box. Such an element is not on screen, so its
- * own text overflow is not something a person can see (the session list inside the 0-wide column was reported
- * as "text cut off" in every shot where the list was collapsed).
- */
-export function isClippedAway(el: Element): boolean {
-  const box = el.getBoundingClientRect();
+/** Ancestors whose overflow can affect this box, respecting fixed-position containing blocks. */
+function* clippingAncestors(el: Element) {
+  let fixed = getComputedStyle(el).position === "fixed";
   for (let up = el.parentElement; up !== null; up = up.parentElement) {
     const style = getComputedStyle(up);
+    // A viewport-fixed modal escapes ordinary overflow ancestors. A transform/filter/containment
+    // instead makes that ancestor its containing block, so clipping above it still matters.
+    const containsFixed =
+      [style.transform, style.perspective, style.filter, style.backdropFilter].some(
+        (value) => value && value !== "none",
+      ) ||
+      /layout|paint|strict|content/.test(style.contain) ||
+      /transform|perspective|filter/.test(style.willChange) ||
+      style.contentVisibility === "auto";
+    if (containsFixed) fixed = false;
+    if (!fixed) yield { up, style };
+    fixed ||= style.position === "fixed";
+  }
+}
+
+/**
+ * True when a clipping ancestor leaves nothing showing, such as a collapsed column or closed drawer.
+ * Its own text overflow is then not something a person can see.
+ */
+function isClippedAway(el: Element): boolean {
+  const box = el.getBoundingClientRect();
+  for (const { up, style } of clippingAncestors(el)) {
     if (!CLIPPING.test(`${style.overflow} ${style.overflowX} ${style.overflowY}`)) continue;
     const clip = up.getBoundingClientRect();
     const overlapX = Math.min(box.right, clip.right) - Math.max(box.left, clip.left);
@@ -93,6 +114,23 @@ export function isClippedAway(el: Element): boolean {
     if (overlapX < 1 || overlapY < 1) return true;
   }
   return false;
+}
+
+/** Visible controls cut horizontally by an ancestor still need reporting when their own text fits. */
+function ancestorCuts(el: Element): boolean {
+  const box = el.getBoundingClientRect();
+  let cut = false;
+  for (const { up, style } of clippingAncestors(el)) {
+    if (style.visibility === "hidden" || style.display === "none") return false;
+    const clip = up.getBoundingClientRect();
+    if (!CLIPPING.test(`${style.overflow} ${style.overflowX} ${style.overflowY}`)) continue;
+    // Folded columns and rows scrolled outside the vertical viewport are intentionally absent.
+    if (clip.width < 1 || clip.height < 1 || box.bottom <= clip.top || box.top >= clip.bottom)
+      return false;
+    if (CLIPPING.test(`${style.overflowX} ${style.overflow}`))
+      cut ||= box.left < clip.left - 1 || box.right > clip.right + 1;
+  }
+  return cut;
 }
 
 /**
@@ -103,6 +141,7 @@ export function isTextCutOff(el: Element): boolean {
   // A visually hidden element (clipped to 1 px, like a screen-reader-only title) is cut on purpose.
   const box = el.getBoundingClientRect();
   if (box.width <= 1.5 && box.height <= 1.5) return false;
+  if (ancestorCuts(el)) return true;
   const style = getComputedStyle(el);
   // An ellipsis is a designed cut, not an accident.
   if (style.textOverflow === "ellipsis" || el.scrollWidth <= el.clientWidth + 1) return false;
@@ -178,9 +217,18 @@ function layoutReport() {
     .map(nameOf);
   const root = document.documentElement;
   const horizontalScroll = root.scrollWidth > vw + 1;
+  const cards = [...document.querySelectorAll(".approval")]
+    .filter((card) => shown(card) && !isClippedAway(card))
+    .flatMap((card) => {
+      const parts = clippedCardParts(card);
+      return parts.length === 0
+        ? []
+        : [`card content clipped: ${nameOf(card)} (${parts.join(", ")})`];
+    });
   const problems = [
     ...overlays.filter((o) => !o.inside).map((o) => `outside the window: ${o.name}`),
     ...cutOff.map((n) => `text cut off: ${n}`),
+    ...cards,
     ...(horizontalScroll ? [`horizontal scroll: ${String(root.scrollWidth)} > ${String(vw)}`] : []),
   ];
   return {
@@ -214,7 +262,7 @@ export function registerInspectRoutes(app: App): () => void {
         } catch {
           throw new UiControlError("invalidParams", "that is not a valid CSS selector");
         }
-        return el === null ? null : el.getBoundingClientRect();
+        return el === null || !elementVisible(el) ? null : el.getBoundingClientRect();
       });
       if (found === null) return { found: false, ...base };
       return {
@@ -230,28 +278,11 @@ export function registerInspectRoutes(app: App): () => void {
     // where the secret fields are, so a window screenshot can blank them (`secretSafety.ts`).
     // `{lock: true}` before a capture (secret fields show dots, Show is disabled), `{lock: false}` after it; the
     // Debug API compares both answers and discards the capture when anything moved (`secretSafety.ts`).
-    app.uiControl.register("secrets", async (body) => {
-      const { lock } = asObject(body);
-      if (lock === true) {
-        setCaptureLock(true);
-        // Two frames: the fields are painted as dots before the answer goes back.
-        await new Promise<void>((resolve) => {
-          requestAnimationFrame(() => {
-            requestAnimationFrame(() => {
-              resolve();
-            });
-          });
-        });
-      }
-      const answer = {
-        ...secretRects(),
-        ...captureLock(),
-        viewportWidth: window.innerWidth,
-        viewportHeight: window.innerHeight,
-      };
-      if (lock === false) setCaptureLock(false);
-      return answer;
-    }),
+    app.uiControl.register(
+      "secrets",
+      (body) => screenshotSecrets(asObject(body).lock),
+      () => true,
+    ),
   ];
   return () => {
     counter.stop();

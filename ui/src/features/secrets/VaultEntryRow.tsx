@@ -12,7 +12,7 @@ import { VaultItemActions } from "./VaultItemActions";
 import { originHost, type EntryPermission, type VaultAct, type VaultListing } from "./vaultEntries";
 
 /** Values and labels shared by add and inline permission controls. */
-export const PERMISSIONS: ReadonlyArray<readonly [EntryPermission, string]> = Object.entries(
+const PERMISSIONS: ReadonlyArray<readonly [EntryPermission, string]> = Object.entries(
   vocabulary.vaultPermissions,
 ).map(([id, value]) => [id as EntryPermission, value.name]);
 
@@ -65,13 +65,11 @@ export function VaultEntryRow(props: {
   const projectPermissions = item.projectPermissions;
   const inherited = `Default (${term("vaultPermissions", defaultPermission).name})`;
   const grants =
-    entry.kind === "secret"
-      ? list.grants
-          .filter((g) => g.secretIds.includes(item.id))
-          .map((g) => ({ id: g.id, label: g.command, detail: g.project }))
-      : list.fillGrants
+    entry.kind === "login"
+      ? list.fillGrants
           .filter((g) => g.loginId === item.id)
-          .map((g) => ({ id: g.id, label: g.origin, detail: "Sign-in" }));
+          .map((g) => ({ id: g.id, label: g.origin, detail: "Sign-in" }))
+      : [];
   const servers =
     entry.kind === "secret" ? list.serverGrants.filter((g) => g.secretId === item.id) : [];
   return (
@@ -104,7 +102,7 @@ export function VaultEntryRow(props: {
             </span>
           )}
         </RowDisclosure>
-        <span className="ui-caption">Default permission</span>
+        <span className="ui-caption vault-default-caption">Default permission</span>
         <Selector
           testId="secrets.vault-entry-row-act"
           compact
@@ -121,7 +119,7 @@ export function VaultEntryRow(props: {
         />
         <Button
           data-testid="secrets.vault-entry-row-set-show-projects"
-          small
+          shape="outlined"
           type="button"
           aria-expanded={showProjects}
           aria-label={`Project permissions for ${item.name}`}
@@ -179,7 +177,7 @@ export function VaultEntryRow(props: {
                 <span>{term("vaultPermissions", p.permission).name}</span>
                 <Button
                   data-testid="secrets.vault-entry-row-act-3"
-                  small
+                  shape="outlined"
                   type="button"
                   disabled={busy}
                   onClick={() => {
@@ -258,17 +256,15 @@ export function VaultEntryRow(props: {
             </p>
           )}
           {!item.own && <p className="key-field-hint">Managed in another vault app.</p>}
-          {grants.length > 0 && (
-            <h4>{entry.kind === "login" ? "Granted sign-ins" : "Granted commands"}</h4>
-          )}
+          {grants.length > 0 && <h4>Granted sign-ins</h4>}
           {grants.map((g) => (
             <div data-item-id={g.id} className="check secrets-row" key={g.id} data-grant={g.id}>
-              <code className="secrets-name" title={`${g.label} · ${g.detail}`}>
-                {g.label}
-              </code>
+              <div className="secret-grant-description">
+                <code title={`${g.label} · ${g.detail}`}>{g.label}</code>
+              </div>
               <Button
                 data-testid="secrets.vault-entry-row-act-4"
-                small
+                shape="outlined"
                 type="button"
                 disabled={busy}
                 onClick={() => {
@@ -294,12 +290,12 @@ export function VaultEntryRow(props: {
                 {g.grant === "none"
                   ? "Not allowed"
                   : g.grant === "always"
-                    ? "Always"
+                    ? term("vaultPermissions", "allowed").name
                     : "Until close"}
               </span>
               <Button
                 data-testid="secrets.vault-entry-row-act-5"
-                small
+                shape="outlined"
                 type="button"
                 disabled={busy || g.grant === "none"}
                 onClick={() => {

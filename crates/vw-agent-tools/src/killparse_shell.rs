@@ -1,6 +1,12 @@
 //! The existing path/safety tokenizer: splits a plain command line into segments (simple
-//! commands) and words. It only has to be right for plain lists: anything with an expansion, a substitution,
-//! a here-doc or grouping can need more checks by its callers. The Git and kill guards do not use it.
+//! commands) and words. It only has to be right for plain lists: anything with an expansion, a substitution
+//! or grouping can need more checks by its callers. The git guard reads it too (`gitparse::readings`).
+//!
+//! Here-documents (`<<WORD`, `<<-WORD`, not the `<<<` here-string): the lines after the command line, up to the
+//! delimiter line, are still split into segments as before (a shell may run them: `bash <<EOF`), and each such
+//! segment names the segment whose `<<` opened it (`Segment::here_doc_of`), so a caller can tell an inline script's
+//! input from commands (Python's `// 2` is not the path `//`). A body whose opening command was not
+//! kept as a segment stays unmarked (read as commands).
 //!
 //! Handles single and double quotes, backslash escapes, `$...` and backticks (kept as text), comments, redirections (`> file`, `2>&1`, `&>`: file targets kept separately, never mistaken for arguments) and the
 //! operators `;`, `&&`, `||`, `|`, `|&`, `&`, newlines and parentheses. A segment remembers whether it reads
@@ -41,6 +47,8 @@ pub(crate) struct Segment {
     pub(crate) comment: String,
     /// A redirection whose target starts with `#` (read as a comment here, maybe not by the shell).
     pub(crate) redirect_into_comment: bool,
+    /// For a line of a here-document's body: the index (in the same list) of the segment whose `<<` opened it.
+    pub(crate) here_doc_of: Option<usize>,
 }
 
 #[derive(Default)]
@@ -52,12 +60,23 @@ struct Builder {
     next_piped: bool,
     next_invoked: bool,
     pending_redirect: Option<RedirectKind>,
+    /// Here-documents whose bodies start after the current line: delimiter, `<<-` (leading tabs stripped), the
+    /// index of the segment that opened it once that segment is kept, whether it may be marked at all, and the
+    /// number of the segment that was being read at its `<<`.
+    here_docs: Vec<(String, bool, Option<usize>, bool, usize)>,
+    /// The number of the segment being read (every finished segment counts, kept or not).
+    seq: usize,
+    /// The `<(` and `>(` process substitutions read: with any, no body of this input is marked.
+    substitutions: usize,
 }
 
 #[derive(Clone, Copy)]
 enum RedirectKind {
     File,
-    Delimiter,
+    /// `<<` (`true`: `<<-`): the word is the delimiter of a here-document.
+    Delimiter(bool),
+    /// `<<<`: the word is the here-string itself (data, not a file).
+    HereString,
 }
 
 impl Builder {
@@ -65,8 +84,20 @@ impl Builder {
         if self.started {
             let word = std::mem::take(&mut self.word);
             if let Some(kind) = self.pending_redirect.take() {
-                if matches!(kind, RedirectKind::File) {
-                    self.current.redirects.push(word);
+                match kind {
+                    RedirectKind::File => self.current.redirects.push(word),
+                    RedirectKind::Delimiter(strip) => {
+                        // Marked only for a quoted delimiter bash reads like this tokenizer (not `$'..'`, `$".."` or
+                        // an expansion), opened by a command whose name came first: `( cat ) <<EOF` or
+                        // `{ cat; } <<EOF` redirect a group, `<<EOF cat` names its command later.
+                        let exact = word.quoted
+                            && !word.expanded
+                            && !word.text.contains(['$', '`'])
+                            && !self.current.words.is_empty();
+                        self.here_docs
+                            .push((word.text, strip, None, exact, self.seq));
+                    }
+                    RedirectKind::HereString => {}
                 }
             } else {
                 self.current.words.push(word);
@@ -91,8 +122,49 @@ impl Builder {
             // `a | | b` or a leading operator: keep the pipe flag only for a real next command.
             self.next_piped = piped_next && self.next_piped;
         } else {
+            // Only the here-documents whose `<<` was read in this very segment belong to it.
+            for (_, _, owner, _, seq) in &mut self.here_docs {
+                if *seq == self.seq {
+                    owner.get_or_insert(self.segments.len());
+                }
+            }
             self.segments.push(seg);
             self.next_piped = piped_next;
+        }
+        self.seq += 1;
+    }
+
+    /// After a line break: the bodies of the here-documents the finished line opened, in order. Each body ends at
+    /// a line equal to its delimiter (leading tabs stripped for `<<-`; a trailing `\r` also ends it, which can only
+    /// end a body early, so more is read as commands) or at the end of the input. Only a body with an exact
+    /// delimiter, its closing line and plain quoting ([`plain_quotes`]) is marked, nested ones included (fail
+    /// closed: anything else is read as commands, as before).
+    fn here_doc_bodies(&mut self, chars: &mut Peekable<Chars<'_>>, windows_paths: bool) {
+        for (delimiter, strip, owner, exact, _) in std::mem::take(&mut self.here_docs) {
+            let mut body = String::new();
+            let mut closed = false;
+            while chars.peek().is_some() {
+                let mut line: String = chars.by_ref().take_while(|c| *c != '\n').collect();
+                if strip {
+                    line = line.trim_start_matches('\t').to_owned();
+                }
+                if line == delimiter || line.strip_suffix('\r') == Some(delimiter.as_str()) {
+                    closed = true;
+                    break;
+                }
+                body.push_str(&line);
+                body.push('\n');
+            }
+            let base = self.segments.len();
+            let trusted = exact && closed && plain_quotes(&body);
+            for mut segment in segments_with_windows_paths(&body, windows_paths) {
+                segment.here_doc_of = match segment.here_doc_of {
+                    _ if !trusted => None,
+                    Some(nested) => Some(base + nested),
+                    None => owner,
+                };
+                self.segments.push(segment);
+            }
         }
     }
 
@@ -124,7 +196,15 @@ fn segments_with_windows_paths(input: &str, windows_paths: bool) -> Vec<Segment>
         }
         match c {
             ' ' | '\t' | '\r' => b.finish_word(),
-            '\n' | ';' | '(' => b.finish_segment(false),
+            '\n' => {
+                b.finish_segment(false);
+                b.here_doc_bodies(&mut chars, windows_paths);
+            }
+            ';' => b.finish_segment(false),
+            '(' => {
+                b.substitutions += usize::from(b.pending_redirect.is_some());
+                b.finish_segment(false);
+            }
             ')' => {
                 b.finish_segment(false);
                 after_paren = true;
@@ -172,19 +252,9 @@ fn segments_with_windows_paths(input: &str, windows_paths: bool) -> Vec<Segment>
                 redirect(&mut b, &mut chars, c);
             }
             '#' if !windows_paths && !b.started => {
-                if b.pending_redirect.is_some() {
-                    b.current.redirect_into_comment = true;
-                    b.pending_redirect = None;
+                if comment(&mut b, &mut chars) {
+                    b.here_doc_bodies(&mut chars, windows_paths);
                 }
-                let mut skipped = String::new();
-                for n in chars.by_ref() {
-                    if n == '\n' {
-                        break;
-                    }
-                    skipped.push(n);
-                }
-                b.current.comment.push_str(&skipped);
-                b.finish_segment(false);
             }
             '\\' if windows_paths => b.push(c),
             '\\' => match chars.next() {
@@ -211,16 +281,58 @@ fn segments_with_windows_paths(input: &str, windows_paths: bool) -> Vec<Segment>
         }
     }
     b.finish_segment(false);
+    if b.substitutions > 0 {
+        for segment in &mut b.segments {
+            segment.here_doc_of = None;
+        }
+    }
     b.segments
+}
+
+/// True when every line of `body` reads the same as shell words and as a script's own quoting: no backslash, no
+/// triple quote, an even number of `'` and of `"` on each line. (A `#` comment, a multi-line string or an escaped
+/// quote can make the shell reading and Python's differ, so such a body is never marked.)
+fn plain_quotes(body: &str) -> bool {
+    !body.contains(['\\', '`'])
+        && !body.contains("'''")
+        && !body.contains("\"\"\"")
+        && body
+            .lines()
+            .all(|line| line.matches('\'').count() % 2 == 0 && line.matches('"').count() % 2 == 0)
+}
+
+/// A `#` comment to the end of its line: skipped (kept as the segment's `comment` text), the segment finished.
+/// True when a line break ended it (here-document bodies may follow).
+fn comment(b: &mut Builder, chars: &mut Peekable<Chars<'_>>) -> bool {
+    if b.pending_redirect.is_some() {
+        b.current.redirect_into_comment = true;
+        b.pending_redirect = None;
+    }
+    let mut skipped = String::new();
+    let mut line_ended = false;
+    for n in chars.by_ref() {
+        if n == '\n' {
+            line_ended = true;
+            break;
+        }
+        skipped.push(n);
+    }
+    b.current.comment.push_str(&skipped);
+    b.finish_segment(false);
+    line_ended
 }
 
 /// Consumes the rest of a redirection operator (`>`, `>>`, `>&`, `<`, `<<`, `&>`) and marks the next word
 /// (its target) to be kept separately from arguments, except here-doc delimiters; `>&1` targets are consumed here.
 fn redirect(b: &mut Builder, chars: &mut Peekable<Chars<'_>>, operator: char) {
-    let here_doc = operator == '<' && chars.peek() == Some(&'<');
-    while matches!(chars.peek(), Some('>' | '<')) {
-        chars.next();
+    let mut more = String::new();
+    while let Some(c) = chars.next_if(|c| matches!(c, '>' | '<')) {
+        more.push(c);
     }
+    // `<<` and `<<-` open a here-document, `<<<` is a here-string; `<>` and `<<>`-like forms are not either.
+    let here_doc = operator == '<' && more == "<";
+    let here_string = operator == '<' && more.starts_with("<<");
+    let strip = here_doc && chars.next_if_eq(&'-').is_some();
     if chars.peek() == Some(&'&') {
         chars.next();
         // `>&1`, `>&-`: the target is attached.
@@ -230,7 +342,9 @@ fn redirect(b: &mut Builder, chars: &mut Peekable<Chars<'_>>, operator: char) {
         return;
     }
     b.pending_redirect = Some(if here_doc {
-        RedirectKind::Delimiter
+        RedirectKind::Delimiter(strip)
+    } else if here_string {
+        RedirectKind::HereString
     } else {
         RedirectKind::File
     });

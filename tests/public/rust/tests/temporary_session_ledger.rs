@@ -5,23 +5,48 @@ mod common;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use common::core::{ScriptRig, script_core_with};
-use common::fake::scratch;
+use common::core::{ScriptRig, real_core};
 use common::logs;
+use common::processes::scratch;
 use serde_json::{Value, json};
 use vw_core_api::{Command, CommandResult, CoreError, ErrorCode, Origin, SessionToolsResult};
 
-/// Two stored sessions: one the user keeps, one a crashed run left behind as temporary.
-fn seed_file(dir: &Path) -> String {
-    let items = json!([
-        {"id": "keep", "title": "Kept", "status": {"type": "idle"}, "createdAt": 3, "updatedAt": 8,
-         "cwd": "/work/calc", "history": []},
-        {"id": "left-temp", "title": "Left temporary", "status": {"type": "idle"}, "createdAt": 4, "updatedAt": 7,
-         "cwd": "/work/calc", "history": []},
-    ]);
-    let path = dir.join("seed.json");
-    std::fs::write(&path, serde_json::to_vec(&items).unwrap()).unwrap();
-    path.to_string_lossy().into_owned()
+/// The two durable chats are created by real turns before the ledger under test is loaded.
+async fn provision(dir: &Path) -> Value {
+    let model =
+        common::scripted_model::ScriptedModel::start(common::real_vibe::text_script()).await;
+    common::seed_sessions::create(
+        dir,
+        &dir.join("vibe-home"),
+        &model,
+        &[
+            json!({"id":"keep","title":"Kept","cwd":dir.join("work")}),
+            json!({"id":"left-temp","title":"Left temporary","cwd":dir.join("work")}),
+        ],
+    )
+    .await
+}
+
+/// Only fixture input uses aliases; every byte delivered to the product contains real Vibe IDs.
+fn real_input(bytes: &[u8], ids: &Value) -> Vec<u8> {
+    let text = String::from_utf8(bytes.to_vec()).unwrap();
+    text.replace("left-temp", ids["ids"]["left-temp"].as_str().unwrap())
+        .replace("keep", ids["ids"]["keep"].as_str().unwrap())
+        .into_bytes()
+}
+fn input_for(rig: &ScriptRig, bytes: &[u8]) -> Vec<u8> {
+    let ids =
+        serde_json::from_slice(&std::fs::read(rig.dir.join("seed-ids.json")).unwrap()).unwrap();
+    real_input(bytes, &ids)
+}
+fn saw_not_found(rig: &ScriptRig) -> bool {
+    std::fs::read_to_string(rig.dir.join("responses.jsonl"))
+        .unwrap()
+        .lines()
+        .any(|line| {
+            let frame: Value = serde_json::from_str(line).unwrap();
+            frame.get("message").unwrap_or(&frame)["error"]["code"] == "not_found"
+        })
 }
 
 /// A core whose record lives in `sessions_dir` (which `prepare` may fill before the core starts).
@@ -33,7 +58,7 @@ async fn rig(
     rig_with_flags(name, &[], sessions_dir, prepare).await
 }
 
-/// [`rig`] with extra flags for the fake Vibe.
+/// Same setup with explicit storage preparation.
 async fn rig_with_flags(
     name: &str,
     flags: &[&str],
@@ -41,16 +66,31 @@ async fn rig_with_flags(
     prepare: impl FnOnce(&Path),
 ) -> (ScriptRig, PathBuf) {
     let dir = scratch(&format!("{name}-tmp-ledger"));
-    let seed = seed_file(&dir);
+    assert!(flags.is_empty());
+    let ids = provision(&dir).await;
     let sessions_dir = sessions_dir(&dir);
     prepare(&dir);
+    let ledger = sessions_dir.join("temporary.json");
+    if let Ok(bytes) = std::fs::read(&ledger) {
+        std::fs::write(&ledger, real_input(&bytes, &ids)).unwrap();
+    }
     let dir_for = sessions_dir.clone();
-    let mut args = vec!["--seed", seed.as_str()];
-    args.extend_from_slice(flags);
-    let rig = script_core_with(name, &args, move |c| {
-        c.sessions_dir = Some(dir_for);
-    })
-    .await;
+    let rig = real_core(
+        name,
+        &[],
+        Some(&dir.join("vibe-home")),
+        common::real_vibe::text_script(),
+        move |c| {
+            c.sessions_dir = Some(dir_for);
+        },
+    )
+    .await
+    .0;
+    std::fs::write(
+        rig.dir.join("seed-ids.json"),
+        serde_json::to_vec(&ids).unwrap(),
+    )
+    .unwrap();
     (rig, sessions_dir)
 }
 
@@ -184,6 +224,7 @@ async fn assert_failed_start_leaves_nothing(name: &str, flags: &[&str]) {
         "no stray session is left in the list"
     );
     assert!(logged_error(&log, "temporary"), "{}", log.text());
+    assert!(saw_not_found(&r), "real never-run chat was not stored");
     r.core.shutdown().await;
 }
 
@@ -194,9 +235,9 @@ async fn start_fails_and_the_new_session_is_removed_when_the_record_cannot_be_wr
 
 #[tokio::test]
 async fn same_when_vibe_answers_not_found_for_the_never_run_session() {
-    // The synthetic delete answers "not found" for an unstored session. The core still
+    // The real server answers "not_found" for an unstored session. The core still
     // has to finish its own bookkeeping.
-    assert_failed_start_leaves_nothing("missing-after-start", &["--unstored-metadata-miss"]).await;
+    assert_failed_start_leaves_nothing("missing-after-start", &[]).await;
 }
 
 #[tokio::test]
@@ -218,9 +259,9 @@ async fn start_fails_when_the_record_is_unreadable_and_cannot_be_moved_aside() {
     assert_eq!(listed(&r).await, before, "no session is left behind");
     // Unix reports a path below a plain file as "not a directory", which freezes the record at load, before any
     // session exists. Windows reports "not found" there: the record looks like a first run, the start goes out,
-    // and the session-ownership folder (below the same plain file) cannot be created. The new session is then
-    // deleted again, so on both systems the start fails as `internal` and nothing is kept; only the step that
-    // notices the broken folder differs.
+    // and writing the record (below the same plain file) fails. The new session is then deleted again, so on both
+    // systems the start fails as `internal` and nothing is kept; only the step that notices the broken folder
+    // differs.
     #[cfg(unix)]
     {
         assert!(
@@ -239,7 +280,7 @@ async fn start_fails_when_the_record_is_unreadable_and_cannot_be_moved_aside() {
             matches!((start, delete), (Some(start), Some(delete)) if start < delete),
             "the started session was deleted again: {received:?}"
         );
-        assert!(logged_error(&log, "ownership"), "{}", log.text());
+        assert!(logged_error(&log, "temporary"), "{}", log.text());
     }
     r.core.shutdown().await;
 }
@@ -261,16 +302,16 @@ fn channel_requests(path: &Path) -> Vec<(String, String)> {
 async fn start_fails_as_internal_and_the_new_session_is_deleted_when_ownership_cannot_be_recorded()
 {
     let (log, _guard) = logs::capture();
-    let channels = scratch("ownership-channels").join("channels.log");
-    let channels_text = channels.to_string_lossy().into_owned();
-    // The record folder is usable; only the session-ownership folder inside it is a plain file.
+    // The temporary record folder is usable; the shared lease folder is a plain file.
     let (r, dir) = rig_with_flags(
         "ownership",
-        &["--log-channels", channels_text.as_str()],
+        &[],
         |d| d.join("sessions"),
         |d| {
             std::fs::create_dir_all(d.join("sessions")).unwrap();
-            std::fs::write(d.join("sessions").join("leases"), b"plain file").unwrap();
+            let leases = d.join("vibe-home").join("vibe-work-leases");
+            std::fs::rename(&leases, leases.with_file_name("seed-leases")).unwrap();
+            std::fs::write(leases, b"plain file").unwrap();
         },
     )
     .await;
@@ -291,7 +332,7 @@ async fn start_fails_as_internal_and_the_new_session_is_deleted_when_ownership_c
     );
 
     // The start went out, and then exactly one delete, for a session that was not there before: the new one
-    // (the fake names a started session `fake-session-<n>`).
+    // (captured from the real request log).
     let received = r.received();
     let start = received.iter().position(|m| m == "session/start");
     let delete = received.iter().position(|m| m == "session/delete");
@@ -299,7 +340,7 @@ async fn start_fails_as_internal_and_the_new_session_is_deleted_when_ownership_c
         matches!((start, delete), (Some(start), Some(delete)) if start < delete),
         "{received:?}"
     );
-    let requests = channel_requests(&channels);
+    let requests = channel_requests(&r.dir.join("channels.log"));
     let deleted: Vec<&str> = requests
         .iter()
         .filter(|(method, _)| method == "session/delete")
@@ -307,7 +348,8 @@ async fn start_fails_as_internal_and_the_new_session_is_deleted_when_ownership_c
         .collect();
     assert_eq!(deleted.len(), 1, "{requests:?}");
     assert!(
-        deleted[0].starts_with("fake-session-") && !before.iter().any(|id| id == deleted[0]),
+        r.opened_ids().iter().any(|id| id == deleted[0])
+            && !before.iter().any(|id| id == deleted[0]),
         "the delete names the new session: {deleted:?} / {before:?}"
     );
     assert_eq!(
@@ -351,22 +393,31 @@ async fn assert_aside_and_swept(name: &str, content: &[u8], kept_ids_swept: &[&s
     let moved = aside(&dir);
     assert_eq!(moved.len(), 1, "exactly one copy moved aside: {moved:?}");
     assert_eq!(
-        moved[0].1, content,
+        moved[0].1,
+        input_for(&r, content),
         "the damaged record is preserved unchanged"
     );
     assert!(logged_error(&log, "temporary"), "{}", log.text());
     for id in kept_ids_swept {
-        wait_until_gone(&r, id).await;
+        wait_until_gone(&r, &r.id(id)).await;
     }
     let ids = listed(&r).await;
     assert!(
-        ids.iter().any(|i| i == "keep"),
+        ids.iter().any(|i| i == &r.id("keep")),
         "a kept session is never deleted: {ids:?}"
     );
     // After the sweep the list is empty again and a readable record (if any) agrees.
     let deadline = Instant::now() + Duration::from_secs(60);
-    while !temporary_ids(&r).await.is_empty() {
-        assert!(Instant::now() < deadline, "the list never emptied");
+    loop {
+        let left = temporary_ids(&r).await;
+        if left.is_empty() {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the list never emptied: {left:?}\n{}",
+            log.text()
+        );
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
     assert!(record(&dir).is_none_or(|ids| ids.is_empty()));
@@ -397,10 +448,11 @@ async fn record_that_is_no_list_keeps_nothing_and_is_still_preserved() {
     assert!(temporary_ids(&r).await.is_empty());
     // Nothing was guessed: both stored sessions are still there.
     tokio::time::sleep(Duration::from_millis(300)).await;
-    assert_eq!(
-        listed(&r).await,
-        vec!["keep".to_owned(), "left-temp".to_owned()]
-    );
+    assert_eq!(listed(&r).await, {
+        let mut ids = vec![r.id("keep"), r.id("left-temp")];
+        ids.sort();
+        ids
+    });
     r.core.shutdown().await;
 }
 
@@ -441,7 +493,7 @@ async fn valid_record_is_not_moved_aside() {
         },
     )
     .await;
-    wait_until_gone(&r, "left-temp").await;
+    wait_until_gone(&r, &r.id("left-temp")).await;
     assert!(aside(&dir).is_empty());
     assert!(!logged_error(&log, "temporary"), "{}", log.text());
     r.core.shutdown().await;
@@ -449,16 +501,14 @@ async fn valid_record_is_not_moved_aside() {
 
 #[tokio::test]
 async fn quitting_with_an_untouched_temporary_chat_empties_the_record() {
-    let (r, dir) = rig_with_flags(
-        "untouched-chat",
-        &["--unstored-metadata-miss"],
-        |d| d.join("sessions"),
-        |_| {},
-    )
-    .await;
+    let (r, dir) = rig_with_flags("untouched-chat", &[], |d| d.join("sessions"), |_| {}).await;
     let id = start_temporary(&r).await.unwrap();
     assert_eq!(record(&dir), Some(vec![id]));
     r.core.shutdown().await;
+    assert!(
+        saw_not_found(&r),
+        "the real never-run session was not stored"
+    );
     assert_eq!(
         record(&dir),
         Some(Vec::new()),

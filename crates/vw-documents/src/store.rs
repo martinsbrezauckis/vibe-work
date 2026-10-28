@@ -3,7 +3,7 @@
 //! the core can save every accepted attachment into the session project.
 //!
 //! Life of a document: `add_path` (the native picker or an OS drop gave the path, in Rust) -> local
-//! kinds are read at once (`ready`), OCR kinds wait for the user (`waiting`) -> `begin_read` hands the
+//! kinds are read at once (`ready`), OCR kinds wait for the caller to start automatic reading (`waiting`) -> `begin_read` hands the
 //! bytes to the caller, which calls OCR -> `finish_read` stores the text (`ready`) or the reason
 //! (`failed`, bytes kept for another try). `save_with` writes the original bytes once and keeps the
 //! resulting path for the composer.
@@ -11,7 +11,7 @@
 //! Depends on: `kind`, `pages`, `local`, `assemble`, getrandom. Called by: vw-core-api (`documents`).
 //! Invariants: nothing here takes a path or bytes from a client (only Rust callers); at most
 //! [`MAX_DOCS`] documents and [`MAX_HELD_BYTES`] of original file bytes are held; a file over
-//! [`MAX_FILE_BYTES`] or [`MAX_PAGES`] is refused before it is read in full; ids are random.
+//! [`MAX_FILE_BYTES`] is refused before it is read in full; ids are random.
 
 use std::fmt::Write as _;
 use std::io::Read;
@@ -28,8 +28,6 @@ use crate::pages::page_count;
 
 /// Largest file accepted (Mistral OCR's limit, its FAQ).
 pub const MAX_FILE_BYTES: u64 = 50 * 1024 * 1024;
-/// Most pages accepted (Mistral OCR's limit, its FAQ).
-pub const MAX_PAGES: u32 = 1000;
 /// Most documents held at once.
 pub const MAX_DOCS: usize = 8;
 /// Most file bytes held at once (documents waiting to be read).
@@ -41,7 +39,7 @@ pub const MAX_PICTURE_BYTES: usize = 10 * 1024 * 1024;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum DocStatus {
-    /// An OCR kind waiting for the user to press "Read text".
+    /// An OCR kind waiting for automatic reading to start.
     Waiting,
     /// OCR is running.
     Reading,
@@ -89,9 +87,6 @@ pub enum AddError {
     /// Over [`MAX_FILE_BYTES`].
     #[error("This file is larger than 50 MB, the most Mistral OCR accepts.")]
     TooLarge,
-    /// Over [`MAX_PAGES`].
-    #[error("This document has {0} pages; Mistral OCR accepts at most 1,000.")]
-    TooManyPages(u32),
     /// The kind is not accepted.
     #[error("{0}")]
     Kind(#[from] KindError),
@@ -149,6 +144,7 @@ struct Entry {
     info: DocumentInfo,
     bytes: Option<Vec<u8>>,
     text: Option<String>,
+    full_text: Option<String>,
     saved: Option<(String, PathBuf)>,
 }
 
@@ -230,17 +226,21 @@ impl DocumentStore {
         if bytes.len() as u64 > MAX_FILE_BYTES {
             return Err(AddError::TooLarge);
         }
-        // Unknown/legacy binary formats are still useful to the agent as project files. Their
-        // bytes are never interpreted as text or sent to OCR merely because of a filename.
+        // Reserve capacity under the same lock used to insert: concurrent adds cannot all parse
+        // against one spare slot. Reject a full store before kind detection or local extraction.
+        let mut entries = self.lock();
+        let held_now: u64 = entries.iter().map(|e| e.info.size).sum();
+        if entries.len() >= MAX_DOCS || held_now + bytes.len() as u64 > MAX_HELD_BYTES {
+            return Err(AddError::Full);
+        }
+        // Unknown/legacy binary formats are still useful to the agent as project files (shipped in 0.1.1): they
+        // are attached as the original file and its path, never read as text or sent to OCR because of a name.
         let kind = match detect(name, &bytes) {
             Ok(kind) => kind,
             Err(KindError::Unsupported) => DocKind::Binary,
             Err(error) => return Err(error.into()),
         };
         let pages = page_count(kind, &bytes);
-        if let Some(n) = pages.filter(|&n| n > MAX_PAGES) {
-            return Err(AddError::TooManyPages(n));
-        }
         let mut info = DocumentInfo {
             id: new_id(),
             name: name.to_owned(),
@@ -256,30 +256,24 @@ impl DocumentStore {
             error: None,
             can_attach_as_picture: kind.can_attach_as_picture() && bytes.len() <= MAX_PICTURE_BYTES,
         };
+        let mut full_text = None;
         let (held, text) = if kind == DocKind::Binary {
             info.status = DocStatus::Ready;
             (Some(bytes), None)
         } else if kind.method() == ReadMethod::Local {
-            let extracted = from_text(name, &read_local(kind, &bytes)?);
+            let body = read_local(kind, &bytes)?;
+            full_text = Some(format!("File: {name}\n\n{body}"));
+            let extracted = from_text(name, &body);
             set_ready(&mut info, &extracted);
             (Some(bytes), Some(extracted.text))
         } else {
             (Some(bytes), None)
         };
-        let mut entries = self.lock();
-        let held_now: u64 = entries
-            .iter()
-            .filter_map(|e| e.bytes.as_ref())
-            .map(|b| b.len() as u64)
-            .sum();
-        let adding = held.as_ref().map_or(0, |b| b.len() as u64);
-        if entries.len() >= MAX_DOCS || held_now + adding > MAX_HELD_BYTES {
-            return Err(AddError::Full);
-        }
         entries.push(Entry {
             info: info.clone(),
             bytes: held,
             text,
+            full_text,
             saved: None,
         });
         Ok(info)
@@ -307,6 +301,15 @@ impl DocumentStore {
             .iter()
             .find(|e| e.info.id == id)
             .map(|e| (e.info.clone(), e.text.clone()))
+    }
+
+    /// Complete text for the saved reader; message previews keep their independent bound.
+    #[must_use]
+    pub fn full_text(&self, id: &str) -> Option<String> {
+        self.lock()
+            .iter()
+            .find(|e| e.info.id == id)
+            .and_then(|e| e.full_text.clone())
     }
 
     /// Saves the original bytes once through a caller-supplied project writer, retaining the
@@ -391,6 +394,8 @@ impl DocumentStore {
         let entry = entries.iter_mut().find(|e| e.info.id == job.id)?;
         match result {
             Ok(ocr) => {
+                entry.full_text =
+                    Some(crate::from_pages_with_limit(&job.name, &ocr.pages, usize::MAX).text);
                 let extracted = from_pages(&job.name, &ocr.pages);
                 set_ready(&mut entry.info, &extracted);
                 entry.info.model = Some(ocr.model);

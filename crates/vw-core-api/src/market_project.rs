@@ -186,7 +186,11 @@ pub(crate) fn session_plugin(name: &str, plugins: &Value, skills: &Value) -> Ses
         .map(|d| text(d, "message"))
         .collect();
     SessionPluginView {
-        loaded: found.is_some(),
+        // Native Vibe retains unavailable tool tombstones after a plugin is unpinned.
+        loaded: found.is_some_and(|p| {
+            p.get("pinnedRoot") != Some(&Value::Null)
+                || p.get("installedRoot") != Some(&Value::Null)
+        }),
         components,
         skills,
         issues,
@@ -272,5 +276,26 @@ pub(crate) fn consent_summary(entry: &Entry) -> String {
             plugin.disk_mb
         ),
         _ => format!("Install {}", quote(&entry.name)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn native_unavailable_plugin_row_is_not_loaded() {
+        let catalog = |root| {
+            json!({"plugins":{"plugins":[{"name":"notes-pack","pinnedRoot":root,"installedRoot":null,
+            "components":[{"kind":"tool","name":"plugin_notes_pack_notes.search","status":"unavailable"}]}]}})
+        };
+        let removed = session_plugin("notes-pack", &catalog(Value::Null), &json!({}));
+        assert!(!removed.loaded);
+        assert_eq!(removed.components[0].status.as_deref(), Some("unavailable"));
+        assert!(
+            session_plugin("notes-pack", &catalog(json!("/pinned/package")), &json!({})).loaded
+        );
+        assert!(!session_plugin("absent", &catalog(Value::Null), &json!({})).loaded);
     }
 }

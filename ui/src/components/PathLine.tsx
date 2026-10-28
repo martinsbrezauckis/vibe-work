@@ -4,6 +4,7 @@
  * tooltip. The copy action copies the original text.
  * Depends on: PathText, IconButton, styles/shared-controls.css (`.path-line`). Called by: LocalPlugins, EndDialog.
  */
+import { writeClipboard } from "../state/clipboard";
 import { IconButton } from "./IconButton";
 import { PathText } from "./PathText";
 
@@ -16,7 +17,7 @@ export function PathLine({ path, className = "" }: { path: string; className?: s
         data-testid="path-line.copy"
         icon="copy"
         label="Copy path"
-        onClick={() => void navigator.clipboard.writeText(path).catch(() => undefined)}
+        onClick={() => void writeClipboard(path).catch(() => undefined)}
       />
     </div>
   );

@@ -88,18 +88,6 @@ impl PagePath {
     pub fn folder(&self) -> &str {
         self.0.rsplit_once('/').map_or("", |(dir, _)| dir)
     }
-
-    /// The first segment when the page is in a folder (`plans`), else `None`.
-    #[must_use]
-    pub fn top_folder(&self) -> Option<&str> {
-        self.0.split_once('/').map(|(top, _)| top)
-    }
-
-    /// True for Markdown pages.
-    #[must_use]
-    pub fn is_markdown(&self) -> bool {
-        self.0.to_ascii_lowercase().ends_with(".md")
-    }
 }
 
 impl fmt::Display for PagePath {

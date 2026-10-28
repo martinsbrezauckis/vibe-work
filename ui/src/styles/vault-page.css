@@ -67,8 +67,11 @@
 .vault-entry-line {
   flex-wrap: wrap;
 }
+/* The name's basis decides when the row wraps. At the 900 px window the line is ~462 px wide (the session list stays
+   docked from 900 px since 55b1f3a2b); 19ch + the picker + Project permissions needed ~466 px at 1ch = 9 px. 12ch, the
+   name's own basis, keeps the row one line there with ~59 px to spare; the name still takes all free width. */
 .vault-entry-line > .ui-disclosure {
-  flex: 1 1 19ch;
+  flex: 1 1 12ch;
   min-width: 0;
 }
 .vault-entry-line .ui-disclosure .secrets-name,
@@ -80,6 +83,13 @@
 }
 .vault-entry-line > .ui-selector {
   flex: none;
+}
+/* At the 900 px minimum window the row keeps one line: the visible caption goes, the picker keeps its own
+   accessible name ("Default permission for <entry>") and its value says what it is. */
+@media (max-width: 1000px) {
+  .vault-entry-line > .vault-default-caption {
+    display: none;
+  }
 }
 .vault-entry-details {
   padding: 0 0 var(--space-card-bottom);
@@ -97,8 +107,7 @@
   gap: var(--space-control-gap);
 }
 .set-cat-body .vault-actions-inline .vault-actions-menu {
-  flex-wrap: nowrap;
-  overflow-x: auto;
+  flex-wrap: wrap;
 }
 .set-cat-body .vault-actions-inline .vault-actions-editor.is-rename {
   flex-wrap: wrap;
@@ -111,4 +120,12 @@
 }
 .vault-add-entry > .generator-options {
   grid-column: 1 / -1;
+}
+
+/* A saved command's covered files must remain readable beside its Revoke button. */
+.set-cat-body .secret-grant-description {
+  flex: 1 1 12ch;
+  min-width: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }

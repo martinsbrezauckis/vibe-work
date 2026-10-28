@@ -30,7 +30,7 @@ export interface Source {
 }
 
 /** Mistral's hosted search connector tools whose output lists pages (see the module header). */
-export const CONNECTOR_SEARCH_TOOLS: ReadonlySet<string> = new Set([
+const CONNECTOR_SEARCH_TOOLS: ReadonlySet<string> = new Set([
   "connector_web_search.web_search",
   "connector_web_search.news_search",
 ]);

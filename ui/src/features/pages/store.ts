@@ -6,7 +6,8 @@
  * Project tab components, pagesRoutes.ts, point.ts, the Projects overview (open a page), UI tests.
  * Invariants:
  * - Nothing here loads a page the core did not accept: refusals come back as errors and are shown as text.
- * - A `pagesChanged` event reloads what the store already shows for that session (a `null` session: all).
+ * - A `pagesChanged` event reloads what the store already shows for that session (a `null` session: all); a
+ *   `pageMenu` event (a right click on the page: a point, no page text) goes to the tab that opens the page menu.
  * - `layout` calls are serialized and only the newest one is sent (a resize sends many).
  * - Page text (titles, labels, comments) is only ever rendered as plain text by the components.
  * -: a core started without Project Pages (a browser development host) answers `notInThisBuild`; that
@@ -16,6 +17,7 @@
 import { toCallError } from "../../protocol/client/types";
 import type {
   AnswerValue,
+  CoreEvent,
   PageAnswers,
   PagesRequest,
   PagesResult,
@@ -28,12 +30,15 @@ import { createStore } from "../../state/createStore";
 import { pruneSessions } from "../../state/prune";
 import { reuseAnswers } from "./inputs";
 
+/** A right click on the Project page, as the core reports it: the page area's point and whether text was selected. */
+export type PageMenuAt = Omit<Extract<CoreEvent, { type: "pageMenu" }>, "type">;
+
 /** A session's hub answer. */
 export type HubAnswer = Extract<PagesResult, { type: "hub" }>;
 /** A session's page answer. */
-export type PageAnswer = Extract<PagesResult, { type: "page" }>;
+type PageAnswer = Extract<PagesResult, { type: "page" }>;
 /** The plan checklist's answer. */
-export type PlanAnswer = Extract<PagesResult, { type: "currentPlan" }>;
+type PlanAnswer = Extract<PagesResult, { type: "currentPlan" }>;
 
 /** The tab's state. */
 export interface PagesUi {
@@ -138,6 +143,7 @@ export function createPages(core: CoreController) {
     }
   };
 
+  const menuListeners = new Set<(menu: PageMenuAt) => void>();
   let shown: Shown = null;
   let sent: Shown | undefined;
   let sending = false;
@@ -317,6 +323,37 @@ export function createPages(core: CoreController) {
       }
     },
     cancelPick: () => run({ op: "cancelPick" }).catch(() => undefined),
+    /** The section (with the selection as its quote) the last right click on the page was on; `null`: refused. */
+    async menuSection(
+      sessionId: string,
+      section?: string,
+      quote?: string,
+    ): Promise<PickedSection | null> {
+      const result = await act(sessionId, {
+        op: "menuSection",
+        sessionId,
+        ...(section === undefined ? {} : { section }),
+        ...(quote === undefined ? {} : { quote }),
+      });
+      return result?.type === "picked" ? result.picked : null;
+    },
+    /** The text the last right click on the page had selected; `null`: refused. */
+    async menuCopy(sessionId: string, section?: string, quote?: string): Promise<string | null> {
+      const result = await act(sessionId, {
+        op: "menuCopy",
+        sessionId,
+        ...(section === undefined ? {} : { section }),
+        ...(quote === undefined ? {} : { quote }),
+      });
+      return result?.type === "copied" ? result.text : null;
+    },
+    /** Calls `listener` for every right click on the Project page (a point and a flag, no page text). */
+    onPageMenu(listener: (menu: PageMenuAt) => void): () => void {
+      menuListeners.add(listener);
+      return () => {
+        menuListeners.delete(listener);
+      };
+    },
     /** Stores a comment; returns its id, or `null` when refused (the error is shown). */
     async addComment(
       sessionId: string,
@@ -372,6 +409,11 @@ export function createPages(core: CoreController) {
     );
   });
   const stopListening = core.listen((event) => {
+    if (event.type === "pageMenu") {
+      const menu = { sessionId: event.sessionId, x: event.x, y: event.y, selected: event.selected };
+      for (const listener of menuListeners) listener(menu);
+      return;
+    }
     // after `lagged` the core's events for this were missed: read again what is shown.
     if (event.type !== "pagesChanged" && event.type !== "lagged") return;
     const { hubs, plans } = store.get();

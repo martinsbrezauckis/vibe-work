@@ -11,16 +11,20 @@
 
 mod engine;
 #[cfg(target_os = "linux")]
+mod linux_capture;
+#[cfg(target_os = "linux")]
 mod linux_layout;
 mod media;
 mod native_click;
+mod page_origin;
+mod pdf;
 mod platform;
 #[cfg(target_os = "macos")]
 mod rules_macos;
 mod storage;
 pub mod window_shot;
 
-pub use engine::TauriEngine;
+pub use engine::{PageMenuChoice, TauriEngine};
 pub use media::enable_media_capture;
 
 /// One-line statement of what this crate is responsible for, exposed so tests and diagnostics

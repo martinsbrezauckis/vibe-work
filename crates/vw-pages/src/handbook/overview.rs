@@ -14,7 +14,6 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 
 use crate::handbook::files::{modified_ms, read_page, read_prefix};
-use crate::handbook::format;
 use crate::page::{PageFacts, Step, scan_html};
 
 /// Bytes read for a head.
@@ -37,8 +36,6 @@ pub enum HandbookState {
     Lite,
     /// A folder with pages but no usable manifest (index missing or not a manifest).
     NoManifest,
-    /// Pages of an earlier build (`docs/pages/`, `vw-*` names): needs migration (§11).
-    PreFormat,
 }
 
 /// The manifest head (§3).
@@ -136,10 +133,9 @@ fn mtime(path: &Path) -> u64 {
     std::fs::metadata(path).map_or(0, |m| modified_ms(&m))
 }
 
-/// The card of `project` whose handbook folder is `folder` (relative); `legacy` when the folder is the pre-1.0
-/// `docs/pages/`.
+/// The card of `project` whose handbook folder is `folder` (relative).
 #[must_use]
-pub fn card(project: &Path, folder: &str, legacy: bool) -> ProjectCard {
+pub fn card(project: &Path, folder: &str) -> ProjectCard {
     let root = folder
         .split('/')
         .fold(project.to_path_buf(), |p, s| p.join(s));
@@ -167,8 +163,6 @@ pub fn card(project: &Path, folder: &str, legacy: bool) -> ProjectCard {
         .flatten();
     card.changed_ms = card.changed_ms.max(mtime(&index_file));
     card.state = match &index {
-        Some(facts) if facts.is_pre_format() => HandbookState::PreFormat,
-        _ if legacy => HandbookState::PreFormat,
         Some(facts) if facts.kind.as_deref() == Some("index") => {
             card.manifest = Some(Manifest::of(facts));
             HandbookState::Handbook
@@ -176,7 +170,7 @@ pub fn card(project: &Path, folder: &str, legacy: bool) -> ProjectCard {
         None if has_markdown(&root) => HandbookState::Lite,
         _ => HandbookState::NoManifest,
     };
-    card.plans = active_plans(&root, card.state == HandbookState::PreFormat);
+    card.plans = active_plans(&root);
     if let Some(newest) = card.plans.iter().map(|p| p.modified_ms).max() {
         card.changed_ms = card.changed_ms.max(newest);
     }
@@ -194,8 +188,8 @@ fn has_markdown(root: &Path) -> bool {
     })
 }
 
-/// Active plans of `root/plans/`: by head status `active` (a pre-1.0 plan: any plan with an open step).
-fn active_plans(root: &Path, pre_format: bool) -> Vec<PlanSummary> {
+/// Active plans of `root/plans/`: by head status `active`.
+fn active_plans(root: &Path) -> Vec<PlanSummary> {
     let Ok(entries) = std::fs::read_dir(root.join("plans")) else {
         return Vec::new();
     };
@@ -213,8 +207,8 @@ fn active_plans(root: &Path, pre_format: bool) -> Vec<PlanSummary> {
         if !std::fs::symlink_metadata(&file).is_ok_and(|m| m.is_file()) {
             continue;
         }
-        let active = pre_format
-            || read_head(&file, markdown).is_some_and(|h| h.status.as_deref() == Some("active"));
+        let active =
+            read_head(&file, markdown).is_some_and(|h| h.status.as_deref() == Some("active"));
         if !active {
             continue;
         }
@@ -222,20 +216,10 @@ fn active_plans(root: &Path, pre_format: bool) -> Vec<PlanSummary> {
             continue;
         };
         let facts = scan.facts;
-        let open = facts
-            .steps
-            .iter()
-            .any(|s| !format::STEP_FINISHED.contains(&s.status.as_str()));
-        if pre_format && (facts.steps.is_empty() || !open) {
-            continue;
-        }
         plans.push(PlanSummary {
             path: format!("plans/{name}"),
             title: facts.title.clone().unwrap_or_else(|| name.clone()),
-            modified: facts
-                .modified
-                .clone()
-                .or_else(|| facts.legacy.as_ref().and_then(|l| l.date.clone())),
+            modified: facts.modified.clone(),
             modified_ms: mtime(&file),
             steps: facts.steps,
         });

@@ -23,6 +23,9 @@ pub enum KeyError {
     /// The chosen vault item is not a Mistral credential.
     #[error("that vault item does not hold a Mistral key")]
     NotACandidate,
+    /// The selected key must stay available until another is chosen.
+    #[error("Choose another Mistral key before removing this one.")]
+    KeyInUse,
     /// Policy enumeration or a direct policy record could not be trusted.
     #[error("the secret's permissions could not be read; access was refused")]
     PermissionsUnreadable,

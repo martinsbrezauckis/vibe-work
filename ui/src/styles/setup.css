@@ -18,7 +18,7 @@
   margin: 12px 0;
   padding: 14px 16px;
   border: 1px solid var(--orange);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: var(--panel);
   text-align: left;
 }
@@ -75,7 +75,7 @@
   height: var(--control-height-field);
   box-sizing: border-box;
   padding: 0 12px;
-  border-radius: 9px;
+  border-radius: var(--radius-9);
   border: 1px solid var(--line-2);
   background: var(--bg);
   color: var(--text);
@@ -84,9 +84,6 @@
 }
 .key-field-row input:focus-visible {
   outline: none;
-  box-shadow:
-    0 0 0 2px var(--bg),
-    0 0 0 4px var(--focus);
 }
 .key-field-row input[aria-invalid="true"] {
   border-color: var(--red);
@@ -109,7 +106,7 @@
   padding: 10px 12px;
   border: 1px solid var(--line-2);
   border-left: 3px solid var(--red);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: var(--red-soft);
   color: var(--text);
   font-size: var(--text-13);
@@ -120,7 +117,7 @@
   padding: 10px 12px;
   border: 1px solid var(--line-2);
   border-left: 3px solid var(--green);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: var(--green-soft);
   color: var(--text);
   font-size: var(--text-14);
@@ -130,7 +127,7 @@
   gap: 10px;
   padding: 12px 14px;
   border: 1px solid var(--line-2);
-  border-radius: 10px;
+  border-radius: var(--radius-lg);
   background: var(--panel);
   margin: 0;
 }
@@ -167,20 +164,6 @@ fieldset.key-offer {
   font-size: var(--text-13-5);
   color: var(--text);
 }
-.key-link {
-  all: unset;
-  cursor: pointer;
-  color: var(--blue);
-  font-size: var(--text-12-5);
-  text-decoration: underline;
-  justify-self: start;
-}
-.key-link:focus-visible {
-  outline: none;
-  box-shadow:
-    0 0 0 2px var(--bg),
-    0 0 0 4px var(--focus);
-}
 .vault-choices {
   display: grid;
   grid-template-columns: 1fr;
@@ -193,7 +176,7 @@ fieldset.key-offer {
   gap: 4px;
   padding: 12px 14px;
   border: 1px solid var(--line-2);
-  border-radius: 10px;
+  border-radius: var(--radius-lg);
   background: var(--panel);
   font-size: var(--text-12-5);
   color: var(--text-2);
@@ -208,9 +191,6 @@ fieldset.key-offer {
 }
 .vault-choice:focus-visible {
   outline: none;
-  box-shadow:
-    0 0 0 2px var(--bg),
-    0 0 0 4px var(--focus);
 }
 .key-sr {
   position: absolute;
@@ -236,7 +216,7 @@ fieldset.key-offer {
 .key-select {
   height: var(--control-height-small);
   max-width: 220px;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   border: 1px solid var(--line-2);
   background-color: var(--bg);
   color: var(--text);
@@ -337,7 +317,7 @@ fieldset.key-offer {
   overflow: auto;
   padding: 8px 10px;
   border: 1px solid var(--line-2);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   font-size: var(--text-11);
   white-space: pre-wrap;
   overflow-wrap: anywhere;

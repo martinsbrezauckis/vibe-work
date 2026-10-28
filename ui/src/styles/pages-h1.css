@@ -6,14 +6,13 @@
   flex: none;
   max-height: 45%;
   overflow: auto;
-  font-size: 13px;
+  font-size: var(--text-13);
   border-top: 1px solid var(--line-2);
   padding-top: 6px;
 }
-.pages-answers summary {
-  cursor: pointer;
+.pages-answers-count {
   color: var(--text-2);
-  font-size: 12.5px;
+  font-size: var(--text-12-5);
 }
 .pages-input-list {
   list-style: none;
@@ -28,10 +27,10 @@
   padding: 8px 10px;
   background: var(--panel);
   border: 1px solid var(--line-2);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
 }
 .pages-input-q {
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   overflow-wrap: anywhere;
 }
 .pages-options,
@@ -75,12 +74,12 @@
   color: var(--text);
   background: var(--bg);
   border: 1px solid var(--line-2);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   padding: 6px 8px;
 }
 .pages-visual {
   flex: none;
-  font-size: 12.5px;
+  font-size: var(--text-12-5);
   padding: 2px 0;
 }
 .pages-visual summary {
@@ -91,9 +90,9 @@
   flex-wrap: wrap;
 }
 .pages-visual-badge {
-  font-size: 11px;
-  font-weight: 500;
-  border-radius: 999px;
+  font-size: var(--text-11);
+  font-weight: var(--weight-medium);
+  border-radius: var(--radius-pill);
   padding: 1px 8px;
   border: 1px solid var(--line-2);
   color: var(--text-2);
@@ -123,13 +122,13 @@
 }
 .pages-visual-where {
   color: var(--text-3);
-  font-size: 11.5px;
+  font-size: var(--text-11-5);
 }
 .plan-checklist {
   display: grid;
   gap: 10px;
   padding: 12px;
-  font-size: 13px;
+  font-size: var(--text-13);
   overflow: auto;
   max-height: 100%;
 }
@@ -142,11 +141,11 @@
 }
 .plan-checklist-head span {
   color: var(--text-3);
-  font-size: 12px;
+  font-size: var(--text-12);
 }
 .plan-checklist-bar {
   height: 4px;
-  border-radius: 2px;
+  border-radius: var(--radius-2);
   background: var(--line-2);
   overflow: hidden;
 }
@@ -174,7 +173,7 @@
   color: var(--text);
   background: none;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   padding: 5px 6px;
   cursor: pointer;
 }
@@ -206,14 +205,14 @@
   color: var(--text-2);
 }
 .plan-checklist-live {
-  font-size: 10.5px;
+  font-size: var(--text-10-5);
   color: var(--orange);
   border: 1px solid var(--orange-soft);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   padding: 0 6px;
 }
 .plan-checklist-source {
-  font-size: 10.5px;
+  font-size: var(--text-10-5);
   color: var(--text-3);
 }
 @media (prefers-reduced-motion: reduce) {

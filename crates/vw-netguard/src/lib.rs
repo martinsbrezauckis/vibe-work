@@ -1,10 +1,10 @@
 //! The agent browser's network guard (navigation policy): which addresses the built-in browser may reach, and an app-local HTTP
 //! proxy that enforces it at request time for every request a browser webview sends (documents and subresources).
-//! It is an extra layer on top of the navigation policy (Linux: a listener per webview; Windows,: one
-//! app-wide listener next to the per-webview request barrier, [`chromium`]); it is never a condition for loading a
-//! page. [`rules`] gives the same address table as content rules for engines that filter by URL (macOS).
+//! It is an extra layer on top of the navigation policy (a listener per data folder or store: Linux, macOS 14+, and
+//! Windows next to the per-webview request barrier, [`chromium`]); on Linux it is never a condition for loading a
+//! page, while macOS and Windows previews that cannot have it are refused (vw-webview). [`rules`] gives the same address table as content rules for engines that filter by URL (macOS).
 //!
-//! Depends on: tokio, url, getrandom, `serde_json`. Called by: the app (binds the proxy at startup), vw-core-api (serves it,
+//! Depends on: tokio, url, getrandom, `serde_json`, hyper-util (the user's proxy rules, [`upstream`]). Called by: the app (binds the proxy at startup), vw-core-api (serves it,
 //! answers loopback questions, reads refusals), vw-webview (proxy URL and canary check per webview), vw-host
 //! (internal ports), vw-preview (address classes of literal hosts).
 //! Invariants:
@@ -21,6 +21,8 @@ pub mod ip;
 pub mod resolve;
 pub mod rules;
 mod serve;
+pub mod upstream;
+mod ws_origin;
 
 pub use decide::{NoLoopback, Scope, ScopeFuture};
 pub use guard::{
@@ -28,3 +30,4 @@ pub use guard::{
     SEEN_CAP,
 };
 pub use resolve::{Resolve, ResolveFuture, SystemResolver};
+pub use upstream::Upstream;

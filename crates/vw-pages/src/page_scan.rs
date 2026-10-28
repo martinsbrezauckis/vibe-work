@@ -7,8 +7,8 @@
 
 use crate::html::{Tag, Token, clip, squash, tokens};
 use crate::page::{
-    LegacyHead, MAX_SECTIONS, MAX_STEPS, PageDetail, PageFacts, PageScan, Reference, Relation,
-    STEP_STATES, Section, Step,
+    MAX_SECTIONS, MAX_STEPS, PageDetail, PageFacts, PageScan, Reference, Relation, STEP_STATES,
+    Section, Step,
 };
 
 const MAX_LINKS: usize = 2000;
@@ -26,9 +26,9 @@ const KNOWN_FIELDS: &[&str] = &[
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Container {
     None,
-    /// `nav.hb-related` (or the pre-1.0 `nav.vw-related`).
+    /// `nav.hb-related`.
     RelatedNav,
-    /// `ol.hb-steps` (or the pre-1.0 `ol.vw-steps`).
+    /// `ol.hb-steps`.
     StepsList,
 }
 
@@ -179,7 +179,7 @@ fn open_tag(tag: &Tag, stack: &[Open], scan: &mut PageScan) {
                     href: url.clone(),
                 });
             }
-            // Pre-1.0 pages list related pages in `nav.vw-related` without `rel`.
+            // A related navigation section supplies the relation when the link omits it.
             if rel.is_empty() && stack.iter().any(|o| o.container == Container::RelatedNav) {
                 facts.relations.push(Relation {
                     rel: "related".to_owned(),
@@ -224,11 +224,9 @@ fn new_open(tag: Tag, stack: &[Open]) -> Open {
     };
     Open {
         is_heading: HEADINGS.contains(&tag.name.as_str()),
-        container: if tag.name == "nav"
-            && (has_class(&tag, "hb-related") || has_class(&tag, "vw-related"))
-        {
+        container: if tag.name == "nav" && has_class(&tag, "hb-related") {
             Container::RelatedNav
-        } else if tag.name == "ol" && (has_class(&tag, "hb-steps") || has_class(&tag, "vw-steps")) {
+        } else if tag.name == "ol" && has_class(&tag, "hb-steps") {
             Container::StepsList
         } else {
             Container::None
@@ -361,12 +359,6 @@ fn read_meta(tag: &Tag, facts: &mut PageFacts, detail: &mut PageDetail) {
         "dcterms.modified" => facts.modified = Some(value),
         "description" => facts.description = Some(value),
         "author" => facts.authors.push(value),
-        "vw-kind" => {
-            facts.legacy.get_or_insert_with(LegacyHead::default).kind =
-                Some(value.to_ascii_lowercase());
-        }
-        "vw-status" => facts.legacy.get_or_insert_with(LegacyHead::default).status = Some(value),
-        "vw-date" => facts.legacy.get_or_insert_with(LegacyHead::default).date = Some(value),
         "vw-generated" => facts.generated = value.eq_ignore_ascii_case("hub"),
         other if other.starts_with("handbook.") && !KNOWN_FIELDS.contains(&other) => {
             detail.unknown_fields.push(clip(other, 60));

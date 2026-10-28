@@ -75,7 +75,7 @@ pub(crate) async fn call(
     let input: CheckArgs = serde_json::from_value(args.clone())
         .map_err(|e| format!("handbook_check expects {{}} or {{repair: \"stylesheet\"}}: {e}"))?;
     let folder = shared.pages.as_ref().map_or_else(
-        || vw_pages::handbook::resolve_folder(&project, None),
+        || vw_pages::handbook::resolve_folder(None),
         |hub| hub.service.folder(&project),
     );
     let service = shared.pages.as_ref().map(|hub| hub.service.clone());
@@ -191,11 +191,6 @@ fn check(project: &Path, folder: &vw_pages::handbook::Folder) -> Value {
     if !root.is_dir() {
         answer["note"] = json!(
             "no handbook folder yet: call handbook_check({repair: \"stylesheet\"}), then write index.html and pages (Project Handbook Format 1.2)"
-        );
-    }
-    if folder.legacy {
-        answer["migration"] = json!(
-            "this handbook is in docs/pages/ (an earlier format): migrate it to docs/handbook/ when the user agrees"
         );
     }
     answer

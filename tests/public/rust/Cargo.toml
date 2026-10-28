@@ -1,19 +1,20 @@
-# Public integration tests over synthetic services and disposable files. The root workspace's
-# check runs these on every platform; no installed app, account or private source is needed.
+# Public integration tests over pinned Vibe, scripted loopback services and disposable files.
+# The root check runs these on every platform; install the hash-locked Vibe as in README Develop.
 [package]
 name = "vw-public-tests"
 version = "0.0.0"
 edition = "2024"
 publish = false
 
-# Shared fixture code also builds with optional extensions in the maintainers' test runner.
-# This public crate has no such feature or dependency; all-features stays self-contained.
-[lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = ['cfg(feature, values("fixture-extensions"))'] }
-
 [dependencies]
+# Strict OCR fixtures decode files before claiming the provider accepts them.
+oxideav-avif = "0.0.11"
+oxideav-core = "0.1"
+lopdf = { version = "0.42", default-features = false }
+image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "webp", "gif", "tiff", "bmp"] }
 serde = "1"
 serde_json = "1"
+regex = "1"
 tokio = { version = "1.53", features = ["full", "test-util"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["fmt"] }
@@ -28,9 +29,7 @@ url = "2"
 zip = { version = "8.6.0", default-features = false, features = ["deflate"] }
 tar = { version = "0.4.46", default-features = false }
 flate2 = { version = "1.1.10", default-features = false, features = ["zlib-rs"] }
-vw-protocol = { path = "../../../crates/vw-protocol" }
 vw-rpc = { path = "../../../crates/vw-rpc" }
-vw-session = { path = "../../../crates/vw-session" }
 vw-supervisor = { path = "../../../crates/vw-supervisor" }
 vw-platform = { path = "../../../crates/vw-platform" }
 vw-secrets = { path = "../../../crates/vw-secrets" }
@@ -49,7 +48,6 @@ vw-worktrees = { path = "../../../crates/vw-worktrees" }
 vw-pages = { path = "../../../crates/vw-pages" }
 vw-vibe-install = { path = "../../../crates/vw-vibe-install" }
 vw-netguard = { path = "../../../crates/vw-netguard" }
-vibe-support-sign = { path = "../../../tools/public/vibe-support/sign" }
 make-latest-json = { path = "../../../tools/public/update-manifest" }
 
 [target.'cfg(unix)'.dependencies]

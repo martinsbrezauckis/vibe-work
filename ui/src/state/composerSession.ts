@@ -10,13 +10,15 @@
  *   (the runtime in the reply, or the next `runtimeUpdated`, is what the chips show).
  * - Chips are initialized when a composer opens and before its first turn; menus never initialize picks.
  */
+import { writeClipboard } from "./clipboard";
+import { retryPluginRefresh } from "./composerPluginRecovery";
 import { TEXT } from "../vocabulary";
 import { PLUGIN_RELOAD_REFUSED } from "./composerStore";
 import type { JsonValue } from "../protocol/core";
 import { formatTokens } from "./account";
 import { toCallError } from "../protocol/client/types";
 import { currentModeId, modeOf } from "../features/composer/model/access";
-import { currentPick, type CurrentPick } from "../features/composer/model/models";
+import { currentPick, selectedModel, type CurrentPick } from "../features/composer/model/models";
 import { anchorProblem } from "../features/composer/model/session";
 import { type Obj, arr, obj, str } from "../features/transcript/model/entries";
 import type { ComposerStore } from "./composerStore";
@@ -28,7 +30,7 @@ import type { SessionActions } from "./sessionActions";
 import type { Shell } from "./shellStore";
 import type { Toasts } from "./toastStore";
 import {
-  modelWriteAccepted,
+  requireModelWriteAccepted,
   prepareComposerSession,
   type ComposerInitialization,
 } from "./composerDefaults";
@@ -55,6 +57,9 @@ export function createSessionControls(deps: {
   openTools?: (() => void) | undefined;
 }) {
   const { core, composer, shell, toasts, sessions, rewind } = deps;
+  // Owned children are read through their parent; their views have no independent runtime or loops.
+  const owned = (sessionId: string): boolean =>
+    core.store.get().sessions[sessionId]?.ownedByParent === true;
   const call = async (method: string, params: Record<string, JsonValue>, token?: string) => {
     const reply = await core.run({
       type: "call",
@@ -92,10 +97,25 @@ export function createSessionControls(deps: {
   const controls = {
     /** Loads effective chips and admits new-chat defaults before interaction or submission. */
     prepareSession(sessionId: string, fresh = false, held?: CurrentPick): Promise<boolean> {
-      return prepareComposerSession(core, composer, deps.initialization, sessionId, fresh, held);
+      if (owned(sessionId)) return Promise.resolve(false);
+      return prepareComposerSession(
+        core,
+        composer,
+        deps.initialization,
+        sessionId,
+        fresh,
+        held,
+        (message) => {
+          composer.note(sessionId, message);
+          toasts.push({ kind: "error", bellKind: "failure", text: message });
+        },
+      );
     },
+    retryPluginRefresh: (sessionId: string): Promise<void> =>
+      retryPluginRefresh(core, composer, sessionId),
     /** Reads the session's runtime (models, profiles, active ones). Opens its channel if needed. */
     async loadRuntime(sessionId: string): Promise<boolean> {
+      if (owned(sessionId)) return false;
       try {
         keepRuntime(sessionId, await call("runtime/read", { sessionId }));
         return true;
@@ -127,7 +147,8 @@ export function createSessionControls(deps: {
       }
     },
     /** Reads the session's loops (`loops/list`) for the Loops list and the session row's mark. */
-    loadLoops: (sessionId: string, force = false) => loops.loadLoops(sessionId, force),
+    loadLoops: (sessionId: string, force = false) =>
+      owned(sessionId) ? Promise.resolve() : loops.loadLoops(sessionId, force),
     /** Deletes one loop of the session (`loops/delete`). */
     deleteLoop: (sessionId: string, loopId: string) => loops.deleteLoop(sessionId, loopId),
     /** Deletes every loop of the session (`loops/clear`). */
@@ -140,28 +161,34 @@ export function createSessionControls(deps: {
     ): Promise<boolean> {
       composer.setMenu(null);
       try {
+        const selected = selectedModel(core.store.get().sessions[sessionId]?.runtime, modelAlias);
         const pending = deps.initialization.pending.get(sessionId);
         if (pending !== undefined) await pending;
         const reply = await core.run({
           type: "pickModel",
           sessionId,
           ...(modelAlias === undefined ? {} : { modelAlias }),
+          ...selected,
           ...(reasoningEffort === undefined ? {} : { reasoningEffort }),
         });
-        if (reply.type !== "reply" || !modelWriteAccepted(reply.result)) return false;
+        if (reply.type !== "reply") return false;
+        requireModelWriteAccepted(reply.result);
         keepRuntime(sessionId, reply.result);
         if (runtimeIn(reply.result) === undefined)
           if (!(await controls.loadRuntime(sessionId))) return false;
         const actual = currentPick(core.store.get().sessions[sessionId]?.runtime, undefined);
         if (
-          (modelAlias !== undefined && actual.alias !== modelAlias) ||
-          (reasoningEffort !== undefined && actual.effort !== reasoningEffort)
+          obj(reply.result)?.["modelChoiceFallback"] !== true &&
+          ((modelAlias !== undefined && actual.alias !== modelAlias) ||
+            (reasoningEffort !== undefined && actual.effort !== reasoningEffort))
         )
           return false;
         deps.initialization.ready.add(sessionId);
         return true;
       } catch (thrown) {
-        toasts.push({ kind: "error", bellKind: "failure", text: failed(thrown) });
+        const error = toCallError(thrown).error;
+        if (error.code !== "accessModeUnverified")
+          toasts.push({ kind: "error", bellKind: "failure", text: error.message });
         return false;
       }
     },
@@ -196,7 +223,7 @@ export function createSessionControls(deps: {
         return true;
       } catch (thrown) {
         const error = toCallError(thrown).error;
-        if (error.code !== "confirmationDeclined")
+        if (error.code !== "confirmationDeclined" && error.code !== "accessModeUnverified")
           toasts.push({ kind: "error", bellKind: "failure", text: error.message });
         return false;
       }
@@ -232,6 +259,12 @@ export function createSessionControls(deps: {
                 sessionId,
                 ...(args === "" ? {} : { extraInstructions: args }),
               });
+              return done();
+            } catch (thrown) {
+              const error = toCallError(thrown).error;
+              if (error.code !== "cancelled" || error.serverCode !== "compactionStopped")
+                throw thrown;
+              composer.note(sessionId, error.message);
               return done();
             } finally {
               if (compactionRuns.get(sessionId) === run) {
@@ -280,13 +313,18 @@ export function createSessionControls(deps: {
           case "thinking":
             composer.setMenu({ sessionId, kind: "model" });
             return done();
-          case "reload":
-            await call("config/reload", { sessionId });
+          case "reload": {
+            const refreshed = await core.run({ type: "refreshPlugins", sessionId });
+            if (refreshed.type === "reply" && obj(refreshed.result)?.["pending"] !== true)
+              composer.pluginReloaded(sessionId);
             composer.note(
               sessionId,
-              "Config and skills reloaded. Changed AGENTS.md files reach this session when it reopens: Settings, Instructions, Apply.",
+              refreshed.type === "reply" && obj(refreshed.result)?.["pending"] === true
+                ? "Plugins will refresh when this reply ends."
+                : "Config, skills and plugins refreshed.",
             );
             return done();
+          }
           case "status": {
             const result = await call("runtime/read", { sessionId });
             keepRuntime(sessionId, result);
@@ -330,7 +368,7 @@ export function createSessionControls(deps: {
               .map((b) => str(obj(b)?.["text"] ?? null) ?? "")
               .join("");
             if (text === "") return invalid("There is no answer to copy yet.");
-            await navigator.clipboard.writeText(text);
+            await writeClipboard(text);
             return done();
           }
           case "help":
@@ -359,12 +397,19 @@ export function createSessionControls(deps: {
             // Vibe answers `{}`; the change is read from the session's components before and after (like the CLI).
             const before = pluginComponents(await call("plugin/info", { sessionId }));
             try {
-              await call("plugin/reload", { sessionId });
+              const refreshed = await core.run({ type: "refreshPlugins", sessionId });
+              if (refreshed.type === "reply" && obj(refreshed.result)?.["pending"] === true) {
+                composer.note(sessionId, "Plugins will refresh when this reply ends.");
+                return done();
+              }
             } catch (thrown) {
-              // Vibe's own reason goes to the window console only; the user gets the plain note and the new-chat action.
-              console.warn("plugin/reload refused:", failed(thrown));
-              composer.pluginReloadRefused(sessionId);
-              return { ok: false, kind: "command", message: PLUGIN_RELOAD_REFUSED };
+              const rejected = failed(thrown) === PLUGIN_RELOAD_REFUSED;
+              console.warn("Plugin refresh failed:", failed(thrown));
+              const message = rejected
+                ? PLUGIN_RELOAD_REFUSED
+                : "This chat could not finish refreshing its plugins; send a message to try again.";
+              composer.pluginReloadRefused(sessionId, message);
+              return { ok: false, kind: "command", message };
             }
             composer.pluginReloaded(sessionId);
             const after = pluginComponents(await call("plugin/info", { sessionId }));
@@ -409,18 +454,16 @@ export function createSessionControls(deps: {
             return invalid(`/${name} is not a command.`);
         }
       } catch (thrown) {
-        return fail(failed(thrown));
+        const error = toCallError(thrown).error;
+        return error.code === "accessModeUnverified" ? invalid(error.message) : fail(error.message);
       }
     },
   };
   return controls;
 }
 
-/** The session controls. */
-export type SessionControls = ReturnType<typeof createSessionControls>;
-
 /** The component names (`kind:name`) of a `plugin/info` reply, sorted. */
-export function pluginComponents(reply: JsonValue | null): string[] {
+function pluginComponents(reply: JsonValue | null): string[] {
   return arr(obj(obj(reply)?.["info"] ?? null)?.["components"])
     .map(obj)
     .map((c) => {

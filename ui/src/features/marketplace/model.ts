@@ -17,7 +17,7 @@ export const MARKET_FILTERS: readonly { id: MarketFilter; label: string }[] = [
 ];
 
 /** Group ids in page order. */
-export type GroupId = "plugin" | "pack" | "server";
+type GroupId = "plugin" | "pack" | "server";
 
 const GROUPS: readonly { id: GroupId; label: string; line: string }[] = [
   {
@@ -44,7 +44,7 @@ export interface Status {
 }
 
 /** The status of a pack or plugin. */
-export function installStatus(e: MarketEntryView, installing: InstallProgress | null): Status {
+function installStatus(e: MarketEntryView, installing: InstallProgress | null): Status {
   if (installing !== null && installing.id === e.entry.id)
     return { text: progressText(installing), tone: "info" };
   if (e.foreign) return { text: "A folder of this name exists (not ours)", tone: "warn" };
@@ -73,7 +73,7 @@ export function addedServer(e: MarketEntryView, servers: readonly ServerView[]):
 }
 
 /** The status of a remote server: the measured access class, or Vibe's live state once added. */
-export function serverStatus(e: MarketEntryView, servers: readonly ServerView[]): Status {
+function serverStatus(e: MarketEntryView, servers: readonly ServerView[]): Status {
   const access = e.entry.server?.access;
   const added = addedServer(e, servers);
   if (added !== null) {
@@ -133,7 +133,7 @@ export function progressText(p: InstallProgress): string {
 }
 
 /** True when the entry passes the filter and the search text. */
-export function matches(
+function matches(
   e: MarketEntryView,
   filter: MarketFilter,
   search: string,

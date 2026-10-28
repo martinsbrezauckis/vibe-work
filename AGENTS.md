@@ -9,7 +9,7 @@ code style; `README.md` (Develop) has the full setup.
 - Run `pnpm install --frozen-lockfile` at the repository root first. Without `ui/node_modules` every UI check fails
   for a reason that has nothing to do with your change.
 - Rust comes from `rust-toolchain.toml` (rustup installs it). The generated-code check needs the pinned Vibe in
-  `data/venv` (README, Develop).
+  `data/vibe-<version>/venv`, the version in `tools/public/codegen/vibe.pin`, or `$VIBE_PYTHON` (README, Develop).
 
 ## Done means checked
 
@@ -26,7 +26,7 @@ code style; `README.md` (Develop) has the full setup.
 ## Generated files: never edit them by hand
 
 - `crates/vw-protocol/src/generated/` and `ui/src/protocol/generated/`: Vibe's protocol types. Regenerate with
-  `python tools/public/codegen/generate.py --write` (needs `data/venv`).
+  `data/vibe-<version>/venv/bin/python tools/public/codegen/generate.py --write` (or `$VIBE_PYTHON`).
 - `ui/src/protocol/core/`: the core API types, made from the Rust types in `crates/vw-core-api`. Change the Rust type,
   then run `cargo run -p vw-core-api --features ts --bin gen-core-ts -- --write` (the first build takes minutes).
 - A file whose header says GENERATED or "do not edit" is regenerated, never edited.

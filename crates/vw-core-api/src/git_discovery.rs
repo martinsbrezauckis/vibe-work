@@ -23,6 +23,9 @@ impl Core {
         &self,
         session_id: &str,
     ) -> Result<Vec<(GitRepoView, Place)>, CoreError> {
+        if self.workspace_folder(session_id)?.is_some() {
+            return self.workspace_repos(session_id);
+        }
         let view = self
             .shared
             .store
@@ -117,6 +120,24 @@ impl Core {
                 (GitRepoView { name, root, branch }, place)
             })
             .collect())
+    }
+
+    fn workspace_repos(&self, session_id: &str) -> Result<Vec<(GitRepoView, Place)>, CoreError> {
+        let place = self.git_place(session_id)?;
+        let name = place
+            .root
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .into_owned();
+        Ok(vec![(
+            GitRepoView {
+                root: ".".into(),
+                name,
+                branch: None,
+            },
+            place,
+        )])
     }
 
     pub(crate) fn git_selected_place(

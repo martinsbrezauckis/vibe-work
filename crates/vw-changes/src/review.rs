@@ -136,8 +136,9 @@ pub fn undo_user_save(baseline: &mut Baseline, undo: UserSaveUndo) -> Result<(),
 /// long file path and a short root can never end up in different spellings). Only the file's folder is
 /// canonicalized and the file name joined back: the file may be new, and a file that is itself a symlink is
 /// the link, never its target. When either side cannot be canonicalized (it is gone), the paths are compared
-/// as written.
-fn repository_relative(root: &Path, path: &Path) -> Option<PathBuf> {
+/// as written. Also used by the editor's saved-version comparison (vw-core-api `files_saved`).
+#[must_use]
+pub fn repository_relative(root: &Path, path: &Path) -> Option<PathBuf> {
     let file = path
         .file_name()
         .zip(path.parent())

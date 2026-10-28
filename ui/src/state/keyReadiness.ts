@@ -11,13 +11,13 @@ import { term } from "../vocabulary";
 
 /** Why the agent cannot answer, and where the user can make the key usable. */
 export interface KeyReadiness {
-  kind: "setup" | "locked" | "missing" | "failed" | "testing" | "blocked";
+  kind: "setup" | "locked" | "missing" | "failed" | "testing" | "blocked" | "unread";
   /** One sentence shared by the chat notice and the Send tooltip. */
   message: string;
   /** The same state in a short status-bar label. */
   status: string;
   action: string;
-  destination: "setup" | "account";
+  destination: "setup" | "account" | "retry";
 }
 
 const SETUP: KeyReadiness = {
@@ -68,8 +68,17 @@ const BLOCKED: KeyReadiness = {
   destination: "setup",
 };
 
+const UNREAD: KeyReadiness = {
+  kind: "unread",
+  message: "Could not read the Mistral key status. Try again.",
+  status: "Mistral key status unavailable",
+  action: "Retry",
+  destination: "retry",
+};
+
 /** Returns a stable blocking description, or `null` when the key can be used. */
 export function keyReadiness(state: KeyUi): KeyReadiness | null {
+  if (state.availability === "failed") return UNREAD;
   if (state.availability !== "ready") return null;
   switch (stepOf(state.status).kind) {
     case "create":

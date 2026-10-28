@@ -1,4 +1,4 @@
-//! Fake Vibe and agent-tools integration helpers for disposable tests.
+//! Real Vibe, scripted models and agent-tools integration helpers for disposable tests.
 //! They start test binaries and call the local tool wire; callers own all processes and folders.
 #![allow(dead_code, unreachable_pub)]
 
@@ -6,7 +6,6 @@ use std::ffi::OsString;
 use std::io::{BufRead, BufReader, Write};
 use std::net::TcpStream;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::time::Duration;
 
 use serde_json::{Value, json};
@@ -18,9 +17,8 @@ mod launch_reaper;
 #[allow(unused_imports)]
 pub use launch_reaper::LaunchReaper;
 
-use crate::common::core::CanaryKey;
-use crate::common::fake::{fake_config, scratch};
 use crate::common::gate::FakeConfirmer;
+use crate::common::processes::scratch;
 
 /// The test build of the `vw-agent-tools` program.
 pub const BIN: &str = env!("CARGO_BIN_EXE_vw_agent_tools_bin");
@@ -46,7 +44,7 @@ pub struct Dirs {
     pub root: PathBuf,
     pub ledger: PathBuf,
     pub data: PathBuf,
-    pub persist: PathBuf,
+    pub stored: PathBuf,
     pub leases: LeaseConfig,
 }
 
@@ -56,7 +54,7 @@ impl Dirs {
         Self {
             ledger: root.join("ledger"),
             data: root.join("agent-tools"),
-            persist: root.join("fake-sessions.json"),
+            stored: root.join("vibe-home/logs/session/unified"),
             leases: per_run_leases(),
             root,
         }
@@ -66,12 +64,28 @@ impl Dirs {
 pub struct Rig {
     pub core: Core,
     pub dirs: Dirs,
-    /// `{"method", "agentConfig"}` lines the fake Vibe received.
+    /// `{"method", "agentConfig"}` lines the real Vibe received.
     pub agent_log: PathBuf,
+    /// `{"method", "params"}` of every request the real Vibe received, in arrival order.
+    pub params_log: PathBuf,
     pub confirmer: FakeConfirmer,
 }
 
-/// A core over the scripted fake Vibe with the agent tools on. `tag` separates the fake's logs per core.
+/// Tool requests formerly hidden in protocol fixtures now come from the loopback model.
+fn model_script() -> crate::common::scripted_model::Script {
+    serde_json::from_value(json!({"markers":true,"rules":[
+        {"system":"You are a security classifier","user":"smart-safe","reply":{"text":"{\"safe\":true,\"risk_level\":\"low\",\"user_authorization\":\"high\",\"reason\":\"Scripted safe case\"}"}},
+        {"system":"You are a security classifier","reply":{"text":"{\"safe\":false,\"risk_level\":\"high\",\"user_authorization\":\"high\",\"reason\":\"Scripted approval case\"}"}},
+        {"side":true,"reply":{"text":"Scripted title"}},
+        {"user":"^(Fill in the form on my supplier portal in my Chrome[.]|Open my Chrome and check the order[.])$","step":0,"reply":{"tools":[{"name":"write_file","args":{"path":"fixture.txt","content":"scripted tool\n"}}]}},
+        {"user":"^write a file$","step":0,"reply":{"tools":[{"name":"write_file","args":{"path":"fixture.txt","content":"scripted tool\n"}}]}},
+        {"user":"^Explain the result[.]$","reply":{"text":"approved: approve"}},
+        {"user":"^read it to me$","step":0,"reply":{"text":"Sure, reading it now.","tools":[{"name":"run_typescript","args":{"code":"async function main() { return await tools.mcp_vw.read_aloud({}); }"}}]}},
+        {"reply":{"text":"Scripted reply"}}
+    ]})).unwrap()
+}
+
+/// A core over real Vibe with the agent tools on. `tag` separates the process logs per core.
 pub async fn rig(dirs: &Dirs, tag: &str) -> Rig {
     rig_with(dirs, tag, |_| {}).await
 }
@@ -81,24 +95,33 @@ pub async fn rig_with(dirs: &Dirs, tag: &str, tweak: impl FnOnce(&mut CoreConfig
     rig_args(dirs, tag, &[], tweak).await
 }
 
-/// [`rig_with`] with more fake Vibe arguments (`--status-events`, so a running turn shows in the store).
+/// [`rig_with`] with a strict empty server-options boundary; real Vibe publishes its own status events.
 pub async fn rig_args(
     dirs: &Dirs,
     tag: &str,
     extra: &[&str],
     tweak: impl FnOnce(&mut CoreConfig),
 ) -> Rig {
-    let agent_log = dirs.root.join(format!("agent-config-{tag}.jsonl"));
-    let persist = dirs.persist.to_string_lossy().into_owned();
-    let mut args = vec!["--script", "--persist", &persist];
-    args.extend_from_slice(extra);
-    let mut config = fake_config(tag, &args);
+    assert!(extra.is_empty(), "use real faults: {extra:?}");
+    rig_with_script(dirs, tag, model_script(), tweak).await
+}
+
+/// [`rig_with`] with explicit model replies, including holds controlled by a disposable file.
+pub async fn rig_with_script(
+    dirs: &Dirs,
+    tag: &str,
+    script: crate::common::scripted_model::Script,
+    tweak: impl FnOnce(&mut CoreConfig),
+) -> Rig {
+    let run = dirs.root.join(tag);
+    std::fs::create_dir_all(&run).unwrap();
+    let model = crate::common::scripted_model::ScriptedModel::start(script).await;
+    let mut config = crate::common::shared_real_vibe::supervisor_config(&run, &model);
+    crate::common::shared_real_vibe::reuse_home(&mut config, &dirs.root.join("vibe-home"), &model);
     config.cwd.clone_from(&dirs.root);
-    config.vibe_home = dirs.root.join("vibe-home");
-    config.extra_env.push((
-        "VW_FAKE_LOG_AGENT_CONFIG".to_owned(),
-        agent_log.clone().into_os_string(),
-    ));
+    crate::common::core::record(&mut config, &run);
+    let agent_log = run.join("agent-config.jsonl");
+    let params_log = run.join("params.jsonl");
     let mut core_config = CoreConfig::default();
     core_config.procmon.ledger_dir = Some(dirs.ledger.clone());
     core_config.procmon.leases = dirs.leases.clone();
@@ -107,14 +130,24 @@ pub async fn rig_args(
     tools.start_wait = Duration::from_secs(6);
     core_config.agent_tools = Some(tools);
     tweak(&mut core_config);
+    std::fs::write(
+        config.vibe_home.join("hooks.toml"),
+        vw_host::agent_tools::hook_block(
+            &core_config.agent_tools.as_ref().unwrap().binary,
+            &core_config.agent_tools.as_ref().unwrap().endpoint_file(),
+        ),
+    )
+    .unwrap();
     let confirmer = FakeConfirmer::new();
-    let core = Core::start(config, Arc::new(CanaryKey), confirmer.clone(), core_config)
+    let secret = model.route(&mut config).await;
+    let core = Core::start(config, secret, confirmer.clone(), core_config)
         .await
-        .expect("core starts on the fake server");
+        .expect("core starts on real pinned Vibe");
     Rig {
         core,
         dirs: dirs.clone(),
         agent_log,
+        params_log,
         confirmer,
     }
 }
@@ -142,10 +175,14 @@ impl Rig {
         }))
         .unwrap();
         match self.core.execute(Origin::Ui, command).await.unwrap() {
-            CommandResult::Reply { result, .. } => result["state"]["session"]["id"]
-                .as_str()
-                .expect("a session id")
-                .to_owned(),
+            CommandResult::Reply { result, .. } => {
+                let id = result["state"]["session"]["id"]
+                    .as_str()
+                    .unwrap()
+                    .to_owned();
+                self.bind_hook(&id);
+                id
+            }
             other => panic!("{other:?}"),
         }
     }
@@ -165,12 +202,23 @@ impl Rig {
         }))
         .unwrap();
         match self.core.execute(Origin::Ui, command).await.unwrap() {
-            CommandResult::Reply { result, .. } => result,
+            CommandResult::Reply { result, .. } => {
+                if let Some(id) = result["state"]["session"]["id"].as_str() {
+                    self.bind_hook(id);
+                }
+                result
+            }
             other => panic!("{other:?}"),
         }
     }
 
-    /// Every `agentConfig` the fake Vibe received.
+    pub fn bind_hook(&self, session: &str) {
+        let server = self.injected(self.agent_configs().len() - 1);
+        let who = credential_of(&server);
+        bind_session(&self.core, &self.endpoint_file(), who, session);
+    }
+
+    /// Every `agentConfig` the real Vibe received.
     pub fn agent_configs(&self) -> Vec<Value> {
         std::fs::read_to_string(&self.agent_log)
             .unwrap_or_default()
@@ -210,8 +258,71 @@ pub fn credential_of(server: &Value) -> (String, String) {
     )
 }
 
-/// Calls a tool over the real wire (as the MCP server does).
+type HookRoutes = std::collections::HashMap<(String, String), (String, String, Core)>;
+fn hook_routes() -> &'static std::sync::Mutex<HookRoutes> {
+    static ROUTES: std::sync::OnceLock<std::sync::Mutex<HookRoutes>> = std::sync::OnceLock::new();
+    ROUTES.get_or_init(Default::default)
+}
+
+/// Associates a manually created session with its actual hook endpoint for direct tool fixtures.
+pub fn bind_session(core: &Core, file: &Path, who: (String, String), session: &str) {
+    let hook: vw_agent_tools::hook::EndpointFile =
+        serde_json::from_slice(&std::fs::read(file).unwrap()).unwrap();
+    hook_routes()
+        .lock()
+        .unwrap()
+        .insert(who, (hook.credential, session.into(), core.clone()));
+}
+
+/// Calls the hook and then the tool over the real wire. Direct policy fixtures answer the generic
+/// access-mode card once as the user; model-driven tests exercise that card without this helper.
 pub async fn call(who: &(String, String), tool: &str, args: Value) -> Result<Value, String> {
+    let args = prepare_call(who, tool, args).await?;
+    raw_call(who, tool, args).await
+}
+
+/// Completes hook policy before a test controls the tool's own wire connection.
+pub async fn prepare_call(
+    who: &(String, String),
+    tool: &str,
+    mut args: Value,
+) -> Result<Value, String> {
+    let route = hook_routes().lock().unwrap().get(who).cloned();
+    if args.get(wire::tools::RECEIPT_FIELD).is_none()
+        && let Some((hook, session, core)) = route
+    {
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let call = format!(
+            "fixture-{}",
+            NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        );
+        let payload = json!({"session_id":session,"tool_call_id":call,"tool_name":format!("mcp_vw.{tool}"),"tool_input":args});
+        let endpoint = who.0.clone();
+        let mut pending = tokio::task::spawn_blocking(move || {
+            wire::call(&endpoint, &hook, wire::tools::TOOL_RECEIPT, payload, None)
+        });
+        args = loop {
+            tokio::select! {
+                result = &mut pending => break result.unwrap()?,
+                () = tokio::time::sleep(Duration::from_millis(10)) => {
+                    let state = core.execute(Origin::Ui, Command::ReadSession { session_id:session.clone() }).await;
+                    if let Ok(CommandResult::Session { snapshot, .. }) = state {
+                        for entry in snapshot.state["history"].as_array().into_iter().flatten() {
+                            if entry["vwSourceCallId"] == call && entry["state"]["status"] == "open" {
+                                let id = format!("callback:{}", entry["id"].as_str().unwrap());
+                                core.answer_ask(&id, serde_json::from_value(json!({"answer":"once","note":null})).unwrap()).await.unwrap();
+                            }
+                        }
+                    }
+                }
+            }
+        };
+    }
+    Ok(args)
+}
+
+/// Sends a raw tool request for tests of credential and decision rejection.
+pub async fn raw_call(who: &(String, String), tool: &str, args: Value) -> Result<Value, String> {
     let (endpoint, credential) = who.clone();
     let tool = tool.to_owned();
     tokio::task::spawn_blocking(move || {
@@ -298,4 +409,37 @@ pub fn os(pairs: &[(&str, &str)]) -> Vec<(OsString, OsString)> {
         .iter()
         .map(|(k, v)| (OsString::from(k), OsString::from(v)))
         .collect()
+}
+
+/// Exercise the new secret broker start/status protocol, retaining the old tests' final-result assertions.
+/// Every wire call uses the real core; the command is submitted exactly once.
+#[allow(dead_code)]
+pub async fn call_and_collect(
+    who: &(String, String),
+    tool: &str,
+    args: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let before = std::time::Instant::now();
+    let mut value = call(who, tool, args).await?;
+    if tool != "secret_run" {
+        return Ok(value);
+    }
+    assert!(
+        before.elapsed() < std::time::Duration::from_secs(30),
+        "secret_run must return promptly"
+    );
+    let until = tokio::time::Instant::now() + std::time::Duration::from_secs(60);
+    while let Some(id) = value["requestId"].as_str() {
+        assert!(
+            tokio::time::Instant::now() < until,
+            "secret result did not finish: {value}"
+        );
+        value = call(
+            who,
+            "secret_run_status",
+            serde_json::json!({"requestId":id}),
+        )
+        .await?;
+    }
+    Ok(value)
 }

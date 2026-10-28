@@ -6,17 +6,25 @@
  */
 import { useApp } from "../shell/AppContext";
 import { createStore, useStore } from "../../state/createStore";
+import { OFFERS_INITIAL, type OffersState } from "../../state/installOffers";
 import { MARKET_INITIAL, type Market, type MarketState } from "../../state/market";
 import type { ServerView } from "../../protocol/core";
 import { useConnectors } from "../connectors/hooks";
 
 const NONE = createStore<MarketState>(MARKET_INITIAL);
+const NO_OFFERS = createStore<OffersState>(OFFERS_INITIAL);
 const NO_SERVERS: readonly ServerView[] = [];
 
 /** Subscribes to `select(state)` of the tab (see `useStore` for the selector rule). */
 export function useMarket<S>(select: (state: MarketState) => S): S {
   const { market } = useApp();
   return useStore(market?.store ?? NONE, select);
+}
+
+/** The entries' install offers (see `useStore` for the selector rule). */
+export function useMarketOffers<S>(select: (state: OffersState) => S): S {
+  const { market } = useApp();
+  return useStore(market?.offers ?? NO_OFFERS, select);
 }
 
 /** The window's own actions, or `null` without a core. */

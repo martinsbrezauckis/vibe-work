@@ -2,7 +2,7 @@
  * The Projects overview's controller: the cards of every project the core knows
  * (manifest head + active plans, read without opening a session), each
  * project's live hub fetched lazily one at a time for its health line and detail pane, the filter, the search text,
- * the selected project, and the actions the page offers (open the handbook or a page, start a handbook, migrate,
+ * the selected project, and the actions the page offers (open the handbook or a page, start a handbook,
  * new session, show the folder).
  * Depends on: coreStore (`run`, `listen`), shellStore, sessionActions, composer, toastStore, sessionSummary,
  * features/pages/model and handbookPrompts. Called by: createApp, the Projects page, the rail, the `ui/projects` route.
@@ -10,13 +10,12 @@
  * handbook (hubs stay keyed by folder: a handbook belongs to a folder); the actions take a project id; a project
  * without a main folder has no card and offers "Choose main folder…".
  * Invariants:
- * - Nothing here writes into a repository: handbook and migration requests send user messages.
+ * - Nothing here writes into a repository: handbook requests send user messages.
  * - Hubs are fetched one at a time (a queue); a hub already loaded or loading is not asked again until `refresh`.
  * - Picking a session elsewhere closes the page (like the Tools page); a `pagesChanged` event refreshes it while open.
  */
 import { toCallError } from "../protocol/client/types";
 import type { PagesRequest, PagesResult, ProjectCard, ProjectHub } from "../protocol/core";
-import { MIGRATE_HANDBOOK_PROMPT } from "../features/pages/model";
 import {
   type HandbookPrompt,
   handbookRequestBusy,
@@ -147,17 +146,6 @@ export function createProjects(deps: {
     return rows[0]?.id ?? null;
   };
 
-  /** Starts a session in project `id` (its main folder) and sends `prompt` as its first message. */
-  const startWith = async (project: string, prompt: string): Promise<string | null> => {
-    if (composer.actions === null || folderOf(project) === null) return null;
-    const id = await groups.startIn(project);
-    if (id === null) return null;
-    composer.setDraft(id, prompt);
-    const sent = await composer.actions.send(id, "send");
-    if (!sent.ok) toasts.push({ kind: "warn", bellKind: "failure", text: sent.message });
-    return id;
-  };
-
   /** The selected usable chat in the project, otherwise its newest usable chat. */
   const requestSession = (project: string): string | null => {
     const selected = shell.store.get().selected;
@@ -251,6 +239,24 @@ export function createProjects(deps: {
     setQuery(query: string): void {
       patch({ query });
     },
+    /** Opens the project's folder in Files before starting a session. */
+    openFiles(project: string): void {
+      const folder = folderOf(project);
+      if (folder === null) return;
+      shell.actions.selectSession(null);
+      shell.actions.setNewFolder(folder, "session");
+      shell.actions.openTab("git");
+      patch({ open: false });
+    },
+    /** Opens a terminal in the project's folder on the New chat screen (no session starts). */
+    openTerminal(project: string): void {
+      const folder = folderOf(project);
+      if (folder === null) return;
+      shell.actions.selectSession(null);
+      shell.actions.setNewFolder(folder, "session");
+      shell.actions.openTab("terminal");
+      patch({ open: false });
+    },
     /** Opens the handbook (or one page) of project `project` in a session's Project tab; a new one when none is open. */
     async openHandbook(project: string, path: string | null = null): Promise<void> {
       if (folderOf(project) === null) return;
@@ -273,11 +279,7 @@ export function createProjects(deps: {
     async writePlan(project: string, trustedClick = false): Promise<void> {
       await sendFor(project, "plan", trustedClick);
     },
-    /** "Migrate": a new session with the migration prompt (§11; the agent moves the files). */
-    async migrate(project: string): Promise<void> {
-      patch({ open: false });
-      await startWith(project, MIGRATE_HANDBOOK_PROMPT);
-    },
+
     /** A new session in project `project` (its main folder, or a folder the user picks, or `folder` a route names). */
     async newSession(project: string, folder?: string): Promise<void> {
       const id = await groups.startIn(project, folder);
@@ -289,10 +291,12 @@ export function createProjects(deps: {
       if (folder !== null) await sessions?.revealPath(folder);
     },
     /** "Choose main folder…" (the native picker), or `folder` when a route names one. */
-    async chooseFolder(project: string, folder?: string | null): Promise<void> {
+    async chooseFolder(project: string, folder?: string | null): Promise<boolean> {
+      let saved = true;
       if (folder === undefined) await groups.chooseFolder(project);
-      else await groups.setFolder(project, folder);
+      else saved = await groups.setFolder(project, folder);
       await controller.refresh();
+      return saved;
     },
     /** Opens a session (a "Needs you" row or a session chip). */
     openSession(sessionId: string): void {

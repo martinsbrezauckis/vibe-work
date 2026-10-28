@@ -61,6 +61,8 @@ pub struct WriteRequest<'a> {
     pub notes: &'a Path,
     /// `YYYY-MM-DDTHH:MM:SSZ`; `None` = now.
     pub pub_date: Option<&'a str>,
+    /// The oldest systems the packages run on (each entry's minimum; `None` = that entry carries none).
+    pub minimums: crate::Minimums<'a>,
     /// The folder with the three artifacts and their `.sig` files.
     pub artifacts: &'a Path,
     /// The manifest file to write.
@@ -88,6 +90,7 @@ pub fn write_manifest(request: &WriteRequest<'_>) -> Result<PathBuf, Refused> {
         notes: notes.trim(),
         pub_date: request.pub_date.unwrap_or(&now),
         pubkey: &key,
+        minimums: request.minimums,
     };
     let text = crate::build(&release, request.artifacts)?;
     let out = request.out.to_path_buf();
@@ -101,7 +104,8 @@ pub fn write_manifest(request: &WriteRequest<'_>) -> Result<PathBuf, Refused> {
     Ok(out)
 }
 
-/// Checks a written manifest file against the artifacts (all of the crate root's rules plus the app version).
+/// Checks a written manifest file against the artifacts (all of the crate root's rules plus the app version);
+/// `minimums` as for `write`.
 ///
 /// # Errors
 /// [`Refused`] on the first broken rule.
@@ -110,11 +114,18 @@ pub fn check_manifest(
     app_config: &Path,
     pubkey: &Path,
     artifacts: &Path,
+    minimums: crate::Minimums<'_>,
     manifest: &Path,
 ) -> Result<(), Refused> {
     expect_app_version(version, app_config)?;
     let key = read_pubkey(pubkey)?;
-    crate::check(&read(manifest, "manifest")?, artifacts, version, &key)
+    crate::check(
+        &read(manifest, "manifest")?,
+        artifacts,
+        version,
+        &key,
+        &minimums,
+    )
 }
 
 /// Verifies `<file>.sig` over `file` for `version`, bound to the file's name.

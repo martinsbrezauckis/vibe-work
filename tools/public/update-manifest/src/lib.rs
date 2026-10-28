@@ -23,7 +23,12 @@
 //!   (prehashed minisign signatures only), and its trusted comment (covered by the signature) names
 //!   `version:<version>` and `file:<asset name>`. The version rule is the app's own (`requireSignedVersion`: an old
 //!   release can never be replayed as a new one); the file rule binds each signature to the asset it was made for;
-//! - `notes` is a non-empty text and `pub_date` an RFC 3339 UTC time `YYYY-MM-DDTHH:MM:SSZ`; no other fields.
+//! - `notes` is a non-empty text and `pub_date` an RFC 3339 UTC time `YYYY-MM-DDTHH:MM:SSZ`; no other fields;
+//! - the oldest system each package runs on ([`Minimums`]), each exactly when the release step passes it and then
+//!   equal to it: `darwin-aarch64` `minimumSystemVersion` (the bundle's `LSMinimumSystemVersion`, `11.0`),
+//!   `windows-x86_64` `minimumSystemVersion` (a Windows build, `10.0.17763`), `linux-x86_64` `minimumGlibc` (the
+//!   highest glibc symbol version the `AppImage`'s programs need, `2.39`); dotted numbers. The app's updater does not
+//!   download a package its system is older than (older apps ignore the fields). No other field is allowed.
 //!
 //! Modules: `files` (the commands on files, plus the app-version and channel-key rules), `time` (`pub_date`).
 //! Depends on: minisign-verify, base64, semver, `serde_json`. Called by: `src/main.rs`; the app's updater format
@@ -317,14 +322,74 @@ pub fn find_assets(dir: &Path) -> Result<Vec<Asset>, Refused> {
     Ok(assets)
 }
 
+/// The field of the oldest system version (macOS, the Windows build); the app reads the same name.
+pub const MINIMUM_SYSTEM_VERSION: &str = "minimumSystemVersion";
+
+/// The field of the oldest glibc (Linux); the app reads the same name.
+pub const MINIMUM_GLIBC: &str = "minimumGlibc";
+
+/// The oldest systems the release's packages run on, as the release step reads them from the artifacts; `None` =
+/// that entry carries no minimum.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Minimums<'a> {
+    /// `darwin-aarch64` `minimumSystemVersion`: the macOS bundle's `LSMinimumSystemVersion` (`11.0`).
+    pub macos: Option<&'a str>,
+    /// `windows-x86_64` `minimumSystemVersion`: the oldest Windows build (`10.0.17763`).
+    pub windows: Option<&'a str>,
+    /// `linux-x86_64` `minimumGlibc`: the highest glibc symbol version the `AppImage`'s programs need (`2.39`).
+    pub linux_glibc: Option<&'a str>,
+}
+
+impl<'a> Minimums<'a> {
+    /// The field and value `platform`'s entry carries, `None` when it carries none.
+    #[must_use]
+    pub fn of(&self, platform: &str) -> Option<(&'static str, &'a str)> {
+        match platform {
+            "darwin-aarch64" => self.macos.map(|v| (MINIMUM_SYSTEM_VERSION, v)),
+            "windows-x86_64" => self.windows.map(|v| (MINIMUM_SYSTEM_VERSION, v)),
+            "linux-x86_64" => self.linux_glibc.map(|v| (MINIMUM_GLIBC, v)),
+            _ => None,
+        }
+    }
+
+    fn check_values(&self) -> Result<(), Refused> {
+        for value in [self.macos, self.windows, self.linux_glibc]
+            .into_iter()
+            .flatten()
+        {
+            system_version_text(value)?;
+        }
+        Ok(())
+    }
+}
+
+/// `version` is a system version the app can compare: dotted numbers, at most four parts (`11.0`, `14`, `11.7.10`,
+/// `10.0.17763`, the glibc `2.39`).
+///
+/// # Errors
+/// [`Refused`] naming the value.
+pub fn system_version_text(version: &str) -> Result<(), Refused> {
+    let parts: Vec<&str> = version.split('.').collect();
+    if parts.len() <= 4
+        && parts
+            .iter()
+            .all(|p| !p.is_empty() && p.len() <= 9 && p.bytes().all(|b| b.is_ascii_digit()))
+    {
+        Ok(())
+    } else {
+        refused(format!("{version:?} is not a system version (like 11.0)"))
+    }
+}
+
 /// The manifest text for already-checked parts (no checks here: [`build`] and the format tests use it).
-/// `entries`: `(platform key, url, signature)`.
+/// `entries`: `(platform key, url, signature)`; `minimums`: each entry's oldest system ([`Minimums::of`]).
 #[must_use]
 pub fn render(
     version: &str,
     notes: &str,
     pub_date: &str,
     entries: &[(&str, &str, &str)],
+    minimums: &Minimums<'_>,
 ) -> String {
     let mut platforms = Map::new();
     for (key, url, signature) in entries {
@@ -334,6 +399,9 @@ pub fn render(
             Value::String((*signature).to_owned()),
         );
         entry.insert("url".to_owned(), Value::String((*url).to_owned()));
+        if let Some((field, minimum)) = minimums.of(key) {
+            entry.insert(field.to_owned(), Value::String(minimum.to_owned()));
+        }
         platforms.insert((*key).to_owned(), Value::Object(entry));
     }
     let mut manifest = Map::new();
@@ -357,6 +425,8 @@ pub struct Release<'a> {
     pub pub_date: &'a str,
     /// The release public key (base64 minisign text, the channel's `pubkey`).
     pub pubkey: &'a str,
+    /// The oldest systems the packages run on, each written into its own entry.
+    pub minimums: Minimums<'a>,
 }
 
 /// Builds the manifest text from the artifacts and `.sig` files in `dir`, and checks it with [`check`].
@@ -365,6 +435,7 @@ pub struct Release<'a> {
 /// [`Refused`] on the first broken rule (see the module docs).
 pub fn build(release: &Release<'_>, dir: &Path) -> Result<String, Refused> {
     plain_version(release.version)?;
+    release.minimums.check_values()?;
     let base = release_base(release.version);
     let mut entries = Vec::new();
     for asset in find_assets(dir)? {
@@ -380,8 +451,20 @@ pub fn build(release: &Release<'_>, dir: &Path) -> Result<String, Refused> {
         .iter()
         .map(|(k, u, s)| (*k, u.as_str(), s.as_str()))
         .collect();
-    let text = render(release.version, release.notes, release.pub_date, &borrowed);
-    check(&text, dir, release.version, release.pubkey)?;
+    let text = render(
+        release.version,
+        release.notes,
+        release.pub_date,
+        &borrowed,
+        &release.minimums,
+    );
+    check(
+        &text,
+        dir,
+        release.version,
+        release.pubkey,
+        &release.minimums,
+    )?;
     Ok(text)
 }
 
@@ -399,11 +482,18 @@ fn text_field<'a>(object: &'a Map<String, Value>, key: &str) -> Result<&'a str, 
     }
 }
 
-/// Checks a manifest text against the artifacts in `dir` (see the module docs for every rule).
+/// Checks a manifest text against the artifacts in `dir` (see the module docs for every rule); `minimums` are the
+/// entries' expected oldest systems (`None`: that entry has none).
 ///
 /// # Errors
 /// [`Refused`] on the first broken rule.
-pub fn check(text: &str, dir: &Path, version: &str, pubkey: &str) -> Result<(), Refused> {
+pub fn check(
+    text: &str,
+    dir: &Path,
+    version: &str,
+    pubkey: &str,
+    minimums: &Minimums<'_>,
+) -> Result<(), Refused> {
     plain_version(version)?;
     let manifest: Value = serde_json::from_str(text)
         .map_err(|e| Refused(format!("the manifest is not JSON: {e}")))?;
@@ -441,9 +531,19 @@ pub fn check(text: &str, dir: &Path, version: &str, pubkey: &str) -> Result<(), 
         let Some(Value::Object(entry)) = platforms.get(platform) else {
             return refused(format!("platform {platform} is missing"));
         };
-        if entry.len() != 2 {
+        let expected = minimums.of(platform);
+        for field in [MINIMUM_SYSTEM_VERSION, MINIMUM_GLIBC] {
+            let want = expected.filter(|(f, _)| *f == field).map(|(_, v)| v);
+            let found = entry.get(field).map(Value::as_str);
+            if found != want.map(Some) {
+                return refused(format!(
+                    "{platform}: \"{field}\" is {found:?}, expected {want:?}"
+                ));
+            }
+        }
+        if entry.len() != 2 + usize::from(expected.is_some()) {
             return refused(format!(
-                "{platform}: only \"url\" and \"signature\" are allowed"
+                "{platform}: only \"url\", \"signature\" and the platform's minimum are allowed"
             ));
         }
         let url = text_field(entry, "url")?;

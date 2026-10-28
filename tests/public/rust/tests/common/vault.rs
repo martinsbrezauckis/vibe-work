@@ -10,7 +10,7 @@ use vw_vault::location::{VaultLocation, forbid_canonical_profile};
 use vw_vault::remember::{DeviceSecretStore, MemoryDeviceStore};
 use vw_vault::{KdfParams, SecretString, Vault, VaultConfig};
 
-use crate::common::fake::scratch;
+use crate::common::processes::scratch;
 
 /// Argon2 at Vault's accepted minimum (19 MiB, 1 pass): real format, fast tests.
 pub fn fast_kdf() -> KdfParams {

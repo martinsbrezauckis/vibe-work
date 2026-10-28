@@ -4,6 +4,7 @@
  * agent drives the page and can take it back.
  * Depends on: protocol types. Called by: PreviewTab.
  */
+import { Button } from "../../components/Controls";
 import type { ReactElement } from "react";
 
 import type { BrowserState } from "../../protocol/core";
@@ -36,15 +37,15 @@ export function AgentStrip({
         <span className="browser-strip-text">
           You stopped the agent's use of the browser. It may use it again after your next message.
         </span>
-        <button
+        <Button
           data-testid="preview.agent-strip-preview-btn"
           type="button"
-          className="preview-btn"
+          appearance="preview"
           title="Resume"
           onClick={onResume}
         >
           Resume
-        </button>
+        </Button>
       </div>
     );
   }
@@ -61,15 +62,16 @@ export function AgentStrip({
     >
       <span className="browser-strip-dot" aria-hidden="true" />
       <span className="browser-strip-text">{message}</span>
-      <button
+      <Button
         data-testid="preview.agent-strip-preview-btn-2"
         type="button"
-        className="preview-btn browser-stop"
+        appearance="preview"
+        placement="browser-stop"
         title="Stop"
         onClick={onStop}
       >
         Stop
-      </button>
+      </Button>
     </div>
   );
 }

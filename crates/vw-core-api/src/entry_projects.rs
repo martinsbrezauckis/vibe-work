@@ -103,17 +103,6 @@ pub(crate) async fn before_open(shared: &Shared, method: &str, params: &Value) -
     } else {
         Err("this session has no user-selected project folder".to_owned())
     };
-    let identity = match (identity, shared.config.keys.as_ref()) {
-        (Ok(identity), Some(keys)) => match keys.entry_defaults().await {
-            Ok(defaults) => Ok(identity.with_defaults(defaults)),
-            Err(error) if vw_keys::is_locked(&error) => {
-                Ok(identity.with_defaults(std::collections::BTreeMap::new()))
-            }
-            Err(_) => Err("the secret's permissions could not be read; vault access for this session was refused".to_owned()),
-        },
-        (Ok(identity), None) => Ok(identity.with_defaults(std::collections::BTreeMap::new())),
-        (Err(reason), _) => Err(reason),
-    };
     Some(Opening {
         identity,
         registered,
@@ -171,6 +160,7 @@ pub(crate) async fn finish_copy(shared: &Shared, id: &str, path: Option<&Path>) 
         .remove(id);
     let Some(opening) = opening else { return };
     let path = path.map(Path::to_path_buf);
+    let cwd = shared.names.cwd_of(&shared.store, id);
     let vibe_root = shared.worktrees.vibe_root().to_path_buf();
     let identity = tokio::task::spawn_blocking(move || {
         opening.identity.and_then(|chosen| {
@@ -184,12 +174,17 @@ pub(crate) async fn finish_copy(shared: &Shared, id: &str, path: Option<&Path>) 
             {
                 return Err("the copy does not match the selected start target".to_owned());
             }
+            // Vibe preserves a selected repository subfolder inside the new copy. Bind the
+            // actual tool cwd, while refusing a symlink or context that escapes the checked root.
+            let cwd = cwd
+                .and_then(|cwd| vw_platform::canonical_plain(Path::new(&cwd)).ok())
+                .filter(|cwd| cwd.starts_with(&path))
+                .ok_or_else(|| "the session folder is outside its copy".to_owned())?;
             let mut registered = opening.registered;
             registered.retain(|p| p == Path::new(chosen.allowed_project()));
             // An admitted start makes its exact chosen folder known, including a native copy-dialog choice.
             registered.insert(PathBuf::from(&chosen.plain));
-            capture(&path.to_string_lossy(), &registered)
-                .map(|identity| identity.inherit_defaults(&chosen))
+            capture(&cwd.to_string_lossy(), &registered)
         })
     })
     .await

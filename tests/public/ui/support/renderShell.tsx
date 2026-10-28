@@ -77,6 +77,9 @@ export async function renderShell(
       : { prepareCapture: options.prepareCapture }),
     ...(options.player === undefined ? {} : { player: options.player }),
   });
+  // The host attributes what the window sends while it serves a Debug API action to the Debug API (its driving
+  // rule); tests that call `uiControl.handle` directly have no transport, so the fake asks the page.
+  client.servingProbe = () => app.uiControl.servingAction() !== null;
   registerPlaceholderTabs(app.panelTabs);
   if (options.terminal === true) registerTerminalTab(app);
   const view = render(
@@ -86,6 +89,7 @@ export async function renderShell(
   );
   await act(async () => {
     await app.core?.start();
+    await app.newChat?.start();
   });
   return { app, client, view, composer: composerBox };
 }

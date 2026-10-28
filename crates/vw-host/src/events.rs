@@ -41,6 +41,13 @@ pub enum HostEvent {
         /// Session whose browser held the one-use choice; no page value crosses this event.
         session_id: String,
     },
+    /// A physical Point Vibe at this click in the page menu of a Browser page: the session's app preview or one of
+    /// its web pages. The window runs the pick of that page, which reads the selection in the page.
+    BrowserPointContext {
+        /// The page the click was in: the session id for its app preview, the page key for a web page; no page
+        /// value crosses this event.
+        session_id: String,
+    },
 }
 
 /// The host's event channel.

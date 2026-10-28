@@ -5,6 +5,7 @@
  * Depends on: AppContext, useKeys, fields, VibeKeyOffer, ConsoleLink. Called by: SetupScreen,
  * ResultStep (to replace a key that failed), KeySettings.
  */
+import { Button } from "../../components/Controls";
 import { useState } from "react";
 
 import { useApp } from "../shell/AppContext";
@@ -16,10 +17,13 @@ import { useKeyUi } from "./useKeys";
 /** The step. `offers` false hides the saved/Vibe key offers (replacing a key that failed). */
 export function KeyStep({
   offers = true,
+  additional = false,
   label,
   onSaved,
 }: {
   offers?: boolean;
+  /** Saves a separately named credential without selecting it. */
+  additional?: boolean;
   label?: string;
   /** Called after the key was stored (Settings closes its replace form). */
   onSaved?: () => void;
@@ -29,13 +33,15 @@ export function KeyStep({
   const vibeKeys = useKeyUi((s) => s.vibeKeys);
   const busy = useKeyUi((s) => s.busy);
   const problem = useKeyUi((s) => s.problem);
+  const savedKeys = useKeyUi((s) => s.mistralKeys);
+  const [name, setName] = useState(savedKeys.length > 0 ? "Work key" : "Personal key");
   const [key, setKey] = useState("");
 
   const save = () => {
     if (keys === null || key.trim() === "") return;
     const value = key;
     setKey("");
-    void keys.saveKey(value).then((ok) => {
+    void (additional ? keys.addMistralKey(name, value) : keys.saveKey(value)).then((ok) => {
       if (ok) onSaved?.();
     });
   };
@@ -48,17 +54,17 @@ export function KeyStep({
           {candidates.map((c) => (
             <div data-item-id={c.itemId} className="key-saved" key={c.itemId}>
               <span>{c.label}</span>
-              <button
+              <Button
                 data-testid="setup.key-step-use-saved"
                 type="button"
-                className="btn-primary"
+                appearance="dialog"
                 disabled={busy}
                 onClick={() => {
                   void keys?.useSaved(c.itemId);
                 }}
               >
                 Use the saved key
-              </button>
+              </Button>
             </div>
           ))}
         </div>
@@ -80,6 +86,22 @@ export function KeyStep({
           save();
         }}
       >
+        {additional && (
+          <div className="key-field">
+            <label htmlFor="mistral-key-name">Name</label>
+            <div className="key-field-row">
+              <input
+                data-testid="setup.key-name"
+                id="mistral-key-name"
+                maxLength={200}
+                value={name}
+                onChange={(e) => {
+                  setName(e.target.value);
+                }}
+              />
+            </div>
+          </div>
+        )}
         <SecretField
           label={label ?? "Paste your Mistral API key"}
           testId="setup.key-input"
@@ -91,14 +113,14 @@ export function KeyStep({
         <ConsoleLink />
         <Problem text={problem?.text ?? null} />
         <div className="key-actions">
-          <button
+          <Button
             type="submit"
-            className="btn-primary"
+            appearance="dialog"
             data-testid="setup.save"
-            disabled={busy || key.trim() === ""}
+            disabled={busy || key.trim() === "" || (additional && name.trim() === "")}
           >
-            {busy ? "Saving..." : "Save and test the key"}
-          </button>
+            {busy ? "Saving…" : "Save and test the key"}
+          </Button>
         </div>
       </form>
     </div>

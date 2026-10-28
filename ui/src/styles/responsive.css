@@ -1,23 +1,28 @@
 /*
- * Narrow-window rules: the side panel and the session list become overlay drawers (<= 1100 px), the
+ * Narrow-window rules: the side panel and the session list become overlay drawers (<= 899 px), the
  * rail and long title-bar labels drop away (<= 640 px). The toast fallback lives in the
  * existing status bar, so drawers keep the same bounds while feedback appears.
  * Loaded after shell.css so these override it.
  */
 /* Narrow windows: the panel is an overlay drawer and the list hides; phones also lose the rail. */
-@media (max-width: 1100px) {
+@media (max-width: 899px) {
   .body,
   .body.has-panel,
   .body.no-col.has-panel {
     grid-template-columns: 56px 0 minmax(0, 1fr) 0;
   }
+  /* The drawers fill the body's own box (under the title bar and any update card, above the status bar); no
+     z-index here, so the drawers still stack with the rest of the window. */
+  .body {
+    position: relative;
+  }
   .body.has-panel .panel {
-    position: fixed;
+    position: absolute;
     right: 0;
-    top: 38px;
-    bottom: 26px;
+    top: 0;
+    bottom: 0;
     width: min(var(--pw), 92vw);
-    z-index: 35;
+    z-index: var(--z-page);
     box-shadow: var(--shadow);
   }
   .column {
@@ -49,12 +54,12 @@
 
 /* Narrow windows: the list opens as an overlay drawer from the rail's button (at phone width from
    the title bar's menu button). Closed it stays hidden, as before. */
-@media (max-width: 1100px) {
+@media (max-width: 899px) {
   .column.drawer-open {
-    position: fixed;
-    inset: 38px 0 26px 0;
+    position: absolute;
+    inset: 0;
     visibility: visible;
-    z-index: 36;
+    z-index: var(--z-page-detail);
     border: 0;
     background: none;
     overflow: visible;

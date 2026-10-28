@@ -13,7 +13,7 @@
 //! - At most one install holds the slot, taken in one locked step before the dialog (`MarketState::reserve`); its
 //!   task holds the core while it runs and is aborted on cancel and at shutdown (its staging folder is removed by
 //!   the installer's guard).
-//! - After an install or removal every session with an open channel gets `plugin/reload` (Vibe re-pins plugins);
+//! - After an install or removal every open chat uses the core plugin refresh (re-pin, then rebind host hooks);
 //!   a failing reload is reported to the composer, never fatal. Reads never reopen a session.
 
 use std::path::PathBuf;
@@ -244,7 +244,12 @@ impl Core {
                 self.change_plugin(origin, "removePlugin", path, session_id, cwd)
                     .await?
             }
-            MarketRequest::Install { id } => self.start_install(origin, id).await?,
+            MarketRequest::Install { id, offer_id } => {
+                self.start_install(origin, id, offer_id).await?
+            }
+            MarketRequest::OfferInstall { id } => MarketResult::Offer {
+                offer: self.market_offer(&id)?,
+            },
             MarketRequest::CancelInstall {} => {
                 let taken = self.shared.market.slot().take();
                 if let Some(slot) = taken {
@@ -293,6 +298,8 @@ impl Core {
                 for name in servers {
                     self.shared.connectors.mark_removed(&name, true);
                 }
+                crate::ask::grants::connector_removed(&self.shared);
+                crate::ask::grants::plugin_changed(&self.shared);
                 info!(id, "marketplace: removed");
                 self.reload_sessions().await;
                 let notice = store.remove_data(&id).err().map(|error| {
@@ -312,6 +319,19 @@ impl Core {
         Store::new(&self.shared.instructions.own_home)
     }
 
+    /// The address of catalog server `id` (the reviewed, pinned catalog), `None` for an unknown id or a catalog that
+    /// did not load. The host pins a Debug API "add this catalog server" grant to it (`vw-host` `ui_grants`).
+    #[must_use]
+    pub fn catalog_server_url(&self, id: &str) -> Option<String> {
+        let catalog = self.catalog().ok()?;
+        catalog
+            .entries
+            .iter()
+            .find(|entry| entry.id == id)
+            .and_then(|entry| entry.server.as_ref())
+            .map(|server| server.url.clone())
+    }
+
     pub(crate) fn catalog(&self) -> Result<Arc<Catalog>, CoreError> {
         self.shared
             .market
@@ -320,8 +340,14 @@ impl Core {
             .map_err(|e| CoreError::new(ErrorCode::Internal, e))
     }
 
-    /// `install`: checks, the native dialog, then the owned task.
-    async fn start_install(&self, origin: Origin, id: String) -> Result<MarketResult, CoreError> {
+    /// `install`: checks, the native dialog (or the window's click on a shown offer), then the owned task.
+    async fn start_install(
+        &self,
+        origin: Origin,
+        id: String,
+        offer_id: Option<String>,
+    ) -> Result<MarketResult, CoreError> {
+        let offered = self.take_market_offer(origin, &id, offer_id.as_deref())?;
         let catalog = self.catalog()?;
         let entry = catalog
             .entry(&id)
@@ -342,7 +368,7 @@ impl Core {
             .market
             .reserve(&id)
             .map_err(|running| running_error(&running))?;
-        let checked = self.check_and_confirm(origin, &id, &entry).await;
+        let checked = self.check_and_confirm(origin, &id, &entry, offered).await;
         let (store, fetcher) = match checked {
             Ok(ready) => ready,
             Err(error) => {
@@ -422,12 +448,14 @@ impl Core {
         Ok(MarketResult::InstallStarted { id })
     }
 
-    /// The checks after the slot is reserved: not a foreign folder, a downloader, then the native dialog.
+    /// The checks after the slot is reserved: not a foreign folder, a downloader, then the native dialog unless
+    /// the window's click confirmed a shown offer (`offered`).
     async fn check_and_confirm(
         &self,
         origin: Origin,
         id: &str,
         entry: &vw_market::Entry,
+        offered: bool,
     ) -> Result<(Store, Arc<dyn Fetcher>), CoreError> {
         let store = self.store();
         store.receipt(id).map_err(|e| from_market(&e))?;
@@ -448,15 +476,74 @@ impl Core {
             .fetcher
             .clone()
             .map_err(|e| CoreError::new(ErrorCode::Internal, e))?;
-        let summary = crate::market_project::consent_summary(entry);
-        self.ask_native(
-            crate::command::requester(origin),
-            "vw/marketplace/install",
-            json!({"id": id}),
-            summary,
-        )
-        .await?;
+        if offered {
+            info!(
+                id,
+                "marketplace: the window's click confirmed the shown offer"
+            );
+        } else {
+            let summary = crate::market_project::consent_summary(entry);
+            self.ask_native(
+                crate::command::requester(origin),
+                "vw/marketplace/install",
+                json!({"id": id}),
+                summary,
+            )
+            .await?;
+        }
         Ok((store, fetcher))
+    }
+
+    /// Takes the window's install offer for `id`, first (single use, also when a later check fails). True when the
+    /// click may skip the native dialog: only the window's; the Debug API keeps its confirmer path.
+    fn take_market_offer(
+        &self,
+        origin: Origin,
+        id: &str,
+        offer_id: Option<&str>,
+    ) -> Result<bool, CoreError> {
+        let Some(offer) = offer_id else {
+            return Ok(false);
+        };
+        self.shared.install_offers.take(
+            offer,
+            &crate::install_offers::OfferKey::new("vw/marketplace/install", id, ""),
+            self.shared.asks.now_ms(),
+        )?;
+        Ok(origin == Origin::Ui)
+    }
+
+    /// `offerInstall`: the catalog's own name, publisher and licence, and what the install puts on this computer
+    /// (the same sentence the native dialog shows), kept as a single-use offer for `install`.
+    fn market_offer(
+        &self,
+        id: &str,
+    ) -> Result<crate::install_offers::ToolsInstallOffer, CoreError> {
+        let catalog = self.catalog()?;
+        let entry = catalog
+            .entry(id)
+            .ok_or_else(|| from_market(&MarketError::UnknownEntry(id.to_owned())))?;
+        if entry.kind == Kind::Server || !installable(entry) {
+            return Err(from_market(&MarketError::NotInstallable(
+                "there is nothing to install for it on this computer".to_owned(),
+            )));
+        }
+        let offer = crate::install_offers::ToolsInstallOffer {
+            offer_id: String::new(),
+            kind: "marketplace".to_owned(),
+            name: entry.name.clone(),
+            publisher: Some(entry.publisher.clone()),
+            source: "Vibe Work's reviewed Tools catalog".to_owned(),
+            licence: Some(entry.licence.clone()),
+            runs: crate::market_project::consent_summary(entry),
+            version: None,
+            expires_at: 0,
+        };
+        self.shared.install_offers.make(
+            crate::install_offers::OfferKey::new("vw/marketplace/install", id, ""),
+            offer,
+            self.shared.asks.now_ms(),
+        )
     }
 
     /// One progress step from the installer: downloads are reported at most every 250 ms.
@@ -499,17 +586,11 @@ impl Core {
         self.shared.emit(CoreEvent::MarketInstall { progress });
     }
 
-    /// `plugin/reload` for every session with an open channel.
+    /// Refreshes every open chat; working chats pick up the change at turn end.
     pub(crate) async fn reload_sessions(&self) {
         for open in self.shared.channels.open_channels() {
-            let params = json!({"sessionId": open.session_id});
-            if let Err(error) = self.shared.gate.call("plugin/reload", params, None).await {
-                warn!(%error, "marketplace: a session did not reload its plugins");
-                self.shared.emit(CoreEvent::Alert {
-                    session_id: Some(open.session_id),
-                    kind: crate::event::AlertKind::PluginReloadFailed,
-                    message: error.to_string(),
-                });
+            if let Err(error) = self.refresh_plugins(&open.session_id).await {
+                warn!(%error, "marketplace: a session did not refresh its plugins");
             }
         }
     }
@@ -521,17 +602,9 @@ impl Core {
         cwd: Option<String>,
     ) -> MarketView {
         let project = self.plugin_project(session_id.as_deref(), cwd.as_deref());
-        let swept = {
-            let _held = self.shared.plugin_approvals.mutations.lock().await;
-            self.shared.plugin_approvals.sweep()
-        };
-        let discovery = match swept {
-            Ok(()) => {
-                self.discover_plugins(project.as_deref(), session_id.as_deref())
-                    .await
-            }
-            Err(error) => Err(error.to_string()),
-        };
+        let discovery = self
+            .discover_plugins(project.as_deref(), session_id.as_deref())
+            .await;
         let open = session_id.filter(|id| self.shared.channels.has_channel(id));
         let (plugins, skills) = match &open {
             Some(id) => (

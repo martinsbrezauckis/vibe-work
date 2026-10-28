@@ -2,19 +2,22 @@
  * The details panel of the selected marketplace entry: what it is and who makes it, what it installs and
  * runs, how it was reviewed, its licence and pin, its state in the viewed session (loaded, skills, Vibe's issues), and
  * its actions (install / update / stop / remove; for servers add, with the vendor's own rule when it only allows
- * approved apps and what to do instead).
- * Depends on: AppContext (link dialog), hooks, model, MarketCard (glyph, main action). Called by: MarketplacePage.
+ * approved apps and what to do instead). An install shows the offer block directly above Install, which
+ * then installs exactly that offer.
+ * Depends on: AppContext (link dialog), hooks, model, MarketCard (glyph, main action), InstallOffer.
+ * Called by: MarketplacePage.
  * Invariants: vendor pages open only through the link dialog; the headless browser's note that it has none of the
  * built-in browser's address guards is the catalog's text, shown as is.
  */
-import { Button } from "../../components/Controls";
-import type { ReactElement } from "react";
+import { Badge, Button } from "../../components/Controls";
+import { type ReactElement, useRef } from "react";
 
 import type { MarketEntryView, MarketView } from "../../protocol/core";
 import { useApp } from "../shell/AppContext";
 import { CategoryIcon } from "../connectors/CategoryIcon";
+import { escapeCloses, InstallOffer, useOfferFocus } from "../connectors/InstallOffer";
 import { glyphOf, mainAction } from "./MarketCard";
-import { useMarket, useMarketActions, useServers } from "./hooks";
+import { useMarket, useMarketActions, useMarketOffers, useServers } from "./hooks";
 import { categoryLabel, contents, pinLine, progressText, statusOf } from "./model";
 
 function SessionPart({ e }: { e: MarketEntryView }): ReactElement | null {
@@ -95,65 +98,82 @@ function Actions({ e }: { e: MarketEntryView }): ReactElement {
   const servers = useServers();
   const action = mainAction(e, servers);
   const running = installing !== null && installing.id === e.entry.id;
+  const offer = useMarketOffers((o) => o.open[e.entry.id]);
+  const focus = useMarketOffers((o) => o.focus);
+  const confirm = useRef<HTMLButtonElement>(null);
+  useOfferFocus(focus, e.entry.id, "confirm", confirm);
+  const cancel = () => {
+    actions?.cancelOffer(e.entry.id);
+  };
   return (
     <div className="cactions">
       {action === "add" ? (
-        <button
+        <Button
           data-testid="marketplace.market-detail-add-server"
           type="button"
-          className="btn-primary"
+          appearance="dialog"
           onClick={() => void actions?.addServer(e.entry.id)}
         >
           Add and sign in
-        </button>
+        </Button>
       ) : null}
       {action === "addKey" ? (
-        <button
+        <Button
           data-testid="marketplace.market-detail-add-key-server"
           type="button"
-          className="btn-primary"
+          appearance="dialog"
           onClick={() => void actions?.addKeyServer(e.entry.id)}
         >
           Add with your key
-        </button>
+        </Button>
       ) : null}
       {action === "install" || action === "update" ? (
-        <button
+        <Button
           data-testid="marketplace.market-detail-install"
+          ref={confirm}
           type="button"
-          className="btn-primary"
-          disabled={installing !== null}
-          onClick={() => void actions?.install(e.entry.id)}
+          appearance="dialog"
+          disabled={installing !== null || (offer !== undefined && offer.phase !== "shown")}
+          onClick={() =>
+            void (action === "install"
+              ? actions?.installShown(e.entry.id)
+              : actions?.install(e.entry.id))
+          }
+          onKeyDown={offer === undefined ? undefined : escapeCloses(cancel)}
         >
-          {action === "install" ? "Install" : "Update"}
-        </button>
+          {action === "update"
+            ? "Update"
+            : offer?.phase === "installing"
+              ? "Installing…"
+              : "Install"}
+        </Button>
       ) : null}
       {running ? (
-        <button
+        <Button
           data-testid="marketplace.market-detail-cancel"
           type="button"
-          className="tb-btn"
+
           onClick={() => void actions?.cancel()}
         >
           Stop
-        </button>
+        </Button>
       ) : null}
       {e.installed !== null && !running ? (
         <>
           {e.installed.changed === true ? (
-            <button
+            <Button
               data-testid="marketplace.market-detail-install-2"
               type="button"
-              className="tb-btn"
+
               onClick={() => void actions?.install(e.entry.id)}
             >
               Reinstall
-            </button>
+            </Button>
           ) : null}
           {e.folder ? (
-            <button
+            <Button
               type="button"
-              className="tb-btn"
+
               data-testid="marketplace.market-detail-toggle"
               onClick={() => {
                 if (e.folder)
@@ -161,12 +181,12 @@ function Actions({ e }: { e: MarketEntryView }): ReactElement {
               }}
             >
               {e.off ? "Turn on" : "Turn off"}
-            </button>
+            </Button>
           ) : null}
           <Button
             data-testid="marketplace.market-detail-remove"
             type="button"
-            small
+            shape="outlined"
             variant="danger"
             onClick={() =>
               e.off && e.folder
@@ -205,7 +225,9 @@ function Body({ e, view }: { e: MarketEntryView; view: MarketView | null }): Rea
       </header>
       <p>{e.entry.summary}</p>
       <p>
-        <span className={`cstat mstat-${status.tone}`}>{status.text}</span>
+        <Badge presentation="market-status" state={status.tone}>
+          {status.text}
+        </Badge>
       </p>
       {installing !== null && installing.id === e.entry.id ? (
         <p className="cmuted" role="status">
@@ -253,7 +275,35 @@ function Body({ e, view }: { e: MarketEntryView; view: MarketView | null }): Rea
         </p>
       )}
       <SessionPart e={e} />
+      <Offer e={e} />
       <Actions e={e} />
+    </>
+  );
+}
+
+/** The install offer block right above Install, and the read-failed line when the offer could not be read. */
+function Offer({ e }: { e: MarketEntryView }): ReactElement | null {
+  const actions = useMarketActions();
+  const offer = useMarketOffers((o) => o.open[e.entry.id]);
+  const problem = useMarketOffers((o) => o.problems[e.entry.id]);
+  const focus = useMarketOffers((o) => o.focus);
+  return (
+    <>
+      {problem === undefined ? null : (
+        <p className="key-problem" role="alert" data-testid="marketplace.offer-problem">
+          {problem}
+        </p>
+      )}
+      {offer === undefined ? null : (
+        <InstallOffer
+          testId="marketplace.offer"
+          open={offer}
+          focus={focus}
+          onCancel={() => {
+            actions?.cancelOffer(e.entry.id);
+          }}
+        />
+      )}
     </>
   );
 }
@@ -267,14 +317,14 @@ export function MarketDetail(): ReactElement | null {
   if (e === null) return null;
   return (
     <aside className="cdetail" aria-label={`${e.entry.name} details`} data-testid="market-detail">
-      <button
+      <Button
         data-testid="marketplace.market-detail-select"
         type="button"
-        className="tb-btn cdetail-close"
+        placement="detail-close"
         onClick={() => actions?.select(null)}
       >
         Close
-      </button>
+      </Button>
       <Body e={e} view={view} />
     </aside>
   );

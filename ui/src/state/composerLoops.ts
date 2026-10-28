@@ -116,11 +116,9 @@ export function createLoopActions(deps: LoopDeps) {
         await actions.loadLoops(sessionId, true);
         return true;
       } catch (thrown) {
-        toasts.push({
-          kind: "error",
-          bellKind: "failure",
-          text: toCallError(thrown).error.message,
-        });
+        const error = toCallError(thrown).error;
+        if (error.code !== "accessModeUnverified")
+          toasts.push({ kind: "error", bellKind: "failure", text: error.message });
         // The loop may be gone already (it was cancelled elsewhere): show what Vibe holds now.
         await actions.loadLoops(sessionId, true);
         return false;
@@ -135,11 +133,9 @@ export function createLoopActions(deps: LoopDeps) {
         await actions.loadLoops(sessionId, true);
         return count;
       } catch (thrown) {
-        toasts.push({
-          kind: "error",
-          bellKind: "failure",
-          text: toCallError(thrown).error.message,
-        });
+        const error = toCallError(thrown).error;
+        if (error.code !== "accessModeUnverified")
+          toasts.push({ kind: "error", bellKind: "failure", text: error.message });
         await actions.loadLoops(sessionId, true);
         return null;
       }
@@ -214,7 +210,9 @@ export function createLoopActions(deps: LoopDeps) {
           }
         }
       } catch (thrown) {
-        const message = toCallError(thrown).error.message;
+        const error = toCallError(thrown).error;
+        const message = error.message;
+        if (error.code === "accessModeUnverified") return invalid(sessionId, message);
         return refusedInput(thrown)
           ? invalid(sessionId, `${message} ${LOOP_USAGE}`)
           : fail(sessionId, message);
@@ -223,6 +221,3 @@ export function createLoopActions(deps: LoopDeps) {
   };
   return actions;
 }
-
-/** The loop actions. */
-export type LoopActions = ReturnType<typeof createLoopActions>;

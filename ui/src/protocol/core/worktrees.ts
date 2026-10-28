@@ -48,11 +48,7 @@ sessionId: string,
 /**
  * `fingerprint` of the inspection the user saw.
  */
-fingerprint: string, } | { "op": "keep", 
-/**
- * Session id.
- */
-sessionId: string, } | { "op": "orphans", };
+fingerprint: string, } | { "op": "orphans", };
 
 export type WorktreesResult = { "kind": "count", 
 /**
@@ -98,7 +94,7 @@ inspection: WorktreeInspection, } | { "kind": "removed",
 /**
  * What happened.
  */
-outcome: RemoveOutcome, } | { "kind": "kept", } | { "kind": "orphans", 
+outcome: RemoveOutcome, } | { "kind": "orphans", 
 /**
  * Undecided leftovers and kept copies, oldest first.
  */
@@ -172,11 +168,7 @@ state: WorktreeState,
 /**
  * Vibe Work made it (a record exists).
  */
-madeHere: boolean, 
-/**
- * The user's decision at the end of the session, if any.
- */
-decision: Decision | null, };
+madeHere: boolean, };
 
 export type WorktreeState = "pending" | "ready" | "missing" | "removed";
 
@@ -275,10 +267,6 @@ export type OrphanWorktree = {
  * The original session's id.
  */
 sessionId: string, 
-/**
- * The original session's owner chose to keep this copy.
- */
-kept: boolean, 
 /**
  * The copy's folder (window only).
  */

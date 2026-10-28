@@ -2,11 +2,14 @@
  * The line above the text box while dictating: the timer, the live text (realtime), a note
  * (live text lost, the length limit, nothing heard) or the error, with Stop and Cancel. While the OS asks for the
  * microphone (a first use on macOS) it says so, with Cancel and no time limit.
- * Depends on: AppContext, the voice hooks. Called by: Composer.
+ * Depends on: AppContext, the voice hooks, the announcer. Called by: Composer.
  * Invariants: render only; shown for the session that dictates; the live text is plain text (React
- * escapes it), never Markdown.
+ * escapes it), never Markdown. The strip is not a live region: a note or an error is said once by the app's
+ * announcer after the microphone closed.
  */
-import type { ReactElement } from "react";
+import { Button } from "../../components/Controls";
+import { type ReactElement, useEffect } from "react";
+import { announce } from "../../state/announcer";
 
 import { useApp } from "../shell/AppContext";
 import { clock, useDictation } from "./hooks";
@@ -23,13 +26,20 @@ export function DictationStrip({ sessionId }: { sessionId: string }): ReactEleme
   const note = useDictation((s) => s.note);
   const error = useDictation((s) => s.error);
   const permissionWait = useDictation((s) => s.permissionWait);
+  const idle = phase !== "starting" && phase !== "recording" && phase !== "transcribing";
+  // Said once, after the microphone closed: the note or the error. Never the clock or the live words (re-read every
+  // second), and nothing while recording (the screen reader's voice would be heard by the microphone).
+  const said = idle ? (error ?? note ?? "") : "";
+  useEffect(() => {
+    if (said !== "") announce(said, { assertive: error !== null });
+  }, [said, error]);
   if (voice === null) return null;
   const { dictation } = voice;
   const live = phase === "starting" || phase === "recording" || phase === "transcribing";
   if (!live && note === null && error === null) return null;
   if (live && owner !== sessionId) return null;
   return (
-    <div className={`dictation dictation-${phase}`} role="status" data-testid="dictation-strip">
+    <div className={`dictation dictation-${phase}`} data-testid="dictation-strip">
       {phase === "recording" ? <span className="rec-dot" aria-hidden="true" /> : null}
       <span className="mono dictation-time">
         {phase === "recording" ? `${clock(seconds)} / ${clock(max)}` : null}
@@ -52,22 +62,22 @@ export function DictationStrip({ sessionId }: { sessionId: string }): ReactEleme
               : (error ?? note)}
       </span>
       {phase === "recording" ? (
-        <button
+        <Button
           data-testid="voice.dictation-strip-stop"
           type="button"
-          className="mini"
+          appearance="compact"
           title="Stop dictation and transcribe speech"
           aria-label="Stop dictation and transcribe speech"
           onClick={() => void dictation.stop()}
         >
           Stop
-        </button>
+        </Button>
       ) : null}
       {phase === "recording" || phase === "starting" ? (
-        <button
+        <Button
           data-testid="voice.dictation-strip-cancel"
           type="button"
-          className="mini"
+          appearance="compact"
           title="Cancel dictation (Escape)"
           aria-label="Cancel dictation (Escape)"
           onClick={() => {
@@ -75,13 +85,13 @@ export function DictationStrip({ sessionId }: { sessionId: string }): ReactEleme
           }}
         >
           Cancel
-        </button>
+        </Button>
       ) : null}
       {!live ? (
-        <button
+        <Button
           data-testid="voice.dictation-strip-dismiss"
           type="button"
-          className="mini"
+          appearance="compact"
           aria-label="Dismiss dictation notice"
           title="Dismiss dictation notice"
           onClick={() => {
@@ -89,7 +99,7 @@ export function DictationStrip({ sessionId }: { sessionId: string }): ReactEleme
           }}
         >
           OK
-        </button>
+        </Button>
       ) : null}
     </div>
   );

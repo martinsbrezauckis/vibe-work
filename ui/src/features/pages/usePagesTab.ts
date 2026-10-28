@@ -6,7 +6,8 @@
  * Invariants: comments and points end as context chips (never commands); "Send to Vibe" marks the comment sent only
  * after the chip is in the composer; when the tab shows another folder's handbook than the session's own (such as its project's main folder) the chips name it by its absolute path and `foreign` says so.
  */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { writeClipboard } from "../../state/clipboard";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { AnswerValue, Comment, JsonValue, PickedSection, Rect } from "../../protocol/core";
 import { toCallError } from "../../protocol/client/types";
@@ -21,9 +22,10 @@ import {
   chipFolder,
   commentChip,
   fixChip,
-  migrationChip,
   mismatchChip,
+  sectionChip,
 } from "./model";
+import { usePageMenu } from "./PageMenu";
 import { answersChip } from "./inputs";
 import { insertChip, pointSection } from "./point";
 import type { Pages } from "./store";
@@ -80,12 +82,16 @@ export function usePagesTab(pages: Pages, sessionId: string) {
     if (chipIn(commentChip(chips, comment)))
       void pages.markSent(sessionId, comment.page, [comment.id]);
   };
+  // The page area last shown: the page menu opens at a right click's point in it (the page reports page points).
+  const area = useRef<Rect | null>(null);
   const report = useCallback(
     (rect: Rect | null) => {
+      if (rect !== null) area.current = rect;
       pages.layout(rect === null ? null : { sessionId, rect });
     },
     [pages, sessionId],
   );
+  const menu = usePageMenu(pages, sessionId, showingPage, area);
   const shownPath = showingPage ? path : null;
   const answer = useCallback(
     (input: string, value: AnswerValue | null) => {
@@ -100,6 +106,33 @@ export function usePagesTab(pages: Pages, sessionId: string) {
     answers: shownPath === null ? null : answers,
     /**: the shown page is a prototype (runs its own script, sandboxed). */
     prototype: page?.facts.kind === "prototype",
+    /**: the page's right-click menu (open while `menu.at` is set; the page is parked under it). */
+    menu: {
+      ...menu,
+      point: () =>
+        void pages.menuSection(sessionId).then((picked) => {
+          if (picked === null) return;
+          const outcome = insertChip(app, sessionId, sectionChip(chips, picked));
+          note(outcome.ok ? `Added to your message: ${outcome.chip.label}` : outcome.reason);
+        }),
+      comment: () =>
+        void pages.menuSection(sessionId).then((picked) => {
+          if (picked !== null) setDraft(picked);
+        }),
+      copy: () => {
+        const copying = pages.menuCopy(sessionId).then(async (text) => {
+          if (text === null) return;
+          try {
+            await writeClipboard(text);
+            app.toasts.feedback("Copied the selected text.");
+          } catch {
+            note("The selected text could not be copied.");
+          }
+        });
+        // The native selection read must finish before the UI-control request lets go of its clipboard writer.
+        void app.core?.trackAction(copying);
+      },
+    },
     /**: the shown page's current visual check report. */
     visual: shownPath === null ? undefined : hub?.visual[shownPath],
     checking,
@@ -133,10 +166,7 @@ export function usePagesTab(pages: Pages, sessionId: string) {
       const findings = hub?.hub?.validation.findings ?? [];
       chipIn(fixChip(chips, findings));
     },
-    /** Puts the migration request into the composer as a chip (the user sends it). */
-    askMigrate: () => {
-      chipIn(migrationChip());
-    },
+
     toolbar: {
       hub: () => {
         pages.showHub(sessionId);

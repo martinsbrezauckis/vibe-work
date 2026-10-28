@@ -13,8 +13,10 @@
  * - A session seen for the first time produces no transition (opening the app must not announce
  *   every old session), and a child (subagent) session never announces "finished".
  */
+import { cardAsks, toolTransport } from "./askBell";
+import { pendingHistoryAsks } from "../features/transcript/model/protectedChange";
 import { type CoreState, subagentCardsOf } from "./coreModel";
-import { statusType } from "./sessionSummary";
+import { sessionTitle, statusType } from "./sessionSummary";
 
 /** What the user chose to hear about. */
 export type NotifyLevel = "errors" | "permissions" | "all";
@@ -49,18 +51,46 @@ function object(value: unknown): Record<string, unknown> | null {
 
 /** Notifications `prev` -> `next` calls for (one per newly opened callback). */
 export function transitions(prev: CoreState, next: CoreState): Transition[] {
-  if (prev.sessions === next.sessions && prev.subagentCards === next.subagentCards) return [];
+  if (
+    prev.sessions === next.sessions &&
+    prev.subagentCards === next.subagentCards &&
+    prev.asks === next.asks
+  )
+    return [];
   const found: Transition[] = [];
+  for (const ask of Object.values(next.asks)) {
+    if (
+      ask.surface === "native" &&
+      ask.requester !== "core" &&
+      (ask.requester !== "debugApi" || ask.personOnly) &&
+      prev.asks[ask.id] === undefined
+    ) {
+      found.push({
+        sessionId: ask.session ?? "",
+        kind: "permission",
+        title: ask.title,
+        callbackId: ask.id,
+      });
+    }
+  }
   for (const [id, entry] of Object.entries(next.sessions)) {
     const before = prev.sessions[id];
     if (before === undefined) continue;
     const was = statusType(before.session);
     const now = statusType(entry.session);
-    const title =
-      typeof entry.session["title"] === "string" && entry.session["title"] !== ""
-        ? entry.session["title"]
-        : `Session ${id}`;
-    const opened = entry.openCallbackIds.filter((c) => !before.openCallbackIds.includes(c));
+    const title = sessionTitle(entry.session);
+    const earlier = [
+      ...before.openCallbackIds,
+      ...cardAsks(prev, id),
+      ...pendingHistoryAsks(before.state?.["history"]),
+    ];
+    const opened = [
+      ...entry.openCallbackIds,
+      ...cardAsks(next, id),
+      ...pendingHistoryAsks(entry.state?.["history"]),
+    ].filter(
+      (c, i, all) => all.indexOf(c) === i && !earlier.includes(c) && !toolTransport(next, id, c),
+    );
     const earlierChildren = new Set(
       subagentCardsOf(prev.subagentCards, id, before.state?.["childSessions"]).map(
         (card) => card.callbackId,
@@ -82,7 +112,17 @@ export function transitions(prev: CoreState, next: CoreState): Transition[] {
     if (opened.length > 0) kinds.push("permission");
     // A blocked status with no callback id cannot identify a card. The callback list is the
     // source of truth for permission notifications; status can oscillate while a card is open.
-    if (kinds.length === 0 && was === "running" && now === "idle" && !isChild)
+    // A chat with a waiting prompt has not finished (a held approval can read idle); its finish is
+    // announced when the last prompt closes.
+    const waitsNow = waiting(next, id, entry.openCallbackIds, entry.state?.["history"]);
+    const waitedBefore = waiting(prev, id, before.openCallbackIds, before.state?.["history"]);
+    if (
+      kinds.length === 0 &&
+      now === "idle" &&
+      !isChild &&
+      !waitsNow &&
+      (was === "running" || waitedBefore)
+    )
       kinds.push("finished");
     for (const kind of kinds) {
       const message = object(entry.session["status"])?.["message"];
@@ -100,6 +140,23 @@ export function transitions(prev: CoreState, next: CoreState): Transition[] {
     }
   }
   return found;
+}
+
+/** Whether a prompt of session `id` waits in `state`: a card, a pending history ask, or a window of its own. */
+function waiting(
+  state: CoreState,
+  id: string,
+  callbacks: readonly string[],
+  history: Parameters<typeof pendingHistoryAsks>[0],
+): boolean {
+  return (
+    callbacks.length > 0 ||
+    cardAsks(state, id).length > 0 ||
+    pendingHistoryAsks(history).length > 0 ||
+    Object.values(state.asks).some(
+      (ask) => ask.session === id && ask.surface === "native" && ask.requester === "agent",
+    )
+  );
 }
 
 /** Does `level` include `kind`? */
@@ -133,7 +190,7 @@ const SUMMARY: Record<NotifyKind, string> = {
 export function textFor(t: Transition): { title: string; body: string } {
   const prefix = `${SUMMARY[t.kind]} · `;
   const remaining = BODY_LIMIT - prefix.length;
-  const name = t.title.trim() || `Session ${t.sessionId}`;
+  const name = sessionTitle({ title: t.title });
   const bounded = name.length > remaining ? `${name.slice(0, remaining - 1)}…` : name;
   return { title: "Vibe Work", body: `${prefix}${bounded}` };
 }
@@ -146,5 +203,5 @@ export function fullTextFor(t: Transition): string {
     finished: "finished",
   };
   const detail = t.kind === "error" && t.detail !== undefined ? `: ${t.detail}` : ".";
-  return `${t.title} ${summary[t.kind]}${detail}`;
+  return `${sessionTitle({ title: t.title })} ${summary[t.kind]}${detail}`;
 }

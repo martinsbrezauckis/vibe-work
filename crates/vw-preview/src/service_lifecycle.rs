@@ -177,7 +177,9 @@ impl PreviewService {
                 if tabs.selected.as_deref() == Some(old) {
                     tabs.selected = Some(new.to_owned());
                 }
-                if state.tabs.contains_key(new) {
+                // Reading the destination's pinned App preview creates an empty tab list before promotion.
+                // Only real destination web pages compete with the pages being handed over.
+                if state.tabs.get(new).is_some_and(|tabs| !tabs.web.is_empty()) {
                     for key in tabs.web {
                         state.page_owners.remove(&key);
                         state.entries.remove(&key);

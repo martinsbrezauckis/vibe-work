@@ -6,7 +6,7 @@
  * Depends on: state/worktrees (`run`, `start`), model.ts. Called by: sessions/NewChatPanel.
  * Invariants: answers are kept with the folder they are for (a changed folder never shows the old one); a
  * failed read hides the section (starting in the folder itself stays possible); the toggle's last value is
- * remembered; every request for a folder a Debug API client chose carries the Debug API origin.
+ * remembered; every request is the window's (a folder a Debug API client chose was picked for this run).
  */
 import { useEffect, useState } from "react";
 
@@ -47,10 +47,10 @@ export interface CopyForm {
   /** The start button starts a copy. */
   active: boolean;
   /**
-   * Starts the session in a copy (no first turn: the new-chat composer sends it). `origin` "debug-api" lowers the
-   * start to the Debug API origin; a folder a Debug API client chose always starts with it.
+   * Starts the session in a copy (no first turn: the new-chat composer sends it). A folder a Debug API client chose
+   * was picked for this run when it chose it, so the window's start may trust it.
    */
-  start(origin?: "debug-api"): Promise<string | null>;
+  start(): Promise<string | null>;
 }
 
 function defaultBase(options: WorktreeOptions): string {
@@ -60,14 +60,15 @@ function defaultBase(options: WorktreeOptions): string {
   return options.branches[0]?.name ?? "";
 }
 
-/** The form for `folder`, chosen `by` the picker or a Debug API client. */
+/**
+ * The form for `folder`, chosen `by` the picker or a Debug API client (a native pick refreshes the options even when the folder spelling stays the same).
+ */
 export function useCopyForm(
   folder: string | null,
   by: NewFolderBy | null,
   othersLive: boolean,
   worktrees: Worktrees | null,
 ): CopyForm {
-  const origin = by === "debug-api" ? "debug-api" : undefined;
   const [found, setFound] = useState<{ folder: string; options: WorktreeOptions } | null>(null);
   // The user's choice in this panel (`null`: none yet, the default applies).
   const [choice, setChoice] = useState<{
@@ -92,7 +93,7 @@ export function useCopyForm(
     if (folder === null || worktrees === null) return;
     let live = true;
     worktrees
-      .run({ op: "options", cwd: folder }, origin)
+      .run({ op: "options", cwd: folder })
       .then((result) => {
         if (!live || result.kind !== "options") return;
         setFound({ folder, options: result.options });
@@ -107,7 +108,7 @@ export function useCopyForm(
     return () => {
       live = false;
     };
-  }, [folder, worktrees, origin, newChatRequest]);
+  }, [folder, by, worktrees, newChatRequest]);
 
   // the message is the new-chat composer's text, so it changes with every key. A name is suggested only
   // while a copy would be made (a git folder, offered, the switch on): a plain folder is never asked (the core
@@ -119,7 +120,7 @@ export function useCopyForm(
     let live = true;
     const timer = setTimeout(() => {
       worktrees
-        .run({ op: "suggestName", cwd: folder, text: message }, origin)
+        .run({ op: "suggestName", cwd: folder, text: message })
         .then((result) => {
           if (live && result.kind === "name") setBranchState(result.branch);
         })
@@ -129,7 +130,7 @@ export function useCopyForm(
       live = false;
       clearTimeout(timer);
     };
-  }, [copyOn, message, edited, folder, worktrees, origin]);
+  }, [copyOn, message, edited, folder, worktrees]);
 
   const available = options?.isGit === true;
   const offered = options?.offered === true;
@@ -158,12 +159,9 @@ export function useCopyForm(
     },
     include: options?.include ?? null,
     active: available && offered && on && folder !== null,
-    async start(lowered) {
+    async start() {
       if (worktrees === null || folder === null) return null;
-      return worktrees.start(
-        { cwd: folder, base, branch: branch.trim(), firstMessage: "" },
-        lowered ?? origin,
-      );
+      return worktrees.start({ cwd: folder, base, branch: branch.trim(), firstMessage: "" });
     },
   };
 }

@@ -36,6 +36,17 @@ pub(crate) struct EventsQuery {
 
 fn event_name(event: &CoreEvent) -> &'static str {
     match event {
+        CoreEvent::AskOpened { .. } => "askOpened",
+        CoreEvent::AskClosed { .. } => "askClosed",
+        CoreEvent::AskGrants { .. } => "askGrants",
+        CoreEvent::ChromeAsk { .. } => "chromeAsk",
+        CoreEvent::ChromeControl { .. } => "chromeControl",
+        CoreEvent::GuardRefused { .. } => "guardRefused",
+        CoreEvent::ProtectedChange { .. } => "protectedChange",
+        CoreEvent::ReadAloud { .. } => "readAloud",
+        CoreEvent::PanelRead { .. } => "panelRead",
+        CoreEvent::GithubReads { .. } => "githubReads",
+        CoreEvent::KeepAwake { .. } => "keepAwake",
         CoreEvent::SecretScan { .. } => "secretScan",
         CoreEvent::Snapshot { .. } => "snapshot",
         CoreEvent::Change { .. } => "change",
@@ -49,6 +60,7 @@ fn event_name(event: &CoreEvent) -> &'static str {
         CoreEvent::Alert { .. } => "alert",
         CoreEvent::SessionStuck { .. } => "sessionStuck",
         CoreEvent::SessionHolder { .. } => "sessionHolder",
+        CoreEvent::QueueReturned { .. } => "queueReturned",
         CoreEvent::DebugApi { .. } => "debugApi",
         CoreEvent::KeyNeeded { .. } => "keyNeeded",
         CoreEvent::KeyStatusChanged {} => "keyStatusChanged",
@@ -62,6 +74,7 @@ fn event_name(event: &CoreEvent) -> &'static str {
         CoreEvent::PreviewShowRequested { .. } => "previewShowRequested",
         CoreEvent::BrowserChanged { .. } => "browserChanged",
         CoreEvent::PagesChanged { .. } => "pagesChanged",
+        CoreEvent::PageMenu { .. } => "pageMenu",
         CoreEvent::FilesChanged { .. } => "filesChanged",
         CoreEvent::LineCommentsChanged { .. } => "lineCommentsChanged",
         CoreEvent::ProjectsChanged {} => "projectsChanged",

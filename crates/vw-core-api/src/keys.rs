@@ -3,13 +3,13 @@
 //! Vibe and none returns a secret:
 //! - inputs that are secret (passphrase, API key) are [`SecretInput`]: redacted in `Debug`, written
 //!   as `"<redacted>"` if a command is ever serialized, zeroed on drop;
-//! - results are statuses, counts and metadata; `setupStoreKey`, `removeKey`, `importVibeKey`,
-//!   `removeVibeKeyOriginal`, `createVault`, `unlockVault`, `lockVault` and `useExistingKey`
+//! - results are statuses, counts and metadata; `setupStoreKey`, `importVibeKey`,
+//!   `removeVibeKeyOriginal`, `createVault`, `unlockVault`, `lockVault`, `setLockVaultOnQuit` and `useExistingKey`
 //!   answer `done` (ok) or an error, nothing else.
 //!
 //! Who may change the key and the vault: the window only (on the vault the Debug API has
 //! the agent's rights; `vault_scope` refuses it every op here except the reads `readStatus`, `listKeyCandidates`,
-//! `detectVibeKey` and `testKey`). What never changes: no
+//! `listMistralKeys`, `detectVibeKey` and `testKey`). What never changes: no
 //! command, result, event or log carries the key or the passphrase as a value (the Debug API's response
 //! guard in vw-debug-api also refuses to send any registered secret).
 //!
@@ -21,6 +21,18 @@ use vw_vault::{SecretString, VaultError, VaultKind, VaultStatus};
 
 use crate::command::CommandResult;
 use crate::error::{CoreError, ErrorCode};
+
+/// Application key availability for Skills; the supervisor's proxy credential is never authentication.
+/// A configured key service takes precedence over the development process's environment.
+pub(crate) fn mistral_key_available(keys: Option<&KeyService>) -> bool {
+    keys.map_or_else(
+        || {
+            std::env::var_os("MISTRAL_API_KEY")
+                .is_some_and(|key| !key.to_string_lossy().trim().is_empty())
+        },
+        |keys| keys.speech_available() && !keys.key_was_rejected(),
+    )
+}
 
 /// A secret command input (passphrase or API key).
 #[derive(Clone, PartialEq, Eq)]
@@ -112,41 +124,66 @@ impl From<VibeKeySource> for ExistingSource {
 pub enum KeyRequest {
     /// Vault and key status (no secret).
     ReadStatus {},
-    /// Creates a new private Vibe Work vault and unlocks it in a managed app.
+    /// Creates a new private Vibe Work vault and unlocks it in a managed app. Its key is kept in
+    /// the computer's credential store until Lock (or a quit with `lockVaultOnQuit`).
     CreateVault {
         /// The new passphrase.
         passphrase: SecretInput,
-        /// Remember this device (product default: on).
-        remember_device: bool,
     },
-    /// Unlocks with the passphrase.
+    /// Unlocks with the passphrase; the key is kept as for `createVault`.
     UnlockVault {
         /// The passphrase.
         passphrase: SecretInput,
-        /// Turn "remember this device" on or off (absent: keep).
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        #[cfg_attr(feature = "ts", ts(optional))]
-        remember_device: Option<bool>,
         /// Which vault, when two exist.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[cfg_attr(feature = "ts", ts(optional))]
         vault: Option<VaultChoice>,
     },
-    /// Locks the vault (model requests wait for the next unlock).
+    /// Locks the vault and deletes its kept key (model requests wait for the next unlock, also
+    /// after a restart).
     LockVault {},
+    /// Turns "Lock the vault when Vibe Work quits" on or off (takes effect at the quit).
+    SetLockVaultOnQuit {
+        /// On: quitting locks the vault and deletes its kept key.
+        on: bool,
+    },
     /// Stores the key (first setup or replacement). One-way: answers `done` or an error.
     /// Replacing an active key asks the native confirmation before storage.
     SetupStoreKey {
         /// The key.
         api_key: SecretInput,
     },
-    /// Stops using the key (deletes Vibe Work's own vault resource; never another app's item).
-    RemoveKey {},
     /// Mistral credentials already in the vault (metadata).
     ListKeyCandidates {},
     /// Uses one of them instead of storing a copy.
     UseExistingKey {
         /// Its vault item id.
+        item_id: String,
+    },
+    /// Every saved Mistral credential, including the active one; metadata only.
+    ListMistralKeys {},
+    /// Stores and tests a new item without changing the active credential.
+    AddMistralKey {
+        /// The vault display label.
+        name: String,
+        /// One-way secret input.
+        api_key: SecretInput,
+    },
+    /// Selects a saved credential after busy checks and a native confirmation.
+    UseMistralKey {
+        /// The chosen vault identity.
+        item_id: String,
+    },
+    /// Changes a saved credential's label.
+    RenameMistralKey {
+        /// Vault identity.
+        item_id: String,
+        /// New label.
+        name: String,
+    },
+    /// Removes an unused credential after the window asks the user.
+    RemoveMistralKey {
+        /// Vault identity.
         item_id: String,
     },
     /// `GET /v1/models` with the key in use (nothing is spent).
@@ -169,6 +206,10 @@ pub enum KeyRequest {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "a wire view: each flag is an independent fact the window shows"
+)]
 pub struct KeyStatusView {
     /// `noVault`, `locked`, `unlocked`, `twoVaults`, `remoteNotSupported`, `legacyProfile`,
     /// `setupUnfinished`.
@@ -181,8 +222,12 @@ pub struct KeyStatusView {
     pub vault_selected: bool,
     /// The selected vault's profile folder, or null before a choice.
     pub vault_path: Option<String>,
-    /// This device is (or can be) unlocked without the passphrase.
+    /// The vault's key is kept in this computer's credential store (it opens at the next start
+    /// without the passphrase).
     pub remembered_device: bool,
+    /// "Lock the vault when Vibe Work quits" (absent in a status from before the switch: off).
+    #[serde(default)]
+    pub lock_vault_on_quit: bool,
     /// `unknown` (locked), `missing`, `ready`.
     pub key_state: String,
     /// The vault item the key comes from, when ready.
@@ -322,6 +367,7 @@ impl From<KeyStatus> for KeyStatusView {
                 added_ms: item.added_ms,
             }),
             remember_note: status.remember_note,
+            lock_vault_on_quit: status.lock_on_quit,
         }
     }
 }
@@ -374,6 +420,7 @@ pub(crate) fn reason(error: &KeyError) -> &'static str {
             VaultError::Corrupt(_) => "corrupt",
             VaultError::Io { .. } => "io",
         },
+        KeyError::KeyInUse => "keyInUse",
         KeyError::NoKey => "noKey",
         KeyError::InvalidKey => "invalidKey",
         KeyError::PermissionsUnreadable => "permissionsUnreadable",
@@ -398,6 +445,13 @@ pub(crate) fn reason(error: &KeyError) -> &'static str {
     }
 }
 
+/// The error when a vault command runs while this run has no vault (`notConfigured`), shown to the user as it is.
+pub(crate) fn no_vault() -> CoreError {
+    let mut error = CoreError::new(ErrorCode::KeyService, "No vault is connected.");
+    error.server_code = Some("notConfigured".to_owned());
+    error
+}
+
 pub(crate) fn key_error(error: &KeyError) -> CoreError {
     let mut core = CoreError::new(ErrorCode::KeyService, error.to_string());
     core.server_code = Some(reason(error).to_owned());
@@ -418,32 +472,21 @@ pub(crate) async fn execute(
         KeyRequest::ReadStatus {} => Ok(CommandResult::KeyStatus {
             status: keys.status().await.map_err(map)?.into(),
         }),
-        KeyRequest::CreateVault {
-            passphrase,
-            remember_device,
-        } => {
+        KeyRequest::CreateVault { passphrase } => {
             // Registered only once the vault holds it (an unconfirmed input stays out of the redaction list).
             let kept = passphrase.0.clone();
-            keys.create_vault(passphrase.0, remember_device)
-                .await
-                .map_err(map)?;
+            keys.create_vault(passphrase.0).await.map_err(map)?;
             kept.register_as(vw_secrets::SecretKind::Typed);
             done
         }
-        KeyRequest::UnlockVault {
-            passphrase,
-            remember_device,
-            vault,
-        } => {
+        KeyRequest::UnlockVault { passphrase, vault } => {
             let choice = vault.map(|v| match v {
                 VaultChoice::Shellx => VaultKind::Shellx,
                 VaultChoice::Desktop => VaultKind::Desktop,
                 VaultChoice::VibeWork => VaultKind::VibeWork,
             });
             let kept = passphrase.0.clone();
-            keys.unlock(passphrase.0, remember_device, choice)
-                .await
-                .map_err(map)?;
+            keys.unlock(passphrase.0, choice).await.map_err(map)?;
             kept.register_as(vw_secrets::SecretKind::Typed);
             done
         }
@@ -451,13 +494,13 @@ pub(crate) async fn execute(
             keys.lock();
             done
         }
+        KeyRequest::SetLockVaultOnQuit { on } => keys.set_lock_on_quit(on).map_err(map).and(done),
         KeyRequest::SetupStoreKey { api_key } => {
             let kept = api_key.0.clone();
             keys.store_key(api_key.0).await.map_err(map)?;
             kept.register_as(vw_secrets::SecretKind::MistralKey);
             done
         }
-        KeyRequest::RemoveKey {} => keys.remove_key().await.map_err(map).and(done),
         KeyRequest::ListKeyCandidates {} => Ok(CommandResult::KeyCandidates {
             candidates: keys
                 .candidates()
@@ -474,6 +517,11 @@ pub(crate) async fn execute(
         KeyRequest::UseExistingKey { item_id } => {
             keys.use_existing(item_id).await.map_err(map).and(done)
         }
+        request @ (KeyRequest::ListMistralKeys {}
+        | KeyRequest::AddMistralKey { .. }
+        | KeyRequest::UseMistralKey { .. }
+        | KeyRequest::RenameMistralKey { .. }
+        | KeyRequest::RemoveMistralKey { .. }) => crate::mistral_keys::execute(keys, request).await,
         KeyRequest::TestKey {} => Ok(CommandResult::KeyTest {
             model_count: u32::try_from(keys.test_key().await.map_err(map)?.model_count)
                 .unwrap_or(u32::MAX),

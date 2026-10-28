@@ -32,7 +32,7 @@ category Ideas: the task, how you would use it, and an example. Requests there s
   only through the typed command client.
 - Files stay small (a size check enforces a ceiling).
 - The protocol types in `crates/vw-protocol/src/generated/` and `ui/src/protocol/generated/` come from pinned Vibe
-  2.26.1; `ui/src/protocol/core/` comes from Rust core API types. Change the generator or source types and regenerate
+  3.0.2; `ui/src/protocol/core/` comes from Rust core API types. Change the generator or source types and regenerate
   as described in `AGENTS.md`; never edit generated files by hand.
 
 ## License

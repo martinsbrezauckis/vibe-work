@@ -19,6 +19,7 @@
  * before (nothing hides behind a filter). Selection follows the result identity while answers arrive; surviving
  * rows update in place and new hits append within their group.
  */
+import { Button } from "../../components/Controls";
 import { type ReactElement, useEffect, useMemo, useRef, useState } from "react";
 
 import { Highlight } from "../../components/Highlight";
@@ -59,12 +60,15 @@ function PaletteDialog(): ReactElement {
   const dialog = useRef<HTMLDivElement>(null);
   const list = useRef<HTMLUListElement>(null);
   const [query, setQuery] = useState(carried);
-  const [filter, setFilter] = useState<Filter>("all");
+  const filesOnly = useShellState((s) => s.paletteFiles);
+  const [filter, setFilter] = useState<Filter>(filesOnly ? "file" : "all");
   const close = () => {
     shell.actions.setOverlay(null);
   };
   useModalFocus(true, dialog, close);
-  const { mode, text } = paletteQuery(query);
+  const parsed = paletteQuery(query);
+  const { mode, text } =
+    filesOnly && parsed.mode === "empty" ? { mode: "text" as const, text: "" } : parsed;
   const searching = mode !== "empty";
   const found = useCoreSearch(mode === "text" ? text : "");
   const byKind = usePaletteResults(query, found);
@@ -223,17 +227,17 @@ function PaletteDialog(): ReactElement {
                     className="pal-more"
                     role="presentation"
                   >
-                    <button
+                    <Button
                       data-testid="shell.command-palette-set-filter"
                       type="button"
-                      className="pal-more-action"
+                      appearance="expander"
                       tabIndex={-1}
                       onClick={() => {
                         setFilter(group);
                       }}
                     >
                       Show all {count(group)}
-                    </button>
+                    </Button>
                   </li>
                 ) : null;
               return [

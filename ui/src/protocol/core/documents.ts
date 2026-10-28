@@ -21,6 +21,10 @@ sessionId: string, } | { "op": "extract",
 /**
  * The document.
  */
+id: string, } | { "op": "release",
+/**
+ * The document.
+ */
 id: string, } | { "op": "remove",
 /**
  * The document.
@@ -95,7 +99,7 @@ kind: string,
  */
 kindLabel: string,
 /**
- * `ocr` (Mistral OCR on request), `local` (read here), or `file` (path only).
+ * `ocr` (Mistral OCR), `local` (read here), or legacy `file` (path only).
  */
 method: string,
 /**

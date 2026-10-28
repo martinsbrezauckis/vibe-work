@@ -125,62 +125,20 @@ impl Core {
         })
     }
 
-    /// Why the session's state forbids a removal now. The store learns `archivedAt` from Vibe's
-    /// `session/updated`, which can arrive after the archive's answer, so a session the store does not show as
-    /// archived is read from Vibe once more (`session/read`, straight through the gate, no store change) before
-    /// it counts as still in use. For a session archived before its first turn, our own record remembers the
-    /// user's decision because Vibe has no saved session to mark.
+    /// Explicit removal can end an idle owning chat, but never interrupts work or another owner.
     async fn session_block(&self, target: &Target) -> Option<String> {
         if target.record.session_deleted {
             return None;
         }
-        let id = target.session_id.as_str();
-        let view = self.shared.store.view(id)?;
-        let session = view.state.get("session")?;
-        let status = session.pointer("/status/type").and_then(Value::as_str);
-        if matches!(status, Some("running" | "blocked")) {
+        if self.session_copy_state(&target.session_id).await.0
+            == crate::worktrees::SessionCopyState::OtherList
+        {
+            return Some("This copy belongs to a chat in the other chat list.".to_owned());
+        }
+        if crate::recovery::working(&self.shared, &target.session_id) {
             return Some("Its session is still working. Stop it first.".to_owned());
         }
-        let archived = |s: &Value| s.get("archivedAt").is_some_and(|v| !v.is_null());
-        if archived(session)
-            || (target.record.session_archived
-                && view
-                    .state
-                    .get("turns")
-                    .and_then(Value::as_array)
-                    .is_some_and(Vec::is_empty))
-        {
-            return None;
-        }
-        let read = self
-            .shared
-            .gate
-            .call(
-                "session/read",
-                json!({"sessionId": id, "history": {"limit": 1}, "turns": {"limit": 1}}),
-                None,
-            )
-            .await;
-        let read = match read {
-            Ok(read) => read,
-            Err(error) => {
-                return Some(format!(
-                    "Its session could not be checked. Try again: {error}"
-                ));
-            }
-        };
-        let current = read.result.pointer("/state/session");
-        if current
-            .and_then(|s| s.pointer("/status/type"))
-            .and_then(Value::as_str)
-            .is_some_and(|status| matches!(status, "running" | "blocked"))
-        {
-            return Some("Its session is still working. Stop it first.".to_owned());
-        }
-        let archived_now = current.is_some_and(archived);
-        (!archived_now).then(|| {
-            "Its session still uses this copy. Archive or delete the session first.".to_owned()
-        })
+        None
     }
 
     /// Vibe's probe: `(outcome, holders)`. Only called after the preflight passed.
@@ -301,6 +259,23 @@ impl Core {
         Ok(Self::shape(&target, found, blocked, holders))
     }
 
+    async fn finish_copy_removal(&self, origin: Origin, target: &Target) -> Result<(), CoreError> {
+        // Archive only after the inspected removal was confirmed and completed. Archiving
+        // before the dialog lets Vibe 3 reap the folder even when the person cancels.
+        if !target.record.session_deleted {
+            let params = json!({"sessionId": target.session_id, "archived": true});
+            self.forward(origin, "session/archive", params, None)
+                .await?;
+        }
+        let records = self.shared.worktrees.records()?;
+        records
+            .update(&target.session_id, |r| r.decision = Some(Decision::Removed))
+            .map_err(core_error)?;
+        self.shared
+            .emit(crate::event::CoreEvent::WorktreesChanged {});
+        Ok(())
+    }
+
     /// `worktrees remove`.
     ///
     /// # Errors
@@ -331,14 +306,6 @@ impl Core {
             ));
         };
         let path_text = path.display().to_string();
-        self.shared.channels.close(&target.session_id).await;
-        let (outcome, held) = self.vibe_probe(origin, &path_text).await?;
-        if outcome == "kept_in_use" {
-            return Err(CoreError::new(
-                ErrorCode::Denied,
-                format!("{held} other session(s) use this copy; it was not removed."),
-            ));
-        }
         let plan = plan_branch(&target.record, &found);
         let delete_branch = plan == BranchPlan::Deleted;
         let params = json!({"cwd": path_text, "force": true, "deleteBranch": delete_branch, "inspect": false});
@@ -367,6 +334,23 @@ impl Core {
         if let Some(reason) = blocked {
             return Err(CoreError::new(ErrorCode::Denied, reason));
         }
+        // Removal finishes by archiving the chat. Refuse an unrestorable archive before closing
+        // its channel or removing any files; inspection and a cancelled confirmation stay unchanged.
+        if !target.record.session_deleted {
+            crate::session_end::check_archive(
+                &self.shared,
+                "session/archive",
+                &json!({"sessionId":target.session_id,"archived":true}),
+            )?;
+        }
+        self.shared.channels.close(&target.session_id).await;
+        let (outcome, held) = self.vibe_probe(origin, &path_text).await?;
+        if outcome == "kept_in_use" {
+            return Err(CoreError::new(
+                ErrorCode::Denied,
+                format!("{held} other session(s) use this copy; it was not removed."),
+            ));
+        }
         let reply = self
             .forward(origin, METHOD, params, Some(token.as_str().to_owned()))
             .await?;
@@ -379,14 +363,14 @@ impl Core {
                 .to_owned()
         };
         let vibe_outcome = text("outcome");
-        let removed = vibe_outcome == "removed" && !path.exists();
+        wait_for_reaping(&path, &reply.result).await;
+        let removed = !path.exists()
+            && matches!(
+                vibe_outcome.as_str(),
+                "removed" | "kept_in_use" | "not_found" | "kept_unmanaged"
+            );
         if removed {
-            let records = self.shared.worktrees.records()?;
-            records
-                .update(&target.session_id, |r| r.decision = Some(Decision::Removed))
-                .map_err(core_error)?;
-            self.shared
-                .emit(crate::event::CoreEvent::WorktreesChanged {});
+            self.finish_copy_removal(origin, &target).await?;
         }
         Ok(RemoveOutcome {
             removed,
@@ -406,6 +390,22 @@ impl Core {
                 .unwrap_or_default(),
         })
     }
+}
+
+/// A never-run chat can start automatic cleanup when its channel closes. The reaper's
+/// lock is not a session holder; wait briefly for that already-started removal, without retrying a write.
+async fn wait_for_reaping(path: &Path, reply: &Value) {
+    if reply.get("outcome").and_then(Value::as_str) != Some("kept_in_use")
+        || reply.get("holders").and_then(Value::as_u64) != Some(0)
+    {
+        return;
+    }
+    let _ = tokio::time::timeout(std::time::Duration::from_secs(3), async {
+        while path.exists() {
+            tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+        }
+    })
+    .await;
 }
 
 /// The native dialog's sentence for a prepared removal: the folder, what is discarded, the branch outcome.

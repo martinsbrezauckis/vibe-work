@@ -22,6 +22,7 @@ import {
   entryId,
   inputOf,
   obj,
+  num,
   outputOf,
   outputText,
   str,
@@ -31,6 +32,7 @@ import { DiffView } from "./DiffView";
 import { SearchBody } from "./SearchBody";
 import { FileRef } from "../../files/FileRef";
 import { ShowAll } from "./ShowAll";
+import { StepDiffActions } from "./StepDiffActions";
 
 function json(value: JsonValue | undefined): string {
   if (value === undefined || value === null) return "";
@@ -63,13 +65,41 @@ function KindBody({ entry, view }: { entry: Obj; view: EffectView }): ReactEleme
         </>
       );
     }
-    case "file_edit": {
-      const diff = editDiff(entry);
-      return diff === null ? null : <DiffView diff={diff} id={id} />;
+    case "file_search": {
+      return (
+        <>
+          <p>Search: {str(input?.["pattern"]) ?? ""}</p>
+          <ul className="source-list">
+            {arr(output?.["parsedMatches"]).map((raw, i) => {
+              const match = obj(raw);
+              const file = str(match?.["file"]) ?? str(match?.["path"]);
+              return file === null ? null : (
+                <li key={i}>
+                  <FileRef path={file} line={num(match?.["line"]) ?? num(match?.["lineNumber"])}>
+                    {file}
+                  </FileRef>
+                </li>
+              );
+            })}
+          </ul>
+          <ShowAll id={`${id}:matches`} text={str(output?.["matches"]) ?? ""} linkify />
+        </>
+      );
     }
+    case "file_edit":
     case "file_write": {
-      const diff = writeDiff(entry);
-      return diff === null ? null : <DiffView diff={diff} id={id} />;
+      const diff = view.kind === "file_edit" ? editDiff(entry) : writeDiff(entry);
+      return diff === null ? null : (
+        <DiffView
+          diff={diff}
+          id={id}
+          headerActions={
+            view.status === "completed" && diff.path !== "" ? (
+              <StepDiffActions diff={diff} sessionId={str(entry["sessionId"])} />
+            ) : null
+          }
+        />
+      );
     }
     case "file_read": {
       const content = str(output?.["content"]);
@@ -100,12 +130,17 @@ function KindBody({ entry, view }: { entry: Obj; view: EffectView }): ReactEleme
           <dt>Agent</dt>
           <dd>
             {
-              term("accessModes", str(detail?.["agentName"]) ?? str(input?.["agent"]) ?? "subagent")
-                .name
+              term(
+                "accessModes",
+                str(detail?.["agentName"]) ??
+                  str(input?.["name"]) ??
+                  str(input?.["agent"]) ??
+                  "subagent",
+              ).name
             }
           </dd>
           <dt>Task</dt>
-          <dd>{str(input?.["task"]) ?? ""}</dd>
+          <dd>{str(input?.["message"]) ?? str(input?.["task"]) ?? ""}</dd>
         </dl>
       );
     }

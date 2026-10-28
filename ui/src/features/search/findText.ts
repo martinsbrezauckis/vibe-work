@@ -36,11 +36,6 @@ function registry(): { highlights: HighlightRegistry; make: (ranges: Range[]) =>
   return { highlights: css.highlights, make: (ranges) => new Ctor(...ranges) };
 }
 
-/** True when this engine can mark words (the CSS Custom Highlight API). */
-export function canMarkWords(): boolean {
-  return registry() !== null;
-}
-
 /** Ranges of every occurrence of every word in the text nodes under `root`. */
 function rangesIn(root: Element, words: readonly string[]): Range[] {
   const out: Range[] = [];

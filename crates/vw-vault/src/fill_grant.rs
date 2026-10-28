@@ -1,4 +1,4 @@
-//! Fill grants (the shape of `command_grant`): the user's "Always for this site" answer to the
+//! Fill grants: the user's "Always for this site" answer to the
 //! native dialog that lets the agent fill a vault login's password on one site. Kept in the vault, not in a file of
 //! Vibe Work's: an agent runs as the same user and could plant a plain file; a vault record needs the vault's unlock
 //! material, and the head guard (`chain`) refuses an older vault version copied back.

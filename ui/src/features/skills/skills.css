@@ -1,0 +1,56 @@
+/* Skills list layout; shared stickers own control appearance and semantic colours. */
+.skills-list {
+  display: grid;
+}
+.skills-row {
+  min-width: 0;
+}
+.skills-row-main {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  flex-wrap: wrap;
+}
+.skills-row-text {
+  flex: 1 1 340px;
+  min-width: 0;
+}
+.skills-row-title,
+.skills-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.skills-row-title .ui-disclosure {
+  overflow-wrap: anywhere;
+}
+.skills-actions {
+  flex: 0 1 auto;
+}
+.skills-description {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  margin: 6px 0 0;
+  color: var(--text-2);
+}
+.skills-detail {
+  margin: 14px 0 0;
+  overflow-wrap: anywhere;
+}
+.skills-loading {
+  display: grid;
+  gap: 12px;
+}
+.skills-loading .sk {
+  height: 60px;
+}
+
+.skills-name {
+  display: flex;
+  max-width: 100%;
+  min-width: 0;
+}

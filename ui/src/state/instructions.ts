@@ -8,8 +8,8 @@
  *   review step; the file is replaced with exactly the reviewed draft, and the core refuses if the file
  *   changed after it was loaded).
  * - After a successful save the open sessions are told to take the new text (`apply`): Vibe builds a
- *   session's instructions once, so a session that already ran a turn reopens on its next message
- *   (observed live).
+ *   session's instructions once, so a used session reopens before its next message after current
+ *   work has finished (proved against the pinned runtime's actual model requests).
  * - The CLI copy is "load into the editor, then review and save", so it uses the same safe path and
  *   never writes anywhere on its own.
  * - Failures are shown as plain text; none is swallowed.
@@ -23,10 +23,10 @@ import type { InstructionsDoc } from "../protocol/core";
 import { toCallError } from "../protocol/client/types";
 import type { CoreController } from "./coreStore";
 import { type Store, createStore } from "./createStore";
-import { type DiffLine, diffCounts, lineDiff } from "./lineDiff";
+import { type DiffLine, lineDiff } from "./lineDiff";
 
 /** Who wrote an editor's draft. */
-export type DraftBy = "user" | "debug-api";
+type DraftBy = "user" | "debug-api";
 
 /** One editor's state. */
 export interface DocView {
@@ -89,7 +89,8 @@ export interface Instructions {
   /** Throws the draft away. */
   discard(scope: InstructionsScope): void;
   /** Writes the reviewed draft, then applies it to open sessions. */
-  save(scope: InstructionsScope): Promise<void>;
+  /** `by`: who pressed Save; a Debug API client saves only from the review step (the diff of what Save writes). */
+  save(scope: InstructionsScope, by?: DraftBy): Promise<void>;
   /** Puts the user's command-line instructions into the personal editor (not saved yet); `by` as above. */
   loadCli(by?: DraftBy): Promise<void>;
 }
@@ -99,7 +100,7 @@ function message(thrown: unknown): string {
 }
 
 /** Creates the controller for `core`. */
-export function createInstructions(core: CoreController): Instructions {
+function createInstructions(core: CoreController): Instructions {
   const store = createStore<InstructionsState>({
     personal: EMPTY,
   });
@@ -157,47 +158,40 @@ export function createInstructions(core: CoreController): Instructions {
         stale: false,
       });
     },
-    async save(scope) {
+    async save(scope, by = "user") {
       const view = store.get()[scope];
-      if (view.doc === null || !view.reviewing || view.busy === "saving") return;
+      // The person saves changed text at once; a Debug API client, or text one wrote, only from the review step.
+      if (view.doc === null || view.busy === "saving" || view.stale || !isDirty(view)) return;
+      if (!view.reviewing && (by === "debug-api" || view.draftBy === "debug-api")) return;
       const text = view.draft;
       const expected = view.doc.exists ? view.doc.text : undefined;
-      // A draft a Debug API client wrote saves with its origin, whoever clicks (module docs).
-      const options = view.draftBy === "debug-api" ? ({ origin: "debug-api" } as const) : undefined;
       patch(scope, { busy: "saving", error: null, notice: null });
       try {
-        const written = await core.run(
-          {
-            type: "instructions",
-            request: {
-              op: "write",
-              scope,
-              text,
-              ...(expected === undefined ? {} : { expected }),
-            },
+        const written = await core.run({
+          type: "instructions",
+          request: {
+            op: "write",
+            scope,
+            text,
+            ...(expected === undefined ? {} : { expected }),
           },
-          options,
-        );
+        });
         if (written.type !== "instructions" || written.result.type !== "doc")
           throw new Error("unexpected answer");
         const doc = written.result.doc;
         patch(scope, { doc, draft: doc.text, draftBy: "user", reviewing: false });
         const applied = await core
-          .run(
-            {
-              type: "instructions",
-              request: { op: "apply", scope },
-            },
-            options,
-          )
+          .run({
+            type: "instructions",
+            request: { op: "apply", scope },
+          })
           .catch(() => null);
-        const count =
-          applied?.type === "instructions" && applied.result.type === "applied"
-            ? applied.result.reopened + applied.result.waiting
-            : 0;
         patch(scope, {
           busy: "idle",
-          notice: savedNotice(count),
+          notice:
+            applied === null
+              ? "Saved. New chats receive the new text. Open chats could not be refreshed; close and reopen them to include it."
+              : savedNotice(),
         });
       } catch (thrown) {
         const error = toCallError(thrown).error;
@@ -223,17 +217,23 @@ export function createInstructions(core: CoreController): Instructions {
           return;
         }
         const current = store.get().personal;
+        // Added below what the editor holds (never replacing unsaved typing); a second press adds nothing.
+        const cli = result.result.text;
+        const draft = current.draft.includes(cli.trim())
+          ? current.draft
+          : current.draft.trim() === ""
+            ? cli
+            : `${current.draft.trimEnd()}\n\n${cli}`;
         patch("personal", {
           busy: "idle",
-          draft: result.result.text,
+          draft,
           draftBy:
             by === "debug-api"
               ? "debug-api"
-              : result.result.text === current.doc?.text
+              : draft === current.doc?.text
                 ? "user"
                 : current.draftBy,
-          notice:
-            "Your command-line instructions are in the editor. Review the changes, then save to copy them.",
+          notice: null,
         });
       } catch (thrown) {
         patch("personal", { busy: "idle", error: message(thrown) });
@@ -243,12 +243,9 @@ export function createInstructions(core: CoreController): Instructions {
   return instructions;
 }
 
-/** The sentence shown after a save: who uses the new text and when. */
-export function savedNotice(sessions: number): string {
-  if (sessions === 0) return "Saved. New sessions use it from their first message.";
-  const open =
-    sessions === 1 ? "1 open session reopens" : `${String(sessions)} open sessions reopen`;
-  return `Saved. ${open} on its next message to use it. New sessions use it from the start.`;
+/** The status shown after a successful save. */
+export function savedNotice(): string {
+  return "Saved.";
 }
 
 /** One controller per core (the settings screens and the UI-control route share it). */
@@ -262,9 +259,4 @@ export function instructionsFor(core: CoreController): Instructions {
     controllers.set(core, found);
   }
   return found;
-}
-
-/** Counts for the review header. */
-export function reviewCounts(view: DocView): { added: number; removed: number } {
-  return diffCounts(reviewDiff(view));
 }

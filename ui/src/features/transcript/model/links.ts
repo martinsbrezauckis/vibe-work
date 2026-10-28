@@ -11,7 +11,7 @@
  */
 
 /** Longest URL that may be opened (the Rust side has the same limit). */
-export const MAX_URL_LENGTH = 4096;
+const MAX_URL_LENGTH = 4096;
 
 /** The verdict on a link. */
 export type LinkCheck =

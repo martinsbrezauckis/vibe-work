@@ -70,6 +70,20 @@ fn describe_scope(scope: &str) -> String {
 struct NativeConsent(Weak<Shared>);
 
 impl ConsentConfirmer for NativeConsent {
+    fn refusal_text(&self, session_id: &str) -> Option<String> {
+        let shared = self.0.upgrade()?;
+        let owner = shared
+            .preview
+            .as_ref()
+            .and_then(|hub| hub.service.owner_session_id(session_id))
+            .unwrap_or_else(|| session_id.into());
+        let record =
+            shared.asks.records().into_iter().rev().find(|r| {
+                r.ask.kind == METHOD && r.ask.session.as_deref() == Some(owner.as_str())
+            })?;
+        Some(vw_ask::agent_text(&record.outcome, &record.ask.title))
+    }
+
     fn confirm(&self, request: ConsentRequest) -> ConsentFuture<'_> {
         Box::pin(async move {
             let Some(shared) = self.0.upgrade() else {
@@ -109,19 +123,13 @@ impl ConsentConfirmer for NativeConsent {
                     .clone_into(&mut scopes);
             }
             let summary = format!(
-                "Allow service {} (client {}, shown on page {}) to access your {} account with these permissions: {}?\n\nSession: {} (ID {})",
+                "Allow service {} (client {}, shown on page {}) to access your {} account with these permissions: {}?\n\nSession: {}",
                 vw_gate::dialog_quote(&service),
                 vw_gate::dialog_quote(&request.client),
                 vw_gate::dialog_quote(&request.title),
                 request.provider.name(),
                 scopes,
-                vw_gate::dialog_quote(
-                    &shared
-                        .names
-                        .title_of(&shared.store, &owner)
-                        .unwrap_or_else(|| owner.clone()),
-                ),
-                vw_gate::dialog_quote(&owner),
+                vw_gate::dialog_chat_quote(&shared.names.confirmation_title(&shared.store, &owner),),
             );
             let confirmation = ConfirmationRequest {
                 method: METHOD.to_owned(),
@@ -137,7 +145,13 @@ impl ConsentConfirmer for NativeConsent {
                 requester,
                 always: None,
             };
-            shared.confirmer.confirm(&confirmation).await.approved()
+            if requester == Requester::Agent {
+                crate::ask::guards::wait(&shared, confirmation, "this provider permission")
+                    .await
+                    .is_ok()
+            } else {
+                shared.confirmer.confirm(&confirmation).await.approved()
+            }
         })
     }
 }

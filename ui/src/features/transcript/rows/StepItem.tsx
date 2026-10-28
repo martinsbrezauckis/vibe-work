@@ -4,7 +4,8 @@
  * The status class, name, target and expandable output use labels from Vibe's display fields and status from Vibe's state enum (not
  * guessed from free text), body per kind (`StepBody`).
  * Adapted from ShellX.
- * Depends on: model/entries, StepBody, Time, the transcript store. Called by: StepsGroup.
+ * A finished Chrome Control step also shows its outcome line under the header (`model/chromeOutcome.ts`).
+ * Depends on: model/entries, model/chromeOutcome, StepBody, Time, the transcript store. Called by: StepsGroup.
  * Invariants: memoised on the entry object (a patch to another step does not re-render this one); the
  * open state lives in the store (`step:<entry id>`).
  */
@@ -13,6 +14,7 @@ import { Walker } from "../../../components/Walker";
 
 import { useApp } from "../../shell/AppContext";
 import { useTranscriptUi } from "../hooks";
+import { chromeOutcome } from "../model/chromeOutcome";
 import { type Obj, effectView, entryId } from "../model/entries";
 import { StepBody } from "./StepBody";
 import { formatElapsed } from "./Time";
@@ -41,6 +43,7 @@ export const StepItem = memo(function StepItem({ entry }: { entry: Obj }): React
   const view = effectView(entry);
   const state = stateClass(view);
   const label = `${open ? "Hide" : "Show"} details for ${view.verb} ${view.target}`;
+  const outcome = chromeOutcome(entry);
   return (
     <div className={`step ${state}`} data-kind={view.kind || "generic"} data-entry-id={id}>
       <button
@@ -67,6 +70,11 @@ export const StepItem = memo(function StepItem({ entry }: { entry: Obj }): React
           <span className="sr">{STATE_TEXT[state]}</span>
         </span>
       </button>
+      {outcome === null ? null : (
+        <p className="step-outcome" data-chrome-outcome="">
+          {outcome}
+        </p>
+      )}
       {open ? <StepBody entry={entry} view={view} /> : null}
     </div>
   );

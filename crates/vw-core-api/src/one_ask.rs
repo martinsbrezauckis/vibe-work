@@ -21,8 +21,7 @@
 //! (`gitcheck`, `killcheck`, `tools`, `secret_run`).
 //! Invariants:
 //! - Only an exact match counts: the same session, the same call (bash: the tool call id inside the card's id; MCP: the
-//!   tool name and the whole argument object) and the same command text. Each memory is used once and forgotten after
-//!   [`KEEP`]; at most [`MAX`] of each kind are kept (the oldest go first).
+//!   tool name and the whole argument object) and the same command text. Each memory is used once and forgotten when consumed; at most [`MAX`] of each kind are kept (the oldest go first).
 //! - Nothing here turns a refusal into a yes: a push is refused before the guards read the ledger, a declined dialog
 //!   records nothing, and a card answered with anything but an approval records nothing.
 //! - The answer the core sends for the user is "approve" (once) only, never "for this session" or "always" (those
@@ -34,15 +33,10 @@
 
 use std::collections::VecDeque;
 use std::sync::{Mutex, PoisonError};
-use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
 
 use crate::command::Origin;
-
-/// How long a remembered yes waits for the other ask of its call (Vibe's card follows the hook within ~0.1 s in the
-/// measurements; a queue of earlier cards waiting on the user can delay it).
-pub(crate) const KEEP: Duration = Duration::from_secs(10 * 60);
 
 /// Most remembered items of each kind.
 pub(crate) const MAX: usize = 256;
@@ -78,7 +72,6 @@ struct GuardYes {
     sessions: Vec<String>,
     call_id: String,
     command: String,
-    at: Instant,
 }
 
 struct Card {
@@ -86,16 +79,15 @@ struct Card {
     callback_id: String,
     tool: String,
     input: Value,
-    at: Instant,
 }
 
 struct CardYes {
     session: String,
+    callback_id: String,
     tool: String,
     input: Value,
     /// Who answered the card: the window or the Debug API (which acts as the user outside the vault).
     by: Origin,
-    at: Instant,
 }
 
 #[derive(Default)]
@@ -103,14 +95,6 @@ struct Inner {
     guard_yes: VecDeque<GuardYes>,
     cards: VecDeque<Card>,
     card_yes: VecDeque<CardYes>,
-}
-
-impl Inner {
-    fn expire(&mut self, now: Instant) {
-        self.guard_yes.retain(|g| now.duration_since(g.at) < KEEP);
-        self.cards.retain(|c| now.duration_since(c.at) < KEEP);
-        self.card_yes.retain(|c| now.duration_since(c.at) < KEEP);
-    }
 }
 
 /// The remembered answers of one core (kept in the agent tools, `AgentTools::one_ask`: the guards exist only with them).
@@ -150,9 +134,7 @@ impl Ledger {
         if call_id.is_empty() {
             return;
         }
-        let now = Instant::now();
         let mut inner = self.lock();
-        inner.expire(now);
         let mut names: Vec<String> = sessions
             .iter()
             .filter(|s| !s.is_empty())
@@ -163,15 +145,14 @@ impl Ledger {
             sessions: names,
             call_id: call_id.to_owned(),
             command: command.to_owned(),
-            at: now,
         });
         while inner.guard_yes.len() > MAX {
             inner.guard_yes.pop_front();
         }
     }
 
-    /// True when Vibe's approval card `callback` asks about a call whose guard dialog the user already approved: the
-    /// same session, the callback id `approval-<that call id>`, the same command. The memory is used up.
+    /// True when Vibe's approval card `callback` asks about a call whose guard already answered for the user: the
+    /// same session, the callback id `approval-<that call id>`, and the same command (a guard's dialog). The memory is used up.
     pub(crate) fn answer_for_card(&self, callback: &Value) -> bool {
         let Some((session, id, effect)) = approval_parts(callback) else {
             return false;
@@ -179,14 +160,12 @@ impl Ledger {
         let Some(call_id) = id.strip_prefix(CARD_PREFIX) else {
             return false;
         };
-        let Some(command) = effect.pointer("/input/command").and_then(Value::as_str) else {
-            return false;
-        };
-        let now = Instant::now();
+        let command = effect.pointer("/input/command").and_then(Value::as_str);
         let mut inner = self.lock();
-        inner.expire(now);
         let found = inner.guard_yes.iter().position(|g| {
-            g.call_id == call_id && g.command == command && g.sessions.iter().any(|s| s == session)
+            command.is_some_and(|command| g.command == command)
+                && g.call_id == call_id
+                && g.sessions.iter().any(|s| s == session)
         });
         found.is_some_and(|at| inner.guard_yes.remove(at).is_some())
     }
@@ -200,15 +179,12 @@ impl Ledger {
         let Some(tool) = effect.get("toolName").and_then(Value::as_str) else {
             return;
         };
-        let now = Instant::now();
         let mut inner = self.lock();
-        inner.expire(now);
         inner.cards.push_back(Card {
             session: session.to_owned(),
             callback_id: id.to_owned(),
             tool: tool.to_owned(),
             input: effect.get("input").cloned().unwrap_or(Value::Null),
-            at: now,
         });
         while inner.cards.len() > MAX {
             inner.cards.pop_front();
@@ -225,9 +201,7 @@ impl Ledger {
         output: &Value,
         by: Origin,
     ) {
-        let now = Instant::now();
         let mut inner = self.lock();
-        inner.expire(now);
         let Some(at) = inner
             .cards
             .iter()
@@ -246,15 +220,22 @@ impl Ledger {
         if approved {
             inner.card_yes.push_back(CardYes {
                 session: card.session,
+                callback_id: card.callback_id,
                 tool: card.tool,
                 input: card.input,
                 by,
-                at: now,
             });
             while inner.card_yes.len() > MAX {
                 inner.card_yes.pop_front();
             }
         }
+    }
+
+    /// A failed callback send cannot leave a reusable approval behind.
+    pub(crate) fn card_answer_failed(&self, session: &str, callback_id: &str) {
+        self.lock()
+            .card_yes
+            .retain(|yes| yes.session != session || yes.callback_id != callback_id);
     }
 
     /// True when the user approved Vibe's card for this exact call of our own tool `tool` (`mcp_vw.<name>`) with
@@ -266,9 +247,7 @@ impl Ledger {
     /// `mcp_keys`, `browser_fill`, the confirmer's native-only methods) never reads this: it is always the user's own
     /// answer in the native dialog, also when the card was answered (from the window or the Debug API).
     pub(crate) fn card_said_yes(&self, session: &str, tool: &str, args: &Value) -> bool {
-        let now = Instant::now();
         let mut inner = self.lock();
-        inner.expire(now);
         let found = inner
             .card_yes
             .iter()
@@ -323,6 +302,20 @@ mod tests {
         ledger.guard_said_yes(&["s"], "", "git fetch");
         assert!(!ledger.answer_for_card(&card("s", "approval-", "file_system.bash", &cmd)));
         assert_eq!(approve_once()["decision"]["type"], "approve");
+    }
+
+    #[test]
+    fn a_failed_card_send_revokes_only_that_approval() {
+        let ledger = Ledger::default();
+        let args = json!({"command":"git rebase main"});
+        let tool = "mcp_vw.process_start";
+        for id in ["approval-a", "approval-b"] {
+            ledger.card_opened(&card("s", id, tool, &args));
+            ledger.card_answered("s", id, &approve_once(), Origin::Ui);
+        }
+        ledger.card_answer_failed("s", "approval-a");
+        assert!(ledger.card_said_yes("s", tool, &args));
+        assert!(!ledger.card_said_yes("s", tool, &args));
     }
 
     #[test]

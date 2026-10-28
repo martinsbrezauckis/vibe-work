@@ -59,6 +59,10 @@ pub const ALLOWLIST: &[RouteSpec] = &[
     // Model list (Vibe's model probe; our own test call goes direct, not through here).
     api("GET", "/v1/models"),
     api("GET", "/v1/models/{}"),
+    // RegistrySkillsClient (Vibe 2.26.1, core/skills/registry/_client.py): catalog, pinned payload, versions.
+    api("GET", "/v1/skills"),
+    api("GET", "/v1/skills/{}"),
+    api("GET", "/v1/skills/{}/versions"),
     // Web search tool (`web_search.py`: `beta.conversations.start_async`).
     api("POST", "/v1/conversations"),
     // Identity for experiments (`core/identity.py`: `/users/me` under `api_base`).

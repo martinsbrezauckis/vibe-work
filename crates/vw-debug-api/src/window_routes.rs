@@ -15,6 +15,8 @@
 //!   Linux, macOS: the window's own webviews composed), never from the screen.
 //! - A crop is the element's bounding rectangle the UI reports (CSS pixels, scaled to the capture's pixels),
 //!   clipped to the image; an unknown selector is `404 notFound`, nothing is guessed.
+//! - macOS main-window captures end at the page viewport reported under the capture lock: the native snapshot's
+//!   bounds can include the title bar's automatic content inset. The width, pixel scale and origin stay the same.
 //! - Secret fields are blanked (the secret rule): before a main-window PNG leaves, the UI's `secrets`
 //!   route names the rectangles of every secret field shown (key and password fields) and they are painted over
 //!   with a flat grey; the answer says how many (`x-vw-secret-blanked`). The UI's capture lock holds across the
@@ -229,13 +231,15 @@ async fn element_rect(
 }
 
 /// What the UI's `secrets` route answered: the secret fields' rectangles (CSS pixels), how many show their value
-/// in clear, the capture lock's epoch, the viewport width.
+/// in clear, the capture lock's epoch, the viewport width (and height for macOS viewport cropping).
 #[derive(Debug, PartialEq)]
 struct SecretState {
     rects: Vec<[f64; 4]>,
     clear: u64,
     epoch: u64,
     viewport: f64,
+    #[cfg(target_os = "macos")]
+    viewport_height: f64,
 }
 
 /// Asks the UI where secret fields are, turning the capture lock on (`lock = true`, before a capture) or off
@@ -257,11 +261,24 @@ async fn secret_state(state: &ApiState, lock: bool) -> Result<SecretState, Box<R
     let answer = handler(json!({ "lock": lock }))
         .await
         .map_err(|e| refused(&e.message))?;
+    match answer.get("state").and_then(Value::as_str) {
+        Some("busy") => return Err(refused("the window is busy with another request")),
+        Some("pending") => return Err(refused("the UI has not finished checking secret fields")),
+        _ => {}
+    }
     let viewport = answer
         .get("viewportWidth")
         .and_then(Value::as_f64)
-        .filter(|w| *w >= 1.0)
-        .ok_or_else(|| refused("no viewport width"))?;
+        .ok_or_else(|| refused("the UI returned no viewport width"))?;
+    if viewport < 1.0 {
+        return Err(refused("the page has not loaded a viewport"));
+    }
+    #[cfg(target_os = "macos")]
+    let viewport_height = answer
+        .get("viewportHeight")
+        .and_then(Value::as_f64)
+        .filter(|height| *height >= 1.0)
+        .ok_or_else(|| refused("the UI returned no viewport height"))?;
     let rects = answer
         .get("rects")
         .and_then(Value::as_array)
@@ -277,6 +294,41 @@ async fn secret_state(state: &ApiState, lock: bool) -> Result<SecretState, Box<R
         clear: answer.get("clear").and_then(Value::as_u64).unwrap_or(0),
         epoch: answer.get("epoch").and_then(Value::as_u64).unwrap_or(0),
         viewport,
+        #[cfg(target_os = "macos")]
+        viewport_height,
+    })
+}
+
+/// The page viewport in a native snapshot's pixels. Keep the width and origin so CSS rectangles use the same
+/// scale for both secret blanking and element crops; only the extra rows below the viewport are removed.
+#[cfg(any(target_os = "macos", test))]
+fn viewport_rect(
+    image_width: u32,
+    image_height: u32,
+    viewport_width: f64,
+    viewport_height: f64,
+) -> Result<vw_preview::PixelRect, String> {
+    if image_width == 0
+        || image_height == 0
+        || !viewport_width.is_finite()
+        || !viewport_height.is_finite()
+        || viewport_width < 1.0
+        || viewport_height < 1.0
+    {
+        return Err("invalid capture viewport".to_owned());
+    }
+    let height = (viewport_height * f64::from(image_width) / viewport_width).round();
+    if !height.is_finite() || height < 1.0 || height > f64::from(image_height) {
+        return Err("the snapshot does not cover the page viewport".to_owned());
+    }
+    // Checked above: a positive integer no larger than the existing image height.
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    let height = height as u32;
+    Ok(vw_preview::PixelRect {
+        x: 0,
+        y: 0,
+        width: image_width,
+        height,
     })
 }
 
@@ -317,6 +369,22 @@ async fn main_capture(
             continue;
         }
         let mut image = vw_preview::decode(&png).map_err(|m| Box::new(failed(&m)))?;
+        #[cfg(target_os = "macos")]
+        {
+            // WKWebView's default snapshot uses its bounds, while its automatic title-bar inset reduces the
+            // page viewport. Crop the composed image before blanking, using the same width-derived CSS scale.
+            let rect = viewport_rect(
+                image.width,
+                image.height,
+                after.viewport,
+                after.viewport_height,
+            )
+            .map_err(|m| Box::new(failed(&m)))?;
+            if rect.height != image.height {
+                image = vw_preview::crop(&image, rect)
+                    .ok_or_else(|| Box::new(failed("the page viewport is outside the snapshot")))?;
+            }
+        }
         let rects = to_pixels(&after, image.width);
         for rect in &rects {
             let patch = vw_preview::canvas(rect.width, rect.height, [128, 128, 128, 255]);
@@ -416,5 +484,70 @@ async fn window(State(state): State<ApiState>, headers: HeaderMap, body: Bytes) 
     match app.control(request).await {
         Ok(view) => ok(&view),
         Err(message) => failed(&message),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{SecretState, to_pixels, viewport_rect};
+
+    #[test]
+    fn viewport_excludes_native_insets_at_the_capture_scale() {
+        let retina = viewport_rect(2560, 1600, 1280.0, 772.0).unwrap();
+        assert_eq!(
+            (retina.x, retina.y, retina.width, retina.height),
+            (0, 0, 2560, 1544)
+        );
+        let ordinary = viewport_rect(1280, 800, 1280.0, 772.0).unwrap();
+        assert_eq!((ordinary.width, ordinary.height), (1280, 772));
+        let fractional = viewport_rect(1920, 1200, 1280.0, 771.0).unwrap();
+        assert_eq!(fractional.height, 1157);
+        assert_eq!(
+            viewport_rect(2560, 1600, 1280.0, 800.0).unwrap().height,
+            1600
+        );
+    }
+
+    #[test]
+    fn viewport_crop_preserves_pixels_and_secret_coordinates() {
+        let mut image = vw_preview::canvas(20, 16, [255, 0, 0, 255]);
+        let fields = SecretState {
+            rects: vec![[3.0, 4.0, 2.0, 2.0]],
+            clear: 0,
+            epoch: 1,
+            viewport: 10.0,
+            #[cfg(target_os = "macos")]
+            viewport_height: 6.0,
+        };
+        let before = to_pixels(&fields, image.width);
+        let crop = viewport_rect(image.width, image.height, 10.0, 6.0).unwrap();
+        image = vw_preview::crop(&image, crop).unwrap();
+        let after = to_pixels(&fields, image.width);
+        assert_eq!(before, after);
+        for rect in after {
+            let secret = vw_preview::canvas(rect.width, rect.height, [128, 128, 128, 255]);
+            vw_preview::paste(&mut image, &secret, rect);
+        }
+        let cropped = image;
+        assert_eq!((cropped.width, cropped.height), (20, 12));
+        assert_eq!(cropped.pixel(0, 0), Some([255, 0, 0, 255]));
+        assert_eq!(cropped.pixel(6, 8), Some([128, 128, 128, 255]));
+        assert_eq!(cropped.pixel(9, 11), Some([128, 128, 128, 255]));
+    }
+
+    #[test]
+    fn viewport_refuses_invalid_or_incomplete_captures() {
+        for (width, height) in [
+            (0.0, 772.0),
+            (-1.0, 772.0),
+            (f64::NAN, 772.0),
+            (1280.0, 0.0),
+            (1280.0, f64::INFINITY),
+            (1280.0, 801.0),
+        ] {
+            assert!(viewport_rect(2560, 1600, width, height).is_err());
+        }
+        assert!(viewport_rect(0, 1600, 1280.0, 772.0).is_err());
+        assert!(viewport_rect(2560, 0, 1280.0, 772.0).is_err());
     }
 }

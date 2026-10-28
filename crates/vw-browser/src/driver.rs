@@ -136,7 +136,7 @@ struct Baseline {
     before: Option<PageModel>,
     loads: u64,
     console: Option<u64>,
-    refused: Vec<(String, String)>,
+    refused: u64,
 }
 
 /// The agent browser over the sessions' previews.
@@ -233,7 +233,8 @@ impl Browser {
                 options.text_page.unwrap_or(0) * PAGE_CHARS,
             )
         };
-        let script = scripts::observe(&page, max_refs, max_text, offset);
+        let script =
+            scripts::observe_focused(&page, max_refs, max_text, offset, options.find.as_deref());
         let loads_before = self.service.load_state(session_id).map(|l| l.loads);
         let mut model: PageModel = self.run_in_mount(session_id, script, Some(&mount)).await?;
         // Authorization binds to the document that answered: the same mount, a page it may show.
@@ -378,7 +379,7 @@ impl Browser {
         let before = self.current_seen(session_id).map(|s| s.model);
         let load0 = self.service.load_state(session_id);
         let console0 = self.service.console_mark(session_id).await.ok();
-        let refused0 = self.service.refusals(session_id);
+        let refused0 = self.service.refusal_mark(session_id);
         let mut result = json!({"action": action.name()});
         let mut page_target = Value::Null;
         match action {
@@ -469,11 +470,16 @@ impl Browser {
     ) -> Result<Value, ActError> {
         let Baseline {
             before,
-            loads: loads_before,
+            loads,
             console: console0,
             refused: refused0,
         } = base;
-        let dialogs = self.settle(session_id, loads_before).await;
+        self.await_action_navigation(session_id, action, loads, refused0)
+            .await;
+        let dialogs = self.settle(session_id, loads).await;
+        if let Some(outcome) = self.navigation_outcome(session_id, loads, refused0, &result) {
+            return outcome;
+        }
         self.prove_receipt(session_id, action, &mut result, &mut page_target)
             .await?;
         let after = self
@@ -485,6 +491,9 @@ impl Browser {
                 },
             )
             .await;
+        if let Some(outcome) = self.navigation_outcome(session_id, loads, refused0, &result) {
+            return outcome;
+        }
         let mut receipt = self.host(session_id);
         receipt["result"] = result;
         let (after_model, verdict, snapshot) = after.map_err(failed)?;
@@ -492,9 +501,8 @@ impl Browser {
         receipt["change"] = facts;
         let refused_now: Vec<Value> = self
             .service
-            .refusals(session_id)
+            .refusals_since(session_id, refused0)
             .into_iter()
-            .filter(|r| !refused0.contains(r))
             .map(|(url, reason)| json!({"url": url, "reason": reason}))
             .collect();
         let errors: Vec<Value> = match console0 {

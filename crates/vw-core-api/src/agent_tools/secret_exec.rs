@@ -5,11 +5,6 @@
 //! process (it shows in the session's processes and is stopped as a tree on time out), and output is withheld by the
 //! agent tools listener's scrub (`server.rs`) instead of an exact-match replace here (more forms are covered).
 //!
-//! On Linux the program starts through the descriptor the final check hashed,
-//! (`/proc/self/fd/<n>`, `argv[0]` = its real path), so what runs is the file that was checked even if another file
-//! is renamed over the path meanwhile; a `#!` program, other systems, or a missing `/proc` run by path
-//! (`secret_pin` module header).
-//!
 //! Depends on: tokio (`process`), vw-procmon, vw-vault (`SecretString`). Called by: `secret_run`.
 //! Invariants: the values go only into the child's environment (never argv, never a log); the environment is cleared
 //! first; a variable the allowlist also has is replaced by the secret, not doubled.
@@ -40,15 +35,6 @@ pub(crate) struct Exec<'a> {
     pub(crate) session_id: &'a str,
     /// The resolved program.
     pub(crate) program: &'a Path,
-    /// The pinned files as the final check left them open (the program is started through it on Linux).
-    #[cfg_attr(
-        not(target_os = "linux"),
-        allow(
-            dead_code,
-            reason = "the caller keeps the files open; programs run by path outside Linux"
-        )
-    )]
-    pub(crate) held: &'a super::secret_pin::Held,
     /// Its arguments.
     pub(crate) args: &'a [String],
     /// Working folder.
@@ -66,7 +52,7 @@ pub(crate) async fn execute(
     exec: &Exec<'_>,
     values: &[(String, SecretString)],
 ) -> Result<Value, String> {
-    let mut command = command_for(exec);
+    let mut command = tokio::process::Command::new(exec.program);
     command
         .args(exec.args)
         .current_dir(exec.cwd)
@@ -127,25 +113,6 @@ pub(crate) async fn execute(
         "stderr": String::from_utf8_lossy(&stderr),
         "outputTruncated": out_cut || err_cut,
     }))
-}
-
-/// The command that starts the checked program: through its held descriptor on Linux (see the module header), by path
-/// otherwise.
-fn command_for(exec: &Exec<'_>) -> tokio::process::Command {
-    #[cfg(target_os = "linux")]
-    if !exec.held.script && Path::new("/proc/self/fd").is_dir() {
-        use std::os::fd::AsRawFd as _;
-        // The descriptor closes at exec (std opens files close-on-exec); the kernel resolves this path in the child
-        // before that, to the inode the check hashed. `/proc/self/exe` of the program is then its real path, so
-        // programs that find their own files next to themselves keep working.
-        let mut command = tokio::process::Command::new(format!(
-            "/proc/self/fd/{}",
-            exec.held.program.as_raw_fd()
-        ));
-        command.arg0(exec.program);
-        return command;
-    }
-    tokio::process::Command::new(exec.program)
 }
 
 fn register(shared: &Shared, session_id: &str, process: ProcessRef, pid: Option<u32>) {

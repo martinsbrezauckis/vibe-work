@@ -5,6 +5,8 @@ description: Read this before you build or restyle a page to look like an existi
 
 Vibe Work can save what the page in the built-in browser is made of into this session's folder, under `capture/<page>-<time>/`. Open the page first (`browser_act` with `navigate`, see `vw:browser`), then call `browser_capture` inside `run_typescript`:
 
+Run each example tool call in a separate program; carry returned values into the next call.
+
 ```ts
 await tools.mcp_vw.browser_act({ action: "navigate", url: "https://example.com/" });
 const cap = await tools.mcp_vw.browser_capture({ what: "design" });

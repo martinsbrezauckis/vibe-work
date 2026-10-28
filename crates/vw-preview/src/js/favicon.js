@@ -24,7 +24,7 @@
         canvas.width = canvas.height = 32;
         canvas.getContext("2d").drawImage(image, 0, 0, 32, 32);
         state.data = canvas.toDataURL("image/png");
-      } catch (_) { /* Unreadable pixels use the UI's generic icon. */ }
+      } catch { /* Unreadable pixels use the UI's generic icon. */ }
       state.done = true;
     };
     image.onerror = () => { state.done = true; };

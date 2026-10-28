@@ -3,6 +3,7 @@
  * against the last commit. A new baseline is taken only when the user clicks "Start reviewing from now". The core never does that on its own.
  * Depends on: store.ts. Called by: ChangesTab.
  */
+import { Button } from "../../components/Controls";
 import type { ReactElement } from "react";
 
 import type { ChangesView } from "../../protocol/core";
@@ -22,16 +23,16 @@ export function LostBanner(props: {
         changes against the last commit instead. Nothing here can be kept or reverted until you
         start reviewing from now.
       </p>
-      <button
+      <Button
         data-testid="changes.lost-banner-restart"
         type="button"
-        className="mini"
+        appearance="compact"
         disabled={busy}
         data-action="restart"
         onClick={() => void changes.restart(view.sessionId)}
       >
         Start reviewing from now
-      </button>
+      </Button>
     </div>
   );
 }

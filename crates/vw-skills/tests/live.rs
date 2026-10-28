@@ -1,4 +1,4 @@
-//! Opt-in stdio smoke test against the tagged Vibe server from data/venv.
+//! Opt-in stdio smoke test against `VIBE_PYTHON` or the versioned environment from `vibe.pin`.
 //! Uses disposable project/home, no inherited credentials, and rejects network sockets.
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
@@ -19,6 +19,23 @@ use vw_skills::{
     SkillsCatalogParams, SkillsClient, SkillsError, SkillsImportParams, SkillsInstalledParams,
     SkillsListParams, SkillsSetEnabledParams, SkillsTransport, TransportError,
 };
+
+const PIN: &str = include_str!("../../../tools/public/codegen/vibe.pin");
+
+fn vibe_python() -> PathBuf {
+    std::env::var_os("VIBE_PYTHON").map_or_else(
+        || {
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join(format!("../../data/vibe-{}/venv", PIN.trim()))
+                .join(if cfg!(windows) {
+                    "Scripts/python.exe"
+                } else {
+                    "bin/python"
+                })
+        },
+        PathBuf::from,
+    )
+}
 
 struct Channel {
     _child: Child,
@@ -61,9 +78,9 @@ impl SkillsTransport for StdioTransport {
 }
 
 #[tokio::test]
-async fn tagged_vibe_without_credentials_or_network() {
+async fn installed_vibe_without_credentials_or_network() {
     if std::env::var_os("VW_SKILLS_LIVE").as_deref() != Some(std::ffi::OsStr::new("1")) {
-        eprintln!("SKIPPED live Vibe test: set VW_SKILLS_LIVE=1");
+        eprintln!("SKIPPED live Vibe test: set VW_SKILLS_LIVE=1 (not a pass)");
         return;
     }
     tokio::time::timeout(Duration::from_secs(45), live())
@@ -72,15 +89,9 @@ async fn tagged_vibe_without_credentials_or_network() {
 }
 
 fn launch(project: &Path, home: &Path, vibe_home: &Path) -> StdioTransport {
-    let repo = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .unwrap()
-        .parent()
-        .unwrap();
-    let mut child = Command::new(repo.join("data/venv/bin/python"))
+    let mut child = Command::new(vibe_python())
         .arg("-c")
         .arg(include_str!("support/live_server.py"))
-        .arg(repo.join("data/mistral-vibe"))
         .current_dir(project)
         .env_clear()
         .env("PATH", "/usr/bin:/bin")
@@ -111,7 +122,7 @@ async fn initialize(transport: &StdioTransport, project: &Path) -> String {
         )
         .await
         .unwrap();
-    assert_eq!(initialized["serverInfo"]["version"], "2.26.1");
+    assert_eq!(initialized["serverInfo"]["version"], PIN.trim());
     {
         let mut channel = transport.0.lock().await;
         channel
@@ -175,7 +186,9 @@ async fn live() {
     );
     let active = client
         .list(&SkillsListParams {
-            session_id: session_id.clone(),
+            session_id: Some(session_id.clone()),
+            cwd: None,
+            trust_workspace: false,
         })
         .await
         .unwrap();
@@ -230,6 +243,7 @@ async fn live() {
         "no authenticated Mistral endpoint available"
     );
     eprintln!(
-        "Live Vibe v2.26.1 PASSED: installed, list, unauthenticated catalog, disable, import rejection"
+        "Live Vibe {} PASSED: installed, list, unauthenticated catalog, disable, import rejection",
+        PIN.trim()
     );
 }

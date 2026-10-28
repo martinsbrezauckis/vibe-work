@@ -109,7 +109,6 @@ function reduce(entry: SessionEntry, change: SessionChange): SessionEntry {
     }
     case "notice":
     case "removed":
-    case "handedOff":
       return entry;
   }
 }

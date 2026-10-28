@@ -1,5 +1,4 @@
-//! Which vault the profile folder holds. Two app-layer layouts exist today in one folder (extraction
-//! note §1.2, Vault finding V-1), on the same storage core:
+//! Which vault the profile folder holds. Two app-layer layouts can share one folder and the same storage core:
 //! - **ShellX** (`shellx_profile`): `profile.json` with a `mode` key; local repository in
 //!   `local-vault-server/repos/<repo>`.
 //! - **Vault app** (`crates/tauri-plugin-vault/src/profile.rs:27-41,192-250` @ the pin):

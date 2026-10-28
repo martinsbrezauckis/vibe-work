@@ -12,7 +12,7 @@
  */
 
 /** A running capture. */
-export interface Capture {
+interface Capture {
   /** Stops the microphone and the audio graph; flushes the last partial chunk first. */
   stop(): void;
 }
@@ -34,7 +34,7 @@ export interface CaptureOptions {
  * The audio graph, ready but **without the microphone**: its rate is known before the core is asked to
  * start a stream (the core must know the rate), and the microphone opens only after the core said yes.
  */
-export interface PreparedCapture {
+interface PreparedCapture {
   /** The rate the chunks will be at. */
   readonly sampleRate: number;
   /** Opens the microphone (the OS permission prompt, if any, shows here). */
@@ -60,7 +60,7 @@ export function micErrorText(error: unknown): string {
 }
 
 /** Converts floats in -1..1 to 16-bit little-endian bytes. */
-export function floatToPcm16(samples: Float32Array): Uint8Array {
+function floatToPcm16(samples: Float32Array): Uint8Array {
   const out = new Uint8Array(samples.length * 2);
   const view = new DataView(out.buffer);
   for (let i = 0; i < samples.length; i += 1) {
@@ -71,7 +71,7 @@ export function floatToPcm16(samples: Float32Array): Uint8Array {
 }
 
 /** Collects float blocks and hands out PCM chunks of `size` samples. */
-export function chunker(size: number, onChunk: (pcm: Uint8Array) => void) {
+function chunker(size: number, onChunk: (pcm: Uint8Array) => void) {
   let buffer = new Float32Array(size);
   let filled = 0;
   return {

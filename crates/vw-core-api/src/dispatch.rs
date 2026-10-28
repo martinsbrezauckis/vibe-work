@@ -10,11 +10,10 @@
 //!   as a `refused` event when it is a refusal (nothing was sent).
 //! - Every reply of Vibe's git listings goes through `secret_scrub` (no credentials in remote addresses).
 //! - The Debug API origin acts as the user: the core supplies the confirmation token for it
-//!   (`own_token`), except Full access and the vault, which need a native answer. On the vault, every
+//!   (`own_token`), except the vault, which needs a native answer. On the vault, every
 //!   command first passes `vault_scope::admit`, which refuses the Debug API's user-only vault acts.
-//! - After a profile switch that needed no confirmation (`session/agent/update`, or `config/write`
-//!   touching `/default_agent`), `runtime/read` is called and an alert is raised when Vibe reports
-//!   `bypassToolPermissions: true` (a custom profile TOML can redefine `ask`).
+//! - The full-access alert follows a switch of a session, or a write of the default profile for new
+//!   sessions, from a lower mode to Full access (`full_access_alert`); never a reopen or a start.
 //! - A new registered copy's first `turn/start` receives one package setup fact after the user's text;
 //!   only a successful send marks that fact delivered for this run.
 
@@ -25,7 +24,7 @@ use vw_gate::{ConfirmationToken, GateError, Reply, TRUSTED_SURFACE_METHODS};
 use crate::command::{Command, CommandResult, Origin};
 use crate::core::Core;
 use crate::error::{CoreError, ErrorCode, clip};
-use crate::event::{AlertKind, CoreEvent};
+use crate::event::CoreEvent;
 use crate::plan::{Planned, plan};
 use crate::routing::needs_channel;
 use crate::sessions;
@@ -44,9 +43,17 @@ impl Core {
         command: Command,
     ) -> Result<CommandResult, CoreError> {
         let name = command.name();
+        // A Stop counts before it waits for anything (`stops.rs`).
+        let stopping = crate::stops::requested(&self.shared, &command);
         crate::secret_scan::note_command(&self.shared, &command);
         // A Debug API pick names its target or is refused by name, before the session lease or any native work.
-        let lease = match crate::preview_pick::admit(origin, &command) {
+        let unanswered = match &command {
+            Command::AnswerCallback { callback_id, .. } => {
+                crate::ask::cards::ensure_unanswered(&self.shared, callback_id)
+            }
+            _ => Ok(()),
+        };
+        let lease = match unanswered.and_then(|()| crate::preview_pick::admit(origin, &command)) {
             Ok(()) => self.session_change_lease(&command).await,
             Err(error) => Err(error),
         };
@@ -57,6 +64,7 @@ impl Core {
             Err(error) => Err(error),
         }
         .map_err(|error| self.not_installed_reason(error));
+        crate::stops::finished(&self.shared, &stopping);
         if let Err(error) = &result {
             self.note_failure(origin, name, error);
         }
@@ -108,6 +116,12 @@ impl Core {
         if let Some(refusal) = crate::worktrees::raw_worktree_refusal(&command) {
             return Err(refusal);
         }
+        // Vibe's unified harness has no `tools/list`: answered here from the session's `runtime/read`.
+        if let Command::Call { method, params, .. } = &command
+            && method == crate::tools_list::METHOD
+        {
+            return crate::tools_list::answer(self, origin, params.clone()).await;
+        }
         match plan(command) {
             Planned::Session { method, params } => self.session_call(origin, method, params).await,
             Planned::Forward {
@@ -116,19 +130,17 @@ impl Core {
                 token,
                 trusted_access_switch,
             } => {
-                // The user's next message lifts a Stop of the agent's browser use.
-                let browser_start =
-                    matches!(method.as_str(), "turn/start" | "session/turn/enqueue")
-                        .then(|| {
-                            params
-                                .get("sessionId")
-                                .and_then(Value::as_str)
-                                .map(str::to_owned)
-                        })
-                        .flatten();
-                if let Some(id) = &browser_start {
-                    crate::browser::turn_started(&self.shared, id);
-                }
+                let _interruption = if method == "turn/interrupt" {
+                    self.shared.agent_tools.as_ref().and_then(|tools| {
+                        params
+                            .get("sessionId")
+                            .and_then(Value::as_str)
+                            .map(|id| tools.on_demand.interrupting(id))
+                    })
+                } else {
+                    None
+                };
+                let browser_start = self.start_browser_turn(&method, &params);
                 let setup_id = params
                     .get("sessionId")
                     .and_then(Value::as_str)
@@ -166,6 +178,7 @@ impl Core {
                         params,
                         token,
                         trusted_access_switch,
+                        None,
                     )
                     .await
                 {
@@ -194,6 +207,23 @@ impl Core {
         }
     }
 
+    /// Tracks browser use for a submitted or queued turn before forwarding it.
+    fn start_browser_turn(&self, method: &str, params: &Value) -> Option<String> {
+        // The user's next message lifts a Stop of the agent's browser use.
+        let browser_start = matches!(method, "turn/start" | "session/turn/enqueue")
+            .then(|| {
+                params
+                    .get("sessionId")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned)
+            })
+            .flatten();
+        if let Some(id) = &browser_start {
+            crate::browser::turn_started(&self.shared, id);
+        }
+        browser_start
+    }
+
     /// Release browser use after a failed send when no turn is active.
     async fn release_failed_browser_turn(&self, id: &str) {
         if let Some(hub) = &self.shared.preview {
@@ -210,8 +240,18 @@ impl Core {
     }
 
     /// Commands the core answers itself, or with a dedicated gate entry point.
-    async fn local(&self, origin: Origin, command: Command) -> Result<CommandResult, CoreError> {
+    pub(crate) async fn local(
+        &self,
+        origin: Origin,
+        command: Command,
+    ) -> Result<CommandResult, CoreError> {
         match command {
+            Command::GithubReads { request } => self.github_reads(request).await,
+            Command::AskGrants { request } => self.ask_grants(request),
+            Command::ChromeControl { request } => self.chrome_control(origin, request).await,
+            Command::VibeRules { request } => self.vibe_rules(origin, request).await,
+            Command::KeepAwake { request } => self.keep_awake(request).await,
+            Command::NewChat { request } => self.new_chat(origin, request).await,
             Command::SecretScan { request } => self.secret_scan(request).await,
             Command::ListSessions {
                 limit,
@@ -230,36 +270,8 @@ impl Core {
                 callback_id,
                 output,
             } => {
-                // No channel step: a callback lives only on its session's open channel (a closed or
-                // crashed channel ends it), so an answer for a session without one is refused by the
-                // gate's callback book as unknown.
-                let output = self.shared.connectors.callback_answer(
-                    &session_id,
-                    &callback_id,
-                    &self.shared.gate,
-                    output,
-                )?;
-                let answer = output.clone();
-                let result = self
-                    .shared
-                    .gate
-                    .answer_callback(&session_id, &callback_id, output)
+                crate::ask::cards::answer(&self.shared, origin, session_id, callback_id, output)
                     .await
-                    .map_err(|e| CoreError::from_gate("callback/result", &e))?;
-                // The user's yes on Vibe's card counts for the guard inside our own tool (one ask per call).
-                if let Some(ledger) = crate::one_ask::of(&self.shared) {
-                    ledger.card_answered(&session_id, &callback_id, &answer, origin);
-                }
-                self.shared.emit(CoreEvent::CallbackAnswered {
-                    session_id,
-                    callback_id,
-                    origin,
-                });
-                Ok(CommandResult::Reply {
-                    result,
-                    client_user_message_id: None,
-                    user_entry_ids: Vec::new(),
-                })
             }
             Command::ListCallbacks {} => Ok(CommandResult::Callbacks {
                 open: self
@@ -268,9 +280,11 @@ impl Core {
                     .open_callbacks()
                     .into_iter()
                     .map(CallbackInfo::from)
+                    .chain(crate::ask::tool_calls::open(&self.shared))
                     .collect(),
             }),
             Command::RequestConfirmation { method, params } => {
+                crate::session_ownership::check_delete(&self.shared, &method, &params).await?;
                 let token = self
                     .shared
                     .gate
@@ -290,6 +304,23 @@ impl Core {
             Command::ReadStatus {} => Ok(CommandResult::Status {
                 status: self.status(),
             }),
+            Command::CopyText { text } => {
+                if text.len() > 1_000_000 {
+                    return Err(CoreError::new(
+                        ErrorCode::InvalidParams,
+                        "clipboard text exceeds one million bytes",
+                    ));
+                }
+                self.shared
+                    .config
+                    .clipboard
+                    .as_ref()
+                    .ok_or_else(|| CoreError::new(ErrorCode::Internal, "clipboard is unavailable"))?
+                    .write_text(text)
+                    .await
+                    .map_err(|_| CoreError::new(ErrorCode::Internal, "clipboard is unavailable"))?;
+                Ok(CommandResult::Done {})
+            }
             Command::ReadAnomalies { session_id } => self.anomalies(session_id),
             Command::Keys { request } => crate::key_replace::execute(&self.shared, request).await,
             Command::Vibe { request } => {
@@ -306,17 +337,38 @@ impl Core {
 
     /// The feature tabs' commands (terminals, instructions, documents, speech, Changes, preview): each has its
     /// own handler module; split out so `local` stays one screen long.
+    #[allow(clippy::too_many_lines, reason = "exhaustive typed command routing")]
     async fn feature(&self, origin: Origin, command: Command) -> Result<CommandResult, CoreError> {
         match command {
-            Command::StopSession { session_id } => {
-                sessions::snapshot(&self.shared, &session_id)?;
-                self.shared.channels.close(&session_id).await;
+            Command::DecideProtectedChange {
+                session_id,
+                proposal_id,
+                approve,
+                note,
+            } => Ok(CommandResult::ProtectedChange {
+                proposal: crate::protected_changes::decide(
+                    &self.shared,
+                    session_id,
+                    proposal_id,
+                    approve,
+                    note,
+                    if crate::command_origin::debug_api_acts(&self.shared, origin) {
+                        vw_ask::AnsweredBy::DebugApi
+                    } else {
+                        vw_ask::AnsweredBy::Person
+                    },
+                )
+                .await?,
+            }),
+            Command::RefreshPlugins { session_id } => {
+                let pending = self.refresh_plugins(&session_id).await?;
                 Ok(CommandResult::Reply {
-                    result: json!({"stopped": true}),
+                    result: json!({"pending": pending}),
                     client_user_message_id: None,
                     user_entry_ids: Vec::new(),
                 })
             }
+            Command::StopSession { session_id } => crate::stop_tree::stop(self, &session_id).await,
             Command::SetDefaultModel { model_alias } => {
                 crate::default_model::set(&self.shared, &model_alias).await?;
                 Ok(CommandResult::Reply {
@@ -346,6 +398,9 @@ impl Core {
             Command::Projects { request } => self.projects(origin, request).await,
             Command::Files { request } => self.files(origin, request).await,
             Command::Connectors { request } => self.connectors(origin, request).await,
+            Command::Skills { request } => Ok(CommandResult::Skills {
+                result: self.skills(origin, request).await?,
+            }),
             Command::Marketplace { request } => self.marketplace(origin, request).await,
             Command::Worktrees { request } => Ok(CommandResult::Worktrees {
                 result: self.worktrees(origin, request).await?,
@@ -427,6 +482,10 @@ impl Core {
         method: &str,
         params: Value,
     ) -> Result<CommandResult, CoreError> {
+        // A chat start never waits on gh (it can hang on a keyring prompt or without network).
+        if method == "session/start" && self.shared.github_reads.enabled() {
+            self.shared.github_reads.refresh_later();
+        }
         let reply = self.forward(origin, method, params, None).await?;
         let Some(id) = reply
             .result
@@ -484,7 +543,19 @@ impl Core {
         params: Value,
         token: Option<String>,
     ) -> Result<Reply, CoreError> {
-        self.forward_with_access_switch(origin, method, params, token, false)
+        self.forward_with_access_switch(origin, method, params, token, false, None)
+            .await
+    }
+
+    /// [`Self::forward`] for an app continuation: sent only while the chat's Stop generation is still
+    /// `generation`, checked once the chat's send lock is held (`stops.rs`); otherwise nothing is sent.
+    pub(crate) async fn forward_unless_stopped(
+        &self,
+        method: &str,
+        params: Value,
+        generation: u64,
+    ) -> Result<Reply, CoreError> {
+        self.forward_with_access_switch(Origin::Ui, method, params, None, false, Some(generation))
             .await
     }
 
@@ -497,7 +568,19 @@ impl Core {
         params: Value,
         token: Option<String>,
         trusted_access_switch: bool,
+        stop: Option<u64>,
     ) -> Result<Reply, CoreError> {
+        let mut params = params;
+        let selected = crate::model_choices::selected(&self.shared, method, &mut params);
+        if let Some(reply) = crate::stop_tree::interrupt(&self.shared, method, &params).await? {
+            return Ok(reply);
+        }
+        crate::session_ownership::check_delete(&self.shared, method, &params).await?;
+        let _refresh = self.plugin_refresh_lock(method, &params).await?;
+        // Under the chat's send lock (`stops.rs`): a Stop's interrupt reaches a turn a checked send started; a Stop
+        // since the continuation was scheduled refuses it here, before a stopped chat is reopened (the test that
+        // decides runs again right before the send, `turn_start::call`).
+        let params = crate::stop_tree::admit(&self.shared, method, params, stop).await?;
         // A composer's runtime read must wait for the open's verified mode too.
         let _runtime_restore = self.runtime_restore_lock(method, &params).await;
         // A stuck session is never opened implicitly (`stuck.rs`): refused at once, nothing sent.
@@ -520,23 +603,19 @@ impl Core {
         let restore = self
             .resume_restore(method, &mut params, token.is_some())
             .await?;
-        if token.is_none() {
+        if token.is_none() && method != "config/model/write" {
             token = self
                 .own_token(origin, method, &params, trusted_access_switch)
                 .await?;
         }
-        if let Some(id) = needs_channel(method, &params)
-            && !self.shared.channels.has_channel(id)
-        {
-            // Refusals first: a call the gate refuses must not open (and lease) the session.
-            self.shared
-                .gate
-                .check(method, &params, token.as_ref())
-                .map_err(|e| CoreError::from_gate(method, &e))?;
-            let id = id.to_owned();
-            self.bounded_open(&id, self.attach_session(origin, &id))
-                .await?;
-        }
+        // A stale picker is resolved against the current session in `pick`, after an implicit reopen.
+        // The preliminary check still validates the session-only write before attaching a channel.
+        let admission_params = crate::model_choices::admission(method, &params);
+        self.ensure_command_channel(origin, method, &admission_params, token.as_ref())
+            .await?;
+        self.shared.channels.canonical_params(method, &mut params);
+        Box::pin(crate::model_choices::before(&self.shared, method, &params)).await;
+        let _skills_guard = self.lock_skills_work(method).await;
         // The session's review baseline exists before Vibe starts working in its folder.
         if crate::changes::starts_work(method) {
             self.changes_before_work(&params).await;
@@ -553,64 +632,86 @@ impl Core {
         }
         let entry_project = crate::entry_projects::before_open(&self.shared, method, &params).await;
         // Persist only byte-carrying input the gate has accepted; filenames never grant read access.
-        self.shared
-            .gate
-            .check(method, &params, token.as_ref())
-            .map_err(|e| CoreError::from_gate(method, &e))?;
-        crate::attachment_save::prepare(&self.shared, method, &mut params).await?;
-        let compaction_channel = crate::dispatch_compaction::channel(&self.shared, method, &params);
-        let gate = &self.shared.gate;
-        let call = gate.call(method, params.clone(), token.as_ref());
-        let reply = match restore.as_ref().and_then(|_| params["sessionId"].as_str()) {
-            // A resume is an open too: bounded, and a session Vibe cannot reopen is marked stuck.
-            Some(id) => {
-                let id = id.to_owned();
-                let mut reply = None;
-                self.bounded_open(&id, async {
-                    reply = Some(call.await.map_err(|e| CoreError::from_gate(method, &e))?);
-                    Ok(())
-                })
+        if method != "config/model/write" {
+            self.prepare_model_input(method, &mut params, token.as_ref())
                 .await?;
-                reply
-                    .ok_or_else(|| CoreError::new(ErrorCode::Internal, "resume without a reply"))?
-            }
-            None => {
-                match crate::session_end::missing_reply(&self.shared, method, &params, call.await) {
-                    Ok(reply) => reply,
-                    Err(error) => {
-                        return Err(crate::dispatch_compaction::failed(
-                            &self.shared,
-                            method,
-                            &params,
-                            compaction_channel,
-                            &error,
-                        )
-                        .await);
-                    }
-                }
-            }
-        };
+        }
+        let (compaction, _in) = crate::dispatch_compaction::channel(&self.shared, method, &params);
+        // Full access before a switch or a default write (after any reopen above): the alert is for a raise.
+        let was_full = self.full_before(method, &params);
+        let deleted_children =
+            crate::session_end::deletion_children(&self.shared, method, &params).await;
+        let mut reply = Box::pin(self.send_call(crate::dispatch_call::Sending {
+            method,
+            params: &params,
+            token: token.as_ref(),
+            stop,
+            opening: restore.is_some(),
+            compaction,
+            selected,
+        }))
+        .await?;
         if let Some(opening) = entry_project {
             opening.finish(&self.shared, &reply.result);
         }
+        if method == "session/fork" {
+            crate::model_choices::forked(&self.shared, &params, &reply.result);
+        }
+        if matches!(method, "runtime/read" | "config/reload")
+            && let Some(id) = params["sessionId"].as_str()
+            && let Some(runtime) = reply.result.get("runtime")
+        {
+            crate::model_choices::publish(&self.shared, id, runtime.clone()).await;
+        }
+        if method == "turn/interrupt"
+            && let Some(id) = params["sessionId"].as_str()
+        {
+            crate::stop_tree::descendants(&self.shared, id).await?;
+        }
+        crate::session_loops::after(&self.shared, method, &params, &mut reply.result).await?;
+        sessions::project_result(&self.shared, method, &params, &mut reply.result);
         // A delete ends the session here, in one place (`session_end.rs`).
         sessions::observe(&self.shared, method, &params, &reply.result).await?;
-        if let Some(restore) = restore {
-            self.restore_profile(origin, restore).await?;
+        for child in deleted_children {
+            crate::session_end::deleted(&self.shared, &child).await;
         }
-        if token.is_none() && switches_profile(method, &params) {
-            self.check_bypass(origin, &params).await;
+        self.plugins_after_open(origin, restore, method, &params, &reply.result)
+            .await?;
+        if let Some(was_full) = was_full {
+            self.after_access_write(origin, method, &params, token.is_none(), was_full)
+                .await;
         }
         // credentials in remote addresses of Vibe's git listings never leave the core (`secret_scrub`).
-        let mut reply = reply;
         reply.result = crate::secret_scrub::git_listing(method, std::mem::take(&mut reply.result));
         Ok(reply)
     }
 
+    /// Refuse before opening or leasing a channel, then attach only when this command needs it.
+    async fn ensure_command_channel(
+        &self,
+        origin: Origin,
+        method: &str,
+        params: &Value,
+        token: Option<&ConfirmationToken>,
+    ) -> Result<(), CoreError> {
+        if let Some(id) = needs_channel(method, params)
+            && !self.shared.channels.has_channel(id)
+        {
+            self.shared
+                .gate
+                .check(method, params, token)
+                .map_err(|e| CoreError::from_gate(method, &e))?;
+            self.bounded_open(id, self.attach_session(origin, id))
+                .await?;
+        }
+        Ok(())
+    }
+
     /// The confirmation token the core supplies itself for a call that came without one, or `None`:
     /// - the window (trusted surface): for `TRUSTED_SURFACE_METHODS` only, without a dialog;
-    /// - the Debug API (it acts as the user): for calls that need a confirmation; the
-    ///   confirmer answers most requests directly, while Full access still opens a native dialog.
+    /// - the Debug API (it acts as the user): for calls that need a confirmation. The confirmer
+    ///   answers them without a dialog, Full access included; only the vault's dialogs
+    ///   (`vault_scope::DIALOG_METHODS`) still wait for the user's answer in the native dialog.
     ///
     /// A call that needs no confirmation (`ConfirmationNotApplicable`) gets `None` and proceeds unchanged.
     async fn own_token(
@@ -661,82 +762,4 @@ impl Core {
             Err(error) => Err(CoreError::from_gate(method, &error)),
         }
     }
-
-    /// Reads the runtime after an unconfirmed profile switch and raises an alert when tool
-    /// permissions are bypassed. A failed read is logged, not raised: the switch itself worked.
-    pub(crate) async fn check_bypass(&self, origin: Origin, params: &Value) {
-        let Some(session_id) = params.get("sessionId").and_then(Value::as_str) else {
-            return;
-        };
-        let read = self
-            .shared
-            .gate
-            .call("runtime/read", json!({"sessionId": session_id}), None)
-            .await;
-        match read {
-            Ok(reply) => {
-                let bypass = reply
-                    .result
-                    .pointer("/runtime/bypassToolPermissions")
-                    .and_then(Value::as_bool)
-                    == Some(true);
-                if bypass {
-                    warn!(
-                        origin = origin.as_str(),
-                        session_id, "profile switch bypasses tool permissions"
-                    );
-                    self.shared.emit(CoreEvent::Alert {
-                        session_id: Some(session_id.to_owned()),
-                        kind: AlertKind::BypassToolPermissions,
-                        message: "This access mode runs every tool without asking (its profile turns tool permissions off).".to_owned(),
-                    });
-                }
-            }
-            Err(error) => {
-                warn!(session_id, %error, "runtime/read after a profile switch failed");
-            }
-        }
-    }
-}
-
-/// True for calls that change which profile a session (or new sessions) use.
-pub(crate) fn switches_profile(method: &str, params: &Value) -> bool {
-    match method {
-        "session/agent/update" => true,
-        "config/write" => params
-            .get("ops")
-            .and_then(Value::as_array)
-            .is_some_and(|ops| {
-                ops.iter()
-                    .any(|op| op.get("path").and_then(Value::as_str) == Some("/default_agent"))
-            }),
-        _ => false,
-    }
-}
-
-/// Maps a request body that is not a valid command (vw-debug-api uses it for decode errors).
-///
-/// The text names keys only, never values: serde's messages can quote the caller's values
-/// (`invalid type: string "..."`), and refusals are logged and broadcast. Messages about a
-/// missing or unknown field, or an unknown command type, name our own schema's keys (or the
-/// caller's key, clipped) and are kept; anything else becomes a fixed text.
-#[must_use]
-pub fn invalid_command(error: &serde_json::Error) -> CoreError {
-    let text = error.to_string();
-    let keep = ["missing field `", "unknown field `", "unknown variant `"]
-        .iter()
-        .any(|prefix| text.starts_with(prefix));
-    let detail = if keep {
-        // Drop serde's "expected one of ..." tail and the position: the key is what matters.
-        let head = text.split(", expected").next().unwrap_or(&text);
-        clip(head.split(" at line ").next().unwrap_or(head), 200)
-    } else if error.is_syntax() || error.is_eof() {
-        "the body is not valid JSON".to_owned()
-    } else {
-        "a field has the wrong type or value".to_owned()
-    };
-    CoreError::new(
-        ErrorCode::InvalidCommand,
-        format!("not a valid command: {detail}"),
-    )
 }

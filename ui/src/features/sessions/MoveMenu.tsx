@@ -32,7 +32,7 @@ export function MoveMenu() {
     },
     {
       id: "to-new",
-      label: "New project...",
+      label: "New project…",
       run: () => void groups.createWith(mover.sessionIds),
     },
   ];

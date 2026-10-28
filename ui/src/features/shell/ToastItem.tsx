@@ -1,6 +1,7 @@
 /**
  * One readable toast: a three-line prefix with an explicit full-text action, independent dismiss
- * control and length-aware timer. Depends on toastReading/Icon; called by Toasts. Pointer, keyboard
+ * control and length-aware timer. Docked in the status bar it shows its own message on one line (cut with an
+ * ellipsis) with Show all. Depends on toastReading/Icon; called by Toasts. Pointer, keyboard
  * focus and an open notifications panel pause expiry; warnings and errors persist.
  */
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
@@ -88,13 +89,12 @@ export function ToastItem({
       if (left.current !== null) left.current = Math.max(0, left.current - (Date.now() - started));
     };
   }, [paused, leaving, leave]);
-  const summary = kind === "error" ? "Error" : kind === "warn" ? "Warning" : "Notice";
   return (
     <div
       data-item-id={toast.id}
       className={`toast${leaving ? " out" : ""}`}
-      role="status"
       data-kind={kind}
+      data-guard={toast.guardRefusal === undefined ? undefined : "true"}
       data-toast-id={String(id)}
       data-active={active ? "true" : undefined}
       hidden={docked && !active}
@@ -118,26 +118,32 @@ export function ToastItem({
       <div className="toast-content">
         <span ref={message} className="toast-text">
           {toast.plugin ? (
-            <PluginNoticeText text={docked ? summary : preview} name={toast.plugin.name} />
+            <PluginNoticeText text={docked ? text : preview} name={toast.plugin.name} />
           ) : docked ? (
-            summary
+            text
           ) : (
             preview
           )}
         </span>
-        {(docked || preview !== text) && (
+        {(toast.guardRefusal !== undefined || docked || preview !== text) && (
           <Button
             data-testid="shell.toast-item-button"
-            small
+            appearance="expander"
             data-toast-more="true"
-            aria-label="Open notifications: Show all"
+            aria-label={toast.guardRefusal === undefined ? "Open notifications: Show all" : "Show"}
             onClick={onOpen}
           >
-            Show all
+            {toast.guardRefusal === undefined ? "Show all" : "Show"}
           </Button>
         )}
       </div>
-      <IconButton data-testid="shell.toast-item-x" icon="x" aria-label="Dismiss" onClick={leave} />
+      <IconButton
+        tooltip={false}
+        data-testid="shell.toast-item-x"
+        icon="x"
+        label="Dismiss"
+        onClick={leave}
+      />
       {life !== null && (
         <span
           className="toast-timer"

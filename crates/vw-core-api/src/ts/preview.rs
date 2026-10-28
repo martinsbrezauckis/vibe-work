@@ -69,3 +69,21 @@ pub(super) fn browser_decls(cfg: &Config) -> Vec<String> {
     })
     .collect()
 }
+
+/// Protected-folder review declarations; histories carry these through the core's JSON boundary.
+pub(super) fn proposal_decls(cfg: &Config) -> Vec<String> {
+    vec![
+        crate::ProtectedChangeView::decl(cfg),
+        crate::ProtectedChangeStatus::decl(cfg),
+        crate::ProtectedFileView::decl(cfg),
+        crate::ProtectedChangeProblem::decl(cfg),
+    ]
+    .into_iter()
+    .map(|decl| {
+        decl.lines()
+            .map(str::trim_end)
+            .collect::<Vec<_>>()
+            .join("\n")
+    })
+    .collect()
+}

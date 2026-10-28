@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct SourceView {
-    /// What it is ("uv 0.12.24 (Astral)", "mistral-vibe 2.26.0 (`PyPI`)", "Python 3.12 (through uv)").
+    /// What it is ("uv 0.12.24 (Astral)", "mistral-vibe 2.26.0 (`PyPI`)", "Python 3.14.8 (through uv)").
     pub name: String,
     /// Where it comes from (download or page URL).
     pub url: String,
@@ -176,6 +176,11 @@ pub struct InstallView {
     pub existing: Vec<ExistingView>,
     /// Whether `checkExisting` ran in this app run.
     pub checked_existing: bool,
+    /// The older app-owned Vibe version this install replaces after an app update (setup then says Update, not
+    /// Install); absent for a fresh install or the user's own install.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
+    pub replacing: Option<String>,
     /// Vibe updates from the signed supported-Vibe manifest (boxed: the view travels in core events).
     pub update: Box<VibeUpdateView>,
 }

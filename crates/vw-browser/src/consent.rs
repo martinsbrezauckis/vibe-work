@@ -169,4 +169,8 @@ pub type ConsentFuture<'a> = Pin<Box<dyn Future<Output = bool> + Send + 'a>>;
 pub trait ConsentConfirmer: Send + Sync {
     /// Asks the user in a native dialog; false means the action must not run.
     fn confirm(&self, request: ConsentRequest) -> ConsentFuture<'_>;
+    /// Terminal permission sentence when the presenter retains a shared ask record.
+    fn refusal_text(&self, _session_id: &str) -> Option<String> {
+        None
+    }
 }

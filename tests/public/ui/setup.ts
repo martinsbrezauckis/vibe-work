@@ -10,15 +10,23 @@
  * whole list fits the "viewport" and every row is mounted (jsdom has no layout: virtua never measures
  * items there, because their `offsetParent` is null, and keeps its size estimate). `scrollTo` is a
  * no-op for the same reason.
+ *
+ * The app's announcer (`ui/src/state/announcer.ts`) is emptied after each test, and text queries skip its regions.
  */
 import "@testing-library/jest-dom/vitest";
 import { cleanup, configure } from "@testing-library/react";
 import { afterEach, beforeEach } from "vitest";
+import { resetAnnouncer } from "../../../ui/src/state/announcer";
 
 // `findBy*` / `waitFor` wait for a condition, so their limit is only a failure bound. The 1 s default
 // is shorter than a cold dynamic import under CPU load; a generous bound removes that race without
 // slowing passing tests (they resolve the moment the element exists).
-configure({ asyncUtilTimeout: 30_000 });
+// The app's announcement regions repeat visible words for screen readers only; text queries look at what is shown.
+configure({
+  asyncUtilTimeout: 30_000,
+  defaultIgnore:
+    "script, style, [data-announcer-root], [data-announcer-root] *",
+});
 
 class TestResizeObserver {
   private readonly callback: ResizeObserverCallback;
@@ -79,4 +87,5 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  resetAnnouncer();
 });

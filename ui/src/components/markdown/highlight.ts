@@ -1,6 +1,6 @@
 /**
  * Syntax highlighting for code blocks in model output, CSP-safe:
- * - `shiki/core` with the JavaScript regex engine (`@shikijs/engine-javascript`): no WebAssembly, so
+ * - `shiki/core` with `shiki/engine/javascript`: no WebAssembly, so
  *   the CSP needs no `wasm-unsafe-eval`;
  * - languages are imported lazily, one chunk each, from a fixed list (an unknown language is plain
  *   text, never a dynamic import of an arbitrary name);
@@ -8,14 +8,15 @@
  *   (`syn-token-keyword`) whose colour is a design token (`--syn-*` in `styles/tokens.css`). Tokens are
  *   rendered as React elements with classes only: no HTML string, no `style` attribute
  *   (`codeToHtml` is forbidden: it needs innerHTML and its `style="…"` is blocked by `style-src 'self'`).
- * Depends on: shiki 4.5.0, @shikijs/engine-javascript 4.5.0. Called by: CodeBlock.
+ * Depends on: shiki 4.5.0. Called by: CodeBlock, the File tab, and the code
+ * editor's language list (`features/editor/languages.ts`), which offers exactly the languages listed here.
  * Invariants: never throws to the caller (a failure means plain text); large inputs are not
  * highlighted (`MAX_HIGHLIGHT_CHARS`); results are cached per (language, code) for re-mounted rows.
  */
 import type { HighlighterCore, LanguageInput } from "shiki/core";
 
 /** Largest code block that is highlighted; bigger ones stay plain text (keeps the window responsive). */
-export const MAX_HIGHLIGHT_CHARS = 30_000;
+const MAX_HIGHLIGHT_CHARS = 30_000;
 
 /** One highlighted piece of a line. */
 export interface CodeToken {
@@ -27,7 +28,7 @@ export interface CodeToken {
 type Loader = () => Promise<{ default: LanguageInput }>;
 
 /** The languages offered, by shiki id. Each import becomes its own lazily loaded chunk. */
-const LANGUAGES: Record<string, Loader> = {
+const LANGUAGES = {
   bash: () => import("shiki/langs/shellscript.mjs"),
   c: () => import("shiki/langs/c.mjs"),
   cpp: () => import("shiki/langs/cpp.mjs"),
@@ -55,7 +56,18 @@ const LANGUAGES: Record<string, Loader> = {
   typescript: () => import("shiki/langs/typescript.mjs"),
   xml: () => import("shiki/langs/xml.mjs"),
   yaml: () => import("shiki/langs/yaml.mjs"),
-};
+} satisfies Record<string, Loader>;
+
+/** A language id this module offers. */
+export type HighlightLanguage = keyof typeof LANGUAGES;
+
+/** Every language id offered; the code editor offers the same ones. */
+export const HIGHLIGHT_LANGUAGES = Object.keys(LANGUAGES) as readonly HighlightLanguage[];
+
+/** Whether `id` is an offered language: an own key only (a name like `constructor` is not a language). */
+function offered(id: string): id is HighlightLanguage {
+  return Object.hasOwn(LANGUAGES, id);
+}
 
 /** Fence names that mean one of the languages above. */
 const ALIASES: Record<string, string> = {
@@ -78,17 +90,18 @@ const ALIASES: Record<string, string> = {
   rs: "rust",
   ts: "typescript",
   mts: "typescript",
+  cts: "typescript",
   yml: "yaml",
   svg: "xml",
   patch: "diff",
 };
 
 /** The language id for a fence name, or `null` when it is not offered. */
-export function languageOf(fence: string | null): string | null {
+export function languageOf(fence: string | null): HighlightLanguage | null {
   if (fence === null) return null;
   const name = fence.trim().toLowerCase();
-  const id = ALIASES[name] ?? name;
-  return id in LANGUAGES ? id : null;
+  const id = (Object.hasOwn(ALIASES, name) ? ALIASES[name] : undefined) ?? name;
+  return offered(id) ? id : null;
 }
 
 const THEME = "vw-tokens";
@@ -119,7 +132,7 @@ function getHighlighter(): Promise<HighlighterCore> {
 function loadLanguage(hl: HighlighterCore, id: string): Promise<boolean> {
   let pending = loaded.get(id);
   if (pending === undefined) {
-    const loader = LANGUAGES[id];
+    const loader: Loader | undefined = offered(id) ? LANGUAGES[id] : undefined;
     pending =
       loader === undefined
         ? Promise.resolve(false)
@@ -163,7 +176,7 @@ export async function highlight(
   lang: string,
   limit = MAX_HIGHLIGHT_CHARS,
 ): Promise<CodeToken[][] | null> {
-  if (code.length > limit || !(lang in LANGUAGES)) return null;
+  if (code.length > limit || !offered(lang)) return null;
   const key = `${lang}\u0000${code}`;
   const hit = cache.get(key);
   if (hit !== undefined) return hit;

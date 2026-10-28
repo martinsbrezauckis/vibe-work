@@ -33,6 +33,7 @@ fn path(shared: &Shared) -> Option<PathBuf> {
 /// The safety reminder's text.
 pub(crate) fn guard(
     shared: &Shared,
+    session: &str,
     command: &str,
     cwd: Option<&std::path::Path>,
 ) -> Result<(), String> {
@@ -42,7 +43,13 @@ pub(crate) fn guard(
     match safety::check(command, cwd, &safety::load(&path)) {
         Some(stop) => {
             tracing::info!(rule = %stop.rule, "safety reminder stopped an agent command");
-            Err(stop.text)
+            Err(crate::guard_refusals::record(
+                shared,
+                session,
+                crate::GuardKind::SafetyRule,
+                crate::guard_refusals::step(shared, session, None),
+                &stop.text,
+            ))
         }
         None => Ok(()),
     }

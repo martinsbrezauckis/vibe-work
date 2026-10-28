@@ -27,9 +27,7 @@ webview = [
     "dep:webview2-com",
     "dep:base64",
     "dep:serde_json",
-    "dep:objc2",
     "dep:objc2-web-kit",
-    "dep:block2",
     "dep:gtk",
     "dep:gdk",
     "dep:glib",
@@ -38,6 +36,11 @@ webview = [
 ]
 
 [dependencies]
+# Handle-relative cleanup of immutable Vibe package copies; never follow links while changing modes.
+cap-std = "4.0.3"
+cap-fs-ext = "4.0.3"
+# Idle-sleep inhibition only; no CLI features or display inhibition. MIT.
+keepawake = { version = "=0.6.1", default-features = false }
 thiserror = "2"
 arboard = { version = "=3.6.1", default-features = false, features = ["wayland-data-control"] }
 tokio = { version = "1.53", features = ["sync", "time", "rt"] }
@@ -54,14 +57,24 @@ dunce = "1.0.5"
 # Strict JSON boolean result from the page's final native-click guard (all webview platforms).
 serde_json = { version = "1", optional = true }
 
+[dev-dependencies]
+tempfile = "3"
+
+# examples/confirm_window_probe.rs (macOS): its own app window (NSBackingStoreType is in NSGraphics, the activation
+# policy in NSRunningApplication) and a close from another thread through the main queue. Versions in the lockfile.
+[target.'cfg(target_os = "macos")'.dev-dependencies]
+dispatch2 = "0.3"
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSGraphics", "NSRunningApplication"] }
+
 [target.'cfg(target_os = "macos")'.dependencies]
-# `WKWebView` snapshots (webview.rs, feature `webview`). The versions wry 0.57 already uses (lockfile).
-objc2 = { version = "0.6", optional = true }
-objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSData", "NSDictionary", "NSError", "NSString", "NSArray", "NSHTTPCookie", "NSProcessInfo", "NSJSONSerialization"] }
-objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSPasteboard", "NSImage", "NSImageRep", "NSBitmapImageRep", "NSView", "NSWindow", "NSResponder", "NSEvent", "NSGraphicsContext", "objc2-core-foundation"] }
+# `WKWebView` snapshots (webview.rs, feature `webview`), the confirmation window (`confirm_window/mac.rs`) and the
+# services provider of "Send to Vibe Work" (`send_to_mac.rs`). The versions wry 0.57 already uses (lockfile).
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSData", "NSDictionary", "NSError", "NSString", "NSArray", "NSHTTPCookie", "NSProcessInfo", "NSLocale", "NSGeometry", "NSJSONSerialization", "NSValue", "NSURL", "NSDate", "NSSet", "NSUserDefaults", "NSEnumerator"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSPasteboard", "NSImage", "NSImageRep", "NSBitmapImageRep", "NSView", "NSWindow", "NSResponder", "NSEvent", "NSGraphicsContext", "NSPrintInfo", "NSPrintOperation", "objc2-core-foundation", "NSPasteboardItem", "NSWorkspace", "NSRunningApplication", "block2", "NSAccessibilityProtocols", "NSAlert", "NSButton", "NSControl"] }
 # Content rule lists per preview webview (WKContentRuleListStore, the configuration's user content controller).
-objc2-web-kit = { version = "0.3", optional = true, default-features = false, features = ["std", "block2", "objc2-app-kit", "WKWebView", "WKSnapshotConfiguration", "WKContentRuleList", "WKContentRuleListStore", "WKUserContentController", "WKWebViewConfiguration", "WKWebsiteDataStore", "WKHTTPCookieStore"] }
-block2 = { version = "0.6", optional = true }
+objc2-web-kit = { version = "0.3", optional = true, default-features = false, features = ["std", "block2", "objc2-app-kit", "objc2-core-foundation", "WKWebView", "WKPreferences", "WKSnapshotConfiguration", "WKContentRuleList", "WKContentRuleListStore", "WKUserContentController", "WKWebViewConfiguration", "WKWebsiteDataStore", "WKWebsiteDataRecord", "WKHTTPCookieStore"] }
+block2 = "0.6"
 # proc_pidinfo(PROC_PIDTBSDINFO) for precise start times (process.rs). Already in the lockfile.
 libc = "0.2"
 
@@ -73,13 +86,23 @@ base64 = { version = "0.22", optional = true }
 # Window captures (`window_capture.rs`): GDI, PrintWindow (Storage_Xps), the display ICC profile.
 # User-only folders and files (`private_file.rs`): the token's SID, SDDL, Get/SetNamedSecurityInfoW.
 # The main window's bare Alt tap (`window_keys.rs`): comctl32 SetWindowSubclass (wry uses it too).
-# The WebView2 UserDataFolder policy (webview.rs `shared_user_data_folder`): Win32_System_Registry.
-windows = { version = "0.62", features = ["Win32_System_Registry", "Win32_Foundation", "Win32_System_Threading", "Win32_Graphics_Gdi", "Win32_Storage_Xps", "Win32_UI_WindowsAndMessaging", "Win32_UI_ColorSystem", "Win32_Security", "Win32_Security_Authorization", "Win32_UI_Shell"] }
+# The confirmation window (`confirm_window/win.rs`): the common-controls task dialog, Win32_UI_Controls.
+# Owned-tree cleanup (`remove_tree/windows.rs`): handle disposition preserves shared read-only attributes.
+# The Git Bash wrapper's kill-on-close job (`kill_job.rs`): job objects, the command line, the standard handles.
+windows = { version = "0.62", features = ["Win32_Globalization", "Win32_Foundation", "Win32_System_Threading", "Win32_Graphics_Gdi", "Win32_Storage_Xps", "Win32_UI_WindowsAndMessaging", "Win32_UI_ColorSystem", "Win32_Security", "Win32_Security_Authorization", "Win32_Storage_FileSystem", "Win32_UI_Shell", "Win32_System_Com", "Win32_UI_Controls", "Win32_System_JobObjects", "Win32_System_Environment", "Win32_System_Console"] }
+# The "Send to Vibe Work" Explorer verbs under HKCU (`send_to_windows.rs`) and the WebView2 UserDataFolder policy
+# lookup (webview.rs `user_data_folder_override`); already in the lockfile (0.6.1).
+windows-registry = "0.6"
 # Toasts with an Activated handler that lives as long as the toast (notify.rs `show_toast`): the crate
 # notify-rust uses on Windows, same version (already in the lockfile).
 tauri-winrt-notification = "=0.8.1"
 
 [target.'cfg(target_os = "linux")'.dependencies]
+# gnu_get_libc_version for the update check's glibc reading (`system_version.rs`). Already in the lockfile.
+libc = "0.2"
+# The startup accessibility bus check (`a11y_bus.rs`): libdbus, the library GTK's accessibility bridge registers
+# with, so the check fails exactly when the bridge would. Already in the lockfile through tao (0.9.12).
+dbus = "0.9"
 # Native click delivery on the Tauri child WebKitGTK widget, using GTK's event queue.
 gtk = { version = "0.18", optional = true }
 gdk = { version = "0.18", optional = true }
@@ -90,4 +113,4 @@ javascriptcore-rs = { version = "1.1.2", optional = true }
 [target.'cfg(unix)'.dependencies]
 # Process hardening without our own `unsafe`: safe wrappers for prctl/setrlimit.
 # rustix 1.1.5 is already in the lockfile through other crates.
-rustix = { version = "1.1.5", features = ["process"] }
+rustix = { version = "1.1.5", features = ["process", "fs"] }

@@ -10,9 +10,9 @@
  */
 
 /** A dragged session row: its id and its children's ids. */
-export const SESSION_MIME = "application/x-vibe-work-sessions";
+const SESSION_MIME = "application/x-vibe-work-sessions";
 /** A dragged project (reordering). */
-export const PROJECT_MIME = "application/x-vibe-work-project";
+const PROJECT_MIME = "application/x-vibe-work-project";
 
 /** The part of `DataTransfer` the list uses (a plain object in tests). */
 export interface Transfer {

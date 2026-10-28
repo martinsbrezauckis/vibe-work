@@ -27,7 +27,7 @@ import { createStore } from "./createStore";
 import type { Shell } from "./shellStore";
 
 /** An answer to a question across libraries. */
-export interface LibraryAnswer {
+interface LibraryAnswer {
   question: string;
   answer: string;
   sources: readonly LibrarySourceView[];
@@ -36,7 +36,7 @@ export interface LibraryAnswer {
 }
 
 /** A document's text, opened from the list or from a source. */
-export interface LibraryViewer {
+interface LibraryViewer {
   name: string;
   text: string;
   truncated: boolean;
@@ -140,10 +140,7 @@ export function createLibraries(deps: {
     req: LibrariesRequest,
   ): Promise<LibrariesResult> => {
     if (origin === "ui" && deps.keyReady?.() === false) throw new Error("Mistral key required");
-    const result = await core.run(
-      { type: "libraries", request: req },
-      origin === "debug-api" ? { origin } : undefined,
-    );
+    const result = await core.run({ type: "libraries", request: req });
     if (result.type !== "libraries") throw new Error("unexpected answer to a libraries request");
     return result.result;
   };
@@ -182,10 +179,7 @@ export function createLibraries(deps: {
         const result = await request(origin, { op: "list" });
         if (result.kind === "list")
           patch({ libraries: result.libraries, costs: result.costs, error: null });
-        const projects = await core.run(
-          { type: "projects", request: { op: "list" } },
-          origin === "debug-api" ? { origin } : undefined,
-        );
+        const projects = await core.run({ type: "projects", request: { op: "list" } });
         if (projects.type === "projects" && projects.result.type === "list")
           patch({ projects: projects.result.projects.map((p) => ({ id: p.id, name: p.name })) });
       } catch (thrown) {

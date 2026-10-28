@@ -191,6 +191,44 @@ async fn token_for_other_method_is_refused() {
     assert!(rig.transport.frames().is_empty());
 }
 
+/// PREDICT: a confirmed call the server refuses for a moment is sent once more with the same spent token (two
+/// frames, the second answer returned), and the token cannot be used again afterwards; an error the caller does not
+/// accept is not sent again.
+#[tokio::test]
+async fn a_passing_refusal_resends_the_confirmed_call_once() {
+    let rig = rig();
+    let (method, params) = &p2_cases()[2];
+    let passing = |error: &GateError| format!("{error}").contains("in use");
+    let token = rig.gate.request_confirmation(method, params).await.unwrap();
+    rig.transport.fail_next(method, "the file is in use");
+    let r = rig
+        .gate
+        .call_with_retry(method, params.clone(), Some(&token), passing, || async {})
+        .await;
+    assert!(r.is_ok(), "{r:?}");
+    assert_eq!(rig.transport.frames().len(), 2);
+    let again = rig.gate.call(method, params.clone(), Some(&token)).await;
+    assert!(
+        matches!(
+            again,
+            Err(GateError::ConfirmationRejected {
+                fault: TokenFault::Reused,
+                ..
+            })
+        ),
+        "{again:?}"
+    );
+
+    let token = rig.gate.request_confirmation(method, params).await.unwrap();
+    rig.transport.fail_next(method, "not found");
+    let r = rig
+        .gate
+        .call_with_retry(method, params.clone(), Some(&token), passing, || async {})
+        .await;
+    assert!(matches!(r, Err(GateError::Transport(_))), "{r:?}");
+    assert_eq!(rig.transport.frames().len(), 3);
+}
+
 /// PREDICT: reuse is refused with its own fault, and the second send never happens.
 #[tokio::test]
 async fn token_is_single_use() {

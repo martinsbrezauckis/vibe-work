@@ -55,7 +55,11 @@ pub(crate) fn validate_root(root: &Path) -> Result<PathBuf, Error> {
     fs::canonicalize(root).map_err(|error| Error::io(root, error))
 }
 
-pub(crate) fn validate_target(root: &Path, relative: &Path) -> Result<Target, Error> {
+pub(crate) fn validate_target_with_parents(
+    root: &Path,
+    relative: &Path,
+    allow_missing: bool,
+) -> Result<Target, Error> {
     let mut absolute = root.to_owned();
     let mut metadata = None;
     for component in relative.components() {
@@ -78,7 +82,15 @@ pub(crate) fn validate_target(root: &Path, relative: &Path) -> Result<Target, Er
     let parent = absolute.parent().ok_or_else(|| Error::InvalidPath {
         path: relative.into(),
     })?;
-    let parent = fs::canonicalize(parent).map_err(|error| Error::io(relative, error))?;
+    let mut existing = parent;
+    if allow_missing {
+        while !existing.exists() {
+            existing = existing.parent().ok_or_else(|| Error::InvalidPath {
+                path: relative.into(),
+            })?;
+        }
+    }
+    let parent = fs::canonicalize(existing).map_err(|error| Error::io(relative, error))?;
     if !parent.starts_with(root) {
         return Err(Error::OutsideRoot {
             path: relative.into(),

@@ -4,9 +4,14 @@
 //! the policy: notify, download, then ask. This file is the Tauri side only:
 //! - [`PluginBackend`]: check / download / install with the plugin's `Update`;
 //! - [`AppHooks`]: the OS notification and the relaunch after an install (core shut down first);
+//! - Windows: the installer copies earlier updates left in the temp folder are removed a while after start;
 //! - [`UpdatesHandle`]: the manager as Tauri state for the commands;
 //! - [`VibeSlot`]: the run's Vibe installer, so the same check also reads the signed supported-Vibe
-//!   manifest (`vibe-support.json` next to `latest.json`, verified with the same `pubkey`).
+//!   manifest (`vibe-support.json` next to `latest.json`, verified with the same `pubkey`);
+//! - the system check: the manifest entry of this platform may name the oldest system the package runs on
+//!   (`minimumSystemVersion` for macOS and the Windows build, `minimumGlibc` for the C library on Linux); on an older
+//!   system the offer carries that finding and the flow never downloads it (`vw_host::update_os`). An absent
+//!   minimum imposes no restriction; a present unreadable minimum fails the check before download.
 //!
 //! Depends on: tauri, tauri-plugin-updater, vw-host (`update_flow`, `updates`), vw-platform (notification).
 //! Called by: `lib.rs` (plugin registration, setup), `commands.rs` (the `update_*` commands).
@@ -27,6 +32,9 @@ use vw_host::update_flow::{
 };
 use vw_host::updates::{UpdatesOff, channel};
 use vw_platform::{NotificationRequest, Notifier};
+
+#[cfg(test)]
+mod selection_tests;
 
 /// How long after start the check runs (the window and Vibe come first).
 const CHECK_DELAY: Duration = Duration::from_secs(15);
@@ -106,8 +114,37 @@ pub fn start<R: Runtime>(
     attach_vibe_check(app, &manager);
     if !dev_build {
         manager.spawn_check(&tauri::async_runtime::handle().inner().clone(), CHECK_DELAY);
+        #[cfg(windows)]
+        remove_installer_copies_later(app);
     }
     let _ = handle.0.set(manager);
+}
+
+/// Windows: the updater keeps the installer it ran in the temp folder (it runs after the app exits); a while after
+/// start, when that installer has long finished, the copies for this version and older ones go
+/// (`vw_host::update_leftovers`). Off the async workers: it is file work.
+#[cfg(windows)]
+fn remove_installer_copies_later<R: Runtime>(app: &AppHandle<R>) {
+    let name = app.package_info().name.clone();
+    let running = app.package_info().version.to_string();
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(CHECK_DELAY).await;
+        let removed = tokio::task::spawn_blocking(move || {
+            vw_host::update_leftovers::remove_installer_copies(
+                &std::env::temp_dir(),
+                &name,
+                &running,
+            )
+        })
+        .await
+        .unwrap_or_default();
+        if !removed.is_empty() {
+            tracing::info!(
+                folders = removed.len(),
+                "update: removed the installer copies of earlier updates"
+            );
+        }
+    });
 }
 
 /// Every update check also checks the signed supported-Vibe manifest next to `latest.json` (same channel,
@@ -159,14 +196,105 @@ fn matches_offer(update: &Update, offer: &Offer) -> bool {
     update.version == offer.version && update.signature == offer.signature
 }
 
-fn offer_of(update: &Update) -> Offer {
-    Offer {
+fn offer_of(update: &Update) -> Result<Offer, String> {
+    let os_too_old = os_too_old(update).map_err(|error| {
+        format!(
+            "the update announcement for version {} has {error}; nothing was downloaded",
+            update.version
+        )
+    })?;
+    Ok(Offer {
         version: update.version.clone(),
         notes: update.body.clone(),
         signature: update.signature.clone(),
         // No link from the manifest: the "Open release page" button goes to the official repository's tag for this
         // version (`vw_host::update_flow::release_page_for`).
+        os_too_old,
+    })
+}
+
+/// Reads the dynamic entry or the same installer-specific, then plain target key as the plugin.
+/// Requires exactly one package binding by URL and signature. Preserves present minimums of any type for the
+/// host to validate; `None` only when the selected entry has no such field.
+fn entry_minimum<'a>(
+    raw: &'a serde_json::Value,
+    download_url: &tauri::Url,
+    signature: &str,
+    target: &str,
+    installer: Option<&str>,
+    field: &str,
+) -> Result<Option<&'a serde_json::Value>, String> {
+    let matches_package = |entry: &serde_json::Value| {
+        entry.get("signature").and_then(serde_json::Value::as_str) == Some(signature)
+            && entry
+                .get("url")
+                .and_then(serde_json::Value::as_str)
+                .and_then(|text| tauri::Url::parse(text).ok())
+                .is_some_and(|url| url == *download_url)
+    };
+    // The plugin prefers a static response when `platforms` is present and non-null.
+    let Some(platforms) = raw.get("platforms").filter(|value| !value.is_null()) else {
+        return if matches_package(raw) {
+            Ok(raw.get(field))
+        } else {
+            Err("no matching package entry".into())
+        };
+    };
+    let platforms = platforms.as_object().ok_or("unreadable package entries")?;
+    let entry = installer
+        .and_then(|installer| platforms.get(&format!("{target}-{installer}")))
+        .or_else(|| platforms.get(target))
+        .filter(|entry| matches_package(entry))
+        .ok_or("no matching package entry")?;
+    if platforms
+        .values()
+        .filter(|entry| matches_package(entry))
+        .count()
+        != 1
+    {
+        return Err("ambiguous package entries".into());
     }
+    Ok(entry.get(field))
+}
+
+/// This computer's system as the update check compares it: its name, the manifest field it reads, and its value
+/// (`None` when it cannot be read: a valid minimum then imposes no restriction). Linux: running glibc; macOS and
+/// Windows: the system version (`minimumSystemVersion`).
+fn this_system() -> (&'static str, &'static str, Option<String>) {
+    if cfg!(target_os = "linux") {
+        return (
+            "Linux",
+            vw_host::update_os::MINIMUM_GLIBC,
+            vw_platform::glibc_version(),
+        );
+    }
+    match vw_platform::system_version() {
+        Some((os, version)) => (os, vw_host::update_os::minimum_field(os), Some(version)),
+        None => (
+            "this system",
+            vw_host::update_os::MINIMUM_SYSTEM_VERSION,
+            None,
+        ),
+    }
+}
+
+/// This computer's system against the announced package's minimum, read before anything is downloaded.
+fn os_too_old(update: &Update) -> Result<Option<vw_host::update_os::OsTooOld>, String> {
+    let (os, field, current) = this_system();
+    // The builder uses the plugin's default target and installer selection.
+    let target = tauri_plugin_updater::target().ok_or("no package target")?;
+    let installer = tauri::utils::platform::bundle_type().map(|bundle| bundle.to_string());
+    let minimum = entry_minimum(
+        &update.raw_json,
+        &update.download_url,
+        &update.signature,
+        &target,
+        installer.as_deref(),
+        field,
+    )?;
+    let found = vw_host::update_os::check_minimum(os, current.as_deref(), minimum)?;
+    tracing::info!(%os, %field, ?minimum, current = ?current, too_old = found.is_some(), "update: system check");
+    Ok(found)
 }
 
 /// The updater, with the core shut down before a Windows installer takes the process (the plugin runs
@@ -200,7 +328,7 @@ impl<R: Runtime> UpdateBackend for PluginBackend<R> {
                 .check()
                 .await
                 .map_err(|e| e.to_string())?;
-            let offer = found.as_ref().map(offer_of);
+            let offer = found.as_ref().map(offer_of).transpose()?;
             *cached.lock().unwrap_or_else(PoisonError::into_inner) = found;
             Ok(offer)
         })
@@ -251,9 +379,19 @@ impl<R: Runtime> UpdateBackend for PluginBackend<R> {
                     .ok_or("the update server no longer offers this version; check again")?,
             };
             // The installer may exit the process (Windows) or block on file work: not on the async workers.
-            tokio::task::spawn_blocking(move || update.install(&package).map_err(|e| e.to_string()))
-                .await
-                .map_err(|e| e.to_string())?
+            tokio::task::spawn_blocking(move || {
+                // The AppImage install backs up the running image under the user cache folder when the temp
+                // folder is on another disk, and fails when that folder is missing.
+                #[cfg(target_os = "linux")]
+                vw_host::update_appimage::ensure_cache_dir(
+                    std::env::var_os("XDG_CACHE_HOME").as_deref(),
+                    std::env::home_dir().as_deref(),
+                )
+                .map_err(|e| format!("the cache folder for the update could not be made: {e}"))?;
+                update.install(&package).map_err(|e| e.to_string())
+            })
+            .await
+            .map_err(|e| e.to_string())?
         })
     }
 }
@@ -272,7 +410,7 @@ impl<R: Runtime> UpdateHooks for AppHooks<R> {
         if let Err(error) = notifier.show(
             NotificationRequest { title, body },
             Box::new(move || {
-                if let Some(window) = app.get_webview_window("main") {
+                if let Some(window) = crate::main_window(&app) {
                     let _ = window.unminimize();
                     let _ = window.set_focus();
                 }
@@ -294,6 +432,16 @@ impl<R: Runtime> UpdateHooks for AppHooks<R> {
             if let Some(host) = app.state::<HostHandle>().try_get() {
                 host.shutdown().await;
             }
+            // Linux (the AppImage): the restart starts the new image with a plain spawn, which would hand it the old
+            // image's mount keep-alive descriptor and keep the old image mounted until the new app quits.
+            #[cfg(target_os = "linux")]
+            {
+                let changed = vw_platform::stop_descriptor_inheritance();
+                tracing::info!(
+                    changed,
+                    "update: inherited descriptors closed for the restart"
+                );
+            }
             app.restart()
         })
     }
@@ -304,6 +452,34 @@ impl<R: Runtime> UpdateHooks for AppHooks<R> {
 #[cfg(test)]
 mod manifest_format {
     use tauri_plugin_updater::RemoteRelease;
+
+    #[test]
+    fn the_selected_entry_preserves_present_unreadable_minimums() {
+        let url = tauri::Url::parse("https://example.invalid/chosen").unwrap();
+        for field in [
+            vw_host::update_os::MINIMUM_SYSTEM_VERSION,
+            vw_host::update_os::MINIMUM_GLIBC,
+        ] {
+            for minimum in [serde_json::json!(7), serde_json::json!(null)] {
+                let raw = serde_json::json!({"platforms": {
+                    "other": {"url": "https://example.invalid/other", field: "14.0"},
+                    "chosen": {"url": url.as_str(), "signature": "sig", field: minimum},
+                }});
+                assert_eq!(
+                    super::entry_minimum(&raw, &url, "sig", "chosen", None, field),
+                    Ok(Some(&minimum))
+                );
+            }
+            let raw = serde_json::json!({"platforms": {
+                "chosen": {"url": url.as_str(), "signature": "sig"},
+                "other": {"url": "https://example.invalid/other", field: 7},
+            }});
+            assert_eq!(
+                super::entry_minimum(&raw, &url, "sig", "chosen", None, field),
+                Ok(None)
+            );
+        }
+    }
 
     #[test]
     fn the_release_manifest_parses_with_the_plugin() {
@@ -322,7 +498,18 @@ mod manifest_format {
             .iter()
             .map(|(k, u, s)| (k.as_str(), u.as_str(), s.as_str()))
             .collect();
-        let text = make_latest_json::render("1.2.3", "Notes.", "2026-10-12T09:00:00Z", &borrowed);
+        let minimums = make_latest_json::Minimums {
+            macos: Some("11.0"),
+            windows: Some("10.0.17763"),
+            linux_glibc: Some("2.39"),
+        };
+        let text = make_latest_json::render(
+            "1.2.3",
+            "Notes.",
+            "2026-10-12T09:00:00Z",
+            &borrowed,
+            &minimums,
+        );
         let release: RemoteRelease = serde_json::from_str(&text).unwrap();
         assert_eq!(release.version.to_string(), "1.2.3");
         assert_eq!(release.notes.as_deref(), Some("Notes."));
@@ -331,6 +518,46 @@ mod manifest_format {
         for (key, url, signature) in &entries {
             assert_eq!(release.download_url(key).unwrap().as_str(), url);
             assert_eq!(release.signature(key).unwrap(), signature);
+        }
+        // Each entry's minimum reaches the app's system check under the field that system reads (unknown fields to
+        // the plugin itself, so older apps read the same manifest): macOS and Windows a system version, Linux glibc.
+        let raw: serde_json::Value = serde_json::from_str(&text).unwrap();
+        let url = |key: &str| tauri::Url::parse(&format!("{base}asset-{key}")).unwrap();
+        let (system, glibc) = (
+            vw_host::update_os::MINIMUM_SYSTEM_VERSION,
+            vw_host::update_os::MINIMUM_GLIBC,
+        );
+        let found = |key: &str, field: &str| {
+            super::entry_minimum(&raw, &url(key), &format!("sig-{key}"), key, None, field).unwrap()
+        };
+        let text = |key: &str, field: &str| found(key, field).and_then(serde_json::Value::as_str);
+        assert_eq!(text("darwin-aarch64", system), Some("11.0"));
+        assert_eq!(text("windows-x86_64", system), Some("10.0.17763"));
+        assert_eq!(text("linux-x86_64", glibc), Some("2.39"));
+        assert_eq!(found("linux-x86_64", system), None);
+        assert_eq!(found("darwin-aarch64", glibc), None);
+        assert!(
+            super::entry_minimum(
+                &serde_json::json!({}),
+                &url("darwin-aarch64"),
+                "sig-darwin-aarch64",
+                "darwin-aarch64",
+                None,
+                system,
+            )
+            .is_err()
+        );
+        // This computer reads the field of its own system, with its own version.
+        let (os, field, current) = super::this_system();
+        if cfg!(target_os = "linux") {
+            assert_eq!((os, field), ("Linux", glibc));
+            assert!(current.is_some(), "the glibc version is read");
+        } else if cfg!(target_os = "windows") {
+            assert_eq!((os, field), ("Windows", system));
+            assert!(current.is_some_and(|v| v.starts_with("10.0.")));
+        } else if cfg!(target_os = "macos") {
+            assert_eq!((os, field), ("macOS", system));
+            assert!(current.is_some());
         }
         // The running build's own target is one of them (x86_64 Windows/Linux, Apple-silicon macOS).
         if let Some(target) = tauri_plugin_updater::target() {

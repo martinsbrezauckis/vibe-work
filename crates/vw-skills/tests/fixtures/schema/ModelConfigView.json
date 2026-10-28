@@ -5,6 +5,18 @@
       "title": "Alias",
       "type": "string"
     },
+    "autoCompactThreshold": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Autocompactthreshold"
+    },
     "displayName": {
       "title": "Displayname",
       "type": "string"
@@ -40,6 +52,25 @@
     "name": {
       "title": "Name",
       "type": "string"
+    },
+    "source": {
+      "anyOf": [
+        {
+          "enum": [
+            "admin",
+            "growthbook",
+            "catalog",
+            "project",
+            "local"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Source"
     },
     "supportsImages": {
       "title": "Supportsimages",

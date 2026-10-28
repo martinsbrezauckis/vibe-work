@@ -21,10 +21,9 @@
   min-height: 0;
 }
 .preview-error {
-  /* Float over the existing tab chrome; an error never adds a row above the native page. */
-  position: absolute;
-  bottom: 100%;
-  inset-inline: 0;
+  /* A row of the chrome under the toolbar: the native page moves down while it shows, and the page tabs above stay
+     visible (an error floated over them hid the tab strip). */
+  margin: 4px 0 0;
   max-height: 48px;
   overflow: auto;
 }
@@ -59,20 +58,9 @@
   align-items: center;
   padding: 6px 10px;
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
 }
-.preview-btn {
-  border: 1px solid var(--line-2);
-  background: var(--raised);
-  color: var(--text);
-  border-radius: 7px;
-  padding: 4px 10px;
-  font-size: var(--text-12);
-  cursor: pointer;
-}
-.preview-btn:hover:not(:disabled) {
-  background: var(--hover);
-}
+
 .preview-target .preview-btn {
   grid-row: span 2;
   grid-column: 2;
@@ -96,7 +84,7 @@
   padding: 8px 10px;
   border: 1px solid var(--orange-2);
   background: var(--orange-soft);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   font-size: var(--text-12-5);
 }
 .preview-busy p {
@@ -132,10 +120,10 @@
   white-space: nowrap;
 }
 .preview-save-control > .preview-btn:first-child {
-  border-radius: 7px 0 0 7px;
+  border-radius: var(--radius-7) 0 0 var(--radius-7);
 }
 .preview-save-control > .preview-save-more {
-  border-radius: 0 7px 7px 0;
+  border-radius: 0 var(--radius-7) var(--radius-7) 0;
   border-left: 0;
   padding-inline: 7px;
 }
@@ -143,17 +131,17 @@
   position: absolute;
   top: calc(100% + 4px);
   right: 0;
-  z-index: 30;
+  z-index: var(--z-popover);
   min-width: 154px;
   padding: 4px;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: var(--raised);
   box-shadow: var(--shadow);
 }
 .preview-save-menu button {
   width: 100%;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   padding: 7px 9px;
   text-align: left;
   color: var(--text);
@@ -176,7 +164,7 @@
   width: 100%;
   padding: 9px 11px;
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: var(--bg);
   color: var(--text);
   font: inherit;
@@ -197,7 +185,7 @@
   white-space: nowrap;
   padding: 4px 8px;
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
 }
 .preview-address[data-loading="true"] {
   color: var(--text-3);
@@ -216,7 +204,7 @@
   flex: 1;
   min-height: 120px;
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: var(--raised);
 }
 .preview-viewport[data-live="true"] {
@@ -251,7 +239,7 @@
 }
 .browser-note {
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   padding: 6px 8px;
   display: flex;
   flex-direction: column;
@@ -289,7 +277,7 @@
   color: var(--text);
   background: var(--raised);
   border: 1px solid var(--line-2);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   padding: 4px 6px;
 }
 .browser-note-sent {
@@ -401,12 +389,12 @@
   position: absolute;
   top: calc(100% + 4px);
   left: 0;
-  z-index: 30;
+  z-index: var(--z-popover);
   width: min(320px, calc(100vw - 32px));
   max-height: min(70vh, 520px);
   overflow-y: auto;
   background: var(--raised);
-  border-radius: 10px;
+  border-radius: var(--radius-lg);
   box-shadow: var(--shadow);
   padding: 4px;
   display: flex;
@@ -419,7 +407,7 @@
   border: 0;
   background: none;
   color: var(--text);
-  border-radius: 7px;
+  border-radius: var(--radius-7);
   padding: 6px 10px;
   cursor: pointer;
 }

@@ -13,6 +13,7 @@ import { pointPreview } from "../pages/point";
 import { useApp } from "../shell/AppContext";
 import { KeyNotice, useKeyReadiness } from "../shell/KeyNotice";
 import { useShellState } from "../shell/hooks";
+import { panelOwner } from "../../state/shellState";
 import { ActionLog } from "./ActionLog";
 import { DelegationReceipts } from "./DelegationReceipts";
 import { AddressBar } from "./AddressBar";
@@ -26,6 +27,7 @@ import { isLocalPage } from "./browserModel";
 import { PageTabs } from "./PageTabs";
 import { PreviewNotes, Servers } from "./Servers";
 import { SaveVault } from "./SaveVault";
+import { onContextPoint } from "./contextSaveEvents";
 import type { Previews } from "./store";
 import { Toolbar } from "./Toolbar";
 import { Viewport } from "./Viewport";
@@ -43,7 +45,10 @@ export function PreviewTab({
 }): ReactElement {
   const app = useApp();
   const vaultBlocked = useKeyReadiness("vault") !== null;
-  const sessionId = useShellState((s) => s.selected);
+  const sessionId = useShellState(panelOwner);
+  // Pointing and notes go to a chat's next message: none without a chat (the New chat screen has no session yet).
+  const chat = useShellState((s) => s.selected !== null);
+  const newChatOwner = useShellState((s) => s.newChatOwner);
   const [pointNotice, setPointNotice] = useState<{ sessionId: string; text: string } | null>(null);
   const [saveNotice, setSaveNotice] = useState<{ sessionId: string; text: string } | null>(null);
   const list = useStore(previews.store, (s) =>
@@ -71,6 +76,27 @@ export function PreviewTab({
     void browser.load(sessionId);
     void browser.loadTabs(sessionId);
   }, [previews, browser, sessionId]);
+  // Point Vibe at this from the page's own right-click menu, on the selection the page selected again: the app
+  // preview's pick (the toolbar's), or a web page's selection-only pick. The click names the page (the session for
+  // the app preview, the page key for a web page); only the page shown now answers.
+  const shownTab = tabs?.find((tab) => tab.active);
+  const shownWeb = shownTab?.kind === "web" ? shownTab.pageKey : null;
+  const shownLocal =
+    shownTab?.kind !== "web" && list?.preview?.url != null && isLocalPage(list.preview.url);
+  useEffect(() => {
+    if (sessionId === null || (!shownLocal && shownWeb === null)) return;
+    return onContextPoint((from) => {
+      const page = shownWeb ?? sessionId;
+      if (from !== page) return;
+      const tab = shownWeb ?? undefined;
+      void pointPreview(app, sessionId, "ui", undefined, tab).then((outcome) => {
+        setPointNotice({
+          sessionId,
+          text: outcome.ok ? `Added to your message: ${outcome.chip.label}` : outcome.reason,
+        });
+      });
+    });
+  }, [app, sessionId, shownLocal, shownWeb]);
 
   if (sessionId === null) return <div className="empty">Choose a session to use its browser.</div>;
   const selected = tabs?.find((tab) => tab.active);
@@ -167,7 +193,7 @@ export function PreviewTab({
           )
         }
         annotate={
-          local && picking === undefined
+          local && chat && picking === undefined
             ? (mode) => {
                 void browser.annotate(sessionId, mode);
               }
@@ -211,10 +237,12 @@ export function PreviewTab({
           )
         }
         openExternal={(url) => {
-          app.transcript.askLink(url);
+          // The person's own page, its address in full in the bar above: opened at once (a failure shows a toast),
+          // also where no chat is open to show the link dialog.
+          void app.transcript.openLink(url);
         }}
         point={
-          local
+          local && chat
             ? () => {
                 setPointNotice({
                   sessionId,
@@ -232,6 +260,15 @@ export function PreviewTab({
             : null
         }
       />
+      {open && (
+        <CaptureMenu
+          capture={capture}
+          sessionId={sessionId}
+          tabId={selectedTabId}
+          statusOnly
+          reveal={(path) => void app.sessions?.revealPath(path)}
+        />
+      )}
       {pointNotice?.sessionId === sessionId && (
         <p className="preview-focus" role="status">
           {pointNotice.text}
@@ -247,6 +284,7 @@ export function PreviewTab({
       <Viewport
         previews={previews}
         sessionId={sessionId}
+        beforeChat={sessionId === newChatOwner}
         {...(webTabId ? { tabId: webTabId } : {})}
         live={open && !waiting && !stopped}
         waiting={waiting}

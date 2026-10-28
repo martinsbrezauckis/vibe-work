@@ -16,8 +16,6 @@ pub const FORMAT_MINOR: u32 = 2;
 
 /// The default handbook folder, relative to the project folder (§2).
 pub const FOLDER: &str = "docs/handbook";
-/// The folder earlier builds used (§11); read when [`FOLDER`] does not exist.
-pub const LEGACY_FOLDER: &str = "docs/pages";
 /// The shared stylesheet's file name at the handbook root (§6.4).
 pub const STYLESHEET: &str = "handbook.css";
 /// The assets folder (§2).
@@ -245,15 +243,6 @@ pub const KINDS: &[KindSpec] = &[
 #[must_use]
 pub fn kind(name: &str) -> Option<&'static KindSpec> {
     KINDS.iter().find(|k| k.name == name)
-}
-
-/// The kind whose files live in folder `folder` (`plans` → plan), if any.
-#[must_use]
-pub fn kind_of_folder(folder: &str) -> Option<&'static KindSpec> {
-    KINDS.iter().find(|k| match k.naming {
-        Naming::Slug(f) | Naming::Numbered(f) | Naming::Dated(f) => f == folder,
-        Naming::Root(_) => false,
-    })
 }
 
 /// True when `status` is a closed status of `kind` (the page goes under Archive).

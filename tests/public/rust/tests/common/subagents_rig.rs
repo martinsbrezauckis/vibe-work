@@ -1,10 +1,10 @@
-//! Disposable fake-Vibe setup and session helpers for Subagents setting tests.
+//! Disposable real-Vibe setup and session helpers for Subagents setting tests.
 //! Called by setting behavior tests that use the disposable server.
 
 use std::path::{Path, PathBuf};
 
-use super::channel_rig::{Rig, rig};
-use super::fake::scratch;
+use super::channel_rig::{Rig, default_seed, rig_in_fault};
+use super::processes::scratch;
 use serde_json::json;
 use vw_core_api::{Command, CommandResult, CoreError, SessionToolsResult};
 
@@ -17,17 +17,24 @@ pub struct Setup {
 }
 
 pub async fn setup(name: &str, extra: &[&str]) -> Setup {
+    setup_fault(name, extra, serde_json::Value::Null).await
+}
+pub async fn setup_fault(name: &str, extra: &[&str], fault: serde_json::Value) -> Setup {
     let dir = scratch(&format!("{name}-side-files"));
     let sessions_dir = dir.join("sessions");
-    let agent_log = dir.join("agent-config.log");
-    let agent_flag = format!("--log-agent-config={}", agent_log.display());
-    let mut flags = vec!["--subagents-rule", agent_flag.as_str()];
-    flags.extend_from_slice(extra);
     let for_core = sessions_dir.clone();
-    let r = rig(name, &flags, move |c| {
-        c.sessions_dir = Some(for_core);
-    })
+    let r = rig_in_fault(
+        name,
+        &dir,
+        &default_seed(),
+        extra,
+        move |c| {
+            c.sessions_dir = Some(for_core);
+        },
+        fault,
+    )
     .await;
+    let agent_log = r.rig.dir.join("agent-config.jsonl");
     Setup {
         r,
         sessions_dir,
@@ -102,9 +109,15 @@ pub fn position(r: &Rig, method: &str, session: &str) -> usize {
 
 /// Starts a chat of the user's in `folder` and runs one turn in it (so Vibe counts it as an existing chat).
 pub async fn users_chat_in(r: &Rig, folder: &str) -> String {
+    let folder = folder
+        .split('/')
+        .filter(|part| !part.is_empty())
+        .fold(r.rig.dir.clone(), |path, part| path.join(part));
+    std::fs::create_dir_all(&folder).unwrap();
+    r.rig.core.register_picked_folder(&folder).unwrap();
     let started = r
         .run(Command::StartSession {
-            agent_config: Some(json!({"cwd": folder})),
+            agent_config: Some(json!({"cwd": folder, "agent":"ask", "trustWorkspace":true})),
         })
         .await
         .unwrap();

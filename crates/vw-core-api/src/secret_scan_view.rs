@@ -3,7 +3,7 @@
 
 use serde::{Deserialize, Serialize};
 
-/// App-owned scan switches, off until explicitly enabled.
+/// App-owned scan switch, off until explicitly enabled. Redaction is always a person's Redact on one finding.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -11,9 +11,6 @@ pub struct SecretScanSettings {
     /// Scan session logs in the background.
     #[serde(default)]
     pub enabled: bool,
-    /// Automatically redact keys and tokens; website passwords always require manual Redact.
-    #[serde(default)]
-    pub auto_redact: bool,
 }
 
 /// Scanner operations available equally to the UI and Debug API.
@@ -28,9 +25,9 @@ pub struct SecretScanSettings {
 pub enum SecretScanRequest {
     /// Current settings, status and retained findings.
     Read {},
-    /// Persist both switches; switching off clears automatic redaction.
+    /// Persist the switch.
     Write {
-        /// New switches.
+        /// New switch.
         settings: SecretScanSettings,
     },
     /// Full background scan, regardless of incremental stamps.
@@ -73,7 +70,7 @@ pub enum SecretScanStatus {
 pub struct SecretLeakName {
     /// Vault name, never its value.
     pub name: String,
-    /// Website password; redaction remains a manual decision.
+    /// Website password.
     pub website_password: bool,
     /// Existing Vault login for Change password; absent on keys and older cached findings.
     #[serde(default)]
@@ -131,6 +128,10 @@ pub struct SecretLeakFinding {
     /// Files the OS refused to replace.
     #[serde(default)]
     pub unreadable_files: u32,
+    /// Redact can work: one of the chat's files is a log from before Vibe 3.0. Vibe 3.0 chats are sealed by
+    /// digests, so their only remedy is deleting the chat (Redact is not offered there).
+    #[serde(default)]
+    pub redactable: bool,
 }
 
 /// The scanner's value-free view. Live reports and file stamps remain in Rust.
@@ -138,7 +139,7 @@ pub struct SecretLeakFinding {
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct SecretScanView {
-    /// Saved switches.
+    /// Saved switch.
     pub settings: SecretScanSettings,
     /// Current status.
     pub status: SecretScanStatus,

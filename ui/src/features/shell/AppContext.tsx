@@ -3,6 +3,7 @@
  * to components through React context so tests can build a whole shell from fakes.
  * Depends on: state/*. Called by: main.tsx (provides), every shell component (`useApp`).
  */
+import type { NewChatDraft } from "../../state/newChatDraft";
 import { type ReactNode, createContext, useContext } from "react";
 
 import type { SecretScan } from "../../state/secretScan";
@@ -11,6 +12,7 @@ import type { Commands } from "../../state/commands";
 import type { Composer } from "../../state/composer";
 import type { Projects } from "../../state/projects";
 import type { Connectors } from "../../state/connectors";
+import type { Skills } from "../../state/skills";
 import type { Market } from "../../state/market";
 import type { Documents } from "../../state/documents";
 import type { Libraries } from "../../state/libraries";
@@ -31,6 +33,7 @@ import type { Worktrees } from "../../state/worktrees";
 import type { Git } from "../../state/git";
 import type { LeftRunning } from "../../state/leftRunning";
 import type { SessionTools } from "../../state/sessionTools";
+import type { Changes } from "../changes/store";
 import type { Find } from "../../state/findStore";
 import type { SessionProcesses } from "../../state/sessionProcesses";
 
@@ -51,18 +54,24 @@ export interface App {
   documents: Documents | null;
   /** Files the agent mentions: clickable references and the File tab; `null` without a core. */
   files: Files | null;
+  /** The New chat screen's terminals, browser and files before the first message; `null` without a core. */
+  newChat: NewChatDraft | null;
   /** Dictation, narration and their settings; `null` without a core. */
   voice: Voice | null;
   /** The Connectors page; `null` without a core. */
   connectors: Connectors | null;
   /** The Tools page's Marketplace tab; `null` without a core. */
   market: Market | null;
+  /** Skills offered in new chats in the selected folder. */
+  skills: Skills | null;
   /** The Libraries page; `null` without a core. */
   libraries: Libraries | null;
   /** Worktree per session: copies, end-of-session choice, orphans; `null` without a core. */
   worktrees: Worktrees | null;
   /** The outer git loop of the Changes tab: branch bar, Commit, Push, PR, PR card; `null` without a core. */
   git: Git | null;
+  /** Session changes, shared by transcript navigation and the Changes tab. */
+  changes: Changes | null;
   /** Updates: the host's update flow as the window shows it; `null` without a core. */
   updates: Updates | null;
   /** Processes deleted sessions left running: the after-delete question and the list; `null` without a core. */

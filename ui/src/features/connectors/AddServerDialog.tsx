@@ -8,6 +8,7 @@
  * Invariants: nothing is sent while the address or the key part is refused here; the core and the gate check
  * again; a typed key value is cleared when the dialog closes (it is unmounted).
  */
+import { Button } from "../../components/Controls";
 import { type ReactElement, useCallback, useRef, useState } from "react";
 
 import { useModalFocus } from "../../hooks/useModalFocus";
@@ -171,23 +172,23 @@ function Dialog(): ReactElement {
           {typeof key === "string" ? <p className="cmuted">{key}</p> : null}
         </section>
         <footer className="modal-actions">
-          <button
+          <Button
             data-testid="connectors.add-server-dialog-tb-btn"
             type="button"
-            className="tb-btn"
+
             onClick={close}
           >
             Cancel
-          </button>
-          <button
+          </Button>
+          <Button
             data-testid="connectors.add-server-dialog-btn-primary"
             type="button"
-            className="btn-primary"
+            appearance="dialog"
             disabled={!ok}
             onClick={add}
           >
             {needsKey ? "Add with key" : "Add and sign in"}
-          </button>
+          </Button>
         </footer>
       </div>
     </>

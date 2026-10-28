@@ -84,6 +84,7 @@ export default function TerminalView({
     <div
       ref={hostRef}
       className="vw-terminal"
+      data-toast-avoid="terminal"
       data-terminal-id={terminalId}
       role="region"
       aria-label={`Terminal (${LEAVE_KEYS} leaves it)`}

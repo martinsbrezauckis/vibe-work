@@ -8,7 +8,9 @@
 //!
 //! Registered (callers), each when the value is stored or read from storage, never for an unconfirmed input (a
 //! wrong passphrase, a key that failed its test): the Mistral API key read from the vault and the remembered-device
-//! secret (`vw-vault`), a key or passphrase once `setupStoreKey`, `createVault` or `unlockVault` succeeded
+//! secret (`vw-vault`), every stored vault value each time the key service finds the vault open (start with a
+//! kept or remembered key, create, unlock: `vw-keys` `scan_secrets::open_and_registered`, so a value is hidden before
+//! anything lists it), a key or passphrase once `setupStoreKey`, `createVault` or `unlockVault` succeeded
 //! (`vw-core-api` `keys`), keys found in Vibe's own `.env` / keyring when the user asks to detect them
 //! (`vw-keys`), the key-proxy token (`vw-keyproxy`), the Debug API token at start (`vw-debug-api`), the
 //! environment key of a development run (`vw-supervisor`), and the credentials of MCP servers in Vibe Work's own

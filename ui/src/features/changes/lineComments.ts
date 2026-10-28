@@ -28,7 +28,7 @@ import { commentChip, rangeBetween } from "./lineCommentModel";
 import type { Changes } from "./store";
 
 /** The rows being commented. */
-export interface Draft {
+interface Draft {
   sessionId: string;
   path: string;
   hunkId: string;

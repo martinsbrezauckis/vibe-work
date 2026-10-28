@@ -11,6 +11,19 @@ use support::{Harness, TOKEN};
 use vw_gh_broker::ENDPOINT_ENV;
 
 #[test]
+fn missing_local_gh_names_the_next_step() {
+    let output = Command::new(env!("CARGO_BIN_EXE_gh"))
+        .env_clear()
+        .arg("--version")
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    let message = String::from_utf8_lossy(&output.stderr);
+    assert!(message.contains("install GitHub CLI"), "{message}");
+    assert!(message.contains("restart Vibe Work"), "{message}");
+}
+
+#[test]
 fn shim_has_no_token_and_preserves_cwd_output_and_exit_code() {
     let harness = Harness::new();
     std::fs::write(harness.cwd.path().join("exit-code"), "8").unwrap();
@@ -61,7 +74,10 @@ fn shim_fails_plainly_when_endpoint_is_missing() {
         .output()
         .unwrap();
     assert_eq!(output.status.code(), Some(1));
-    assert_eq!(output.stderr, b"gh broker: no broker endpoint configured\n");
+    assert_eq!(
+        output.stderr,
+        b"gh broker: GitHub reader is not available (no broker endpoint configured)\n"
+    );
 }
 
 #[test]
@@ -75,7 +91,8 @@ fn standalone_broker_reads_token_from_stdin_and_clears_ambient_child_overrides()
         .env("GH_ENTERPRISE_TOKEN", "fake-enterprise-token")
         .env("GH_REPO", "evil.example/o/r")
         .env("GH_BROWSER", "untrusted-browser")
-        .env("HTTPS_PROXY", "http://evil.example")
+        .env("HTTPS_PROXY", "http://company-proxy.invalid:8080")
+        .env("SSL_CERT_FILE", "/company/root.pem")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -95,6 +112,11 @@ fn standalone_broker_reads_token_from_stdin_and_clears_ambient_child_overrides()
         let reply = vw_gh_broker::call(line.trim(), &request).unwrap();
         assert_eq!(reply.exit_code, 0);
         assert!(String::from_utf8_lossy(&reply.stdout).contains("unexpected_env=false"));
+        assert!(
+            String::from_utf8_lossy(&reply.stdout)
+                .contains("proxy=http://company-proxy.invalid:8080")
+        );
+        assert!(String::from_utf8_lossy(&reply.stdout).contains("cert=/company/root.pem"));
         assert!(String::from_utf8_lossy(&reply.stdout).contains("gh_token_set=true"));
         assert!(!String::from_utf8_lossy(&reply.stdout).contains(TOKEN));
     }));

@@ -150,6 +150,8 @@ pub(crate) struct Shared {
     pub(crate) changes: tokio::sync::broadcast::Sender<Option<String>>,
     /// Bumped on every finished load (waiters for `open`).
     pub(crate) loads: tokio::sync::watch::Sender<u64>,
+    /// Right clicks on the shown page (`page_menu`).
+    pub(crate) menus: tokio::sync::broadcast::Sender<crate::page_menu::PageMenuAt>,
     /// A loaded PDF counts as the shown file (the File tab's viewer).
     pub(crate) pdf: bool,
 }
@@ -258,9 +260,15 @@ impl PreviewHooks for ViewerHooks {
         let mut guard = self.0.lock();
         let state: &mut State = &mut guard;
         let Some(mount) = state.mount.clone().filter(|m| m.label == label) else {
+            tracing::debug!(
+                label,
+                current = state.mount.as_ref().map_or("-", |m| m.label.as_str()),
+                "page viewer event from a webview that is not the mounted one"
+            );
             return false;
         };
         let Some(viewer) = state.viewers.get_mut(&mount.session) else {
+            tracing::debug!(label, "page viewer event without a viewer for its session");
             return true;
         };
         let mut keep = true;

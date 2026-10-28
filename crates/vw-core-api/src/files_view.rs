@@ -45,6 +45,13 @@ pub enum FilesRequest {
         /// The handle from `resolve`.
         file: String,
     },
+    /// The checked file as it was in the last commit, bounded to editable text.
+    ReadSaved {
+        /// The session.
+        session_id: String,
+        /// The handle from resolve.
+        file: String,
+    },
     /// Whether the file still exists and its fingerprint (the File tab's live reload).
     Stat {
         /// The session.
@@ -116,6 +123,16 @@ pub enum FilesRequest {
         /// The fingerprint of the content the edit started from.
         fingerprint: String,
     },
+    /// The window's answer to the agent's `panel_read` (`CoreEvent::PanelRead`): what this session's side panel
+    /// shows. Taken only for the request's own session (`panel_read`).
+    PanelAnswer {
+        /// The session the request named.
+        session_id: String,
+        /// The request's id.
+        request_id: String,
+        /// The panel.
+        panel: crate::panel_view::PanelView,
+    },
 }
 
 impl FilesRequest {
@@ -126,6 +143,7 @@ impl FilesRequest {
             Self::Layout { session_id, .. } => session_id.as_deref(),
             Self::Resolve { session_id, .. }
             | Self::Read { session_id, .. }
+            | Self::ReadSaved { session_id, .. }
             | Self::Stat { session_id, .. }
             | Self::View { session_id, .. }
             | Self::Reload { session_id }
@@ -134,7 +152,8 @@ impl FilesRequest {
             | Self::Screenshot { session_id }
             | Self::Open { session_id, .. }
             | Self::Reveal { session_id, .. }
-            | Self::Write { session_id, .. } => Some(session_id),
+            | Self::Write { session_id, .. }
+            | Self::PanelAnswer { session_id, .. } => Some(session_id),
         }
     }
 }
@@ -232,6 +251,13 @@ pub enum FilesResult {
         /// The file.
         content: FileContent,
     },
+    /// The last committed text, or a plain explanation when unavailable.
+    Saved {
+        /// Complete text, never a truncated snapshot.
+        text: Option<String>,
+        /// Why a comparison cannot be opened.
+        note: Option<String>,
+    },
     /// `stat`.
     Stat {
         /// The file is still there (and still allowed).
@@ -255,6 +281,11 @@ pub enum FilesResult {
     },
     /// `layout`, `open`, `reveal`.
     Done {},
+    /// `panelAnswer`: false when no such request waits for this session (answered already, or expired).
+    PanelAnswered {
+        /// The agent got this answer.
+        accepted: bool,
+    },
     /// `write`.
     Written {
         /// The file's fingerprint now.

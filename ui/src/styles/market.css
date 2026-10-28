@@ -12,7 +12,7 @@
   padding: 6px 10px;
   color: var(--text-2);
   font: inherit;
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   cursor: pointer;
 }
 .ttab[aria-selected="true"] {
@@ -41,7 +41,7 @@
   padding: 6px 10px;
   border-left: 3px solid var(--line-2);
   color: var(--text-2);
-  font-size: 12.5px;
+  font-size: var(--text-12-5);
 }
 .linkish {
   background: none;
@@ -56,7 +56,7 @@
   min-width: 0;
   padding: 16px;
   border: 1px solid var(--line-2);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: var(--bg);
 }
 .local-plugin h4 {
@@ -72,9 +72,46 @@
 }
 .local-plugin-path {
   margin: 8px 0;
-  font-size: 12px;
+  font-size: var(--text-12);
 }
 /* Plugin contents are a list; the composer also uses ctools for its horizontal toolbar. */
 .local-plugin > .ctools {
   display: block;
+}
+
+/* The install offer block (Skills rows and the Marketplace detail, `features/connectors/InstallOffer.tsx`):
+   a hairline box holding the shared `dl.set-facts` rows, the stale notice and, on a skill row, its two buttons. */
+.install-offer {
+  max-width: 560px;
+  box-sizing: border-box;
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-md);
+}
+.install-offer h4 {
+  margin: 0 0 6px;
+  font-size: var(--text-12-5);
+  color: var(--text-2);
+}
+.install-offer .set-facts .check {
+  padding: 6px 0;
+  font-size: var(--text-12-5);
+  gap: 12px;
+}
+.install-offer .set-facts .check + .check {
+  border-top: 1px solid var(--line);
+}
+.install-offer .set-facts dt {
+  color: var(--text-3);
+}
+/* The one sentence of an offer that shows again: under the facts, right above the actions. */
+.install-offer .server-note {
+  margin: 8px 0 0;
+}
+.install-offer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
 }

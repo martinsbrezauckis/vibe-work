@@ -122,13 +122,33 @@ sessionId: string,
 /**
  * The element to pick without a click.
  */
-target?: PickTarget, } | { "op": "cancelPick",
+target?: PickTarget,
+/**
+ * A web page of the session's Browser tab (its page key), instead of the app preview.
+ */
+tabId?: string, } | { "op": "copyText",
+/**
+ * The owning session.
+ */
+sessionId: string,
+/**
+ * A web page of this session's Browser tab.
+ */
+tabId: string,
+/**
+ * The element and optional exact selected text.
+ */
+target: PickTarget, } | { "op": "cancelPick",
 /**
  * The session.
  */
 sessionId: string, };
 
-export type PreviewResult = { "type": "previews",
+export type PreviewResult = { "type": "copied",
+/**
+ * Untrusted page text.
+ */
+text: string, } | { "type": "previews",
 /**
  * The session's preview (`None` before anything was opened).
  */
@@ -216,6 +236,10 @@ listening: boolean,
 proven: boolean, };
 
 export type PickTarget = {
+/**
+ * Exact selected text within the element (preview picks and Copy only). A missing match is refused.
+ */
+quote?: string,
 /**
  * A CSS selector.
  */

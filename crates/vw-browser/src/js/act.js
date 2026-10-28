@@ -7,6 +7,7 @@
 // Adapted from ShellX control script (native value setter, beforeinput/input/
 // change, contenteditable insertText) and actionability checks; changed: Enter submits the form the way a
 // browser does for a real key press, select uses the native setter.
+/* global ENV, MAX_FRAME_DEPTH, MAX_SHADOW_DEPTH, REQ, actionRef, candidates, clip, composedParent, consentSnapshot, describe, editable, enabled, globalRect, inFrame, labelOf, nativeClickPoint, refOf, roleOf, secretKind, viewOf, visibilityState, visible -- Supplied by the Rust script assembler and its shared prelude. */
 (() => {
   __VW_COMMON__;
   __VW_NATIVE_CLICK__;
@@ -234,10 +235,10 @@
       const selection = viewOf(el).getSelection();
       selection.removeAllRanges();
       selection.addRange(range);
-      let inserted = false;
+      let inserted;
       try {
         inserted = doc.execCommand("insertText", false, text);
-      } catch (_) {
+      } catch {
         inserted = false;
       }
       if (!inserted) el.textContent = text;

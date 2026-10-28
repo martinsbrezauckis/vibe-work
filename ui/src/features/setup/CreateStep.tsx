@@ -6,13 +6,14 @@
  * Invariants: the key and the password live only in this component's state until submit, then both
  * are cleared whether or not the call worked; a failure leaves the user on this step with the reason.
  */
+import { Button } from "../../components/Controls";
 import { useState } from "react";
 import { term } from "../../vocabulary";
 
 import { Selector } from "../../components/Selector";
 import { useApp } from "../shell/AppContext";
 import { ConsoleLink } from "./ConsoleLink";
-import { NewPasswordField, Problem, RememberChoice, SecretField } from "./fields";
+import { NewPasswordField, Problem, SecretField } from "./fields";
 import { VibeKeyNote } from "./VibeKeyOffer";
 import { useKeyUi } from "./useKeys";
 
@@ -26,7 +27,6 @@ export function CreateStep() {
   const [useVibe, setUseVibe] = useState(true);
   const [key, setKey] = useState("");
   const [password, setPassword] = useState("");
-  const [remember, setRemember] = useState(true);
   const fromVibe = found !== undefined && useVibe;
   const ready = password !== "" && (fromVibe || key.trim() !== "");
 
@@ -37,7 +37,7 @@ export function CreateStep() {
     // Clear first: whatever happens next, the inputs no longer hold the secrets.
     setKey("");
     setPassword("");
-    void keys.createWithKey(pass, remember, how);
+    void keys.createWithKey(pass, how);
   };
 
   return (
@@ -90,27 +90,26 @@ export function CreateStep() {
         If you forget the password, paste your key again. Vibe Work never sees your Mistral account
         password.
       </p>
-      <RememberChoice checked={remember} onChange={setRemember} testId="setup.remember" />
       <Problem text={problem?.text ?? null} />
       <div className="key-actions">
-        <button
+        <Button
           type="submit"
-          className="btn-primary"
+          appearance="dialog"
           data-testid="setup.save"
           disabled={busy || !ready}
         >
-          {busy ? "Saving..." : "Save and test the key"}
-        </button>
-        <button
+          {busy ? "Saving…" : "Save and test the key"}
+        </Button>
+        <Button
           data-testid="setup.create-step-dismiss"
           type="button"
-          className="tb-btn"
+
           onClick={() => {
             keys?.dismiss();
           }}
         >
           Not now
-        </button>
+        </Button>
       </div>
     </form>
   );

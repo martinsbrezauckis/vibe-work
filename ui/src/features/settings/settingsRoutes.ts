@@ -10,10 +10,21 @@
  *   with `setting`, at that setting (lit for a moment, as a search hit does);
  * - `category {id}`: show one category; `search {query}`: type into the search inside Settings;
  * - `statusUsage {show?: bool}`: the Appearance switch for the status bar's context readout (returned as `statusUsage`);
+ * - `markVibeLines {on: bool}` (Appearance) and `saveBeforeSend {on: bool}` (General): the open-files switches
+ *   (returned as `markVibeLines`, `saveBeforeSend`); `openHtmlMarkdownAs {mode: preview|code|side}` (Appearance,
+ *   returned as `openHtmlMarkdownAs`);
  * - `instructions {do: load|type|review|back|discard|save|loadCli, scope?, text?}`;
  * - `errorDetail {mode: plain|details}`;
  * - `cliSharing {share?: bool}`: the CLI session-sharing switch; saves `share` when given, returns the
- *   switch, the CLI's home and both Vibe versions (applies at the next start).
+ *   switch, the CLI's home and both Vibe versions (applies at the next start);
+ * - `sendTo {on?: bool, notNow?: true}`: General › Right-click menus ("Send to Vibe Work"): `on` turns the system's
+ *   entries on or off (the start screen's Add is `on: true`), `notNow` is that row's Not now; returns `sendTo` (the
+ *   switch, the system, whether the one-time row shows) and `sendToError` (the sentence the page shows, or null);
+ * - `allowed {do, ...}`: Safety's level links and summary line, and Settings › Allowed without asking (Find,
+ *   open/close, Show 20 more, Revoke, Revoke all + its confirmation, Open session, Clear the search, Open Project
+ *   secrets); see `allowed/routes.ts`. Returned as `allowed`.
+ * - `chrome {do, ...}`: Settings › Browser › Your Chrome (levels, rows, Set up, store page, Remove); see
+ *   `chrome/chromeRoute.ts`. Returned as `chrome`.
  * Depends on: AppContext, state/instructions, state/errorDetail, state/uiControl, catalog, AboutSettings (constants).
  * Called by: useShellWiring.
  * Invariants: bodies are validated (`invalidParams`); commands the actions trigger go out with the Debug
@@ -23,12 +34,15 @@
  * later Save click still writes with the Debug API origin (`state/instructions.ts`).
  */
 import { errorDetail, setErrorDetail } from "../../state/errorDetail";
+import { sendToRequest, sendToState } from "../../state/sendTo";
 import {
   type DocView,
   type Instructions,
   instructionsFor,
   isDirty,
 } from "../../state/instructions";
+import { chromeAvailable } from "./chrome/chromeRows";
+import { chromeAction } from "./chrome/chromeRoute";
 import { UiControlError } from "../../state/uiControl";
 import {
   ABOUT_AUTHOR,
@@ -40,6 +54,7 @@ import {
 import { offeredCategories } from "./availability";
 import { SEARCH_INDEX, searchSettings, settingPath } from "./catalog";
 import { MISTRAL_LINKS } from "./mistralLinks";
+import { allowedAction } from "./allowed/routes";
 import type { App } from "../shell/AppContext";
 
 function asObject(body: unknown): Record<string, unknown> {
@@ -104,12 +119,14 @@ function read(app: App, instructions: Instructions | null) {
     category: view.category,
     categories: offeredCategories(app).map((c) => ({ id: c.id, label: c.label })),
     query: view.query,
-    results: searchSettings(view.query).map((r) => ({
-      id: r.id,
-      category: r.category,
-      label: r.label,
-      path: settingPath(r),
-    })),
+    results: searchSettings(view.query, chromeAvailable(app.core?.store.get().chromeControl)).map(
+      (r) => ({
+        id: r.id,
+        category: r.category,
+        label: r.label,
+        path: settingPath(r),
+      }),
+    ),
     rows: view.open ? rows() : [],
     about: {
       version: app.core === null ? null : (app.core.store.get().appVersion ?? null),
@@ -127,6 +144,9 @@ function read(app: App, instructions: Instructions | null) {
           },
     errorDetail: errorDetail.get(),
     statusUsage: app.shell.store.get().showUsage,
+    markVibeLines: app.shell.store.get().markVibeLines,
+    saveBeforeSend: app.shell.store.get().saveBeforeSend,
+    openHtmlMarkdownAs: app.shell.store.get().openHtmlMarkdownAs,
   };
 }
 
@@ -155,7 +175,7 @@ async function instructionsAction(instructions: Instructions, input: Record<stri
       instructions.discard(scope());
       break;
     case "save":
-      await instructions.save(scope());
+      await instructions.save(scope(), "debug-api");
       break;
     case "loadCli":
       await instructions.loadCli("debug-api");
@@ -195,7 +215,13 @@ export function registerSettingsRoutes(app: App): () => void {
         if (
           setting !== undefined &&
           (typeof setting !== "string" ||
-            !SEARCH_INDEX.some((e) => e.id === setting && e.opens === undefined))
+            !SEARCH_INDEX.some(
+              (e) =>
+                e.id === setting &&
+                e.opens === undefined &&
+                (chromeAvailable(app.core?.store.get().chromeControl) ||
+                  !e.id.startsWith("chrome-control")),
+            ))
         )
           throw new UiControlError(
             "invalidParams",
@@ -234,6 +260,22 @@ export function registerSettingsRoutes(app: App): () => void {
         if (show !== undefined) app.shell.actions.setShowUsage(show);
         break;
       }
+      case "openHtmlMarkdownAs": {
+        const mode = input["mode"];
+        if (mode !== "preview" && mode !== "code" && mode !== "side")
+          throw new UiControlError("invalidParams", "mode must be preview, code or side");
+        app.shell.actions.setOpenHtmlMarkdownAs(mode);
+        break;
+      }
+      case "markVibeLines":
+      case "saveBeforeSend": {
+        const on = input["on"];
+        if (typeof on !== "boolean")
+          throw new UiControlError("invalidParams", "on must be a boolean");
+        if (input["action"] === "markVibeLines") app.shell.actions.setMarkVibeLines(on);
+        else app.shell.actions.setSaveBeforeSend(on);
+        break;
+      }
       case "errorDetail": {
         const mode = input["mode"];
         if (mode !== "plain" && mode !== "details")
@@ -248,14 +290,43 @@ export function registerSettingsRoutes(app: App): () => void {
           throw new UiControlError("invalidParams", "share must be a boolean");
         return { ...read(app, instructions), cliSharing: await app.core.client.cliSharing(share) };
       }
+      case "sendTo": {
+        const client = app.core?.client;
+        if (client?.sendTo === undefined)
+          throw new UiControlError("notFound", "this run has no right-click menus");
+        const on = input["on"];
+        const notNow = input["notNow"];
+        if (on !== undefined && typeof on !== "boolean")
+          throw new UiControlError("invalidParams", "on must be a boolean");
+        if (notNow !== undefined && notNow !== true)
+          throw new UiControlError("invalidParams", "notNow must be true");
+        const view = await sendToRequest(
+          client,
+          on !== undefined
+            ? { op: "set", on }
+            : notNow === true
+              ? { op: "notNow" }
+              : { op: "read" },
+        );
+        return {
+          ...read(app, instructions),
+          sendTo: view ?? sendToState(client).view,
+          sendToError: sendToState(client).error,
+        };
+      }
       case "instructions":
         if (instructions === null) throw new UiControlError("notFound", "this run has no core");
         await instructionsAction(instructions, input);
         break;
+      case "allowed":
+        if (app.core === null) throw new UiControlError("notFound", "this run has no core");
+        return { ...read(app, instructions), allowed: await allowedAction(app, input) };
+      case "chrome":
+        return { ...read(app, instructions), chrome: await chromeAction(app, input) };
       default:
         throw new UiControlError(
           "invalidParams",
-          "action must be read, open, close, category, search, statusUsage, instructions, errorDetail or cliSharing",
+          "action must be read, open, close, category, search, statusUsage, instructions, errorDetail, cliSharing, sendTo, allowed or chrome",
         );
     }
     return read(app, instructions);

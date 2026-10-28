@@ -134,6 +134,20 @@ pub(crate) fn start_events(shared: &Arc<Shared>) {
     let Some(hub) = &shared.preview else {
         return;
     };
+    let weak = Arc::downgrade(shared);
+    hub.service.on_guard_refused(move |page, reason| {
+        let Some(shared) = weak.upgrade() else {
+            return;
+        };
+        let Some(owner) = shared
+            .preview
+            .as_ref()
+            .and_then(|hub| hub.service.owner_session_id(page))
+        else {
+            return;
+        };
+        crate::guard_refusals::record(&shared, &owner, crate::GuardKind::Network, None, reason);
+    });
     crate::browser_consent::install(shared);
     crate::browser_delegation::install(shared);
     #[cfg(feature = "e2e-script")]
@@ -146,6 +160,17 @@ pub(crate) fn start_events(shared: &Arc<Shared>) {
         hub.service.set_network_guard(guard.clone());
         guard.set_context(Arc::new(crate::browser_guard::GuardContext::new(shared)));
         crate::browser_guard::register_internal_ports(shared, guard);
+        // Public requests go through the user's proxy: Settings > Network (or the process environment) when
+        // set, else the guard keeps the system's proxy settings it read when it was bound.
+        let network = vw_mistral::network::current();
+        if network.has_proxy() {
+            guard.set_upstream(vw_netguard::Upstream::from_values(
+                network.http_proxy.as_deref(),
+                network.https_proxy.as_deref(),
+                network.all_proxy.as_deref(),
+                network.no_proxy.as_deref(),
+            ));
+        }
         guard.serve();
     }
     let mut changes = hub.service.changes();
@@ -322,9 +347,10 @@ pub(crate) fn core_error(error: &PreviewError) -> CoreError {
         | PreviewError::Engine(EngineError::FocusRequired | EngineError::Unsupported(_)) => {
             ErrorCode::Denied
         }
-        PreviewError::Layout(_) | PreviewError::PoolSetting(_) | PreviewError::InvalidTab(_) => {
-            ErrorCode::InvalidParams
-        }
+        PreviewError::Layout(_)
+        | PreviewError::PoolSetting(_)
+        | PreviewError::InvalidTab(_)
+        | PreviewError::NotInView => ErrorCode::InvalidParams,
         PreviewError::Engine(EngineError::Timeout(_)) => ErrorCode::Timeout,
         PreviewError::Engine(EngineError::Platform(_))
         | PreviewError::Image(_)
@@ -369,7 +395,7 @@ pub(crate) async fn open_for_session(
             "browser page is not owned by a loaded session",
         )
     })?;
-    if shared.store.view(&owner).is_none() {
+    if !crate::new_chat::known_owner(shared, &owner) {
         return Err(CoreError::not_loaded(&owner));
     }
     let text = match (url, port) {
@@ -388,6 +414,20 @@ pub(crate) async fn open_for_session(
         .await?
         .map_err(|e| CoreError::new(ErrorCode::Internal, format!("process monitor: {e}")))?;
     let user = !strict;
+    let denied = |text: String| {
+        let message = if strict {
+            crate::guard_refusals::record(
+                shared,
+                &owner,
+                crate::GuardKind::Network,
+                crate::guard_refusals::step(shared, &owner, None),
+                &text,
+            )
+        } else {
+            text
+        };
+        CoreError::new(ErrorCode::Denied, message)
+    };
     let (url, destination) = hub
         .service
         .policy()
@@ -396,16 +436,16 @@ pub(crate) async fn open_for_session(
             |p| port_owner(shared, &ports, &owner, p, strict),
             user,
         )
-        .map_err(|e| CoreError::new(ErrorCode::Denied, e.to_string()))?;
+        .map_err(|e| denied(e.to_string()))?;
     if session_id == owner
         && !matches!(
             destination,
             vw_preview::Destination::Loopback { .. } | vw_preview::Destination::Blank
         )
     {
-        return Err(CoreError::new(
-            ErrorCode::Denied,
-            "App preview opens this session's local servers only; open a web tab for public pages",
+        return Err(denied(
+            "App preview opens this session's local servers only; open a web tab for public pages"
+                .to_owned(),
         ));
     }
     let lan = match destination {
@@ -414,8 +454,7 @@ pub(crate) async fn open_for_session(
             Points::Public => false,
             Points::LocalNetwork if user => true,
             Points::LocalNetwork => {
-                return Err(CoreError::new(
-                    ErrorCode::Denied,
+                return Err(denied(
                     vw_preview::UrlRefusal::Lan(
                         url.host_str().unwrap_or("").chars().take(80).collect(),
                     )
@@ -429,6 +468,9 @@ pub(crate) async fn open_for_session(
         .names
         .cwd_of(&shared.store, &owner)
         .map(|cwd| PathBuf::from(cwd).join("downloads"));
+    // Other sessions' servers join the URL rules now, from this open's scan, not at the next re-check: a page's
+    // first requests to them go out as it loads (macOS compiles the rules before that) and are not repeated.
+    hub.service.set_server_ports(ports.servers.clone()).await;
     hub.service
         .open(OpenRequest {
             session_id: session_id.to_owned(),
@@ -551,7 +593,7 @@ impl Core {
                 tab_id,
                 width,
             } => {
-                if shared.store.view(&session_id).is_none() {
+                if !crate::new_chat::known_owner(shared, &session_id) {
                     return Err(CoreError::not_loaded(&session_id));
                 }
                 let page = crate::browser_tabs::user_page(
@@ -570,7 +612,7 @@ impl Core {
                 rect,
             } => {
                 if let Some(owner) = session_id.as_deref()
-                    && shared.store.view(owner).is_none()
+                    && !crate::new_chat::known_owner(shared, owner)
                 {
                     return Err(CoreError::not_loaded(owner));
                 }
@@ -609,7 +651,7 @@ impl Core {
                 tab_id,
                 action,
             } => {
-                if shared.store.view(&session_id).is_none() {
+                if !crate::new_chat::known_owner(shared, &session_id) {
                     return Err(CoreError::not_loaded(&session_id));
                 }
                 let page = match tab_id {
@@ -624,15 +666,20 @@ impl Core {
                     }
                     None => session_id.clone(),
                 };
+                tracing::debug!(session = %session_id, page = %page, ?action, "browser overlay request");
                 match action {
                     BrowserOverlayAction::Prepare => {
-                        let prepared = service
-                            .prepare_browser_overlay(&session_id, &page)
-                            .await
-                            .map_err(err)?;
-                        PreviewResult::Overlay {
-                            snapshot: prepared.snapshot,
-                            bounds: Some(prepared.bounds),
+                        match service.prepare_browser_overlay(&session_id, &page).await {
+                            Ok(prepared) => PreviewResult::Overlay {
+                                snapshot: prepared.snapshot,
+                                bounds: Some(prepared.bounds),
+                            },
+                            // A tab switch overtook the menu: nothing to park, the window closes its menus.
+                            Err(PreviewError::NotInView) => PreviewResult::Overlay {
+                                snapshot: None,
+                                bounds: None,
+                            },
+                            Err(error) => return Err(err(error)),
                         }
                     }
                     BrowserOverlayAction::Show => {
@@ -683,24 +730,31 @@ impl Core {
                 self.stop_busy_owner(&session_id, port).await?;
                 PreviewResult::Done {}
             }
-            PreviewRequest::Pick { session_id, target } => PreviewResult::Picked {
-                picked: match &target {
-                    Some(target) => {
-                        crate::preview_pick::pick_at(service, &session_id, target).await?
-                    }
-                    None => crate::preview_pick::pick(service, &session_id).await?,
-                },
+            PreviewRequest::Pick {
+                session_id,
+                target,
+                tab_id,
+            } => PreviewResult::Picked {
+                picked: crate::preview_pick::run(service, &session_id, target, tab_id).await?,
             },
             PreviewRequest::CancelPick { session_id } => {
                 crate::preview_pick::cancel(service, &session_id).await;
                 PreviewResult::Done {}
             }
+            PreviewRequest::CopyText {
+                session_id,
+                tab_id,
+                target,
+            } => PreviewResult::Copied {
+                text: crate::preview_pick::copy_text(service, &session_id, &tab_id, &target)
+                    .await?,
+            },
         };
         Ok(CommandResult::Preview { result })
     }
 
     async fn preview_list(&self, session_id: &str) -> Result<PreviewResult, CoreError> {
-        if self.shared.store.view(session_id).is_none() {
+        if !crate::new_chat::known_owner(&self.shared, session_id) {
             return Err(CoreError::not_loaded(session_id));
         }
         let hub = hub(&self.shared)?;
@@ -734,22 +788,8 @@ impl Core {
         let explanation = self.explain_port(Some(session_id.to_owned()), port).await?;
         Ok(busy_view(&self.shared, session_id, &explanation, None))
     }
-
-    /// Stops the holder of `port` the explanation offers to stop (one of our sessions' processes only).
-    async fn stop_busy_owner(&self, session_id: &str, port: u16) -> Result<(), CoreError> {
-        let explanation = self.explain_port(Some(session_id.to_owned()), port).await?;
-        let target = explanation.options.iter().find_map(|o| match o {
-            vw_procmon::PortOption::StopOwner { process, .. } => Some(*process),
-            _ => None,
-        });
-        let Some(target) = target else {
-            return Err(CoreError::new(
-                ErrorCode::Denied,
-                format!(
-                    "nothing on port {port} can be stopped from Vibe Work (it is not one of its sessions' processes)"
-                ),
-            ));
-        };
-        self.stop_process_for_user(target).await.map(|_| ())
-    }
 }
+
+#[cfg(test)]
+#[path = "previews_readonly_tests.rs"]
+mod readonly_tests;

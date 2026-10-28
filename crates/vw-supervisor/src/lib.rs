@@ -13,7 +13,7 @@
 //!   [`Supervisor::resume`] reports progress while a resume takes its time.
 //! - Clean shutdown closes stdin, waits, then kills; no zombies. On Windows the server lives in a
 //!   kill-on-close job object, so it dies with this process even on a hard kill.
-//! - One process per app, in [`ServerMode::Multiplex`] by default: many isolated
+//! - One process per app, multiplexed: many isolated
 //!   channels, one per active session, plus the lobby channel [`Supervisor::current`] returns.
 
 mod backoff;
@@ -23,11 +23,12 @@ mod discovery;
 mod env;
 mod handshake;
 mod launch;
+mod python;
 mod shell_env;
 mod supervisor;
 
 pub use backoff::Backoff;
-pub use config::{Recovering, ServerMode, SupervisorConfig, SupervisorError, SupervisorState};
+pub use config::{Recovering, SupervisorConfig, SupervisorError, SupervisorState};
 pub use discovery::{
     BINARY_NAME, Discovered, Discovery, DiscoveryError, FoundVia, canonical_executable,
     is_executable,
@@ -37,6 +38,8 @@ pub use env::{
     MCP_TOKEN_VAR, NoSecret, SecretError, SecretProvider, build_env, is_hijack_var,
 };
 pub use handshake::{default_initialize_params, handshake};
+pub use launch::{CHILD_STOP_ADAPTER, adapter_python};
+pub use python::server_python;
 pub use supervisor::{OpenedChannel, Supervisor};
 pub use vw_agent_tools::agent_env::isolate_credentials;
 

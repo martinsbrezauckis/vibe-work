@@ -12,7 +12,9 @@ fn main() -> io::Result<()> {
     println!("gh_token_set={}", !token.is_empty());
     let config = env::var("GH_CONFIG_DIR").unwrap_or_default();
     println!("config_empty={}", std::fs::read_dir(config)?.next().is_none());
-    let inherited = ["GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GH_DEBUG", "GH_BROWSER", "GH_REPO", "HTTPS_PROXY"];
+    let inherited = ["GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GH_DEBUG", "GH_BROWSER", "GH_REPO"];
+    println!("proxy={}", env::var("HTTPS_PROXY").unwrap_or_default());
+    println!("cert={}", env::var("SSL_CERT_FILE").unwrap_or_default());
     println!("unexpected_env={}", inherited.iter().any(|key| env::var_os(key).is_some()));
     println!("token={token}/{token}");
     eprintln!("stderr-token={token}");

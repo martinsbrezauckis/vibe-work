@@ -4,6 +4,7 @@
  * Depends on: lineComments.ts (Draft), lineCommentModel (range text). Called by: HunkLines.
  * Invariants: renders only; the comment is plain text; it says where it is kept (Vibe Work's data, not the repo).
  */
+import { Button } from "../../components/Controls";
 import { formatKeys } from "../../state/shortcuts";
 import { type ReactElement, useEffect, useRef, useState } from "react";
 
@@ -55,21 +56,21 @@ export function LineCommentForm(props: {
         }}
       />
       <div className="lc-form-row">
-        <button
+        <Button
           data-testid="changes.line-comment-form-save"
           type="button"
-          className="mini"
+          appearance="compact"
           disabled={empty}
           onClick={() => {
             save(text, false);
           }}
         >
           Comment
-        </button>
-        <button
+        </Button>
+        <Button
           data-testid="changes.line-comment-form-save-2"
           type="button"
-          className="mini"
+          appearance="compact"
           disabled={empty}
           data-action="comment-send"
           onClick={() => {
@@ -77,15 +78,15 @@ export function LineCommentForm(props: {
           }}
         >
           Comment and send to Vibe
-        </button>
-        <button
+        </Button>
+        <Button
           data-testid="changes.line-comment-form-mini"
           type="button"
-          className="mini"
+          appearance="compact"
           onClick={cancel}
         >
           Cancel
-        </button>
+        </Button>
         <span className="lc-note">
           Kept in Vibe Work, not in the repo. {formatKeys("Mod+Enter")} comments.
         </span>

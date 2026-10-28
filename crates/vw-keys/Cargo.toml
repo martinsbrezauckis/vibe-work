@@ -17,7 +17,6 @@ vw-vault = { path = "../vw-vault" }
 vw-secrets = { path = "../vw-secrets" }
 vw-keyproxy = { path = "../vw-keyproxy" }
 vw-mistral = { path = "../vw-mistral" }
-vw-supervisor = { path = "../vw-supervisor" }
 keyring-core = "=1.0.0"
 reqwest = { version = "0.13.5", default-features = false }
 serde = { version = "1", features = ["derive"] }
@@ -29,3 +28,6 @@ zeroize = "1.8"
 # Encodes the vault's random network MAC key; both crates already occur in the workspace lock.
 base64 = "0.23"
 getrandom = "0.3"
+
+# Lowercase owner-scalar encoding; already present in the workspace lock.
+hex = "0.4"

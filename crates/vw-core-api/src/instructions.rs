@@ -1,13 +1,11 @@
 //! Instructions in the core: reads and writes the `AGENTS.md` files Vibe puts in the
 //! system prompt. The personal one lives in Vibe Work's own `VIBE_HOME` (the app has its
-//! own home, so the command-line tool's `~/.vibe/AGENTS.md` does not apply here); the project one
-//! lives in the folder of a session.
+//! own home, so the command-line tool's `~/.vibe/AGENTS.md` does not apply here).
 //!
 //! Depends on: `instructions_view` (request and answer types), `core::Shared` (session folders, the
 //! home paths), `error`. Called by: `dispatch` (`Command::Instructions`).
 //! Invariants:
-//! - The project file is `<session folder>/AGENTS.md`, the folder from the core's own record of the
-//!   session, never a path from the client. The personal file is `<own VIBE_HOME>/AGENTS.md`.
+//! - The personal file is `<own VIBE_HOME>/AGENTS.md`; Projects owns project instruction files.
 //! - The user's command-line home is only ever READ (one file, on `readCli`, plus a size-free
 //!   existence check for the "can copy" hint). No code path here writes, renames or deletes in it.
 //! - A write replaces the file with exactly the given text, through a temporary file in the same
@@ -71,9 +69,8 @@ fn refuse(reason: &str, message: impl Into<String>) -> CoreError {
 }
 
 /// Reads the file at `path` as a document (never follows a link).
-fn read_doc(scope: InstructionsScope, path: &Path, folder: Option<String>) -> InstructionsDoc {
+fn read_doc(path: &Path, folder: Option<String>) -> InstructionsDoc {
     let mut doc = InstructionsDoc {
-        scope,
         path: path.to_string_lossy().into_owned(),
         folder,
         exists: false,
@@ -105,12 +102,11 @@ fn read_doc(scope: InstructionsScope, path: &Path, folder: Option<String>) -> In
         doc.note = Some("The file is over 1 MB. Edit it in your own editor.".to_owned());
     } else {
         match fs::read(path).map(String::from_utf8) {
-            Ok(Ok(text)) if scope == InstructionsScope::Personal => {
+            Ok(Ok(text)) => {
                 // Vibe Work's own note is not the user's text: a file holding only the note reads as no file.
                 doc.text = crate::working_note::strip(&text);
                 doc.exists = !doc.text.is_empty() || !crate::working_note::is_ours(&text);
             }
-            Ok(Ok(text)) => doc.text = text,
             Ok(Err(_)) => {
                 doc.editable = false;
                 doc.note = Some("The file is not plain UTF-8 text, so it is not shown.".to_owned());
@@ -124,12 +120,10 @@ fn read_doc(scope: InstructionsScope, path: &Path, folder: Option<String>) -> In
     doc
 }
 
-/// Adds the "a CLI file can be copied" hint to a personal document (project documents get none).
+/// Adds the "a CLI file can be copied" hint to a personal document.
 fn with_cli(mut doc: InstructionsDoc, cli_home: Option<&Path>) -> InstructionsDoc {
-    if doc.scope == InstructionsScope::Personal {
-        doc.cli_available =
-            Some(cli_home.is_some_and(|home| cli_text(&home.join(FILE_NAME)).is_some()));
-    }
+    doc.cli_available =
+        Some(cli_home.is_some_and(|home| cli_text(&home.join(FILE_NAME)).is_some()));
     doc
 }
 
@@ -185,14 +179,13 @@ fn normalized(text: Option<&str>) -> &str {
 
 /// The pure part of a write, run off the async threads: checks the file, then replaces it.
 fn write_checked(
-    scope: InstructionsScope,
     path: &Path,
     folder: Option<String>,
     text: &str,
     expected: Option<&str>,
     cli: Option<&Path>,
 ) -> Result<InstructionsDoc, CoreError> {
-    let current = read_doc(scope, path, folder.clone());
+    let current = read_doc(path, folder.clone());
     if current.exists && !current.editable {
         return Err(refuse(
             "notEditable",
@@ -203,7 +196,7 @@ fn write_checked(
     }
     // The personal file is compared as it is on disk: it must be exactly what the user was shown, or our exact
     // note followed by it (`working_note::shows_as`), so no text the user did not see can slip through a save.
-    let raw = if scope == InstructionsScope::Personal && current.exists {
+    let raw = if current.exists {
         Some(fs::read_to_string(path).unwrap_or_default())
     } else {
         None
@@ -215,26 +208,22 @@ fn write_checked(
     if stale {
         return Err(refuse(
             "changedOnDisk",
-            "AGENTS.md changed after it was loaded. Reload it and review the difference again.",
+            "AGENTS.md changed after it was loaded. Load it again, then save your change.",
         ));
     }
     if !current.exists && text.is_empty() {
         return Ok(with_cli(current, cli));
     }
     // The personal file keeps Vibe Work's note in front of the user's text when it had one.
-    let composed = if scope == InstructionsScope::Personal {
-        let existing = raw.unwrap_or_else(|| fs::read_to_string(path).unwrap_or_default());
-        crate::working_note::keep(&existing, text)
-    } else {
-        text.to_owned()
-    };
+    let existing = raw.unwrap_or_else(|| fs::read_to_string(path).unwrap_or_default());
+    let composed = crate::working_note::keep(&existing, text);
     write_atomic(path, &composed).map_err(|error| {
         CoreError::new(
             ErrorCode::Internal,
             format!("AGENTS.md could not be written: {}", error.kind()),
         )
     })?;
-    Ok(with_cli(read_doc(scope, path, folder), cli))
+    Ok(with_cli(read_doc(path, folder), cli))
 }
 
 impl Core {
@@ -245,28 +234,24 @@ impl Core {
         request: InstructionsRequest,
     ) -> Result<CommandResult, CoreError> {
         let result = match request {
-            InstructionsRequest::Read { scope, session_id } => {
-                let (path, folder) = self.target(scope, session_id.as_deref())?;
+            InstructionsRequest::Read { .. } => {
+                let (path, folder) = self.target()?;
                 let cli = self.shared.instructions.cli_home.clone();
                 let doc =
-                    blocking(move || with_cli(read_doc(scope, &path, folder), cli.as_deref()))
-                        .await?;
+                    blocking(move || with_cli(read_doc(&path, folder), cli.as_deref())).await?;
                 InstructionsResult::Doc { doc }
             }
             InstructionsRequest::ReadCli {} => self.read_cli().await?,
             InstructionsRequest::Write {
                 scope,
-                session_id,
                 text,
                 expected,
             } => {
-                let doc = self
-                    .write(origin, scope, session_id.as_deref(), text, expected)
-                    .await?;
+                let doc = self.write(origin, scope, text, expected).await?;
                 InstructionsResult::Doc { doc }
             }
-            InstructionsRequest::Apply { scope, session_id } => {
-                self.apply(origin, scope, session_id.as_deref()).await?
+            InstructionsRequest::Apply { .. } => {
+                self.apply_instruction_folder(origin, None).await?
             }
         };
         Ok(CommandResult::Instructions { result })
@@ -292,7 +277,6 @@ impl Core {
         &self,
         origin: Origin,
         scope: InstructionsScope,
-        session_id: Option<&str>,
         text: String,
         expected: Option<String>,
     ) -> Result<InstructionsDoc, CoreError> {
@@ -305,17 +289,10 @@ impl Core {
         if text.contains('\0') {
             return Err(invalid("the text holds a NUL character"));
         }
-        let (path, folder) = self.target(scope, session_id)?;
+        let (path, folder) = self.target()?;
         let cli = self.shared.instructions.cli_home.clone();
         let doc = blocking(move || {
-            write_checked(
-                scope,
-                &path,
-                folder,
-                &text,
-                expected.as_deref(),
-                cli.as_deref(),
-            )
+            write_checked(&path, folder, &text, expected.as_deref(), cli.as_deref())
         })
         .await??;
         tracing::info!(
@@ -327,34 +304,19 @@ impl Core {
         Ok(doc)
     }
 
-    /// Closes the channels of the sessions that should take the current instruction files.
-    async fn apply(
-        &self,
-        origin: Origin,
-        scope: InstructionsScope,
-        session_id: Option<&str>,
-    ) -> Result<InstructionsResult, CoreError> {
-        let folder = match scope {
-            InstructionsScope::Personal => None,
-            InstructionsScope::Project => self.target(scope, session_id)?.1,
-        };
-        self.apply_instruction_folder(origin, scope, folder).await
-    }
-
     /// Refreshes sessions whose prompt may have included a changed project file.
     pub(crate) async fn apply_project_instruction_folder(
         &self,
         origin: Origin,
         folder: &str,
     ) -> Result<InstructionsResult, CoreError> {
-        self.apply_instruction_folder(origin, InstructionsScope::Project, Some(folder.to_owned()))
+        self.apply_instruction_folder(origin, Some(folder.to_owned()))
             .await
     }
 
     async fn apply_instruction_folder(
         &self,
         origin: Origin,
-        scope: InstructionsScope,
         folder: Option<String>,
     ) -> Result<InstructionsResult, CoreError> {
         let (mut reopened, mut waiting) = (0_u32, 0_u32);
@@ -387,49 +349,22 @@ impl Core {
                 waiting += 1;
             }
         }
-        tracing::info!(scope = ?scope, reopened, waiting, "core: instructions applied");
+        let scope = if folder.is_some() {
+            vw_vocabulary::label("workNames", "projectTab")
+        } else {
+            "Personal"
+        };
+        tracing::info!(%scope, reopened, waiting, "core: instructions applied");
         Ok(InstructionsResult::Applied { reopened, waiting })
     }
 
-    /// The file a request is about, and the folder for a project one.
-    fn target(
-        &self,
-        scope: InstructionsScope,
-        session_id: Option<&str>,
-    ) -> Result<(PathBuf, Option<String>), CoreError> {
-        match scope {
-            InstructionsScope::Personal => {
-                let home = &self.shared.instructions.own_home;
-                if home.as_os_str().is_empty() {
-                    return Err(refuse("notConfigured", "this run has no Vibe Work home"));
-                }
-                Ok((home.join(FILE_NAME), None))
-            }
-            InstructionsScope::Project => {
-                let id =
-                    session_id.ok_or_else(|| invalid("a project document needs a sessionId"))?;
-                let folder = self
-                    .shared
-                    .names
-                    .cwd_of(&self.shared.store, id)
-                    .ok_or_else(|| {
-                        CoreError::new(
-                            ErrorCode::NotFound,
-                            format!(
-                                "session {id} is not known to the core (list or open it first)"
-                            ),
-                        )
-                    })?;
-                let dir = PathBuf::from(&folder);
-                if !dir.is_absolute() || !dir.is_dir() {
-                    return Err(CoreError::new(
-                        ErrorCode::NotFound,
-                        "the session's folder is not available",
-                    ));
-                }
-                Ok((dir.join(FILE_NAME), Some(folder)))
-            }
+    /// The personal file in Vibe Work's own home.
+    fn target(&self) -> Result<(PathBuf, Option<String>), CoreError> {
+        let home = &self.shared.instructions.own_home;
+        if home.as_os_str().is_empty() {
+            return Err(refuse("notConfigured", "this run has no Vibe Work home"));
         }
+        Ok((home.join(FILE_NAME), None))
     }
 }
 

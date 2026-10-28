@@ -104,6 +104,7 @@ fn server_view(server: &toml::Table) -> Option<ServerView> {
         tools: Vec::new(),
         error: None,
         plugin: None,
+        source: None,
         configured: true,
         key: None,
     })

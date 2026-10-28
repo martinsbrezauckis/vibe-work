@@ -72,9 +72,19 @@ pub enum MarketRequest {
         #[cfg_attr(feature = "ts", ts(optional))]
         cwd: Option<String>,
     },
-    /// Installs (or updates) a pack or plugin. Asks the native dialog from the window; runs in the background
-    /// (progress and the outcome arrive as `marketInstall` events). One at a time.
+    /// Installs (or updates) a pack or plugin; runs in the background (progress and the outcome arrive as
+    /// `marketInstall` events). One at a time. From the window with `offer_id` the click confirms that
+    /// shown offer and no native dialog opens; without it the native dialog asks as before.
     Install {
+        /// The catalog entry.
+        id: String,
+        /// The id of the `offerInstall` offer the window showed.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[cfg_attr(feature = "ts", ts(optional))]
+        offer_id: Option<String>,
+    },
+    /// What Install would put on this computer (name, publisher, licence, what runs), as a single-use offer.
+    OfferInstall {
         /// The catalog entry.
         id: String,
     },
@@ -109,6 +119,11 @@ pub enum MarketResult {
     InstallStarted {
         /// The entry.
         id: String,
+    },
+    /// `offerInstall`: what the click would install; the click sends `offerId` back.
+    Offer {
+        /// The single-use offer.
+        offer: crate::install_offers::ToolsInstallOffer,
     },
 }
 
@@ -277,6 +292,10 @@ pub struct LocalPluginView {
     pub name: String,
     /// Vibe's description.
     pub description: String,
+    /// The version its manifest gives; `null` when it gives none.
+    pub version: Option<String>,
+    /// The author its manifest gives; `null` when it gives none.
+    pub author: Option<String>,
     /// Its installed folder, including for restored chats with a separate pinned checkout.
     pub path: String,
     /// Vibe's scope (`project`, `global`, `builtin`).

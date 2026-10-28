@@ -5,6 +5,7 @@
  * Invariants: the text is file content (possibly hostile): rendered as plain text in a `<pre>`, never as HTML or
  * Markdown.
  */
+import { Button } from "../../components/Controls";
 import { type ReactElement, useCallback, useRef } from "react";
 
 import { useModalFocus } from "../../hooks/useModalFocus";
@@ -43,15 +44,15 @@ export function TextViewer(): ReactElement | null {
           ) : null}
         </section>
         <footer>
-          <button
+          <Button
             data-testid="libraries.text-viewer-tb-btn"
             type="button"
-            className="tb-btn"
+
             data-dialog-initial-focus="true"
             onClick={close}
           >
             Close
-          </button>
+          </Button>
         </footer>
       </div>
     </>

@@ -16,7 +16,7 @@
 .tx > .find-bar {
   position: sticky;
   top: 0;
-  z-index: 2;
+  z-index: var(--z-raised);
 }
 .find-bar input {
   flex: 1 1 160px;
@@ -25,7 +25,7 @@
   font-size: var(--text-13);
   padding: 4px 8px;
   border: 1px solid var(--line-2);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: var(--bg);
   color: var(--text);
 }
@@ -34,7 +34,7 @@
   align-items: center;
   gap: 4px;
   border: 1px solid transparent;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text-2);
   padding: 3px 6px;
@@ -47,7 +47,7 @@
   font-size: var(--text-12);
   color: var(--text-2);
   border: 1px solid var(--line-2) !important;
-  border-radius: 999px !important;
+  border-radius: var(--radius-pill) !important;
   padding: 2px 8px !important;
   white-space: nowrap;
 }
@@ -72,7 +72,7 @@
 .find-current {
   outline: 2px solid var(--mark-on);
   outline-offset: 2px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
 }
 
 /* The palette's "Searching older conversations…" line. */
@@ -170,7 +170,7 @@
   overflow: auto;
   margin: 6px 0 4px;
   padding: 8px 10px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: var(--bg);
   border: 1px solid var(--line);
   font-family: var(--font-mono);

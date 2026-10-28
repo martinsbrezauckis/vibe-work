@@ -3,7 +3,7 @@
 //!
 //! Depends on: `search_index`, `search_files`, `search_text`, `names` (session folders). Called by: `dispatch`.
 //! Invariants: the Debug API and the window get the same answers (the Debug API acts as the user); file
-//! search runs off the async runtime; only folders sessions work in are searched.
+//! search runs off the async runtime; only known session folders or exact user-picked folders are searched.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -60,10 +60,36 @@ impl Core {
             .collect()
     }
 
+    /// The folder to search for `path` named by the window without a session: a folder picked in this run (in its
+    /// canonical or plain spelling, or, on macOS and Linux, the spelling it was picked in), or the New chat folder
+    /// restored after a restart. Exact folders only, compared without touching the disk.
+    fn picked_search_folder(&self, path: &std::path::Path) -> Option<PathBuf> {
+        let plain = vw_platform::plain_path(path);
+        let gate = &self.shared.gate;
+        if gate
+            .picked_roots()
+            .iter()
+            .chain(self.shared.new_chat.restored_folder().iter())
+            .any(|root| vw_platform::plain_path(root) == plain)
+        {
+            return Some(path.to_path_buf());
+        }
+        #[cfg(not(windows))]
+        if let Some((_, canonical)) = gate
+            .picked_spellings()
+            .into_iter()
+            .find(|(spelling, _)| *spelling == plain)
+        {
+            return Some(canonical);
+        }
+        None
+    }
+
     /// Executes one `search` request.
     ///
     /// # Errors
-    /// `invalidParams` for an empty query; `internal` when the file search task fails.
+    /// `invalidParams` for an empty query outside name search, `denied` for an unknown folder;
+    /// `internal` when the file search task fails.
     pub(crate) async fn search(&self, request: SearchRequest) -> Result<SearchResult, CoreError> {
         let empty = || CoreError::new(ErrorCode::InvalidParams, "the query is empty");
         match request {
@@ -84,20 +110,51 @@ impl Core {
                 query,
                 session_id,
                 limit,
+                names_only,
+                folder,
             } => {
-                let prepared = Query::new(&query).ok_or_else(empty)?;
-                let folders = self.search_folders(session_id.as_deref());
+                let names_only = names_only.unwrap_or(false);
+                let prepared = Query::new(&query);
+                if prepared.is_none() && !names_only {
+                    return Err(empty());
+                }
+                let mut folders = self.search_folders(session_id.as_deref());
+                if let Some(folder) = folder {
+                    let path = PathBuf::from(folder);
+                    folders.retain(|known| known.path == path);
+                    if folders.is_empty() {
+                        // A picked folder is kept in its canonical spelling (Windows: `\\?\C:\...`), the window
+                        // names it as the folder dialog gave it: compared in the plain spelling, names exact. The
+                        // New chat folder restored after a restart counts like a pick; on macOS and Linux a folder
+                        // picked through a symbolic link is searched at the folder the link led to when picked.
+                        if let Some(path) = (session_id.is_none())
+                            .then(|| self.picked_search_folder(&path))
+                            .flatten()
+                        {
+                            folders.push(Folder {
+                                path,
+                                session_id: None,
+                            });
+                        } else {
+                            return Err(CoreError::new(
+                                ErrorCode::Denied,
+                                "Choose a folder first to search its files.",
+                            ));
+                        }
+                    }
+                }
                 let names: Vec<String> = folders
                     .iter()
                     .map(|f| f.path.display().to_string())
                     .collect();
                 let limit = limit_of(limit);
-                let found =
-                    tokio::task::spawn_blocking(move || search_files(&folders, &prepared, limit))
-                        .await
-                        .map_err(|e| {
-                            CoreError::new(ErrorCode::Internal, format!("file search failed: {e}"))
-                        })?;
+                let found = tokio::task::spawn_blocking(move || {
+                    search_files(&folders, prepared.as_ref(), limit, names_only)
+                })
+                .await
+                .map_err(|e| {
+                    CoreError::new(ErrorCode::Internal, format!("file search failed: {e}"))
+                })?;
                 Ok(SearchResult::Files {
                     hits: found.hits,
                     total: found.total,

@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
 use common::update_rig::{DirGuard, unique_dir};
-use make_latest_json::{Refused, WriteRequest};
+use make_latest_json::{Minimums, Refused, WriteRequest};
 use serde_json::Value;
 
 const VERSION: &str = "1.1.0";
@@ -62,6 +62,12 @@ struct Release {
     key: Key,
     version: String,
     pub_date: Option<String>,
+    /// The bundle's `LSMinimumSystemVersion` the release step passes for darwin.
+    macos_minimum: Option<String>,
+    /// The oldest Windows build the release step passes for windows.
+    windows_minimum: Option<String>,
+    /// The highest glibc symbol version the AppImage's programs need (linux).
+    linux_glibc: Option<String>,
 }
 
 impl Release {
@@ -76,6 +82,9 @@ impl Release {
             key: Key::new(),
             version: VERSION.to_owned(),
             pub_date: Some("2026-10-12T09:00:00Z".to_owned()),
+            macos_minimum: None,
+            windows_minimum: None,
+            linux_glibc: None,
         };
         for asset in names(VERSION) {
             release.put(&asset, &content(&asset));
@@ -111,6 +120,14 @@ impl Release {
         self.assets.join("latest.json")
     }
 
+    fn minimums(&self) -> Minimums<'_> {
+        Minimums {
+            macos: self.macos_minimum.as_deref(),
+            windows: self.windows_minimum.as_deref(),
+            linux_glibc: self.linux_glibc.as_deref(),
+        }
+    }
+
     fn write(&self) -> Result<PathBuf, Refused> {
         let (config, channel, pubkey, notes) = (
             self.root.join("tauri.conf.json"),
@@ -126,6 +143,7 @@ impl Release {
             pubkey: &pubkey,
             notes: &notes,
             pub_date: self.pub_date.as_deref(),
+            minimums: self.minimums(),
             artifacts: &self.assets,
             out: &out,
         })
@@ -137,6 +155,7 @@ impl Release {
             &self.root.join("tauri.conf.json"),
             &self.root.join("updater.pub"),
             &self.assets,
+            self.minimums(),
             manifest,
         )
     }
@@ -188,6 +207,120 @@ fn complete_release_gives_the_pinned_manifest() {
         assert_eq!(entry["signature"], sig.trim());
     }
     release.check(&out).unwrap();
+}
+
+// ---- the oldest macOS the package runs on ----------------------------------------------------------------
+
+#[test]
+fn the_macos_minimum_goes_into_the_darwin_entry_only() {
+    let mut release = Release::new("minos");
+    release.macos_minimum = Some("11.0".to_owned());
+    let out = release.write().unwrap();
+    let manifest: Value = serde_json::from_slice(&std::fs::read(&out).unwrap()).unwrap();
+    let platforms = &manifest["platforms"];
+    assert_eq!(platforms["darwin-aarch64"]["minimumSystemVersion"], "11.0");
+    assert!(
+        platforms["windows-x86_64"]
+            .get("minimumSystemVersion")
+            .is_none()
+    );
+    assert!(
+        platforms["linux-x86_64"]
+            .get("minimumSystemVersion")
+            .is_none()
+    );
+    release.check(&out).unwrap();
+    // The check compares with the bundle's value: another value, or none expected, is refused.
+    release.macos_minimum = Some("14.0".to_owned());
+    let text = release.check(&out).unwrap_err().0;
+    assert!(text.contains("minimumSystemVersion"), "{text}");
+    release.macos_minimum = None;
+    let text = release.check(&out).unwrap_err().0;
+    assert!(text.contains("minimumSystemVersion"), "{text}");
+}
+
+#[test]
+fn a_macos_minimum_that_is_not_a_version_is_refused() {
+    for bad in ["eleven", "11.", "v11.0", "", "11.0 beta"] {
+        let mut release = Release::new("minos-bad");
+        release.macos_minimum = Some(bad.to_owned());
+        refused_with(release.write(), "is not a system version", &release);
+    }
+}
+
+#[test]
+fn check_refuses_a_minimum_on_another_platform() {
+    let mut release = Release::new("minos-other");
+    release.macos_minimum = Some("11.0".to_owned());
+    let out = release.write().unwrap();
+    let mut manifest: Value = serde_json::from_slice(&std::fs::read(&out).unwrap()).unwrap();
+    manifest["platforms"]["windows-x86_64"]["minimumSystemVersion"] = "10.0".into();
+    std::fs::write(&out, manifest.to_string()).unwrap();
+    let text = release.check(&out).unwrap_err().0;
+    assert!(text.contains("windows-x86_64"), "{text}");
+}
+
+// ---- the oldest Windows build and the Linux C library ------------------------------------------------------
+
+#[test]
+fn every_platform_carries_its_own_minimum() {
+    let mut release = Release::new("minos-all");
+    release.macos_minimum = Some("11.0".to_owned());
+    release.windows_minimum = Some("10.0.17763".to_owned());
+    release.linux_glibc = Some("2.39".to_owned());
+    let out = release.write().unwrap();
+    let manifest: Value = serde_json::from_slice(&std::fs::read(&out).unwrap()).unwrap();
+    let platforms = &manifest["platforms"];
+    assert_eq!(platforms["darwin-aarch64"]["minimumSystemVersion"], "11.0");
+    assert_eq!(
+        platforms["windows-x86_64"]["minimumSystemVersion"],
+        "10.0.17763"
+    );
+    assert_eq!(platforms["linux-x86_64"]["minimumGlibc"], "2.39");
+    // Each field only where it belongs: Linux names glibc, never a system version; the others never glibc.
+    assert!(
+        platforms["linux-x86_64"]
+            .get("minimumSystemVersion")
+            .is_none()
+    );
+    assert!(platforms["windows-x86_64"].get("minimumGlibc").is_none());
+    assert!(platforms["darwin-aarch64"].get("minimumGlibc").is_none());
+    release.check(&out).unwrap();
+    // The check compares each with what the release step passes.
+    release.windows_minimum = Some("10.0.19045".to_owned());
+    let text = release.check(&out).unwrap_err().0;
+    assert!(text.contains("windows-x86_64"), "{text}");
+    release.windows_minimum = Some("10.0.17763".to_owned());
+    release.linux_glibc = None;
+    let text = release.check(&out).unwrap_err().0;
+    assert!(
+        text.contains("linux-x86_64") && text.contains("minimumGlibc"),
+        "{text}"
+    );
+}
+
+#[test]
+fn windows_and_glibc_minimums_that_are_not_versions_are_refused() {
+    for bad in ["ten", "10.0.", "", "2.39 (Ubuntu)", "GLIBC_2.39"] {
+        let mut release = Release::new("minos-bad-win");
+        release.windows_minimum = Some(bad.to_owned());
+        refused_with(release.write(), "is not a system version", &release);
+        let mut release = Release::new("minos-bad-glibc");
+        release.linux_glibc = Some(bad.to_owned());
+        refused_with(release.write(), "is not a system version", &release);
+    }
+}
+
+#[test]
+fn check_refuses_a_system_version_on_linux() {
+    let mut release = Release::new("minos-linux-field");
+    release.linux_glibc = Some("2.39".to_owned());
+    let out = release.write().unwrap();
+    let mut manifest: Value = serde_json::from_slice(&std::fs::read(&out).unwrap()).unwrap();
+    manifest["platforms"]["linux-x86_64"]["minimumSystemVersion"] = "24.04".into();
+    std::fs::write(&out, manifest.to_string()).unwrap();
+    let text = release.check(&out).unwrap_err().0;
+    assert!(text.contains("linux-x86_64"), "{text}");
 }
 
 // ---- write refusals --------------------------------------------------------------------------------------

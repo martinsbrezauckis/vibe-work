@@ -32,6 +32,7 @@ pub struct FakeTransport {
     replies: Arc<Mutex<HashMap<String, Value>>>,
     dead: Arc<Mutex<bool>>,
     yield_before_record: Arc<Mutex<bool>>,
+    fail_next: Arc<Mutex<HashMap<String, String>>>,
 }
 
 impl FakeTransport {
@@ -49,6 +50,10 @@ impl FakeTransport {
     /// Makes every later request fail as "server dead".
     pub fn kill(&self) {
         *lock(&self.dead) = true;
+    }
+    /// The next request for `method` is recorded (it was sent) and answered with a server error saying `message`.
+    pub fn fail_next(&self, method: &str, message: &str) {
+        lock(&self.fail_next).insert(method.to_owned(), message.to_owned());
     }
     /// Makes the transport suspend before recording, so concurrent callers interleave.
     pub fn interleave(&self) {
@@ -81,6 +86,15 @@ impl Transport for FakeTransport {
                 method: method.clone(),
                 params,
             });
+            if let Some(message) = lock(&this.fail_next).remove(&method) {
+                return Err(RpcError::Remote {
+                    method: method.clone(),
+                    error: serde_json::from_value(
+                        json!({"code": "internal_error", "message": message}),
+                    )
+                    .expect("a server error object"),
+                });
+            }
             Ok(lock(&this.replies)
                 .get(&method)
                 .cloned()
@@ -257,20 +271,9 @@ pub fn runtime_with_models(aliases: &[&str]) -> Value {
     json!({"runtime": {"config": {"models": models}}, "ready": true})
 }
 
-/// A directory under cargo's per-target tmp dir, empty and fresh.
+/// A directory under the shared real-server sandbox root, empty and fresh.
 pub fn scratch(name: &str) -> std::path::PathBuf {
-    use std::sync::atomic::{AtomicU32, Ordering};
-    static NEXT: AtomicU32 = AtomicU32::new(0);
-    let dir = std::path::PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
-        .join("vw-gate")
-        .join(format!(
-            "{name}-{}-{}",
-            std::process::id(),
-            NEXT.fetch_add(1, Ordering::Relaxed)
-        ));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).unwrap();
-    dir
+    super::processes::scratch(name)
 }
 
 /// Spellings of the method name `base` that must never resolve to it (case, slashes, whitespace,

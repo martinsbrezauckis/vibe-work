@@ -14,7 +14,7 @@
 //! - Dropping the supervisor aborts the monitor, which drops the child handle and kills the tree.
 
 use std::collections::BTreeSet;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
@@ -27,7 +27,7 @@ use vw_rpc::{Connection, DeathReport, ExitInfo, Multiplexer, RequestOptions, Tim
 use crate::config::{Recovering, SupervisorConfig, SupervisorError, SupervisorState};
 use crate::discovery::canonical_executable;
 use crate::env::SecretProvider;
-use crate::launch::{self, Link, Running};
+use crate::launch::{self, Running};
 
 /// A channel opened on the current multiplexed server, with the server generation it belongs to (a
 /// restart makes every channel of the old generation dead).
@@ -192,6 +192,19 @@ impl Supervisor {
             .clone()
     }
 
+    /// The executables named in the configured launcher argv (canonical), when the server runs under one (a sandbox,
+    /// fault wrapper or recording tap in tests; the app configures none). [`Self::server_pid`] is then the first of
+    /// them, and the server runs below that launcher's own children.
+    #[must_use]
+    pub fn launcher_programs(&self) -> Vec<PathBuf> {
+        self.inner
+            .config
+            .launcher
+            .iter()
+            .filter_map(|arg| canonical_executable(Path::new(arg)))
+            .collect()
+    }
+
     /// The folder the server process runs in (the app's own `work/` folder in a real run): where a chat that is not
     /// about a user's project can open without touching one.
     #[must_use]
@@ -251,15 +264,10 @@ impl Supervisor {
     /// installed on it before its first frame.
     ///
     /// # Errors
-    /// [`SupervisorError::Unsupported`] in single mode; [`SupervisorError::NotReady`] when no server is
+    /// [`SupervisorError::NotReady`] when no server is
     /// ready in time; [`SupervisorError::Rpc`] when the process is dead or closing;
     /// [`SupervisorError::Handshake`] when the channel's handshake fails (the channel is closed again).
     pub async fn open_channel(&self, wait: Duration) -> Result<OpenedChannel, SupervisorError> {
-        if self.inner.config.mode != crate::config::ServerMode::Multiplex {
-            return Err(SupervisorError::Unsupported(
-                "channels need ServerMode::Multiplex",
-            ));
-        }
         let (mux, generation) = self.multiplexer(wait).await?;
         let conn = launch::open_channel(&mux, &self.inner.config).await?;
         Ok(OpenedChannel { conn, generation })
@@ -316,21 +324,8 @@ impl Supervisor {
             .unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// Sends `session/resume` for `session_id` with the caller's params and publishes progress
-    /// (`Ready.recovering`) every `progress_interval` until it answers, so a slow resume shows as
-    /// "recovering, 12 s of ~31 s" instead of a hang. On success the session leaves `needs_resume`.
-    ///
-    /// # Errors
-    /// [`SupervisorError::NotReady`] when no server is ready within `resume_timeout`;
-    /// [`SupervisorError::Rpc`] for the request's own failure (timeout after `resume_timeout`,
-    /// error answer, server dead).
-    pub async fn resume(&self, session_id: &str, params: Value) -> Result<Value, SupervisorError> {
-        let conn = self.connection(self.inner.config.resume_timeout).await?;
-        self.resume_on(&conn, session_id, params).await
-    }
-
-    /// [`Supervisor::resume`] on a given connection (in multiplex mode: the session's own channel).
-    /// Same timeout and progress reporting.
+    /// Resumes a session on its own channel, publishing progress until it answers.
+    /// On success the session leaves `needs_resume`.
     ///
     /// # Errors
     /// [`SupervisorError::Rpc`] for the request's own failure (timeout after `resume_timeout`, error
@@ -472,7 +467,7 @@ impl Inner {
     fn publish_ready(&self, running: &Running, generation: u64, needs_resume: Vec<String>) {
         self.conn.send_replace(Some(running.conn.clone()));
         self.mux
-            .send_replace(running.mux().map(|mux| (mux.clone(), generation)));
+            .send_replace(Some((running.mux.clone(), generation)));
         self.state.send_replace(SupervisorState::Ready {
             generation,
             server: running.server.clone(),
@@ -591,28 +586,22 @@ async fn monitor(inner: Arc<Inner>, mut running: Running, mut shutdown: watch::R
     }
 }
 
-/// Resolves when the server is gone: the plain connection died, or (multiplex) the process died or
+/// Resolves when the server is gone: the process died or
 /// its lobby channel died on its own (see the module invariants).
 async fn process_closed(running: &Running) -> DeathReport {
-    match &running.link {
-        Link::Single => running.conn.closed().await,
-        Link::Multiplex(mux) => tokio::select! {
-            report = mux.closed() => report,
+    tokio::select! {
+            report = running.mux.closed() => report,
             report = running.conn.closed() => {
                 warn!(cause = report.cause.kind(), "lobby channel died; treating the server as dead");
                 report
             }
-        },
     }
 }
 
 /// Closes stdin, waits the grace period, kills what is left and reaps it.
 async fn stop_gracefully(inner: &Inner, running: Running) -> Option<ExitInfo> {
-    match &running.link {
-        Link::Single => running.conn.close_input().await,
-        // Vibe closes every channel (each harness flushes and releases its lease) and exits.
-        Link::Multiplex(mux) => mux.close_input().await,
-    }
+    // Vibe closes every channel, flushes each harness and releases its lease.
+    running.mux.close_input().await;
     let graceful = running.child.wait_exit(inner.config.shutdown_grace).await;
     if graceful.is_none() {
         warn!(

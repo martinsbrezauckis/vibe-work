@@ -39,9 +39,11 @@ function useTokens(text: string, lang: string | null): CodeToken[][] | null {
 export function TextView({
   content,
   line,
+  end,
 }: {
   content: FileContent;
   line: number | null;
+  end?: number;
 }): ReactElement {
   const text = content.text ?? "";
   const lang = languageOf(languageForName(content.name));
@@ -49,19 +51,31 @@ export function TextView({
   const all = tokens ?? text.split("\n").map((l) => [{ text: l, className: "" }]);
   // A file ending with a newline has no line after it (no empty numbered line at the end).
   const lines = text.endsWith("\n") && all.length > 1 ? all.slice(0, -1) : all;
+  const shorter = end !== undefined && Math.max(line ?? 0, end) > lines.length;
+  const first = shorter ? 1 : line;
+  const last = shorter ? 1 : (end ?? line);
   const box = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    if (line === null) return;
+    if (first === null) return;
     box.current
-      ?.querySelector(`[data-line="${String(line)}"]`)
+      ?.querySelector(`[data-line="${String(first)}"]`)
       ?.scrollIntoView({ block: "center" });
-  }, [line, content.fingerprint]);
+  }, [first, content.fingerprint]);
   return (
     <div className="file-text" ref={box} data-lang={lang ?? "text"}>
+      {shorter && (
+        <p className="file-note" role="status">
+          This file is shorter now than when the lines were pointed at.
+        </p>
+      )}
       <pre>
         <code>
           {lines.map((parts, i) => (
-            <span key={i} className={`file-line${line === i + 1 ? " at" : ""}`} data-line={i + 1}>
+            <span
+              key={i}
+              className={`file-line${first !== null && last !== null && i + 1 >= first && i + 1 <= last ? " at" : ""}`}
+              data-line={i + 1}
+            >
               <span className="file-ln" aria-hidden="true">
                 {i + 1}
               </span>

@@ -1,9 +1,7 @@
 /**
- * What the agent is told about a quick edit: a short unified-style diff of the user's change, sent
- * as a context chip with the next message (the composer's chips are data, never typed text, never a command).
- * Depends on: state/lineDiff. Called by: FileEditor (after a save).
- * Invariants: pure; at most `MAX_LINES` changed lines with two lines of context around each run; the chip says the
- * user made the change, so the agent does not take it for its own.
+ * A short unified-style diff of a quick edit and how many lines it changed (a save reports the count).
+ * Depends on: state/lineDiff. Called by: saveEdit.
+ * Invariants: pure; at most `MAX_LINES` changed lines with two lines of context around each run.
  */
 import { lineDiff } from "../../../state/lineDiff";
 
@@ -43,10 +41,4 @@ export function editDiff(before: string, after: string): { lines: string[]; chan
     return { lines: [...lines.slice(0, MAX_LINES), `… ${String(left)} more lines`], changed };
   }
   return { lines, changed };
-}
-
-/** The chip's text for an edit of `display` (a path the user sees). */
-export function editNoteText(display: string, before: string, after: string): string {
-  const { lines } = editDiff(before, after);
-  return `I edited ${display} myself in Vibe Work's file viewer (it is saved on disk). My change:\n\`\`\`diff\n${lines.join("\n")}\n\`\`\``;
 }

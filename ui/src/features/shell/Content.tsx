@@ -11,13 +11,14 @@
  * and connectors features.
  * Called by: Shell.
  */
+import { FoldChatButton } from "./WindowStrips";
 import { TEXT } from "../../vocabulary";
 import type { ReactNode } from "react";
 
 import { BrandMark } from "../../components/BrandMark";
 import { Icon } from "../../components/Icon";
 import { useStore } from "../../state/createStore";
-import { TAB_KINDS, TAB_META, panelOf } from "../../state/shellState";
+import { TAB_KINDS, TAB_META, type TabKind, panelOf } from "../../state/shellState";
 import { LazyComposer } from "../composer/LazyComposer";
 import { NewChatPanel } from "../sessions/NewChatPanel";
 import { NEW_CHAT } from "../../state/newChatKey";
@@ -31,6 +32,7 @@ import { TemporaryChip } from "../sessions/TemporaryChip";
 import { useFindKeys } from "../search/useFindKeys";
 import { Transcript } from "../transcript/Transcript";
 import { ConnectorsPage } from "../connectors/ConnectorsPage";
+import { SkillsPage } from "../skills/SkillsPage";
 import { MarketplacePage } from "../marketplace/MarketplacePage";
 import { useMarket } from "../marketplace/hooks";
 import { LibrariesPage } from "../libraries/LibrariesPage";
@@ -39,18 +41,20 @@ import { EndDialog } from "../worktrees/EndDialog";
 import { OrphanList } from "../worktrees/OrphanList";
 import { IncludeNote } from "../worktrees/IncludeNote";
 import { WorktreeChip } from "../worktrees/WorktreeChip";
+import { GrantsChip } from "../ask/GrantsChip";
 import { PrChip } from "../git/PrChip";
-import { sessionHasGit, useSessionGit } from "../git/useSessionGit";
+import { useSessionGit } from "../git/useSessionGit";
 import { useConnectors } from "../connectors/hooks";
 import { ProjectsPage } from "../projects/ProjectsPage";
 import { SettingsPage } from "../settings/SettingsPage";
 import { useProjects } from "../projects/hooks";
 import { useApp } from "./AppContext";
 import { KeyNotice } from "./KeyNotice";
+import { SendToOffer } from "./SendToOffer";
 import { formatKeys } from "../../state/shortcuts";
 import { CoveredByPage } from "./coverContext";
 import { TAB_ICON } from "./tabIcons";
-import { useCoreState, useSessionSummaries, useShellState } from "./hooks";
+import { useCoreState, useLayout, useSessionSummaries, useShellState } from "./hooks";
 
 function ServerNote() {
   const server = useCoreState((s) => s.server);
@@ -76,22 +80,27 @@ function ServerNote() {
 function Header({ title, sessionId }: { title: string; sessionId: string }) {
   const { shell, panelTabs } = useApp();
   const panel = useShellState(panelOf);
+  const shown = useLayout().panelOpen;
   const hidden = useStore(panelTabs.hidden, (h) => h);
   const gitStatus = useSessionGit(sessionId);
   return (
     <div className="shead">
+      <FoldChatButton />
       <h1>{title}</h1>
-      <WorktreeChip sessionId={sessionId} status={gitStatus} />
+      {/* The header's second line: the location chip and the session grants chip, one family. */}
+      <div className="shead-line">
+        <WorktreeChip sessionId={sessionId} status={gitStatus} />
+        <GrantsChip sessionId={sessionId} />
+      </div>
       <IncludeNote sessionId={sessionId} />
       <TemporaryChip sessionId={sessionId} />
       <PrChip sessionId={sessionId} />
       {/* toasts keep these buttons clear (Changes, Files,...): a stack moved off the composer to the top
           right covered Changes. */}
       <div className="acts" role="group" aria-label="Side panel" data-toast-avoid="header">
-        {TAB_KINDS.filter(
-          (kind) => !hidden.includes(kind) && (kind !== "git" || sessionHasGit(gitStatus)),
-        ).map((kind) => {
-          const active = panel.open && panel.active === kind;
+        {TAB_KINDS.filter((kind) => !hidden.includes(kind)).map((kind) => {
+          // Shown, not only open: a panel the layout folds (a list opened by hand) is opened by its tab, never closed.
+          const active = shown && panel.active === kind;
           const label = `${active ? "Close" : "Open"} ${TAB_META[kind].label} tab${kind === "terminal" && !active ? ` (${formatKeys("Mod+`")})` : ""}`;
           return (
             <button
@@ -104,7 +113,8 @@ function Header({ title, sessionId }: { title: string; sessionId: string }) {
               title={label}
               aria-label={label}
               onClick={() => {
-                shell.actions.toggleTab(kind);
+                if (active) shell.actions.toggleTab(kind);
+                else shell.actions.openTab(kind);
               }}
             >
               <Icon name={TAB_ICON[kind]} />
@@ -113,6 +123,44 @@ function Header({ title, sessionId }: { title: string; sessionId: string }) {
           );
         })}
       </div>
+    </div>
+  );
+}
+
+/** The New chat screen works before a session exists: Browser, Files and Terminal (no Project, Plan, Changes). */
+const NEW_CHAT_TABS: readonly TabKind[] = ["browser", "git", "terminal"];
+
+/** The New chat header's side panel toggles (as a session's, for the tabs that work before the chat). */
+function NewChatToggles() {
+  const { shell } = useApp();
+  const panel = useShellState(panelOf);
+  const shown = useLayout().panelOpen;
+  return (
+    <div className="acts" role="group" aria-label="Side panel" data-toast-avoid="header">
+      {NEW_CHAT_TABS.map((kind) => {
+        // Shown, not only open: a panel the layout folds (a list opened by hand) is opened by its tab, never closed.
+        const active = shown && panel.active === kind;
+        const label = `${active ? "Close" : "Open"} ${TAB_META[kind].label} tab${kind === "terminal" && !active ? ` (${formatKeys("Mod+`")})` : ""}`;
+        return (
+          <button
+            data-testid={`shell.welcome-open-${kind}-tab`}
+            data-item-id={kind}
+            key={kind}
+            type="button"
+            className="pbtn"
+            aria-pressed={active}
+            title={label}
+            aria-label={label}
+            onClick={() => {
+              if (active) shell.actions.toggleTab(kind);
+              else shell.actions.openTab(kind);
+            }}
+          >
+            <Icon name={TAB_ICON[kind]} />
+            <span className="lbltxt">{TAB_META[kind].label}</span>
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -129,7 +177,6 @@ function HeldWrap({ sessionId, children }: { sessionId: string; children: ReactN
 
 /** The content area. */
 export function Content() {
-  const { shell } = useApp();
   const selected = useShellState((s) => s.selected);
   const session = useSessionSummaries().find((s) => s.id === selected);
   // The Mistral key setup covers the work view while no working key exists.
@@ -152,7 +199,13 @@ export function Content() {
     </div>
   ) : tools ? (
     <div className="view">
-      {toolsTab === "marketplace" ? <MarketplacePage /> : <ConnectorsPage />}
+      {toolsTab === "skills" ? (
+        <SkillsPage />
+      ) : toolsTab === "marketplace" ? (
+        <MarketplacePage />
+      ) : (
+        <ConnectorsPage />
+      )}
     </div>
   ) : libraries ? (
     <div className="view">
@@ -189,39 +242,30 @@ export function Content() {
           ) : (
             <>
               <div className="shead">
+                <FoldChatButton />
                 <h1>{TEXT.newChat}</h1>
-                <div className="acts" role="group" aria-label="Side panel">
-                  <button
-                    data-testid="shell.welcome-open-git-tab"
-                    type="button"
-                    className="pbtn"
-                    aria-label="Open Git tab"
-                    onClick={() => {
-                      shell.actions.openTab("git");
-                    }}
-                  >
-                    <Icon name="git-branch" />
-                    <span className="lbltxt">Git</span>
-                  </button>
-                </div>
+                <NewChatToggles />
               </div>
               <div className="view view-welcome">
                 {/* The calm idle state: a faint construction grid fading out from the centre; nothing moves. */}
                 <div className="welcome-grid" aria-hidden="true" />
                 <div className="welcome">
-                  <BrandMark />
-                  <h2>What should Vibe work on?</h2>
-                  <p>
-                    Type below to start a chat in the folder, pick one from the list, or press{" "}
-                    {formatKeys("Mod+K")} for everything else.
-                  </p>
+                  <div className="welcome-intro">
+                    <BrandMark />
+                    <h2>What should Vibe work on?</h2>
+                    <p>
+                      Type below to start a chat in the folder, pick one from the list, or press{" "}
+                      {formatKeys("Mod+K")} for everything else.
+                    </p>
+                    <KeyNotice />
+                    <SendToOffer />
+                    <OrphanList />
+                    <ServerNote />
+                  </div>
                   <NewChatPanel />
-                  <KeyNotice />
                   <div className="new-chat-composer">
                     <LazyComposer sessionId={NEW_CHAT} />
                   </div>
-                  <OrphanList />
-                  <ServerNote />
                 </div>
               </div>
             </>

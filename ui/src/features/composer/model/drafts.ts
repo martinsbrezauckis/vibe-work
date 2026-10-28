@@ -18,9 +18,9 @@ export type Drafts = Readonly<Record<string, string>>;
 /** `localStorage` key. */
 export const DRAFTS_KEY = "vw.composerDrafts";
 /** Most drafts kept (the oldest entries beyond it are dropped when saving). */
-export const MAX_DRAFTS = 200;
+const MAX_DRAFTS = 200;
 /** Longest draft kept in storage (a longer one is kept in memory only). */
-export const MAX_DRAFT_CHARS = 100_000;
+const MAX_DRAFT_CHARS = 100_000;
 
 /** The draft of `sessionId`, or "" (no session, or nothing typed). */
 export function draftFor(drafts: Drafts, sessionId: string | null | undefined): string {

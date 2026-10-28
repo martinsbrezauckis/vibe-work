@@ -143,15 +143,24 @@ fn plain_relative(rel: &str) -> bool {
 }
 
 /// Searches `folders` for `query`; at most `limit` hits are returned.
-pub(crate) fn search(folders: &[Folder], query: &Query, limit: usize) -> Found {
+pub(crate) fn search(
+    folders: &[Folder],
+    query: Option<&Query>,
+    limit: usize,
+    names_only: bool,
+) -> Found {
     let started = Instant::now();
     let mut found = Found::default();
     let mut bytes: u64 = 0;
     let mut names: Vec<FileHit> = Vec::new();
     let mut lines: Vec<FileHit> = Vec::new();
+    let mut inspected = 0;
     'folders: for folder in folders {
         for rel in candidates(&folder.path) {
-            if found.scanned >= MAX_FILES || bytes >= MAX_BYTES || started.elapsed() >= DEADLINE {
+            if (if names_only { inspected } else { found.scanned }) >= MAX_FILES
+                || bytes >= MAX_BYTES
+                || started.elapsed() >= DEADLINE
+            {
                 found.truncated = true;
                 break 'folders;
             }
@@ -160,6 +169,7 @@ pub(crate) fn search(folders: &[Folder], query: &Query, limit: usize) -> Found {
             if !plain_relative(&rel) || rel.split('/').any(|part| part.starts_with('.')) {
                 continue;
             }
+            inspected += 1;
             let hit = |line: Option<u32>, text: String| FileHit {
                 folder: folder.path.display().to_string(),
                 path: rel.clone(),
@@ -167,7 +177,7 @@ pub(crate) fn search(folders: &[Folder], query: &Query, limit: usize) -> Found {
                 text,
                 session_id: folder.session_id.clone(),
             };
-            if find(&rel, query).is_some() {
+            if !names_only && query.is_some_and(|query| find(&rel, query).is_some()) {
                 found.total = found.total.saturating_add(1).min(COUNT_CAP);
                 names.push(hit(None, rel.clone()));
             }
@@ -176,7 +186,7 @@ pub(crate) fn search(folders: &[Folder], query: &Query, limit: usize) -> Found {
             let Ok(meta) = std::fs::symlink_metadata(&path) else {
                 continue;
             };
-            if !meta.is_file() || meta.len() > MAX_FILE {
+            if !meta.is_file() || (!names_only && meta.len() > MAX_FILE) {
                 continue;
             }
             // Nor a file under a linked folder: git lists names from its index, and a tracked folder replaced by a
@@ -184,6 +194,19 @@ pub(crate) fn search(folders: &[Folder], query: &Query, limit: usize) -> Found {
             if vw_changes::has_symlinked_parent(&folder.path, &path) {
                 continue;
             }
+            if names_only {
+                let name = path.file_name().unwrap_or_default().to_string_lossy();
+                if query.is_none_or(|query| find(&name, query).is_some()) {
+                    found.total = found.total.saturating_add(1).min(COUNT_CAP);
+                    if names.len() < limit {
+                        names.push(hit(None, rel.clone()));
+                    }
+                }
+                continue;
+            }
+            let Some(query) = query else {
+                continue;
+            };
             let Ok(content) = std::fs::read(&path) else {
                 continue;
             };
@@ -239,8 +262,9 @@ mod tests {
                 path: root.clone(),
                 session_id: None,
             }],
-            &Query::new("missing").unwrap(),
+            Some(&Query::new("missing").unwrap()),
             20,
+            false,
         );
         assert!(found.truncated);
         assert_eq!(found.scanned, 1);
@@ -260,7 +284,7 @@ mod tests {
             path: root.clone(),
             session_id: None,
         }];
-        let found = search(&folders, &Query::new("forecast").unwrap(), 20);
+        let found = search(&folders, Some(&Query::new("forecast").unwrap()), 20, false);
         for path in ["decision.html", "decision.htm"] {
             let hits: Vec<_> = found.hits.iter().filter(|h| h.path == path).collect();
             assert!(hits.len() >= 2, "{hits:?}");
@@ -288,7 +312,7 @@ mod tests {
         );
         for query in ["device-width", "color: red", "hidden"] {
             assert!(
-                search(&folders, &Query::new(query).unwrap(), 20)
+                search(&folders, Some(&Query::new(query).unwrap()), 20, false)
                     .hits
                     .is_empty(),
                 "{query}"

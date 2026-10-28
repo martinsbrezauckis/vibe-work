@@ -1,14 +1,14 @@
-//! The app-owned `vw-plan` agent profile: Vibe's plan rules plus write permission for the
+//! The app-owned `vw-plan` agent profile: write permission only for the
 //! plan pages of every known project, written to `VIBE_HOME/agents/vw-plan.toml`.
 //!
-//! Facts (Vibe 2.26.0): custom profiles are read when a session is opened (`core/agents/registry.py`, built by
+//! Facts (Vibe 3.0.0): custom profiles are read when a session is opened (`core/agents/registry.py`, built by
 //! `AgentManager` in `app_server/_runtime.py:1485`), so the file must name a project before its session opens;
 //! allowlist entries are matched with `PurePath.match` when absolute (`permissions.py:91-111`): `*` stays inside
 //! one folder, relative entries never match an absolute path.
 //!
 //! Depends on: shared vocabulary. Called by: vw-core-api (`plan_profile`), tests.
 //! Invariants:
-//! - Only absolute entries: `VIBE_HOME/plans/*` and `<project>/<handbook folder>/plans/*` (Windows projects with `\`).
+//! - Only absolute entries: `<project>/<handbook folder>/plans/*` (Windows projects with `\`).
 //! - A project whose path or pages folder contains a glob character (`*`, `?`, `[`, `]`) is left out (its entry
 //!   could match other folders); so is a relative project path.
 //! - The text is valid TOML (every string escaped); `bash` is not disabled, so the profile is limited, never
@@ -24,7 +24,7 @@ pub const NAME: &str = "vw-plan";
 pub struct PlanTarget {
     /// The project folder as Vibe reports it (the session's `cwd`).
     pub project: String,
-    /// The pages folder relative to it (`docs/pages`).
+    /// The pages folder relative to it (`docs/handbook`).
     pub pages_folder: String,
 }
 
@@ -80,17 +80,12 @@ fn toml_string(text: &str) -> String {
     out
 }
 
-/// The profile text for `targets` (sorted, deduplicated) and Vibe's own plans folder `vibe_home/plans`.
+/// The profile text for `targets` (sorted, deduplicated).
 #[must_use]
-pub fn toml(vibe_home: &Path, targets: &[PlanTarget]) -> String {
-    let home = vibe_home.to_string_lossy();
-    let home = home.trim_end_matches(['/', '\\']);
-    let sep = if is_windows_path(home) { "\\" } else { "/" };
-    let mut entries = vec![format!("{home}{sep}plans{sep}*")];
-    let mut patterns: Vec<String> = targets.iter().filter_map(pattern).collect();
-    patterns.sort();
-    patterns.dedup();
-    entries.extend(patterns);
+pub fn toml(_vibe_home: &Path, targets: &[PlanTarget]) -> String {
+    let mut entries: Vec<String> = targets.iter().filter_map(pattern).collect();
+    entries.sort();
+    entries.dedup();
     let list = entries
         .iter()
         .map(|e| format!("  {},", toml_string(e)))

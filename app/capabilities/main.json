@@ -22,6 +22,7 @@
     "allow-open-link",
     "allow-open-mail-link",
     "allow-notify-session",
+    "allow-show-prompt",
     "allow-terminal-attach",
     "allow-terminal-ack",
     "allow-terminal-detach",
@@ -30,6 +31,9 @@
     "allow-update-download",
     "allow-update-install",
     "allow-update-set-auto-download",
-    "allow-update-open-release-page"
+    "allow-update-open-release-page",
+    "allow-hand-over-subscribe",
+    "allow-hand-over-take",
+    "allow-send-to"
   ]
 }

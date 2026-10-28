@@ -1,7 +1,7 @@
 //! The `documents` command and how files enter the core.
 //!
-//! Files enter only through [`Core::add_documents`], which the app calls with the paths the native
-//! picker or an OS drop gave it (Rust side; the test host's stand-in calls it the same way). The
+//! Files enter through [`Core::add_documents`] for native picker paths, or `addDropped` for
+//! bytes read by the window on drop/paste (origin `ui`; native Tauri drops are disabled). The
 //! `documents` command then lists, reads, removes and extracts them; extraction calls Mistral OCR from
 //! the core with the key from the key service, never through the webview.
 //!
@@ -32,12 +32,15 @@ use crate::event::CoreEvent;
 pub struct DocumentsConfig {
     /// Longest wait for one OCR request (default [`vw_mistral::OCR_TIMEOUT`], 300 s).
     pub ocr_timeout: Duration,
+    /// Maximum hold of an agent tool call before returning a resumable reading status.
+    pub agent_wait: Duration,
 }
 
 impl Default for DocumentsConfig {
     fn default() -> Self {
         Self {
             ocr_timeout: vw_mistral::OCR_TIMEOUT,
+            agent_wait: Duration::from_secs(25),
         }
     }
 }
@@ -51,6 +54,19 @@ fn not_found(id: &str) -> CoreError {
         ErrorCode::NotFound,
         format!("no document {id} (it was removed or sent)"),
     )
+}
+
+fn ocr_pages(out: vw_mistral::OcrOutput) -> Result<OcrPages, String> {
+    if out.pages.iter().all(|page| page.trim().is_empty()) {
+        return Err(
+            "No readable text was found in this document. Try another copy of the file.".to_owned(),
+        );
+    }
+    Ok(OcrPages {
+        pages: out.pages,
+        model: out.model,
+        pages_processed: out.pages_processed,
+    })
 }
 
 /// Runs OCR on one document and stores the outcome (the command waits for it).
@@ -82,12 +98,8 @@ async fn extract(shared: &Shared, id: &str) -> Result<CommandResult, CoreError> 
     let outcome = keys
         .ocr(&input, shared.config.documents.ocr_timeout)
         .await
-        .map(|out| OcrPages {
-            pages: out.pages,
-            model: out.model,
-            pages_processed: out.pages_processed,
-        })
-        .map_err(|e| e.to_string());
+        .map_err(|e| e.to_string())
+        .and_then(ocr_pages);
     match &outcome {
         Ok(pages) => info!(document = id, pages = pages.pages.len(), "OCR finished"),
         Err(reason) => warn!(document = id, %reason, "OCR failed"),
@@ -104,6 +116,15 @@ async fn extract(shared: &Shared, id: &str) -> Result<CommandResult, CoreError> 
     } else {
         None
     };
+    if let Some(text) = &text {
+        shared.saved_documents.seed(
+            id,
+            &crate::saved_documents::Text {
+                text: store.full_text(id).unwrap_or_else(|| text.clone()),
+                kept: document.kept,
+            },
+        );
+    }
     Ok(result(DocumentsResult::Document { document, text }))
 }
 
@@ -214,15 +235,30 @@ pub(crate) async fn execute(
                     )
                 })?;
             let owned = shared.clone();
+            let document_id = id.clone();
             let path = tokio::task::spawn_blocking(move || {
                 owned.documents.save_with(&id, &session_id, |info, bytes| {
-                    crate::document_save::save(
+                    let path = crate::document_save::save(
                         std::path::Path::new(&cwd),
                         &session_id,
                         &info.id,
                         &info.name,
                         bytes,
-                    )
+                    )?;
+                    let root = vw_platform::canonical_plain(std::path::Path::new(&cwd))
+                        .map_err(|e| e.to_string())?;
+                    let relative = path
+                        .strip_prefix(&root)
+                        .map_err(|e| e.to_string())?
+                        .to_path_buf();
+                    owned.saved_documents.register(
+                        &owned,
+                        &session_id,
+                        &info.id,
+                        relative,
+                        crate::saved_documents::digest(bytes),
+                    )?;
+                    Ok(path)
                 })
             })
             .await
@@ -230,15 +266,31 @@ pub(crate) async fn execute(
                 CoreError::new(ErrorCode::Internal, format!("attachment task failed: {e}"))
             })?
             .map_err(|e| CoreError::new(ErrorCode::InvalidParams, e.to_string()))?;
+            if let Some((info, Some(text))) = store.read(&document_id) {
+                shared.saved_documents.seed(
+                    &document_id,
+                    &crate::saved_documents::Text {
+                        text: store.full_text(&document_id).unwrap_or(text),
+                        kept: DocumentView::from(&info).kept,
+                    },
+                );
+            }
             Ok(result(DocumentsResult::Saved {
                 path: path.to_string_lossy().into_owned(),
             }))
         }
         DocumentsRequest::Extract { id } => extract(shared, &id).await,
         DocumentsRequest::AddDropped { files } => add_dropped(shared, files).await,
-        DocumentsRequest::Remove { id } => Ok(result(DocumentsResult::Removed {
+        DocumentsRequest::Release { id } => Ok(result(DocumentsResult::Removed {
             removed: store.remove(&id),
         })),
+        DocumentsRequest::Remove { id } => {
+            let removed = store.remove(&id);
+            let revoked = shared.saved_documents.remove(&id);
+            Ok(result(DocumentsResult::Removed {
+                removed: removed || revoked,
+            }))
+        }
         DocumentsRequest::TakePicture { id } => {
             let info = store.info(&id).ok_or_else(|| not_found(&id))?;
             let (mime, bytes) = store
@@ -255,7 +307,7 @@ pub(crate) async fn execute(
 
 impl Core {
     /// Adds the files the native picker or an OS drop gave (never a path from the webview, the Debug
-    /// API or the model; design §3) and publishes `documentsAdded`. Each file is either
+    /// API or the model) and publishes `documentsAdded`. Each file is either
     /// added or refused with the reason; reading runs off the async runtime.
     pub async fn add_documents(
         &self,
@@ -291,5 +343,28 @@ impl Core {
             refused: outcome.1.clone(),
         });
         outcome
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_empty_ocr_result_is_an_explicit_read_failure() {
+        for pages in [vec![], vec![" \n\t".to_owned()]] {
+            let out = vw_mistral::OcrOutput {
+                pages,
+                model: "test-ocr".to_owned(),
+                pages_processed: Some(1),
+            };
+            assert!(ocr_pages(out).err().unwrap().contains("No readable text"));
+        }
+        let out = vw_mistral::OcrOutput {
+            pages: vec!["Actual document text".to_owned()],
+            model: "test-ocr".to_owned(),
+            pages_processed: Some(1),
+        };
+        assert_eq!(ocr_pages(out).unwrap().pages, ["Actual document text"]);
     }
 }

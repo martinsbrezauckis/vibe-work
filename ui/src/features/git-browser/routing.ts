@@ -20,7 +20,7 @@ export async function adapterAction(
     if (app.worktrees === null)
       throw new UiControlError("serverUnavailable", `${TEXT.newChat} is unavailable.`);
     app.shell.actions.selectSession(null);
-    app.worktrees.newChatHere(target.path, action === "new-task", origin);
+    await app.worktrees.newChatHere(target.path, action === "new-task", origin);
     return;
   }
   const sessionId = target.sessionId;
@@ -44,6 +44,7 @@ export async function adapterAction(
     chosen.status[sessionId]?.repo !== repo
   )
     throw new UiControlError("denied", "Repository selection changed. Refresh the Git tree.");
+  if (action === "review") return;
   if (action === "commit") await git.openCommit(sessionId);
   else if (action === "push") await git.push(sessionId);
   else if (action === "pr") await git.openPr(sessionId);

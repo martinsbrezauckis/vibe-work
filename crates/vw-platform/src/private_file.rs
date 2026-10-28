@@ -10,11 +10,14 @@
 //!   existing file or a planted symlink at the path makes the write fail instead of being
 //!   followed). A directory owned by someone else cannot be chmod-ed and is refused.
 //! - Windows: the directory's DACL is replaced by one entry, the current user (by SID) with full
-//!   control, inherited by new children; inheritance from the parent is removed. The file gets
-//!   the same explicit user-only DACL after it is written. Both are written with the Win32 security
+//!   control, inherited by new children; inheritance from the parent is removed. A file is created
+//!   (`CreateFileW`, `CREATE_NEW`) with the same explicit, protected user-only DACL in its security
+//!   descriptor, so it is user-only from its first moment (it never carries the folder's
+//!   inherited entries). Both use the Win32 security
 //!   API (`os::acl`, with `unsafe` confined to vw-platform). Previously PowerShell handled it,
 //!   adding about 0.6 s per store save on Windows 11. Reading back (`is_user_only`) stays on
-//!   `icacls`, a second, independent mechanism.
+//!   `icacls`, a second, independent mechanism. Paths past 248 characters are handed to these calls in the
+//!   `\\?\` form (`os::long_path`), as `std::fs` does for its own calls, so a deep folder works the same.
 //! - A directory owned by another user is refused (Unix: `chmod` fails with EPERM; Windows: its owner is
 //!   read first, because replacing the DACL leaves the owner its implicit right to change it back).
 //! - Every function fails closed: an error means the caller must not use the path for a secret.
@@ -91,6 +94,16 @@ pub fn ensure_private_dir(path: &Path) -> Result<(), PrivateFileError> {
     os::restrict_dir(path)
 }
 
+/// Creates a new file at `path` that only the current user can use from its creation (Unix: mode 0600; Windows: a
+/// protected user-only DACL in the creating call), open for writing. The parent should already be private
+/// ([`ensure_private_dir`]). The file must not exist yet.
+///
+/// # Errors
+/// [`PrivateFileError`] when the file exists (also a dangling symlink) or cannot be created.
+pub fn create_private_new(path: &Path) -> Result<fs::File, PrivateFileError> {
+    os::create_new(path).map_err(|e| io("create file", path, e))
+}
+
 /// Writes `bytes` to a new file at `path` that only the current user can read. The parent must
 /// already be private ([`ensure_private_dir`]). The file must not exist yet.
 ///
@@ -98,12 +111,14 @@ pub fn ensure_private_dir(path: &Path) -> Result<(), PrivateFileError> {
 /// [`PrivateFileError`] when the file exists (also a dangling symlink), cannot be written or
 /// synced, or its permissions cannot be set; a partly written file is removed.
 pub fn write_private_new(path: &Path, bytes: &[u8]) -> Result<(), PrivateFileError> {
-    let mut file = os::create_new(path).map_err(|e| io("create file", path, e))?;
+    let mut file = create_private_new(path)?;
     let written = file
         .write_all(bytes)
         .and_then(|()| file.sync_all())
-        .map_err(|e| io("write file", path, e))
-        .and_then(|()| os::restrict_file(path));
+        .map_err(|e| io("write file", path, e));
+    // Windows: user-only since `create_private_new`; Unix: 0600 asserted again (independent of the umask).
+    #[cfg(unix)]
+    let written = written.and_then(|()| os::restrict_file(path));
     if written.is_err() {
         let _ = fs::remove_file(path);
     }
@@ -193,7 +208,7 @@ mod os {
 mod os {
     //! Windows DACLs: set with `SetNamedSecurityInfoW` (a protected one-entry DACL for the SID in the
     //! process token), read back with `icacls`, keyed by the current user's name from `whoami`.
-    use std::fs::{File, OpenOptions};
+    use std::fs::File;
     use std::os::windows::process::CommandExt;
     use std::path::{Path, PathBuf};
     use std::process::Command;
@@ -202,6 +217,42 @@ mod os {
 
     /// `CREATE_NO_WINDOW`: no console window flashes when a GUI app runs the tool.
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+    /// Paths of this many UTF-16 units or more get the long form ([`long_path`]): the shortest limit of the Win32
+    /// calls, a directory name (260 minus room for an 8.3 file name), the same threshold std uses.
+    const LONG_FROM: usize = 248;
+
+    /// `path` as Win32 calls accept it past 260 characters. `std::fs` converts long paths itself; the calls made
+    /// here directly (`CreateFileW`, the named security calls, `icacls`) failed instead ("The system cannot find
+    /// the path specified."), so a data folder deeper than about 120 characters could not hold the session lease
+    /// records. A long path is made absolute the way Windows does it (`std::path::absolute`: `/` becomes `\`,
+    /// `.` and `..` are applied) and gets the `\\?\` prefix (`\\?\UNC\` for a network share). Shorter paths, and
+    /// paths that already start with `\\?\` or `\\.\`, are passed exactly as before.
+    pub(super) fn long_path(path: &Path) -> std::borrow::Cow<'_, Path> {
+        use std::os::windows::ffi::{OsStrExt, OsStringExt};
+        if path.as_os_str().encode_wide().count() < LONG_FROM {
+            return std::borrow::Cow::Borrowed(path);
+        }
+        let Ok(full) = std::path::absolute(path) else {
+            return std::borrow::Cow::Borrowed(path);
+        };
+        let units: Vec<u16> = full.as_os_str().encode_wide().collect();
+        let starts = |prefix: &str| {
+            let prefix: Vec<u16> = prefix.encode_utf16().collect();
+            units.starts_with(&prefix)
+        };
+        if starts(r"\\?\") || starts(r"\\.\") {
+            return std::borrow::Cow::Owned(full);
+        }
+        let (prefix, rest) = if starts(r"\\") {
+            (r"\\?\UNC\", &units[2..])
+        } else {
+            (r"\\?\", &units[..])
+        };
+        let mut long: Vec<u16> = prefix.encode_utf16().collect();
+        long.extend_from_slice(rest);
+        std::borrow::Cow::Owned(PathBuf::from(std::ffi::OsString::from_wide(&long)))
+    }
 
     fn system_tool(name: &str) -> PathBuf {
         let root = std::env::var_os("SystemRoot").unwrap_or_else(|| "C:\\Windows".into());
@@ -330,12 +381,13 @@ mod os {
         reason = "Win32 security calls without a safe wrapper (unsafe code is kept inside vw-platform)"
     )]
     mod acl {
-        //! The Win32 security calls behind `grant_only_user` and `check_owner`: the current user's SID
-        //! from the process token, a DACL from SDDL written with `SetNamedSecurityInfoW`, a file's
-        //! owner with `GetNamedSecurityInfoW`. Every buffer the OS allocates is freed with `LocalFree`
+        //! The Win32 security calls behind `grant_only_user`, `create_new` and `check_owner`: the current
+        //! user's SID from the process token, a DACL from SDDL written with `SetNamedSecurityInfoW` or given
+        //! to `CreateFileW` at creation, a file's owner with `GetNamedSecurityInfoW`. Every buffer the OS allocates is freed with `LocalFree`
         //! exactly once, on every path (the [`Local`] guard).
         use std::io;
         use std::os::windows::ffi::OsStrExt;
+        use std::os::windows::io::{FromRawHandle as _, OwnedHandle};
         use std::path::Path;
         use std::sync::OnceLock;
 
@@ -347,7 +399,11 @@ mod os {
         use windows::Win32::Security::{
             ACL, DACL_SECURITY_INFORMATION, GetSecurityDescriptorDacl, GetTokenInformation,
             OWNER_SECURITY_INFORMATION, PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR,
-            PSID, TOKEN_QUERY, TOKEN_USER, TokenUser,
+            PSID, SECURITY_ATTRIBUTES, TOKEN_QUERY, TOKEN_USER, TokenUser,
+        };
+        use windows::Win32::Storage::FileSystem::{
+            CREATE_NEW, CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_GENERIC_WRITE, FILE_SHARE_DELETE,
+            FILE_SHARE_READ, FILE_SHARE_WRITE,
         };
         use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
         use windows::core::{BOOL, PCWSTR, PWSTR};
@@ -366,8 +422,13 @@ mod os {
             }
         }
 
+        /// The NUL-terminated name the calls take, in the long form past 248 characters ([`super::long_path`]).
         fn wide(path: &Path) -> Vec<u16> {
-            path.as_os_str().encode_wide().chain(Some(0)).collect()
+            super::long_path(path)
+                .as_os_str()
+                .encode_wide()
+                .chain(Some(0))
+                .collect()
         }
 
         fn status(code: WIN32_ERROR) -> io::Result<()> {
@@ -442,9 +503,12 @@ mod os {
             }
         }
 
-        /// Writes a protected DACL with one full-control entry for `sid` (inherited by new children
-        /// when `inherit`) to `path`.
-        pub(super) fn set_only_user(path: &Path, sid: &str, inherit: bool) -> io::Result<()> {
+        /// A security descriptor holding a protected DACL with one full-control entry for `sid` (inherited by new
+        /// children when `inherit`); freed by the returned guard.
+        fn only_user_descriptor(
+            sid: &str,
+            inherit: bool,
+        ) -> io::Result<(PSECURITY_DESCRIPTOR, Local)> {
             // The SID comes from the process token (`S-1-` digits and dashes), never from a caller.
             if !sid.starts_with("S-1-")
                 || !sid
@@ -470,7 +534,13 @@ mod os {
                 )
             }
             .map_err(io::Error::other)?;
-            let _free = Local(descriptor.0);
+            Ok((descriptor, Local(descriptor.0)))
+        }
+
+        /// Writes a protected DACL with one full-control entry for `sid` (inherited by new children
+        /// when `inherit`) to `path`.
+        pub(super) fn set_only_user(path: &Path, sid: &str, inherit: bool) -> io::Result<()> {
+            let (descriptor, _free) = only_user_descriptor(sid, inherit)?;
             let mut present = BOOL::default();
             let mut defaulted = BOOL::default();
             let mut dacl: *mut ACL = std::ptr::null_mut();
@@ -504,6 +574,38 @@ mod os {
             })
         }
 
+        /// Creates the new file `path` (`CREATE_NEW`: an existing name, also a link, is refused) for writing, with a
+        /// protected one-entry full-control DACL for `sid` given in the creating call, so the file never carries
+        /// its folder's inherited entries. Sharing as `std::fs` opens files (read, write, delete).
+        pub(super) fn create_only_user(path: &Path, sid: &str) -> io::Result<std::fs::File> {
+            let (descriptor, _free) = only_user_descriptor(sid, false)?;
+            let attributes = SECURITY_ATTRIBUTES {
+                nLength: u32::try_from(std::mem::size_of::<SECURITY_ATTRIBUTES>())
+                    .map_err(io::Error::other)?,
+                lpSecurityDescriptor: descriptor.0,
+                bInheritHandle: BOOL::from(false),
+            };
+            let name = wide(path);
+            // SAFETY: `name` is NUL-terminated and lives across the call; `attributes` and the descriptor it points
+            // to (freed by the guard after the call) are valid for the call. On success the handle is new and owned
+            // by the returned File only.
+            let handle = unsafe {
+                CreateFileW(
+                    PCWSTR(name.as_ptr()),
+                    FILE_GENERIC_WRITE.0,
+                    FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                    Some(&raw const attributes),
+                    CREATE_NEW,
+                    FILE_ATTRIBUTE_NORMAL,
+                    None,
+                )
+            }
+            .map_err(|e| io::Error::from_raw_os_error(e.code().0 & 0xFFFF))?;
+            // SAFETY: `handle` is a valid, newly opened file handle that nothing else owns.
+            let owned = unsafe { OwnedHandle::from_raw_handle(handle.0) };
+            Ok(std::fs::File::from(owned))
+        }
+
         /// The owner SID of `path`.
         pub(super) fn owner_sid(path: &Path) -> io::Result<String> {
             let name = wide(path);
@@ -535,8 +637,10 @@ mod os {
     /// The principals named by the access entries of `icacls <path>` (names, or bare SIDs when a
     /// SID does not resolve). Lines without `:(` (summary line, blanks) are not entries.
     fn principals(path: &Path) -> Result<Vec<String>, PrivateFileError> {
-        let listing = run("icacls.exe", &[path.as_os_str()], path)?;
-        let shown = path.display().to_string();
+        // icacls prints the path as it was given, so the prefix stripped below is the same long form.
+        let long = long_path(path);
+        let listing = run("icacls.exe", &[long.as_os_str()], path)?;
+        let shown = long.display().to_string();
         Ok(listing
             .lines()
             .filter(|line| line.contains(":("))
@@ -555,12 +659,9 @@ mod os {
         grant_only_user(path, true)
     }
 
+    /// A new file with the current user's protected one-entry DACL from its creation ([`acl::create_only_user`]).
     pub(super) fn create_new(path: &Path) -> std::io::Result<File> {
-        OpenOptions::new().write(true).create_new(true).open(path)
-    }
-
-    pub(super) fn restrict_file(path: &Path) -> Result<(), PrivateFileError> {
-        grant_only_user(path, false)
+        acl::create_only_user(path, &acl::current_user_sid()?)
     }
 
     /// Reads `icacls <path>`: every access entry line is `<principal>:<flags>`; the path is

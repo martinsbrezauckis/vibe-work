@@ -95,7 +95,7 @@ impl PreviewService {
                 .entries
                 .iter()
                 .filter(|(_, e)| {
-                    e.mount.as_ref().is_some_and(|m| {
+                    e.ready_mount().is_some_and(|m| {
                         m.class == crate::policy::PageClass::Local
                             && (m.rules.is_some() || m.rules_pending)
                     })
@@ -153,9 +153,11 @@ impl PreviewService {
             };
             if close {
                 tracing::warn!(session = %id.session_id, "preview closed until its URL rules apply");
-                if let Some(entry) = self.inner.lock().entries.get_mut(&id.session_id) {
+                if let Some(entry) = self.inner.lock().entries.get_mut(&id.session_id)
+                    && let Some(url) = entry.url.clone()
+                {
                     entry.note_refused(
-                        "about:blank",
+                        url.as_str(),
                         "the preview was closed while its address rules changed; open it again",
                     );
                 }

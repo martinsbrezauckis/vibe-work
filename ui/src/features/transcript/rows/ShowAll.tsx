@@ -7,6 +7,7 @@
  * Invariants: text only (a `<pre>`; with `linkify`, file paths become File tab buttons once the core said yes);
  * the switch says how much is hidden.
  */
+import { Button } from "../../../components/Controls";
 import type { ReactElement } from "react";
 
 import { LinkedText } from "../../files/FileRef";
@@ -15,8 +16,8 @@ import { headText, tailText } from "../model/text";
 import { useTranscriptUi } from "../hooks";
 
 /** Default cut: lines and characters. */
-export const CUT_LINES = 200;
-export const CUT_CHARS = 20_000;
+const CUT_LINES = 200;
+const CUT_CHARS = 20_000;
 
 /** Props of [`ShowAll`]. */
 export interface ShowAllProps {
@@ -48,10 +49,10 @@ export function ShowAll({
       ? `${String(cut.hiddenLines)} more lines`
       : `${String(text.length - cut.text.length)} more characters`;
   const more = (where: string) => (
-    <button
+    <Button
       data-testid="transcript.show-all-toggle"
       type="button"
-      className="show-all-btn"
+      appearance="expander"
       aria-label="Show full text"
       title="Show full text"
       onClick={() => {
@@ -60,7 +61,7 @@ export function ShowAll({
     >
       Show all ({hidden}
       {where})
-    </button>
+    </Button>
   );
   return (
     <div className="show-all">
@@ -68,10 +69,10 @@ export function ShowAll({
       <pre className={className}>{linkify ? <LinkedText text={shown} /> : shown}</pre>
       {cut.cut && !full && !tail ? more("") : null}
       {cut.cut && full ? (
-        <button
+        <Button
           data-testid="transcript.show-all-toggle-2"
           type="button"
-          className="show-all-btn"
+          appearance="expander"
           aria-label="Show less text"
           title="Show less text"
           onClick={() => {
@@ -79,7 +80,7 @@ export function ShowAll({
           }}
         >
           Show less
-        </button>
+        </Button>
       ) : null}
     </div>
   );

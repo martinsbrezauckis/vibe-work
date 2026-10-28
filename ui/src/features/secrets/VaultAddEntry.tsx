@@ -2,6 +2,7 @@
  * One compact add form for secrets, logins and MCP keys. Depends on typed requests, SecretField and
  * Settings controls. Called by the Vault page; user input clears before dispatch, values never return.
  */
+import { Button } from "../../components/Controls";
 import { useState } from "react";
 import { Selector } from "../../components/Selector";
 import type { SecretsRequest } from "../../protocol/core";
@@ -216,29 +217,29 @@ export function VaultAddEntry(props: {
         options={generator.options}
         setOptions={generator.setOptions}
       >
-        <button
+        <Button
           data-testid="secrets.vault-add-entry-tb-btn"
           type="submit"
-          className="tb-btn primary"
+          variant="primary"
           disabled={props.busy || !valid || value === "" || (login && value.length < 8)}
         >
           Save entry
-        </button>
-        <button
+        </Button>
+        <Button
           data-testid="secrets.vault-add-entry-save"
           type="button"
-          className="tb-btn"
+
           disabled={props.busy || !valid || !generator.valid}
           onClick={() => {
             save(true);
           }}
         >
           Generate
-        </button>
-        <button
+        </Button>
+        <Button
           data-testid="secrets.vault-add-entry-set-value-2"
           type="button"
-          className="tb-btn"
+
           disabled={props.busy}
           onClick={() => {
             setValue("");
@@ -246,7 +247,7 @@ export function VaultAddEntry(props: {
           }}
         >
           Cancel
-        </button>
+        </Button>
       </GeneratorOptions>
     </form>
   );

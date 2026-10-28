@@ -24,6 +24,22 @@ pub struct DocumentsPicked {
 }
 
 impl Host {
+    /// Takes waiting OS hand-overs through the native attachment reader. The window places the results.
+    ///
+    /// # Errors
+    /// `serverUnavailable` without a core; waiting hand-overs remain in the inbox then.
+    pub async fn take_hand_overs(
+        &self,
+        inbox: &crate::hand_over::HandOverInbox,
+    ) -> Result<Vec<crate::hand_over::HandOverView>, CoreError> {
+        let core = self.core_or_unavailable()?;
+        let mut views = Vec::new();
+        for hand_over in inbox.take() {
+            views.push(crate::hand_over::HandOverView::read(hand_over, core).await);
+        }
+        Ok(views)
+    }
+
     /// Uploads files the native picker gave into a Mistral library (paths from the OS only).
     ///
     /// # Errors

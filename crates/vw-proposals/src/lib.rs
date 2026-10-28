@@ -44,6 +44,7 @@ pub struct Proposal {
     reason: String,
     root: PathBuf,
     canonical_root: PathBuf,
+    create_parents: bool,
     files: Vec<Snapshot>,
 }
 
@@ -67,8 +68,21 @@ impl Proposal {
     /// # Errors
     /// Invalid metadata, duplicate/unsafe paths, unsuitable file types, I/O or entropy failure.
     pub fn new(root: impl AsRef<Path>, changes: Request) -> Result<Self, Error> {
+        Self::capture(root.as_ref(), changes, false)
+    }
+
+    /// Capture additions whose parent folders do not exist yet. No folders are created until approval.
+    /// Existing ancestors and newly introduced symlinks are checked before any mutation.
+    ///
+    /// # Errors
+    /// The same capture errors as [`Self::new`].
+    pub fn with_new_directories(root: impl AsRef<Path>, changes: Request) -> Result<Self, Error> {
+        Self::capture(root.as_ref(), changes, true)
+    }
+
+    fn capture(root: &Path, changes: Request, create_parents: bool) -> Result<Self, Error> {
         validate_request(&changes)?;
-        let root = paths::absolute_root(root.as_ref())?;
+        let root = paths::absolute_root(root)?;
         let canonical_root = paths::validate_root(&root)?;
         let mut seen = HashSet::new();
         let mut files = Vec::with_capacity(changes.changes.len());
@@ -77,7 +91,8 @@ impl Proposal {
             if !seen.insert(path.clone()) {
                 return Err(Error::DuplicatePath { path });
             }
-            let target = paths::validate_target(&canonical_root, &path)?;
+            let target =
+                paths::validate_target_with_parents(&canonical_root, &path, create_parents)?;
             let kind = change.kind();
             match (kind, &target.metadata) {
                 (Kind::Add, Some(_)) => return Err(Error::AlreadyExists { path }),
@@ -114,6 +129,7 @@ impl Proposal {
             reason: changes.reason,
             root,
             canonical_root,
+            create_parents,
             files,
         })
     }

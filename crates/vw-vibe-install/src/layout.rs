@@ -241,7 +241,7 @@ pub fn tree_bytes(dir: &Path) -> u64 {
 }
 
 /// Whether a `<name>-<version>.dist-info` folder exists under `venv` (site-packages is at most 4 levels down:
-/// `lib/python3.12/site-packages` or `Lib/site-packages`).
+/// `lib/python3.14.8/site-packages` or `Lib/site-packages`).
 #[must_use]
 pub fn has_dist_info(venv: &Path, name: &str, version: &str) -> bool {
     fn walk(dir: &Path, wanted: &str, depth: u32) -> bool {

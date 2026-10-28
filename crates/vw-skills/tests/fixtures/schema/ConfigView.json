@@ -39,6 +39,11 @@
       "title": "Disablewelcomebanneranimation",
       "type": "boolean"
     },
+    "enableMouseCapture": {
+      "default": true,
+      "title": "Enablemousecapture",
+      "type": "boolean"
+    },
     "enableNotifications": {
       "title": "Enablenotifications",
       "type": "boolean"

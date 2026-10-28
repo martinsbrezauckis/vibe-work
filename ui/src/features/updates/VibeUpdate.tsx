@@ -9,6 +9,7 @@
  * that exact offer. The dialog is modal (`aria-modal`: native views hide while it shows) and shows exactly while
  * the core holds an update offer.
  */
+import { Button } from "../../components/Controls";
 import { type ReactElement, useRef } from "react";
 
 import { useModalFocus } from "../../hooks/useModalFocus";
@@ -46,12 +47,12 @@ export function VibeUpdateCard(): ReactElement | null {
       {notice.actions.length > 0 && (
         <div className="update-notice-actions">
           {notice.actions.map((action) => (
-            <button
+            <Button
               data-testid="updates.vibe-update-prepare-update"
               data-item-id={action}
               key={action}
               type="button"
-              className={action === "update" ? "tb-btn primary" : "tb-btn"}
+              variant={action === "update" ? "primary" : undefined}
               disabled={action === "update" && busy}
               onClick={() => {
                 if (action === "update") void vibe.prepareUpdate();
@@ -59,7 +60,7 @@ export function VibeUpdateCard(): ReactElement | null {
               }}
             >
               {LABELS[action]}
-            </button>
+            </Button>
           ))}
         </div>
       )}
@@ -108,24 +109,24 @@ export function VibeUpdateDialog(): ReactElement | null {
           <OfferDetails offer={offer} />
         </section>
         <footer className="modal-actions">
-          <button
+          <Button
             data-testid="updates.vibe-update-tb-btn"
             type="button"
-            className="tb-btn"
+
             data-dialog-initial-focus="true"
             onClick={cancel}
           >
             Cancel
-          </button>
-          <button
+          </Button>
+          <Button
             data-testid="updates.vibe-update-confirm-update"
             type="button"
-            className="tb-btn primary"
+            variant="primary"
             disabled={busy}
             onClick={() => void vibe.confirmUpdate(offer.offerId)}
           >
             Update Vibe
-          </button>
+          </Button>
         </footer>
       </div>
     </>

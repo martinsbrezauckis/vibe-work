@@ -24,7 +24,7 @@ export default defineConfig({
   server: { host: "127.0.0.1", port: 1420, strictPort: true },
   build: {
     target: "es2023",
-    sourcemap: true,
+    sourcemap: false,
     // Never inline the dictation audio worklet as a `data:` URL (Vite inlines small assets): the CSP's
     // `script-src 'self'` refuses a worklet module from `data:`.
     assetsInlineLimit: (file) => (file.endsWith("pcm-worklet.js") ? false : undefined),

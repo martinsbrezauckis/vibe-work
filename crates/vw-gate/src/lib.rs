@@ -48,6 +48,7 @@ mod runtime_view;
 mod session_rules;
 mod shape;
 mod table;
+mod tool_rules;
 mod transport;
 
 pub use callbacks::{CallbackKind, OpenCallback};
@@ -57,14 +58,16 @@ pub use confirm::{
 };
 pub use content::{MAX_IMAGE_BYTES, MAX_IMAGES, MAX_TEXT_BYTES};
 pub use dialog::{
-    dialog_label, dialog_line, dialog_quote, dialog_value, is_hidden_char, is_quote_char,
+    dialog_chat_quote, dialog_command, dialog_label, dialog_line, dialog_quote, dialog_value,
+    is_hidden_char, is_quote_char,
 };
 pub use error::{CallbackFault, DenyReason, GateError, TokenFault};
-pub use gate::{Gate, GateConfig, Reply, TRUSTED_SURFACE_METHODS};
+pub use gate::{Gate, GateConfig, OFFERED_INSTALL_METHODS, Reply, TRUSTED_SURFACE_METHODS};
 pub use inbound::{InboundKind, classify_server_request};
 pub use mcp_url::{MAX_MCP_URL_LENGTH, McpUrlRefusal, check_mcp_server_url};
 pub use profile::full_access_escalation;
 pub use table::{classified_methods, classify, forwarded_without_unified_evidence};
+pub use tool_rules::ToolRuleRemoval;
 pub use transport::Transport;
 
 /// One-line statement of what this crate is responsible for, exposed so tests and diagnostics

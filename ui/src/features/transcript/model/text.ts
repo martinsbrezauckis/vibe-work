@@ -34,7 +34,7 @@ export function safeHead(text: string, end: number): string {
 }
 
 /** `text.slice(start)` moved forward so it does not start inside a surrogate pair. */
-export function safeTail(text: string, start: number): string {
+function safeTail(text: string, start: number): string {
   if (start <= 0) return text;
   const from = start < text.length && isLowSurrogate(text.charCodeAt(start)) ? start + 1 : start;
   return text.slice(from);

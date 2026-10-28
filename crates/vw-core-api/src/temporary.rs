@@ -1,9 +1,9 @@
 //! Temporary sessions are discarded after use.
 //!
-//! Vibe 2.26.0 has no per-session "don't save": `SessionKind.EPHEMERAL` is promoted to a stored session on its
+//! Vibe 3.0.2 has no per-session "don't save": `SessionKind.EPHEMERAL` is promoted to a stored session on its
 //! first turn, and `session_logging.enabled = false` is process-wide. So a temporary session is a
-//! normal Vibe session that Vibe Work deletes for the user: when Vibe Work quits ([`delete_all`], from
-//! `Core::shutdown`), or at the next start when the app crashed before ([`sweep_leftovers`]). The user may delete it
+//! normal Vibe session that Vibe Work deletes for the user: when Vibe Work quits ([`Core::delete_temporary_all`], from
+//! `Core::shutdown`), or at the next start after a crash ([`Core::delete_temporary_all`]). The user may delete it
 //! earlier like any session. Until then it is stored by Vibe like any other (the Vibe CLI lists it when sessions are
 //! shared with the CLI, the default), which the UI says in words.
 //!
@@ -27,7 +27,8 @@
 //!   a damaged record come only from the leading whole entries of its top-level list, never from other text.
 //! - The deletion asks no dialog ([`vw_gate::Requester::Core`]): the consent is the user's "Temporary chat" choice.
 //! - Each deletion is bounded ([`DELETE_WAIT`]); a failure keeps the id on the list for the next start. Vibe's "not
-//!   found" is not a failure: the session is gone (a chat nobody wrote in was never stored).
+//!   found" succeeds only after checking for leftover files, or for a chat this core knows was never stored.
+//!   Each sweep attempts an id once ([`Core::delete_temporary_all`]); unfinished deletion stays recorded.
 //! - When a folder is configured, an id is on the list only if the record on disk names it too ([`TemporarySessions::add`]
 //!   rolls the id back when the write fails).
 
@@ -49,6 +50,17 @@ const DELETE_WAIT: Duration = Duration::from_secs(10);
 /// The record's file name inside `sessions_dir`.
 const FILE: &str = "temporary.json";
 
+/// How one delete of a temporary session ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Deleted {
+    /// Vibe confirmed it, or answered "not found" (the session is gone either way).
+    Yes,
+    /// Vibe answered with another error.
+    Refused,
+    /// The gate refused to issue the token, or Vibe did not answer within [`DELETE_WAIT`].
+    NoAnswer,
+}
+
 /// Why a temporary session could not be recorded; the text goes to the log and into the error the start answers.
 #[derive(Debug, thiserror::Error)]
 #[error("{0}")]
@@ -63,19 +75,6 @@ pub(crate) struct TemporarySessions {
     /// Set at load when the record on disk is damaged and could not be moved aside: it has to stay as it is, so no
     /// write is attempted and every [`TemporarySessions::add`] fails with this text.
     frozen: Option<String>,
-}
-
-/// Deletes the temporary sessions an earlier run left (it crashed before quitting). Runs once, in the background;
-/// holds only a weak reference, so a core shut down meanwhile is not kept alive. Called by `Core::start`.
-pub(crate) fn spawn_sweep(shared: &Arc<Shared>) {
-    if shared.temporary.ids().is_empty() {
-        return;
-    }
-    let weak = Arc::downgrade(shared);
-    tokio::spawn(async move {
-        let Some(shared) = weak.upgrade() else { return };
-        Core { shared }.delete_temporary_all(true).await;
-    });
 }
 
 /// Reads the record. Returns the ids that can be used and, when the record is not a clean list of ids, what is
@@ -264,6 +263,23 @@ impl TemporarySessions {
         Ok(())
     }
 
+    /// [`Self::add`] on the blocking pool: the record's write waits for the disk (a synced replace, seen taking
+    /// seconds on a busy disk) and must not hold an async worker. Returns once the record is on disk, as `add` does.
+    pub(crate) async fn add_saved(self: &Arc<Self>, id: &str) -> Result<(), NotRecorded> {
+        let (record, id) = (self.clone(), id.to_owned());
+        tokio::task::spawn_blocking(move || record.add(&id))
+            .await
+            .unwrap_or_else(|join| Err(NotRecorded(format!("the record task stopped ({join})"))))
+    }
+
+    /// [`Self::remove`] on the blocking pool (see [`Self::add_saved`]); returns once the record was rewritten.
+    pub(crate) async fn remove_saved(self: &Arc<Self>, id: &str) {
+        let (record, id) = (self.clone(), id.to_owned());
+        if let Err(join) = tokio::task::spawn_blocking(move || record.remove(&id)).await {
+            warn!(%join, "temporary sessions: the record update stopped");
+        }
+    }
+
     /// Removes a session (it was deleted). A record that cannot be updated only means a stale id: the next start
     /// finds no such session, drops it and goes on.
     pub(crate) fn remove(&self, id: &str) {
@@ -327,15 +343,15 @@ impl Core {
     /// a session nobody wrote in it may answer "not found": no confirmed delete then ended the session in the core,
     /// and the bookkeeping is finished here instead.
     pub(crate) async fn discard_unused(&self, id: &str) -> bool {
-        let removed = self.delete_temporary(id).await;
+        let removed = self.delete_temporary(id).await == Deleted::Yes;
         if removed && self.shared.store.view(id).is_some() {
             crate::session_end::deleted(&self.shared, id).await;
         }
         removed
     }
 
-    /// Deletes one temporary session without a dialog (see the module header). True when Vibe confirmed it.
-    async fn delete_temporary(&self, id: &str) -> bool {
+    /// Deletes one temporary session without a dialog (see the module header).
+    async fn delete_temporary(&self, id: &str) -> Deleted {
         let params = json!({"sessionId": id});
         let token = match self
             .shared
@@ -346,7 +362,7 @@ impl Core {
             Ok(token) => token,
             Err(error) => {
                 warn!(session_id = id, %error, "temporary session: delete not confirmed");
-                return false;
+                return Deleted::NoAnswer;
             }
         };
         let call = self.forward(
@@ -356,7 +372,7 @@ impl Core {
             Some(token.as_str().to_owned()),
         );
         match tokio::time::timeout(DELETE_WAIT, call).await {
-            Ok(Ok(_)) => true,
+            Ok(Ok(_)) => Deleted::Yes,
             Ok(Err(error))
                 if error.code == crate::ErrorCode::NotFound
                     || error.server_code.as_deref() == Some("not_found") =>
@@ -364,26 +380,29 @@ impl Core {
                 // Gone already: deleted in the CLI, or never stored (Vibe stores a session from its first turn, so
                 // a temporary chat nobody wrote in answers "not found" to its own delete). Nothing left to delete,
                 // and the id must leave the record or every start would try it again.
-                self.shared.temporary.remove(id);
-                true
+                self.shared.temporary.remove_saved(id).await;
+                Deleted::Yes
             }
             Ok(Err(error)) => {
                 warn!(session_id = id, %error, "temporary session: delete failed");
-                false
+                Deleted::Refused
             }
             Err(_) => {
                 warn!(session_id = id, "temporary session: delete timed out");
-                false
+                Deleted::NoAnswer
             }
         }
     }
 
     /// Deletes every temporary session (quit, or the start after a crash). Returns how many were deleted.
+    ///
+    /// Each id is attempted once. Startup awaits this sweep before admitting any session readers.
     pub(crate) async fn delete_temporary_all(&self, at_start: bool) -> usize {
         let ids = self.shared.temporary.ids();
         let mut deleted = 0;
         for id in &ids {
-            let removed = self.delete_temporary(id).await;
+            let outcome = self.delete_temporary(id).await;
+            let removed = outcome == Deleted::Yes;
             if removed {
                 deleted += 1;
             }
@@ -395,5 +414,57 @@ impl Core {
             info!(deleted, of = ids.len(), "temporary sessions deleted");
         }
         deleted
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use super::TemporarySessions;
+
+    /// The record's writes wait for the disk (a synced replace): other async work on the same worker keeps running
+    /// meanwhile. One worker thread, a ticker task, 40 adds and removes: the ticker ran during them.
+    #[tokio::test(flavor = "current_thread")]
+    async fn writing_the_record_does_not_hold_the_async_worker() {
+        let dir = std::env::temp_dir().join(format!(
+            "vw-temporary-worker-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let record = Arc::new(TemporarySessions::load(Some(dir.clone())));
+        let ticks = Arc::new(AtomicUsize::new(0));
+        let counter = ticks.clone();
+        let ticker = tokio::spawn(async move {
+            loop {
+                counter.fetch_add(1, Ordering::Relaxed);
+                tokio::task::yield_now().await;
+            }
+        });
+        tokio::task::yield_now().await;
+        let before = ticks.load(Ordering::Relaxed);
+        for i in 0..20 {
+            record.add_saved(&format!("s{i}")).await.unwrap();
+        }
+        for i in 0..20 {
+            record.remove_saved(&format!("s{i}")).await;
+        }
+        let during = ticks.load(Ordering::Relaxed) - before;
+        ticker.abort();
+        assert_eq!(record.ids(), Vec::<String>::new());
+        assert_eq!(
+            std::fs::read_to_string(dir.join(super::FILE)).unwrap(),
+            "[]",
+            "the record on disk follows every write"
+        );
+        assert!(
+            during >= 40,
+            "the ticker ran only {during} times during 40 writes"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

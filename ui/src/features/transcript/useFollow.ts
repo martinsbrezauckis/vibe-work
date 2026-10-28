@@ -34,22 +34,12 @@ export function useFollow(
   const [pinned, setPinned] = useState(true);
   const userUp = useRef(false);
   const touchY = useRef(0);
-  const attentionFrame = useRef(0);
 
   const toEnd = useCallback(() => {
     if (paused) return;
-    cancelAnimationFrame(attentionFrame.current);
     if (attention >= 0) {
-      list.current?.scrollToIndex(attention, { align: "start" });
-      attentionFrame.current = requestAnimationFrame(() => {
-        const rows = document.querySelectorAll<HTMLElement>('.tx-list [data-row-kind="callback"]');
-        const row = rows[rows.length - 1];
-        const card = row?.querySelector<HTMLElement>(".approval, .qcard");
-        if (!row || !card) return;
-        // The virtual row includes spacing above the card; align the card's own heading with the viewport.
-        const offset = card.getBoundingClientRect().top - row.getBoundingClientRect().top;
-        if (offset > 0) list.current?.scrollToIndex(attention, { align: "start", offset });
-      });
+      // The card fits the viewport; end alignment also leaves its answers clear of the composer.
+      list.current?.scrollToIndex(attention, { align: "end" });
     } else if (count > 0) list.current?.scrollToIndex(count - 1, { align: "end" });
   }, [list, count, paused, attention]);
 
@@ -57,13 +47,6 @@ export function useFollow(
   useLayoutEffect(() => {
     if (attention >= 0) toEnd();
   }, [attention, toEnd]);
-
-  useLayoutEffect(
-    () => () => {
-      cancelAnimationFrame(attentionFrame.current);
-    },
-    [],
-  );
 
   // Follow new rows and rows that changed while pinned.
   useLayoutEffect(() => {
@@ -85,8 +68,14 @@ export function useFollow(
     [list],
   );
 
+  const pause = useCallback(() => {
+    userUp.current = true;
+    setPinned(false);
+  }, []);
   return {
     pinned,
+    /** A directed navigation keeps its target in view while rows expand. */
+    pause,
     onScroll,
     /** Sizes changed (a row grew while streaming): keep the end in view while pinned. */
     onResize: () => {

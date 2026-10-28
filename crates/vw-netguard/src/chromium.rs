@@ -21,8 +21,8 @@ pub const WRY_DEFAULT_ARGUMENTS: &str =
 /// The `WebView2` browser arguments for webviews whose traffic goes through the guard listener `proxy_url`
 /// (`http://127.0.0.1:<port>`): wry's defaults, `--proxy-server` and `--proxy-bypass-list=<-loopback>`.
 ///
-/// Every webview environment that shares a `WebView2` browser process must use identical arguments, so the engine
-/// passes the same string (one app-wide listener) to every preview.
+/// Every webview environment that shares a `WebView2` browser process (one per user data folder) must use identical
+/// arguments, so the engine passes the same string (that folder's listener) to every preview on the folder.
 ///
 /// # Errors
 /// A reason when `proxy_url` is not `http://127.0.0.1:<port>` or `http://[::1]:<port>`.

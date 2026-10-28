@@ -177,6 +177,9 @@ struct Place {
     y: f64,
     width: f64,
     height: f64,
+    /// Top of the webview's page viewport (`y` except under a macOS title bar: `ViewPlace::viewport_top`). The main
+    /// webview's snapshot starts there, so children are pasted relative to it.
+    page_top: f64,
     scale: f64,
 }
 
@@ -200,6 +203,7 @@ async fn place_of(webview: &tauri::Webview<Wry>) -> Result<Place, String> {
             y: f64::from(origin.1),
             width: f64::from(alloc.width()),
             height: f64::from(alloc.height()),
+            page_top: f64::from(origin.1),
             scale: f64::from(view.scale_factor()),
         }));
     })
@@ -216,6 +220,7 @@ async fn place_of(webview: &tauri::Webview<Wry>) -> Result<Place, String> {
             y: p.y,
             width: p.width,
             height: p.height,
+            page_top: p.viewport_top,
             scale: p.scale,
         });
         let _ = reply.send(place.ok_or_else(|| "the webview is not in a window".to_owned()));
@@ -275,7 +280,9 @@ async fn main_image(window: &Window<Wry>) -> Result<Rgba, String> {
         let Ok(part) = decoded(&png) else { continue };
         let rect = vw_preview::PixelRect {
             x: to_px((place.x - base.x) * scale),
-            y: to_px((place.y - base.y) * scale),
+            // In the main page's coordinates (macOS: the main page starts below the title bar, the children are
+            // placed there too: `platform::css_origin`).
+            y: to_px((place.y - base.page_top) * scale),
             width: u32::try_from(to_px(place.width * scale).max(1)).unwrap_or(1),
             height: u32::try_from(to_px(place.height * scale).max(1)).unwrap_or(1),
         };
@@ -379,7 +386,7 @@ async fn dialog_image(window: &Window<Wry>, id: &str) -> Result<Rgba, String> {
 // ---- macOS dialogs: not captured --------------------------------------------------------------------------------
 
 // The Linux and Windows versions wait for the UI thread; here nothing waits, so these answer an already-finished
-// future with the same signature (block MCL: macOS clippy `unused_async`), and the shared callers `.await` them as
+// future with the same signature (macOS Clippy `unused_async`), and the shared callers `.await` them as
 // on the other platforms.
 
 #[cfg(target_os = "macos")]

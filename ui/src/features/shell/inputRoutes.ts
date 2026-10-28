@@ -1,9 +1,10 @@
 /**
- * The `ui/click` and `ui/key` routes (the Debug API controls the whole app as
- * the user): a click on any element, or a key press, exactly where a user's would land, for every control that
- * has no route of its own (a menu button, a row's actions, Choose folder). The Rust side lists the same names
+ * The `ui/click`, `ui/key` and `ui/menu` routes (the Debug API controls the whole app as
+ * the user): a click on any element, a key press or a right click, exactly where a user's would land, for every
+ * control that has no route of its own (a menu button, a row's actions, Choose folder), and the open action menu
+ * (read it, choose an item as a click does). The Rust side lists the same names
  * (`crates/vw-host/src/host.rs` SHELL_ROUTES).
- * Depends on: state/uiControl, AppContext types. Called by: useShellWiring.
+ * Depends on: state/uiControl, state/openMenu, AppContext types. Called by: useShellWiring.
  * Invariants:
  * - The click is the element's own `click()` (the same handlers a mouse click runs); a disabled or hidden
  *   element is refused (`denied`), never clicked, so a route can do only what a user can.
@@ -13,14 +14,26 @@
  */
 import { flushSync } from "react-dom";
 
+import { openMenu } from "../../state/openMenu";
+import { parseKeys } from "../../state/shortcuts";
 import { UiControlError } from "../../state/uiControl";
 import type { App } from "./AppContext";
+import { elementVisible } from "./elementVisibility";
 import { queryNeutral } from "./secretSafety";
 
 function asObject(body: unknown): Record<string, unknown> {
   if (typeof body === "object" && body !== null && !Array.isArray(body))
     return body as Record<string, unknown>;
   throw new UiControlError("invalidParams", "the body must be a JSON object");
+}
+
+/** Use the shortcut registry's physical key names for keyboard actions as well as character input. */
+function physicalCode(key: string): string {
+  try {
+    return parseKeys(key === " " ? "Space" : key).code;
+  } catch {
+    return key;
+  }
 }
 
 /** The `index`-th element matching `selector` (CSS), refused when it is missing, hidden or disabled. */
@@ -38,9 +51,7 @@ function target(selector: unknown, index: unknown): HTMLElement {
   const at = typeof index === "number" && Number.isInteger(index) && index >= 0 ? index : 0;
   const el = all[at];
   if (el === undefined) throw new UiControlError("notFound", "no element matches that selector");
-  const rect = el.getBoundingClientRect();
-  if (rect.width < 1 || rect.height < 1 || getComputedStyle(el).visibility === "hidden")
-    throw new UiControlError("denied", "the element is not visible");
+  if (!elementVisible(el)) throw new UiControlError("denied", "the element is not visible");
   const disabled = el instanceof HTMLButtonElement && el.disabled;
   if (disabled || el.getAttribute("aria-disabled") === "true")
     throw new UiControlError("denied", "the element is disabled");
@@ -81,9 +92,11 @@ export function registerInputRoutes(app: App): () => void {
       return { clicked: el.getAttribute("aria-label") ?? el.tagName.toLowerCase() };
     }),
     app.uiControl.register("key", (body) => {
-      const { key, selector, index, ctrl, shift, alt, meta } = asObject(body);
+      const { key, code, selector, index, ctrl, shift, alt, meta } = asObject(body);
       if (typeof key !== "string" || key === "")
         throw new UiControlError("invalidParams", "key must be a key name such as Escape or k");
+      if (code !== undefined && (typeof code !== "string" || code === ""))
+        throw new UiControlError("invalidParams", "code must be a physical key name such as KeyK");
       const el =
         selector === undefined
           ? (document.activeElement ?? document.body)
@@ -91,6 +104,7 @@ export function registerInputRoutes(app: App): () => void {
       if (el instanceof HTMLElement && selector !== undefined) el.focus();
       const init: KeyboardEventInit = {
         key,
+        code: typeof code === "string" ? code : physicalCode(key),
         bubbles: true,
         cancelable: true,
         ctrlKey: ctrl === true,
@@ -102,6 +116,66 @@ export function registerInputRoutes(app: App): () => void {
       el.dispatchEvent(new KeyboardEvent("keyup", init));
       return { key };
     }),
+    app.uiControl.register(
+      "menu",
+      (body) => {
+        const { action = "state", selector, index, item } = asObject(body ?? {});
+        const shown = () => {
+          const menu = openMenu();
+          return menu === null
+            ? { open: false }
+            : {
+                open: true,
+                testId: menu.testId,
+                label: menu.label,
+                heading: menu.heading,
+                items: menu.items,
+              };
+        };
+        if (action === "state") return shown();
+        if (action === "open") {
+          // A right click in the middle of the element: the same handler the mouse runs.
+          const el = target(selector, index);
+          const box = el.getBoundingClientRect();
+          flushSync(() => {
+            el.dispatchEvent(
+              new MouseEvent("contextmenu", {
+                bubbles: true,
+                cancelable: true,
+                button: 2,
+                clientX: box.left + Math.min(box.width / 2, 40),
+                clientY: box.top + Math.min(box.height / 2, 12),
+              }),
+            );
+          });
+          return shown();
+        }
+        const menu = openMenu();
+        if (menu === null) throw new UiControlError("notFound", "no menu is open");
+        if (action === "close") {
+          flushSync(() => {
+            menu.close();
+          });
+          return shown();
+        }
+        if (action !== "choose")
+          throw new UiControlError("invalidParams", "action must be state, open, choose or close");
+        if (typeof item !== "string")
+          throw new UiControlError("invalidParams", "item must be the id of a menu item");
+        const entry = menu.items.find((candidate) => candidate.id === item);
+        if (entry === undefined)
+          throw new UiControlError("notFound", "the open menu has no such item");
+        if (entry.disabled) throw new UiControlError("denied", "that item is disabled");
+        flushSync(() => {
+          menu.choose(item);
+        });
+        return { chosen: item };
+      },
+      (body) => {
+        const action = (body as { action?: unknown } | null)?.action;
+        return action === undefined || action === "state";
+      },
+    ),
   ];
   return () => {
     document.removeEventListener("click", onClick, true);

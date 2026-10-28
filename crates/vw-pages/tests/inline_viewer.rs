@@ -63,6 +63,7 @@ impl Drop for Driver {
 struct Browser {
     driver: Arc<Mutex<Driver>>,
     hooks: Arc<Mutex<Option<Arc<dyn PreviewHooks>>>>,
+    quiet_loads: bool,
 }
 
 impl Browser {
@@ -82,12 +83,14 @@ impl PreviewEngine for Browser {
         Box::pin(async move {
             self.call(json!({"op":"mount", "url":spec.url.as_str(), "script":spec.console_script}))
                 .await;
-            self.hooks
-                .lock()
-                .unwrap()
-                .as_ref()
-                .unwrap()
-                .page_event(&spec.id.label, PageEvent::Finished(spec.url));
+            if !self.quiet_loads {
+                self.hooks
+                    .lock()
+                    .unwrap()
+                    .as_ref()
+                    .unwrap()
+                    .page_event(&spec.id.label, PageEvent::Finished(spec.url));
+            }
             Ok(())
         })
     }
@@ -96,12 +99,14 @@ impl PreviewEngine for Browser {
         Box::pin(async move {
             self.call(json!({"op":"navigate", "url":url.as_str()}))
                 .await;
-            self.hooks
-                .lock()
-                .unwrap()
-                .as_ref()
-                .unwrap()
-                .page_event(&id.label, PageEvent::Finished(url));
+            if !self.quiet_loads {
+                self.hooks
+                    .lock()
+                    .unwrap()
+                    .as_ref()
+                    .unwrap()
+                    .page_event(&id.label, PageEvent::Finished(url));
+            }
             Ok(())
         })
     }
@@ -204,6 +209,7 @@ async fn trusted_inline_controls_and_a_resorting_sandbox() {
     let browser = Browser {
         driver: Arc::new(Mutex::new(Driver::start())),
         hooks: Arc::default(),
+        quiet_loads: false,
     };
     let fixture = browser.call(json!({"op":"fixture"})).await;
     let root = std::env::temp_dir().join(format!("vw-inline-browser-{}", std::process::id()));
@@ -297,6 +303,68 @@ async fn trusted_inline_controls_and_a_resorting_sandbox() {
         .unwrap();
     assert_eq!(comment.section, "card-0");
     assert_repository_unchanged(&folder, &fixture);
+    service.shutdown().await;
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
+#[ignore = "requires the local Chromium driver in HB_INLINE_DRIVER"]
+async fn step_fragments_scroll_and_rendered_documents_finish_without_native_load_events() {
+    let browser = Browser {
+        driver: Arc::new(Mutex::new(Driver::start())),
+        hooks: Arc::default(),
+        quiet_loads: true,
+    };
+    let root = std::env::temp_dir().join(format!("vw-step-browser-{}", std::process::id()));
+    let project = root.join("project");
+    let folder = project.join("docs/handbook");
+    std::fs::create_dir_all(&folder).unwrap();
+    std::fs::write(folder.join("plan.html"), r#"<!doctype html><title>Step navigation</title>
+        <meta name="handbook.kind" content="plan"><section id="goal">Goal</section>
+        <div style="height:1800px"></div><ol class="hb-steps"><li data-step="s4" data-status="todo">Fourth step</li></ol>
+        <div style="height:1200px"></div>"#).unwrap();
+    let mut config = PagesConfig::new(root.join("data"), root.join("view"));
+    config.load_wait = Duration::from_millis(400);
+    let service = PagesService::new(Arc::new(browser.clone()), config);
+    service
+        .layout(Some((
+            "viewer".into(),
+            Rect {
+                x: 0.0,
+                y: 0.0,
+                width: 360.0,
+                height: 600.0,
+            },
+        )))
+        .await
+        .unwrap();
+    let path = PagePath::parse("plan.html").unwrap();
+    service
+        .open_at("viewer", &project, Some(path.clone()), Some("goal".into()))
+        .await
+        .unwrap();
+    service
+        .open_at("viewer", &project, Some(path.clone()), Some("s4".into()))
+        .await
+        .unwrap();
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let position = browser.call(json!({"op":"evaluate", "script":"document.querySelector('[data-step=s4]').getBoundingClientRect().top"})).await;
+    let view = service.view("viewer").unwrap();
+    println!("step position={position}; viewer={view:?}");
+    assert!(
+        position.as_f64().unwrap().abs() < 3.0,
+        "step must scroll into view: {position}"
+    );
+    assert!(!view.loading, "rendered document is loaded");
+    assert_eq!(view.title.as_deref(), Some("Step navigation"));
+    service
+        .open_at("viewer", &project, Some(path), Some("s4".into()))
+        .await
+        .unwrap();
+    assert_eq!(
+        service.view("viewer").unwrap().title.as_deref(),
+        Some("Step navigation")
+    );
     service.shutdown().await;
     std::fs::remove_dir_all(root).unwrap();
 }

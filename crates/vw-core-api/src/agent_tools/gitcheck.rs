@@ -27,7 +27,7 @@ use serde_json::{Value, json};
 use vw_agent_tools::gitparse::{CREDENTIAL_REASON, GH_WRITE_REASON, GitKind, GitScan, scan};
 use vw_agent_tools::hook::PUSH_REASON;
 use vw_changes::git::{Call, Index};
-use vw_gate::{Confirmation, ConfirmationRequest, Confirmer};
+use vw_gate::ConfirmationRequest;
 
 use crate::core::Shared;
 use crate::one_ask::Asked;
@@ -96,7 +96,34 @@ pub(crate) async fn guard(
     command: &str,
     asked: Asked<'_>,
 ) -> Result<(), String> {
-    let found = scan(command);
+    decide(shared, session, cwd, command, asked)
+        .await
+        .map_err(|reason| {
+            if matches!(asked, Asked::Hook { .. }) || reason.starts_with("Not done:") {
+                reason
+            } else {
+                crate::guard_refusals::record(
+                    shared,
+                    session,
+                    crate::GuardKind::Git,
+                    crate::guard_refusals::step(shared, session, None),
+                    &reason,
+                )
+            }
+        })
+}
+
+async fn decide(
+    shared: &Arc<Shared>,
+    session: &str,
+    cwd: &Path,
+    command: &str,
+    asked: Asked<'_>,
+) -> Result<(), String> {
+    let mut found = scan(command);
+    if shared.github_reads.enabled() {
+        found.ops.retain(|op| !op.what.starts_with("gh "));
+    }
     if !found.needs_core() {
         return Ok(());
     }
@@ -104,11 +131,21 @@ pub(crate) async fn guard(
     let id = session.to_owned();
     let folder = cwd.to_path_buf();
     let mut checked = found.clone();
-    let renames: Vec<String> = found
+    // Only a rename that runs in this folder can be checked here: after a `cd` (any reading saying so) the target
+    // lives in another repository, and the rename is held as another branch's rewrite anyway.
+    let mut renames: Vec<String> = found
         .ops
         .iter()
         .filter_map(|op| op.rename_to.clone())
+        .filter(|to| {
+            !found
+                .ops
+                .iter()
+                .any(|op| op.elsewhere && op.rename_to.as_ref() == Some(to))
+        })
         .collect();
+    renames.sort();
+    renames.dedup();
     let reading = tokio::task::spawn_blocking(move || {
         let own = own_branch(&worker, &id, &folder);
         for op in &mut checked.ops {
@@ -118,18 +155,20 @@ pub(crate) async fn guard(
         }
         let occupied: Vec<String> = renames
             .into_iter()
-            .filter(|to| {
-                own.as_deref() != Some(to.as_str())
-                    && Call::new(&folder, Index::User)
-                        .args([
-                            "show-ref",
-                            "--verify",
-                            "--quiet",
-                            &format!("refs/heads/{to}"),
-                        ])
-                        .timeout(Duration::from_secs(5))
-                        .output()
-                        .map_or(true, |out| out.code != Some(1))
+            .filter(|to| own.as_deref() != Some(to.as_str()))
+            .filter_map(|to| {
+                let code = Call::new(&folder, Index::User)
+                    .args([
+                        "show-ref",
+                        "--verify",
+                        "--quiet",
+                        &format!("refs/heads/{to}"),
+                    ])
+                    .timeout(Duration::from_secs(5))
+                    .output()
+                    .ok()
+                    .and_then(|out| out.code);
+                target_reason(code, &to)
             })
             .collect();
         (checked, own, occupied)
@@ -146,11 +185,7 @@ pub(crate) async fn guard(
         (Err(CREDENTIAL_REASON.to_owned()), "denied (credentials)")
     } else {
         let mut asks = needs_user(&found, own_branch);
-        asks.extend(
-            occupied
-                .iter()
-                .map(|name| format!("renaming onto existing branch `{name}`")),
-        );
+        asks.extend(occupied);
         if asks.is_empty() {
             remember_rename(shared, session, &found, own_branch).await?;
             (Ok(()), "allowed")
@@ -158,31 +193,41 @@ pub(crate) async fn guard(
             remember_rename(shared, session, &found, own_branch).await?;
             // The user approved Vibe's card for this exact call of our own tool moments ago.
             (Ok(()), "allowed by the user on Vibe's card")
-        } else if hold(shared, session, command, &asks).await {
-            remember_rename(shared, session, &found, own_branch).await?;
-            if let Asked::Hook {
-                call_id,
-                hook_session,
-            } = asked
-            {
-                // Vibe's card for this bash call (if its permissions ask) gets this yes from the core.
-                if let Some(ledger) = crate::one_ask::of(shared) {
-                    ledger.guard_said_yes(&[hook_session, session], call_id, command);
-                }
-            }
-            (Ok(()), "allowed by the user")
         } else {
-            (
-                Err(format!(
-                    "Not run: the user declined {} in Vibe Work's dialog. Continue without it, or ask the user.",
-                    asks.join(", ")
-                )),
-                "refused by the user",
-            )
+            match hold(shared, session, cwd, command, &asks, asked).await {
+                Ok(()) => {
+                    remember_rename(shared, session, &found, own_branch).await?;
+                    if let Asked::Hook {
+                        call_id,
+                        hook_session,
+                    } = asked
+                    {
+                        // Vibe's card for this bash call (if its permissions ask) gets this yes from the core.
+                        if let Some(ledger) = crate::one_ask::of(shared) {
+                            ledger.guard_said_yes(&[hook_session, session], call_id, command);
+                        }
+                    }
+                    (Ok(()), "allowed by the user")
+                }
+                Err(reason) => (Err(reason), "refused"),
+            }
         }
     };
     tracing::info!(session, ops = found.ops.len(), decision = how, "git guard");
     verdict
+}
+
+/// Why a rename onto `to` is held, from `git show-ref --verify --quiet`'s exit code: 0 = that branch exists, 1 = it
+/// does not (`None`, nothing to say); anything else (no repository here, git failed) = unknown, still held, and
+/// said as such instead of claiming the branch exists.
+fn target_reason(code: Option<i32>, to: &str) -> Option<String> {
+    match code {
+        Some(0) => Some(format!("renaming onto existing branch `{to}`")),
+        Some(1) => None,
+        _ => Some(format!(
+            "renaming to `{to}`, which Vibe Work could not check for an existing branch"
+        )),
+    }
 }
 
 fn git_path(cwd: &Path, args: &[&str]) -> Option<PathBuf> {
@@ -304,37 +349,67 @@ fn needs_user(found: &GitScan, own_branch: Option<&str>) -> Vec<String> {
     asks
 }
 
+fn command_chat<'a>(session: &'a str, asked: Asked<'a>) -> &'a str {
+    match asked {
+        Asked::Hook { hook_session, .. } => hook_session,
+        Asked::Card(_) => session,
+    }
+}
+
 /// Holds the command for the user: a native dialog with the exact command.
-async fn hold(shared: &Shared, session: &str, command: &str, asks: &[String]) -> bool {
-    let title = shared
-        .names
-        .title_of(&shared.store, session)
-        .unwrap_or_else(|| session.to_owned());
-    let request = ConfirmationRequest {
+async fn hold(
+    shared: &Arc<Shared>,
+    session: &str,
+    cwd: &Path,
+    command: &str,
+    asks: &[String],
+    asked: Asked<'_>,
+) -> Result<(), String> {
+    let title = shared.names.confirmation_title(&shared.store, session);
+    // A child may borrow its parent's worktree record, but never its exact-command approval identity.
+    let session = command_chat(session, asked);
+    let mut request = ConfirmationRequest {
         method: HOLD_METHOD.to_owned(),
         requester: vw_gate::Requester::Agent,
         summary: hold_summary(&title, command, asks),
-        params: json!({"sessionId": session, "command": command, "why": asks}),
+        params: json!({"sessionId": session, "cwd": cwd, "command": command, "why": asks}),
         always: None,
     };
-    shared.confirmer.confirm(&request).await == Confirmation::Approved
+    if let Asked::Hook { call_id, .. } = asked {
+        request.params["toolCallId"] = Value::String(call_id.into());
+    }
+    crate::ask::guards::wait(shared, request, "this Git command").await
 }
 
 fn hold_summary(title: &str, command: &str, asks: &[String]) -> String {
     format!(
         "The agent of the session {} wants to run a Git command that may rewrite a branch outside its own copy. It runs as you.\n\nWhy this was held: {}.\n\nCommand:\n{}",
-        vw_gate::dialog_quote(title),
+        vw_gate::dialog_chat_quote(title),
         asks.iter()
             .map(|reason| vw_gate::dialog_line(reason))
             .collect::<Vec<_>>()
             .join("; "),
-        vw_gate::dialog_quote(command),
+        vw_gate::dialog_command(command),
     )
 }
 
 #[cfg(test)]
 mod kg1_tests {
-    use super::hold_summary;
+    use super::{hold_summary, target_reason};
+
+    #[test]
+    fn a_rename_target_is_called_existing_only_when_git_says_so() {
+        assert_eq!(
+            target_reason(Some(0), "spare-2").as_deref(),
+            Some("renaming onto existing branch `spare-2`")
+        );
+        assert_eq!(target_reason(Some(1), "spare-2"), None);
+        for unknown in [Some(128), None] {
+            let reason = target_reason(unknown, "spare-2").unwrap();
+            assert!(!reason.contains("existing branch `"), "{reason}");
+            assert!(reason.contains("could not check"), "{reason}");
+        }
+    }
 
     #[test]
     fn held_git_command_is_complete() {
@@ -342,6 +417,6 @@ mod kg1_tests {
         let text = hold_summary("Build session", &command, &["remote rewrite".to_owned()]);
         assert!(text.contains("Build session"));
         assert!(text.contains("remote rewrite"));
-        assert!(text.ends_with(&format!("Command:\n{}", vw_gate::dialog_quote(&command))));
+        assert!(text.ends_with(&format!("Command:\n{command}")));
     }
 }

@@ -1,7 +1,7 @@
 //! Redaction of grouped findings, guarded by existing channels and session leases.
 //! Depends on live scanner reports and the worker cache; called by the worker. Replacements are rescanned.
 
-use super::{Worker, automatic_ids, count, failure, finding_id, hits, inputs, owned};
+use super::{Worker, count, failure, finding_id, hits, inputs, inside_log_folder, owned};
 use crate::{
     Core, CoreError, ErrorCode, SecretLeakName, SecretLeakState,
     core::Shared,
@@ -9,7 +9,7 @@ use crate::{
     secret_scan_cache::{Stamp, fingerprint},
 };
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     path::PathBuf,
     sync::{PoisonError, atomic::Ordering},
 };
@@ -30,7 +30,6 @@ impl Worker {
         shared: &std::sync::Arc<Shared>,
         runtime: &tokio::runtime::Handle,
         id: &str,
-        auto: bool,
     ) -> Result<(), CoreError> {
         let secrets = match inputs(shared) {
             Ok(secrets) => {
@@ -66,14 +65,6 @@ impl Worker {
                 .is_some()
         {
             self.set_state(shared, id, SecretLeakState::ChatOpen, 0);
-            for file in self
-                .cache
-                .files
-                .values_mut()
-                .filter(|file| file.chat_id == finding.chat_id)
-            {
-                file.retry_auto = auto;
-            }
             return Ok(());
         }
         let _lease = match shared.leases.claim(&finding.chat_id) {
@@ -94,15 +85,10 @@ impl Worker {
         self.ensure_scope(shared, runtime, id, &paths)?;
         let mut outcome = FileOutcome::default();
         for path in paths {
-            if shared.secret_scan.stopped.load(Ordering::Acquire)
-                || (auto && {
-                    let settings = shared.secret_scan.view().settings;
-                    !settings.enabled || !settings.auto_redact
-                })
-            {
+            if shared.secret_scan.stopped.load(Ordering::Acquire) {
                 return Ok(());
             }
-            let file = self.redact_file(&path, secrets.as_deref(), auto)?;
+            let file = self.redact_file(&path, secrets.as_deref())?;
             outcome.redacted += file.redacted;
             outcome.changed += file.changed;
             outcome.format += file.format;
@@ -193,10 +179,7 @@ impl Worker {
             }))?
         };
         for path in paths {
-            if !path
-                .canonicalize()
-                .is_ok_and(|path| path.starts_with(&folder))
-            {
+            if !inside_log_folder(&folder, path) {
                 return Err(failure(
                     "The saved finding is outside the configured session log folder.",
                 ));
@@ -248,11 +231,33 @@ impl Worker {
         }
     }
 
+    /// A Vibe 3.0 store is sealed by digests: a replaced value would make the chat unloadable, so its files are
+    /// reported as "could not be changed without damaging the chat" and left exactly as they are. Without a known
+    /// log folder a file counts as sealed.
+    pub(crate) fn sealed_file(&self, path: &std::path::Path) -> bool {
+        self.folder
+            .as_deref()
+            .is_none_or(|folder| crate::secret_scan_cache::sealed(folder, path))
+    }
+
     fn redact_file(
         &mut self,
         path: &PathBuf,
         secrets: Option<&[VaultScanSecret]>,
-        auto: bool,
+    ) -> Result<FileOutcome, CoreError> {
+        if self.sealed_file(path) {
+            return Ok(FileOutcome {
+                format: 1,
+                ..FileOutcome::default()
+            });
+        }
+        self.redact_unsealed_file(path, secrets)
+    }
+
+    fn redact_unsealed_file(
+        &mut self,
+        path: &PathBuf,
+        secrets: Option<&[VaultScanSecret]>,
     ) -> Result<FileOutcome, CoreError> {
         let authority = finding_id(&self.cache.files[path].chat_id);
         let reports = self.reports.entry(authority).or_default();
@@ -288,12 +293,7 @@ impl Worker {
         }
         let report = &reports[path];
         let file = &self.cache.files[path];
-        let ids = if auto {
-            let secrets = secrets.ok_or_else(|| failure("Waits for the Vault to be unlocked."))?;
-            automatic_ids(report, &hits(report, secrets))
-        } else {
-            file.hits.keys().cloned().collect()
-        };
+        let ids: BTreeSet<String> = file.hits.keys().cloned().collect();
         if ids.is_empty() {
             return Ok(FileOutcome::default());
         }
@@ -302,7 +302,6 @@ impl Worker {
             .with_format_guard(crate::secret_scan_format::safe);
         let result = vw_logscan::redact(&selected);
         let replaced = count(result.redacted_files.len());
-        let skipped = !result.skipped_files.is_empty();
         let removed = if replaced > 0 {
             file.hits
                 .iter()
@@ -332,7 +331,6 @@ impl Worker {
                 if let Ok(stamp) = Stamp::read(path) {
                     file.stamp = stamp;
                 }
-                file.retry_auto = auto && skipped;
             }
             reports.insert(path.clone(), report);
         } else if result.skipped_files.is_empty()

@@ -27,19 +27,26 @@
 //! - Nothing here decides ownership: the core does, from the process monitor (vw-procmon).
 
 pub mod agent_env;
+pub mod chrome_guard;
+mod chrome_specs;
 pub mod cli;
 mod command_segments;
 pub mod credential;
 pub mod folders;
 pub mod forge;
+pub mod git_bash;
 pub mod gitparse;
 mod gitparse_cmds;
+mod heredoc_input;
 pub mod hook;
 pub mod killparse;
 mod killparse_cmds;
 mod killparse_shell;
 pub mod mcp;
+#[cfg(any(windows, test))]
+mod msys_paths;
 pub mod output;
+mod receipt_hook;
 pub mod safety;
 pub mod secretspec;
 pub mod spawn;

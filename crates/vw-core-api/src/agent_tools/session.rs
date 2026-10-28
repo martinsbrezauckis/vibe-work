@@ -3,7 +3,7 @@
 //!
 //! Depends on: vw-procmon, `core::Shared`, `processes` (session contexts), `names`. Called by: `tools`,
 //! `start`, `killcheck`.
-//! Invariant: owner texts name a session by its title (or id) and another app by its OS executable name only.
+//! Invariant: owner texts name a session by its title, preview or untitled-session label and another app by its OS executable name only.
 
 use std::net::IpAddr;
 use std::path::{Path, PathBuf};
@@ -18,7 +18,17 @@ use crate::core::Shared;
 /// Errors when the session is not loaded or has none.
 pub(crate) fn folders(shared: &Shared, session_id: &str) -> Result<Vec<PathBuf>, String> {
     if let Some(view) = shared.store.view(session_id) {
-        crate::session_folders::check(&shared.instructions.own_home, &view.state, None)?;
+        crate::session_folders::check(&shared.instructions.own_home, &view.state, None).map_err(
+            |reason| {
+                crate::guard_refusals::record(
+                    shared,
+                    session_id,
+                    crate::GuardKind::Folder,
+                    crate::guard_refusals::step(shared, session_id, None),
+                    &reason,
+                )
+            },
+        )?;
     }
     let contexts = crate::processes::contexts(&shared.store);
     let Some(context) = contexts.into_iter().find(|c| c.session_id == session_id) else {
@@ -59,21 +69,16 @@ pub(crate) fn inside(folders: &[PathBuf], path: Option<&str>) -> Result<PathBuf,
         Ok(resolved)
     } else {
         Err(format!(
-            "folder {path} is outside this session's folder; process_start only runs inside it"
+            "folder {path} is outside this session's folder. Choose a folder inside it"
         ))
     }
 }
 
-/// Another session's name for refusals: "another session ('Title')", else its id. Always says "another"
+/// Another session's visible name for refusals. Always says "another"
 /// (session titles can look alike, so the agent needs an unambiguous process owner).
 pub(crate) fn session_name(shared: &Shared, session_id: &str) -> String {
-    shared
-        .names
-        .title_of(&shared.store, session_id)
-        .map_or_else(
-            || format!("another session ({session_id})"),
-            |t| format!("another session ('{t}')"),
-        )
+    let title = shared.names.display_title(&shared.store, session_id);
+    format!("another session ('{title}')")
 }
 
 /// "session 'Shop'" / "another app (node)" / "another app".
@@ -95,8 +100,8 @@ pub(crate) fn refusal_text(shared: &Shared, refusal: &StopRefusal) -> String {
             owner_text(shared, owner)
         ),
         StopRefusal::NotProven { pid, .. } => format!(
-            "pid {pid} was not started by this session through process_start (or a terminal of it), so it \
-             is not stopped; a Vibe background process is stopped with your own background-process tool"
+            "pid {pid} was not started by this session or one of its terminals, so it \
+             was not stopped. Use this session's controls to stop its own background programs"
         ),
         other => format!("{other}; it was not stopped"),
     }

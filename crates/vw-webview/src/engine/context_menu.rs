@@ -1,7 +1,9 @@
-//! Polls only interactive browser mounts for a physical page context-menu choice.
+//! Polls only interactive browser mounts for a physical page context-menu choice (Save to vault, Point Vibe at
+//! this).
 //!
-//! Depends on the page-init script's one-bit intent accessor and a host callback. Called by the preview
-//! engine on mount and close. The payload contains a session id only; the selected value remains inside the page.
+//! Depends on the page-init script's one-bit intent accessors and a host callback. Called by the preview
+//! engine on mount and close. The payload contains a session id and which item was clicked only; the selected
+//! value remains inside the page.
 
 use std::collections::HashMap;
 use std::sync::{Mutex, PoisonError};
@@ -10,11 +12,33 @@ use std::time::Duration;
 use tauri::{Webview, Wry};
 use vw_preview::MountId;
 
-pub(super) type Sink = std::sync::Arc<dyn Fn(String) + Send + Sync>;
+pub(super) type Sink = std::sync::Arc<dyn Fn(String, PageMenuChoice) + Send + Sync>;
+
+/// Which item of the page's own right-click menu a person clicked.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PageMenuChoice {
+    /// Save to vault: the core still reads the one-use choice and asks before storing.
+    SaveToVault,
+    /// Point Vibe at this: the window runs the preview pick, which reads the selection in the page.
+    PointVibe,
+}
+
+/// The choices one poll answer holds: a number, bit 1 Save to vault, bit 2 Point Vibe at this.
+fn choices(answer: &str) -> Vec<PageMenuChoice> {
+    let bits = answer.trim().parse::<u8>().unwrap_or(0);
+    let mut out = Vec::new();
+    if bits & 1 != 0 {
+        out.push(PageMenuChoice::SaveToVault);
+    }
+    if bits & 2 != 0 {
+        out.push(PageMenuChoice::PointVibe);
+    }
+    out
+}
 
 const POLL: Duration = Duration::from_millis(150);
 const ANSWER_WAIT: Duration = Duration::from_secs(4);
-const INTENT: &str = "!!window.__vw_context_menu_intent?.take()";
+const INTENT: &str = "(window.__vw_context_menu_intent?.take() ? 1 : 0) + (window.__vw_point_intent?.take() ? 2 : 0)";
 
 /// One owned poll task per mounted browser, aborted on close or engine drop.
 #[derive(Default)]
@@ -42,10 +66,10 @@ impl Pollers {
                 {
                     break;
                 }
-                if let Ok(Ok(answer)) = tokio::time::timeout(ANSWER_WAIT, rx).await
-                    && answer == "true"
-                {
-                    sink(session_id.clone());
+                if let Ok(Ok(answer)) = tokio::time::timeout(ANSWER_WAIT, rx).await {
+                    for choice in choices(&answer) {
+                        sink(session_id.clone(), choice);
+                    }
                 }
             }
         });
@@ -82,5 +106,27 @@ impl Drop for Pollers {
         {
             task.abort();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{PageMenuChoice, choices};
+
+    const NONE: [PageMenuChoice; 0] = [];
+
+    #[test]
+    fn a_poll_answer_names_only_the_items_clicked() {
+        assert_eq!(choices("0"), NONE);
+        assert_eq!(choices("1"), [PageMenuChoice::SaveToVault]);
+        assert_eq!(choices("2"), [PageMenuChoice::PointVibe]);
+        assert_eq!(
+            choices("3"),
+            [PageMenuChoice::SaveToVault, PageMenuChoice::PointVibe]
+        );
+        // Anything else a page could make the answer look like counts as no click.
+        assert_eq!(choices("true"), NONE);
+        assert_eq!(choices("\"2\""), NONE);
+        assert_eq!(choices(""), NONE);
     }
 }

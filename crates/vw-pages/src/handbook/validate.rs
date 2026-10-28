@@ -4,7 +4,7 @@
 //! ever get hints (HB-I04).
 //!
 //! This module holds the result types, the driver and the rules about the book as a whole (the manifest HB-E09,
-//! the index's links HB-W03 and date HB-W04, other files HB-I03, lite page hints HB-I04, pre-1.0 pages HB-W16,
+//! the index's links HB-W03 and date HB-W04, other files HB-I03, lite page hints HB-I04,
 //! stylesheet integrity HB-E11 and theme rules HB-I06);
 //! the rules about one HTML page are in `handbook::rules`, link rules in `handbook::refs`.
 //!
@@ -148,7 +148,7 @@ pub fn validate(root: &Path) -> Validation {
 pub fn validate_scan(root: &Path, folder: &FolderScan) -> Validation {
     let mut report = Report::default();
     let index = folder.page(INDEX);
-    let manifest = index.filter(|i| !i.scan.facts.is_pre_format());
+    let manifest = index;
     let linked = manifest.map(refs::linked_pages);
     match index {
         None => report.add(
@@ -156,20 +156,11 @@ pub fn validate_scan(root: &Path, folder: &FolderScan) -> Validation {
             INDEX,
             "no index.html: the handbook has no manifest (§3)",
         ),
-        Some(found) if found.scan.facts.is_pre_format() => {}
         Some(found) => manifest_rules(found, &mut report),
     }
     for found in &folder.pages {
-        let path = found.path.as_str();
         if found.scan.facts.lite {
             lite_rules(root, folder, found, linked.as_ref(), &mut report);
-        } else if found.scan.facts.is_pre_format() {
-            let what = if found.scan.facts.generated {
-                "index written by an earlier build of the app (vw-generated): replace it with an index written to §8"
-            } else {
-                "pre-1.0 page (vw-kind/vw-status/vw-date): needs migration (§11); other checks skipped"
-            };
-            report.add("HB-W16", path, what);
         } else {
             crate::handbook::rules::page_rules(root, folder, found, &mut report);
         }
@@ -262,7 +253,7 @@ fn index_rules(folder: &FolderScan, index: &Found, linked: &HashSet<String>, rep
     for found in &folder.pages {
         let path = found.path.as_str();
         let facts = &found.scan.facts;
-        if path == INDEX || facts.lite || facts.is_pre_format() || linked.contains(path) {
+        if path == INDEX || facts.lite || linked.contains(path) {
             continue;
         }
         report.add(
@@ -283,7 +274,7 @@ fn index_rules(folder: &FolderScan, index: &Found, linked: &HashSet<String>, rep
     let newest = folder
         .pages
         .iter()
-        .filter(|f| f.path.as_str() != INDEX && !f.scan.facts.lite && !f.scan.facts.is_pre_format())
+        .filter(|f| f.path.as_str() != INDEX && !f.scan.facts.lite)
         .filter_map(|f| {
             let date = f.scan.facts.modified.as_deref()?;
             format::is_date(date).then_some((date, f.path.as_str()))

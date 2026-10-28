@@ -3,7 +3,7 @@ import type { GitStatusView, WorktreeInfo } from "../../protocol/core";
 import { chipText } from "./model";
 
 /** A display name only; full paths remain in the chip's tooltip and expansion. */
-export function folderName(path: string): string {
+function folderName(path: string): string {
   return (
     path
       .replace(/[\\/]+$/, "")
@@ -22,11 +22,14 @@ export function locationText(
   const name = project ?? (cwd === null ? null : folderName(cwd));
   if (info !== null && info.state !== "ready")
     return [name, chipText(info)].filter(Boolean).join(" › ");
-  const head = status?.repo === "." ? status.state?.head : null;
+  // A ready copy can arrive before the Git read for its new cwd. The old folder's branch belongs to
+  // the main checkout; use the recorded copy branch until Git has read the copy itself.
+  const current = info !== null && status?.location !== "copy" ? undefined : status;
+  const head = current?.repo === "." ? current.state?.head : null;
   const branch =
     head?.kind === "branch"
       ? head.name
-      : (status?.repos.find((repo) => repo.root === ".")?.branch ?? info?.branch ?? null);
+      : (current?.repos.find((repo) => repo.root === ".")?.branch ?? info?.branch ?? null);
   if (info === null && branch === null && head?.kind !== "detached") return null;
   const copy = info === null ? null : `copy "${folderName(info.path ?? cwd ?? info.branch)}"`;
   const text = [name, copy, branch === null ? "Not on a branch" : `branch ${branch}`]

@@ -6,6 +6,27 @@ use std::sync::Arc;
 use crate::{EngineError, MountId, PreviewError, PreviewService};
 
 impl PreviewService {
+    /// Prints only the current authorized mount; released pages are never recreated.
+    ///
+    /// # Errors
+    /// A hidden/protected page, replaced mount, engine failure or timeout.
+    pub async fn print_pdf_on_mount(&self, id: &MountId) -> Result<Vec<u8>, PreviewError> {
+        let _activity = self.session_lock(&id.session_id).await;
+        if self.page_mount(&id.session_id).as_ref() != Some(id) {
+            return Err(EngineError::NotMounted.into());
+        }
+        if self.shots_blocked(&id.session_id) {
+            return Err(PreviewError::Image(crate::browse::SHOTS_BLOCKED.to_owned()));
+        }
+        self.require_visible_screenshot(&id.session_id)?;
+        Ok(tokio::time::timeout(
+            std::time::Duration::from_secs(36),
+            self.engine.print_pdf(id),
+        )
+        .await
+        .map_err(|_| EngineError::Timeout("saving the PDF".into()))??)
+    }
+
     /// Evaluates a script only while `id` is the session's mounted preview.
     ///
     /// # Errors

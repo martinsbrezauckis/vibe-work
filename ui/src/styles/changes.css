@@ -25,7 +25,7 @@
   margin: 0 0 8px;
 }
 .bulk .live2 {
-  font-size: 11.5px;
+  font-size: var(--text-11-5);
   color: var(--text-3);
   display: inline-flex;
   align-items: center;
@@ -37,33 +37,45 @@
   margin: 0 0 12px;
   padding: 0;
   border: 1px solid var(--line);
-  border-radius: 10px;
+  border-radius: var(--radius-lg);
   overflow: hidden;
 }
-.files li button {
+/* A row: the file's button, then its ⋯ (the row's menu). */
+.files li {
+  display: flex;
+  align-items: center;
+  border-top: 1px solid var(--line);
+  background: var(--bg);
+}
+.files li:first-child {
+  border-top: 0;
+}
+.files li > .row-more {
+  margin-right: 6px;
+}
+.files li > button:not(.row-more) {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 2px 8px;
-  width: 100%;
+  flex: 1;
+  min-width: 0;
   align-items: center;
   padding: 8px 12px;
   border: 0;
-  border-top: 1px solid var(--line);
-  background: var(--bg);
+  background: transparent;
   cursor: pointer;
-  font-family: var(--mono);
-  font-size: 12px;
+  font-family: var(--font-mono);
+  font-size: var(--text-12);
   color: var(--text-2);
   text-align: left;
 }
-.files li:first-child button {
-  border-top: 0;
-}
-.files li button[aria-current="true"] {
+.files li:has(> button[aria-current="true"]) {
   background: var(--active);
+}
+.files li > button:not(.row-more)[aria-current="true"] {
   color: var(--text);
 }
-.files li button > span:first-child {
+.files li > button:not(.row-more) > span:first-child {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -71,7 +83,7 @@
 .files .fst {
   grid-column: 1 / 3;
   font-family: var(--font-ui);
-  font-size: 11px;
+  font-size: var(--text-11);
   color: var(--text-3);
 }
 .filebar {
@@ -82,8 +94,8 @@
   margin-bottom: 8px;
 }
 .filebar .fname {
-  font-family: var(--mono);
-  font-size: 12px;
+  font-family: var(--font-mono);
+  font-size: var(--text-12);
   color: var(--text-2);
   margin-right: auto;
   overflow: hidden;
@@ -99,32 +111,19 @@
   flex-wrap: wrap;
 }
 .dtool .fmeta {
-  font-size: 11.5px;
+  font-size: var(--text-11-5);
   color: var(--text-3);
 }
-.mini {
-  border: 1px solid var(--line-2);
-  background: var(--panel);
-  border-radius: 6px;
-  padding: 2px 8px;
-  font-size: 11.5px;
-  cursor: pointer;
-  font-family: var(--font-ui);
-  color: var(--text-2);
-}
-.mini:hover:not(:disabled) {
-  color: var(--text);
-  border-color: var(--line-3);
-}
+
 .review {
   border: 1px solid var(--line);
-  border-radius: 10px;
+  border-radius: var(--radius-lg);
   overflow: hidden;
   background: var(--bg);
 }
 .review-note {
   padding: 12px;
-  font-size: 12.5px;
+  font-size: var(--text-12-5);
   color: var(--text-3);
 }
 .hunk + .hunk {
@@ -137,8 +136,8 @@
   padding: 6px 10px;
   background: var(--raised);
   border-bottom: 1px solid var(--line);
-  font-family: var(--mono);
-  font-size: 11.5px;
+  font-family: var(--font-mono);
+  font-size: var(--text-11-5);
   color: var(--text-3);
 }
 .hunk-h .sp {
@@ -151,8 +150,8 @@
 .split {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  font-family: var(--mono);
-  font-size: 12px;
+  font-family: var(--font-mono);
+  font-size: var(--text-12);
   line-height: 1.65;
 }
 .split > div {
@@ -187,7 +186,7 @@
   background: repeating-linear-gradient(45deg, transparent 0 4px, var(--line) 4px 5px);
 }
 .bnote {
-  font-size: 12px;
+  font-size: var(--text-12);
   color: var(--text-3);
   margin-top: 10px;
 }
@@ -199,9 +198,9 @@
   padding: 10px 12px;
   margin-bottom: 12px;
   border: 1px solid var(--line);
-  border-radius: 10px;
+  border-radius: var(--radius-lg);
   background: var(--raised);
-  font-size: 12.5px;
+  font-size: var(--text-12-5);
   color: var(--text-2);
 }
 .history-offer span {
@@ -209,19 +208,19 @@
 }
 .turn-changes {
   border: 1px solid var(--line);
-  border-radius: 10px;
+  border-radius: var(--radius-lg);
   overflow: hidden;
   margin-bottom: 12px;
   background: var(--bg);
 }
 @media (prefers-reduced-motion: no-preference) {
-  .files li button {
+  .files li > button:not(.row-more) {
     transition: background 0.12s ease;
   }
 }
 .shared-note {
   flex-basis: 100%;
-  font-size: 12.5px;
+  font-size: var(--text-12-5);
   color: var(--text-2);
   margin: 4px 0;
 }

@@ -77,6 +77,10 @@ pub(crate) async fn place(
     #[cfg(not(target_os = "linux"))]
     {
         let b = placement.bounds.checked().map_err(EngineError::Platform)?;
+        let b = crate::page_origin::in_window(
+            b,
+            crate::page_origin::css_origin(&webview.window()).await?,
+        );
         webview
             .set_bounds(tauri::Rect {
                 position: tauri::Position::Logical(tauri::LogicalPosition::new(b.x, b.y)),
@@ -132,6 +136,25 @@ pub(crate) fn outside((width, height): (f64, f64)) -> (f64, f64) {
     (-(width + 10_000.0), -(height + 10_000.0))
 }
 
+/// Where a hidden webview parked at `bounds` (its would-be placement) sits.
+/// - Windows (and the position Linux ignores): [`outside`], above and left of the client area.
+/// - macOS: left of the content view at the placement's own top (`bounds.y`, in the content view's coordinates:
+///   [`crate::page_origin::in_window`]), never above it. A `WKWebView` whose
+///   frame reaches above the window's content layout rect gets an automatic top content inset (the title bar area)
+///   measured from its top edge: parked 10,000 pt above the window, its layout viewport height went negative
+///   (`innerHeight` -10032 for the vf1 sign-in page; no height media query matched for the viewport fixture) and a
+///   vertical scroller took 17 pt of its width (1249 instead of 1280 CSS px at desktop width), so the agent's clicks
+///   were refused and a background read differed from the shown page. Left of the window at the
+///   shown top it lays out exactly as it does once shown, and still no part of it can be drawn over the app.
+#[must_use]
+pub(crate) fn outside_at(bounds: vw_preview::Rect) -> (f64, f64) {
+    if cfg!(target_os = "macos") {
+        (-(bounds.width + 10_000.0), bounds.y)
+    } else {
+        outside((bounds.width, bounds.height))
+    }
+}
+
 /// Parks a hidden webview at `placement`'s size and zoom: the page lays out at the viewport it would have
 /// on screen, nothing is drawn. Used for a fresh mount that is not shown (`resize_hidden` false: Windows and macOS
 /// created it outside the window at this size already) and for a hidden webview whose device width changed
@@ -170,7 +193,10 @@ pub(crate) async fn park(
     }
     #[cfg(not(target_os = "linux"))]
     {
-        let (x, y) = outside((bounds.width, bounds.height));
+        let (x, y) = outside_at(crate::page_origin::in_window(
+            bounds,
+            crate::page_origin::css_origin(&webview.window()).await?,
+        ));
         webview
             .set_bounds(tauri::Rect {
                 position: tauri::Position::Logical(tauri::LogicalPosition::new(x, y)),
@@ -217,11 +243,22 @@ pub(crate) async fn park_browser_overlay(
     #[cfg(not(target_os = "linux"))]
     {
         webview.hide().map_err(platform)?;
+        // macOS: at the placement's own top, never above the window (see `outside_at`: a frame above the content
+        // layout rect gets a top inset larger than its height).
+        let top = if cfg!(target_os = "macos") {
+            crate::page_origin::in_window(
+                bounds,
+                crate::page_origin::css_origin(&webview.window()).await?,
+            )
+            .y
+        } else {
+            f64::from(BROWSER_PARKED_OFFSET)
+        };
         webview
             .set_bounds(tauri::Rect {
                 position: tauri::Position::Logical(tauri::LogicalPosition::new(
                     f64::from(BROWSER_PARKED_OFFSET),
-                    f64::from(BROWSER_PARKED_OFFSET),
+                    top,
                 )),
                 size: tauri::Size::Logical(tauri::LogicalSize::new(bounds.width, bounds.height)),
             })
@@ -230,10 +267,9 @@ pub(crate) async fn park_browser_overlay(
 }
 
 /// Removes the service-worker registrations of the webview's website data: a worker outlives the
-/// page that registered it and could later send requests under a newer mount's rights. Run at every guarded mount
-/// (Linux), before the first page; the page environment also refuses new registrations (`page_init.js`) on every
-/// platform.
-#[cfg_attr(not(target_os = "linux"), allow(clippy::unused_async))]
+/// page that registered it and could later send requests under a newer mount's rights. Run at every guarded web mount
+/// on every platform (Windows and macOS through vw-platform `webview::clear_service_workers`),
+/// before the first page; the page environment also refuses new registrations (`page_init.js`) on every platform.
 pub(crate) async fn clear_service_workers(
     webview: &Webview<Wry>,
     limit: Duration,
@@ -265,11 +301,62 @@ pub(crate) async fn clear_service_workers(
         )
         .await
     }
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(windows)]
     {
-        let _ = (webview, limit);
-        Ok(())
+        with_native(
+            webview,
+            "clearing service workers",
+            limit,
+            |native, reply| {
+                vw_platform::webview::clear_service_workers(
+                    &native.controller(),
+                    Box::new(move |result| {
+                        let _ = reply.send(result);
+                    }),
+                );
+            },
+        )
+        .await
     }
+    #[cfg(target_os = "macos")]
+    {
+        with_native(
+            webview,
+            "clearing service workers",
+            limit,
+            |native, reply| {
+                vw_platform::webview::clear_service_workers(
+                    native.inner(),
+                    Box::new(move |result| {
+                        let _ = reply.send(result);
+                    }),
+                );
+            },
+        )
+        .await
+    }
+}
+
+/// [`clear_service_workers`] for a `guarded` web mount (nothing otherwise). Linux refuses the mount when it fails (as
+/// before); Windows and macOS report it and go on: a runtime without the call must not cost the preview (hardening
+/// never cuts the feature).
+pub(crate) async fn clear_service_workers_at_mount(
+    webview: &Webview<Wry>,
+    guarded: bool,
+) -> Result<(), EngineError> {
+    if !guarded {
+        return Ok(());
+    }
+    // WebKitGTK takes about 4.6-4.8 s to clear a storage that holds a live registration (about 30 ms without one): 6 s
+    // covers it and keeps the whole mount within the preview service's 10 s engine bound.
+    let cleared = clear_service_workers(webview, Duration::from_secs(6)).await;
+    if cfg!(target_os = "linux") {
+        return cleared;
+    }
+    if let Err(error) = cleared {
+        tracing::warn!(%error, "service workers of the preview storage were not cleared");
+    }
+    Ok(())
 }
 
 /// Reads session-cookie presence through `WebKitGTK`, without exposing cookie values.
@@ -594,6 +681,46 @@ pub(crate) async fn screenshot(
         })
         .await
     }
+}
+
+/// macOS: a sharp viewport snapshot of a zoomed preview (block ): rendered at one point per CSS pixel
+/// (`vw_platform::webview::snapshot_png_sharp`); the full-page stitch retries with ordinary slices if it fails.
+#[cfg(target_os = "macos")]
+pub(crate) async fn screenshot_sharp(
+    webview: &Webview<Wry>,
+    limit: Duration,
+) -> Result<Vec<u8>, EngineError> {
+    with_native(
+        webview,
+        "taking a sharp screenshot",
+        limit,
+        |native, reply| {
+            vw_platform::webview::snapshot_png_sharp(
+                native.inner(),
+                Box::new(move |result| {
+                    let _ = reply.send(result);
+                }),
+            );
+        },
+    )
+    .await
+}
+
+/// macOS: turns WebTransport off for the webview's next documents (`vw_platform::web_transport`): `WebKit` opens
+/// WebTransport sessions around the data store's proxy. Call before the first page.
+#[cfg(target_os = "macos")]
+pub(crate) async fn web_transport_off(webview: &Webview<Wry>) -> Result<(), EngineError> {
+    with_native(
+        webview,
+        "turning WebTransport off",
+        Duration::from_secs(4),
+        |native, reply| {
+            let _ = reply.send(vw_platform::web_transport::turn_off_web_transport(
+                native.inner(),
+            ));
+        },
+    )
+    .await
 }
 
 /// Windows: refuses a webview that did not get the session's own `WebView2` profile (named `profile`, the storage

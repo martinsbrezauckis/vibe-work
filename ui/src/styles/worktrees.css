@@ -5,7 +5,7 @@
  */
 .copy-section {
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   padding: 10px 12px;
   margin: 0;
   display: grid;
@@ -17,21 +17,35 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  font-weight: 500;
+  font-weight: var(--weight-medium);
 }
 .copy-reason {
   margin: 0;
   color: var(--text-2);
-  font-size: 12.5px;
+  font-size: var(--text-12-5);
 }
 .copy-fields {
   display: grid;
   gap: 8px;
 }
+/* "More options": the base branch, the branch name and the git-ignored files note, closed by default. */
+.copy-more summary {
+  color: var(--text-2);
+  font-size: var(--text-12-5);
+  cursor: pointer;
+  width: fit-content;
+  border-radius: var(--radius-5);
+}
+.copy-more summary:focus-visible {
+  outline: 2px solid var(--text-2);
+}
+.copy-more[open] > summary {
+  margin-bottom: 8px;
+}
 .copy-fields label {
   display: grid;
   gap: 4px;
-  font-size: 12.5px;
+  font-size: var(--text-12-5);
   color: var(--text-2);
 }
 .copy-fields select,
@@ -41,18 +55,37 @@
   color: var(--text);
   background-color: var(--bg);
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   padding: 5px 8px;
   min-width: 0;
 }
 .copy-fields select {
   padding-right: 24px;
 }
-.shead:has(.wt-location) {
+/* The header's second line holds the location chip and the session grants chip:
+   the chips share one line, an expanded chip's content opens below it at full width. */
+.shead:has(.shead-line > *) {
   flex-wrap: wrap;
 }
-.shead .wt-location {
+.shead .shead-line {
   order: 1;
+  flex: 0 0 100%;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: 14px;
+}
+.shead .shead-line:empty {
+  display: none;
+}
+.shead-line > .wt-location,
+.shead-line > .ask-grants {
+  display: contents;
+}
+.shead-line .wt-location-full,
+.shead-line .ask-grants-list {
+  order: 2;
   flex: 0 0 100%;
   min-width: 0;
 }
@@ -72,7 +105,7 @@
 }
 .wt-location-full {
   margin-top: 6px;
-  font-size: 12px;
+  font-size: var(--text-12);
   color: var(--text-2);
   overflow-wrap: anywhere;
 }
@@ -104,7 +137,7 @@
   margin-top: 18px;
 }
 .wt-orphans h3 {
-  font-size: 13px;
+  font-size: var(--text-13);
   margin: 0 0 6px;
 }
 .wt-orphans ul {
@@ -125,19 +158,19 @@
 
 /* what .worktreeinclude copies. In the header the list opens as a small panel under the chip row. */
 .wt-include {
-  font-size: 12.5px;
+  font-size: var(--text-12-5);
   color: var(--text-2);
   position: relative;
 }
 .shead .wt-include details[open] > .wt-files {
   position: absolute;
-  z-index: 5;
+  z-index: var(--z-sticky);
   top: 100%;
   left: 0;
   min-width: 260px;
   background-color: var(--bg);
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   padding: 8px 12px 8px 26px;
 }
 .wt-include summary {
@@ -145,4 +178,47 @@
 }
 .wt-skipped {
   color: var(--text-3);
+}
+/* The session grants list: one row per grant, its words wrap, Revoke on the right. */
+.ask-grants-list {
+  margin-top: 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--panel);
+  padding: 8px 12px;
+}
+.ask-grants-list > .ui-help {
+  margin: 0 0 2px;
+}
+.ask-grants-list .ask-grant {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0;
+}
+.ask-grants-list .ask-grant + .ask-grant {
+  border-top: 1px solid var(--line);
+}
+.ask-grants-list .ask-grant > span {
+  color: var(--text);
+  font-size: var(--text-13);
+  overflow-wrap: anywhere;
+}
+.ask-grants-list .ask-grant .d {
+  display: block;
+  color: var(--text-3);
+  font-size: var(--text-12);
+}
+.ask-grants-list code {
+  font-family: var(--font-mono);
+}
+.ask-grants-list .key-line:empty {
+  display: none;
+}
+.ask-grants-text {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }

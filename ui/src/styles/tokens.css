@@ -41,11 +41,9 @@
   --brand-2: #fa500f;
   --brand-3: #e61300;
   --scrim: #00000066;
-  --danger-strong: #e81123;
-  --mono: "Space Mono", ui-monospace, Menlo, monospace;
   /* Shared typography and control geometry used by Settings and Vault. */
   --font-ui: "Inter Variable", Inter, system-ui, sans-serif;
-  --font-mono: var(--mono);
+  --font-mono: "Space Mono", ui-monospace, Menlo, monospace;
   --text-10-5: 10.5px;
   --text-11: 11px;
   --text-11-5: 11.5px;
@@ -59,12 +57,54 @@
   --text-22: 22px;
   --text-24: 24px;
   --text-28: 28px;
+  --text-14-5: 14.5px;
+  --text-15: 15px;
+  --text-18: 18px;
+  --text-34: 34px;
+  --weight-bold: 700;
+  --leading-tight: 1;
+  --leading-copy: 1.55;
   --weight-regular: 400;
   --weight-medium: 500;
   --weight-semibold: 600;
   --weight-heading: 650;
   --leading-ui: 1.5;
   --leading-helper: 1.45;
+  /* Shared corners and stacking levels retain existing geometry. */
+  --radius-lg: 10px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-14: 14px;
+  --radius-5: 5px;
+  --radius-7: 7px;
+  --radius-pill: 999px;
+  --radius-2: 2px;
+  --radius-round: 50%;
+  --radius-3: 3px;
+  --radius-9: 9px;
+  --radius-xs: 4px;
+  --radius-xl: 12px;
+  --radius-2-5: 2.5px;
+  --radius-1: 1px;
+  --radius-dialog: 16px;
+  --z-sticky: 5;
+  --z-overlay: 3;
+  --z-toolbar: 4;
+  --z-menu: 60;
+  --z-selector: 65;
+  --z-content: 1;
+  --z-raised: 2;
+  --z-page: 35;
+  --z-page-detail: 36;
+  --z-underlay: -1;
+  --z-browser-menu: 90;
+  --z-floating: 25;
+  --z-browser-address: 120;
+  --z-popover: 30;
+  --z-panel: 20;
+  --z-scrim: 40;
+  --z-dialog: 50;
+  --focus-ring: 0 0 0 2px var(--bg), 0 0 0 4px var(--focus);
   --space-control-gap: 8px;
   --space-card-gap: 16px;
   --space-card-inline: 16px;
@@ -75,6 +115,8 @@
   --control-height-search: 34px;
   --control-height-field: 36px;
   --settings-row-min-height: 50px;
+  /* The chat header and the side panel's tab bar share one height, so their bottom lines meet. */
+  --header-height: 54px;
   /* Motion (styles/feel.css): one vocabulary for every response. Exits run about 0.7x their entries. */
   --t-press: 80ms; /* a press going down (release: 160 ms) */
   --t-hover: 140ms; /* hover in and out, colour changes */
@@ -247,9 +289,6 @@ input[type="checkbox"]:checked::before {
    (the old outline forced a 6 px radius on everything). Only for keyboard focus. */
 :focus-visible {
   outline: none;
-  box-shadow:
-    0 0 0 2px var(--bg),
-    0 0 0 4px var(--focus);
 }
 @media (prefers-reduced-motion: reduce) {
   *,

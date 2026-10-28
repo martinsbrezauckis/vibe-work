@@ -230,7 +230,10 @@ fn with_eol(text: &str) -> String {
 
 /// The hunks of `old` -> `new` (3 lines of context), without file headers.
 fn hunks(old: &str, new: &str) -> String {
-    let (old, new) = (with_eol(old), with_eol(new));
+    let (old, new) = (
+        with_eol(&old.replace("\r\n", "\n")),
+        with_eol(&new.replace("\r\n", "\n")),
+    );
     let diff = TextDiff::configure()
         .timeout(Duration::from_millis(200))
         .diff_lines(&old, &new);
@@ -326,6 +329,9 @@ pub(crate) fn render(head: &ExportHead, entries: &[Value]) -> (String, ExportCou
     let mut last_section: Option<&str> = None;
     let mut in_steps = false;
     for entry in entries {
+        if entry.pointer("/outcome/type").and_then(Value::as_str) == Some("discarded") {
+            continue;
+        }
         match (s(entry, "type"), s(entry, "role")) {
             (Some("message"), Some(role @ ("user" | "assistant"))) => {
                 let text = message_body(entry);

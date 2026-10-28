@@ -1,5 +1,5 @@
 //! The single writer for the app's settings.json, shared by core features and host switches.
-//! Depends on `serde_json` and atomic replacement; preserves unrelated settings and normalizes scan switches.
+//! Depends on `serde_json` and atomic replacement; preserves unrelated settings and normalizes the scan switch.
 
 use crate::SecretScanSettings;
 use serde_json::{Map, Value};
@@ -8,7 +8,7 @@ use std::sync::{Mutex, PoisonError};
 
 static WRITE: Mutex<()> = Mutex::new(());
 
-/// Merge app settings and atomically save them. Disabling scanning always saves automatic redaction off.
+/// Merge app settings and atomically save them. The scan switch is saved without fields older versions wrote.
 ///
 /// # Errors
 /// Settings cannot be read, parsed, or written. No Vibe configuration is touched.
@@ -21,11 +21,6 @@ pub fn write_app_settings(path: &Path, update: Map<String, Value>) -> std::io::R
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Map::new(),
         Err(error) => return Err(error),
     };
-    let was_enabled = settings
-        .get("secretScan")
-        .and_then(|scan| scan.get("enabled"))
-        .and_then(Value::as_bool)
-        .unwrap_or(false);
     for (key, value) in update {
         if value.is_null() {
             settings.remove(&key);
@@ -34,9 +29,7 @@ pub fn write_app_settings(path: &Path, update: Map<String, Value>) -> std::io::R
         }
     }
     if let Some(value) = settings.get_mut("secretScan") {
-        let mut scan: SecretScanSettings =
-            serde_json::from_value(value.clone()).map_err(std::io::Error::other)?;
-        scan.auto_redact &= scan.enabled && was_enabled;
+        let scan = saved_scan(value).map_err(std::io::Error::other)?;
         *value = serde_json::to_value(scan).map_err(std::io::Error::other)?;
     }
     if let Some(parent) = path.parent() {
@@ -54,6 +47,25 @@ pub(crate) fn scan_settings(path: &Path) -> SecretScanSettings {
     std::fs::read(path)
         .ok()
         .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
-        .and_then(|settings| serde_json::from_value(settings.get("secretScan")?.clone()).ok())
+        .and_then(|settings| saved_scan(settings.get("secretScan")?).ok())
         .unwrap_or_default()
+}
+
+/// The saved scan switch. Earlier versions also saved `autoRedact` (automatic redaction, removed): it is dropped and
+/// never acts, so such a file keeps its scan setting and other writers can still save. Commands refuse the field.
+fn saved_scan(value: &Value) -> serde_json::Result<SecretScanSettings> {
+    let mut value = value.clone();
+    if let Some(scan) = value.as_object_mut() {
+        scan.remove("autoRedact");
+    }
+    serde_json::from_value(value)
+}
+
+/// Missing or older settings keep idle-sleep inhibition on by default.
+pub(crate) fn keep_awake_enabled(path: &Path) -> bool {
+    std::fs::read(path)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
+        .and_then(|settings| settings.get("keepAwake").and_then(Value::as_bool))
+        .unwrap_or(true)
 }

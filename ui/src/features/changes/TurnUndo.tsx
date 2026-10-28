@@ -7,11 +7,12 @@
  * Invariant: the limits of this undo are said where the user decides (here and in the confirmation):
  * whole turns only, later turns go too, and only files Vibe saved before changing them.
  */
+import { Button } from "../../components/Controls";
 import { type ReactElement, useMemo } from "react";
 
 import type { ChangesView } from "../../protocol/core";
 import { useCoreState } from "../shell/hooks";
-import { editDiff, writeDiff } from "../transcript/model/diff";
+import { editDiff, writeDiff, firstChangedLine } from "../transcript/model/diff";
 import { type Obj, arr, detailOf, entryId, obj } from "../transcript/model/entries";
 import { DiffView } from "../transcript/rows/DiffView";
 import type { Changes } from "./store";
@@ -28,7 +29,9 @@ function EntryDiff({
 }): ReactElement | null {
   const diff = detailOf(entry)["kind"] === "file_edit" ? editDiff(entry) : writeDiff(entry);
   return diff === null ? null : (
-    <DiffView diff={{ ...diff, path }} id={`changes:${sessionId}:${entryId(entry)}`} />
+    <div data-review-path={path} data-review-line={firstChangedLine(diff)}>
+      <DiffView diff={{ ...diff, path }} id={`changes:${sessionId}:${entryId(entry)}`} />
+    </div>
   );
 }
 
@@ -62,15 +65,15 @@ export function TurnUndo(props: {
       {view.offerHistory && !foundRepo && (
         <div className="history-offer" role="note">
           <span>Keep versions of this folder so you can save work and go back.</span>
-          <button
+          <Button
             data-testid="changes.turn-undo-ask-history"
             type="button"
-            className="mini"
+            appearance="compact"
             data-action="enable-history"
             onClick={() => void changes.askHistory(view.sessionId)}
           >
             Turn on version history
-          </button>
+          </Button>
         </div>
       )}
       {[...view.turns].reverse().map((turn) => {
@@ -89,16 +92,16 @@ export function TurnUndo(props: {
               </span>
               <span className="sp" />
               {turn.subagent === undefined && turn.anchorEntryId !== null && (
-                <button
+                <Button
                   data-testid="changes.turn-undo-ask-undo"
                   type="button"
-                  className="mini"
+                  appearance="compact"
                   disabled={busy}
                   data-action="undo-turn"
                   onClick={() => void changes.askUndo(view.sessionId, turn.turnId, turn.number)}
                 >
                   Undo turn
-                </button>
+                </Button>
               )}
             </div>
             {turn.files.map((file) =>

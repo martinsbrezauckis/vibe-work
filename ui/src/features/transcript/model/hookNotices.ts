@@ -3,7 +3,7 @@
  * diagnostics; only lifecycle/no-op notices and a duplicated skipped call leave the transcript.
  * Depends on: entries. Called by: build and the hook row. Unknown notices remain visible.
  */
-import { type Obj, detailOf, entryId, entryType, stateOf, statusOf, str } from "./entries";
+import { type Obj, detailOf, entryId, entryType, obj, stateOf, statusOf, str } from "./entries";
 
 const HOOK_KINDS = new Set([
   "hook_run_started",
@@ -56,6 +56,16 @@ export function hookLine(entry: Obj, byId: ReadonlyMap<string, Obj>): HookLine |
       error: true,
     };
   }
+  // A successful transport binding/rewrite is diagnostic bookkeeping, not conversation text.
+  if (
+    name === "vibe-work tool receipt" &&
+    reason === null &&
+    (status === "ok" ||
+      (detail["scope"] === "pre_tool" &&
+        status === "warning" &&
+        /^Rewrote tool_input for '[a-z][a-z0-9_]*'$/.test(content)))
+  )
+    return null;
   // An invalid input rewrite can itself deny the call after a warning completion.
   if (reason !== null) return { text: reason || `Not run: ${name} refused the call.`, error: true };
   if (content.trim() !== "") return { text: `${name}: ${content}`, error: status === "error" };
@@ -80,8 +90,13 @@ export function transcriptEntries(entries: readonly Obj[]): Obj[] {
       suppressedCalls.add(callId);
   }
   return entries.filter((entry) =>
-    isHookNotice(entry)
-      ? hookLine(entry, byId) !== null
-      : !(entryType(entry) === "effect" && suppressedCalls.has(entryId(entry))),
+    (entryType(entry) === "callback" &&
+      entry["vwToolAsk"] !== true &&
+      str(obj(obj(detailOf(entry)["effect"])?.["input"])?.["_vwReceipt"]) !== null) ||
+    obj(entry["outcome"])?.["type"] === "discarded"
+      ? false
+      : isHookNotice(entry)
+        ? hookLine(entry, byId) !== null
+        : !(entryType(entry) === "effect" && suppressedCalls.has(entryId(entry))),
   );
 }

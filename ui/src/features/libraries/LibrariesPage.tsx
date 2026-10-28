@@ -5,6 +5,7 @@
  * Depends on: hooks, AskPanel, LibraryDetail, TextViewer. Called by: Content.
  * Invariants: components render, the libraries controller decides; file content is text only.
  */
+import { Button } from "../../components/Controls";
 import { type ReactElement, type SyntheticEvent, useEffect, useRef, useState } from "react";
 
 import type { LibraryScope } from "../../protocol/core";
@@ -47,14 +48,14 @@ function NewLibrary(): ReactElement {
         onChange={setScope}
         disabled={blocked}
       />
-      <button
+      <Button
         data-testid="libraries.libraries-page-tb-btn"
         type="submit"
-        className="tb-btn"
+
         disabled={blocked || busy === "create" || name.trim() === ""}
       >
         Make library
-      </button>
+      </Button>
     </form>
   );
 }

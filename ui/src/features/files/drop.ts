@@ -7,19 +7,18 @@
  * - a folder -> refused ("drop the files inside it");
  * - over 50 MB -> refused (the documents limit);
  * - PNG, JPEG, GIF or WebP (by their bytes) up to 10 MB -> an inline picture (the gate checks it again);
- * - everything else (and bigger pictures) -> a document (`documents addDropped`): PDF/Word/PowerPoint/pictures wait
- *   for "Read text" (OCR), Excel/CSV/any UTF-8 text are read on this computer at once; archives and binary files
+ * - everything else (and bigger pictures) -> a document (`documents addDropped`): PDF/pictures are read automatically
+ *   with OCR; Word/PowerPoint/Excel/CSV/UTF-8 text are read locally; archives and binary files
  *   come back refused with the core's sentence.
  *
  * Depends on: composer image model (sniffing, base64), attachments (refusal text). Called by: Composer, the `ui/files drop` route, tests.
  */
-import { NEW_CHAT } from "../../state/newChatKey";
 import { toCallError } from "../../protocol/client/types";
 import { MAX_IMAGE_BYTES, sniffImage, toBase64 } from "../composer/model/images";
 import { attachmentRefusal } from "./attachments";
 
 /** The largest file the documents path takes (the core checks it again). */
-export const MAX_DROP_BYTES = 50 * 1024 * 1024;
+const MAX_DROP_BYTES = 50 * 1024 * 1024;
 
 /** One dropped item, independent of the browser API it came from. */
 export interface DroppedItem {
@@ -164,18 +163,13 @@ export async function runDrop(
   origin: "ui" | "debug-api",
 ): Promise<DropReport> {
   const pictures = origin === "ui" ? app.composer.actions : app.composer.debugApi;
-  // documents belong to a session (the core reads and keeps them per session), so the new-chat view takes
-  // pictures only until its chat has started; documents are refused with that reason.
-  const newChat = sessionId === NEW_CHAT;
   const documents =
-    app.documents === null || newChat
+    app.documents === null
       ? null
       : origin === "ui"
         ? app.documents.actions
         : app.documents.debugApi;
-  const noDocuments = newChat
-    ? "Documents attach once the chat has started: send a first message, then add them."
-    : "Documents are not available in this build.";
+  const noDocuments = "Documents are not available in this build.";
   const report = await dropFiles(items, {
     attachPictures: (files) => pictures?.attachFiles(sessionId, files) ?? Promise.resolve(0),
     addDocuments: (files) =>

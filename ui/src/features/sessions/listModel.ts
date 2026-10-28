@@ -107,7 +107,7 @@ function segments(path: string): string[] {
 }
 
 /** The folder form the core compares (trailing separators removed). */
-export function normalizeFolder(path: string): string {
+function normalizeFolder(path: string): string {
   const trimmed = path.replace(/[\\/]+$/, "");
   return trimmed === "" || trimmed.endsWith(":") ? path : trimmed;
 }
@@ -322,4 +322,21 @@ export function buildList(
     unfiled: withChips(unfiled, null),
     grouped: true,
   };
+}
+
+/** Names independently branched chats separately from owned subagent chats in a disclosure. */
+export function childChatLabel(
+  children: readonly RowNode[],
+  owned: (id: string) => boolean,
+): string {
+  const agents = children.filter((child) => owned(child.session.id)).length;
+  const branches = children.length - agents;
+  const words = (count: number, kind: string) =>
+    `${String(count)} ${kind} chat${count === 1 ? "" : "s"}`;
+  return [
+    branches > 0 ? words(branches, "branched") : "",
+    agents > 0 ? words(agents, "subagent") : "",
+  ]
+    .filter(Boolean)
+    .join(" and ");
 }

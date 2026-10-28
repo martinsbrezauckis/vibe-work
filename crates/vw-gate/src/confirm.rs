@@ -71,6 +71,21 @@ pub enum Confirmation {
 }
 
 impl Confirmation {
+    /// Shared agent-facing sentence for a declined permission.
+    #[must_use]
+    pub fn agent_text(self, what: &str) -> String {
+        match self {
+            Self::Declined => vw_ask::agent_text(
+                &vw_ask::Outcome::Refused {
+                    by: vw_ask::AnsweredBy::Person,
+                    note: None,
+                },
+                what,
+            ),
+            _ => String::new(),
+        }
+    }
+
     /// True for both approvals (this request is approved either way).
     #[must_use]
     pub fn approved(self) -> bool {

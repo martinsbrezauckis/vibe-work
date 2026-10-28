@@ -1,13 +1,12 @@
 //! The instructions part of the command API: the requests both clients send inside
 //! `Command::Instructions` and what comes back. Instructions are the `AGENTS.md` files Vibe puts in
-//! the system prompt: the personal one in Vibe Work's own `VIBE_HOME` and one per project folder.
+//! the system prompt. This command reads and writes the personal file in Vibe Work's own `VIBE_HOME`.
 //!
 //! Depends on: serde. Called by: `command`, `instructions` (the handler), the UI through the
 //! generated TypeScript, vw-debug-api.
 //! Invariants:
 //! - Wire form: `{"op": "<camelCase>", ...camelCase fields}`, unknown fields refused.
-//! - A project document is always the session's folder as the core knows it, never a path from the
-//!   client; the personal document is always the file in Vibe Work's own home.
+//! - Personal requests always address the file in Vibe Work's own home. Projects shares the document view.
 //! - Nothing here names a path inside the user's CLI home beyond what [`InstructionsDoc::cli`]
 //!   states (found or not): the CLI file's text only travels in a `readCli` answer.
 
@@ -20,8 +19,6 @@ use serde::{Deserialize, Serialize};
 pub enum InstructionsScope {
     /// `$VIBE_HOME/AGENTS.md` of Vibe Work's own home: applies to every session of the app.
     Personal,
-    /// `AGENTS.md` in the folder of one session.
-    Project,
 }
 
 /// One request about instructions. The Debug API acts with the user's rights; reads and writes
@@ -37,12 +34,8 @@ pub enum InstructionsScope {
 pub enum InstructionsRequest {
     /// Reads one document (text, whether it can be edited, where it is).
     Read {
-        /// Personal or project.
+        /// Personal instructions.
         scope: InstructionsScope,
-        /// The session whose folder holds the project document (required for `project`).
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        #[cfg_attr(feature = "ts", ts(optional))]
-        session_id: Option<String>,
     },
     /// Reads the personal `AGENTS.md` of the user's own Vibe command-line home, so the user can
     /// copy it into Vibe Work's. One-way: nothing is ever written there. From the Debug API origin
@@ -51,12 +44,8 @@ pub enum InstructionsRequest {
     /// Replaces one document with `text`, exactly. Refused when the file no longer holds what the
     /// user saw (`expected`), when it is a link, or when the text is over the size limit.
     Write {
-        /// Personal or project.
+        /// Personal instructions.
         scope: InstructionsScope,
-        /// The session whose folder holds the project document (required for `project`).
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        #[cfg_attr(feature = "ts", ts(optional))]
-        session_id: Option<String>,
         /// The complete new text.
         text: String,
         /// The text the user saw when the preview was made (absent: the file did not exist).
@@ -71,12 +60,8 @@ pub enum InstructionsRequest {
     /// channels of the affected sessions: a quiet session closes now, a busy one when its turn ends;
     /// the next message reopens the session (`session/resume`) with the new text. No file is touched.
     Apply {
-        /// `personal`: every open session. `project`: the open sessions in the session's folder.
+        /// Every open session.
         scope: InstructionsScope,
-        /// The session whose folder is meant (required for `project`).
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        #[cfg_attr(feature = "ts", ts(optional))]
-        session_id: Option<String>,
     },
 }
 
@@ -85,8 +70,6 @@ pub enum InstructionsRequest {
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct InstructionsDoc {
-    /// Personal or project.
-    pub scope: InstructionsScope,
     /// The file's full path (shown to the user; the user owns these folders).
     pub path: String,
     /// The folder the project document lives in (`project` only).

@@ -2,20 +2,22 @@
  * The first-run setup screen for the Mistral key: covers the content area while no working key
  * exists (or while the result of the test is being read). One short step, plain words: it picks the
  * step the key status calls for (`stepOf`) and renders it under a title that says where the user is.
- * Depends on: AppContext, useKeys, the step components, state/keyView, state/keyText.
+ * Depends on: AppContext, useKeys, the step components, state/keyView, state/keyText, SendToOffer (the one-time
+ * right-click menus question under the step).
  * Called by: Content (when `keys.covers()`), Settings (the same steps, inline).
  * Invariants: reads state only; every change goes through the key controller; no secret is kept here.
  */
 import { blockedText } from "../../state/keyText";
 import { covers } from "../../state/keyStore";
 import { stepOf } from "../../state/keyView";
-import { vibeCovers } from "../../state/vibeInstall";
+import { installTitle, vibeCovers } from "../../state/vibeInstall";
 import { KeyStep } from "./KeyStep";
 import { ResultStep } from "./ResultStep";
 import { UnlockStep } from "./UnlockStep";
 import { VaultStartStep } from "./VaultStartStep";
 import { useKeyUi } from "./useKeys";
 import { VibeInstallStep, useVibeUi } from "./VibeInstallStep";
+import { SendToOffer } from "../shell/SendToOffer";
 
 /** The screen. */
 export function SetupScreen() {
@@ -26,6 +28,7 @@ export function SetupScreen() {
   const showResult = pending || step.kind === "ready";
   // the Vibe install comes first and runs while the user adds the key.
   const installing = useVibeUi(vibeCovers);
+  const vibeTitle = useVibeUi((s) => installTitle(s.view));
   const keyCovers = useKeyUi(covers);
   if (!keyCovers) {
     return (
@@ -35,8 +38,9 @@ export function SetupScreen() {
         data-step="vibe"
         data-testid="setup-screen"
       >
-        <h2 id="setup-title">Install Vibe</h2>
+        <h2 id="setup-title">{vibeTitle}</h2>
         <VibeInstallStep />
+        <SendToOffer />
       </section>
     );
   }
@@ -49,7 +53,7 @@ export function SetupScreen() {
     >
       {installing && (
         <>
-          <h2>Install Vibe</h2>
+          <h2>{vibeTitle}</h2>
           <VibeInstallStep />
         </>
       )}
@@ -80,8 +84,10 @@ export function SetupScreen() {
           {blockedText(step.reason)}
         </p>
       ) : (
-        <p>Reading the vault...</p>
+        <p>Reading the vault…</p>
       )}
+      {/* The one-time question about the right-click menus (macOS and Linux have no installer to ask it). */}
+      <SendToOffer />
     </section>
   );
 }

@@ -28,6 +28,12 @@ fn run_with(
         }
         let targets = preflight(proposal)?;
         for (file, target) in proposal.files.iter().zip(&targets) {
+            if proposal.create_parents && file.kind == crate::Kind::Add {
+                let parent = target.absolute.parent().ok_or_else(|| Error::InvalidPath {
+                    path: file.path.clone(),
+                })?;
+                fs::create_dir_all(parent).map_err(|error| Error::io(&file.path, error))?;
+            }
             apply_file(file, target)?;
             record.applied.push(file.path.clone());
         }
@@ -54,7 +60,7 @@ fn preflight(proposal: &Proposal) -> Result<Vec<paths::Target>, Error> {
     }
     let mut targets = Vec::with_capacity(proposal.files.len());
     for file in &proposal.files {
-        let target = paths::validate_target(&root, &file.path).map_err(|error| {
+        let target = paths::validate_target_with_parents(&root, &file.path, proposal.create_parents).map_err(|error| {
             // A missing parent also means a captured file disappeared. Keep this a
             // stale review rather than an application failure; Add still needs a parent.
             if file.base_hash.is_some()

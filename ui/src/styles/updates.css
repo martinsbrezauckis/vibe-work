@@ -1,26 +1,32 @@
 /*
- * Update notice and the Settings "Updates" buttons. The notice is a card under the title bar, right
- * side; it sits above the content and below the toasts, and never moves the layout (fixed position).
+ * Update notice and the Settings "Updates" buttons. The notices are a strip under the title bar, across the window,
+ * in the page flow: the page below moves down while one shows, so a card never lies over a control (a floating card
+ * at the top right covered the chat header's and several Settings pages' buttons). Empty, the strip has no height.
+ * It is page content like the rest, so a modal's scrim and dialog lie over it.
  */
 /* The stack holds the Vibe Work card and the Vibe card. */
 .update-notices {
-  position: fixed;
-  z-index: 55;
-  top: 46px;
-  right: 18px;
-  width: min(440px, 92vw);
   display: grid;
-  gap: 8px;
+  min-width: 0;
 }
 .update-notice {
-  display: grid;
-  gap: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px 14px;
   background: var(--raised);
-  box-shadow: var(--shadow);
-  border-radius: 10px;
-  padding: 12px 14px;
+  border-bottom: 1px solid var(--line);
+  padding: 8px 14px;
   font-size: var(--text-13);
   border-left: 3px solid var(--text-3);
+}
+.update-notice > .update-notice-text {
+  flex: 1 1 280px;
+  min-width: 0;
+}
+.update-notice > progress {
+  flex: 1 1 100%;
 }
 .update-notice[data-tone="ask"] {
   border-left-color: var(--primary-bg);
@@ -57,10 +63,4 @@
 .vibe-update-dialog section {
   max-height: min(60vh, 520px);
   overflow: auto;
-}
-
-/* While a modal dialog is open everything outside it is inert (hooks/useModalFocus); the stack sits above the scrim
-   (z-index 55 > 40), so it would cover the dialog (seen with the Vibe update dialog at 390 px): hide it meanwhile. */
-.update-notices[inert] {
-  display: none;
 }

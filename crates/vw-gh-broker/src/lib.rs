@@ -2,6 +2,7 @@
 //! Depends on local IPC, serde, clap and the real GitHub CLI. The broker owns the token;
 //! each request is checked before gh starts, and returned bytes have the token redacted.
 
+pub mod entry;
 mod local;
 mod policy;
 mod runner;

@@ -9,7 +9,7 @@ import type { ReactElement } from "react";
 const pad = (n: number): string => String(n).padStart(2, "0");
 
 /** `HH:MM` in local time. */
-export function fmtTime(ms: number): string {
+function fmtTime(ms: number): string {
   const d = new Date(ms);
   return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }

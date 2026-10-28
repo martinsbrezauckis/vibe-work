@@ -183,9 +183,16 @@ impl Browser {
         };
         let _authorization_wait = self.sessions.authorization_wait(session_id, by);
         if !confirmer.confirm(request).await {
-            return Err(refused(format!(
-                "Not run: the user declined access to {service} through {}",
-                provider.name(),
+            return Err(refused(confirmer.refusal_text(session_id).unwrap_or_else(
+                || {
+                    vw_ask::agent_text(
+                        &vw_ask::Outcome::Refused {
+                            by: vw_ask::AnsweredBy::Person,
+                            note: None,
+                        },
+                        &format!("access to {service} through {}", provider.name()),
+                    )
+                },
             )));
         }
         Ok(())

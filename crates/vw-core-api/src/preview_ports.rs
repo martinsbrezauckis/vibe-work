@@ -22,6 +22,7 @@ use vw_procmon::{Attribution, Confidence, Owner, PortExplanation, PortOption, bu
 
 use crate::agent_tools::session::{owner_text, url};
 use crate::core::Shared;
+use crate::error::{CoreError, ErrorCode};
 use crate::preview_view::{BusyOption, BusyPortView, PreviewTarget};
 
 /// Busy-port explanations returned per list.
@@ -35,6 +36,9 @@ pub(crate) struct SessionPorts {
     pub(crate) leased: Vec<u16>,
     /// Owner of every listening port (any session or app).
     owners: BTreeMap<u16, PortOwner>,
+    /// Every port a listener attributed to any session holds (what a Local page may reach), as the re-check's
+    /// [`LivePorts::servers`].
+    pub(crate) servers: Vec<u16>,
 }
 
 impl SessionPorts {
@@ -62,9 +66,13 @@ pub(crate) fn session_ports(shared: &Shared, session_id: &str) -> Result<Session
     let mut owners: BTreeMap<u16, PortOwner> = BTreeMap::new();
     let mut proven: BTreeSet<u16> = BTreeSet::new();
     let mut targets: Vec<PreviewTarget> = Vec::new();
+    let mut servers: BTreeSet<u16> = BTreeSet::new();
     let leased = shared.procmon.leases().of(session_id);
     for item in attribution.listeners() {
         let port = item.listener.port;
+        if matches!(item.attributed.owner, Owner::Session { .. }) {
+            servers.insert(port);
+        }
         let owner = match &item.attributed.owner {
             Owner::Session { session_id: s } if s == session_id => PortOwner::ThisSession,
             Owner::Session { .. } => {
@@ -118,6 +126,7 @@ pub(crate) fn session_ports(shared: &Shared, session_id: &str) -> Result<Session
         targets,
         leased,
         owners,
+        servers: servers.into_iter().collect(),
     })
 }
 
@@ -280,4 +289,28 @@ pub(crate) fn busy_ports(shared: &Shared, session_id: &str) -> Vec<BusyPortView>
         }
     }
     views
+}
+
+impl crate::core::Core {
+    /// Stops the holder of `port` the explanation offers to stop (one of our sessions' processes only).
+    pub(crate) async fn stop_busy_owner(
+        &self,
+        session_id: &str,
+        port: u16,
+    ) -> Result<(), CoreError> {
+        let explanation = self.explain_port(Some(session_id.to_owned()), port).await?;
+        let target = explanation.options.iter().find_map(|o| match o {
+            vw_procmon::PortOption::StopOwner { process, .. } => Some(*process),
+            _ => None,
+        });
+        let Some(target) = target else {
+            return Err(CoreError::new(
+                ErrorCode::Denied,
+                format!(
+                    "nothing on port {port} can be stopped from Vibe Work (it is not one of its sessions' processes)"
+                ),
+            ));
+        };
+        self.stop_process_for_user(target).await.map(|_| ())
+    }
 }

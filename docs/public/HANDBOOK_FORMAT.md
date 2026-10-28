@@ -60,8 +60,7 @@ docs/handbook/
 
 **Why `docs/handbook/` and not `docs/pages/`:** the folder names the thing (the app tab is "Project", the
 concept is the handbook); "pages" is easily read as GitHub Pages; a recognisable name lets people and
-other tools find a handbook without the app. Earlier builds used `docs/pages/`: readers still open that
-folder when `docs/handbook/` does not exist, and §11 says how to move it.
+other tools find a handbook without the app.
 Note: if a repository publishes `docs/` with GitHub Pages, the handbook is published too.
 
 ## 3. The manifest (`index.html`)
@@ -509,7 +508,6 @@ A validator (Vibe Work runs one in its core; it reads files only and never edits
 | HB-W13 | warning | `handbook.css` missing or not linked |
 | HB-W14 | warning | page over 256 KB, over 500 sections or over 200 steps (the rest is not read) |
 | HB-W15 | warning | `handbook.format` major newer than 1 |
-| HB-W16 | warning | pre-1.0 page (`vw-kind`/`vw-status`/`vw-date`): needs migration (§11); other checks skipped |
 | HB-W17 | warning | an input without a question (`.hb-question`), a `text` input with options, or over 500 inputs / 100 options (the rest is not read) |
 | HB-I01 | info | field, kind or status from a newer minor version |
 | HB-I02 | info | more than one step `doing` |
@@ -542,22 +540,6 @@ How the rules read in the cases the table does not spell out:
 
 When the index is missing or out of date (E09, W03, W04), Vibe Work shows its own live list built from
 the page heads and says why; it can hand the findings to the agent as a request to fix them.
-
-## 11. Migration from pre-1.0 pages
-
-Earlier Vibe Work builds used `docs/pages/`, app-written `index.html` and `vw-*` meta names. Readers
-accept such pages (HB-W16). To migrate, the agent:
-
-1. Moves `docs/pages/` to `docs/handbook/`; `asks/` becomes `requests/` (numbered), `reports/` pages that
-   are research go to `research/`.
-2. Replaces `vw-kind` with `handbook.kind` (`ask` → `request`; `note` → `guide`, `reference` or
-   `explanation`), `vw-status` with a status token from §4, and `vw-date` with `dcterms.modified`
-   (and `dcterms.created`, from git history when known).
-3. Adds `handbook.format` and `description`; renames classes `vw-steps` → `hb-steps`, `vw-related` →
-   `hb-related`, `vw-meta` → `hb-meta`, `vw-kind` → `hb-kind`; replaces the inline style block with a
-   link to `handbook.css`; adds the `data-field` markers.
-4. Replaces an app-generated `index.html` (`<meta name="vw-generated" content="hub">`) with an index
-   written to §8, and fixes every link the validator reports.
 
 ## 12. Example handbook
 

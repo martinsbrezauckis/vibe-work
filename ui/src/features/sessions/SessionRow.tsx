@@ -3,13 +3,15 @@
  * local and CLI continuation tags,
  * the folder chip (for a session outside its project's main folder), a "more" button and child fold controls.
  * Right click, the context-menu key, Shift+F10 and the more button open the same action menu; F2 renames,
- * Delete asks for the native delete confirmation. The row can be dragged onto a project or "Not in a
+ * Delete asks for the native delete confirmation (not on a subagent's row: Vibe deletes a subagent's chat only
+ * with its parent). The row can be dragged onto a project or "Not in a
  * project" (with its children), and "Move to project…" in the menu is the keyboard way to do the same.
  * Depends on: AppContext, hooks, useGroups, dnd, Badge, RenameField, RowMenu, listModel (`RowNode`),
  * components/Icon. Called by: SessionRows. Invariants: the row never changes data
  * itself, it calls `sessions.*` / `groups.*` actions; the main button carries `data-session-id` and
  * `aria-current`; SessionRows owns child visibility and stable sibling identities.
  */
+import { Badge } from "../../components/Controls";
 import { useState } from "react";
 
 import { Icon } from "../../components/Icon";
@@ -19,13 +21,13 @@ import { NO_SESSION_TOOLS } from "../../state/sessionTools";
 import { useApp } from "../shell/AppContext";
 import { useCoreState, useShellState } from "../shell/hooks";
 import { VoiceChatTag } from "../voice/VoiceChatTag";
-import { Badge } from "./Badge";
+import { ActivityMark } from "./ActivityMark";
 import { LoopsTag } from "./LoopsTag";
 import { dragSessions } from "./dnd";
 import { beginSessionDrag } from "./listDrop";
-import type { RowNode } from "./listModel";
+import { childChatLabel, type RowNode } from "./listModel";
 import { RenameField } from "./RenameField";
-import { type MenuItem, RowMenu } from "../../components/RowMenu";
+import { type MenuItem, RowMenu, menuGroups } from "../../components/RowMenu";
 import { useGroupActions, useGroups } from "./useGroups";
 
 /** Stands in for the retry store when the app has no core (no session actions). */
@@ -55,6 +57,10 @@ export function SessionRow({
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const [renaming, setRenaming] = useState(false);
   const hasChildren = node.children.length > 0;
+  const childLabel = useCoreState(() =>
+    childChatLabel(node.children, (id) => sessions?.deleteRefusal(id) != null),
+  );
+  const subagent = useCoreState(() => sessions?.deleteRefusal(s.id) != null);
   const retrying = useStore(sessions?.retrying ?? NO_RETRIES, (x) => x.has(s.id));
   const temporary = useStore(app.sessionTools?.store ?? NO_SESSION_TOOLS, (x) =>
     x.temporary.includes(s.id),
@@ -77,58 +83,64 @@ export function SessionRow({
           separated: true,
         },
       ];
-  const items: MenuItem[] = [
-    ...stuckItems,
-    { id: "open", label: "Open", run: () => void sessions?.open(s.id), separated: s.stuck },
-    {
-      id: "rename",
-      label: "Rename",
-      run: () => {
-        setRenaming(true);
+  // One menu grammar: open, then the session's own changes, copy and show, Archive, Delete last in red.
+  // Items that cannot apply are left out (Pin on an archived session, Show folder without a folder).
+  const items: MenuItem[] = menuGroups(
+    stuckItems,
+    [{ id: "open", label: "Open", run: () => void sessions?.open(s.id) }],
+    [
+      {
+        id: "rename",
+        label: "Rename",
+        keys: "F2",
+        run: () => {
+          setRenaming(true);
+        },
       },
-    },
-    {
-      id: "pin",
-      label: s.pinned ? "Unpin" : "Pin to the top",
-      run: () => void sessions?.pin(s.id, !s.pinned),
-      disabled: s.archived,
-    },
-    {
-      id: "archive",
-      label: s.archived ? "Unarchive" : "Archive",
-      run: () => void sessions?.archive(s.id, !s.archived),
-    },
-    ...(groups !== null && grouped
-      ? [
-          {
-            id: "move",
-            label: "Move to project...",
-            run: () => {
-              groups.openMover(ids(node), menu ?? { x: 24, y: 24 });
-            },
+      !s.archived && {
+        id: "pin",
+        label: s.pinned ? "Unpin" : "Pin to the top",
+        run: () => void sessions?.pin(s.id, !s.pinned),
+      },
+      groups !== null &&
+        grouped && {
+          id: "move",
+          label: "Move to project…",
+          run: () => {
+            groups.openMover(ids(node), menu ?? { x: 24, y: 24 });
           },
-        ]
-      : []),
-    {
-      // Export the whole session as Markdown, through the native save dialog.
-      id: "export",
-      label: "Export as Markdown...",
-      run: () => void app.sessionTools?.exportSession(s.id),
-    },
-    {
-      id: "reveal",
-      label: "Show folder",
-      run: () => void sessions?.revealFolder(s.id),
-      disabled: s.cwd === null,
-    },
-    {
-      id: "delete",
-      label: "Delete...",
-      run: () => void sessions?.remove(s.id),
-      danger: true,
-      separated: true,
-    },
-  ];
+        },
+    ],
+    [
+      {
+        // Export the whole session as Markdown, through the native save dialog.
+        id: "export",
+        label: "Export as Markdown…",
+        run: () => void app.sessionTools?.exportSession(s.id),
+      },
+      s.cwd !== null && {
+        id: "reveal",
+        label: "Show folder",
+        run: () => void sessions?.revealFolder(s.id),
+      },
+    ],
+    [
+      (s.archived || !s.neverRan) && {
+        id: "archive",
+        label: s.archived ? "Unarchive" : "Archive",
+        run: () => void sessions?.archive(s.id, !s.archived),
+      },
+    ],
+    [
+      !subagent && {
+        id: "delete",
+        label: "Delete…",
+        keys: "Delete",
+        run: () => void sessions?.remove(s.id),
+        danger: true,
+      },
+    ],
+  );
   const openMenuAt = (x: number, y: number) => {
     setMenu({ x, y });
   };
@@ -162,8 +174,8 @@ export function SessionRow({
             type="button"
             className="twist"
             aria-expanded={expanded}
-            aria-label={`${expanded ? "Hide" : "Show"} ${String(node.children.length)} child sessions`}
-            title={`${expanded ? "Hide" : "Show"} ${String(node.children.length)} child sessions`}
+            aria-label={`${expanded ? "Hide" : "Show"} ${childLabel}`}
+            title={`${expanded ? "Hide" : "Show"} ${childLabel}`}
             onClick={() => {
               shell.actions.toggleExpanded(s.id);
             }}
@@ -175,7 +187,7 @@ export function SessionRow({
         )}
         {renaming ? (
           <div className="srow-main">
-            <Badge kind={s.badge} />
+            <ActivityMark kind={s.badge} />
             <RenameField
               initial={s.title}
               onCommit={(title) => {
@@ -200,7 +212,7 @@ export function SessionRow({
               if (e.key === "F2") {
                 e.preventDefault();
                 setRenaming(true);
-              } else if (e.key === "Delete") {
+              } else if (e.key === "Delete" && !subagent) {
                 e.preventDefault();
                 void sessions?.remove(s.id);
               } else if (e.key === "ContextMenu" || (e.key === "F10" && e.shiftKey)) {
@@ -210,49 +222,49 @@ export function SessionRow({
               }
             }}
           >
-            <Badge kind={s.badge} />
+            <ActivityMark kind={s.badge} />
             <span className="t">{s.title}</span>
             {s.pinned && (
-              <span className="tag pin" role="img" aria-label="Pinned" title="Pinned">
+              <Badge presentation="pin" role="img" aria-label="Pinned" title="Pinned">
                 <Icon name="pin" size={12} />
-              </span>
+              </Badge>
             )}
             {s.extraFolders.length > 0 && (
-              <span className="tag" title={`Also works in: ${s.extraFolders.join(", ")}`}>
+              <Badge presentation="session" title={`Also works in: ${s.extraFolders.join(", ")}`}>
                 +{s.extraFolders.length}
                 {s.extraFolders.length === 1 ? " folder" : " folders"}
-              </span>
+              </Badge>
             )}
             {node.chip !== null && (
-              <span className="tag folder-chip" title={`Works in ${s.cwd ?? ""}`}>
+              <Badge presentation="folder" title={`Works in ${s.cwd ?? ""}`}>
                 <Icon name="folder" size={12} />
                 <span>{node.chip}</span>
-              </span>
+              </Badge>
             )}
             <VoiceChatTag sessionId={s.id} />
             <LoopsTag sessionId={s.id} />
             {s.id === cliId && (
-              <span
-                className="tag cli-tag"
+              <Badge
+                presentation="cli-session"
                 title="Continues in CLI: `vibe --continue` in a terminal resumes this session"
               >
                 Continues in CLI
-              </span>
+              </Badge>
             )}
             {s.localOnly && (
-              <span className="tag" title="local">
+              <Badge presentation="session" title="local">
                 local
-              </span>
+              </Badge>
             )}
             {temporary && (
-              <span className="tag" title="Temporary: deleted when you quit Vibe Work">
+              <Badge presentation="session" title="Temporary: deleted when you quit Vibe Work">
                 temporary
-              </span>
+              </Badge>
             )}
             {s.archived && (
-              <span className="tag" title="archived">
+              <Badge presentation="session" title="archived">
                 archived
-              </span>
+              </Badge>
             )}
           </button>
         )}
@@ -277,6 +289,7 @@ export function SessionRow({
         <RowMenu
           at={menu}
           label={`Actions for ${s.title}`}
+          heading={s.title}
           items={items}
           onClose={() => {
             setMenu(null);

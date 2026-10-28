@@ -23,10 +23,17 @@ use serde_json::Value;
 pub const ENV_ENDPOINT: &str = "VW_AGENT_ENDPOINT";
 /// Environment variable carrying the session's credential for the MCP server.
 pub const ENV_CREDENTIAL: &str = "VW_AGENT_CREDENTIAL";
+/// Core-supplied launch argument for a build without the Chrome package.
+pub const WITHOUT_CHROME_ARG: &str = "--without-chrome";
+
+/// Advertise the consented Chrome tool catalog.
+pub const CHROME_CATALOG_ARG: &str = "--chrome-catalog";
 /// Name of the per-session MCP server in `agentConfig.mcpServers` (the agent sees `mcp_vw.<tool>`).
 pub const SERVER_NAME: &str = "vw";
 /// Longest request line in bytes (and longest answer of every tool except a screenshot).
 pub const MAX_LINE: usize = 64 * 1024;
+/// Twenty 1 MiB text files, including worst-case JSON escaping and the envelope.
+pub const MAX_PROPOSAL_LINE: usize = 121 * 1024 * 1024;
 /// Longest answer line in bytes: a `preview_screenshot` (and a `browser_read` with `screenshot`) answer carries a PNG
 /// of at most 1 MiB as base64, so answers may be larger than requests.
 pub const MAX_ANSWER: usize = 2 * 1024 * 1024;
@@ -39,8 +46,19 @@ pub const CALL_TIMEOUT: Duration = Duration::from_secs(50);
 /// Prefix for a lost reply to a process mutation: the request may have run, so it is never a refusal.
 pub const UNKNOWN_OUTCOME: &str = "Outcome unknown:";
 
+/// Plain refusal for a tool absent from this build.
+pub const CHROME_UNAVAILABLE: &str = "Chrome Control is not in this version of Vibe Work.";
+
 /// The session-scoped tools (MCP names).
 pub mod tools {
+    /// Bind a Vibe source/call to one transport receipt (hook credential only).
+    pub const TOOL_RECEIPT: &str = "tool_receipt";
+    /// Hook-injected, single-use transport field; overwritten before each MCP call.
+    pub const RECEIPT_FIELD: &str = "_vwReceipt";
+    /// Reports one final hook refusal to the core bell. Hook credential only.
+    pub const GUARD_REFUSED: &str = "guard_refused";
+    /// Hook-only observation of the exact command before Vibe's display projection.
+    pub const SHELL_COMMAND: &str = "shell_command";
     /// This session's processes, listeners and leased ports.
     pub const PROCESSES_LIST: &str = "processes_list";
     /// This session's leased ports.
@@ -60,6 +78,9 @@ pub mod tools {
     pub const COPY_CHECK: &str = "copy_check";
     /// The connector hook's question: was this MCP server removed while an open chat still lists its tool?
     pub const CONNECTOR_CHECK: &str = "connector_check";
+    /// The Chrome Control guard's question (hook credential only): may this Chrome Control call run? The core
+    /// answers at once, or after the user answered its card in the session.
+    pub const CHROME_CHECK: &str = "chrome_check";
     /// This session's preview and the URLs it may open.
     pub const PREVIEW_LIST: &str = "preview_list";
     /// Open a URL of this session in its preview.
@@ -105,6 +126,8 @@ pub mod tools {
     pub const LIBRARY_SEARCH: &str = "library_search";
     /// Make or edit an image with Mistral, saved in the session folder.
     pub const IMAGE_GENERATE: &str = "image_generate";
+    /// Read a saved attachment using Vibe Work's document reader.
+    pub const DOCUMENT_READ: &str = "document_read";
     /// The work tools (the core runs them with the user's Mistral key).
     pub const WORK_TOOLS: [&str; 3] = [LIBRARIES_LIST, LIBRARY_SEARCH, IMAGE_GENERATE];
     /// The preview tools.
@@ -114,8 +137,37 @@ pub mod tools {
         PREVIEW_SCREENSHOT,
         PREVIEW_CONSOLE,
     ];
+    /// Read this session's previous reply aloud once in the app window.
+    pub const READ_ALOUD: &str = "read_aloud";
+    /// What the user has open beside the chat (editor tabs, unsaved text, selection, the Files tab). Reads only.
+    pub const PANEL_READ: &str = "panel_read";
+    /// Capture protected-folder changes and wait (bounded) for the owner review.
+    pub const PROPOSE_PROTECTED_CHANGE: &str = "propose_protected_change";
+    /// The outcome of a proposal whose review was still open when `propose_protected_change` answered.
+    pub const PROTECTED_CHANGE_STATUS: &str = "protected_change_status";
+    /// The protected-folder review tools.
+    pub const PROTECTED_CHANGE_TOOLS: [&str; 2] =
+        [PROPOSE_PROTECTED_CHANGE, PROTECTED_CHANGE_STATUS];
+    /// Turn Chrome Control's tools on for this chat (only when the user asks for their Chrome).
+    pub const USE_YOUR_CHROME: &str = "use_your_chrome";
+    /// Turn the headless browser plugin's tools on for this chat (developers only, a separate install).
+    pub const USE_HEADLESS_BROWSER: &str = "use_headless_browser";
+    /// Why a Chrome Control step of this chat was not done, in Vibe Work's own words (inside `run_typescript`
+    /// Vibe 2.26.1 gives the agent only "Tool execution was skipped by Runtime policy" for a refused step).
+    pub const CHROME_OUTCOME: &str = "chrome_outcome";
+    /// Private discovery request: returns only this chat's helper tool schemas.
+    pub const CHROME_TOOL_LIST: &str = "chrome_tool_list";
+    /// Browser tools forwarded through the checked core gateway.
+    pub const CHROME_TOOLS: [&str; 3] = ["chrome_status", "chrome_task", "chrome_execute"];
+    /// Every Chrome entry point, including private discovery, shares the package gate.
+    #[must_use]
+    pub fn is_chrome(name: &str) -> bool {
+        matches!(name, USE_YOUR_CHROME | CHROME_OUTCOME | CHROME_TOOL_LIST)
+            || CHROME_TOOLS.contains(&name)
+    }
+
     /// Every tool a session credential may call.
-    pub const SESSION_TOOLS: [&str; 22] = [
+    pub const SESSION_TOOLS: [&str; 33] = [
         PROCESSES_LIST,
         PORT_LEASE,
         PROCESS_START,
@@ -138,6 +190,17 @@ pub mod tools {
         LIBRARIES_LIST,
         LIBRARY_SEARCH,
         IMAGE_GENERATE,
+        DOCUMENT_READ,
+        READ_ALOUD,
+        PANEL_READ,
+        PROPOSE_PROTECTED_CHANGE,
+        PROTECTED_CHANGE_STATUS,
+        USE_YOUR_CHROME,
+        USE_HEADLESS_BROWSER,
+        CHROME_OUTCOME,
+        "chrome_status",
+        "chrome_task",
+        "chrome_execute",
     ];
 }
 
@@ -202,7 +265,7 @@ pub fn call(
     credential: &str,
     tool: &str,
     args: Value,
-    timeout: Duration,
+    timeout: impl Into<Option<Duration>>,
 ) -> Result<Value, String> {
     let addr: SocketAddr = endpoint
         .parse()
@@ -223,8 +286,11 @@ pub fn call(
     stream
         .write_all(&line)
         .map_err(|e| unconfirmed_process(tool, format!("send to Vibe Work failed: {e}")))?;
-    let text = read_answer_until(&mut stream, MAX_ANSWER, timeout)
-        .map_err(|reason| unconfirmed_process(tool, reason))?;
+    let text = match timeout.into() {
+        Some(timeout) => read_answer_until(&mut stream, MAX_ANSWER, timeout),
+        None => read_line_max(&mut stream, MAX_ANSWER),
+    }
+    .map_err(|reason| unconfirmed_process(tool, reason))?;
     match serde_json::from_str::<Answer>(&text) {
         Ok(Answer::Ok(value)) => Ok(value),
         Ok(Answer::Error(reason)) => Err(reason),
@@ -289,6 +355,10 @@ fn unconfirmed_process(tool: &str, reason: String) -> String {
         format!(
             "{UNKNOWN_OUTCOME} could not confirm {tool}: {reason}. The process may have started; call processes_list to check its pid and readiness before repeating the request."
         )
+    } else if tools::CHROME_TOOLS.contains(&tool) {
+        format!(
+            "{UNKNOWN_OUTCOME} Chrome Control did not return a confirmed reply. Check Chrome before trying again. ({reason})"
+        )
     } else {
         reason
     }
@@ -298,6 +368,13 @@ fn unconfirmed_process(tool: &str, reason: String) -> String {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn lost_chrome_reply_is_unknown_and_must_not_be_repeated() {
+        let text = unconfirmed_process("chrome_execute", "pipe closed".to_owned());
+        assert!(text.starts_with(UNKNOWN_OUTCOME));
+        assert!(text.contains("Check Chrome"));
+    }
 
     #[test]
     fn answer_survives_idle_socket_polls_and_keeps_partial_json() {

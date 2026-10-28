@@ -7,14 +7,18 @@
  *   each shown entry (id, kind, name, publisher, status words, installed version, update, in-session state);
  * - `open` (shows the Marketplace tab), `connectors` (shows the Connectors tab), `filter {filter}`, `search {text}`,
  *   `select {id|null}`, `reload`;
- * - `install {id}` (also updates), `cancel`, `remove {id}`, `addServer {id}` (a catalog server through the Connectors
- *   flow; its sign-in finishes only in a browser);
+ * - `install {id}` (also updates; without an offer), `cancel`, `remove {id}`, `addServer {id}` (a catalog server
+ *   through the Connectors flow; its sign-in finishes only in a browser);
+ * - the one-click install: `offer {id}` = the card's Install… (selects the card, shows the offer in the
+ *   detail), `installOffer {id}` = the detail's Install (installs exactly the shown offer; without one it shows the
+ *   offer first, like the click), `cancelOffer {id}` = Escape on the offer; `read` lists them under `offers`;
  * - `turnOnPlugin {path}`, `turnOffPlugin {path}`, `removePlugin {path}`: a plugin Vibe found (`discovered` in `read`),
  *   also one not installed from the catalog.
  * Depends on: AppContext, uiControl, model. Called by: useShellWiring.
  * Invariants: bodies are validated (`invalidParams`).
  */
 import { toCallError } from "../../protocol/client/types";
+import { offersReport } from "../../state/installOffers";
 import { UiControlError } from "../../state/uiControl";
 import type { App } from "../shell/AppContext";
 import { MARKET_FILTERS, type MarketFilter, marketGroups, statusOf } from "./model";
@@ -48,6 +52,7 @@ function read(app: App): unknown {
     sessionId: s.view?.sessionId ?? null,
     catalogVersion: s.view?.catalogVersion ?? null,
     discovered: s.view?.discovered ?? [],
+    offers: app.market === null ? null : offersReport(app.market.offers.get()),
     discoveryError: s.view?.discoveryError ?? null,
     groups: marketGroups(s.view, s.filter, s.search, servers).map((g) => ({
       group: g.id,
@@ -77,7 +82,7 @@ function read(app: App): unknown {
 }
 
 /** Runs one `ui/marketplace` request. */
-export async function handleMarket(app: App, body: unknown): Promise<unknown> {
+async function handleMarket(app: App, body: unknown): Promise<unknown> {
   const input = asObject(body);
   const market = app.market;
   if (market === null) throw new UiControlError("serverUnavailable", "the app has no core");
@@ -115,6 +120,15 @@ export async function handleMarket(app: App, body: unknown): Promise<unknown> {
       }
       case "install":
         await a.install(text(input, "id"));
+        break;
+      case "offer":
+        await a.offerInstall(text(input, "id"));
+        break;
+      case "installOffer":
+        await a.installShown(text(input, "id"));
+        break;
+      case "cancelOffer":
+        a.cancelOffer(text(input, "id"));
         break;
       case "cancel":
         await a.cancel();

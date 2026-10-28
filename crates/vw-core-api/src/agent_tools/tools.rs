@@ -1,6 +1,6 @@
 //! The session tools behind a session credential: `processes_list`, `port_lease`, `process_start`,
-//! `process_stop`, `process_restart`; the preview tools, `handbook_check` and the
-//! browser tools are dispatched to their own modules. Every one acts on the credential's session
+//! `process_stop`, `process_restart`; the preview tools, `handbook_check`, the
+//! browser tools and the on-demand tool switches (`on_demand`) are dispatched to their own modules. Every one acts on the credential's session
 //! only; answers are small JSON objects, refusals plain text naming the owner.
 //!
 //! Depends on: vw-procmon, vw-agent-tools (`output`), `start`, `session`, `launches`, `core::Shared`,
@@ -30,8 +30,22 @@ pub(crate) async fn call(
     tools: &Arc<AgentTools>,
     session_id: &str,
     tool: &str,
-    args: Value,
+    mut args: Value,
 ) -> Result<Value, String> {
+    if let Some(execution) =
+        crate::ask::tool_calls::receipts::take(shared, session_id, tool, &mut args)?
+    {
+        return execution.await;
+    }
+    if tool == names::DOCUMENT_READ {
+        return super::document_tools::read(shared, session_id, &args).await;
+    }
+    if names::PROTECTED_CHANGE_TOOLS.contains(&tool) {
+        return crate::protected_changes::tool(shared, session_id, tool, args).await;
+    }
+    if let Some(answer) = small_tool(shared, tools, session_id, tool, &args).await {
+        return answer;
+    }
     crate::processes::note_vibe_server(shared);
     if names::WORK_TOOLS.contains(&tool) {
         return super::work_tools::call(shared, session_id, tool, &args).await;
@@ -54,7 +68,6 @@ pub(crate) async fn call(
         }
         return super::preview_tools::call(shared, session_id, tool, &args).await;
     }
-    guard_start(shared, tools, session_id, tool, &args).await?;
     let is_start = matches!(tool, names::PROCESS_START | names::PROCESS_RESTART);
     let start_wait = tools.config.start_wait;
     let restarted_from = (tool == names::PROCESS_RESTART)
@@ -118,10 +131,42 @@ pub(crate) async fn call(
     }
 }
 
+/// The tools answered in one call by their own modules (read aloud, the side panel, the on-demand switches and
+/// `chrome_outcome`); `None` for every other tool.
+async fn small_tool(
+    shared: &Arc<Shared>,
+    tools: &Arc<AgentTools>,
+    session_id: &str,
+    tool: &str,
+    args: &Value,
+) -> Option<Result<Value, String>> {
+    if names::is_chrome(tool) && !shared.chrome_control.config.available() {
+        return Some(Err(crate::chrome_control::setup::ABSENT.to_owned()));
+    }
+    if tool == names::CHROME_TOOL_LIST {
+        return Some(Ok(crate::chrome_control::gateway::list(shared, session_id)));
+    }
+    if names::CHROME_TOOLS.contains(&tool) {
+        return Some(
+            crate::chrome_control::gateway::call(shared, session_id, tool, args.clone()).await,
+        );
+    }
+
+    Some(match tool {
+        names::READ_ALOUD => crate::read_aloud::tool(shared, session_id, args).await,
+        names::PANEL_READ => crate::panel_read::tool(shared, session_id, args).await,
+        names::USE_YOUR_CHROME | names::USE_HEADLESS_BROWSER => {
+            crate::on_demand::tool(shared, &tools.on_demand, session_id, tool)
+        }
+        names::CHROME_OUTCOME => Ok(crate::chrome_control::outcome_tool(shared, session_id)),
+        _ => return None,
+    })
+}
+
 /// The guards a start the core makes itself runs first (Vibe's bash hook never sees it): the kill guard,
 /// the git guard and the safety reminders. A restart re-checks its stored
 /// command.
-async fn guard_start(
+pub(super) async fn guard_start(
     shared: &Arc<Shared>,
     tools: &Arc<AgentTools>,
     session_id: &str,
@@ -179,7 +224,7 @@ async fn guard_start(
             .unwrap_or_default();
         super::gitcheck::guard(shared, session_id, &folder, &command, asked).await?;
         // The safety reminders (Vibe's hook never sees a command the core starts itself).
-        crate::safety::guard(shared, &command, Some(&folder))?;
+        crate::safety::guard(shared, session_id, &command, Some(&folder))?;
     }
     Ok(())
 }
@@ -528,7 +573,13 @@ fn stop(
                 "stillRunning": outcome.remaining,
             }))
         }
-        Err(StopError::Refused(refusal)) => Err(refusal_text(shared, &refusal)),
+        Err(StopError::Refused(refusal)) => Err(crate::guard_refusals::record(
+            shared,
+            session_id,
+            crate::GuardKind::Process,
+            crate::guard_refusals::step(shared, session_id, None),
+            &refusal_text(shared, &refusal),
+        )),
         Err(other) => Err(format!("the stop failed: {other}")),
     }
 }
@@ -548,9 +599,15 @@ fn process_restart(
         .of(target)
         .filter(|l| l.session_id == session_id)
     else {
-        return Err(format!(
-            "pid {pid} was not started with process_start in this session; only those can be restarted \
+        return Err(crate::guard_refusals::record(
+            shared,
+            session_id,
+            crate::GuardKind::Process,
+            crate::guard_refusals::step(shared, session_id, None),
+            &format!(
+                "pid {pid} was not started with process_start in this session; only those can be restarted \
              (process_stop stops it)"
+            ),
         ));
     };
     let reservation = launch

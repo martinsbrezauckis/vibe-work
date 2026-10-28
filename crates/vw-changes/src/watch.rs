@@ -38,7 +38,18 @@ impl Default for Debounce {
 
 /// A running watcher. Drop it to stop.
 pub struct Watcher {
-    _inner: notify::RecommendedWatcher,
+    inner: Option<notify::RecommendedWatcher>,
+    thread: Option<std::thread::JoinHandle<()>>,
+}
+
+impl Drop for Watcher {
+    fn drop(&mut self) {
+        // Closing the event sender wakes the debounce thread; joining also waits for any git ignore read.
+        drop(self.inner.take());
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+    }
 }
 
 impl std::fmt::Debug for Watcher {
@@ -96,7 +107,7 @@ pub fn watch(
     inner
         .watch(&root, RecursiveMode::Recursive)
         .map_err(|e| ChangesError::io("watch", &root, std::io::Error::other(e.to_string())))?;
-    std::thread::Builder::new()
+    let thread = std::thread::Builder::new()
         .name("vw-changes-watch".into())
         .spawn(move || {
             let mut filter = Filter {
@@ -141,5 +152,8 @@ pub fn watch(
             }
         })
         .map_err(|e| ChangesError::io("start the watcher thread for", PathBuf::new(), e))?;
-    Ok(Watcher { _inner: inner })
+    Ok(Watcher {
+        inner: Some(inner),
+        thread: Some(thread),
+    })
 }

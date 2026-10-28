@@ -40,12 +40,44 @@ pub fn page_count(kind: DocKind, bytes: &[u8]) -> Option<u32> {
         DocKind::Pptx => slide_count(bytes),
         DocKind::Docx => entry_text(bytes, "docProps/app.xml").and_then(|x| app_xml_pages(&x)),
         DocKind::Xlsx | DocKind::Csv | DocKind::Text | DocKind::Binary => None,
+        DocKind::Tiff => tiff_pages(bytes),
         DocKind::Png
         | DocKind::Jpeg
         | DocKind::Webp
         | DocKind::Gif
-        | DocKind::Tiff
         | DocKind::Bmp
         | DocKind::Avif => Some(1),
     }
+}
+
+/// Count classic TIFF image directories without decompressing image data. Cycles/invalid offsets are unknown.
+fn tiff_pages(bytes: &[u8]) -> Option<u32> {
+    let little = bytes.starts_with(b"II");
+    let word = |offset: usize| -> Option<u16> {
+        let raw: [u8; 2] = bytes.get(offset..offset.checked_add(2)?)?.try_into().ok()?;
+        Some(if little {
+            u16::from_le_bytes(raw)
+        } else {
+            u16::from_be_bytes(raw)
+        })
+    };
+    let long = |offset: usize| -> Option<u32> {
+        let raw: [u8; 4] = bytes.get(offset..offset.checked_add(4)?)?.try_into().ok()?;
+        Some(if little {
+            u32::from_le_bytes(raw)
+        } else {
+            u32::from_be_bytes(raw)
+        })
+    };
+    let mut offset = long(4)?;
+    let mut seen = std::collections::HashSet::new();
+    while offset != 0 {
+        if !seen.insert(offset) || seen.len() > 50_000 {
+            return None;
+        }
+        let start = usize::try_from(offset).ok()?;
+        let fields = usize::from(word(start)?);
+        offset = long(start.checked_add(2)?.checked_add(fields.checked_mul(12)?)?)?;
+    }
+    u32::try_from(seen.len()).ok().filter(|&n| n > 0)
 }

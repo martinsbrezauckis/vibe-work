@@ -2,7 +2,8 @@
 //! the key is stored), the model proxy (the only reader of the key at run time) and the supervisor
 //! (which gets the placeholder and the `VIBE_*` overrides, never the key).
 //!
-//! Flow: remembered unlock and network-record verification precede proxy construction; the key, once readable, goes
+//! Flow: the vault's last state (its kept key, or the lock-at-quit switch) and network-record verification precede
+//! proxy construction; the key, once readable, goes
 //! into the proxy's key cell; a locked vault or a missing key makes requests wait and raises a
 //! [`KeyEvent::KeyNeeded`] (shows the unlock or setup prompt; a turn never fails silently).
 //! Storing, replacing or removing the key updates the cell at once (no Vibe restart).
@@ -10,29 +11,35 @@
 //! Every operation is one-way: none returns the key. Blocking work (Argon2, files, OS keyring) runs
 //! on `spawn_blocking`.
 //!
-//! Depends on: vw-vault, vw-keyproxy, vw-mistral, `existing`, `vibe_env`, `settings`. Called by:
+//! Depends on: vw-vault, vw-keyproxy, vw-mistral, `existing`, `vibe_env`, `settings`, `last_state`. Called by:
 //! vw-core-api (commands), vw-host (construction, launch config).
 
 use std::ffi::OsString;
 use std::path::PathBuf;
-use std::sync::{Arc, PoisonError};
+use std::sync::{Arc, PoisonError, Weak};
 
 use serde::Serialize;
 use serde_json::Value;
 use tokio::sync::broadcast;
-use tracing::{info, warn};
 use vw_keyproxy::{
     KeyCell, KeyNeed, KeyState, ProxyConfig, ProxyHandle, ProxySecretProvider, RateLimits,
     TokenSlot,
 };
-use vw_mistral::TestCallOk;
+use vw_mistral::{TestCallError, TestCallOk};
 use vw_vault::mistral_key::{self, Candidate};
 use vw_vault::{SecretString, Vault, VaultConfig, VaultKind, VaultStatus};
 use zeroize::Zeroizing;
 
+#[path = "last_state.rs"]
+mod last_state;
+#[path = "mistral_keys.rs"]
+mod mistral_keys;
+pub use mistral_keys::{MistralKey, StoredKeyTest};
+
 use crate::error::KeyError;
 use crate::existing::{ExistingKey, ExistingKeys, ExistingSource};
 use crate::settings::KeySettings;
+use crate::vault_settings::VaultSettings;
 
 /// Longest key the service accepts (Mistral keys are 32 characters).
 pub const MAX_KEY_LEN: usize = 256;
@@ -70,9 +77,11 @@ pub enum KeyEvent {
     KeyChanged,
     /// An answer from Mistral reported the per-minute rate-limit headroom; the latest
     /// snapshot is also kept ([`KeyService::rate_limits`]).
-    RateLimits(RateLimits),
+    RateLimits(Option<RateLimits>),
     /// A temporary Mistral source file could not be deleted after retries. Kept for later subscribers too.
     RemoteFileCleanupFailed(String),
+    /// Saved network settings that waited for the vault were checked at the unlock: in use now, or refused.
+    NetworkSettingsChecked(bool),
 }
 
 /// Why an OCR request did not run or failed.
@@ -80,7 +89,7 @@ pub enum KeyEvent {
 pub enum OcrFailure {
     /// No key is available: the vault is locked or no key is set up (the prompt was raised).
     #[error("{}", match .0 {
-        KeyNeed::Unlock => "Unlock your vault to read documents, then press Read text again.",
+        KeyNeed::Unlock => "Unlock your vault to read documents, then choose Try again on the attachment.",
         KeyNeed::Setup => "Set up your Mistral API key to read documents.",
     })]
     KeyNeeded(KeyNeed),
@@ -150,20 +159,30 @@ pub struct KeyStatus {
     pub active_key: Option<KeyMetadata>,
     /// Why remembering this device did not work, if it did not.
     pub remember_note: Option<String>,
+    /// "Lock the vault when Vibe Work quits".
+    pub lock_on_quit: bool,
 }
 
 /// The key service.
 pub struct KeyService {
     vault: Arc<Vault>,
-    proxy: tokio::sync::Mutex<Option<ProxyHandle>>,
+    pub(crate) proxy: tokio::sync::Mutex<Option<ProxyHandle>>,
     proxy_base: String,
     key: KeyCell,
     tokens: Arc<TokenSlot>,
-    client: reqwest::Client,
+    pub(crate) client: vw_mistral::ClientSlot,
     test_api_base: String,
+    last_key_test: std::sync::Mutex<Option<KeyTest>>,
     settings: KeySettings,
+    pub(crate) chrome_owner_account: String,
+    vault_settings: VaultSettings,
+    /// The switch as this run uses it (also when its file could not be written).
+    lock_on_quit: std::sync::atomic::AtomicBool,
+    /// The kept key opens nothing until a password unlock (`last_state`).
+    locked_until_password: std::sync::atomic::AtomicBool,
+    selection: tokio::sync::Mutex<()>,
     existing: ExistingKeys,
-    events: broadcast::Sender<KeyEvent>,
+    pub(crate) events: broadcast::Sender<KeyEvent>,
     cleanup_notices: Arc<std::sync::Mutex<Vec<String>>>,
     /// The latest rate-limit snapshot the proxy saw; `None` until an answer carried one.
     limits: Arc<std::sync::Mutex<Option<RateLimits>>>,
@@ -171,10 +190,16 @@ pub struct KeyService {
     pub(crate) mcp: vw_keyproxy::McpResolverSlot,
     /// how often the logins were looked up and a password was handed out (diagnostics; never values).
     pub(crate) login_counters: crate::logins::Counters,
-    pub(crate) network_rejected: bool,
+    pub(crate) network: std::sync::Mutex<crate::network::Network>,
 }
 
-fn valid_key(key: &SecretString) -> bool {
+struct KeyTest {
+    // Weak identity neither keeps a removed key alive nor applies its result to a replacement.
+    key: Weak<Zeroizing<String>>,
+    result: Result<TestCallOk, TestCallError>,
+}
+
+pub(super) fn valid_key(key: &SecretString) -> bool {
     let k = key.expose();
     !k.is_empty() && k.len() <= MAX_KEY_LEN && k.chars().all(|c| c.is_ascii_graphic())
 }
@@ -196,7 +221,8 @@ pub(crate) fn now_ms() -> i64 {
 }
 
 impl KeyService {
-    /// Starts the proxy and tries a remembered unlock.
+    /// Starts the proxy and restores the vault's last state: unlocked with the kept key, or locked
+    /// (the kept key deleted) when "Lock the vault when Vibe Work quits" is on.
     ///
     /// # Errors
     /// The vault location is refused ([`vw_vault::VaultError::CanonicalForbidden`]) or the proxy
@@ -220,18 +246,17 @@ impl KeyService {
         if config.settings_path.is_file() {
             vault.select_legacy_if_used()?;
         }
+        let vault_settings = VaultSettings::next_to(&config.settings_path);
         let (network_vault, unlock_vault) = (Arc::clone(&vault), Arc::clone(&vault));
-        match blocking(move || unlock_vault.unlock_remembered()).await? {
-            Ok(true) => info!("key service: vault unlocked with the remembered device"),
-            Ok(false) => {}
-            Err(error) => warn!(%error, "key service: remembered unlock failed"),
-        }
-        let network_rejected = if let Some(file) = network_file {
-            blocking(move || crate::network::load_for_launch(&network_vault, &file).rejected)
-                .await?
-        } else {
-            false
-        };
+        let (at_start, vault_settings) = blocking(move || {
+            let at_start = last_state::restore(&unlock_vault, &vault_settings);
+            (at_start, vault_settings)
+        })
+        .await?;
+        let lock_on_quit = at_start.lock_on_quit;
+        let network =
+            blocking(move || crate::network::launch(&network_vault, network_file, lock_on_quit))
+                .await?;
         let (events, _) = broadcast::channel(64);
         let tokens = Arc::new(TokenSlot::default());
         let key = KeyCell::new(KeyState::Missing(KeyNeed::Unlock));
@@ -245,13 +270,14 @@ impl KeyService {
         let (limits_cell, limits_events) = (Arc::clone(&limits), events.clone());
         proxy_config.on_rate_limits = Arc::new(move |snapshot| {
             *limits_cell.lock().unwrap_or_else(PoisonError::into_inner) = Some(snapshot);
-            let _ = limits_events.send(KeyEvent::RateLimits(snapshot));
+            let _ = limits_events.send(KeyEvent::RateLimits(Some(snapshot)));
         });
         let proxy = ProxyHandle::start(proxy_config, Arc::clone(&tokens), key.clone())
             .await
             .map_err(|e| KeyError::Settings(e.to_string()))?;
         // No redirects: the key goes only to the host we chose (test call and OCR send it directly).
-        let client = vw_mistral::proxy_client().map_err(|e| KeyError::Settings(e.to_string()))?;
+        let client =
+            vw_mistral::ClientSlot::new().map_err(|e| KeyError::Settings(e.to_string()))?;
         let service = Arc::new(Self {
             vault,
             proxy_base: proxy.base_url(),
@@ -260,14 +286,22 @@ impl KeyService {
             tokens,
             client,
             test_api_base: config.test_api_base,
+            last_key_test: std::sync::Mutex::default(),
+            chrome_owner_account: crate::chrome::account(&config.settings_path),
             settings: KeySettings::new(config.settings_path),
+            vault_settings,
+            lock_on_quit: std::sync::atomic::AtomicBool::new(at_start.lock_on_quit),
+            locked_until_password: std::sync::atomic::AtomicBool::new(
+                at_start.locked_until_password,
+            ),
+            selection: tokio::sync::Mutex::new(()),
             existing: config.existing,
             events,
             cleanup_notices: Arc::default(),
             limits,
             mcp,
             login_counters: crate::logins::Counters::default(),
-            network_rejected,
+            network: std::sync::Mutex::new(network),
         });
         service.refresh_key().await;
         Ok(service)
@@ -363,11 +397,8 @@ impl KeyService {
         let vault = Arc::clone(&self.vault);
         let item_id = self.settings.key_item_id();
         let read = blocking(move || {
-            match vault.status() {
-                Ok(VaultStatus::Unlocked { .. }) => {}
-                Ok(VaultStatus::NoVault) => return Err(KeyNeed::Setup),
-                _ => return Err(KeyNeed::Unlock),
-            }
+            // Every vault-opening path ends here: stored values are registered for the Debug API first.
+            crate::scan_secrets::open_and_registered(&vault)?;
             match vault.read_item(&item_id) {
                 Ok(Some(item)) => mistral_key::key_in_item(&item).ok_or(KeyNeed::Setup),
                 _ => Err(KeyNeed::Setup),
@@ -380,6 +411,13 @@ impl KeyService {
             Err(_) => self.key.clear(KeyNeed::Unlock),
         }
         self.changed();
+    }
+
+    /// A different credential starts without the previous credential's headroom.
+    pub(super) fn key_changed(&self) {
+        *self.limits.lock().unwrap_or_else(PoisonError::into_inner) = None;
+        let _ = self.events.send(KeyEvent::RateLimits(None));
+        let _ = self.events.send(KeyEvent::KeyChanged);
     }
 
     /// Current status.
@@ -402,7 +440,7 @@ impl KeyService {
         let item_id = self.settings.key_item_id();
         let key = match (&status, self.key.current()) {
             (VaultStatus::Unlocked { .. }, KeyState::Ready(_)) => KeyPresence::Ready {
-                own: item_id == mistral_key::RESOURCE_ID,
+                own: mistral_key::is_own(&item_id),
                 item_id: item_id.clone(),
             },
             (VaultStatus::Unlocked { .. }, KeyState::Missing(_)) => KeyPresence::Missing,
@@ -445,38 +483,39 @@ impl KeyService {
             key,
             active_key,
             remember_note: note,
+            lock_on_quit: self.lock_on_quit(),
         })
     }
 
-    /// Creates and selects the private Vibe Work vault in managed app mode, then leaves it unlocked.
+    /// Creates and selects the private Vibe Work vault in managed app mode, then leaves it unlocked
+    /// with its key kept in the credential store (the vault keeps its last state).
     /// Low-level fixture configurations retain ShellX-layout creation in their supplied folder.
     ///
     /// # Errors
     /// [`KeyError::Vault`].
-    pub async fn create_vault(
-        &self,
-        passphrase: SecretString,
-        remember: bool,
-    ) -> Result<(), KeyError> {
+    pub async fn create_vault(&self, passphrase: SecretString) -> Result<(), KeyError> {
         let vault = Arc::clone(&self.vault);
-        blocking(move || vault.create(&passphrase, remember)).await??;
+        blocking(move || vault.create(&passphrase, true)).await??;
+        self.password_typed();
+        self.network_unlocked().await;
         self.refresh_key().await;
         Ok(())
     }
 
-    /// Unlocks with the passphrase (`remember`: change "remember this device"; `choice`: which of
-    /// two vaults).
+    /// Unlocks with the passphrase (`choice`: which of two vaults) and keeps the key in the
+    /// credential store (the Vault app's layout has no kept key).
     ///
     /// # Errors
     /// [`KeyError::Vault`].
     pub async fn unlock(
         &self,
         passphrase: SecretString,
-        remember: Option<bool>,
         choice: Option<VaultKind>,
     ) -> Result<(), KeyError> {
         let vault = Arc::clone(&self.vault);
-        blocking(move || vault.unlock(&passphrase, remember, choice)).await??;
+        blocking(move || vault.unlock(&passphrase, Some(true), choice)).await??;
+        self.password_typed();
+        self.network_unlocked().await;
         self.refresh_key().await;
         Ok(())
     }
@@ -486,15 +525,20 @@ impl KeyService {
     /// # Errors
     /// [`KeyError::Vault`] when the saved device key cannot unlock the vault.
     pub async fn unlock_remembered(&self) -> Result<bool, KeyError> {
+        if self.waits_for_password() {
+            return Ok(false);
+        }
         let vault = Arc::clone(&self.vault);
         let unlocked = blocking(move || vault.unlock_remembered_for_user()).await??;
         if unlocked {
+            self.network_unlocked().await;
             self.refresh_key().await;
         }
         Ok(unlocked)
     }
 
-    /// Locks the vault; model requests wait for the next unlock.
+    /// Locks the vault and deletes its kept key; model requests wait for the next unlock, also
+    /// after a restart.
     pub fn lock(&self) {
         self.vault.lock();
         self.key.clear(KeyNeed::Unlock);
@@ -510,16 +554,32 @@ impl KeyService {
     }
 
     async fn store_key_from(&self, key: SecretString, source: KeySource) -> Result<(), KeyError> {
+        let _selection = self.selection.lock().await;
         if !valid_key(&key) {
             return Err(KeyError::InvalidKey);
         }
         let vault = Arc::clone(&self.vault);
         let stored = key.clone();
+        let selected = self.settings.key_item_id();
+        let target = if mistral_key::is_own(&selected) {
+            selected
+        } else {
+            mistral_key::RESOURCE_ID.to_owned()
+        };
+        let item_id = target.clone();
         blocking(move || {
-            let created = vault
-                .read_item(mistral_key::RESOURCE_ID)?
-                .map(|item| item.created_ms);
-            let mut resource = mistral_key::resource(&stored, created, now_ms());
+            let previous = vault.read_item(&item_id)?;
+            let mut resource = mistral_key::resource(
+                &stored,
+                previous.as_ref().map(|item| item.created_ms),
+                now_ms(),
+            );
+            if item_id != mistral_key::RESOURCE_ID {
+                resource.id = item_id;
+                if let Some(item) = previous {
+                    resource.label = item.title;
+                }
+            }
             if source == KeySource::Vibe {
                 resource
                     .public_fields
@@ -528,24 +588,10 @@ impl KeyService {
             vault.upsert_item(&resource.to_item()?)
         })
         .await??;
-        self.settings.set_key_item_id(mistral_key::RESOURCE_ID)?;
+        self.settings.set_key_item_id(&target)?;
         self.key.set_key(Zeroizing::new(key.expose().to_owned()));
         self.changed();
-        let _ = self.events.send(KeyEvent::KeyChanged);
-        Ok(())
-    }
-
-    /// Stops using the key. Vibe Work's own resource is deleted; an item the user chose is left in
-    /// the vault untouched (it belongs to the user or another app).
-    ///
-    /// # Errors
-    /// [`KeyError::Vault`].
-    pub async fn remove_key(&self) -> Result<(), KeyError> {
-        let vault = Arc::clone(&self.vault);
-        blocking(move || vault.delete_item(mistral_key::RESOURCE_ID)).await??;
-        self.settings.set_key_item_id(mistral_key::RESOURCE_ID)?;
-        self.key.clear(KeyNeed::Setup);
-        self.changed();
+        self.key_changed();
         Ok(())
     }
 
@@ -565,6 +611,7 @@ impl KeyService {
     /// # Errors
     /// [`KeyError::NotACandidate`], [`KeyError::Vault`].
     pub async fn use_existing(&self, item_id: String) -> Result<(), KeyError> {
+        let _selection = self.selection.lock().await;
         if !self
             .candidates()
             .await?
@@ -575,7 +622,7 @@ impl KeyService {
         }
         self.settings.set_key_item_id(&item_id)?;
         self.refresh_key().await;
-        let _ = self.events.send(KeyEvent::KeyChanged);
+        self.key_changed();
         Ok(())
     }
 
@@ -587,7 +634,41 @@ impl KeyService {
         let KeyState::Ready(key) = self.key.current() else {
             return Err(KeyError::NoKey);
         };
-        Ok(vw_mistral::list_models(&self.client, &self.test_api_base, key.as_str()).await?)
+        let item_id = self.settings.key_item_id();
+        let result =
+            vw_mistral::list_models(&self.api().0, &self.test_api_base, key.as_str()).await;
+        self.record_model_test(item_id, key.as_str().to_owned(), &result)
+            .await?;
+        let mut latest = self
+            .last_key_test
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        // A test that finishes after rotation must not overwrite the new key's result.
+        if matches!(self.key.current(), KeyState::Ready(current) if Arc::ptr_eq(&current, &key)) {
+            *latest = Some(KeyTest {
+                key: Arc::downgrade(&key),
+                result: result.clone(),
+            });
+        }
+        result.map_err(KeyError::Test)
+    }
+
+    /// Whether the active key's latest completed test answered 401 or 403.
+    /// Untested keys and other failures still need replacement confirmation.
+    #[must_use]
+    pub fn key_was_rejected(&self) -> bool {
+        let latest = self
+            .last_key_test
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let (Some(test), KeyState::Ready(current)) = (latest.as_ref(), self.key.current()) else {
+            return false;
+        };
+        test.key.ptr_eq(&Arc::downgrade(&current))
+            && matches!(
+                test.result,
+                Err(TestCallError::Unauthorized | TestCallError::Forbidden)
+            )
     }
 
     /// Reads one document with Mistral OCR using the key in use (a direct call to
@@ -604,7 +685,7 @@ impl KeyService {
     ) -> Result<vw_mistral::OcrOutput, OcrFailure> {
         let key = self.key_for_call().map_err(OcrFailure::KeyNeeded)?;
         vw_mistral::ocr(
-            &self.client,
+            &self.client.get(),
             &self.test_api_base,
             key.as_str(),
             input,
@@ -627,13 +708,21 @@ impl KeyService {
         let KeyState::Ready(key) = self.key.current() else {
             return Ok(None);
         };
-        vw_mistral::chat::chat(&self.client, &self.test_api_base, key.as_str(), request)
+        let (client, base) = self.api();
+        vw_mistral::chat::chat(&client, base, key.as_str(), request)
             .await
             .map(Some)
     }
 
     /// The key for one of the core's own calls (OCR, speech). Without one it raises
     /// [`KeyEvent::KeyNeeded`] (the unlock or setup prompt) and says which; nothing waits or retries.
+    /// Whether voice has a ready key, without raising an unlock/setup prompt.
+    /// Used before a requested reading so a refusal leaves the window unchanged.
+    #[must_use]
+    pub fn speech_available(&self) -> bool {
+        matches!(self.key.current(), KeyState::Ready(_))
+    }
+
     pub(crate) fn key_for_call(&self) -> Result<Arc<Zeroizing<String>>, KeyNeed> {
         match self.key.current() {
             KeyState::Ready(key) => Ok(key),
@@ -645,8 +734,8 @@ impl KeyService {
     }
 
     /// The no-redirect HTTPS client and the API base of the core's own calls (`speech`).
-    pub(crate) fn api(&self) -> (&reqwest::Client, &str) {
-        (&self.client, &self.test_api_base)
+    pub(crate) fn api(&self) -> (reqwest::Client, &str) {
+        (self.client.get(), &self.test_api_base)
     }
 
     /// Where Vibe itself holds a key (no values).
@@ -682,12 +771,19 @@ impl KeyService {
             .map_err(KeyError::Existing)
     }
 
-    /// Stops the proxy (app exit).
+    /// Stops the proxy and ends the vault session for the quit (app exit, update restart): with
+    /// "Lock the vault when Vibe Work quits" on it locks (deleting the kept key), otherwise the
+    /// kept key stays for the next start.
     pub async fn shutdown(&self) {
         if let Some(proxy) = self.proxy.lock().await.take() {
             proxy.shutdown().await;
         }
-        self.vault.lock();
+        if self.lock_on_quit() {
+            self.vault.lock();
+            crate::network::drop_copy(&self.vault);
+        } else {
+            self.vault.close();
+        }
         self.key.clear(KeyNeed::Unlock);
     }
 }

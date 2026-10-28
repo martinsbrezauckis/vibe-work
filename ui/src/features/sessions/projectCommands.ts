@@ -43,7 +43,7 @@ export function registerProjectCommands(app: App): () => void {
     }),
     app.commands.register({
       id: "projects.moveSession",
-      label: "Move the open session to a project...",
+      label: "Move the open session to a project…",
       section: term("workNames", "projectTab").name,
       keywords: "file group project move session",
       run: () => {

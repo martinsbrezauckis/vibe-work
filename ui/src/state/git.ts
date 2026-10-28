@@ -67,7 +67,7 @@ export interface BringDialog {
 }
 
 /** One open dialog. */
-export type GitDialog = CommitDialog | PrDialog | BringDialog;
+type GitDialog = CommitDialog | PrDialog | BringDialog;
 
 /** The git UI state. */
 export interface GitUi {

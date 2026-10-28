@@ -11,13 +11,14 @@
 //! 4. the request goes upstream with hop-by-hop headers, `Host`, `Cookie` and `Authorization`
 //!    removed, `Authorization: Bearer <key>` (marked sensitive) added, the body streamed;
 //! 5. the answer's five `x-ratelimit-*` headers (exact names, numbers only, nothing else) are
-//!    handed to `ProxyConfig::on_rate_limits`; then the answer is streamed back (the connector catalog gains missing
+//!    handed to `ProxyConfig::on_rate_limits` (at most once per second, newest wins: `limits`); then the answer is streamed back (the connector catalog gains missing
 //!    tool descriptions); redirects are never
 //!    followed (a 3xx goes back unchanged, so the key only goes to the host the proxy chose); an
 //!    upstream that cannot be reached gives 502 (`vibe_work_upstream_unreachable`).
 //!
 //! Compaction calls omit image payloads and have a 60 s end-to-end deadline. Other
-//! attachment-bearing calls have a 120 s deadline, including streamed bytes. Pre-header timeouts
+//! calls bringing a new attachment have a 120 s deadline up to headers, then a 120 s idle limit.
+//! Every received chunk renews the idle limit; historical attachments do not bound later calls. Pre-header timeouts
 //! and retryable upstream failures return a nonretryable 422; an already started stream ends with
 //! a read error on timeout.
 //!
@@ -46,7 +47,7 @@ use tracing::{debug, warn};
 
 use crate::compaction::{MAX_CHAT_BODY, prepare};
 use crate::key::{KeyCell, KeyNeed, KeyState};
-use crate::limits::{RateLimits, now_ms};
+use crate::limits::{LimitsGate, RateLimits, now_ms};
 use crate::mcp::{MCP_PREFIX, McpResolverSlot};
 use crate::routes::{RouteSpec, Upstream, match_route};
 use crate::token::TokenSlot;
@@ -75,8 +76,9 @@ impl Default for Upstreams {
 /// Called when a request starts waiting for a key (the owner asks the user to unlock or set up).
 pub type WaitHook = Arc<dyn Fn(KeyNeed) + Send + Sync>;
 
-/// Called with the rate-limit snapshot of an upstream answer that carried any. Runs on the
-/// request task before the answer is passed on: keep it cheap and non-blocking.
+/// Called with the rate-limit snapshot of an upstream answer that carried any, at most once per
+/// [`crate::LIMITS_EVERY`] (newest wins; a waiting one follows from a short timer task). Runs on the
+/// request task or that timer task: keep it cheap and non-blocking.
 pub type LimitsHook = Arc<dyn Fn(RateLimits) + Send + Sync>;
 
 /// Proxy settings.
@@ -90,8 +92,8 @@ pub struct ProxyConfig {
     /// End-to-end deadline for a Unified Harness context compaction, including request body,
     /// key wait, upstream headers and response body. A failed call releases Vibe's compaction lock.
     pub compaction_deadline: Duration,
-    /// End-to-end deadline for a chat request carrying inline images or model-facing attachment
-    /// path notes, including streamed response bytes. Ordinary text-only streams are unchanged.
+    /// Deadline up to headers for new inline images or attachment path notes, then the longest
+    /// idle wait between response chunks. Historical attachments do not bound later calls.
     pub image_deadline: Duration,
     /// Told when a request waits for a key.
     pub on_wait: WaitHook,
@@ -148,8 +150,9 @@ struct Shared {
     aliases: crate::connectors::Aliases,
     tokens: Arc<TokenSlot>,
     key: KeyCell,
-    client: reqwest::Client,
+    client: vw_mistral::ClientSlot,
     stats: Arc<ProxyStats>,
+    limits: Arc<LimitsGate>,
 }
 
 /// A running proxy. Dropping it does not stop the server; call [`ProxyHandle::shutdown`].
@@ -160,6 +163,8 @@ pub struct ProxyHandle {
     stats: Arc<ProxyStats>,
     stop: Option<oneshot::Sender<()>>,
     task: Option<JoinHandle<()>>,
+    limits: Arc<LimitsGate>,
+    client: vw_mistral::ClientSlot,
 }
 
 impl ProxyHandle {
@@ -172,18 +177,20 @@ impl ProxyHandle {
         tokens: Arc<TokenSlot>,
         key: KeyCell,
     ) -> Result<Self, ProxyError> {
-        let client = vw_mistral::proxy_client()?;
+        let client = vw_mistral::ClientSlot::new()?;
         let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
             .await
             .map_err(ProxyError::Bind)?;
         let addr = listener.local_addr().map_err(ProxyError::Bind)?;
         let stats = Arc::new(ProxyStats::default());
+        let limits = LimitsGate::new(Arc::clone(&config.on_rate_limits));
         let shared = Arc::new(Shared {
+            limits: Arc::clone(&limits),
             config,
             aliases: crate::connectors::Aliases::default(),
             tokens: Arc::clone(&tokens),
             key: key.clone(),
-            client,
+            client: client.clone(),
             stats: Arc::clone(&stats),
         });
         let app = axum::Router::new().fallback(handle).with_state(shared);
@@ -202,6 +209,8 @@ impl ProxyHandle {
             stats,
             stop: Some(stop),
             task: Some(task),
+            limits,
+            client,
         })
     }
 
@@ -229,6 +238,12 @@ impl ProxyHandle {
         &self.key
     }
 
+    /// The client that carries the key upstream.
+    #[must_use]
+    pub fn client(&self) -> &vw_mistral::ClientSlot {
+        &self.client
+    }
+
     /// Counters.
     #[must_use]
     pub fn stats(&self) -> &Arc<ProxyStats> {
@@ -244,6 +259,7 @@ impl ProxyHandle {
         if let Some(task) = self.task.take() {
             let _ = tokio::time::timeout(Duration::from_secs(5), task).await;
         }
+        self.limits.close();
     }
 }
 
@@ -549,7 +565,7 @@ async fn prepared_body(
         );
         let deadline = if shape.compaction {
             Some(arrived + shared.config.compaction_deadline)
-        } else if shape.images > 0 || shape.attachment_notes > 0 {
+        } else if shape.new_attachment {
             Some(arrived + shared.config.image_deadline)
         } else {
             None
@@ -580,7 +596,8 @@ async fn handle(State(shared): State<Arc<Shared>>, request: Request) -> Response
     if parts.uri.path().starts_with(MCP_PREFIX) {
         let tokens = Arc::clone(&shared.tokens);
         let accepts = move |t: &str| tokens.accepts(t);
-        return crate::mcp::handle(&shared.client, &shared.config.mcp, &accepts, parts, body).await;
+        let (client, mcp) = (shared.client.get(), &shared.config.mcp);
+        return crate::mcp::handle(&client, mcp, &accepts, parts, body).await;
     }
     let route = match admit(&shared, &parts) {
         Ok(route) => route,
@@ -645,6 +662,7 @@ async fn handle(State(shared): State<Arc<Shared>>, request: Request) -> Response
     headers.insert(AUTHORIZATION, auth);
     let sending = shared
         .client
+        .get()
         .request(parts.method.clone(), format!("{base}{rest}{query}"))
         .headers(headers)
         .body(body)
@@ -693,7 +711,7 @@ async fn relay_response(
     );
     // Only the five rate-limit header names are read (never a body, never other headers).
     if let Some(limits) = RateLimits::from_headers(response.headers(), now_ms()) {
-        (shared.config.on_rate_limits)(limits);
+        shared.limits.offer(limits);
     }
     let upstream_status = response.status();
     if deadline.is_some()
@@ -733,14 +751,15 @@ async fn relay_response(
             .body(Body::from(bytes))
             .unwrap_or_else(|_| unreachable!());
     }
-    if let Some(deadline) = deadline {
+    if deadline.is_some() {
+        let idle_limit = shared.config.image_deadline;
         let stream = response.bytes_stream();
         let bounded =
             futures_util::stream::unfold((stream, false), move |(mut stream, done)| async move {
                 if done {
                     return None;
                 }
-                match tokio::time::timeout_at(deadline, stream.next()).await {
+                match tokio::time::timeout(idle_limit, stream.next()).await {
                     Ok(Some(Ok(bytes))) => Some((Ok(bytes), (stream, false))),
                     Ok(Some(Err(error))) => {
                         Some((Err(std::io::Error::other(error)), (stream, true)))
@@ -749,7 +768,7 @@ async fn relay_response(
                     Err(_) => Some((
                         Err(std::io::Error::new(
                             std::io::ErrorKind::TimedOut,
-                            "attachment model response exceeded its deadline",
+                            "attachment model response stopped producing bytes",
                         )),
                         (stream, true),
                     )),

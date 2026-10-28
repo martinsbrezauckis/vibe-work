@@ -1,30 +1,20 @@
 //! App session ownership across data folders that share a Vibe home.
-//! Core/channel lifecycle owns OS locks; the holder poll renews diagnostic heartbeats in app data.
-//! Persistent lock files arbitrate stale takeover: dead owners release automatically, and an old heartbeat
-//! never permits stealing a live lock. Shared pointers locate the data-folder record without scanning folders.
+//! Core/channel lifecycle owns OS locks; shared pointers identify the instance and pid holding each lock.
+//! Persistent lock files arbitrate ownership and release automatically when an owner exits.
 
 use std::collections::HashMap;
 use std::fs::{File, OpenOptions, TryLockError};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError, Weak};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
 use crate::error::{CoreError, ErrorCode};
 
-#[derive(Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct Record {
-    instance_id: String,
-    pid: u32,
-    heartbeat: u64,
-    session_id: String,
-}
-
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Pointer {
+    // Shipped readers require this field to decode the holder pid.
     record: PathBuf,
     instance_id: String,
     pid: u32,
@@ -33,26 +23,6 @@ struct Pointer {
 /// A claim held across one operation, and retained while its channel is open.
 pub(crate) struct Lease {
     _lock: File,
-    record: PathBuf,
-    identity: Record,
-}
-
-impl Lease {
-    fn heartbeat(&self) -> Result<(), CoreError> {
-        let record = Record {
-            heartbeat: now(),
-            ..self.identity.clone()
-        };
-        let bytes = serde_json::to_vec(&record).map_err(failure)?;
-        vw_platform::replace_private(&self.record, &bytes).map_err(failure)
-    }
-}
-
-impl Drop for Lease {
-    fn drop(&mut self) {
-        // Remove only this instance's diagnostic, before releasing the stable lock file.
-        let _ = std::fs::remove_file(&self.record);
-    }
 }
 
 /// Optional disk leases, enabled when the app configures session bookkeeping.
@@ -75,13 +45,6 @@ fn failure(error: impl std::fmt::Display) -> CoreError {
 /// started at that moment shares the lock file until it runs its own program, which can take a while on a busy
 /// machine; the wait applies only when the pointer names this instance, so another window is refused at once.
 const RELEASE_WAIT_MS: u32 = 250;
-
-fn now() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs()
-}
 
 impl Leases {
     pub(crate) fn new(home: &Path, data: Option<&Path>) -> Result<Self, CoreError> {
@@ -133,7 +96,7 @@ impl Leases {
             .is_some_and(|pointer| pointer.instance_id == self.instance)
     }
 
-    /// Checks without acquiring ownership or rewriting a foreign record.
+    /// Checks without acquiring ownership or rewriting a foreign pointer.
     pub(crate) fn foreign(&self, id: &str) -> Result<Option<u32>, CoreError> {
         if self.data.is_none() {
             return Ok(None);
@@ -153,7 +116,7 @@ impl Leases {
         }
     }
 
-    /// Acquires before any mutation or resume. An unlocked file makes even a stale record replaceable.
+    /// Acquires before any mutation or resume. An unlocked file permits a new owner.
     pub(crate) fn claim(&self, id: &str) -> Result<Option<Arc<Lease>>, CoreError> {
         let Some(data) = &self.data else {
             return Ok(None);
@@ -164,7 +127,7 @@ impl Leases {
             return Ok(Some(lease));
         }
         let lock = self.lock(id)?;
-        // Our own lease's release finishes within moments; wait for it (at most RELEASE_WAIT) instead of reporting
+        // Our own lease's release finishes within moments; wait for it (at most RELEASE_WAIT_MS) instead of reporting
         // our own process as another window. A lock another instance holds is refused at once.
         let mut waited = 0;
         loop {
@@ -180,23 +143,16 @@ impl Leases {
                 Err(TryLockError::Error(error)) => return Err(failure(error)),
             }
         }
-        vw_platform::ensure_private_dir(data).map_err(failure)?;
-        let record = data.join(format!("{}-{}.json", Self::key(id), self.instance));
-        let lease = Arc::new(Lease {
-            _lock: lock,
-            record,
-            identity: Record {
-                instance_id: self.instance.clone(),
-                pid: std::process::id(),
-                heartbeat: now(),
-                session_id: id.to_owned(),
-            },
-        });
-        lease.heartbeat()?;
+        let lease = Arc::new(Lease { _lock: lock });
+        let name = format!("{}-{}", Self::key(id), self.instance);
+        let record = data.join(format!(
+            "{}.json",
+            &blake3::hash(name.as_bytes()).to_hex()[..32]
+        ));
         vw_platform::replace_private(
             &self.pointer(id),
             &serde_json::to_vec(&Pointer {
-                record: lease.record.clone(),
+                record,
                 instance_id: self.instance.clone(),
                 pid: std::process::id(),
             })
@@ -229,19 +185,6 @@ impl Leases {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .clear();
-    }
-
-    pub(crate) fn heartbeat(&self) {
-        for lease in self
-            .active
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .values()
-        {
-            if let Err(error) = lease.heartbeat() {
-                tracing::warn!(%error, "session heartbeat not written");
-            }
-        }
     }
 }
 

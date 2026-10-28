@@ -1,9 +1,9 @@
 //! A short-lived empty chat for settings that Vibe reads and writes only through a session
-//! (`config/write`, `config/proxy/read|write`) when the caller has no suitable session of its own.
+//! (`config/write`, `config/proxy/read|write`) and Tools skills operations.
 //!
 //! The chat:
-//! - opens in the Vibe server's own working folder (`Supervisor::work_dir`, the app's `work/` folder), never in a
-//!   user's project folder, and runs no turn, so the agent writes nothing there or anywhere else;
+//! - settings use the server working folder; skills without a selected chat use the picked work folder.
+//!   A selected chat uses its own runtime in `skills`. Helpers run no turn, so the agent writes nothing;
 //! - is recorded as a temporary session before anything is done through it, so a crash between the start and the
 //!   delete still ends it at the next start (`temporary.rs`);
 //! - is deleted without a dialog ([`Core::discard_unused`]); a failed delete is tried once more, and when it fails
@@ -11,7 +11,7 @@
 //!   away when Vibe Work quits.
 //!
 //! Depends on: `temporary` (record, `discard_unused`), `dispatch` (`session_call`), `vw-supervisor` (`work_dir`).
-//! Called by: `subagents_setting` (the Subagents switch), `network` (Settings > Network).
+//! Called by: `subagents_setting` (the Subagents switch), `network` (Settings > Network), `skills` (Tools).
 //! Invariants: the user's own chats are never touched; every started chat is deleted by its caller through
 //! [`Core::end_helper_chat`] whether or not the work succeeded.
 
@@ -24,8 +24,8 @@ use crate::command::Origin;
 use crate::core::Core;
 use crate::error::{CoreError, ErrorCode};
 
-/// The pause before the one retry of a failed delete.
-const RETRY_PAUSE: Duration = Duration::from_millis(500);
+/// The pause before the one retry of an empty helper's failed delete.
+pub(crate) const RETRY_PAUSE: Duration = Duration::from_millis(500);
 
 impl Core {
     /// Starts a short-lived empty chat and records it as temporary. `unchanged` finishes the sentence that tells
@@ -39,8 +39,18 @@ impl Core {
         origin: Origin,
         unchanged: &str,
     ) -> Result<String, CoreError> {
+        self.start_helper_chat_in(origin, unchanged, &self.shared.supervisor.work_dir())
+            .await
+    }
+
+    /// Starts an empty recorded helper in the selected working folder.
+    pub(crate) async fn start_helper_chat_in(
+        &self,
+        origin: Origin,
+        unchanged: &str,
+        work_dir: &std::path::Path,
+    ) -> Result<String, CoreError> {
         self.shared.temporary.ensure_recordable()?;
-        let work_dir = self.shared.supervisor.work_dir();
         let start = json!({"agentConfig": {"cwd": work_dir.to_string_lossy()}});
         let id = match self.session_call(origin, "session/start", start).await? {
             crate::CommandResult::Session { snapshot, .. } => snapshot.session_id,
@@ -53,7 +63,7 @@ impl Core {
         };
         // Recorded before anything is done through it, so a crash from here on still deletes the chat at the next
         // start.
-        if let Err(why) = self.shared.temporary.add(&id) {
+        if let Err(why) = self.shared.temporary.add_saved(&id).await {
             let gone = self.discard_unused(&id).await;
             return Err(CoreError::new(
                 ErrorCode::Internal,

@@ -23,6 +23,20 @@ export function runningTurnId(state: Obj | null, session: Obj | undefined): stri
   return null;
 }
 
+/** A direct model wait needs steering; queuing would leave the agent asleep. */
+export function waitingForInput(state: Obj | null, turnId: string | null): boolean {
+  if (turnId === null) return false;
+  const latest = arr(state?.["history"])
+    .map(obj)
+    .reverse()
+    .find((entry) => entry?.["type"] === "effect");
+  return (
+    latest?.["turnId"] === turnId &&
+    latest["generationStatus"] === "in_progress" &&
+    obj(latest["detail"])?.["toolName"] === "self.wait"
+  );
+}
+
 /** One queued turn as listed above the composer. */
 export interface QueuedTurn {
   id: string;

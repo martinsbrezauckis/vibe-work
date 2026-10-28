@@ -6,6 +6,9 @@ uses its current web tab; its browsing never replaces App preview. User-created 
 require a reviewed handoff before the agent can control them. Taking a tab back cancels
 pending agent use. Tab handoff grants no vault access.
 
+These limits apply to Vibe Work's Browser tab. Your Chrome uses Vibe Work Browser Control separately; see
+[setup and permissions](BROWSER_CONTROL.md).
+
 Settings > Browser controls how many Browser page engines can stay live across sessions.
 **Auto** is the default. Fixed choices are 1, 2, 3 and 4; memory can reduce any choice.
 The Settings line shows detected total and available memory and the current effective cap.
@@ -23,7 +26,7 @@ When a tab needs an engine and the pool is full, it closes the least recently us
 eligible background engine first. The tab retains its address, website data and last safe
 visible snapshot. Selecting a suspended tab reloads its page. Snapshots are omitted after a
 vault login fill, and pages that were never visible have no snapshot.
-The pool protects the visible page, the agent's current page during an unfinished turn
+The pool retains the visible page, the agent's current page during an unfinished turn
 (including one waiting for the user's answer), ongoing page operations and a pending user save.
 If every slot is protected,
 the browser tool immediately answers:

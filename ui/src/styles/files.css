@@ -24,19 +24,16 @@
 }
 .fref:focus-visible {
   outline: none;
-  box-shadow:
-    0 0 0 2px var(--bg),
-    0 0 0 4px var(--focus);
-  border-radius: 3px;
+  border-radius: var(--radius-3);
 }
 .fref code {
   color: inherit;
 }
 .step-file {
   margin: 0 0 6px;
-  font-size: 12px;
+  font-size: var(--text-12);
   color: var(--text-2);
-  font-family: var(--mono);
+  font-family: var(--font-mono);
 }
 .pbody:has(> .file-tab) {
   display: flex;
@@ -65,7 +62,7 @@
   flex: 1 1 160px;
 }
 .file-name {
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   color: var(--text);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -73,8 +70,8 @@
 }
 .file-path,
 .file-meta {
-  font-family: var(--mono);
-  font-size: 11.5px;
+  font-family: var(--font-mono);
+  font-size: var(--text-11-5);
   color: var(--text-3);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -91,22 +88,22 @@
   background-color: var(--raised);
   color: var(--text);
   border: 1px solid var(--line-2);
-  border-radius: 7px;
+  border-radius: var(--radius-7);
   padding: 3px 22px 3px 6px;
-  font-size: 12px;
+  font-size: var(--text-12);
 }
 .file-note {
   margin: 0;
-  font-size: 12px;
+  font-size: var(--text-12);
   color: var(--text-2);
   border: 1px solid var(--line-2);
   background: var(--raised);
-  border-radius: 7px;
+  border-radius: var(--radius-7);
   padding: 6px 10px;
   flex: none;
 }
 .file-url {
-  font-family: var(--mono);
+  font-family: var(--font-mono);
   overflow-wrap: anywhere;
 }
 .file-body {
@@ -118,8 +115,8 @@
 }
 .file-text pre {
   margin: 0;
-  font-family: var(--mono);
-  font-size: 12px;
+  font-family: var(--font-mono);
+  font-size: var(--text-12);
   line-height: 1.5;
   color: var(--text);
   white-space: pre;
@@ -139,7 +136,7 @@
   user-select: none;
 }
 .file-md {
-  font-size: 13.5px;
+  font-size: var(--text-13-5);
   line-height: 1.55;
   color: var(--text);
   overflow-wrap: anywhere;
@@ -153,14 +150,14 @@
   max-width: 100%;
   height: auto;
   border: 1px solid var(--line-2);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: var(--panel);
 }
 .file-viewport {
   flex: 1;
   min-height: 160px;
   border: 1px solid var(--line-2);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: var(--panel);
 }
 
@@ -179,14 +176,22 @@
   min-height: 160px;
   overflow: hidden;
 }
-.file-edit-conflict {
+/* While Vibe reads the side panel (panel_read): a quiet line above the code. */
+.file-edit-reading {
+  margin: 4px 0;
+  font-size: var(--text-12);
+  color: var(--text-3);
+}
+.file-edit-conflict,
+.file-edit-notice {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 6px;
   margin: 6px 0;
 }
-.file-edit-conflict > span {
+.file-edit-conflict > span,
+.file-edit-notice > span {
   flex: 1 1 160px;
 }
 .file-merge-compare {

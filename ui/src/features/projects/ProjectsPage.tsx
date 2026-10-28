@@ -12,6 +12,7 @@
  * Invariants: renders only (every decision is in model.ts or the controller); page text is plain text; nothing here
  * writes a file.
  */
+import { Button } from "../../components/Controls";
 import { type ReactElement, useEffect, useMemo, useState } from "react";
 import { EmptyState } from "../../components/EmptyState";
 
@@ -121,10 +122,10 @@ function Page({ projects }: { projects: Projects }): ReactElement {
                 projects.setFilter(key);
               }}
             />
-            <button
+            <Button
               data-testid="projects.projects-page-pick-folder"
               type="button"
-              className="pj-btn"
+              appearance="project"
               title="Choose a folder and start a session in it; it then shows here"
               onClick={() => {
                 void sessionActions?.pickFolder().then((folder) => {
@@ -134,11 +135,11 @@ function Page({ projects }: { projects: Projects }): ReactElement {
             >
               <Icon name="folder-plus" size={16} />
               Add project folder
-            </button>
-            <button
+            </Button>
+            <Button
               data-testid="projects.projects-page-close"
               type="button"
-              className="pj-btn"
+              appearance="project"
               title="A project of your own: a name now, a main folder later if you like"
               onClick={() => {
                 projects.close();
@@ -147,18 +148,18 @@ function Page({ projects }: { projects: Projects }): ReactElement {
             >
               <Icon name="plus" size={16} />
               New project
-            </button>
-            <button
+            </Button>
+            <Button
               data-testid="projects.projects-page-refresh"
               type="button"
-              className="pj-btn"
+              appearance="project"
               aria-label="Read the projects again"
               title="Read the projects again"
               disabled={state.loading}
               onClick={() => void projects.refresh()}
             >
               <Icon name="refresh-cw" size={16} />
-            </button>
+            </Button>
           </div>
         </div>
         <KeyNotice message="Handbook requests use your Mistral key so the agent can write pages and plans." />
@@ -284,12 +285,17 @@ function Page({ projects }: { projects: Projects }): ReactElement {
             close: () => {
               projects.select(null);
             },
+            openFiles: () => {
+              projects.openFiles(selected.project.id);
+            },
+            openTerminal: () => {
+              projects.openTerminal(selected.project.id);
+            },
             openHandbook: (path) => void projects.openHandbook(selected.project.id, path),
             newSession: () => void projects.newSession(selected.project.id),
             reveal: () => void projects.reveal(selected.project.id),
             start: (trustedClick) => void projects.startHandbook(selected.project.id, trustedClick),
             askPlan: (trustedClick) => void projects.writePlan(selected.project.id, trustedClick),
-            migrate: () => void projects.migrate(selected.project.id),
             openSession,
             chooseFolder: () => void projects.chooseFolder(selected.project.id),
           }}

@@ -14,7 +14,7 @@ Models use Vibe's reported display name, falling back to the configured alias. D
 | `smart-approve` | Smart approve | A model checks each tool call: the calls it judges low-risk run, the others ask. | Use Smart approve access mode |
 | `accept-edits` | Accept edits | File edits run. Commands and anything outside the folder ask. | Use Accept edits access mode |
 | `ask` | Ask | Asks before tool use. | Use Ask access mode |
-| `plan` | Plan first | Vibe plans before it changes files. Not read-only: shell commands can still change files. | Use Plan first access mode |
+| `plan` | Plan first | Retired in Vibe 3. Saved sessions reopen in Ask; use Plan on a page to plan. | Plan first was retired in Vibe 3 |
 | `vw-plan` | Plan on a page | Plans first and writes the plan as a page in the project's handbook (docs/handbook/plans/). Other file writes are refused; shell commands still run. | Use Plan on a page access mode |
 | `explore` | Explore | Explore the project with Vibe's configured profile. | Use Explore access mode |
 
@@ -40,9 +40,9 @@ Models use Vibe's reported display name, falling back to the configured alias. D
 
 | ID | Name | Description | Tooltip |
 | --- | --- | --- | --- |
-| `askEachTime` | Ask each time | Ask before agent use; commands and sites you already granted remain allowed. | Ask before agent use; commands and sites you already granted remain allowed. |
-| `allowed` | Allowed | Standing permission during delegated tasks. Local sign-ins still ask each time; MCP forwarding also needs its server grant. | Standing permission during delegated tasks. Local sign-ins still ask each time; MCP forwarding also needs its server grant. |
-| `never` | Never | Refuse agent use. | Refuse agent use. MCP forwarding is blocked while this entry's default or any project refuses. |
+| `askEachTime` | Ask | Ask before secret commands. Saved site and MCP server permissions keep their own scope. | Ask before secret commands. Saved site and MCP server permissions keep their own scope. |
+| `allowed` | Always | Standing permission during delegated tasks. Local sign-ins still ask each time; MCP forwarding also needs its server grant. | Standing permission during delegated tasks. Local sign-ins still ask each time; MCP forwarding also needs its server grant. |
+| `never` | User only | Hidden from the agent in this project. | Hidden from the agent. MCP forwarding is blocked while the default or any project is User only. |
 
 ## Browser delegation permissions
 
@@ -70,3 +70,32 @@ Models use Vibe's reported display name, falling back to the configured alias. D
 | `page` | page | One document in a project's handbook. | Open handbook page |
 | `session` | Session | Existing work with its messages, history and settings, saved in the session list. | Open session |
 | `chat` | chat | Starting an interaction with Vibe, as in New chat or voice chat. | Start a chat |
+
+## Built-in plugins
+
+| ID | Name | Description | Tooltip |
+| --- | --- | --- | --- |
+| `vw` | Vibe Work tools | Lets Vibe use Vibe Work’s browser, capture and data tools in chats. | Lets Vibe use Vibe Work’s browser, capture and data tools in chats. |
+| `vibe` | Vibe essentials | Adds skills for setting up Vibe and creating plugins and skills. | Adds skills for setting up Vibe and creating plugins and skills. |
+
+## Built-in skills
+
+| ID | Name | Description | Tooltip |
+| --- | --- | --- | --- |
+| `vibe:create-plugin` | Create a plugin | Helps Vibe build a plugin with skills, tools and other features. | Helps Vibe build a plugin with skills, tools and other features. |
+| `vibe:skill-creator` | Create a skill | Helps Vibe create and update reusable skills for your tasks. | Helps Vibe create and update reusable skills for your tasks. |
+| `vibe:vibe` | Vibe setup and help | Helps Vibe explain and change its own setup. | Helps Vibe explain and change its own setup. |
+| `vibe:worktree` | Work in a separate copy | Helps Vibe create and manage separate working copies of a Git project. | Helps Vibe create and manage separate working copies of a Git project. |
+| `vw:browser` | Browse the web | Lets Vibe open pages, search and use web apps in Vibe Work’s browser. | Lets Vibe open pages, search and use web apps in Vibe Work’s browser. |
+| `vw:capture` | Capture a page | Lets Vibe save a page’s design, content and images, or compare two captures. | Lets Vibe save a page’s design, content and images, or compare two captures. |
+| `vw:data-analysis` | Analyse data | Helps Vibe turn spreadsheets and data files into findings, tables and charts. | Helps Vibe turn spreadsheets and data files into findings, tables and charts. |
+| `vw:deep-research` | Research a topic | Helps Vibe compare sources and write a report with references. | Helps Vibe compare sources and write a report with references. |
+| `vw:editor` | Work with open files | Lets Vibe read and edit the files you have open in Vibe Work. | Lets Vibe read and edit the files you have open in Vibe Work. |
+| `vw:git` | Manage project changes | Helps Vibe check changes, make commits and prepare pull requests. | Helps Vibe check changes, make commits and prepare pull requests. |
+| `vw:handbook` | Keep a project handbook | Helps Vibe maintain your project’s plans, decisions, guides and reports. | Helps Vibe maintain your project’s plans, decisions, guides and reports. |
+| `vw:images` | Create and edit images | Lets Vibe make or change images for your task. | Lets Vibe make or change images for your task. |
+| `vw:libraries` | Use your libraries | Lets Vibe find answers in documents you keep in Vibe Work’s Libraries. | Lets Vibe find answers in documents you keep in Vibe Work’s Libraries. |
+| `vw:meeting-prep` | Prepare for a meeting | Helps Vibe write a brief with context, an agenda and questions to ask. | Helps Vibe write a brief with context, an agenda and questions to ask. |
+| `vw:preview` | Check your web app | Lets Vibe run and check your web app in the Browser tab. | Lets Vibe run and check your web app in the Browser tab. |
+| `vw:processes` | Run servers and commands | Lets Vibe start, check and stop servers and other long-running commands. | Lets Vibe start, check and stop servers and other long-running commands. |
+| `vw:secrets` | Use saved keys | Lets Vibe use saved keys and tokens when a task needs them. | Lets Vibe use saved keys and tokens when a task needs them. |

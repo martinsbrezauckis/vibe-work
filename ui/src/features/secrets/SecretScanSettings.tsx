@@ -5,7 +5,7 @@ import { useStore } from "../../state/createStore";
 import { scanStatus } from "../../state/secretScanText";
 import { useApp } from "../shell/AppContext";
 
-/** The dependent checkbox and status exist only while scanning is enabled. */
+/** The status and Check now exist only while scanning is enabled. */
 export function SecretScanSettings() {
   const scan = useApp().secretScan;
   return scan === null ? null : <ScanSettings scan={scan} />;
@@ -42,7 +42,7 @@ function ScanSettings({ scan }: { scan: NonNullable<ReturnType<typeof useApp>["s
             onChange={(event) => {
               void scan.run({
                 op: "write",
-                settings: { enabled: event.target.checked, autoRedact: false },
+                settings: { enabled: event.target.checked },
               });
             }}
           />
@@ -50,38 +50,12 @@ function ScanSettings({ scan }: { scan: NonNullable<ReturnType<typeof useApp>["s
       </label>
       {enabled && (
         <div className="key-remember" style={{ paddingInlineStart: "var(--space-card-inline)" }}>
-          <label className="check" htmlFor={`${id}-auto`}>
-            <span>
-              <span id={`${id}-auto-label`}>Redact found secrets automatically</span>
-              <span className="d" id={`${id}-auto-description`}>
-                Replaces each one with [redacted]. Website passwords are never redacted
-                automatically: you decide each one. Open chats are done when they close.
-              </span>
-            </span>
-            <span className="key-check">
-              <input
-                data-testid="secrets.scan-auto-redact"
-                id={`${id}-auto`}
-                aria-labelledby={`${id}-auto-label`}
-                aria-describedby={`${id}-auto-description`}
-                type="checkbox"
-                checked={view?.settings.autoRedact ?? false}
-                aria-disabled={busy}
-                onChange={(event) => {
-                  void scan.run({
-                    op: "write",
-                    settings: { enabled: true, autoRedact: event.target.checked },
-                  });
-                }}
-              />
-            </span>
-          </label>
           <p className="key-line" role="status">
             {status}
           </p>
           <div className="key-actions">
             <Button
-              small
+              shape="outlined"
               data-testid="secrets.scan-check-now"
               aria-disabled={busy}
               onClick={() => {

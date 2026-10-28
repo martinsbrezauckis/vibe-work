@@ -11,22 +11,35 @@ publish = false
 [lints]
 workspace = true
 
+[features]
+# The macOS preview network guard: every preview's website data store sends its traffic through the guard's listener
+# (`WKWebsiteDataStore.proxyConfigurations`, wry's `mac-proxy`: Network.framework's HTTP CONNECT proxy, linked
+# directly, macOS 14+), WebTransport off per preview, and a preview without a working check is refused. Off: macOS
+# previews, including required previews, retain per-mount content rules and refuse failed rule installs. Proxy API: macOS 14 or later
+# (turn it on together with MACOSX_DEPLOYMENT_TARGET and the bundle minimum at 14.0). No effect on Linux/Windows.
+macos-proxy = ["tauri/macos-proxy"]
+
 [dependencies]
 vw-preview = { path = "../vw-preview" }
 # The agent browser's network guard.
 vw-netguard = { path = "../vw-netguard" }
 vw-platform = { path = "../vw-platform", features = ["webview"] }
 # `unstable` = `Window::add_child` (multiwebview; on docs.rs for 2.12.2: still behind the
-# flag). Same version as the app crate; the feature unifies into the app's tauri.
+# flag). Same version as the app crate; the features unify into the app's tauri.
 tauri = { version = "2.12.1", features = ["unstable"] }
 tokio = { version = "1.53", features = ["sync", "time", "rt"] }
 tracing = "0.1"
 url = "2"
 serde_json = "1"
 
+[target.'cfg(target_os = "macos")'.dependencies]
+# Patched with frame context only; features come from Tauri's same Wry instance.
+wry = { version = "=0.57.0", default-features = false }
+
 [target.'cfg(target_os = "linux")'.dependencies]
 # The same versions tauri/wry use (lockfile): GTK placement of child webviews and WebKitGTK snapshots.
 gtk = "0.18"
 webkit2gtk = "=2.0.2"
+javascriptcore-rs = "=1.1.2"
 cairo-rs = { version = "0.18", features = ["png"] }
 glib = "0.18"

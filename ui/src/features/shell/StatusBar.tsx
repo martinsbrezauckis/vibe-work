@@ -9,6 +9,9 @@ import { type ReactNode, useEffect, useState } from "react";
 
 import { PathText } from "../../components/PathText";
 import { contextReadout, rateLimitWarning, usageOf } from "../../state/account";
+import { useKeyUi } from "../setup/useKeys";
+import { useVibeUi } from "../setup/VibeInstallStep";
+import { installStatus } from "../../state/vibeInstall";
 import { VaultLockControls } from "../secrets/VaultLockControls";
 import { useApp } from "./AppContext";
 import { useKeyReadiness } from "./KeyNotice";
@@ -17,6 +20,8 @@ import { useCoreState, useSessionSummaries, useShellState } from "./hooks";
 
 function Server() {
   const server = useCoreState((s) => s.server);
+  // While Vibe is being installed or updated the server is "not installed": say what is happening instead.
+  const installing = useVibeUi((s) => installStatus(s.view));
   switch (server.phase) {
     case "running":
       return (
@@ -46,7 +51,7 @@ function Server() {
     case "notInstalled":
       return (
         <span>
-          <span className="warn">■</span> Vibe is not installed yet
+          <span className="warn">■</span> {installing ?? "Vibe is not installed yet"}
         </span>
       );
     case "stopped":
@@ -71,13 +76,13 @@ function UsageReadout() {
   const session = useCoreState((s) =>
     selected === null ? undefined : s.sessions[selected]?.session,
   );
-  // the share of the model's declared window when its runtime says it (Vibe 2.26.1), else of the
+  // the share of the model's declared window when its runtime says it (Vibe 3), else of the
   // compaction threshold.
   const runtime = useCoreState((s) =>
     selected === null ? undefined : s.sessions[selected]?.runtime,
   );
   if (!show || selected === null) return null;
-  const readout = contextReadout(usageOf(session), runtime);
+  const readout = contextReadout(usageOf(session, runtime), runtime);
   if (readout === null) return null;
   const { percent } = readout;
   const explain = `${readout.explain} Click for Usage and plan.`;
@@ -136,6 +141,7 @@ function RateWarning() {
 /** The status bar. */
 export function StatusBar({ children }: { children?: ReactNode }) {
   const key = useKeyReadiness();
+  const activeKey = useKeyUi((s) => s.status?.activeKey?.label ?? null);
   const debugOn = useCoreState((s) => s.debugApi.enabled);
   const selected = useShellState((s) => s.selected);
   const cwd = useSessionSummaries().find((s) => s.id === selected)?.cwd ?? null;
@@ -143,7 +149,11 @@ export function StatusBar({ children }: { children?: ReactNode }) {
     <footer className="statusbar">
       <Server />
       {key !== null && (
-        <span className="warn" data-testid="statusbar-key" title={key.message}>
+        <span
+          className="warn"
+          data-testid="statusbar-key"
+          title={activeKey === null ? key.message : `Mistral key: ${activeKey}`}
+        >
           {key.status}
         </span>
       )}

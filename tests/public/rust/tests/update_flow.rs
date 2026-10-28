@@ -321,3 +321,53 @@ async fn up_to_date_is_idle_and_drops_a_stale_package() {
     assert_eq!(rig.phase(), Phase::Idle);
     assert!(!rig.package_file().exists());
 }
+
+#[tokio::test]
+async fn an_unreadable_minimum_fails_the_check_without_downloading_or_notifying() {
+    let rig = Rig::new("unreadable-minimum");
+    let error =
+        vw_host::update_os::check_minimum("macOS", Some("15.1"), Some(&serde_json::json!(7)))
+            .unwrap_err();
+    *rig.script.check.lock().unwrap() = Some(Err(error.clone()));
+    rig.manager.check().await.unwrap();
+    assert_eq!(
+        rig.phase(),
+        Phase::Failed {
+            stage: Stage::Check,
+            error: error.clone(),
+            version: None,
+        }
+    );
+    assert_eq!(rig.script.downloads.load(Ordering::SeqCst), 0);
+    assert!(!rig.package_file().exists());
+    assert!(rig.notices().is_empty());
+    assert_eq!(rig.installs(), 0);
+    let status: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(rig.dir.join("updates.json")).unwrap()).unwrap();
+    assert_eq!(status["outcome"], "failed");
+    assert_eq!(status["error"], error);
+}
+
+#[tokio::test]
+async fn an_unreadable_minimum_keeps_a_verified_ready_package() {
+    let rig = Rig::new("ready-unreadable-minimum");
+    rig.announce("1.1.0", PACKAGE);
+    rig.manager.check().await.unwrap();
+    let rig = rig.restart(InstallMode::InApp);
+    let ready = rig.phase();
+    assert!(is_ready(&ready, "1.1.0"));
+    let error =
+        vw_host::update_os::check_minimum("macOS", Some("15.1"), Some(&serde_json::json!(7)))
+            .unwrap_err();
+    *rig.script.check.lock().unwrap() = Some(Err(error));
+    rig.manager.check().await.unwrap();
+    assert_eq!(rig.phase(), ready);
+    assert_eq!(std::fs::read(rig.package_file()).unwrap(), PACKAGE);
+    assert_eq!(rig.script.downloads.load(Ordering::SeqCst), 0);
+    assert!(rig.notices().is_empty());
+    rig.manager
+        .request_install(UpdateRequester::Window)
+        .await
+        .unwrap();
+    assert_eq!(rig.script.installs.lock().unwrap()[0].1, PACKAGE);
+}

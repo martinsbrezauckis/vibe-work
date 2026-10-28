@@ -20,7 +20,7 @@ import { createStore } from "./createStore";
 import type { Toasts } from "./toastStore";
 
 /** How often a non-empty list is checked again for processes that ended by themselves. */
-export const LEFT_RUNNING_POLL_MS = 30_000;
+const LEFT_RUNNING_POLL_MS = 30_000;
 
 /** The UI state. */
 export interface LeftRunningState {

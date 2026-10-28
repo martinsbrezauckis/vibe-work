@@ -2,8 +2,9 @@
 //! gets `[utility_models] title = "mistral-medium-3.5"` unless it already names a title model.
 //!
 //! Why: Vibe Work names the title model, so session titles come from one known model whatever model a session
-//! runs: Mistral Medium 3.5, which answers Vibe's title request (greedy sampling, `temperature = 0`). Without a
-//! `[utility_models]` title model Vibe writes titles with the session's active model.
+//! runs: Mistral Medium 3.5, which answers Vibe's title request (Vibe 3 samples it at the model entry's temperature,
+//! 1.0 for Medium 3.5; 2.26.1 sent greedy `temperature = 0`). Without a `[utility_models]` title model Vibe writes
+//! titles with the session's active model.
 //!
 //! Why this and not `top_p` on the model entry: a model's `top_p` applies to the session's answers, not to the
 //! title request, so it would not change titles, and it would change the sampling of every normal answer on that
@@ -32,7 +33,7 @@ use std::path::Path;
 use toml::{Table, Value};
 
 /// The title model alias we set: Vibe's built-in default model, Mistral Medium 3.5 (`vibe_schema.py`
-/// `DEFAULT_ACTIVE_MODEL_CONFIG`), which accepts Vibe's greedy title request.
+/// `DEFAULT_ACTIVE_MODEL_CONFIG`), which accepts Vibe's title request (2.26.1's greedy one too).
 pub const TITLE_MODEL_ALIAS: &str = "mistral-medium-3.5";
 
 /// The lines written above the added table (English, no paths; they ship into the user's config).

@@ -35,6 +35,7 @@ compile_error!("the e2e-script feature is for debug test builds only");
 mod access;
 mod agent_access;
 pub(crate) mod agent_tools;
+mod app_context;
 mod app_settings;
 mod attachment_save;
 mod background_output;
@@ -59,7 +60,13 @@ mod changes_repo;
 mod changes_slots;
 mod changes_view;
 mod channels;
+mod chrome_control;
 mod command;
+pub use chrome_control::{
+    CHROME_RESTORE_DIALOG_METHOD, ChromeAskView, ChromeControlConfig, ChromeControlRequest,
+    ChromeControlView, ChromeSetupView,
+};
+mod command_decode;
 mod confirmer;
 mod connector_consent;
 mod connectors;
@@ -67,11 +74,13 @@ mod connectors_config;
 mod connectors_project;
 mod connectors_view;
 mod core;
+mod core_config;
 mod core_viewers;
 mod default_model;
 mod dialog_texts;
 mod dictation;
 mod dispatch;
+mod dispatch_call;
 mod dispatch_compaction;
 mod document_save;
 mod documents;
@@ -80,14 +89,24 @@ mod entry_permissions;
 mod entry_projects;
 mod error;
 mod event;
+mod explorer;
+mod explorer_history;
+mod explorer_read;
+#[cfg(test)]
+mod explorer_tests;
+mod explorer_view;
+#[cfg(test)]
+mod export_contract_tests;
 mod export_md;
 mod files;
 mod files_lookup;
 mod files_read;
+mod files_saved;
 pub mod files_scope;
 mod files_view;
 mod files_write;
 mod fill_grants;
+mod full_access_alert;
 mod git_api;
 mod git_browser;
 mod git_browser_view;
@@ -101,12 +120,33 @@ mod git_pr;
 mod git_publish;
 mod git_settings;
 mod git_view;
+mod guard_refusals;
+mod model_choices;
+mod saved_documents;
+mod turn_start;
+pub use guard_refusals::GuardKind;
+mod github_reads;
+mod github_reads_view;
 mod handoff;
 mod helper_chat;
+pub(crate) mod install_offers;
 mod instructions;
 mod instructions_view;
+mod vibe_rules;
+pub use github_reads_view::{GithubReadsRequest, GithubReadsStatus, GithubReadsView};
+mod keep_awake;
+mod keep_awake_view;
+pub use keep_awake_view::{KeepAwakeRequest, KeepAwakeStatus, KeepAwakeView};
+mod new_chat;
+pub use new_chat::NEW_CHAT_RESTORE_DIALOG_METHOD;
+mod new_chat_view;
+pub use new_chat_view::{NewChatRequest, NewChatView};
+#[cfg(test)]
+mod keep_awake_tests;
 mod key_events;
 mod key_replace;
+mod mistral_keys;
+pub use mistral_keys::{MistralKeyTestView, MistralKeyView};
 mod keys;
 mod left_running;
 mod left_running_view;
@@ -122,8 +162,10 @@ mod mcp_keys;
 mod mcp_keys_config;
 mod names;
 mod network;
+mod network_python;
 mod network_test;
 mod network_view;
+mod on_demand;
 mod one_ask;
 mod pages;
 mod pages_answers;
@@ -138,11 +180,24 @@ mod plan;
 mod plan_profile;
 mod plugin_approvals;
 mod plugin_identity;
+mod plugin_refresh;
 mod preview_pick;
 mod preview_ports;
 mod preview_view;
 mod previews;
 mod processes;
+mod protected_changes;
+mod protected_changes_store;
+mod protected_changes_validate;
+mod protected_changes_view;
+pub use protected_changes_view::{
+    ProtectedChangeProblem, ProtectedChangeStatus, ProtectedChangeView, ProtectedFileView,
+};
+#[cfg(test)]
+mod offline_core;
+mod own_server;
+mod panel_read;
+mod panel_view;
 mod project_instruction_files;
 mod project_instruction_links;
 mod project_instruction_ops;
@@ -151,7 +206,10 @@ mod project_instructions_view;
 mod projects;
 mod projects_filing;
 mod projects_view;
+mod provider_errors;
 mod pump;
+mod queue_return;
+mod read_aloud;
 mod recovery;
 mod restore;
 mod resync_budget;
@@ -166,7 +224,7 @@ mod search_index;
 mod search_text;
 mod search_view;
 mod secret_generate;
-mod secret_grants;
+mod secret_path;
 mod secret_replace;
 mod secret_scan;
 mod secret_scan_cache;
@@ -176,21 +234,30 @@ mod secret_scan_tests;
 mod secret_scan_view;
 mod secret_scan_worker;
 mod secret_scrub;
+mod secret_uses;
 mod secrets;
 mod secrets_view;
+mod session_delete;
+mod session_delete_files;
 mod session_end;
 mod session_export;
 mod session_folders;
 mod session_holder;
 mod session_lease;
 mod session_listing;
+mod session_loops;
+mod session_ownership;
 mod session_processes;
 mod session_readonly;
 mod session_tools;
 mod session_tools_view;
 mod sessions;
+mod skills;
+mod skills_view;
 mod speech;
 mod speech_view;
+mod stop_tree;
+mod stops;
 mod stuck;
 mod subagents_setting;
 mod subscription;
@@ -198,6 +265,7 @@ mod temporary;
 mod terminal_procmon;
 mod terminal_view;
 mod terminals;
+mod tools_list;
 mod transport;
 mod vault_scope;
 mod vibe_install;
@@ -206,14 +274,16 @@ mod work;
 mod work_view;
 pub mod working_note;
 mod worktrees;
+mod worktrees_deleted;
 mod worktrees_remove;
+mod worktrees_restore;
 mod worktrees_start;
 mod worktrees_view;
 
 #[cfg(feature = "ts")]
 pub mod ts;
 
-pub use agent_tools::{AgentToolsConfig, BeforeStart};
+pub use agent_tools::AgentToolsConfig;
 pub use app_settings::write_app_settings;
 pub use browser_view::{BrowserRequest, BrowserResult, BrowserShot};
 pub use changes_facts::path_key;
@@ -223,13 +293,13 @@ pub use changes_view::{
     TurnChanges, TurnFile, UndoPreview,
 };
 pub use command::{Command, CommandResult, Origin};
+pub use command_decode::invalid_command;
 pub use connectors_view::{
     CatalogLoad, ConnectorView, ConnectorsRequest, ConnectorsResult, ConnectorsView,
     NewServerSecret, ServerKeyView, ServerView, ToolView,
 };
 pub use core::{Core, CoreConfig, CoreStartError};
 pub use dictation::SpeechConfig;
-pub use dispatch::invalid_command;
 pub use documents::DocumentsConfig;
 pub use documents_view::{
     DocumentRefusal, DocumentSource, DocumentView, DocumentsRequest, DocumentsResult, DroppedFile,
@@ -275,6 +345,7 @@ pub use network_view::{
 };
 pub use pages::PagesSetup;
 pub use pages_view::{PagesRequest, PagesResult, ProjectHub};
+pub use panel_view::{PanelEditor, PanelFiles, PanelSelection, PanelView};
 pub use preview_view::{
     BusyOption, BusyPortView, PickTarget, PreviewRequest, PreviewResult, PreviewTarget,
 };
@@ -291,10 +362,13 @@ pub use secret_scan_view::{
     SecretScanStatus, SecretScanView,
 };
 pub use secrets_view::{
-    EntryPermissionView, FillGrantView, GrantView, LoginPassword, LoginView, PasswordOptions,
+    EntryPermissionView, FillGrantView, LoginPassword, LoginView, PasswordOptions,
     ProjectSecretView, SecretUseView, SecretsRequest, SecretsResult, ServerGrantView,
 };
 pub use session_tools_view::{SessionExportView, SessionToolsRequest, SessionToolsResult};
+pub use skills_view::{
+    SkillDetail, SkillIssue, SkillRow, SkillsAction, SkillsRequest, SkillsResult, SkillsView,
+};
 pub use speech::LANGUAGES;
 pub use speech_view::{DictationMode, DictationUpdate, SpeechRequest, SpeechResult, VoiceView};
 pub use subscription::CoreSubscription;
@@ -338,3 +412,20 @@ pub fn version() -> &'static str {
 pub use git_browser_view::{
     GitBrowserNode, GitBrowserRequest, GitBrowserResult, GitBrowserSnapshot,
 };
+
+pub use explorer_view::{
+    ExplorerEntry, ExplorerHit, ExplorerRequest, ExplorerResult, ExplorerVersion,
+};
+
+mod ask;
+pub use ask::{AskClock, AskGrantsRequest, SystemAskClock};
+pub use install_offers::ToolsInstallOffer;
+pub use vibe_rules::{RuleRef, VibeRule, VibeRulesRequest};
+pub use vw_ask::{Answer, AnsweredBy, Ask, AskRecord, Choice, Outcome, Scope, Surface};
+
+mod command_name;
+mod command_origin;
+
+#[cfg(test)]
+#[path = "../../../tests/public/fixtures/readonly_package.rs"]
+mod readonly_fixture;

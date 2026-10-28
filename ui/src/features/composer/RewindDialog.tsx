@@ -66,20 +66,20 @@ export function RewindDialog(): ReactElement | null {
           )}
         </section>
         <section className="rewind-acts">
-          <button
+          <Button
             data-testid="composer.rewind-dialog-mini"
             type="button"
-            className="mini"
+            appearance="compact"
             title="Cancel rewind (Escape)"
             aria-label="Cancel rewind (Escape)"
             onClick={close}
           >
             Cancel
-          </button>
+          </Button>
           <Button
             data-testid="composer.rewind-dialog-confirm-rewind"
             type="button"
-            small
+            shape="outlined"
             variant="danger"
             title="Rewind into a new session and restore files"
             aria-label="Rewind into a new session and restore files"
@@ -93,7 +93,7 @@ export function RewindDialog(): ReactElement | null {
           <Button
             data-testid="composer.rewind-dialog-confirm-rewind-2"
             type="button"
-            small
+            shape="outlined"
             variant="danger"
             title="Rewind here and restore files"
             aria-label="Rewind here and restore files"

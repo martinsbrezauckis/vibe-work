@@ -39,7 +39,8 @@ async fn maps_recorded_error_codes_and_preserves_plain_reasons() {
             }
             "skills/remove" => json!({"sessionId":"s","name":"n","scope":"global"}),
             "skills/setEnabled" => json!({"sessionId":"s","name":"review","enabled":false}),
-            "skills/list" => json!({"sessionId":"s"}),
+            // The generated 3.0.2 params echo the session-less fields at their defaults.
+            "skills/list" => json!({"sessionId":"s","cwd":null,"trustWorkspace":false}),
             _ => panic!("Uncovered fixture method"),
         };
         let client = SkillsClient::new(Rejection {
@@ -129,7 +130,9 @@ impl SkillsTransport for Broken {
 #[tokio::test]
 async fn distinguishes_wire_and_channel_failures() {
     let params = SkillsListParams {
-        session_id: "s".into(),
+        session_id: Some("s".into()),
+        cwd: None,
+        trust_workspace: false,
     };
     assert!(matches!(
         SkillsClient::new(Broken(true))

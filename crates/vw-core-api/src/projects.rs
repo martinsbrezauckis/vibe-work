@@ -8,10 +8,10 @@
 //! - Both clients act alike (the Debug API controls the app as the user; no native dialog, no
 //!   redaction for project requests). The origin is still logged with every failure by `Core::execute`.
 //! - A main folder must be a folder a known session works in, a project's main folder already, or one the user
-//!   picked in the native dialog, for BOTH origins. The Debug API gets no wider rule: the webview can lower its own
-//!   calls to the Debug API origin (`Host::execute_for_ui_control`, `ExecuteOptions.origin`), so a wider Debug API
-//!   rule would let a script in the window name any folder, and a main folder reaches the `vw-plan` write profile
-//!   and the page server (covered by `vw_core_projects`).
+//!   picked in the native dialog, for BOTH origins. The Debug API gets no wider rule: a `ui/projects` request's
+//!   window commands run as the window's, and a folder it names becomes usable through the Debug API's `pickFolder`
+//!   (the request's grant, `vw-host` `ui_grants`), so the rule stays one for both; a main folder reaches the
+//!   `vw-plan` write profile and the page server (covered by `vw_core_projects`).
 //! - `delete` never deletes a session: its members move to "not in a project".
 
 use std::collections::BTreeMap;

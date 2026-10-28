@@ -1,4 +1,4 @@
-//! The classification table: every client request method in the protocol method map, exactly once.
+//! The classification table: every client request method plus explicitly denied retired methods, exactly once.
 //!
 //! Depends on: vw-protocol (method markers for typed checks), class, error. Called by: gate
 //! (dispatch), tests (`classified_methods`, `forwarded_without_unified_evidence`).
@@ -159,17 +159,30 @@ pub const FORWARDED_WITHOUT_UNIFIED_EVIDENCE: &[(&str, &str)] = &[
         "the bench's rewind runs: rewind in place and as a fork works on the unified harness when turn/start carries clientUserMessageId; the final report only has the earlier legacy-harness run",
     ),
     (
-        "session/turn/queue/steer",
-        "not covered by the bench; sibling of the queue ops that pass on unified; params are three ids",
+        "session/subagents/interrupt",
+        "not covered by the bench; interrupts owned children through their parent runtime; real unified-harness child and sibling isolation is exercised by vw_l13m_tree_loops",
     ),
     (
-        "workspace/git/worktrees/reap/cancel",
-        "not covered by the bench; cancels a reap that itself needs a confirmation; params are ids and a path",
+        "session/turn/queue/steer",
+        "not covered by the bench; sibling of the queue ops that pass on unified; params are three ids",
     ),
 ];
 
 static TABLE: &[Row] = &[
     deny!("initialize", InternalOnly),
+    deny!("imports/discover", NoUserInterface),
+    deny!("imports/start", NoUserInterface),
+    deny!("imports/read", NoUserInterface),
+    deny!("session/turn/queue/edit/start", NoUserInterface),
+    deny!("session/turn/queue/edit/save", NoUserInterface),
+    deny!("session/turn/queue/edit/cancel", NoUserInterface),
+    deny!("session/turn/queue/edit/abandon", NoUserInterface),
+    // New in Vibe 3.0.1/3.0.2 (experimental upstream); no Vibe Work screen uses them in 0.1.2.
+    // `connector_catalog/connect` makes a no-login connector usable on the user's Mistral account.
+    deny!("connector_catalog/connect", NoUserInterface),
+    fwd!("session/subagents/interrupt", SessionSubagentsInterrupt),
+    deny!("session/subagents/read", NoUserInterface),
+    deny!("session/subagents/wait", NoUserInterface),
     fwd!("account/read", AccountRead),
     p2!("agents/install", AgentsInstall),
     deny!("agents/list", NotOnUnified),
@@ -197,7 +210,7 @@ static TABLE: &[Row] = &[
     fwd!("connector_catalog/read", ConnectorCatalogRead),
     fwd!("connector_catalog/refresh", ConnectorCatalogRefresh),
     p1!("connector_catalog/toggle", ConnectorToggle),
-    deny!("diagnostics/list", NotOnUnified),
+    deny!("diagnostics/list", NotSupported),
     fwd!("diagnostics/logs/read", DiagnosticsLogsRead),
     fwd!("events/read", EventsRead),
     deny!("feedback/record", Privacy),
@@ -223,10 +236,11 @@ static TABLE: &[Row] = &[
     p1!("mcp_catalog/toggle", McpToggle),
     fwd!("narration/summarize", NarrationSummarize),
     fwd!("plugin/info", PluginInfo),
-    fwd!("plugin/reload", PluginReload),
+    // Only the core may reload: it holds the chat through the reopen and binds its host hooks again.
+    deny!("plugin/reload", InternalOnly),
     fwd!("plugins/read", PluginsRead),
     fwd!("plugin_catalog/read", PluginCatalogRead),
-    fwd!("providerAuth/read", ProviderAuthRead),
+    deny!("providerAuth/read", Credential),
     p2!("projectLinks/create", ProjectLinksCreate),
     p2!("projectLinks/inspectRoot", ProjectLinksInspectRoot),
     p2!("projectLinks/link", ProjectLinksLink),
@@ -300,9 +314,10 @@ static TABLE: &[Row] = &[
     p2!("skills/setVersion", SkillsSetVersion),
     fwd!("skills/updates", SkillsUpdates),
     fwd!("skills/versions", SkillsVersions),
-    deny!("stats/read", NotOnUnified),
+    deny!("stats/read", NotSupported),
     deny!("telemetry/record", Privacy),
-    deny!("tools/list", NotOnUnified),
+    // Not forwarded; the core answers it from `runtime/read` (vw-core-api `tools_list`).
+    deny!("tools/list", NotSupported),
     fwd!("session/turn/enqueue", SessionTurnEnqueue),
     fwd!("session/turn/queue/read", SessionTurnQueueRead),
     fwd!("session/turn/queue/remove", SessionTurnQueueRemove),
@@ -331,10 +346,7 @@ static TABLE: &[Row] = &[
     // Vibe Work never prunes worktrees by a count.
     deny!("workspace/git/worktrees/prune", UnnamedRemoval),
     deny!("workspace/git/worktrees/reap", UnnamedRemoval),
-    fwd!(
-        "workspace/git/worktrees/reap/cancel",
-        WorkspaceGitWorktreesReapCancel
-    ),
+    deny!("workspace/git/worktrees/reap/cancel", NotSupported),
     p1!("workspace/git/worktrees/remove", WorktreeRemove),
     fwd!("workspace/prompt/prepare", WorkspacePromptPrepare),
     p1!("workspace/trust/decision", WorkspaceTrust),
@@ -369,4 +381,17 @@ pub fn classified_methods() -> impl Iterator<Item = (&'static str, Class)> {
 #[must_use]
 pub fn forwarded_without_unified_evidence() -> &'static [(&'static str, &'static str)] {
     FORWARDED_WITHOUT_UNIFIED_EVIDENCE
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn plugin_reload_can_only_run_inside_the_core_refresh() {
+        assert_eq!(
+            classify("plugin/reload"),
+            Some(Class::Denied(DenyReason::InternalOnly))
+        );
+    }
 }

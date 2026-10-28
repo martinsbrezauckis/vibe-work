@@ -90,11 +90,22 @@ impl Core {
             .as_array()
             .into_iter()
             .flatten()
-            .find(|p| p["path"].as_str() == Some(path.as_str()))
+            // Compared as paths: on Windows `C:\a\b` and `C:/a/b` (as an agent on the Debug API may write it) are
+            // the same folder.
+            .find(|p| {
+                p["path"]
+                    .as_str()
+                    .is_some_and(|found| Path::new(found) == folder)
+            })
             .ok_or_else(|| {
                 refuse("Vibe no longer discovers this plugin. Read the Tools page again.")
             })?;
         let name = row["name"].as_str().unwrap_or("plugin");
+        if op == "turnOnPlugin" && row["readable"] == false {
+            return Err(refuse(
+                "This plugin is not readable. Check its issues in Tools before turning it on.",
+            ));
+        }
         self.confirm_plugin_change(origin, op, &path, name).await?;
         let held = self.shared.plugin_approvals.mutations.lock().await;
         // A dialog can remain open while an agent edits the tree. Check ownership again after it closes.
@@ -134,6 +145,10 @@ impl Core {
             }
         }
         drop(held);
+        // Its tools leave the chats: their "Allow for this session" answers end (a plugin turned on again asks).
+        if op == "removePlugin" || op == "turnOffPlugin" {
+            crate::ask::grants::plugin_changed(&self.shared);
+        }
         self.reload_sessions().await;
         if op == "removePlugin"
             && folder.starts_with(home)
@@ -200,19 +215,217 @@ pub(crate) fn move_plugin(folder: &Path, off: bool) -> Result<(), CoreError> {
             "A plugin folder already exists at the destination. Nothing was overwritten.",
         ));
     }
-    std::fs::rename(folder, target).map_err(|e| {
-        CoreError::new(
-            ErrorCode::Internal,
-            format!("The plugin could not be moved: {e}"),
-        )
-    })?;
+    rename_settled(
+        folder,
+        &target,
+        &mut |from, to| std::fs::rename(from, to),
+        &mut std::thread::sleep,
+        cfg!(windows),
+    )
+}
 
-    Ok(())
+/// Pauses between attempts while Windows reports the plugin folder busy: about 4.5 s in all. Another process reading
+/// files in the folder blocks the move: antivirus or Explorer on a newly copied folder, or a plugin read. (The Tools
+/// board's own reader, `discover_plugins`, no longer reads folders in `plugins/` its sweep has not kept.) Measured on
+/// the Windows test machine: about 150 ms of reads in one Chrome Control folder; the next try 260 ms later passed.
+const BUSY_PAUSES_MS: [u64; 8] = [50, 100, 200, 400, 800, 1000, 1000, 1000];
+
+/// Windows refuses to rename a folder while any process has a file or subfolder inside it open, whatever that
+/// handle's sharing (`ERROR_ACCESS_DENIED`, os error 5), or has the folder itself open without delete sharing
+/// (`ERROR_SHARING_VIOLATION`, 32); both pass once the other process lets go. Off Windows the same numbers mean
+/// EIO/EPIPE and are never retried.
+fn busy(error: &std::io::Error, windows: bool) -> bool {
+    windows && matches!(error.raw_os_error(), Some(5 | 32))
+}
+
+/// Moves `from` to `to`, waiting out a briefly busy folder on Windows (see [`BUSY_PAUSES_MS`]); the move is one
+/// rename, so the folder is either moved whole or left where it was. The destination is checked again before
+/// each retry: an existing one is never overwritten. Blocks the calling thread for at most the pauses' sum, only
+/// while the folder is busy. `rename` and `pause` are the seams the tests inject.
+fn rename_settled(
+    from: &Path,
+    to: &Path,
+    rename: &mut dyn FnMut(&Path, &Path) -> std::io::Result<()>,
+    pause: &mut dyn FnMut(std::time::Duration),
+    windows: bool,
+) -> Result<(), CoreError> {
+    let mut pauses = BUSY_PAUSES_MS.iter();
+    loop {
+        let error = match rename(from, to) {
+            Ok(()) => return Ok(()),
+            Err(error) => error,
+        };
+        if !busy(&error, windows) {
+            return Err(CoreError::new(
+                ErrorCode::Internal,
+                format!("The plugin could not be moved: {error}"),
+            ));
+        }
+        let Some(ms) = pauses.next() else {
+            let name = from.file_name().unwrap_or_default().to_string_lossy();
+            return Err(CoreError::new(
+                ErrorCode::Internal,
+                format!(
+                    "Windows is still using a file in the plugin folder \"{name}\" (often antivirus checking newly copied files, or a program that has the folder open). Nothing was moved. Wait a moment and try again."
+                ),
+            ));
+        };
+        pause(std::time::Duration::from_millis(*ms));
+        if std::fs::symlink_metadata(to).is_ok() {
+            return Err(refuse(
+                "A plugin folder already exists at the destination. Nothing was overwritten.",
+            ));
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::plugin_change_summary;
+
+    use super::{move_plugin, rename_settled};
+    use std::io::{Error, ErrorKind};
+    use std::path::{Path, PathBuf};
+    use std::time::Duration;
+
+    /// Runs `rename_settled` against scripted rename results; returns the result, the number of rename calls
+    /// and the pauses asked for.
+    fn scripted(
+        results: Vec<std::io::Result<()>>,
+        windows: bool,
+    ) -> (Result<(), String>, usize, Vec<Duration>) {
+        let mut results = results.into_iter();
+        let mut calls = 0;
+        let mut pauses = Vec::new();
+        let result = rename_settled(
+            Path::new("/home/vibe-home/plugins/chrome-control"),
+            Path::new("/home/vibe-home/plugins-off/chrome-control"),
+            &mut |_, _| {
+                calls += 1;
+                results
+                    .next()
+                    .unwrap_or_else(|| Err(Error::from_raw_os_error(5)))
+            },
+            &mut |d| pauses.push(d),
+            windows,
+        )
+        .map_err(|e| e.message);
+        (result, calls, pauses)
+    }
+
+    #[test]
+    fn a_windows_access_denied_rename_is_retried_until_the_folder_is_free() {
+        // Windows refuses to rename a folder while any process has a file inside it open (os error 5);
+        // a scanner or reader lets go within moments.
+        let (result, calls, pauses) = scripted(
+            vec![
+                Err(Error::from_raw_os_error(5)),
+                Err(Error::from_raw_os_error(5)),
+                Ok(()),
+            ],
+            true,
+        );
+        assert_eq!(result, Ok(()));
+        assert_eq!(calls, 3);
+        assert_eq!(
+            pauses,
+            [Duration::from_millis(50), Duration::from_millis(100)]
+        );
+    }
+
+    #[test]
+    fn a_windows_sharing_violation_is_retried_too() {
+        let (result, calls, _) = scripted(vec![Err(Error::from_raw_os_error(32)), Ok(())], true);
+        assert_eq!(result, Ok(()));
+        assert_eq!(calls, 2);
+    }
+
+    #[test]
+    fn a_folder_that_stays_busy_fails_after_a_bounded_wait_with_plain_words() {
+        let (result, calls, pauses) = scripted(vec![], true);
+        let total: Duration = pauses.iter().sum();
+        assert!(
+            total >= Duration::from_secs(4) && total <= Duration::from_secs(5),
+            "{total:?}"
+        );
+        assert_eq!(calls, pauses.len() + 1);
+        assert_eq!(
+            result.unwrap_err(),
+            "Windows is still using a file in the plugin folder \"chrome-control\" (often antivirus checking newly copied files, or a program that has the folder open). Nothing was moved. Wait a moment and try again."
+        );
+    }
+
+    #[test]
+    fn other_errors_are_reported_at_once() {
+        let (result, calls, pauses) = scripted(vec![Err(Error::from(ErrorKind::NotFound))], true);
+        assert_eq!(calls, 1);
+        assert_eq!(pauses, [] as [Duration; 0]);
+        assert!(
+            result
+                .unwrap_err()
+                .starts_with("The plugin could not be moved: ")
+        );
+        // errno 5 is EIO off Windows: not a busy folder, never retried.
+        let (result, calls, _) = scripted(vec![Err(Error::from_raw_os_error(5))], false);
+        assert_eq!(calls, 1);
+        assert!(
+            result
+                .unwrap_err()
+                .starts_with("The plugin could not be moved: ")
+        );
+    }
+
+    fn plugin_home(tag: &str) -> PathBuf {
+        let home = std::env::temp_dir()
+            .join(format!("vw-p274-{tag}-{}", std::process::id()))
+            .join("vibe-home");
+        let _ = std::fs::remove_dir_all(home.parent().unwrap());
+        std::fs::create_dir_all(home.join("plugins/held/bin")).unwrap();
+        std::fs::write(home.join("plugins/held/plugin.json"), b"{}").unwrap();
+        std::fs::write(home.join("plugins/held/bin/tool.exe"), b"bytes").unwrap();
+        home
+    }
+
+    /// The real Windows case: a reader holds a file inside the plugin for 300 ms (as a scanner does), the sweep's
+    /// move waits for it and succeeds; held for good, the move fails with the plain text and nothing moved.
+    #[cfg(windows)]
+    #[test]
+    fn windows_move_waits_for_a_briefly_held_file_and_reports_a_held_one() {
+        let home = plugin_home("held");
+        let file = std::fs::File::open(home.join("plugins/held/bin/tool.exe")).unwrap();
+        let release = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(300));
+            drop(file);
+        });
+        move_plugin(&home.join("plugins/held"), false).unwrap();
+        release.join().unwrap();
+        assert!(home.join("plugins-off/held/bin/tool.exe").exists());
+        assert!(!home.join("plugins/held").exists());
+
+        std::fs::create_dir_all(home.join("plugins/held2")).unwrap();
+        std::fs::write(home.join("plugins/held2/plugin.json"), b"{}").unwrap();
+        let file = std::fs::File::open(home.join("plugins/held2/plugin.json")).unwrap();
+        let error = move_plugin(&home.join("plugins/held2"), false).unwrap_err();
+        drop(file);
+        assert!(
+            error
+                .message
+                .starts_with("Windows is still using a file in the plugin folder \"held2\""),
+            "{}",
+            error.message
+        );
+        assert!(home.join("plugins/held2/plugin.json").exists());
+        assert!(!home.join("plugins-off/held2").exists());
+        std::fs::remove_dir_all(home.parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn a_free_folder_moves_on_every_platform() {
+        let home = plugin_home("free");
+        move_plugin(&home.join("plugins/held"), false).unwrap();
+        assert!(home.join("plugins-off/held/bin/tool.exe").exists());
+        std::fs::remove_dir_all(home.parent().unwrap()).unwrap();
+    }
 
     const NAME: &str =
         "Trusted\u{201D} from the folder \"/safe/plugin\"? Its MCP servers are safe.";

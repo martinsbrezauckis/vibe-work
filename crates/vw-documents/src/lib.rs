@@ -1,21 +1,24 @@
 //! Documents the user attaches to a message: what kind a file is (from its bytes), how many pages it has
-//! (told before any OCR quota is spent), reading spreadsheets, CSV and text on this computer, the text
+//! (told before any OCR quota is spent), reading Office documents, CSV and text on this computer, the text
 //! that goes into the message (cut only at whole pages or lines, always saying what was kept), and the
 //! store of documents that are not in a message yet.
 //!
 //! OCR itself is not here: the core calls Mistral through `vw-mistral` with the key from the key
 //! service and hands the pages back to [`DocumentStore::finish_read`].
 //!
-//! Depends on: calamine, zip, flate2, serde. Called by: vw-core-api (`documents`), tests.
-//! Invariant: no function here takes a path or bytes from the webview or the Debug API; the only
-//! entries are Rust callers that got the path from the native picker or an OS drop.
+//! Depends on: calamine, quick-xml, zip, flate2, serde. Called by: vw-core-api (`documents`), tests.
+//! Invariant: paths come from native pickers/drops; browser uploads supply bytes. Every entry
+//! checks the same kind and size bounds before reading.
 
 mod assemble;
 mod kind;
 mod local;
+mod office;
+mod office_xml;
 mod pages;
 mod pdf_pages;
 mod store;
+mod text_budget;
 mod zipinfo;
 
 pub use assemble::{
@@ -28,5 +31,6 @@ pub use pages::page_count;
 pub use pdf_pages::count_pages;
 pub use store::{
     AddError, DocStatus, DocumentInfo, DocumentStore, MAX_DOCS, MAX_FILE_BYTES, MAX_HELD_BYTES,
-    MAX_PAGES, MAX_PICTURE_BYTES, OcrPages, ReadJob, StoreError,
+    MAX_PICTURE_BYTES, OcrPages, ReadJob, StoreError,
 };
+pub use text_budget::MAX_EXTRACTED_BYTES;

@@ -5,6 +5,7 @@
  * Invariants: the answer, titles and passages are file content: rendered as plain text, never as HTML or Markdown
  * links (a document cannot add a link or a script to the page).
  */
+import { Button } from "../../components/Controls";
 import type { ReactElement, SyntheticEvent } from "react";
 
 import { useKeyReadiness } from "../shell/KeyNotice";
@@ -67,14 +68,14 @@ export function AskPanel(): ReactElement {
           disabled={usable === 0}
           onChange={(e) => actions?.setQuestion(e.target.value)}
         />
-        <button
+        <Button
           data-testid="libraries.ask-panel-tb-btn"
           type="submit"
-          className="tb-btn primary"
+          variant="primary"
           disabled={blocked || usable === 0 || busy === "ask" || question.trim() === ""}
         >
           {busy === "ask" ? "Searching…" : "Ask"}
-        </button>
+        </Button>
       </form>
       {answer === null ? null : (
         <div className="lib-answer" data-testid="library-answer">

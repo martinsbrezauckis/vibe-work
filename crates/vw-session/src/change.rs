@@ -51,7 +51,7 @@ pub struct SessionView {
 /// Every variant carries `session_id`, the session it belongs to (except where noted).
 #[derive(Debug, Clone, PartialEq)]
 pub enum Change {
-    /// The whole state was replaced (load, `session/snapshot`, handoff target). Subscribers get a
+    /// The whole state was replaced (load, `session/snapshot`). Subscribers get a
     /// [`crate::Delivery::Snapshot`] instead of this variant; it appears only in [`Applied`].
     Replaced {
         /// Session whose state was replaced.
@@ -61,14 +61,6 @@ pub enum Change {
     Removed {
         /// Session that was removed.
         session_id: String,
-    },
-    /// `session/compacted` / `session/contextCleared`: the conversation moved to a new session
-    /// id. A snapshot of the new session follows.
-    HandedOff {
-        /// Id the conversation had.
-        old_session_id: String,
-        /// Id it has now.
-        new_session_id: String,
     },
     /// `session/updated`: this JSON Patch was applied to `state.session`.
     SessionPatched {
@@ -162,6 +154,9 @@ pub enum Action {
         session_id: String,
         /// Why (gap, patch failure, bad envelope).
         reason: String,
+        /// Re-read once after a short delay instead of now: the safety net after a read that could not
+        /// settle a held event (`SessionEntry::replace_state`), never a loop.
+        delayed: bool,
     },
 }
 

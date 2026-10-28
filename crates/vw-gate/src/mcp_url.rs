@@ -151,6 +151,29 @@ where
     M: vw_protocol::RequestMethod,
     M::Params: serde::de::DeserializeOwned + serde::Serialize,
 {
+    // URL additions use the existing mediated credential path. Vibe's optional credential,
+    // command and environment fields must never bypass it, even as the wire model grows.
+    // Refuse all environment names, including the forwarder token and held provider keys.
+    for field in [
+        "command",
+        "args",
+        "env",
+        "headers",
+        "apiKeyEnv",
+        "apiKeyHeader",
+        "apiKeyFormat",
+        "startupTimeoutSec",
+        "toolTimeoutSec",
+    ] {
+        if params.get(field).is_some_and(|value| !value.is_null()) {
+            return Err(format!(
+                "{field} is not supported here; add tool servers through Vibe Work's settings"
+            ));
+        }
+    }
+    if params.get("transport").and_then(Value::as_str) == Some("stdio") {
+        return Err("command tool servers cannot be added by URL".into());
+    }
     crate::table::typed::<M>(params)?;
     let url = params
         .get("url")

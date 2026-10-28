@@ -5,8 +5,17 @@ use super::{BrowserMountState, PreviewError, PreviewService};
 use crate::visibility;
 
 impl PreviewService {
+    /// Whether a pixel capture of `session_id` would be admitted now, without taking one (the capture's early
+    /// refusal for a request whose output is pixels). The same rule as every screenshot path.
+    ///
+    /// # Errors
+    /// [`PreviewError::NothingOpen`] or [`PreviewError::ScreenshotHidden`] with the reason.
+    pub fn pixels_admitted(&self, session_id: &str) -> Result<(), PreviewError> {
+        self.require_visible_screenshot(session_id)
+    }
+
     /// Only a preview shown in the native window has trustworthy screenshot pixels.
-    pub(super) fn require_visible_screenshot(&self, session_id: &str) -> Result<(), PreviewError> {
+    pub(crate) fn require_visible_screenshot(&self, session_id: &str) -> Result<(), PreviewError> {
         let state = self.inner.lock();
         let Some(entry) = state.entries.get(session_id) else {
             return Err(PreviewError::NothingOpen);

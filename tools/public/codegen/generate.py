@@ -2,7 +2,7 @@
 """Generate the Rust and TypeScript protocol types from the installed Mistral Vibe package.
 
 Role: single entry point of the generator. Run it with the interpreter that has Vibe
-installed (data/venv/bin/python, or the one named by $VIBE_PYTHON).
+installed (data/vibe-3.0.2/venv/bin/python, or the one named by $VIBE_PYTHON).
   --write   regenerate crates/vw-protocol/src/generated and ui/src/protocol/generated
   --check   regenerate into a scratch directory and fail on any difference (CI drift gate)
 Fails loudly when: the installed Vibe version differs from vibe.pin; method_map.json is out of
@@ -28,12 +28,12 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
-import registry_emit  # noqa: E402
-import rust_emit  # noqa: E402
-import ts_emit  # noqa: E402
-from areas import split_files  # noqa: E402
-from introspect import GenerationError, Introspector, build_schema  # noqa: E402
-from ir import ModelDef, Schema  # noqa: E402
+import registry_emit  # noqa: E402 - script directory is added above for isolated Python imports.
+import rust_emit  # noqa: E402 - script directory is added above for isolated Python imports.
+import ts_emit  # noqa: E402 - script directory is added above for isolated Python imports.
+from areas import split_files  # noqa: E402 - script directory is added above for isolated Python imports.
+from introspect import GenerationError, Introspector, build_schema  # noqa: E402 - script directory is added above for isolated Python imports.
+from ir import ModelDef, Schema  # noqa: E402 - script directory is added above for isolated Python imports.
 
 ROOT = HERE.parents[2]
 RUST_DIR = Path("crates/vw-protocol/src/generated")

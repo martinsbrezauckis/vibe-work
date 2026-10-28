@@ -51,7 +51,7 @@ pub struct RunSpec {
     pub cwd: Option<String>,
     /// The secrets.
     pub bindings: Vec<Binding>,
-    /// Why, in the agent's words (shown in the dialog as the agent's text).
+    /// Why, in the agent's words (kept in the tool call for compatibility).
     pub purpose: String,
     /// Run time limit, seconds.
     pub timeout_s: u64,

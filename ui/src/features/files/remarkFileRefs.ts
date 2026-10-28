@@ -14,7 +14,7 @@
 import { findPathRefs, pathOfCode, pathOfHref, repoFolderOfHref } from "./model/refs";
 
 /** Most references marked in one Markdown source. */
-export const MAX_REFS = 60;
+const MAX_REFS = 60;
 
 /** The parts of an mdast node this plugin reads or writes. */
 interface MdNode {

@@ -4,11 +4,11 @@
 //! - `design`: `DESIGN.md` (Google DESIGN.md format) + `tokens.json` (W3C Design Tokens 2025.10) from the live page;
 //! - `structure`: `elements.json` (elements with layout boxes) + `summary.md`;
 //! - `media`: logos, icons, images and fonts the page loaded, under `media/`, with `media.json`;
-//! - `page`: `page.md`, `page.txt`, `page.html` (no scripts), `page.png` (full page) — any subset (`formats`);
+//! - `page`: Markdown, text, passive HTML or PNG, plus an explicit PDF or packed HTML choice (`formats`);
 //! - `bundle`: all of the above in one folder;
 //! - `before` / `after`: a full-page shot now, a matching one later, and their difference.
 //!
-//! Every capture also writes `capture.json` (source URL, time, files, what was skipped and why).
+//! Ordinary captures also write `capture.json`; one-file choices return their metadata without a sidecar.
 //!
 //! Depends on: `driver` (page scripts, screenshots), `files`, `design*`, `structure`, `media`, `page`, `shot`.
 //! Called by: vw-core-api (the agent tool, the `browser` command for the window and the Debug API), tests.
@@ -25,10 +25,14 @@ mod design_out;
 mod design_roles;
 pub mod files;
 pub mod media;
+mod one_file;
 pub mod page;
+#[cfg(target_os = "linux")]
+mod pdf_links;
 mod restore;
 mod run;
 pub mod shot;
+pub mod single_html;
 pub mod structure;
 pub mod svg;
 
@@ -87,6 +91,23 @@ pub enum PageFormat {
     Text(Format),
     /// `page.png`.
     Png,
+    /// A paginated PDF.
+    Pdf,
+    /// Passive HTML with packed resources.
+    SingleHtml,
+}
+
+impl PageFormat {
+    /// The fixed output filename for this format.
+    #[must_use]
+    pub fn file(self) -> &'static str {
+        match self {
+            Self::Text(f) => f.file(),
+            Self::Png => "page.png",
+            Self::Pdf => "page.pdf",
+            Self::SingleHtml => "page-one-file.html",
+        }
+    }
 }
 
 /// One capture request.
@@ -123,14 +144,21 @@ pub fn parse(args: &Value) -> Result<Request, String> {
     if let Some(list) = args.get("formats") {
         let list = list
             .as_array()
-            .ok_or("formats must be a list of markdown, text, html, png")?;
+            .ok_or("formats must be a list of markdown, text, html, png, pdf, single_html")?;
         for f in list {
             let format = match f.as_str() {
                 Some("markdown") => PageFormat::Text(Format::Markdown),
                 Some("text") => PageFormat::Text(Format::Text),
                 Some("html") => PageFormat::Text(Format::Html),
                 Some("png") => PageFormat::Png,
-                _ => return Err("formats must be a list of markdown, text, html, png".to_owned()),
+                Some("pdf") => PageFormat::Pdf,
+                Some("single_html") => PageFormat::SingleHtml,
+                _ => {
+                    return Err(
+                        "formats must be a list of markdown, text, html, png, pdf, single_html"
+                            .to_owned(),
+                    );
+                }
             };
             if !formats.contains(&format) {
                 formats.push(format);
@@ -174,9 +202,21 @@ pub(crate) struct Before {
 #[derive(Clone, Default)]
 pub struct Captures {
     before: Arc<Mutex<HashMap<String, Before>>>,
+    flights: Arc<Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>>,
 }
 
 impl Captures {
+    pub(super) fn begin(&self, session: &str) -> Result<tokio::sync::OwnedMutexGuard<()>, String> {
+        self.flights
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .entry(session.to_owned())
+            .or_default()
+            .clone()
+            .try_lock_owned()
+            .map_err(|_| "A capture is already running in this session.".to_owned())
+    }
+
     pub(crate) fn set_before(&self, session_id: &str, before: Before) {
         self.before
             .lock()

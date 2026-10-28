@@ -18,41 +18,50 @@
 //!   webview. The selected value stays in the page until the core consumes its one-use choice.
 //! - Downloads are written into the app's private staging folder (the hooks decide the path), never straight into a
 //!   session folder; the web inspector exists in development builds only.
-//! - Windows: a mount is shown only after `platform::secure` saw the session's own `WebView2` profile and
-//!   installed the document-request barrier; `place` and the capture of a hidden preview never interleave (the
-//!   visibility lock).
-//! - Public pages open on every platform under the navigation policy; extra layers per platform,
-//!   each reported to the hooks (`network_guard`), none ever blocking a page:
-//!   - Linux: every mount sends its traffic through a guard listener of its own (keyed by the label, so loopback
-//!     rights belong to the mount), proven by two announced canaries before the first real navigation
+//! - The visibility lock serializes placement and native capture, including Linux capture restoration.
+//! - Windows: a mount is shown only after `platform::secure` checked its own `WebView2` profile and
+//!   installed the document-request barrier.
+//! - Required previews open only with the protection layers available in this build, before the first page.
+//!   Each protection layer is reported to the hooks (`network_guard`):
+//!   - Linux: every mount sends its traffic through the guard's listener of its data folder (`folder_guard`:
+//!     `WebKitGTK` keeps the proxy per web context, one per folder; the listener grants only what every mount on the
+//!     folder may reach), proven by two announced canaries before the first real navigation
 //!     (`network_guard(Done(..))`).
 //!   - Windows: the request barrier decides every request per webview (`request_check`, layer `RequestBarrier`), and
-//!     every preview's traffic goes through the guard's app-wide listener (`proxy_url_all`, browser arguments
-//!     `vw_netguard::chromium`, the same for every preview), proven by the same canaries. Where a machine setting
-//!     puts every environment into one user data folder (`shared_user_data_folder`), or the arguments are refused,
-//!     previews are created with the default arguments and the barrier stays (reported, logged).
-//!   - macOS: URL content rules per mount (`rules_macos`, layer `ContentRules`), applied before the first page.
+//!     every preview's traffic goes through the guard's listener of its user data folder (`folder_guard`: browser
+//!     arguments `vw_netguard::chromium` with that folder's port; it grants only what every mount on the folder may
+//!     reach), proven by the same canaries. Where a setting puts every environment of the app into one user data
+//!     folder (`WEBVIEW2_USER_DATA_FOLDER`, the `UserDataFolder` policy; or `WebView2` refuses the arguments because
+//!     another environment on the folder has other ones), no preview can have the guard's proxy, so the previews'
+//!     instance refuses them with a plain message naming why (`win_guard`: never silently unguarded).
+//!   - macOS: URL content rules per mount (`rules_macos`, layer `ContentRules`), applied before the first page;
+//!     these alone protect previews in 0.1.2's default build, and a failed install refuses the mount;
+//!     with the feature `macos-proxy` (0.1.3, minimum macOS 14; `mac_guard::MAC_PROXY`) also
+//!     the guard's listener of the mount's website data store (`proxy_url_for_store`: `WKWebsiteDataStore`
+//!     `proxyConfigurations` belongs to the store, which several mounts can share), set by wry before the webview
+//!     exists. `WebKit` sends host NAMES through it (resolved, checked and connected by the guard: DNS rebinding
+//!     closed) and address literals (loopback, this computer's own addresses) around it, which the content rules
+//!     cover; WebTransport, which ignores the proxy, is turned off first. Proven by the `.invalid` canary only
+//!     (a loopback canary cannot reach the proxy here by design).
 
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 use std::time::Duration;
 
-use tauri::webview::{DownloadEvent, NewWindowResponse, PageLoadEvent, PermissionResponse};
-use tauri::{
-    AppHandle, LogicalPosition, LogicalSize, Manager, Webview, WebviewBuilder, WebviewUrl, Wry,
-};
+use tauri::{AppHandle, LogicalPosition, LogicalSize, Manager, Webview, Wry};
 use url::Url;
-#[cfg(windows)]
-use vw_preview::RequestCheck;
 use vw_preview::accounts::{Provider, ProviderAccount};
 use vw_preview::{
-    ConsoleEntry, EngineError, EngineFuture, GuardCheck, HistoryStep, MountId, MountSpec,
-    PageEvent, Placement, PreviewEngine, PreviewHooks, Storage, parse_drain,
+    ConsoleEntry, EngineError, EngineFuture, HistoryStep, MountId, MountSpec, Placement,
+    PreviewEngine, PreviewHooks, Storage, parse_drain,
 };
+#[cfg(windows)]
+use vw_preview::{GuardCheck, RequestCheck};
 
 use crate::platform;
 
+mod close;
 mod native_input;
 mod overlay;
 
@@ -91,7 +100,7 @@ pub struct TauriEngine {
     /// Visibility per mount label.
     shown: Mutex<HashMap<String, Shown>>,
     /// Held by `place` and by a hidden preview's capture (it shows the webview for a moment).
-    visibility: tokio::sync::Mutex<()>,
+    visibility: Arc<tokio::sync::Mutex<()>>,
     /// Lazy blank webview that owns the shared native cookie manager before any page is mounted.
     account_anchor: tokio::sync::Mutex<Option<Webview<Wry>>>,
     /// Orders native account reads and sign-outs so the UI never reports a stale read across its own deletion.
@@ -101,6 +110,8 @@ pub struct TauriEngine {
     foreign_profiles: Mutex<HashMap<String, PathBuf>>,
     /// The agent browser's network guard: the preview instance only.
     guard: Option<vw_netguard::NetGuard>,
+    /// This instance requires the build's protection layers: content rules on default macOS, proxy proof elsewhere.
+    needs_guard: bool,
     /// Windows: a preview with the guard's browser arguments could not be created once (an environment
     /// with other arguments shares its browser process): later previews use the default arguments.
     #[cfg(windows)]
@@ -110,12 +121,18 @@ pub struct TauriEngine {
     rule_generations: Arc<vw_netguard::rules::RuleGenerations>,
 }
 
-/// How long a mount waits for the guard to see its canary.
-const CANARY_WAIT: Duration = Duration::from_secs(4);
-
 mod accounts_engine;
+mod builder;
+mod mac_guard;
+#[cfg(target_os = "macos")]
+pub(crate) use mac_guard::mac_fault;
+use mac_guard::not_checked;
 mod context_menu;
+mod network_guard;
+pub use context_menu::PageMenuChoice;
+mod folder_guard;
 mod title;
+mod win_guard;
 
 impl TauriEngine {
     /// An engine placing previews in `window_label`.
@@ -129,11 +146,12 @@ impl TauriEngine {
             context_pollers: context_menu::Pollers::default(),
             context_sink: None,
             shown: Mutex::new(HashMap::new()),
-            visibility: tokio::sync::Mutex::new(()),
+            visibility: Arc::new(tokio::sync::Mutex::new(())),
             account_anchor: tokio::sync::Mutex::new(None),
             account_operations: tokio::sync::Mutex::new(()),
             foreign_profiles: Mutex::new(HashMap::new()),
             guard: None,
+            needs_guard: false,
             #[cfg(windows)]
             proxy_args_refused: std::sync::atomic::AtomicBool::new(false),
             #[cfg(target_os = "macos")]
@@ -141,112 +159,31 @@ impl TauriEngine {
         }
     }
 
-    /// The same engine with the agent browser's network guard: every mount uses its proxy.
+    /// The same engine with the agent browser's network guard: mounts use its proxy where this build supports it.
     #[must_use]
     pub fn with_network_guard(mut self, guard: vw_netguard::NetGuard) -> Self {
         self.guard = Some(guard);
         self
     }
 
-    /// Sends a physical browser context-menu intent to the host as a session id only.
+    /// Requires the build's protection layers before the first page: a guard listener and proven canary on
+    /// Linux/Windows and macOS with `macos-proxy`; default macOS (0.1.2) uses content rules only.
+    /// Proxied macOS also needs WebTransport off; Windows needs its own guarded data folder.
+    /// A missing or unproven layer refuses the mount with a plain error.
     #[must_use]
-    pub fn with_context_sink(mut self, sink: Arc<dyn Fn(String) + Send + Sync>) -> Self {
-        self.context_sink = Some(sink);
+    pub fn require_network_guard(mut self) -> Self {
+        self.needs_guard = true;
         self
     }
 
-    /// The proxy URL a new mount gets (`None`: no egress layer for it; public pages open either way).
-    /// - Linux: a guard listener of its own (keyed by the label: loopback rights belong to the mount); `WebKitGTK`
-    ///   sends every request, loopback included, through the proxy.
-    /// - Windows: the guard's app-wide listener, the same for every preview, because every environment
-    ///   that shares a `WebView2` browser process must have identical browser arguments; the per-webview request
-    ///   barrier keeps each mount to its own rights. None where a machine setting shares one user data folder for
-    ///   every environment (the main window's default arguments then decide) or after the arguments were refused.
-    /// - macOS: none; the content rules are its extra layer.
-    fn proxy_for(&self, id: &MountId) -> Result<Option<String>, EngineError> {
-        let Some(guard) = &self.guard else {
-            return Ok(None);
-        };
-        if cfg!(target_os = "linux") {
-            return guard
-                .proxy_url_for(&id.label)
-                .map(Some)
-                .map_err(|e| EngineError::Platform(format!("the network guard: {e}")));
-        }
-        if !(cfg!(windows) && self.proxy_args_usable()) {
-            return Ok(None);
-        }
-        // Windows: a listener that cannot start leaves the preview with the request barrier (as before).
-        Ok(guard
-            .proxy_url_all()
-            .inspect_err(|error| {
-                tracing::warn!(%error, "the browser's network guard listener did not start (request barrier)");
-            })
-            .ok())
-    }
-
-    /// Windows: whether previews may get the guard's browser arguments (no shared user data folder, never refused).
-    #[cfg(windows)]
-    fn proxy_args_usable(&self) -> bool {
-        if self
-            .proxy_args_refused
-            .load(std::sync::atomic::Ordering::Relaxed)
-        {
-            return false;
-        }
-        if vw_platform::webview::shared_user_data_folder() {
-            tracing::info!(
-                "previews share one WebView2 user data folder: default browser arguments, request barrier"
-            );
-            return false;
-        }
-        true
-    }
-
-    #[cfg(not(windows))]
-    #[allow(clippy::unused_self)]
-    fn proxy_args_usable(&self) -> bool {
-        false
-    }
-
-    /// Proves that the fresh mount's traffic passes the guard (Linux): a request for a
-    /// public-looking name (`*.vw-guard.invalid`, only the proxy can answer it) and a navigation to the listener's
-    /// own port on loopback, which reaches the guard in proxy form only when the engine does not bypass the proxy
-    /// for loopback. The result is reported (`network_guard(Done(..))`) and shown as the extra layer's state; it
-    /// never blocks a page.
-    async fn check_guard(
-        &self,
-        webview: &Webview<Wry>,
-        id: &MountId,
-        proxy: Option<&str>,
-        hooks: &Arc<dyn PreviewHooks>,
-    ) {
-        let (Some(guard), Some(proxy)) = (&self.guard, proxy) else {
-            return;
-        };
-        // Each canary is announced to the hooks first (the only canary URL the mount may load), then loaded.
-        let load = |text: &str| match Url::parse(text) {
-            Ok(url) => {
-                hooks.network_guard(&id.label, GuardCheck::Expect(url.clone()));
-                webview.navigate(url).is_ok()
-            }
-            Err(_) => false,
-        };
-        let token = vw_netguard::NetGuard::new_token();
-        let web = load(&vw_netguard::NetGuard::canary_url(&token))
-            && guard.wait_seen(&token, CANARY_WAIT).await;
-        let token = vw_netguard::NetGuard::new_token();
-        let port = Url::parse(proxy).ok().and_then(|u| u.port()).unwrap_or(0);
-        let loopback = web
-            && load(&vw_netguard::NetGuard::loopback_canary_url(proxy, &token))
-            && guard.wait_seen_loopback(&token, port, CANARY_WAIT).await;
-        if !loopback {
-            tracing::warn!(
-                web,
-                "the browser's network guard is not proven for this webview (navigation policy only)"
-            );
-        }
-        hooks.network_guard(&id.label, GuardCheck::Done(web && loopback));
+    /// Sends a physical browser context-menu click to the host as a session id and the item only.
+    #[must_use]
+    pub fn with_context_sink(
+        mut self,
+        sink: Arc<dyn Fn(String, context_menu::PageMenuChoice) + Send + Sync>,
+    ) -> Self {
+        self.context_sink = Some(sink);
+        self
     }
 
     /// Records where `label` is now (shown with `placement`, or hidden).
@@ -345,104 +282,11 @@ impl TauriEngine {
             .cloned()
             .ok_or_else(|| EngineError::Platform("the preview engine has no hooks yet".to_owned()))
     }
-    /// The builder of one mount: storage, console script, and every callback routed to `hooks`.
-    fn builder(
-        spec: &MountSpec,
-        hooks: &Arc<dyn PreviewHooks>,
-        proxy: Option<&str>,
-    ) -> Result<WebviewBuilder<Wry>, EngineError> {
-        let blank = Url::parse("about:blank").map_err(|e| EngineError::Platform(e.to_string()))?;
-        let label = spec.id.label.clone();
-        let (nav, popup, load, title, download) = (
-            (hooks.clone(), label.clone()),
-            (hooks.clone(), label.clone()),
-            (hooks.clone(), label.clone()),
-            (hooks.clone(), label.clone()),
-            (hooks.clone(), label.clone()),
-        );
-        let builder = WebviewBuilder::new(label, WebviewUrl::External(blank))
-            .initialization_script(spec.console_script.clone())
-            .disable_drag_drop_handler()
-            .zoom_hotkeys_enabled(false)
-            .general_autofill_enabled(false)
-            .focused(false)
-            // Inspector only in development builds.
-            .devtools(cfg!(debug_assertions))
-            .on_navigation(move |url| nav.0.allow_navigation(&nav.1, url))
-            .on_new_window(move |url, _features| {
-                popup.0.new_window_refused(&popup.1, &url);
-                NewWindowResponse::Deny
-            })
-            .on_permission_request(|_webview, _kind| PermissionResponse::Deny)
-            .on_page_load(move |webview, payload| {
-                let url = payload.url().clone();
-                let event = match payload.event() {
-                    PageLoadEvent::Started => PageEvent::Started(url.clone()),
-                    PageLoadEvent::Finished => PageEvent::Probe(url.clone()),
-                };
-                // Unload a page outside the allowed ports, including a redirect the engine did not check.
-                if !load.0.page_event(&load.1, event)
-                    && let Ok(blank) = Url::parse("about:blank")
-                {
-                    let _ = webview.navigate(blank);
-                } else if matches!(payload.event(), PageLoadEvent::Finished) {
-                    title::finish(&webview, &load.0, &load.1, url);
-                }
-            })
-            .on_document_title_changed(move |webview, _text| {
-                title::report(&webview, &title.0, &title.1);
-            })
-            .on_download(move |_webview, event| match event {
-                DownloadEvent::Requested { url, destination } => {
-                    let suggested = destination.clone();
-                    match download
-                        .0
-                        .download_destination(&download.1, &url, &suggested)
-                    {
-                        Some(path) => {
-                            *destination = path;
-                            true
-                        }
-                        None => false,
-                    }
-                }
-                DownloadEvent::Finished { url, path, success } => {
-                    download
-                        .0
-                        .download_finished(&download.1, &url, path.as_deref(), success);
-                    true
-                }
-                _ => false,
-            });
-        let builder = match proxy {
-            Some(proxy) => with_proxy(builder, proxy)?,
-            None => builder,
-        };
-        Ok(crate::storage::with_storage(builder, &spec.storage))
-    }
-    /// Creates the child webview of `spec` (with the egress `proxy`, or none) in `window`.
-    async fn create(
-        &self,
-        window: &tauri::Window<Wry>,
-        spec: &MountSpec,
-        hooks: &Arc<dyn PreviewHooks>,
-        proxy: Option<&str>,
-        position: LogicalPosition<f64>,
-        size: LogicalSize<f64>,
-    ) -> Result<Webview<Wry>, EngineError> {
-        let _ = self;
-        let builder = Self::builder(spec, hooks, proxy)?;
-        let window = window.clone();
-        // `add_child` waits for the UI thread: run it off the async workers.
-        tokio::task::spawn_blocking(move || window.add_child(builder, position, size))
-            .await
-            .map_err(|e| EngineError::Platform(e.to_string()))?
-            .map_err(|e| EngineError::Platform(format!("the preview could not be created: {e}")))
-    }
-
     async fn mount_inner(&self, spec: MountSpec) -> Result<(), EngineError> {
+        // Windows, Linux: the local-network page the user opened runs on a data folder of its own.
+        let spec = folder_guard::with_own_folder(spec);
         let hooks = self.hooks()?;
-        let mut proxy = self.proxy_for(&spec.id)?;
+        let mut proxy = self.proxy_for(&spec)?;
         let window = self
             .app
             .get_window(&self.window_label)
@@ -459,10 +303,15 @@ impl TauriEngine {
         };
         let shape = spec.placement.unwrap_or(created);
         let (width, height) = (shape.bounds.width, shape.bounds.height);
+        // The UI's rectangles are the app page's CSS pixels; the child is positioned in the content view's.
+        let in_window = crate::page_origin::in_window(
+            shape.bounds,
+            crate::page_origin::css_origin(&window).await?,
+        );
         let (x, y) = if spec.placement.is_some() {
-            (shape.bounds.x, shape.bounds.y)
+            (in_window.x, in_window.y)
         } else {
-            platform::outside((width, height))
+            platform::outside_at(in_window)
         };
         let (position, size) = (LogicalPosition::new(x, y), LogicalSize::new(width, height));
         let webview = match self
@@ -470,14 +319,21 @@ impl TauriEngine {
             .await
         {
             Ok(webview) => webview,
-            // Windows: an environment with other arguments shares the browser process (a shared user
-            // data folder the settings check did not see): create it with the default arguments, keep the barrier,
-            // and stop asking for the guard's arguments.
-            Err(error) if cfg!(windows) && proxy.is_some() => {
-                tracing::warn!(%error, "preview created with the default browser arguments (request barrier)");
+            // Windows: an environment with other arguments already uses the folder (one folder for every window,
+            // set in a way the settings check did not see): no preview can have the guard's arguments now. The
+            // previews' instance refuses this and every later preview (fail closed); another instance creates it
+            // with the default arguments and the barrier.
+            Err(error)
+                if cfg!(windows) && proxy.is_some() && win_guard::other_arguments(&error) =>
+            {
                 #[cfg(windows)]
                 self.proxy_args_refused
                     .store(true, std::sync::atomic::Ordering::Relaxed);
+                if self.needs_guard {
+                    tracing::warn!(%error, "WebView2 refused the guard's browser arguments: previews are off");
+                    return Err(win_guard::previews_off(win_guard::OneFolder::Refused));
+                }
+                tracing::warn!(%error, "preview created with the default browser arguments (request barrier)");
                 proxy = None;
                 self.create(&window, &spec, &hooks, None, position, size)
                     .await?
@@ -491,42 +347,36 @@ impl TauriEngine {
                 Some(placement) => platform::place(&webview, Some(placement)).await?,
                 None => platform::park(&webview, parked, false).await?,
             }
-            // macOS content rules, in place before the first page (the mount waits for the compile).
-            // `VW_DEV_NO_CONTENT_RULES` (development builds only): the falsifier run on the Mac.
             #[cfg(target_os = "macos")]
-            if let Some(page) = spec.rules.as_ref().filter(|_| {
-                !(cfg!(debug_assertions) && std::env::var_os("VW_DEV_NO_CONTENT_RULES").is_some())
-            }) {
-                match crate::rules_macos::apply(
-                    &webview,
-                    &spec.id.label,
-                    page,
-                    &self.rule_generations,
-                )
-                .await
-                {
-                    Ok(()) => hooks.network_guard(
-                        &spec.id.label,
-                        GuardCheck::Layer(vw_preview::GuardLayer::ContentRules),
-                    ),
-                    Err(error) => tracing::warn!(%error, "preview content rules not applied"),
-                }
-            }
+            self.macos_layers(&webview, &spec, &hooks, proxy.is_some())
+                .await?;
+            // macOS: reaching here with a proxy means WebTransport is off (else the mount was refused above).
+            let bypass_closed = true;
+            // Every guarded web mount (a browser/preview mount: URL rules, or the guard's proxy) starts without the
+            // service workers earlier pages registered in its storage, on every platform.
+            platform::clear_service_workers_at_mount(
+                &webview,
+                proxy.is_some() || spec.rules.is_some(),
+            )
+            .await?;
             if proxy.is_some() {
-                platform::clear_service_workers(&webview, Duration::from_secs(4)).await?;
                 // The proxy resolves and checks every host at request time: the navigation hook never waits for a
                 // lookup on the UI thread for this mount.
                 hooks.names_checked_later(&spec.id.label);
             }
-            self.check_guard(&webview, &spec.id, proxy.as_deref(), &hooks)
+            let proven = self
+                .check_guard(&webview, &spec.id, proxy.as_deref(), bypass_closed, &hooks)
                 .await;
+            if (self.proxy_required() || cfg!(target_os = "macos") && proxy.is_some()) && !proven {
+                return Err(not_checked("its network check could not be confirmed"));
+            }
             webview
                 .navigate(spec.url.clone())
                 .map_err(|e| EngineError::Platform(e.to_string()))
         }
         .await;
         if let Err(error) = setup {
-            let _ = webview.close();
+            let _ = Self::close_webview(&webview);
             if let Some(guard) = &self.guard {
                 guard.forget_session(&spec.id.label);
             }
@@ -566,22 +416,6 @@ impl TauriEngine {
     }
 }
 
-/// Sends a webview's traffic through the guard's listener `proxy` (`http://127.0.0.1:<port>`). Windows: the whole
-/// browser argument string (`vw_netguard::chromium`: wry's defaults, the proxy and `<-loopback>`, which wry's own
-/// proxy option cannot express); elsewhere Tauri's proxy option.
-fn with_proxy(
-    builder: WebviewBuilder<Wry>,
-    proxy: &str,
-) -> Result<WebviewBuilder<Wry>, EngineError> {
-    if cfg!(windows) {
-        let arguments =
-            vw_netguard::chromium::webview2_arguments(proxy).map_err(EngineError::Platform)?;
-        return Ok(builder.additional_browser_args(&arguments));
-    }
-    let url = Url::parse(proxy).map_err(|e| EngineError::Platform(e.to_string()))?;
-    Ok(builder.proxy_url(url))
-}
-
 impl PreviewEngine for TauriEngine {
     fn native_click(
         &self,
@@ -597,7 +431,17 @@ impl PreviewEngine for TauriEngine {
     }
 
     fn mount(&self, spec: MountSpec) -> EngineFuture<'_, ()> {
-        Box::pin(self.mount_inner(spec))
+        let label = spec.id.label.clone();
+        Box::pin(async move {
+            let mounted = self.mount_inner(spec).await;
+            // A failed setup cannot keep authority through its guard listener or store membership.
+            if mounted.is_err()
+                && let Some(guard) = &self.guard
+            {
+                guard.forget_session(&label);
+            }
+            mounted
+        })
     }
 
     fn navigate(&self, id: &MountId, url: Url) -> EngineFuture<'_, ()> {
@@ -607,6 +451,31 @@ impl PreviewEngine for TauriEngine {
                 .navigate(url)
                 .map_err(|e| EngineError::Platform(e.to_string()))
         })
+    }
+
+    fn continue_navigation(
+        &self,
+        id: &MountId,
+        url: Url,
+        current: Box<dyn FnOnce() -> bool + Send>,
+    ) -> Result<(), EngineError> {
+        let webview = self.webview(id)?;
+        let app = self.app.clone();
+        // Always leave the navigation hook first, even if DNS completed during callback registration.
+        tauri::async_runtime::spawn(async move {
+            if let Err(error) = app.run_on_main_thread(move || {
+                if current() {
+                    // The pinned tauri-runtime-wry Context::send_user_message dispatches inline on
+                    // the UI thread, through Navigate -> load_url. There is no unchecked second hop.
+                    if let Err(error) = webview.navigate(url) {
+                        tracing::warn!(%error, "held preview navigation could not load");
+                    }
+                }
+            }) {
+                tracing::warn!(%error, "held preview navigation could not reach UI (closing?)");
+            }
+        });
+        Ok(())
     }
 
     fn history(&self, id: &MountId, step: HistoryStep) -> EngineFuture<'_, ()> {
@@ -714,46 +583,24 @@ impl PreviewEngine for TauriEngine {
     }
 
     fn close(&self, id: &MountId) -> EngineFuture<'_, ()> {
-        let webview = self.webview(id);
-        // The mount's guard listener goes with it.
-        if let Some(guard) = &self.guard {
-            guard.forget_session(&id.label);
-        }
-        self.drains
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .remove(&id.label);
-        self.context_pollers.stop(&id.label);
-        self.shown
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .remove(&id.label);
-        #[cfg(target_os = "macos")]
-        let (app, label, generations) = (
-            self.app.clone(),
-            id.label.clone(),
-            self.rule_generations.clone(),
-        );
-        Box::pin(async move {
-            let closed = match webview {
-                Ok(webview) => webview
-                    .close()
-                    .map_err(|e| EngineError::Platform(e.to_string())),
-                Err(EngineError::NotMounted) => Ok(()),
-                Err(other) => Err(other),
-            };
-            #[cfg(target_os = "macos")]
-            crate::rules_macos::forget(&app, &label, &generations);
-            closed
-        })
+        let id = id.clone();
+        Box::pin(async move { self.close_inner(&id) })
     }
 
     fn screenshot(&self, id: &MountId) -> EngineFuture<'_, Vec<u8>> {
-        Box::pin(self.shot(id.clone(), None, Duration::from_secs(7)))
+        Box::pin(self.shot(id.clone(), None, Duration::from_secs(7), false))
+    }
+
+    fn screenshot_slice(&self, id: &MountId) -> EngineFuture<'_, Vec<u8>> {
+        Box::pin(self.shot(id.clone(), None, Duration::from_secs(7), true))
+    }
+
+    fn print_pdf(&self, id: &MountId) -> EngineFuture<'_, Vec<u8>> {
+        Box::pin(self.pdf(id.clone()))
     }
 
     fn screenshot_full(&self, id: &MountId, size: (u32, u32)) -> EngineFuture<'_, Vec<u8>> {
-        Box::pin(self.shot(id.clone(), Some(size), Duration::from_secs(20)))
+        Box::pin(self.shot(id.clone(), Some(size), Duration::from_secs(20), false))
     }
 
     fn drain_console(&self, id: &MountId) -> EngineFuture<'_, Vec<ConsoleEntry>> {
@@ -768,7 +615,22 @@ impl PreviewEngine for TauriEngine {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .remove(&storage.key.hex());
-        Box::pin(async move { Ok(crate::storage::wipe(&self.app, &storage, foreign).await) })
+        Box::pin(async move {
+            let left = crate::storage::wipe(&self.app, &storage, foreign).await;
+            // macOS: the store is gone; its guard listener goes with it (a new store with this key gets a new port).
+            // Windows: the folder is gone, so its browser process (and the local-network page folders inside it) has
+            // ended; their listeners go with them. A folder still in use keeps its listener and port. Linux: the web
+            // context outlives the webview until quit and keeps its proxy, so its listener stays.
+            if let Some(guard) = &self.guard {
+                if cfg!(target_os = "macos") {
+                    guard.forget_store(&storage.key.hex());
+                } else if cfg!(windows) && !storage.dir.exists() {
+                    guard.forget_store(&folder_guard::store_key(&storage.dir));
+                    guard.forget_stores_under(&folder_guard::inner_store_prefix(&storage.dir));
+                }
+            }
+            Ok(left)
+        })
     }
 
     fn accounts(&self, storage: &Storage) -> EngineFuture<'_, Vec<ProviderAccount>> {
@@ -792,5 +654,21 @@ impl PreviewEngine for TauriEngine {
     fn evaluate(&self, id: &MountId, script: String) -> EngineFuture<'_, String> {
         let id = id.clone();
         Box::pin(async move { self.evaluate_inner(&id, script).await })
+    }
+
+    fn view_size(&self, id: &MountId) -> EngineFuture<'_, Option<(f64, f64)>> {
+        let webview = self.webview(id);
+        Box::pin(async move {
+            let webview = webview?;
+            let bounds = webview
+                .bounds()
+                .map_err(|e| EngineError::Platform(e.to_string()))?;
+            let scale = webview
+                .window()
+                .scale_factor()
+                .map_err(|e| EngineError::Platform(e.to_string()))?;
+            let size = bounds.size.to_logical::<f64>(scale);
+            Ok(Some((size.width, size.height)))
+        })
     }
 }

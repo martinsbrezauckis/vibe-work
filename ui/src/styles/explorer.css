@@ -1,0 +1,199 @@
+/* Files composes the existing panel, fields and list controls. Only layout lives here; all appearance uses app tokens. */
+.fx-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+.fx-header {
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-control-gap);
+  border-bottom: 1px solid var(--line);
+}
+.fx-header p {
+  margin: 0;
+}
+.fx-place,
+.fx-tools {
+  display: flex;
+  align-items: center;
+  gap: var(--space-control-gap);
+  min-width: 0;
+  flex-wrap: wrap;
+}
+.fx-place > .path-start {
+  flex: 1;
+  min-width: 0;
+}
+.fx-place > .ui-selector {
+  max-width: 100%;
+}
+.fx-search.set-search {
+  margin: 0;
+  min-height: var(--control-height-search);
+}
+.fx-search input {
+  min-width: 0;
+  width: 100%;
+}
+.fx-tools > label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.fx-tools > details {
+  position: relative;
+}
+.fx-tools > details > label {
+  position: absolute;
+  right: 0;
+  z-index: var(--z-menu);
+  width: 160px;
+  padding: 12px;
+  background: var(--raised);
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow);
+}
+.fx-tree {
+  flex: 1;
+  min-height: 0;
+}
+.fx-tree-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-control-gap);
+  min-height: 36px;
+  padding: 4px 12px;
+}
+.fx-tree-row:hover {
+  background: var(--hover);
+}
+.fx-tree-row[aria-selected="true"] {
+  background: var(--active);
+}
+.fx-tree-row > .ui-disclosure {
+  flex: 1;
+  min-width: 0;
+}
+.fx-tree-row .path-start {
+  min-width: 0;
+}
+.fx-footer {
+  padding: var(--space-toolbar-block) 12px;
+  border-top: 1px solid var(--line);
+  overflow-wrap: anywhere;
+}
+.fx-scroll {
+  overflow: auto;
+  flex: 1;
+  min-height: 0;
+  padding: 12px;
+}
+.fx-version-row {
+  padding: var(--space-toolbar-block) 0;
+  border-bottom: 1px solid var(--line);
+}
+.fx-version-row > .tb-btn {
+  width: 100%;
+  min-width: 0;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+.fx-version-subject {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fx-day {
+  margin: 16px 0 4px;
+}
+.fx-pending {
+  padding: var(--space-row-block) 0;
+  border-bottom: 1px solid var(--line-2);
+}
+.fx-pending-head > .ui-disclosure {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+.fx-file-row,
+.fx-result {
+  min-width: 0;
+  padding: 4px 0;
+}
+.fx-file-row > .ext-link,
+.fx-result > .ext-link {
+  max-width: 100%;
+}
+.fx-result p {
+  margin: 0 8px 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fx-workspace-actions {
+  display: flex;
+  gap: var(--space-control-gap);
+  flex-wrap: wrap;
+  padding: var(--space-row-block) 0;
+}
+.fx-places {
+  margin-top: 16px;
+}
+.fx-places .git-browser {
+  height: 320px;
+}
+.fx-init {
+  padding: 12px;
+}
+
+.fx-workspace-review {
+  display: flex;
+  flex-direction: column;
+  min-height: 320px;
+  max-height: 640px;
+  overflow: auto;
+  border-top: 1px solid var(--line);
+  padding-block: var(--space-row-block);
+}
+/* Information, not a warning: the large-project line reads as help text with an info mark. */
+.fx-info {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-control-gap);
+}
+.fx-info > svg {
+  flex: none;
+  margin-top: 2px;
+}
+/* The dismiss button keeps its one-line label; the sentence wraps instead. */
+.fx-info > button {
+  flex: none;
+}
+.fx-twist-gap {
+  display: inline-block;
+  width: 14px;
+  flex: none;
+}
+/* Rows with a ⋯ (the row's menu): the name takes the room, the ⋯ sits at the end. */
+.fx-result,
+.fx-file-row,
+.fx-version-row,
+.fx-pending-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 4px;
+}
+.fx-result > p {
+  grid-column: 1 / -1;
+}

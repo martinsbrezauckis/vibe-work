@@ -105,7 +105,7 @@ pub fn sign_as(key: &Key, data: &[u8], file: &str) -> String {
     STANDARD.encode(signature.to_string())
 }
 
-/// The requirements file of a fake Vibe `version` (the fake uv reads the version from it).
+/// The requirements file of a real Vibe `version` (the fake uv reads the version from it).
 pub fn requirements_for(version: &str) -> Vec<u8> {
     format!("mistral-vibe=={version} --hash=sha256:00\n").into_bytes()
 }
@@ -154,11 +154,16 @@ pub fn upload_requirements(channel: &Channel, versions: &[&str]) {
     }
 }
 
-/// Lays out a synthetic install of `version` under `root` (server = a copy of the fake Vibe server).
-pub fn install_fake(root: &Path, version: &str) {
+/// Lays out a synthetic install of `version` under `root` (an inert server-path placeholder; no process is started).
+pub fn install_marker(root: &Path, version: &str) {
     let layout = vw_vibe_install::layout::Layout::new(root.to_path_buf(), version).unwrap();
     std::fs::create_dir_all(layout.server().parent().unwrap()).unwrap();
-    std::fs::copy(super::fake::fake_bin(), layout.server()).unwrap();
+    std::fs::write(layout.server(), b"install-marker fixture: never executed\n").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(layout.server(), std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
     let record = vw_vibe_install::layout::Installed {
         version: version.to_owned(),
         server: layout.server(),
@@ -173,7 +178,7 @@ pub fn install_fake(root: &Path, version: &str) {
 
 /// An installer running Vibe Work's own install of the rig's version (`VIBE`), whose uv archive is on `channel`.
 pub fn running_rig(dir: &Path, channel: &Channel) -> Rig {
-    install_fake(&dir.join("data/vibe"), VIBE);
+    install_marker(&dir.join("data/vibe"), VIBE);
     let archive = uv_archive();
     let name = format!("uv.{}", archive_kind());
     channel.put(&name, archive.clone());

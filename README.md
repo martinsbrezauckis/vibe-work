@@ -14,9 +14,9 @@ An independent open-source project, part of the ShellX family of apps
   <img src="docs/public/images/vibe-work-dark.webp" alt="Vibe Work with three projects, a pending one-line edit to approve, and the Changes panel." width="1920">
 </picture>
 
-Version 0.1.1 adds a code editor, a Git tab for the project and its session copies, and company-network settings.
-Planned next: a Files tab with history and search, side-by-side editors, more browser and desktop automation, and
-many smaller features. Something specific you want Vibe Work to do? Post it in
+Version 0.1.2 adds a Files tab with history and search, editors side by side, Vibe 3 as the engine, and
+permission choices you can review in Settings. You can use the files, editors, terminal and browser before sending
+your first message. Something specific you want Vibe Work to do? Post it in
 [Discussions](https://github.com/martinsbrezauckis/vibe-work/discussions). Changes per version: `CHANGELOG.md`.
 Questions and reports: `CONTRIBUTING.md`.
 
@@ -27,38 +27,51 @@ Questions and reports: `CONTRIBUTING.md`.
 - **Chats in projects.** Pick a folder and a model and type; answers stream in with their steps. Temporary chats are
   deleted when you quit.
 - **Approvals.** An edit or command card shows the diff or the exact command before you answer. Access modes:
-  [docs/public/VOCABULARY.md](docs/public/VOCABULARY.md#access-modes).
+  [docs/public/VOCABULARY.md](docs/public/VOCABULARY.md#access-modes). A card says what Allow once or Allow for this
+  session covers. Saying No stops the turn. Unanswered cards wait until you answer.
+  Review and revoke permissions in Settings > Allowed without asking.
 - **Changes and line comments.** Everything a session changed, hunk by hunk, with keep and revert. A line comment
   goes back to the agent.
 - **A copy per session.** A session can work in its own copy of the project on its own branch. A `.worktreeinclude`
   file copies files such as `.env` into each new copy. A copy is removed only when you choose Remove.
 - **Commit, push, pull request.** Commit with a message drafted in your repository's style, Push with your own git
   sign-in, and pull requests through `gh` or the forge's page (GitHub, GitLab.com, Codeberg) with checks and reviews.
-- **Git tab.** The project folder, its subfolders and every session copy, each with its branch, changed files and
-  next step.
-- **Code editor.** Edit a file beside the chat; an agent's change never overwrites your unsaved edits (Compare,
-  Reload). Right-click a file name in the chat to open it, edit it, show it in its folder or copy its path. HTML
-  pages and PDFs open in an isolated viewer.
+- **Files and history.** Browse folders, search names and text, and open a result at its line. History shows saved
+  versions, who changed what and what has not been published. Its repository view includes the project, subfolders
+  and session copies, with Commit, Publish branch and Bring into main.
+- **Code editor.** Open files in separate tabs, open a second editor to the side, or compare with a saved version.
+  Vibe can read your open file and selection. Changes on different lines merge; changes on the same lines ask you
+  which to keep. Open files save before Vibe works by default (Settings > General). HTML and Markdown open as a
+  preview with Edit and Preview to the side; pictures and PDFs open as previews. Settings > Appearance controls
+  file tabs and how HTML and Markdown open.
 - **App preview.** The agent's dev server in the side panel. Point at an element to send the agent a note with a
   picture.
 - **Agent browser.** Web tabs the agent opens, reads, fills in and clicks through while you watch, with Stop. Logins
   come from the vault for sites you allow; the agent never sees the password.
 - **Capture from a page.** A page's design system, structure, assets, text, full-page pictures and before/after
-  differences, saved under `capture/`.
+  differences, saved under `capture/`. The Browser tab's Capture menu also saves a PDF or one HTML file with pictures
+  and styles for sharing.
 - **Handbook and Projects overview.** Plans, notes, decisions and clickable prototypes as pages beside the chat; the
   plan panel follows the agent's progress. The Projects page shows every project's status and plans.
 - **Processes.** Every process and port is tied to its session; running ones are listed in the status bar with Stop.
-- **Project secrets.** Keys and tokens in the vault, each set to Ask each time, Allowed or Never; a command gets the
-  value, the agent never sees it. An optional check finds your stored secrets in saved chats and offers to remove them.
+- **Project secrets.** Keys and tokens in the vault, each set to Ask, Always or User only; a command gets the
+  value, the agent never sees it. An optional check finds your stored secrets in saved chats and names those chats.
 - **Safety reminders.** Commands such as deleting your home folder, disk tools or shutdown are refused with a reason;
   each rule can be switched in Settings.
 - **Company networks.** Settings › Network: a proxy, the addresses that skip it and a company certificate, with a
   connection test.
 - **Search, export, attachments.** Search across sessions, messages and files; export a session; attach images and
-  documents by picker, paste or drop.
-- **Voice.** Dictation and voice chat through Mistral's Voxtral.
+  documents by picker, paste or drop. Long pastes fold into an openable chip. Turn on Send to Vibe Work in
+  Settings > General to add files and folders from your file manager's right-click menu.
+- **Right-click actions.** Point Vibe at a file, a line, selected terminal output, a web page or a handbook section.
+  The menu also offers the relevant open, history, compare, copy and revert actions.
+- **Voice.** Dictation and voice chat through Mistral's Voxtral. Ask Vibe to read its last reply aloud once, with
+  Skip and Stop, without turning on automatic narration.
 - **Tools.** A marketplace of reviewed skill packs, MCP servers and plugins, each pinned to a checksum, and
-  connectors you sign in to. A plugin you put in Vibe Work's plugins folder yourself stays off until you turn it on.
+  connectors you sign in to. Tools > Skills browses, installs, turns on, turns off and removes skills.
+  Install offers show the source, licence and what runs before you confirm. A plugin you put in Vibe Work's plugins
+  folder yourself stays off until you turn it on.
+  For the Headless browser’s Chromium download, allow it in your antivirus or retry after its scan finishes.
 - **Libraries and images.** Ask across documents stored in your Mistral account, with cited sources; create and edit
   images with Mistral's image generation. Both are billed by Mistral on your API key.
 - **Work skills.** Deep research reports, meeting briefs and data analysis into handbook reports.
@@ -80,7 +93,7 @@ Download the installer for your system from
 
 | System | File | Updates |
 |---|---|---|
-| Windows 10 or 11 (x64) | `.exe` installer, per user, no administrator rights | in the app |
+| Windows 10 1809 (build 10.0.17763) or later (x64) | `.exe` installer, per user, no administrator rights | in the app |
 | macOS 11 or later (Apple silicon) | `.dmg`, signed and notarized | in the app |
 | Linux (x86_64) | `.AppImage` | in the app |
 | Debian and Ubuntu (x86_64) | `.deb` | install the next `.deb` |
@@ -89,9 +102,36 @@ On first start Vibe Work offers to install Vibe (Mistral's `mistral-vibe` from P
 own folder and shows the source, version, checksums and size before you confirm. A Vibe you already have can be used
 instead. Then add your Mistral API key. You need the key and an internet connection.
 
+Linux also needs the system library (glibc) version required by the download. This is measured from each release
+AppImage and its bundled programs; it is not one fixed minimum for every build. Before downloading an update,
+Settings > Updates checks the announced macOS version, Windows build or glibc version and says if yours is too old.
+
 Updates are signed and installed when you click Install and restart. How to check a download's checksum and
 signature: [docs/public/RELEASE_VERIFICATION.md](docs/public/RELEASE_VERIFICATION.md). Vibe Work installs the Vibe versions it has been
-tested with (2.26.1 for this release); newer tested versions arrive through a signed list, without a new app release.
+tested with (3.0.2 for this release); newer tested versions arrive through a signed list, without a new app release.
+
+## Send files or text to a chat
+
+Turn on Settings > General > Send to Vibe Work > Right-click menus. Then right-click a file or folder:
+
+- Windows: Send to Vibe Work (under Show more options on Windows 11), or Send to > Vibe Work.
+- macOS: Send to Vibe Work in Finder's Services menu. Selected text in another app also has Services > Ask Vibe Work.
+- Linux: Scripts > Send to Vibe Work in Files, Send to Vibe Work in Dolphin, or Open with.
+
+Items appear in the open chat's message box, or in New chat if none is open. Documents are read automatically,
+just like files added with Attach. Folders are references to where they are on this computer. Nothing is sent to
+the chat until you press Send. Selected text from other apps is a macOS
+Services feature; the file and folder entries are available on all three systems.
+
+## Vault and permissions
+
+An unlocked vault opens unlocked at the next start and after an update; Lock keeps it locked. Settings > Account >
+Lock the vault when Vibe Work quits turns on locking at every quit. Its key is kept in this computer's credential
+store while unlocked. After updating from 0.1.1 or 0.1.0 with Remember on this computer on, enter the password once.
+
+Permission cards show the action and wait until you answer. Saying No stops the turn; write what to do instead
+in the chat. Ctrl/Cmd+Shift+A goes to a waiting prompt. The session header lists its permissions; Settings > Allowed without asking lists permissions
+you can revoke and links to the controls for lasting choices.
 
 ## What leaves your computer
 
@@ -109,31 +149,42 @@ folder; keys stay in the encrypted vault.
 ## Security model
 
 The agent runs commands with your user's permissions. Vibe's access modes and the app's Plan on a page profile decide
-what it may do without asking; Push, pull requests and vault changes stay your actions. Reports: `SECURITY.md`.
+what it may do without asking; Push, pull requests and vault changes stay your actions. Changes to Vibe's settings,
+skills and agent profiles can be proposed as file changes for your approval. The bell groups refusals and permission
+decisions with links to the chat. Reports: `SECURITY.md`.
+
+Settings > General > Let Vibe read GitHub with your gh login lets the agent read pull requests, issues and checks
+using a sign-in you already set up with the GitHub command-line app. This connection refuses writes and keeps the
+token outside the agent.
 
 ## Develop
 
 Requirements: Rust 1.99.0 (pinned by `rust-toolchain.toml`), Node 22 or later, pnpm 10, the
-[Tauri prerequisites](https://v2.tauri.app/start/prerequisites/) for your system, and Python 3.12 with
+[Tauri prerequisites](https://v2.tauri.app/start/prerequisites/) for your system, and Python 3.14.8 with
 [uv](https://docs.astral.sh/uv/) for the pinned Vibe.
 
 A development build starts Vibe from a `data/` folder in the repository (git-ignored):
 
 ```sh
-# The pinned Vibe (version in tools/public/codegen/vibe.pin), hash-locked like the app installs it, in data/venv.
-uv venv --python 3.12 data/venv
-uv pip install --python data/venv --require-hashes --only-binary :all: -r crates/vw-vibe-install/pin/vibe.requirements.txt
+# The pinned Vibe (version in tools/public/codegen/vibe.pin), hash-locked like the app installs it, in data/vibe-3.0.2/venv.
+uv venv --python 3.14.8 data/vibe-3.0.2/venv
+uv pip install --python data/vibe-3.0.2/venv --require-hashes --only-binary :all: -r crates/vw-vibe-install/pin/vibe.requirements.txt
 # The included minimal Vibe config is copied into each run folder; your own ~/.vibe stays untouched.
 mkdir -p data/vibe-home-template
 cp tools/public/dev/vibe-config.template.toml data/vibe-home-template/config.toml
 
 pnpm install --frozen-lockfile
-VW_DEV_KEYS=1 pnpm tauri dev
+VW_DEV_SERVER_BIN="$PWD/data/vibe-3.0.2/venv/bin/vibe-app-server" VW_DEV_KEYS=1 pnpm tauri dev
 ```
 
 `VW_DEV_SERVER_BIN`, `VW_DEV_HOME_TEMPLATE` and `VW_DEV_RUN_DIR` (absolute paths) override the Vibe program, the
 `config.toml` and the run folder (default `.scratch/dev-app`). `VW_DEV_KEYS=1` runs the key service (setup screen,
 vault, local proxy) in the run folder.
+
+When updating an older development environment, create a fresh Python 3.14.8 venv and install the
+hash-locked requirements above; upgrading packages inside a Python 3.12 venv cannot upgrade Python.
+For an isolated checkout whose `data` is shared, create the venv outside that shared folder and set
+`VW_DEV_SERVER_BIN`, `VW_TEST_VIBE_SERVER` and `VIBE_PYTHON` to its absolute executable paths.
 
 `scripts/public/check.sh` runs what every change must pass: formatting, a production UI build, lints, Rust and UI
 tests, generated-code and vocabulary checks, and size, colour and public-paths guards. CI runs it on Windows, macOS

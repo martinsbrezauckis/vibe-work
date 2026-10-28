@@ -85,13 +85,6 @@ impl Handlers {
             .insert(method, handler);
     }
 
-    pub(crate) fn remove(&self, method: &str) {
-        self.map
-            .write()
-            .unwrap_or_else(PoisonError::into_inner)
-            .remove(method);
-    }
-
     pub(crate) fn get(&self, method: &str) -> Option<Arc<dyn ServerRequestHandler>> {
         self.map
             .read()

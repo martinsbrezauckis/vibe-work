@@ -26,11 +26,6 @@
       "title": "Contextwindow",
       "type": "integer"
     },
-    "experimentalHarness": {
-      "default": false,
-      "title": "Experimentalharness",
-      "type": "boolean"
-    },
     "hooksCount": {
       "title": "Hookscount",
       "type": "integer"

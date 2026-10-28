@@ -22,9 +22,11 @@ pub(crate) fn bootstrap() -> String {
         .join("\n");
     let css = format!("{tokens}\n{}", include_str!("inline_controls.css"));
     format!(
-        "if(window.top===window && window.origin!=='null'){{window.__hbInlineStyle={};}}\n{}",
+        "if(window.top===window && window.origin!=='null'){{window.__hbInlineStyle={};}}\n{}\n{}\n{}",
         serde_json::Value::String(css),
-        include_str!("inline_controls.js")
+        include_str!("anchors.js"),
+        include_str!("inline_controls.js"),
+        crate::page_menu::page_script()
     )
 }
 
@@ -56,7 +58,11 @@ pub(crate) fn prototype_host(source: &str, title: &str) -> Vec<u8> {
 
 /// Prelude of the sandboxed frame (layout and existing handbook comments, never answer writes).
 pub(crate) fn prelude() -> String {
-    format!("<script>{}</script>", include_str!("inline_page.js"))
+    format!(
+        "<script>{}\n{}</script>",
+        include_str!("anchors.js"),
+        include_str!("inline_page.js")
+    )
 }
 
 /// A prototype frame may load only its owning page. Changing documents must never inherit its answer channel.
@@ -223,6 +229,7 @@ impl PagesService {
                 {
                     return;
                 }
+                service.refresh_document(&label).await;
                 let target = service.inline_target(&label);
                 let Some((mount, project, path, load)) = target else {
                     continue;

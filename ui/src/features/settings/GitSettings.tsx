@@ -1,4 +1,5 @@
 /** Git identity in app settings, read and explicitly saved through the core; mounted by SettingsPage. */
+import { GithubReadsSettings } from "./GithubReadsSettings";
 import { Button } from "../../components/Controls";
 import { useEffect } from "react";
 import { useStore } from "../../state/createStore";
@@ -38,7 +39,7 @@ function IdentitySettings({ identity }: { identity: ReturnType<typeof gitIdentit
           type="button"
           data-testid="settings.git-identity-save"
           variant="primary"
-          small
+          shape="outlined"
           disabled={state.busy || state.view === null || (!empty && !validIdentity(state.draft))}
           onClick={() => void identity.save()}
         >
@@ -55,6 +56,7 @@ function IdentitySettings({ identity }: { identity: ReturnType<typeof gitIdentit
           </p>
         )}
       </div>
+      <GithubReadsSettings />
     </section>
   );
 }

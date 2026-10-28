@@ -5,6 +5,7 @@
  * Depends on: AppContext (link opener, toasts), protocol types. Called by: VibeInstallStep, VibeUpdateDialog.
  * Invariants: render only; links open in the system browser through the host's link opener.
  */
+import { Button } from "../../components/Controls";
 import { useState } from "react";
 import type { InstallOffer } from "../../protocol/core";
 import { useApp } from "../shell/AppContext";
@@ -12,15 +13,15 @@ import { useApp } from "../shell/AppContext";
 const mb = (bytes: number) => `${String(Math.round(bytes / (1024 * 1024)))} MB`;
 
 /** A link that opens in the system browser. */
-export function Link({ url, label }: { url: string; label: string }) {
+function Link({ url, label }: { url: string; label: string }) {
   const { core } = useApp();
   const [fallback, setFallback] = useState(false);
   return (
     <>
-      <button
+      <Button
         data-testid="setup.vibe-offer-details-open-link"
         type="button"
-        className="key-link"
+        appearance="key-link"
         onClick={() => {
           core?.client.openLink(url).catch(() => {
             setFallback(true);
@@ -28,7 +29,7 @@ export function Link({ url, label }: { url: string; label: string }) {
         }}
       >
         {label}
-      </button>
+      </Button>
       {fallback && <span role="status"> Open {url} in your browser.</span>}
     </>
   );

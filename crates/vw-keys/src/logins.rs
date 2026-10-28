@@ -324,7 +324,7 @@ impl KeyService {
         Ok(item.as_ref().and_then(fill_grant::from_item))
     }
 
-    /// Creates or changes fill grant `id` atomically (as [`KeyService::update_command_grant`]): `change` gets the
+    /// Creates or changes fill grant `id` atomically (under the vault write lock): `change` gets the
     /// record as the vault holds it at the moment of the write and returns the record to write, or `None`.
     ///
     /// # Errors

@@ -10,7 +10,7 @@
  * restart" request as the notice's, so it is never offered before the download is verified. A package-manager
  * install (`linkOnly`) gets no download switch: nothing is downloaded there.
  */
-import { Button } from "../../components/Controls";
+import { Button, Switch } from "../../components/Controls";
 import { useStore } from "../../state/createStore";
 import { statusLine } from "../../state/updates";
 import { vibeStatusLine } from "../../state/vibeUpdates";
@@ -45,8 +45,9 @@ function Section({ updates }: { updates: NonNullable<ReturnType<typeof useApp>["
           </span>
           {view.mode === "linkOnly" && (
             <span className="d">
-              This copy was installed with a package manager. Vibe Work only tells you about new
-              versions; the package manager installs them.
+              Vibe Work tells you about new versions but does not install them in this copy.
+              Download the new version from the release page and install it the way you installed
+              this one.
             </span>
           )}
         </span>
@@ -55,7 +56,7 @@ function Section({ updates }: { updates: NonNullable<ReturnType<typeof useApp>["
             <Button
               data-testid="updates.update-settings-run"
               type="button"
-              small
+              shape="outlined"
               onClick={run(updates.download)}
             >
               Download
@@ -65,7 +66,7 @@ function Section({ updates }: { updates: NonNullable<ReturnType<typeof useApp>["
             <Button
               data-testid="updates.update-settings-run-2"
               type="button"
-              small
+              shape="outlined"
               variant="primary"
               onClick={run(updates.install)}
             >
@@ -77,7 +78,7 @@ function Section({ updates }: { updates: NonNullable<ReturnType<typeof useApp>["
               <Button
                 data-testid="updates.update-settings-run-3"
                 type="button"
-                small
+                shape="outlined"
                 onClick={run(updates.openReleasePage)}
               >
                 Open release page
@@ -88,7 +89,7 @@ function Section({ updates }: { updates: NonNullable<ReturnType<typeof useApp>["
           <Button
             data-testid="updates.update-settings-run-4"
             type="button"
-            small
+            shape="outlined"
             disabled={busy}
             onClick={run(updates.check)}
           >
@@ -107,11 +108,8 @@ function Section({ updates }: { updates: NonNullable<ReturnType<typeof useApp>["
               nothing installs or restarts without your click.
             </span>
           </span>
-          <button
+          <Switch
             data-testid="updates.update-settings-run-5"
-            type="button"
-            className="switch"
-            role="switch"
             aria-label="Download updates automatically"
             aria-checked={view.autoDownload}
             onClick={run(() => updates.setAutoDownload(!view.autoDownload))}
@@ -143,7 +141,7 @@ function VibeRow() {
           <Button
             data-testid="updates.update-settings-prepare-update"
             type="button"
-            small
+            shape="outlined"
             variant="primary"
             disabled={busy}
             onClick={() => void vibe.prepareUpdate()}

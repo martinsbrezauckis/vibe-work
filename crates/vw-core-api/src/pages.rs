@@ -96,14 +96,16 @@ pub(crate) fn start_events(shared: &Arc<Shared>) {
     }
 }
 
-/// Forwards one viewer service's changes as the events `make` builds, and runs its reload tick (the Project tab's
-/// hub and the File tab's viewer). The task is owned by `hub`.
+/// Forwards one viewer service's changes as the events `make` builds and its page right clicks as `pageMenu` (only
+/// the Project tab's viewer has them), and runs its reload tick (the Project tab's hub and the File tab's viewer).
+/// The task is owned by `hub`.
 pub(crate) fn start_hub_events(
     shared: &Arc<Shared>,
     hub: &Arc<PagesHub>,
     make: fn(Option<String>) -> CoreEvent,
 ) {
     let mut changes = hub.service.changes();
+    let mut menus = hub.service.page_menus();
     let service = hub.service.clone();
     let weak: Weak<Shared> = Arc::downgrade(shared);
     let task = tokio::spawn(async move {
@@ -119,6 +121,20 @@ pub(crate) fn start_hub_events(
                     };
                     let Some(shared) = weak.upgrade() else { return };
                     shared.emit(make(session_id));
+                }
+                menu = menus.recv() => {
+                    let at = match menu {
+                        Ok(at) => at,
+                        Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                        Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
+                    };
+                    let Some(shared) = weak.upgrade() else { return };
+                    shared.emit(CoreEvent::PageMenu {
+                        session_id: at.session_id,
+                        x: at.x,
+                        y: at.y,
+                        selected: at.selected,
+                    });
                 }
                 _ = tick.tick() => {
                     service.reload_if_changed().await;
@@ -170,10 +186,11 @@ pub(crate) fn core_error(error: &PagesError) -> CoreError {
         | PagesError::NotShown
         | PagesError::Comment(vw_pages::CommentError::NotFound)
         | PagesError::Engine(EngineError::NotMounted) => ErrorCode::NotFound,
-        PagesError::Path(_) | PagesError::NoSection | PagesError::NothingPicked => {
-            ErrorCode::InvalidParams
-        }
-        PagesError::Comment(vw_pages::CommentError::Invalid(_))
+        PagesError::Path(_)
+        | PagesError::NoSection
+        | PagesError::NothingPicked
+        | PagesError::NamedTargetMissing
+        | PagesError::Comment(vw_pages::CommentError::Invalid(_))
         | PagesError::Answer(vw_pages::AnswerError::Invalid(_)) => ErrorCode::InvalidParams,
         PagesError::Engine(EngineError::Unsupported(_) | EngineError::FocusRequired) => {
             ErrorCode::Denied
@@ -237,9 +254,7 @@ impl Core {
             .ok_or_else(|| {
                 CoreError::new(
                     ErrorCode::NotFound,
-                    format!(
-                        "session {session_id} has no folder Vibe Work knows (list or open it first)"
-                    ),
+                    "The session's folder is not available. Open the session from the list and try again.",
                 )
             })
     }

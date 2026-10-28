@@ -7,15 +7,18 @@
 //! - An unknown label (closed or never mounted) is refused everything.
 //! - A navigation is allowed only by `UrlPolicy::navigation` with the entry's allowed ports, the mount's page
 //!   class and (Lan mounts) its own host, and, for a host NAME, only when every DNS answer is public
-//!   (`names`, failing closed; the lookup runs outside the registry lock). A Lan mount's own host is not looked up
-//!   (the user opened it). Sub-requests asked through `request_allowed` / `request_check` (the Windows barrier) get
+//!   (`names`, failing closed; the lookup runs outside the registry lock). A Lan mount's own name is checked too,
+//!   allowing local-network answers for that host. Sub-requests through `request_allowed` / `request_check` get
 //!   the same name check; the engine resolves again on connect, so only the Linux guard pins the checked address.
 //! - No callback waits on a lookup for more than `names::UI_WAIT`: a lookup still running
 //!   lets a navigation go on only when the engine checks names again at request time (`names_checked_later`: the
 //!   Linux proxy, the `WebView2` barrier, which holds the request with a deferral via `request_check`), else refuses
-//!   it with "open it again in a moment" while the lookup fills the cache.
+//!   it and holds the person's navigation for a checked UI-thread continuation. Agent opens keep their retry.
 //! - Only the canary URL the engine announced for a mount's pending guard check is allowed (until the check ends) and
-//!   never recorded as the page; any other canary URL is refused.
+//!   never recorded as the page; any other canary URL is refused. A canary of an ENDED check stays refused as a
+//!   navigation, but neither that refusal nor a late load report of it is shown as a refused page (the engine can
+//!   report the canary's load after the check ended, in any order: real app, Linux, a "Not opened ...
+//!   `127.0.0.1:<port>/__vw_guard/<token>`" banner for our own check).
 //! - A mount keeps its page class (web or the session's local server): a navigation inside it to the other class is
 //!   refused (top level or in a frame; `WebKitGTK` asks the same policy for both) and opens only as a fresh mount.
 //! - A page that ends up outside its allowed ports (an engine that does not ask about a redirect) is unloaded:
@@ -34,14 +37,18 @@ use crate::downloads::{self, DownloadState, DownloadView};
 use crate::engine::{GuardCheck, GuardLayer, PageEvent, PreviewHooks, RequestCheck};
 use crate::policy::{Destination, PageClass, UrlPolicy};
 use crate::state::DownloadRecord;
-use crate::state::State;
+use crate::state::{Seen, State};
 
 /// Two download starts of the same URL within this window are the same download (`WebKitGTK` can call a web
 /// context's handler once per webview that ever registered on it).
 const DUPLICATE_WINDOW: Duration = Duration::from_secs(2);
 
 /// Shared registry + policy.
+pub(crate) type RefusalListener = Arc<dyn Fn(&str, &str) + Send + Sync>;
+
 pub(crate) struct Inner {
+    pub(crate) engine: std::sync::Weak<dyn crate::engine::PreviewEngine>,
+    pub(crate) guard_refused: Mutex<Option<RefusalListener>>,
     pub(crate) state: Mutex<State>,
     pub(crate) policy: UrlPolicy,
     /// Session ids whose preview changed (page loaded, title, refusal, download), for the UI's refresh.
@@ -60,6 +67,17 @@ pub(crate) struct Inner {
 }
 
 impl Inner {
+    pub(crate) fn guard_refused(&self, session: &str, reason: &str) {
+        let listener = self
+            .guard_refused
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone();
+        if let Some(listener) = listener {
+            listener(session, reason);
+        }
+    }
+
     /// Tells subscribers that `session_id`'s preview changed (none listening is fine).
     pub(crate) fn changed(&self, session_id: &str) {
         let owner = self.lock().owner_of(session_id);
@@ -102,7 +120,7 @@ fn name_to_check(url: &Url, lan_host: Option<&str>) -> Option<NameCheck> {
 }
 
 /// What a navigation needs after the policy: nothing more, a refusal, or a name lookup.
-enum Pre {
+pub(crate) enum Pre {
     /// Decided: allowed, or refused (`None`: an unknown label, nothing to record).
     Done(Result<(), Option<(String, String)>>),
     /// The policy allows it; `host` must point to public addresses. `later`: the engine checks names again at
@@ -121,8 +139,38 @@ fn pending_text(host: &str) -> String {
 }
 
 impl Hooks {
+    /// Reports a refused sub-request of mount `label` to the security bell, except the engine's own favicon request
+    /// of a canary page (Vibe Work's check traffic, refused all the same: never the page's refusal).
+    fn record_request(&self, label: &str, url: &Url) {
+        if crate::policy::embedded_document(url) {
+            tracing::debug!(
+                scheme = url.scheme(),
+                "embedded document needs no refusal notice"
+            );
+            return;
+        }
+        let session = {
+            let state = self.0.lock();
+            match state.session_of(label) {
+                Some(session)
+                    if state
+                        .entries
+                        .get(session)
+                        .is_some_and(|entry| entry.canary_favicon(url)) =>
+                {
+                    tracing::debug!(session = %session, "the canary page's favicon request refused (not reported)");
+                    None
+                }
+                other => other.map(str::to_owned),
+            }
+        };
+        if let Some(session) = session {
+            self.0
+                .guard_refused(&session, "This request is not allowed from this page");
+        }
+    }
     /// The policy part of a navigation decision (under the registry lock, never waiting).
-    fn pre(&self, label: &str, url: &Url) -> Pre {
+    pub(crate) fn pre(&self, label: &str, url: &Url) -> Pre {
         let mut state = self.0.lock();
         let Some(session) = state.session_of(label).map(str::to_owned) else {
             return Pre::Done(Err(None));
@@ -132,6 +180,10 @@ impl Hooks {
         let entry = state.entry(&session);
         if entry.canary.as_ref() == Some(url) {
             return Pre::Done(Ok(()));
+        }
+        // Our own canary after its check ended: refused, and not recorded (the user never asked for it).
+        if entry.ended_canaries.contains(url) {
+            return Pre::Done(Err(None));
         }
         if pinned_app
             && matches!(
@@ -170,7 +222,7 @@ impl Hooks {
     /// The navigation decision without ever waiting more than [`crate::names::UI_WAIT`] (the engine's UI thread):
     /// a known verdict decides; a lookup still running lets the navigation go on when the engine checks names again
     /// at request time (`later`), else refuses it (fail closed; the lookup goes on and fills the cache).
-    fn decide(&self, label: &str, url: &Url) -> Result<(), Option<(String, String)>> {
+    pub(crate) fn decide(&self, label: &str, url: &Url) -> Result<(), Option<(String, String)>> {
         let (session, host, later, lan) = match self.pre(label, url) {
             Pre::Done(result) => return result,
             Pre::Name {
@@ -190,10 +242,23 @@ impl Hooks {
         }
     }
 
-    /// Records a refused navigation for the receipts and the UI.
-    fn record(&self, session: &str, url: &Url, reason: &str) {
+    /// Records a refused navigation for the receipts, the UI and the security bell, once per refusal: the other
+    /// hook's report of the same navigation (`WebView2` reports one to both, see [`Seen`]) records nothing.
+    fn record(&self, session: &str, url: &Url, reason: &str, seen: Seen) {
+        if crate::policy::embedded_document(url) {
+            tracing::debug!(
+                scheme = url.scheme(),
+                "embedded document needs no refusal notice"
+            );
+            return;
+        }
         let mut state = self.0.lock();
         if let Some(entry) = state.entries.get_mut(session) {
+            if entry.second_report(url, seen) {
+                drop(state);
+                tracing::debug!(session = %session, ?seen, "preview navigation refusal reported by its second hook");
+                return;
+            }
             entry.note_refused(url.as_str(), reason);
         }
         drop(state);
@@ -204,6 +269,7 @@ impl Hooks {
             %reason,
             "preview navigation refused"
         );
+        self.0.guard_refused(session, reason);
         self.0.changed(session);
     }
 
@@ -254,7 +320,7 @@ impl Hooks {
             }
             Err(_) => return Err(()),
         };
-        // Loopback (the same owner rule as the Linux guard, decided synchronously): only from a page of the session's
+        // Loopback (checked synchronously, as on Linux): only from a page of the session's
         // own server (Local mount), never Vibe Work's own ports (fail closed while that list is unknown), only ports
         // of this session or of another session's preview (the cross-session backend).
         let Some(internal) = self.0.internal_ports() else {
@@ -291,7 +357,22 @@ fn add_layer(entry: &mut crate::state::Entry, layer: GuardLayer) {
 pub(crate) struct Hooks(pub(crate) Arc<Inner>);
 
 impl PreviewHooks for Hooks {
+    fn allow_frame_navigation(&self, label: &str, url: &Url) -> bool {
+        match self.decide(label, url) {
+            Ok(()) => true,
+            Err(None) => false,
+            Err(Some((session, reason))) => {
+                self.record(&session, url, &reason, Seen::Navigation);
+                false
+            }
+        }
+    }
+
     fn allow_navigation(&self, label: &str, url: &Url) -> bool {
+        let navigation = self.begin_navigation(label);
+        if self.hold_navigation(label, url, navigation) {
+            return false;
+        }
         match self.decide(label, url) {
             Ok(()) => {
                 // A fresh navigation is the only evidence that the replaced page's URL may be
@@ -322,7 +403,7 @@ impl PreviewHooks for Hooks {
             }
             Err(None) => false,
             Err(Some((session, reason))) => {
-                self.record(&session, url, &reason);
+                self.record(&session, url, &reason, Seen::Navigation);
                 false
             }
         }
@@ -333,7 +414,7 @@ impl PreviewHooks for Hooks {
     }
 
     fn request_allowed(&self, label: &str, url: &Url) -> bool {
-        match self.request_pre(label, url) {
+        let allowed = match self.request_pre(label, url) {
             Ok(None) => true,
             Ok(Some(NameCheck { host, lan })) => self
                 .0
@@ -341,14 +422,28 @@ impl PreviewHooks for Hooks {
                 .quick(&host, crate::names::UI_WAIT)
                 .is_some_and(|v| v.refusal_on(lan).is_none()),
             Err(()) => false,
+        };
+        if !allowed {
+            self.record_request(label, url);
         }
+        allowed
     }
 
     fn request_check(&self, label: &str, url: &Url, document: bool) -> RequestCheck {
+        let seen = if document {
+            Seen::Document
+        } else {
+            Seen::Request
+        };
         let (host, record, lan) = if document {
             match self.pre(label, url) {
                 Pre::Done(Ok(())) => return RequestCheck::Allow,
-                Pre::Done(Err(_)) => return RequestCheck::Deny,
+                Pre::Done(Err(reason)) => {
+                    if let Some((session, reason)) = reason {
+                        self.record(&session, url, &reason, Seen::Document);
+                    }
+                    return RequestCheck::Deny;
+                }
                 Pre::Name {
                     session, host, lan, ..
                 } => (host, Some(session), lan),
@@ -356,8 +451,15 @@ impl PreviewHooks for Hooks {
         } else {
             match self.request_pre(label, url) {
                 Ok(None) => return RequestCheck::Allow,
-                Err(()) => return RequestCheck::Deny,
-                Ok(Some(NameCheck { host, lan })) => (host, None, lan),
+                Err(()) => {
+                    self.record_request(label, url);
+                    return RequestCheck::Deny;
+                }
+                Ok(Some(NameCheck { host, lan })) => (
+                    host,
+                    self.0.lock().session_of(label).map(str::to_owned),
+                    lan,
+                ),
             }
         };
         if let Some(verdict) = self.0.names.quick(&host, Duration::ZERO) {
@@ -365,7 +467,7 @@ impl PreviewHooks for Hooks {
                 None => RequestCheck::Allow,
                 Some(why) => {
                     if let Some(session) = &record {
-                        self.record(session, url, &format!("{host} is not opened: {why}"));
+                        self.record(session, url, &format!("{host} is not opened: {why}"), seen);
                     }
                     RequestCheck::Deny
                 }
@@ -378,7 +480,12 @@ impl PreviewHooks for Hooks {
                 &name,
                 Box::new(move |verdict| {
                     if let (Some(why), Some(session)) = (verdict.refusal_on(lan), &record) {
-                        Hooks(inner).record(session, &url, &format!("{host} is not opened: {why}"));
+                        Hooks(inner).record(
+                            session,
+                            &url,
+                            &format!("{host} is not opened: {why}"),
+                            seen,
+                        );
                     }
                     done(verdict.refusal_on(lan).is_none());
                 }),
@@ -408,9 +515,12 @@ impl PreviewHooks for Hooks {
         };
         let entry = state.entry(&session);
         match check {
-            GuardCheck::Expect(url) => entry.canary = Some(url),
+            GuardCheck::Expect(url) => {
+                entry.end_canary();
+                entry.canary = Some(url);
+            }
             GuardCheck::Done(active) => {
-                entry.canary = None;
+                entry.end_canary();
                 entry.guarded = active;
                 if active {
                     add_layer(entry, GuardLayer::EgressProxy);
@@ -452,11 +562,12 @@ impl PreviewHooks for Hooks {
         let entry = state.entry(&session);
         let mut keep = true;
         match event {
-            // Canary loads of the pending guard check are never the page and never a reason to unload. The announced
-            // canary stays allowed until the check ends (`Done`), not until a load event: WebKitGTK reports the
-            // cancelled previous load as `Finished` with the NEW pending URI (observed in the app).
+            // Canary loads are never the page and never a reason to unload, whenever the engine reports them: the
+            // announced canary stays allowed until the check ends (`Done`), not until a load event (WebKitGTK reports
+            // the cancelled previous load as `Finished` with the NEW pending URI, observed in the app), and a report
+            // that arrives after `Done` is for a canary the engine announced (`ended_canaries`), not a page.
             PageEvent::Started(url) | PageEvent::Finished(url) | PageEvent::Probe(url)
-                if entry.canary.as_ref() == Some(&url) || policy.is_canary(&url) =>
+                if entry.announced_canary(&url) || policy.is_canary(&url) =>
             {
                 return true;
             }
@@ -478,6 +589,8 @@ impl PreviewHooks for Hooks {
                 tracing::info!(session = %session, "preview page outside its ports: unloaded");
                 keep = false;
             }
+            // The old document cannot finish a held load; the out-of-policy unload above still applies.
+            _ if entry.navigation_held() => return true,
             PageEvent::Probe(_) => return true,
             PageEvent::Started(url) => {
                 if let Some(requested) = &entry.pending_open {
@@ -536,17 +649,32 @@ impl PreviewHooks for Hooks {
             PageEvent::Title(_) => {}
         }
         drop(state);
+        if !keep {
+            self.0.guard_refused(
+                &session,
+                "the page ended up outside what this browser opens",
+            );
+        }
         self.0.changed(&session);
         keep
     }
 
     fn new_window_refused(&self, label: &str, url: &Url) {
+        if crate::policy::embedded_document(url) {
+            tracing::debug!(
+                scheme = url.scheme(),
+                "embedded document needs no refusal notice"
+            );
+            return;
+        }
         let mut state = self.0.lock();
         if let Some(session) = state.session_of(label).map(str::to_owned) {
             state
                 .entry(&session)
                 .note_refused(url.as_str(), "pages cannot open new windows here");
             drop(state);
+            self.0
+                .guard_refused(&session, "pages cannot open new windows here");
             self.0.changed(&session);
         }
     }

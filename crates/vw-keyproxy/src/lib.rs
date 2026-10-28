@@ -38,12 +38,13 @@ pub mod connectors;
 mod key;
 mod limits;
 mod mcp;
+mod reasoning;
 mod routes;
 mod server;
 mod token;
 
 pub use key::{KeyCell, KeyNeed, KeyState};
-pub use limits::RateLimits;
+pub use limits::{LIMITS_EVERY, RateLimits};
 pub use mcp::{MCP_PREFIX, McpFuture, McpRefusal, McpResolver, McpResolverSlot, McpTarget};
 pub use routes::{ALLOWLIST, RouteSpec, Upstream, match_route};
 pub use server::{LimitsHook, ProxyConfig, ProxyError, ProxyHandle, ProxyStats, Upstreams};

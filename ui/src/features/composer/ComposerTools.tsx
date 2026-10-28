@@ -22,6 +22,7 @@ import type { ModelChoice } from "./model/models";
 export interface ToolsProps {
   mode: AccessMode | null;
   modes: readonly AccessMode[];
+  defaultAccessLabel?: string;
   modelLabel: string;
   effort: string | null;
   alias: string | null;
@@ -47,14 +48,14 @@ export interface ToolsProps {
 }
 
 /** The faces of the action slot. */
-export type SlotFace = "send" | "voiceChat";
+type SlotFace = "send" | "voiceChat";
 
 /**
  * The composer's one action slot: Send and Voice chat share it. Both faces stay
  * mounted in the same box and cross-fade (`feel.css`, instant with reduced motion); the hidden one is inert and
  * aria-hidden, so it is neither tabbable nor announced.
  */
-export function ActionSlot(p: {
+function ActionSlot(p: {
   face: SlotFace;
   running: boolean;
   sending: boolean;
@@ -140,6 +141,7 @@ export function ComposerTools(p: ToolsProps): ReactElement {
         }}
       />
       <AccessMenu
+        {...(p.defaultAccessLabel === undefined ? {} : { defaultLabel: p.defaultAccessLabel })}
         modes={p.modes}
         current={p.mode?.id ?? null}
         {...(p.mode === null ? {} : { currentLabel: p.mode.label })}

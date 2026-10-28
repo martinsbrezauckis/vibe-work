@@ -7,7 +7,7 @@
 //! Live development uses the key service; other runs get a disposable placeholder.
 //!
 //! Environment (all optional, absolute paths):
-//! - `VW_DEV_SERVER_BIN`: the `vibe-app-server` executable (default `<repo>/data/venv/bin/...`).
+//! - `VW_DEV_SERVER_BIN`: the `vibe-app-server` executable (default `<repo>/data/vibe-<pin>/venv/bin/...`).
 //! - `VW_DEV_HOME_TEMPLATE`: a `config.toml` copied into the dev `VIBE_HOME`
 //!   (default `<repo>/data/vibe-home-template/config.toml`).
 //! - `VW_DEV_RUN_DIR`: the run folder (default `<repo>/.scratch/dev-app`, git-ignored).
@@ -16,7 +16,8 @@
 //! development builds (user builds use [`ProductLaunch`] through [`crate::product`]), the
 //! private test host. Invariants: nothing outside the run folder is written; an existing dev
 //! `config.toml` keeps user edits; relative extension entries are dropped and a session-title model is added when it
-//! names none ([`crate::title_model`]; both launches). Config parsing never fails launch; the dev server runs unsandboxed, so
+//! names none ([`crate::title_model`]; both launches), and Vibe is set to verify HTTPS with the OS certificate store unless
+//! the config sets that itself ([`crate::trust_store`]; both launches). Config parsing never fails launch; the dev server runs unsandboxed, so
 //! live development uses the same vault and proxy flow as a user build.
 
 use std::ffi::OsString;
@@ -36,9 +37,12 @@ pub fn placeholder_provider() -> std::sync::Arc<vw_keyproxy::ProxySecretProvider
 /// Why the development launch config could not be built.
 #[derive(Debug, thiserror::Error)]
 pub enum LaunchError {
+    /// The development server did not report the pinned version.
+    #[error("{0}")]
+    Version(String),
     /// The server executable does not exist at the resolved path.
     #[error(
-        "vibe-app-server not found at {0}: install the pinned Vibe into data/venv (tools/public/codegen/vibe.pin) or set VW_DEV_SERVER_BIN"
+        "vibe-app-server not found at {0}: install the pinned Vibe into data/vibe-<pin>/venv (crates/vw-vibe-install/pin) or set VW_DEV_SERVER_BIN"
     )]
     ServerMissing(PathBuf),
     /// The config template does not exist at the resolved path.
@@ -103,9 +107,10 @@ impl DevLaunch {
             "vibe-app-server"
         };
         let bin_dir = if cfg!(windows) { "Scripts" } else { "bin" };
+        let runtime = crate::launch_version::runtime(repo_root)?;
         Ok(Self {
             server_bin: explicit("VW_DEV_SERVER_BIN")?
-                .unwrap_or_else(|| repo_root.join("data/venv").join(bin_dir).join(server_name)),
+                .unwrap_or_else(|| runtime.join(bin_dir).join(server_name)),
             home_template: explicit("VW_DEV_HOME_TEMPLATE")?
                 .unwrap_or_else(|| repo_root.join("data/vibe-home-template/config.toml")),
             run_dir: explicit("VW_DEV_RUN_DIR")?
@@ -145,9 +150,11 @@ impl DevLaunch {
                 source,
             })?;
         }
+        crate::launch_version::check(&self.server_bin, &self.run_dir)?;
         crate::extension_paths::prepare(&config);
         log_title_model(&vibe_home);
         log_commit_signature(&vibe_home);
+        log_trust_store(&vibe_home);
         clear_connector_cache(&vibe_home);
         let gitconfig = home.join(".gitconfig");
         if !gitconfig.exists() {
@@ -167,9 +174,9 @@ impl DevLaunch {
             ("GIT_CONFIG_NOSYSTEM".to_owned(), OsString::from("1")),
             ("PYTHONUNBUFFERED".to_owned(), OsString::from("1")),
         ];
-        // WORKAROUND(Windows without an interactive logon, e.g. over SSH): Vibe reads the
-        // Credential Manager on `session/list` and fails with 1312 there; a dev run takes its key
-        // from a supplied proxy placeholder, so the keyring is switched off (same as the live tests).
+        // Windows without an interactive logon (e.g. over SSH) has no usable Credential Manager
+        // (error 1312); a dev run takes its key from a supplied proxy placeholder, so Vibe's keyring
+        // is switched off (same as the live tests).
         if cfg!(windows) {
             supervisor.extra_env.push((
                 "PYTHON_KEYRING_BACKEND".to_owned(),
@@ -241,6 +248,7 @@ impl ProductLaunch {
         crate::extension_paths::prepare(&vibe_home.join("config.toml"));
         log_title_model(&vibe_home);
         log_commit_signature(&vibe_home);
+        log_trust_store(&vibe_home);
         clear_connector_cache(&vibe_home);
         let mut supervisor = SupervisorConfig::new(self.server_bin.clone(), vibe_home, work);
         supervisor.extra_env = vec![("PYTHONUNBUFFERED".to_owned(), OsString::from("1"))];
@@ -289,6 +297,30 @@ fn log_commit_signature(vibe_home: &Path) {
             tracing::warn!(%why, "agent commits: config not changed");
         }
         Err(error) => tracing::warn!(%error, "agent commits: config.toml could not be updated"),
+    }
+}
+
+/// Makes Vibe verify HTTPS with the OS certificate store by default in `vibe_home/config.toml`
+/// ([`crate::trust_store`]) and logs what happened. Never fails the launch: without it Vibe falls back to its bundled
+/// certificate list.
+fn log_trust_store(vibe_home: &Path) {
+    use crate::trust_store::TrustStore;
+    match crate::trust_store::ensure(vibe_home) {
+        Ok(TrustStore::Added) => {
+            tracing::info!(
+                "TLS trust: system certificate store on (enable_system_trust_store = true)"
+            );
+        }
+        Ok(TrustStore::Kept(true)) => {
+            tracing::info!("TLS trust: config sets enable_system_trust_store = true, kept");
+        }
+        Ok(TrustStore::Kept(false)) => tracing::warn!(
+            "TLS trust: config sets enable_system_trust_store = false, kept (Vibe uses its bundled certificate list)"
+        ),
+        Ok(TrustStore::Skipped(why)) => {
+            tracing::warn!(%why, "TLS trust: config not changed");
+        }
+        Err(error) => tracing::warn!(%error, "TLS trust: config.toml could not be updated"),
     }
 }
 

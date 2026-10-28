@@ -190,6 +190,14 @@ impl NameCheck {
         self.shared.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
+    /// The resolver in use (for a lookup that needs the addresses themselves: a capture's Lan media).
+    pub(crate) fn resolver(&self) -> NameResolver {
+        self.resolver
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+
     /// Replaces the resolver (and forgets cached answers).
     pub(crate) fn set_resolver(&self, resolver: NameResolver) {
         *self.resolver.lock().unwrap_or_else(PoisonError::into_inner) = resolver;

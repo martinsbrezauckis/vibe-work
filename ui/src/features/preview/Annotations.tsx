@@ -5,6 +5,7 @@
  * changed. Names, text and routes are page text: shown as text only.
  * Depends on: browser.ts, browserModel.ts. Called by: PreviewTab.
  */
+import { Button } from "../../components/Controls";
 import type { ReactElement } from "react";
 
 import { useStore } from "../../state/createStore";
@@ -28,15 +29,15 @@ function NoteRow({
         <span className="browser-note-what">{what}</span>
         <span className="browser-note-route">{a.route}</span>
         <span className="browser-note-status">{statusText(item.status)}</span>
-        <button
+        <Button
           data-testid="preview.annotations-preview-btn"
           type="button"
-          className="preview-btn"
+          appearance="preview"
           aria-label="Remove this note"
           onClick={onRemove}
         >
           Remove
-        </button>
+        </Button>
       </div>
       {item.status === "draft" ? (
         <textarea
@@ -80,24 +81,24 @@ export function Annotations({
         {picking === undefined ? (
           controls && (
             <>
-              <button
+              <Button
                 data-testid="preview.annotations-annotate"
                 type="button"
-                className="preview-btn"
+                appearance="preview"
                 title="Click an element in the preview to add a note about it"
                 onClick={() => void browser.annotate(sessionId, "element")}
               >
                 Note on an element
-              </button>
-              <button
+              </Button>
+              <Button
                 data-testid="preview.annotations-annotate-2"
                 type="button"
-                className="preview-btn"
+                appearance="preview"
                 title="Drag a box in the preview to add a note about that area"
                 onClick={() => void browser.annotate(sessionId, "box")}
               >
                 Note on an area
-              </button>
+              </Button>
             </>
           )
         ) : (
@@ -106,37 +107,38 @@ export function Annotations({
               {picking === "box" ? "Drag a box in the preview" : "Click an element in the preview"}{" "}
               (Escape cancels)
             </span>
-            <button
+            <Button
               data-testid="preview.annotations-cancel-pick"
               type="button"
-              className="preview-btn"
+              appearance="preview"
               onClick={() => void browser.cancelPick(sessionId)}
             >
               Cancel
-            </button>
+            </Button>
           </>
         )}
         {drafts > 0 && (
-          <button
+          <Button
             data-testid="preview.annotations-send"
             type="button"
-            className="preview-btn browser-notes-send"
+            appearance="preview"
+            placement="browser-notes"
             onClick={() => {
               browser.send(sessionId);
             }}
           >
             Add {String(drafts)} {drafts === 1 ? "note" : "notes"} to the message
-          </button>
+          </Button>
         )}
         {notes.some((n) => n.status !== "draft") && (
-          <button
+          <Button
             data-testid="preview.annotations-recheck"
             type="button"
-            className="preview-btn"
+            appearance="preview"
             onClick={() => void browser.recheck(sessionId)}
           >
             Check again
-          </button>
+          </Button>
         )}
       </div>
       {notes.length > 0 && (

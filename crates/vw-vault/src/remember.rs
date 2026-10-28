@@ -16,7 +16,12 @@
 //! Residual risk (copy): on Linux and Windows any program running as the same user
 //! can read the entry (no per-app access control there); on macOS another app gets a prompt.
 //!
-//! Depends on: keyring-core and the OS store crate, blake3, vault-core. Called by: `vault`.
+//! Linux: the Secret Service is a D-Bus service, and D-Bus can start one on request that then never answers. Every
+//! call to it therefore runs with a deadline ([`bounded`]): opening the store [`CONNECT_TIMEOUT`] (no prompt can be
+//! pending there), a read, write or delete [`CALL_TIMEOUT`] (the keyring may be showing its own unlock prompt). Past
+//! the deadline the call fails with "the system keyring did not answer" and the app goes on without it.
+//!
+//! Depends on: keyring-core and the OS store crate, blake3, vault-core. Called by: `vault`, vw-keys (`existing`).
 //! Invariant: secrets cross this module only as [`SecretString`].
 
 use std::collections::HashMap;
@@ -28,6 +33,39 @@ use vault_core::Keyfile;
 use crate::error::VaultError;
 use crate::secret::SecretString;
 
+/// Longest wait for the OS store to open (Linux: the Secret Service's session; nothing asks the user there).
+pub const CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+/// Longest wait for one read, write or delete (Linux: it may wait for the keyring's own unlock prompt).
+pub const CALL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
+/// What a call that ran out of time says.
+pub const NO_ANSWER: &str = "the system keyring did not answer";
+/// Why the app's fallback store keeps nothing (no OS credential store could be opened).
+pub const NO_STORE: &str = "this computer has no system keyring";
+
+/// Runs `call` with a deadline on Linux (module doc); elsewhere it runs as it is. A call past the deadline keeps
+/// its own thread until the store answers or the app quits; the caller gets [`NO_ANSWER`] at once.
+///
+/// # Errors
+/// [`NO_ANSWER`] past `timeout`, or `call`'s own error.
+pub fn bounded<T: Send + 'static>(
+    timeout: std::time::Duration,
+    call: impl FnOnce() -> Result<T, String> + Send + 'static,
+) -> Result<T, String> {
+    if !cfg!(target_os = "linux") {
+        return call();
+    }
+    let (sender, answer) = std::sync::mpsc::sync_channel(1);
+    std::thread::Builder::new()
+        .name("os-credential-store".to_owned())
+        .spawn(move || {
+            let _ = sender.send(call());
+        })
+        .map_err(|error| error.to_string())?;
+    answer
+        .recv_timeout(timeout)
+        .unwrap_or_else(|_| Err(NO_ANSWER.to_owned()))
+}
+
 /// OS credential store service name (ShellX's).
 pub const KEYRING_SERVICE: &str = "shellx-vault";
 /// Account prefix (ShellX's).
@@ -38,6 +76,31 @@ pub const ACCOUNT_PREFIX: &str = "remembered-device-v1";
 pub fn account_for(profile_dir: &Path) -> String {
     let raw = profile_dir.to_string_lossy();
     format!("{ACCOUNT_PREFIX}-{}", blake3::hash(raw.as_bytes()).to_hex())
+}
+
+/// Account prefix of Vibe Work's copy of its network-settings check key (an entry ShellX does not read).
+pub const NETWORK_KEY_PREFIX: &str = "vibe-work-network-key-v1";
+
+/// The account of that copy for a profile folder, derived as [`account_for`] derives the device secret's.
+#[must_use]
+pub fn network_key_account(profile_dir: &Path) -> String {
+    let raw = profile_dir.to_string_lossy();
+    format!(
+        "{NETWORK_KEY_PREFIX}-{}",
+        blake3::hash(raw.as_bytes()).to_hex()
+    )
+}
+
+/// Account prefix for the app's long-lived Chrome owner identity and trusted policy.
+pub const CHROME_OWNER_PREFIX: &str = "vibe-work-chrome-owner-v1";
+
+/// The owner account for one app settings path, independent of the selected vault.
+#[must_use]
+pub fn chrome_owner_account(settings: &Path) -> String {
+    format!(
+        "{CHROME_OWNER_PREFIX}-{}",
+        blake3::hash(settings.to_string_lossy().as_bytes()).to_hex()
+    )
 }
 
 /// A fresh device secret: 32 random bytes, hex.
@@ -85,7 +148,17 @@ pub trait DeviceSecretStore: Send + Sync {
 
 /// In-memory store (tests, SSH runs).
 #[derive(Default)]
-pub struct MemoryDeviceStore(Mutex<HashMap<String, SecretString>>);
+pub struct MemoryDeviceStore(Mutex<HashMap<String, SecretString>>, bool);
+
+impl MemoryDeviceStore {
+    /// The app's fallback when the OS store could not be opened: it keeps nothing. Every write is refused with the
+    /// reason, so nothing reports itself kept across starts: the vault stays "not remembered" (the setup result says
+    /// the password is needed at the next start) and Chrome Control's long-lived identity fails instead of pretending.
+    #[must_use]
+    pub fn temporary() -> Self {
+        Self(Mutex::default(), true)
+    }
+}
 
 impl DeviceSecretStore for MemoryDeviceStore {
     fn get(&self, account: &str) -> Result<Option<SecretString>, VaultError> {
@@ -98,6 +171,16 @@ impl DeviceSecretStore for MemoryDeviceStore {
     }
 
     fn set(&self, account: &str, secret: &SecretString) -> Result<(), VaultError> {
+        if self.1 {
+            return Err(VaultError::Remember(
+                if account.starts_with(CHROME_OWNER_PREFIX) {
+                    "Chrome Control needs the OS credential store"
+                } else {
+                    NO_STORE
+                }
+                .to_owned(),
+            ));
+        }
         self.0
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
@@ -130,9 +213,25 @@ fn remember_error(error: &keyring_core::Error) -> VaultError {
 /// [`VaultError::Remember`] when the platform has no usable store (e.g. no Secret Service session
 /// on Linux).
 pub fn os_credential_store() -> Result<Arc<keyring_core::api::CredentialStore>, VaultError> {
+    // Linux: a store that did not answer once is not waited for again in this run (the app opens it twice at start).
     #[cfg(target_os = "linux")]
-    let store: Arc<keyring_core::api::CredentialStore> =
-        zbus_secret_service_keyring_store::Store::new().map_err(|e| remember_error(&e))?;
+    static SILENT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    #[cfg(target_os = "linux")]
+    if SILENT.load(std::sync::atomic::Ordering::SeqCst) {
+        return Err(VaultError::Remember(NO_ANSWER.to_owned()));
+    }
+    #[cfg(target_os = "linux")]
+    let store: Arc<keyring_core::api::CredentialStore> = bounded(CONNECT_TIMEOUT, || {
+        zbus_secret_service_keyring_store::Store::new()
+            .map(|store| -> Arc<keyring_core::api::CredentialStore> { store })
+            .map_err(|e| e.to_string())
+    })
+    .map_err(|error| {
+        if error == NO_ANSWER {
+            SILENT.store(true, std::sync::atomic::Ordering::SeqCst);
+        }
+        VaultError::Remember(error)
+    })?;
     #[cfg(windows)]
     let store: Arc<keyring_core::api::CredentialStore> =
         windows_native_keyring_store::Store::new().map_err(|e| remember_error(&e))?;
@@ -168,27 +267,58 @@ impl OsDeviceStore {
 
 impl DeviceSecretStore for OsDeviceStore {
     fn get(&self, account: &str) -> Result<Option<SecretString>, VaultError> {
-        match self.entry(account)?.get_password() {
-            Ok(secret) => {
-                let secret = SecretString::new(secret);
-                secret.register_as(vw_secrets::SecretKind::VaultValue);
-                Ok(Some(secret))
-            }
+        let entry = self.entry(account)?;
+        let found = bounded(CALL_TIMEOUT, move || match entry.get_password() {
+            Ok(secret) => Ok(Some(SecretString::new(secret))),
             Err(keyring_core::Error::NoEntry) => Ok(None),
-            Err(error) => Err(remember_error(&error)),
+            Err(error) => Err(error.to_string()),
+        })
+        .map_err(VaultError::Remember)?;
+        if let Some(secret) = &found {
+            secret.register_as(vw_secrets::SecretKind::VaultValue);
         }
+        Ok(found)
     }
 
     fn set(&self, account: &str, secret: &SecretString) -> Result<(), VaultError> {
-        self.entry(account)?
-            .set_password(secret.expose())
-            .map_err(|e| remember_error(&e))
+        let entry = self.entry(account)?;
+        let secret = secret.clone();
+        bounded(CALL_TIMEOUT, move || {
+            entry
+                .set_password(secret.expose())
+                .map_err(|e| e.to_string())
+        })
+        .map_err(VaultError::Remember)
     }
 
     fn delete(&self, account: &str) -> Result<(), VaultError> {
-        match self.entry(account)?.delete_credential() {
+        let entry = self.entry(account)?;
+        bounded(CALL_TIMEOUT, move || match entry.delete_credential() {
             Ok(()) | Err(keyring_core::Error::NoEntry) => Ok(()),
-            Err(error) => Err(remember_error(&error)),
-        }
+            Err(error) => Err(error.to_string()),
+        })
+        .map_err(VaultError::Remember)
+    }
+}
+
+#[cfg(test)]
+mod owner_store_tests {
+    use super::*;
+    #[test]
+    fn fallback_keeps_nothing_that_should_outlive_the_run() {
+        let store = MemoryDeviceStore::temporary();
+        let secret = SecretString::new("fixture value");
+        let owner = chrome_owner_account(Path::new("scratch/settings.json"));
+        assert!(store.set(&owner, &secret).is_err());
+        assert!(store.set(&format!("{owner}-policy"), &secret).is_err());
+        assert!(store.get(&owner).unwrap().is_none());
+        // A remembered device would be reported as kept while the next start finds nothing.
+        let device = format!("{ACCOUNT_PREFIX}-fixture");
+        assert_eq!(
+            store.set(&device, &secret).unwrap_err().to_string(),
+            format!("this device cannot be remembered: {NO_STORE}")
+        );
+        assert!(store.get(&device).unwrap().is_none());
+        store.delete(&device).unwrap();
     }
 }

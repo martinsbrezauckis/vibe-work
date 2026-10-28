@@ -35,6 +35,11 @@ interface Refs {
 
 const Context = createContext<Refs | null>(null);
 
+/** The transcript session for navigation from its completed edit steps. */
+export function useFileSessionId(): string | null {
+  return useContext(Context)?.sessionId ?? null;
+}
+
 /** A store that never changes, for references rendered without a provider (hooks need a store either way). */
 const NO_STORE = createStore<FilesState>({ refs: {}, tabs: {}, drops: {}, edits: {} });
 
@@ -170,7 +175,7 @@ const WEB = /^[a-z][a-z0-9+.-]*:/i;
  * the core resolved the path inside this session's scope as an image and read it (a `data:` URL); until then, and for
  * anything else (a web address, a missing file, not an image), it is the alt text, exactly as before.
  */
-export function InlineImage({ src, alt }: { src: string; alt: string }): ReactElement {
+function InlineImage({ src, alt }: { src: string; alt: string }): ReactElement {
   const refs = useContext(Context);
   const local = !WEB.test(src) ? src : null;
   const state = useStore(refs?.files.store ?? NO_STORE, (s) =>

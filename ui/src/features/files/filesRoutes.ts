@@ -11,7 +11,7 @@
  *   without an item, lists actions or ambiguous choices; a choice always needs its returned file handle.
  *   `switch {file}`, `close`, `reload`, `mode {mode: rendered|source}`, `external {what: open|reveal}`;
  * - `edit {text}`: saves `text` as the shown text file's whole content, like the editor's Save
- *   (conflict-checked: `stale` when the file changed on disk since the tab read it; the agent gets the edit chip);
+ *   (conflict-checked: `stale` when the file changed on disk since the tab read it; nothing goes into the composer);
  * - `drop {files: [{name, data (base64), folder?}]}`: the same routing as a drop on the composer; answers the drop
  *   report and the composer's chips (pictures, document chips, context chips).
  * Depends on: AppContext, state/files, drop, uiControl. Called by: register.tsx.
@@ -304,7 +304,7 @@ async function route(app: App, files: Files, body: unknown): Promise<unknown> {
         return state(app, files, sessionId);
       }
       case "edit": {
-        // a quick edit, saved like the editor's Save (conflict-checked; the agent gets the chip).
+        // a quick edit, saved like the editor's Save (conflict-checked; no composer chip).
         const original = tabOf(files.store.get(), sessionId).content?.text;
         if (original === null || original === undefined)
           throw new UiControlError("invalidParams", "the File tab shows no text file");

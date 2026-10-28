@@ -5,6 +5,7 @@
  * Depends on: lineComments.ts via context, LineCommentThread. Called by: ChangesTab.
  * Invariants: sending only inserts chips into the composer; the user sends the message.
  */
+import { Button } from "../../components/Controls";
 import { type ReactElement, useEffect } from "react";
 
 import { useStore } from "../../state/createStore";
@@ -42,10 +43,10 @@ function Panel({
           {all.length} comment{all.length === 1 ? "" : "s"}
           {outdated.length > 0 ? `, ${String(outdated.length)} outdated` : ""}
         </span>
-        <button
+        <Button
           data-testid="changes.line-comments-panel-send"
           type="button"
-          className="mini"
+          appearance="compact"
           data-action="send-all-comments"
           disabled={unsent.length === 0}
           onClick={() => {
@@ -56,7 +57,7 @@ function Panel({
           }}
         >
           Send {unsent.length} to Vibe
-        </button>
+        </Button>
         <span className="lc-note">Kept in Vibe Work, not in the repo.</span>
       </div>
       {error !== null && (

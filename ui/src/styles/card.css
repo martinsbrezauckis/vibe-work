@@ -1,0 +1,32 @@
+/* Shared card frames and their existing selection/hover variants. Depends on tokens; imported by shared-controls. */
+.pj-card {
+  display: flex;
+  flex-direction: column;
+  container-type: inline-size;
+  gap: 12px;
+  padding: 14px 15px 12px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-xl);
+  background: var(--panel);
+  cursor: pointer;
+  min-width: 0;
+}
+.pj-card:hover:where(:not(:disabled)) {
+  border-color: var(--line-3);
+  background: color-mix(in srgb, var(--panel) 70%, var(--raised));
+}
+.pj-card[data-selected="true"] {
+  border-color: var(--text-3);
+  box-shadow: 0 0 0 1px var(--text-3) inset;
+}
+.ctile {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xl);
+  background: var(--panel);
+  min-width: 0;
+}
+.ctile.sel {
+  border-color: var(--orange);
+}

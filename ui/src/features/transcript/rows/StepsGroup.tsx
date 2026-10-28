@@ -10,6 +10,8 @@
  * shown only because Vibe sent them (a session without thinking has no reasoning entries).
  */
 import { type ReactElement, memo } from "react";
+import { AuditText } from "../../ask/AuditRow";
+import { approvalSummary, auditLine, neverText } from "../../ask/model";
 import { Walker } from "../../../components/Walker";
 
 import { Markdown } from "../../../components/markdown/Markdown";
@@ -26,6 +28,7 @@ import {
   inProgress,
   messageText,
   num,
+  obj,
   str,
 } from "../model/entries";
 import { StepItem } from "./StepItem";
@@ -87,22 +90,67 @@ const Narration = memo(function Narration({ entry }: { entry: Obj }): ReactEleme
   );
 });
 
+/**
+ * A resolved callback's audit row: the core's record when it is still held (this run, newest 500), else
+ * the words Vibe's own entry allows (an older session).
+ */
 function Audit({ entry, related }: { entry: Obj; related: Obj | null }): ReactElement {
   const callbackId = str(entry["callbackId"]) ?? "";
   const via = useTranscriptUi((s) => s.answered[callbackId]);
+  const always = useTranscriptUi((s) => s.always[callbackId]);
   const origin = useCoreState((s) => s.answeredBy[callbackId]);
-  return (
-    <div className="audit" data-callback-id={callbackId} data-entry-id={entryId(entry)}>
-      <span className="px ok" aria-hidden="true" />
-      {auditText(entry, related, via, origin)}
-    </div>
-  );
+  const record = useCoreState((s) => s.askRecords[`callback:${callbackId}`]);
+  const summary = approvalSummary(entry);
+  const question = obj(entry["detail"])?.["kind"] === "user_input";
+  // Question answers come from Vibe’s entry.
+  const fromRecord =
+    record === undefined || question ? null : auditLine(record, summary, via, always);
+  const text = auditText(entry, related, via, origin);
+  const line = fromRecord ?? {
+    square: /^(Said No|Closed|No answer|Stopped|Question skipped)/.test(text) ? "warn" : "ok",
+    text,
+  };
+  return <AuditText line={line} callbackId={callbackId} entryId={entryId(entry)} />;
 }
+
+/**
+ * The audit row of an explicit Never under the step it refused: no card was shown, the step failed, and the
+ * core recorded `never` for one of Vibe Work's own tools in this session while the step ran. The core's record
+ * carries no step id, so the step is found by its tool and time (the refusal happens inside the call).
+ */
+function NeverAudit({ entry }: { entry: Obj }): ReactElement | null {
+  const tool = str(obj(entry["detail"])?.["toolName"]) ?? "";
+  const failed = str(obj(entry["state"])?.["status"]) === "failed";
+  const session = useShellState((s) => s.selected);
+  const from = createdAt(entry);
+  const to = (num(entry["updatedAt"]) ?? from) + NEVER_SLACK_MS;
+  const record = useCoreState((s) =>
+    !failed || !tool.startsWith("mcp_vw.")
+      ? undefined
+      : Object.values(s.askRecords).find(
+          (r) =>
+            r.outcome.type === "never" &&
+            r.ask.session === session &&
+            r.closedAt >= from &&
+            r.closedAt <= to,
+        ),
+  );
+  if (record === undefined) return null;
+  return <AuditText line={{ square: "err", text: neverText(record.ask.title, record.ask.kind) }} />;
+}
+
+/** How long after a step's last update a Never record still belongs to it (ms). */
+const NEVER_SLACK_MS = 5000;
 
 function ItemView({ item }: { item: Item }): ReactElement {
   switch (item.kind) {
     case "effect":
-      return <StepItem entry={item.entry} />;
+      return (
+        <>
+          <StepItem entry={item.entry} />
+          <NeverAudit entry={item.entry} />
+        </>
+      );
     case "reasoning":
       return <Reasoning entry={item.entry} />;
     case "narration":

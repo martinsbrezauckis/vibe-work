@@ -6,53 +6,49 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "../../components/Controls";
 import { IconButton } from "../../components/IconButton";
-import { useStore } from "../../state/createStore";
+import { createStore, useStore } from "../../state/createStore";
 import { projectInstructionsFor } from "../../state/projectInstructions";
 import type { ProjectInstructions } from "../../state/projectInstructions";
 import { DocEditorView } from "../settings/DocEditor";
 import { useApp } from "../shell/AppContext";
 
+const NO_TRUST_GUIDANCE = createStore<string | null>(null);
+
 function Instructions({ controller, folder }: { controller: ProjectInstructions; folder: string }) {
   const { sessions } = useApp();
   const state = useStore(controller.store, (s) => s);
-  const [trust, setTrust] = useState<string | null>(null);
+  const trust = state.trust;
+  const guidance = useStore(sessions?.trustGuidance ?? NO_TRUST_GUIDANCE, (s) => s);
   const [adding, setAdding] = useState(false);
   const [name, setName] = useState("");
   const busy = state.loading || state.view.busy !== "idle";
   useEffect(() => {
     void controller.refresh();
-    let current = true;
-    void sessions?.trustStatus(folder).then((result) => {
-      if (current) setTrust(result?.status ?? null);
-    });
-    return () => {
-      current = false;
-    };
-  }, [controller, folder, sessions]);
+  }, [controller]);
   return (
     <section className="pj-dsec pi-instructions" aria-labelledby="pi-instructions-title">
       <div className="key-actions wrap">
         <h4 id="pi-instructions-title">Instructions</h4>
-        <button
+        <Button
           data-testid="projects.project-settings-set-adding"
           type="button"
-          className="tb-btn"
+
           disabled={busy}
           onClick={() => {
             setAdding(true);
           }}
         >
           New file
-        </button>
-        <button
+        </Button>
+        <Button
           data-testid="projects.project-settings-refresh"
           type="button"
-          className="tb-btn"
+
           disabled={busy}
           onClick={() => void controller.refresh()}
         >
           Refresh files
-        </button>
+        </Button>
       </div>
       <p className="key-line">
         Vibe loads AGENTS.md. Link other files from it so the agent knows to read them.
@@ -62,12 +58,36 @@ function Instructions({ controller, folder }: { controller: ProjectInstructions;
       </p>
       <p className="key-field-hint" role="note" data-testid="project-untrusted">
         {trust === "untrusted"
-          ? "This folder is not trusted. Vibe ignores project instructions until the folder is trusted."
+          ? "Vibe will not read project instructions until the folder is trusted."
           : trust === "trusted"
-            ? "This folder is trusted. Vibe can read its project instructions."
-            : "Vibe ignores project instructions until the folder is trusted."}
+            ? "This folder is trusted. New chats can read its project instructions."
+            : "Folder trust could not be checked."}
       </p>
-      {state.loading && <p role="status">Reading instruction files...</p>}
+      {trust === "untrusted" && sessions !== null && (
+        <div className="key-actions">
+          <Button
+            data-testid="projects.instructions-trust"
+            disabled={busy}
+            onClick={() => {
+              void sessions.trust(folder).then(() => controller.refreshTrust());
+            }}
+          >
+            Trust this folder
+          </Button>
+          {guidance !== null && (
+            <>
+              <p role="status">{guidance}</p>
+              <Button
+                data-testid="projects.instructions-choose"
+                onClick={() => void sessions.pickFolder()}
+              >
+                Choose folder…
+              </Button>
+            </>
+          )}
+        </div>
+      )}
+      {state.loading && <p role="status">Reading instruction files…</p>}
       {state.error !== null && (
         <p className="key-problem" role="alert">
           {state.error}
@@ -79,7 +99,7 @@ function Instructions({ controller, folder }: { controller: ProjectInstructions;
             <div className="pi-file-name mono">{file.name}</div>
             <p className="key-field-hint">
               {file.name === "AGENTS.md"
-                ? "Vibe reads this file"
+                ? "Vibe reads this file when the folder is trusted"
                 : file.linked
                   ? "Linked from AGENTS.md"
                   : "Not linked from AGENTS.md"}
@@ -87,31 +107,31 @@ function Instructions({ controller, folder }: { controller: ProjectInstructions;
               {!file.editable && " · Cannot edit this file"}
             </p>
             <div className="key-actions wrap">
-              <button
+              <Button
                 data-testid="projects.project-settings-open"
                 type="button"
-                className="tb-btn"
+
                 disabled={busy}
                 onClick={() => void controller.open(file.name)}
               >
                 {file.exists ? "Edit" : "Create AGENTS.md"}
-              </button>
+              </Button>
               {file.name !== "AGENTS.md" && (
-                <button
+                <Button
                   data-testid="projects.project-settings-link"
                   type="button"
-                  className="tb-btn"
+
                   disabled={busy || !file.editable}
                   onClick={() => void controller.link(file.name, !file.linked)}
                 >
                   {file.linked ? "Unlink from AGENTS.md" : "Link from AGENTS.md"}
-                </button>
+                </Button>
               )}
               {file.exists && (
                 <Button
                   data-testid="projects.project-settings-remove"
                   type="button"
-                  small
+                  shape="outlined"
                   variant="danger"
                   disabled={busy || !file.editable}
                   onClick={() => void controller.remove(file.name)}
@@ -155,36 +175,30 @@ function Instructions({ controller, folder }: { controller: ProjectInstructions;
           </label>
           <p className="key-field-hint">Created in docs/instructions/ after you review and Save.</p>
           <div className="key-actions">
-            <button
+            <Button
               data-testid="projects.project-settings-tb-btn"
               type="submit"
-              className="tb-btn"
+
               disabled={busy || name === ""}
             >
               Create draft
-            </button>
-            <button
+            </Button>
+            <Button
               data-testid="projects.project-settings-set-adding-2"
               type="button"
-              className="tb-btn"
+
               disabled={busy}
               onClick={() => {
                 setAdding(false);
               }}
             >
               Cancel
-            </button>
+            </Button>
           </div>
         </form>
       )}
       {state.name !== null && (
-        <DocEditorView
-          scope="project"
-          title={state.name}
-          blurb="Edit the text, review the diff, then Save. Nothing is written automatically."
-          view={state.view}
-          actions={controller}
-        />
+        <DocEditorView scope="project" title={state.name} view={state.view} actions={controller} />
       )}
       {state.name === null && state.view.error !== null && (
         <p className="key-problem" role="alert">
@@ -244,14 +258,14 @@ export function ProjectSettings({
           <p className="key-line">
             Choose a main folder to manage this project's instruction files.
           </p>
-          <button
+          <Button
             data-testid="projects.project-settings-tb-btn-2"
             type="button"
-            className="tb-btn"
+
             onClick={chooseFolder}
           >
-            Choose main folder...
-          </button>
+            Choose main folder…
+          </Button>
         </div>
       ) : (
         <Instructions key={folder} controller={controller} folder={folder ?? ""} />

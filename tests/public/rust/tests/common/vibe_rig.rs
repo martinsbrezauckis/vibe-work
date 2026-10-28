@@ -16,7 +16,7 @@ use vw_vibe_install::{InstallView, InstallerConfig, Limits, Sources, UvAsset, Vi
 
 use super::closed_port::ClosedPort;
 
-/// The fake Vibe version the rig installs (fake_uv reports it). Deliberately independent of the real pin
+/// The real Vibe version the rig installs (fake_uv reports it). Deliberately independent of the real pin
 /// (`crates/vw-vibe-install/pin`), so a Vibe bump never touches the install-flow tests.
 pub const VIBE: &str = "2.26.0";
 
@@ -194,7 +194,7 @@ pub fn rig_with(
             ("FAKE_UV_LOG".to_owned(), log.clone().into_os_string()),
             (
                 "FAKE_UV_SERVER".to_owned(),
-                super::fake::fake_bin().into_os_string(),
+                super::shared_real_vibe::server_bin().into_os_string(),
             ),
             ("FAKE_UV_VIBE_VERSION".to_owned(), VIBE.into()),
             ("FAKE_UV_MODE".to_owned(), mode.into()),
@@ -221,7 +221,7 @@ pub fn rig_with(
     }
 }
 
-/// The installer over `<dir>/data/vibe`, with the fake server installed there (as the setup install leaves it)
+/// The installer over `<dir>/data/vibe`, with the pinned real executable installed there (as the setup install leaves it)
 /// when `installed`.
 pub fn pinned_installer(dir: &Path, installed: bool) -> VibeInstaller {
     let root = dir.join("data/vibe");
@@ -229,7 +229,7 @@ pub fn pinned_installer(dir: &Path, installed: bool) -> VibeInstaller {
     let layout = vw_vibe_install::layout::Layout::new(root.clone(), &version).unwrap();
     if installed {
         std::fs::create_dir_all(layout.server().parent().unwrap()).unwrap();
-        std::fs::copy(super::fake::fake_bin(), layout.server()).unwrap();
+        std::fs::copy(super::shared_real_vibe::server_bin(), layout.server()).unwrap();
         let record = vw_vibe_install::layout::Installed {
             version,
             server: layout.server(),

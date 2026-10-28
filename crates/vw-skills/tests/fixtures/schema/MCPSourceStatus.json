@@ -5,6 +5,7 @@
     "enabled",
     "needs_auth",
     "needs_setup",
+    "needs_connect",
     "unavailable"
   ],
   "title": "MCPSourceStatus",

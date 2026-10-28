@@ -26,6 +26,8 @@ pub enum DenyReason {
     NotOnUnified,
     /// Answers `method_not_found` on both harnesses (bench report).
     NotSupported,
+    /// Requires a reviewed user interface before Vibe Work can expose this operation.
+    NoUserInterface,
     /// Never exercised in the bench, so its behaviour on the unified harness is unknown.
     NoEvidence,
     /// Removes git worktrees, dirty ones included, without the files they hold being named to the user
@@ -46,6 +48,7 @@ impl std::fmt::Display for DenyReason {
             Self::Credential => f.write_str("credentials are owned by the OS keychain"),
             Self::Privacy => f.write_str("sends usage data; disabled by privacy policy"),
             Self::NotOnUnified => f.write_str("not available on the unified harness"),
+            Self::NoUserInterface => f.write_str("not available in Vibe Work"),
             Self::NotSupported => f.write_str("not supported by the server"),
             Self::NoEvidence => f.write_str("not verified on the unified harness"),
             Self::UnnamedRemoval => f.write_str(
@@ -180,7 +183,7 @@ pub enum GateError {
         fault: TokenFault,
     },
     /// The user declined in the native dialog.
-    #[error("{method}: declined by the user")]
+    #[error("{}", vw_ask::agent_text(&vw_ask::Outcome::Refused { by: vw_ask::AnsweredBy::Person, note: None }, "this request"))]
     ConfirmationDeclined {
         /// The requested method.
         method: String,

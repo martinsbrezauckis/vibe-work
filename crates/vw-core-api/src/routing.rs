@@ -15,6 +15,25 @@ use serde_json::Value;
 /// used yet. Session-channel methods include `turn/start`, `callback/result`, and
 /// `session/agent/update`; the others follow Vibe's handler requirements.
 const NEEDS_CHANNEL: &[&str] = &[
+    "loops/list",
+    "loops/create",
+    "loops/delete",
+    "loops/clear",
+    "skills/list",
+    "skills/installed",
+    "skills/catalog",
+    "skills/detail",
+    "skills/versions",
+    "skills/setEnabled",
+    "skills/import",
+    "skills/setLatest",
+    // An offered update pins the offered version; Vibe's skills service requires the attached session for every
+    // mutation and for the updates read (`_skills_service.py`: `_begin_mutation`, `require_session`).
+    "skills/setVersion",
+    "skills/setAlias",
+    "skills/convertLocal",
+    "skills/updates",
+    "skills/remove",
     "turn/start",
     "turn/steer",
     "turn/interrupt",
@@ -94,6 +113,20 @@ pub(crate) fn route(method: &str, params: &Value) -> Route {
     }
 }
 
+// Pinned Vibe builds full plugin contexts for lifecycle requests and stored-session config reads.
+// A config read without a session uses the host's plugin-free context; reload explicitly rescans.
+pub(crate) fn loads_plugins(method: &str, params: &Value) -> bool {
+    matches!(
+        method,
+        "session/start" | "session/resume" | "session/continue" | "session/fork" | "plugin/reload"
+    ) || (method == "config/read" && params.get("sessionId").and_then(Value::as_str).is_some())
+}
+
+/// The id of the session a result carries, if any.
+pub(crate) fn result_session(result: &Value) -> Option<&str> {
+    result.pointer("/state/session/id").and_then(Value::as_str)
+}
+
 #[cfg(test)]
 mod tests {
     use super::{Route, needs_channel, route};
@@ -145,5 +178,25 @@ mod tests {
         }
         assert_eq!(needs_channel("config/read", &json!({})), None);
         assert_eq!(needs_channel("turn/start", &json!({})), None);
+    }
+
+    /// Vibe's skills service requires the attached session for every skills mutation and for `skills/updates`
+    /// (`_skills_service.py`: `_begin_mutation` / `require_session`), so each is reopened and follows an imported
+    /// conversation like the reads. An offered update sends `skills/setVersion`.
+    #[test]
+    fn every_skills_call_that_vibe_answers_only_for_the_attached_session_needs_a_channel() {
+        let sid = json!({"sessionId": "s"});
+        for method in [
+            "skills/setVersion",
+            "skills/setAlias",
+            "skills/convertLocal",
+            "skills/updates",
+            "skills/setLatest",
+            "skills/import",
+            "skills/remove",
+            "skills/setEnabled",
+        ] {
+            assert_eq!(needs_channel(method, &sid), Some("s"), "{method}");
+        }
     }
 }

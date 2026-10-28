@@ -287,8 +287,18 @@ pub enum Access {
     Context,
 }
 
+/// The Chrome Control state folder beside the Vibe home (the core's `chrome_control` module keeps the user's
+/// permissions and the helper's copy there).
+pub const CHROME_CONTROL_STATE: &str = "chrome-control";
+
 // Reserve spellings Windows can interpret as this file before it exists, including default data streams.
 fn approval_path(path: &Path, data: &Path) -> bool {
+    data_entry_named(path, data, "plugin-approvals.json")
+}
+
+/// `path` is `data/<name>` or inside it, in any spelling Windows reads as that name (case, trailing dots and
+/// spaces, a default data stream).
+fn data_entry_named(path: &Path, data: &Path, wanted: &str) -> bool {
     path.strip_prefix(data)
         .ok()
         .and_then(|relative| relative.components().next())
@@ -298,7 +308,7 @@ fn approval_path(path: &Path, data: &Path) -> bool {
                 .next()
                 .unwrap_or_default()
                 .trim_end_matches(['.', ' '])
-                .eq_ignore_ascii_case("plugin-approvals.json")
+                .eq_ignore_ascii_case(wanted)
         })
 }
 
@@ -395,25 +405,43 @@ impl Layout {
     ) -> Option<String> {
         let joined = join_for_resolution(base, path);
         let own = match &self.own {
-            Some(own) => format!("Your own folder is {}.", own.display()),
-            None => format!("Your folder is {}.", self.cwd.display()),
+            Some(own) => format!("Your own folder is {}.", shown::shown(own)),
+            None => format!("Your folder is {}.", shown::shown(&self.cwd)),
         };
         let real = match resolve(&joined) {
             Ok(real) => real,
             Err(error) => {
                 return Some(format!(
-                    "Not run: {} could not be resolved for the folder guard ({error}). {own}",
-                    joined.display()
+                    "Not run: the folder guard could not resolve {} ({error}). {own}",
+                    shown::shown(&joined)
                 ));
             }
         };
+        if let Some(data) = self.vibe_home.parent()
+            && data_entry_named(&real, data, CHROME_CONTROL_STATE)
+        {
+            return Some(format!(
+                "Not run: Vibe Work's Chrome Control setup and permissions ({}); only the user changes them, in \
+                 Settings › Browser › Your Chrome. {own}",
+                shown::shown(&joined)
+            ));
+        }
         if access != Access::Read
             && let Some(data) = self.vibe_home.parent()
             && (approval_path(&real, data) || access != Access::Context && data.starts_with(&real))
         {
             return Some(format!(
-                "Not run: {} contains Vibe Work's plugin approvals; change plugins in Tools. {own}",
-                joined.display()
+                "Not run: Vibe Work's plugin approvals ({}); change plugins in Tools. {own}",
+                shown::shown(&joined)
+            ));
+        }
+        if access != Access::Read
+            && let Some(data) = self.vibe_home.parent()
+            && data_entry_named(&real, data, "sessions")
+        {
+            return Some(format!(
+                "Not run: Vibe Work's own session data ({}); the agent does not change it. {own}",
+                shown::shown(&joined)
             ));
         }
         if let Some(copy) = self.copy_of(&real) {
@@ -421,8 +449,8 @@ impl Layout {
             return match permits(&copy, is_own) {
                 Ok(()) => None,
                 Err(why) => Some(format!(
-                    "Not run: {} is in a session copy you cannot use now: {why}. {own}",
-                    joined.display()
+                    "Not run: a session copy you cannot use now ({}): {why}. {own}",
+                    shown::shown(&joined)
                 )),
             };
         }
@@ -431,16 +459,16 @@ impl Layout {
             || real.parent() == Some(self.worktrees.as_path())
         {
             return Some(format!(
-                "Not run: {} holds the sessions' copies (Vibe Work gives each session its own copy). {own} Search and \
+                "Not run: the sessions' copies ({}); Vibe Work gives each session its own copy. {own} Search and \
                  work only inside it.",
-                joined.display()
+                shown::shown(&joined)
             ));
         }
         if access != Access::Read && real.starts_with(&self.vibe_home) {
             return Some(format!(
-                "Not run: {} is Vibe Work's own configuration and session data (the Vibe home); the agent does not \
-                 change it. {own} Read skills with the skill tool or read_file.",
-                joined.display()
+                "Not run: Vibe Work's own configuration and session data, the Vibe home ({}); the agent does not \
+                 change it. {own} Read skills with the skill tool or read_file. To change files there, propose the change with propose_protected_change; the user reviews it.",
+                shown::shown(&joined)
             ));
         }
         None
@@ -613,6 +641,7 @@ fn computed_shell_word(source: &Word, expanded: &str) -> bool {
 }
 
 mod mentions;
+mod shown;
 use mentions::raw_mentions;
 
 /// The refusal for a bash `command` run in `cwd`, or `None`. `home` = `$HOME` of the hook's process.
@@ -633,17 +662,17 @@ pub fn check_command(
     if let Some(given) = given.filter(|g| g.is_absolute()) {
         roots.push(given.to_string_lossy().into_owned());
     }
-    for root in &roots {
+    for root in &mentions::with_bash_spellings(roots) {
         for mention in raw_mentions(&expanded, root) {
-            let folder = folder_part(&mention);
+            let folder = mentions::native(folder_part(&mention));
             if let Some(refusal) =
-                layout.check(Path::new(folder), &layout.cwd, Access::Unknown, permits)
+                layout.check(Path::new(&*folder), &layout.cwd, Access::Unknown, permits)
             {
                 return Some(refusal);
             }
         }
     }
-    let refusal = check_segments(layout, segments(command), home, permits);
+    let refusal = check_segments(layout, &segments(command), home, permits);
     #[cfg(windows)]
     {
         // The hook supplies no shell identity. Check both Bash escaping and Windows' literal path separators.
@@ -651,7 +680,7 @@ pub fn check_command(
         refusal.or_else(|| {
             check_segments(
                 layout,
-                crate::killparse_shell::windows_segments(command),
+                &crate::killparse_shell::windows_segments(command),
                 home,
                 permits,
             )
@@ -663,7 +692,7 @@ pub fn check_command(
 
 fn check_segments(
     layout: &Layout,
-    parsed: Vec<Segment>,
+    parsed: &[Segment],
     home: Option<&Path>,
     permits: &Permits<'_>,
 ) -> Option<String> {
@@ -672,7 +701,7 @@ fn check_segments(
     // (`cd x && ls` runs `ls` inside x.
     let mut dir = layout.cwd.clone();
     let mut moved = false;
-    for segment in parsed {
+    for (segment, data) in parsed.iter().zip(crate::heredoc_input::inputs(parsed)) {
         let words: Vec<String> = segment
             .words
             .iter()
@@ -693,12 +722,17 @@ fn check_segments(
         let is_cd = words
             .get(first_command)
             .is_some_and(|w| w == "cd" || w == "pushd");
+        let access = if is_cd {
+            Access::Context
+        } else {
+            Access::Unknown
+        };
         for (index, word) in words.iter().enumerate() {
             // A leading shell assignment is not a path named `NAME=...`.
-            if index < first_command {
-                continue;
-            }
-            if computed_shell_word(&segment.words[index], word) {
+            if index < first_command
+                || computed_shell_word(&segment.words[index], word)
+                || data && crate::heredoc_input::operator(&segment.words, index)
+            {
                 continue;
             }
             // Bare executable names use PATH, not the current folder, even if a local file has that name.
@@ -715,17 +749,8 @@ fn check_segments(
             else {
                 continue;
             };
-            let part = if part.is_empty() { "." } else { part };
-            if let Some(refusal) = layout.check(
-                Path::new(part),
-                &dir,
-                if is_cd {
-                    Access::Context
-                } else {
-                    Access::Unknown
-                },
-                permits,
-            ) {
+            let part = mentions::native(if part.is_empty() { "." } else { part });
+            if let Some(refusal) = layout.check(Path::new(&*part), &dir, access, permits) {
                 return Some(refusal);
             }
         }
@@ -735,16 +760,8 @@ fn check_segments(
                 continue;
             }
             if let Some(part) = shell_path_part(&target, &dir)
-                && let Some(refusal) = layout.check(
-                    Path::new(part),
-                    &dir,
-                    if is_cd {
-                        Access::Context
-                    } else {
-                        Access::Unknown
-                    },
-                    permits,
-                )
+                && let Some(refusal) =
+                    layout.check(Path::new(&*mentions::native(part)), &dir, access, permits)
             {
                 return Some(refusal);
             }
@@ -753,7 +770,10 @@ fn check_segments(
             && let Some(target) = words.get(first_command + 1).filter(|w| !w.starts_with('-'))
             && !computed_shell_word(&segment.words[first_command + 1], target)
         {
-            let target = Path::new(target);
+            // The folder the shell moves to: a Git Bash `/c/...` target is that Windows folder, also for the
+            // relative paths checked after it.
+            let target = mentions::native(target);
+            let target = Path::new(&*target);
             if let Some(refusal) = layout.check(target, &dir, Access::Context, permits) {
                 return Some(refusal);
             }

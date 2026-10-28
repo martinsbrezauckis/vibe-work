@@ -33,9 +33,9 @@
   margin: 8px 12px 0;
   padding: 6px 10px;
   border: 1px solid var(--line-2);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: var(--panel);
-  font-size: 12px;
+  font-size: var(--text-12);
   color: var(--text-2);
   min-width: 0;
 }
@@ -51,12 +51,12 @@
 }
 .dictation-time {
   color: var(--text-3);
-  font-size: 11px;
+  font-size: var(--text-11);
 }
 .rec-dot {
   width: 8px;
   height: 8px;
-  border-radius: 50%;
+  border-radius: var(--radius-round);
   background: var(--red);
   flex: none;
 }
@@ -78,9 +78,9 @@
   margin: 0 auto 6px;
   padding: 6px 10px;
   border: 1px solid var(--line-2);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: var(--raised);
-  font-size: 12px;
+  font-size: var(--text-12);
   color: var(--text-2);
   min-width: 0;
 }
@@ -104,7 +104,7 @@
   display: grid;
   place-items: center;
   border: 0;
-  border-radius: 50%;
+  border-radius: var(--radius-round);
   background: var(--primary-bg);
   color: var(--primary-fg);
   cursor: pointer;
@@ -145,7 +145,7 @@
   }
 }
 .vchat-tag {
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   color: var(--text);
   flex: none;
 }

@@ -28,14 +28,15 @@ export interface FindBar {
 export interface FindState {
   conversation: FindBar | null;
   file: FindBar | null;
+  step: { sessionId: string; stepId: string } | null;
 }
 
 /** Which bar. */
-export type FindScope = keyof FindState;
+export type FindScope = "conversation" | "file";
 
 /** Creates the store and its actions. */
 export function createFind() {
-  const store = createStore<FindState>({ conversation: null, file: null });
+  const store = createStore<FindState>({ conversation: null, file: null, step: null });
   const set = (scope: FindScope, update: (bar: FindBar) => FindBar) => {
     store.set((s) => {
       const bar = s[scope];
@@ -45,6 +46,10 @@ export function createFind() {
   return {
     store,
     actions: {
+      /** Requests the same transcript highlight as a search result, with focus on the step. */
+      openStep(sessionId: string, stepId: string): void {
+        store.set((s) => ({ ...s, step: { sessionId, stepId } }));
+      },
       /** Opens the conversation's bar (with words carried over, and optionally a message to start at). */
       open(sessionId: string, query?: string, target: string | null = null): void {
         store.set((s) => ({

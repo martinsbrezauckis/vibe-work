@@ -34,7 +34,7 @@ use vw_keys::KeyPresence;
 use crate::command::{CommandResult, Origin};
 use crate::connectors_config::configured_servers;
 use crate::connectors_project::{
-    catalog_load, connectors, merge_session_connectors, merge_session_servers,
+    catalog_load, connectors, merge_plugin_sources, merge_session_connectors, merge_session_servers,
 };
 use crate::connectors_view::{ConnectorsRequest, ConnectorsResult, ConnectorsView};
 use crate::core::{Core, Shared};
@@ -75,10 +75,8 @@ impl ConnectorsState {
             .map_err(|error| CoreError::from_gate("callback/result", &error))?;
         Ok(
             if output["type"] == "approval"
-                && matches!(
-                    output["decision"]["type"].as_str(),
-                    Some("approve" | "approve_for_session" | "approve_permanently")
-                )
+                // Every yes reaches here as `approve` (`ask::cards` sends no other granting decision).
+                && output["decision"]["type"] == "approve"
                 && gate.open_callbacks().iter().any(|callback| {
                     callback.id == id
                         && callback.session_id == session
@@ -312,6 +310,7 @@ impl Core {
             removed.filter(|_| reply.result.get("removed") == Some(&Value::Bool(true)))
         {
             self.shared.connectors.mark_removed(&name, true);
+            crate::ask::grants::connector_removed(&self.shared);
         }
         self.converge(Converge::Servers).await;
         Ok(self.view_result(origin).await)
@@ -544,16 +543,37 @@ impl Core {
             match self
                 .shared
                 .gate
-                .call("mcp_catalog/read", params, None)
+                .call("mcp_catalog/read", params.clone(), None)
                 .await
             {
                 Ok(reply) => merge_session_servers(&mut servers, &reply.result),
                 Err(error) => warn!(%error, "connectors: the session's servers were not read"),
             }
+            match self
+                .shared
+                .gate
+                .call("plugin_catalog/read", params, None)
+                .await
+            {
+                Ok(reply) => merge_plugin_sources(&mut servers, &reply.result),
+                Err(error) => {
+                    warn!(%error, "connectors: the pinned plugins' origins were not read");
+                }
+            }
+        }
+        if let Some(id) = &open
+            && self
+                .shared
+                .agent_tools
+                .as_ref()
+                .is_some_and(|tools| tools.table.has_session(id))
+        {
+            crate::connectors_project::mark_injected_server(&mut servers);
         }
         ConnectorsView {
             catalog: catalog_load(&read),
             catalog_error,
+            private_connectors_hidden: read.get("privateConnectorsHidden").and_then(Value::as_bool),
             connectors: list,
             servers,
             manage_url: read

@@ -1,12 +1,13 @@
 //! Full-page PNG and the before/after comparison.
 //!
 //! Two implementations, chosen per platform:
-//! - **Native, one render** (ShellX Canvas's idea, a whole-document render; ShellX Browser's Windows path):
-//!   `WebKitGTK` `FullDocument` snapshot, `WebView2` `DevTools` `captureBeyondViewport` with a clip of the document size.
+//! - **Native, one render**: `WebView2` `DevTools` `captureBeyondViewport` with a bounded document clip.
 //! - **Stitch** (ShellX Browser's Linux/macOS path): scroll by one
 //!   viewport, take the visible snapshot, paste; improved here: fixed and sticky elements are hidden before every
 //!   slice after the first, also ones that appeared meanwhile (ShellX repeats a sticky header in every slice), slices keep the device pixels (ShellX resized to CSS
 //!   pixels), and the page height is measured again after the lazy pass.
+//!   On Linux, bounded off-screen snapshots render each slice at CSS size times screen DPR; if that fails, the
+//!   whole stitch is retried at the displayed resolution.
 //!
 //! Both run after a lazy pass: images marked `loading=lazy` load eagerly and the page is scrolled through once (lazy
 //! loaders that watch the viewport), waiting a bounded time for pending images; the page's scroll position is restored.
@@ -176,7 +177,21 @@ pub async fn full_page(
         // one-render clip's (which also divides by a page-reported width).
         let full_h = px(m.height).max(1);
         let stitch_h = full_h.min(MAX_CSS_HEIGHT);
-        stitch(&page, &m, stitch_h, full_h > stitch_h, fallback, plain).await
+        let cut = full_h > stitch_h;
+        let result = stitch(&page, &m, stitch_h, cut, fallback.clone(), plain, !plain).await;
+        match result {
+            Ok(full) => Ok(full),
+            Err(error) if !plain => {
+                // Retry the entire stitch at the displayed resolution: mixing scales between slices loses content.
+                page.step("unpin", 0.0).await?;
+                let reason = format!(
+                    "{}; full-resolution slices failed: {error}",
+                    fallback.unwrap_or_default()
+                );
+                stitch(&page, &m, stitch_h, cut, Some(reason), plain, false).await
+            }
+            Err(error) => Err(error),
+        }
     }
     .await;
     let cleanup = restore.finish().await;
@@ -247,8 +262,10 @@ pub fn clip_size(width: f64, height: f64) -> ((u32, u32), bool) {
     ((css_w, css_h), full_w > css_w || full_h > css_h)
 }
 
-/// The stitched canvas for slices of `slice_w` x `slice_h` device pixels (our own snapshot) of a page reporting
-/// `viewport_w` and `client_w` (CSS; page data, may be redefined by the page's script), covering `css_h` CSS pixels:
+/// The stitched canvas for slices of `slice_w` x `slice_h` device pixels (our own snapshot) of a page laid out at a CSS
+/// viewport of `viewport_w` (the preview's own placement, `PreviewService::css_viewport_width`; the page's
+/// `innerWidth` only when that is unknown) and reporting `client_w` (CSS; page data, may be redefined by the page's
+/// script), covering `css_h` CSS pixels:
 /// (width, height, device pixels per CSS pixel). Capped on our side before anything is allocated: the scale stays within 0.25..=4, the width within the slice and [`MAX_PIXEL_WIDTH`], the area within
 /// [`MAX_PIXELS`].
 #[must_use]
@@ -282,6 +299,7 @@ async fn stitch(
     cut: bool,
     fallback: Option<String>,
     plain: bool,
+    scaled: bool,
 ) -> Result<FullShot, String> {
     let view_h = m.viewport_height.max(1.0);
     let mut canvas: Option<Rgba> = None;
@@ -289,6 +307,7 @@ async fn stitch(
     let mut y = 0.0;
     let mut slices = 0u32;
     let mut pinned = 0u32;
+    let mut slice_size = None;
     let max_y = (f64::from(css_h) - view_h).max(0.0);
     loop {
         let at = page.step("scroll", y).await?;
@@ -300,17 +319,20 @@ async fn stitch(
             let now = page.step("pin", 0.0).await?.pinned;
             pinned = pinned.saturating_add(u32::try_from(now).unwrap_or(0));
         }
-        let png = page.screenshot().await?;
+        let png = page.screenshot(scaled).await?;
         let slice = shot::decode(&png)?;
+        let size = (slice.width, slice.height);
+        if slice_size.is_some_and(|previous| previous != size) {
+            return Err("the viewport size changed between capture slices".to_owned());
+        }
+        slice_size = Some(size);
         if canvas.is_none() {
             // Device pixels per CSS pixel: the snapshot covers the viewport (scrollbar included on some engines).
-            let (width, height, s) = stitch_canvas(
-                slice.width,
-                slice.height,
-                m.viewport_width,
-                m.client_width,
-                css_h,
-            );
+            // The CSS viewport is ours (the preview's placement width / zoom); the page's innerWidth
+            // only when the preview service has none (then still clamped below).
+            let viewport = page.css_viewport_width().unwrap_or(m.viewport_width);
+            let (width, height, s) =
+                stitch_canvas(slice.width, slice.height, viewport, m.client_width, css_h);
             scale = s;
             canvas = Some(Rgba {
                 width,

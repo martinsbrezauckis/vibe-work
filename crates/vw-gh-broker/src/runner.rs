@@ -72,14 +72,31 @@ impl Broker {
         }
     }
 
+    /// Serve until the owner closes its control pipe. Active commands finish first.
+    /// # Errors
+    /// Listener or reply transport failure.
+    pub fn serve_until(&self, stopped: &std::sync::atomic::AtomicBool) -> io::Result<()> {
+        while !stopped.load(std::sync::atomic::Ordering::Acquire) {
+            self.answer(Some(stopped))?;
+        }
+        Ok(())
+    }
+
     /// Accept and answer one invocation, also useful to hosts that own the serving loop.
     ///
     /// # Errors
     /// Returns listener or reply transport errors. Invalid requests are answered with a refusal.
     pub fn serve_one(&self) -> io::Result<()> {
+        self.answer(None)
+    }
+
+    fn answer(&self, stopped: Option<&std::sync::atomic::AtomicBool>) -> io::Result<()> {
         let stream = self.listener.accept()?;
         let mut stream = BufReader::new(stream);
         let mut reply = match wire::receive::<Request>(&mut stream) {
+            Ok(_) if stopped.is_some_and(|s| s.load(std::sync::atomic::Ordering::Acquire)) => {
+                Reply::refused("GitHub reader is not available.")
+            }
             Ok(request) => self.run(&request),
             Err(_) => Reply::refused("invalid request; expected argv and cwd"),
         };
@@ -90,7 +107,9 @@ impl Broker {
 
     fn run(&self, request: &Request) -> Reply {
         if let Err(reason) = policy::validate(&request.argv) {
-            return Reply::refused(reason);
+            return Reply::refused(&format!(
+                "Vibe Work only lets Vibe read GitHub. Use the Push and Create PR buttons for changes.\n{reason}"
+            ));
         }
         let mut child = Command::new(&self.executable);
         child.env_clear();
@@ -105,6 +124,18 @@ impl Broker {
             "TMPDIR",
             "LANG",
             "LC_ALL",
+            // gh uses Go's HTTP proxy and system certificate overrides. These are the trusted
+            // app environment, never request-supplied values from the credential-free shim.
+            "HTTP_PROXY",
+            "HTTPS_PROXY",
+            "NO_PROXY",
+            "ALL_PROXY",
+            "http_proxy",
+            "https_proxy",
+            "no_proxy",
+            "all_proxy",
+            "SSL_CERT_FILE",
+            "SSL_CERT_DIR",
         ] {
             if let Some(value) = std::env::var_os(key) {
                 child.env(key, value);

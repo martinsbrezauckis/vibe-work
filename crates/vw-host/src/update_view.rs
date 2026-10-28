@@ -4,7 +4,7 @@
 //!
 //! Wire form of the view (the UI mirrors it in `ui/src/protocol/client/types.ts`; a private test pins the JSON):
 //! `{current, mode, autoDownload, releasePage, lastChecked, phase: {type: "idle"|"checking"|"available"|
-//! "downloading"|"ready"|"installing"|"restarting"|"failed", ...}}`.
+//! "osTooOld"|"downloading"|"ready"|"installing"|"restarting"|"failed", ...}}`.
 //!
 //! Depends on: serde. Called by: [`crate::update_flow`], `app` (`updater.rs`), the private tests.
 
@@ -141,6 +141,18 @@ pub enum Phase {
         /// Release notes, when the manifest has them.
         notes: Option<String>,
     },
+    /// A newer version exists but needs a newer system than this computer has: nothing is downloaded; the next
+    /// check (after a system update) offers it as usual.
+    OsTooOld {
+        /// The announced version.
+        version: String,
+        /// The system's name (`macOS`).
+        os: String,
+        /// The oldest system version the announced version runs on.
+        minimum: String,
+        /// This computer's system version.
+        current: String,
+    },
     /// Downloading in the background.
     Downloading {
         /// The version being downloaded.
@@ -216,6 +228,9 @@ pub struct Offer {
     pub notes: Option<String>,
     /// The announced signature (base64 minisign text).
     pub signature: String,
+    /// Set by the backend when the manifest names a newer system than this computer has
+    /// ([`crate::update_os::os_too_old`]); the flow then never downloads.
+    pub os_too_old: Option<crate::update_os::OsTooOld>,
 }
 
 /// Download progress callback: `(bytes received so far, total when known)`.

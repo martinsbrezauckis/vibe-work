@@ -45,6 +45,26 @@ function withList(
   return { ...state, bySession: { ...state.bySession, [sessionId]: list }, active: nextActive };
 }
 
+/**
+ * Moves `from`'s terminals to `to` (the New chat screen's terminals become the session's at its first message; the
+ * core's events confirm it). The views keep their ids, so nothing is shown again from the start.
+ */
+export function handOver(state: TerminalTabs, from: string, to: string): TerminalTabs {
+  const list = state.bySession[from];
+  if (list === undefined || from === to) return state;
+  const moved = list.map((t) => ({ ...t, sessionId: to }));
+  const active = state.active[from];
+  return {
+    bySession: { ...omit(state.bySession, from), [to]: moved },
+    active:
+      active === undefined
+        ? omit(state.active, from)
+        : { ...omit(state.active, from), [to]: active },
+    loaded: { ...omit(state.loaded, from), [to]: true },
+    error: omit(state.error, from),
+  };
+}
+
 /** Replaces a session's list with the core's (a `list` result). */
 export function applyList(
   state: TerminalTabs,

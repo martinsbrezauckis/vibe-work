@@ -34,20 +34,20 @@ export function FileReview(props: {
         </span>
         {fileActions(file) && !readOnly && (
           <>
-            <button
+            <Button
               data-testid="changes.file-review-keep-file"
               type="button"
-              className="mini"
+              appearance="compact"
               disabled={busy}
               data-action="keep-file"
               onClick={() => void changes.keepFile(sessionId, file)}
             >
               Keep file
-            </button>
+            </Button>
             <Button
               data-testid="changes.file-review-revert-file"
               type="button"
-              small
+              shape="outlined"
               variant="danger"
               disabled={busy}
               data-action="revert-file"

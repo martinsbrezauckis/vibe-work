@@ -5,14 +5,22 @@
  * the chip goes out as a resource block, never as typed text, never as `!cmd` or `/cmd`.
  * Depends on: model.ts (chips), store.ts (page picks), terminal/selection, protocol types, AppContext types.
  * Called by: the Terminal and Browser toolbars, the Project tab, pagesRoutes.ts.
- * Invariants: `origin` "debug-api" uses the composer's Debug API facade (the chip is marked as the Debug API's, so
+ * Invariants: a point on the New chat screen (its owner id) lands in the New chat composer; `origin` "debug-api" uses the composer's Debug API facade (the chip is marked as the Debug API's, so
  * a send goes out with that origin); the UI origin uses the window's own facade.
  */
 import { toCallError } from "../../protocol/client/types";
 import type { PickTarget } from "../../protocol/core";
+import { NEW_CHAT } from "../../state/newChatKey";
 import type { App } from "../shell/AppContext";
 import { readTerminalSelection } from "../terminal/selection";
-import { type Chip, chipFolder, elementChip, sectionChip, terminalChip } from "./model";
+import {
+  type Chip,
+  chipFolder,
+  elementChip,
+  sectionChip,
+  terminalChip,
+  webSelectionChip,
+} from "./model";
 import type { Pages } from "./store";
 
 /** The folder `sessionId`'s page chips name (see `chipFolder`). */
@@ -33,7 +41,9 @@ export function insertChip(
 ): PointOutcome {
   const facade = origin === "debug-api" ? app.composer.debugApi : app.composer.actions;
   if (facade === null) return { ok: false, reason: "Vibe Work is not connected." };
-  facade.insertContext(sessionId, chip);
+  // Before the first message the New chat screen's terminal and browser point into its own composer.
+  const key = sessionId === app.shell.store.get().newChatOwner ? NEW_CHAT : sessionId;
+  facade.insertContext(key, chip);
   return { ok: true, chip };
 }
 
@@ -50,24 +60,33 @@ export function pointTerminal(
 
 /**
  * An element of the session's preview (the user selects text or clicks it in the preview). With `target` the element
- * is named instead, which is how a Debug API request points: it has no pointer, and the answer is immediate.
+ * is named instead, which is how a Debug API request points: it has no pointer, and the answer is immediate. With
+ * `tabId` (a web page of the Browser tab) only the page's selection is read, and the chip says it is a web page's.
  */
 export async function pointPreview(
   app: App,
   sessionId: string,
   origin: "ui" | "debug-api" = "ui",
   target?: PickTarget,
+  tabId?: string,
 ): Promise<PointOutcome> {
   if (app.core === null) return { ok: false, reason: "Vibe Work is not connected." };
   try {
     const result = await app.core.run({
       type: "preview",
-      request: { op: "pick", sessionId, ...(target === undefined ? {} : { target }) },
+      request: {
+        op: "pick",
+        sessionId,
+        ...(target === undefined ? {} : { target }),
+        ...(tabId === undefined ? {} : { tabId }),
+      },
     });
     if (result.type !== "preview" || result.result.type !== "picked") {
       return { ok: false, reason: "Nothing was picked." };
     }
-    return insertChip(app, sessionId, elementChip(result.result.picked), origin);
+    const picked = result.result.picked;
+    const chip = tabId === undefined ? elementChip(picked) : webSelectionChip(picked);
+    return insertChip(app, sessionId, chip, origin);
   } catch (thrown) {
     return { ok: false, reason: toCallError(thrown).error.message };
   }

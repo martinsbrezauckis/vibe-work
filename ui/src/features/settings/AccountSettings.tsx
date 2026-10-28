@@ -23,6 +23,7 @@ import {
 } from "../../state/account";
 import { sessionForPick } from "../../state/modelChoice";
 import { useApp } from "../shell/AppContext";
+import { useKeyUi } from "../setup/useKeys";
 import { KeyNotice, useKeyReadiness } from "../shell/KeyNotice";
 import { useCoreState, useShellState } from "../shell/hooks";
 
@@ -43,7 +44,12 @@ export function AccountSettings({ part }: { part: "account" | "usage" }) {
   const session = useCoreState((s) =>
     selected === null ? undefined : s.sessions[selected]?.session,
   );
-  const [account, setAccount] = useState<AccountView | null>(null);
+  const activeItem = useKeyUi((s) => s.status?.keyItemId ?? null);
+  const [accountRead, setAccount] = useState<{ itemId: string | null; value: AccountView } | null>(
+    null,
+  );
+  // Hide the previous workspace's facts as soon as selection changes.
+  const account = accountRead?.itemId === activeItem ? accountRead.value : null;
   const runtime = useCoreState((s) =>
     selected === null ? undefined : s.sessions[selected]?.runtime,
   );
@@ -64,15 +70,15 @@ export function AccountSettings({ part }: { part: "account" | "usage" }) {
     if (core === null || !running || via === null || keyBlocked) return;
     let live = true;
     void readAccount(core, via).then((view) => {
-      if (live) setAccount(view);
+      if (live) setAccount({ itemId: activeItem, value: view });
     });
     return () => {
       live = false;
     };
-  }, [core, running, via, keyBlocked, part]);
+  }, [core, running, via, keyBlocked, part, activeItem]);
 
   if (core === null || !running) return null;
-  const usage = usageOf(session);
+  const usage = usageOf(session, runtime);
   const readout = contextReadout(usage, runtime);
 
   if (part === "account")
@@ -87,7 +93,7 @@ export function AccountSettings({ part }: { part: "account" | "usage" }) {
           <p className="key-line">Needs a session: Vibe reads the account through one.</p>
         )}
         {via !== null && account === null && !keyBlocked && (
-          <p className="key-line">Reading the account...</p>
+          <p className="key-line">Reading the account…</p>
         )}
         {account !== null && !keyBlocked && (
           <dl className="set-facts" data-testid="account-facts">

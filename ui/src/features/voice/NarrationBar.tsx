@@ -7,13 +7,18 @@
  */
 import type { ReactElement } from "react";
 
+import { IconButton } from "../../components/IconButton";
 import { Icon } from "../../components/Icon";
 import { useApp } from "../shell/AppContext";
 import { useNarration } from "./hooks";
+import { useShellState } from "../shell/hooks";
 
 /** The bar, or nothing. */
 export function NarrationBar(): ReactElement | null {
-  const voice = useApp().voice;
+  const app = useApp();
+  const voice = app.voice;
+  const current = useNarration((s) => s.current);
+  const selected = useShellState((s) => s.selected);
   const phase = useNarration((s) => s.phase);
   const summary = useNarration((s) => s.current?.summary ?? null);
   const waiting = useNarration((s) => s.queue.length);
@@ -25,7 +30,11 @@ export function NarrationBar(): ReactElement | null {
       ? note
       : phase === "summarizing"
         ? "Summarizing the turn…"
-        : (summary ?? "Reading aloud…");
+        : current?.reading !== undefined
+          ? selected === current.sessionId
+            ? `Reading aloud: ${summary ?? ""}`
+            : `Reading aloud from "${current.reading.title}": ${summary ?? ""}`
+          : (summary ?? "Reading aloud…");
   return (
     <div className="narration" role="status" data-testid="narration-bar">
       <Icon name="volume-2" size={14} />
@@ -33,30 +42,28 @@ export function NarrationBar(): ReactElement | null {
       {waiting > 0 ? <span className="mono">+{waiting}</span> : null}
       {phase !== "idle" ? (
         <>
-          <button
+          <IconButton
             data-testid="voice.narration-bar-skip"
             type="button"
-            className="ibtn"
-            aria-label="Skip this narration"
+            label="Skip this narration"
             title="Skip this narration"
             onClick={() => {
               narration.skip();
             }}
-          >
-            <Icon name="skip-forward" size={14} />
-          </button>
-          <button
+            icon="skip-forward"
+            iconSize={14}
+          />
+          <IconButton
             data-testid="voice.narration-bar-stop-all"
             type="button"
-            className="ibtn"
-            aria-label="Stop narration and clear queue"
+            label="Stop narration and clear queue"
             title="Stop narration and clear queue"
             onClick={() => {
               narration.stopAll();
             }}
-          >
-            <Icon name="square" size={14} />
-          </button>
+            icon="square"
+            iconSize={14}
+          />
         </>
       ) : null}
     </div>

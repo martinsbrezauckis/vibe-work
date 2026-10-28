@@ -97,19 +97,19 @@ export function LibraryDetail(): ReactElement | null {
           disabled={blocked}
           onChange={(scope) => void actions?.setScope(library.id, scope)}
         />
-        <button
+        <Button
           data-testid="libraries.library-detail-pick"
           type="button"
-          className="tb-btn primary"
+          variant="primary"
           disabled={blocked || busy === "upload"}
           onClick={() => void actions?.pick(library.id)}
         >
           {busy === "upload" ? "Uploading…" : "Add files"}
-        </button>
-        <button
+        </Button>
+        <Button
           data-testid="libraries.library-detail-delete-library"
           type="button"
-          className="tb-btn"
+
           aria-pressed={confirm}
           disabled={blocked}
           onClick={() => {
@@ -118,7 +118,7 @@ export function LibraryDetail(): ReactElement | null {
           }}
         >
           {confirm ? "Delete it and its files on Mistral" : "Delete library"}
-        </button>
+        </Button>
       </div>
       {docs === undefined ? (
         <p className="cmuted">Reading its documents…</p>
@@ -142,19 +142,19 @@ export function LibraryDetail(): ReactElement | null {
                 )}
               </div>
               <div className="lib-doc-actions">
-                <button
+                <Button
                   data-testid="libraries.library-detail-open-text"
                   type="button"
-                  className="tb-btn"
+
                   disabled={blocked || d.status !== "done"}
                   onClick={() => void actions?.openText(library.id, d.id)}
                 >
                   Open text
-                </button>
+                </Button>
                 <Button
                   data-testid="libraries.library-detail-delete-document"
                   type="button"
-                  small
+                  shape="outlined"
                   variant="danger"
                   aria-label={`Delete ${d.name}`}
                   disabled={blocked}

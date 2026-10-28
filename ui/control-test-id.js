@@ -12,6 +12,10 @@ const native = new Set([
 const shared = new Set([
   "Button",
   "IconButton",
+  "Switch",
+  "Tabs",
+  "Tab",
+  "TabClose",
   "LinkButton",
   "RowDisclosure",
   "CopyButton",
@@ -54,7 +58,10 @@ export default {
     return {
       ImportDeclaration(node) {
         for (const specifier of node.specifiers) {
-          if (specifier.type === "ImportSpecifier" && shared.has(specifier.imported.name))
+          if (
+            specifier.type === "ImportSpecifier" &&
+            (shared.has(specifier.imported.name) || specifier.imported.name === "Badge")
+          )
             aliases.set(specifier.local.name, specifier.imported.name);
         }
       },
@@ -73,6 +80,7 @@ export default {
         if (
           !native.has(tag) &&
           !shared.has(control) &&
+          !(control === "Badge" && get("as")?.value?.value === "button") &&
           !(
             tag === tag.toLowerCase() &&
             (events || roles.test(role ?? "") || get("tabIndex") || get("contentEditable"))

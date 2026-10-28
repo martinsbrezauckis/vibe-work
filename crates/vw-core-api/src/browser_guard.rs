@@ -11,8 +11,6 @@
 //! - A mount holding a page of the session's own server reaches its session's ports (attributed or leased) and other
 //!   sessions' attributed ports (background requests: a backend in one session, frontends in others); never
 //!   another app's port or a free one.
-//! - The app-wide listener (`WebView2`) asks about every live mount ([`PageContext::mounts`]) and passes
-//!   what any of them may reach; each webview's own request barrier keeps it to its mount's rights.
 //! - Owners are read from the process monitor (a scan) at most every [`OWNER_TTL`] per session, so lease and process
 //!   changes apply within that time; scans run on a blocking thread.
 
@@ -71,6 +69,22 @@ impl GuardContext {
 }
 
 impl PageContext for GuardContext {
+    fn refused(&self, key: Option<&str>, reason: &str) {
+        let Some(shared) = self.shared.upgrade() else {
+            return;
+        };
+        let Some(session) = key.and_then(|key| {
+            shared.preview.as_ref().and_then(|hub| {
+                hub.service
+                    .page_for_mount(key)
+                    .and_then(|page| hub.service.owner_session_id(&page))
+            })
+        }) else {
+            return;
+        };
+        crate::guard_refusals::record(&shared, &session, crate::GuardKind::Network, None, reason);
+    }
+
     fn loopback<'a>(&'a self, key: &'a str, port: u16) -> ScopeFuture<'a> {
         Box::pin(async move {
             let shared = self
@@ -94,18 +108,6 @@ impl PageContext for GuardContext {
                 )),
             }
         })
-    }
-
-    fn mounts(&self) -> Vec<String> {
-        self.shared
-            .upgrade()
-            .and_then(|shared| {
-                shared
-                    .preview
-                    .as_ref()
-                    .map(|hub| hub.service.mount_labels())
-            })
-            .unwrap_or_default()
     }
 
     fn lan_host(&self, key: &str) -> Option<String> {

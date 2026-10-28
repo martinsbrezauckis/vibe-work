@@ -39,6 +39,14 @@ pub enum SearchRequest {
     Files {
         /// The words to find.
         query: String,
+        /// Match only file names, without reading content; an empty query lists names.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[cfg_attr(feature = "ts", ts(optional))]
+        names_only: Option<bool>,
+        /// One exact known session folder or user-picked folder (also before a new chat starts).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[cfg_attr(feature = "ts", ts(optional))]
+        folder: Option<String>,
         /// Only this session's folders; the folders of every listed session when absent.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[cfg_attr(feature = "ts", ts(optional))]

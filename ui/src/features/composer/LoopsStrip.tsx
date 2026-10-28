@@ -96,10 +96,10 @@ export function LoopsStrip({
         <span className="loops-sum" role="status">
           {loopsRun(rows.length)} · next {nextText(first, now)}
         </span>
-        <button
+        <Button
           data-testid="composer.loops-strip-toggle"
           type="button"
-          className="mini"
+          appearance="compact"
           aria-expanded={open}
           aria-controls={listId}
           title={toggle}
@@ -109,7 +109,7 @@ export function LoopsStrip({
           }}
         >
           {open ? "Hide" : "Show"}
-        </button>
+        </Button>
       </div>
       {open ? (
         <div id={listId} className="loops-body">
@@ -126,7 +126,7 @@ export function LoopsStrip({
                   data-testid="composer.loops-strip-delete"
                   data-item-id={row.id}
                   type="button"
-                  small
+                  shape="outlined"
                   variant="danger"
                   disabled={deleting.has(row.id)}
                   title={`Delete this loop: ${shortPrompt(row.prompt, 40)}`}
@@ -148,13 +148,13 @@ export function LoopsStrip({
               : mode.id === "auto-approve"
                 ? ` ${mode.label} is on: those turns run without asking you.`
                 : ` It uses the session's access mode (${mode.label}), like a message you type.`}{" "}
-            Loops run while Vibe Work is open, also when you look at another session.
+            Loops run while Vibe Work has this chat open, including when you view another chat.
           </p>
           {rows.length > 1 ? (
             <Button
               data-testid="composer.loops-strip-delete-all"
               type="button"
-              small
+              shape="outlined"
               variant="danger"
               title="Delete every loop of this session"
               aria-label="Delete every loop of this session"

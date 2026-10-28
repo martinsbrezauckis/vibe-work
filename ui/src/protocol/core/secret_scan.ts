@@ -9,15 +9,11 @@ export type SecretScanSettings = {
 /**
  * Scan session logs in the background.
  */
-enabled: boolean,
-/**
- * Automatically redact keys and tokens; website passwords always require manual Redact.
- */
-autoRedact: boolean, };
+enabled: boolean, };
 
 export type SecretScanRequest = { "op": "read", } | { "op": "write",
 /**
- * New switches.
+ * New switch.
  */
 settings: SecretScanSettings, } | { "op": "checkNow", } | { "op": "redact",
 /**
@@ -33,7 +29,7 @@ export type SecretLeakName = {
  */
 name: string,
 /**
- * Website password; redaction remains a manual decision.
+ * Website password.
  */
 websitePassword: boolean,
 /**
@@ -95,11 +91,16 @@ formatFiles: number,
 /**
  * Files the OS refused to replace.
  */
-unreadableFiles: number, };
+unreadableFiles: number,
+/**
+ * Redact can work: one of the chat's files is a log from before Vibe 3.0. Vibe 3.0 chats are sealed by
+ * digests, so their only remedy is deleting the chat (Redact is not offered there).
+ */
+redactable: boolean, };
 
 export type SecretScanView = {
 /**
- * Saved switches.
+ * Saved switch.
  */
 settings: SecretScanSettings,
 /**

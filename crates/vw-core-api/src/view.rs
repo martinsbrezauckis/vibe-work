@@ -40,12 +40,11 @@ pub struct SessionSnapshot {
     pub resync_pending: bool,
     /// Turns this store marked interrupted after a resume.
     pub interrupted_turns: Vec<String>,
-    /// Anomaly counters.
-    pub anomalies: AnomalyCountsView,
 }
 
 impl From<SessionView> for SessionSnapshot {
-    fn from(v: SessionView) -> Self {
+    fn from(mut v: SessionView) -> Self {
+        crate::provider_errors::value(&mut v.state);
         Self {
             session_id: v.session_id,
             state: v.state,
@@ -54,7 +53,6 @@ impl From<SessionView> for SessionSnapshot {
             local_only: v.local_only,
             resync_pending: v.resync_pending,
             interrupted_turns: v.interrupted_turns,
-            anomalies: v.anomalies.into(),
         }
     }
 }
@@ -174,6 +172,10 @@ pub struct SessionRowView {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "ts", ts(optional))]
     pub access_mode: Option<String>,
+    /// Ownership from the existing parent's childSessions (a fork's parent id alone is not ownership).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
+    pub owned_by_parent: Option<bool>,
     /// The server's listing does not contain it yet.
     pub local_only: bool,
 }
@@ -183,6 +185,7 @@ impl From<SessionRow> for SessionRowView {
         Self {
             session: r.session,
             access_mode: None,
+            owned_by_parent: None,
             local_only: r.local_only,
         }
     }

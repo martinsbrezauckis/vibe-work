@@ -6,6 +6,7 @@
 // Answer: { status: ok|filled|stale|ambiguous|originChanged|frameOrigin|notCredential|formOrigin|formMethod|notActionable|
 //           cancelled|error, url, failed?, target?, submitsTo? }. Never the value, never a page exception text (a page
 //           could throw an error that quotes what it was given).
+/* global ENV, REQ, editable, enabled, findRef, hideKeys, labelOf, loginRole, roleOf, submitMethods, submitOrigins, viewOf, visible -- Supplied by the Rust script assembler and its shared prelude. */
 (() => {
   __VW_COMMON__
   const result = (status, extra) => JSON.stringify({ status, url: String(location.href).slice(0, 2000), ...extra });
@@ -20,7 +21,7 @@
     let docOrigin = "";
     try {
       docOrigin = String(el.ownerDocument.location.origin);
-    } catch (_) {
+    } catch {
       docOrigin = "";
     }
     // A same-origin frame (about:blank and srcdoc frames inherit the page's origin) is fine; any other is not.
@@ -64,7 +65,7 @@
     el.dispatchEvent(new (View.InputEvent || View.Event)("input", { bubbles: true, inputType: "insertReplacementText" }));
     el.dispatchEvent(new View.Event("change", { bubbles: true }));
     return result("filled", { target });
-  } catch (_) {
+  } catch {
     return result("error");
   }
 })()

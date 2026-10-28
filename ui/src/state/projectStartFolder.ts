@@ -34,7 +34,8 @@ export async function startFolderFor(
     throw new UiControlError("invalidParams", "folder must be a non-empty path");
   if (core === null) throw new UiControlError("serverUnavailable", "the core is not running");
   try {
-    await core.run({ type: "pickFolder", path: value }, { origin: "debug-api" });
+    // The host runs exactly this command as the Debug API's under the request's grant (`ui_grants.rs`).
+    await core.run({ type: "pickFolder", path: value });
   } catch (thrown) {
     const { error } = toCallError(thrown);
     throw new UiControlError(error.code, error.message);

@@ -6,6 +6,7 @@
  * Depends on: model.ts, protocol types, transcript todos. Called by: PagesTab.
  * Invariants: renders only; page text (step text) is plain text.
  */
+import { Button } from "../../components/Controls";
 import type { ReactElement } from "react";
 
 import type { Step } from "../../protocol/core";
@@ -68,19 +69,20 @@ export function PlanHeader({
       {mismatch !== null && (
         <div className="pages-stale" role="status">
           <span>
-            <b>Plan not updated.</b> Vibe&apos;s todo list says {mismatch.todoDone} of{" "}
-            {mismatch.total} done, the page says {mismatch.pageDone} of {mismatch.total}.
+            <b>Plan not updated.</b> For linked steps, Vibe&apos;s todo list says{" "}
+            {mismatch.todoDone} of {mismatch.total} done, the page says {mismatch.pageDone} of{" "}
+            {mismatch.total}.
           </span>
-          <button
+          <Button
             data-testid="pages.plan-header-ask-update"
             type="button"
-            className="pages-btn"
+            appearance="page"
             onClick={() => {
               askUpdate(mismatch);
             }}
           >
             Ask Vibe to update the page
-          </button>
+          </Button>
         </div>
       )}
     </div>

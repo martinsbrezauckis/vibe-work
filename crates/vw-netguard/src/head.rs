@@ -155,7 +155,7 @@ pub fn parse(text: &str) -> Result<Target, String> {
 }
 
 /// True when the headers ask for a WebSocket upgrade (`Upgrade: websocket`, any case).
-fn is_websocket_upgrade(headers: &[(String, String)]) -> bool {
+pub(crate) fn is_websocket_upgrade(headers: &[(String, String)]) -> bool {
     headers.iter().any(|(n, v)| {
         n.eq_ignore_ascii_case("upgrade")
             && v.split(',')
@@ -176,6 +176,29 @@ fn raw_host(target: &str) -> String {
             .map_or(authority.to_owned(), |(h, _)| format!("{h}]"));
     }
     authority.split(':').next().unwrap_or("").to_owned()
+}
+
+/// The head sent to the user's proxy: absolute-form request line, the client's `Proxy-*` and hop-by-hop
+/// headers dropped, ours (`Proxy-Authorization` when `auth`) added, `Connection: close` unless the request upgrades.
+#[must_use]
+pub fn proxy_head(
+    method: &str,
+    url: &Url,
+    version: &str,
+    headers: &[(String, String)],
+    auth: Option<&str>,
+) -> Vec<u8> {
+    let origin = origin_head(method, url, version, headers);
+    let text = String::from_utf8_lossy(&origin);
+    let rest = text.split_once("\r\n").map_or("", |(_, rest)| rest);
+    let mut out = format!("{method} {} {version}\r\n", url.as_str());
+    if let Some(auth) = auth {
+        out.push_str("Proxy-Authorization: ");
+        out.push_str(auth);
+        out.push_str("\r\n");
+    }
+    out.push_str(rest);
+    out.into_bytes()
 }
 
 /// The head sent to the origin server: origin-form request line, `Proxy-*` / hop-by-hop headers dropped,

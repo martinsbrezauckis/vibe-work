@@ -34,6 +34,7 @@ pub mod guard;
 mod login_fill;
 pub mod model;
 mod native_focus;
+mod navigation_receipt;
 pub mod observe;
 pub mod output;
 mod page;

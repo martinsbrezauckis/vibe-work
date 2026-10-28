@@ -383,18 +383,6 @@ impl Connection {
         Subscription { rx, lagged }
     }
 
-    /// Registers (or replaces) the handler for a server-request method.
-    pub fn set_handler(&self, method: impl Into<String>, handler: impl ServerRequestHandler) {
-        self.shared
-            .handlers
-            .insert(method.into(), Arc::new(handler));
-    }
-
-    /// Removes a handler; later requests of that method get `method_not_found`.
-    pub fn remove_handler(&self, method: &str) {
-        self.shared.handlers.remove(method);
-    }
-
     /// The death report, if the server is dead.
     #[must_use]
     pub fn death(&self) -> Option<DeathReport> {

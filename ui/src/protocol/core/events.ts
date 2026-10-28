@@ -10,13 +10,109 @@ import type { Origin, AlertKind, JsonValue } from "./index";
 import type { SessionChange, SessionSnapshot } from "./sessions";
 import type { RateLimitsView, ServerStatus, DebugApiFlag } from "./status";
 import type { ChangesMode } from "./changes";
+import type { ProtectedChangeView } from "./proposals";
 import type { TerminalEventView } from "./terminal";
 import type { DocumentView, DocumentRefusal, DocumentSource } from "./documents";
 import type { DictationUpdate } from "./speech";
 import type { InstallProgress } from "./market";
 import type { InstallView } from "./vibe";
+import type { GithubReadsView } from "./github_reads";
+import type { Ask, AskRecord, SessionGrant, GrantOffer, ChromeAskView, ChromeControlView } from "./ask";
+import type { KeepAwakeView } from "./keep_awake";
 import type { SecretScanView } from "./secret_scan";
-export type CoreEvent = { "type": "secretScan",
+export type CoreEvent = { "type": "askOpened",
+/**
+ * Value-free pending metadata.
+ */
+ask: Ask, } | { "type": "askClosed",
+/**
+ * In-memory value-free record.
+ */
+record: AskRecord, } | { "type": "askGrants",
+/**
+ * Every kept grant, oldest first.
+ */
+grants: Array<SessionGrant>,
+/**
+ * What "Allow for this session" would keep on each open card that offers it (its covers line).
+ */
+offers: Array<GrantOffer>, } | { "type": "chromeAsk",
+/**
+ * The card's entry; its outcome is the ask record with the same id.
+ */
+entry: ChromeAskView, } | { "type": "chromeControl",
+/**
+ * The view after the change.
+ */
+view: ChromeControlView, } | { "type": "guardRefused",
+/**
+ * Owning chat (a subagent belongs to its parent).
+ */
+sessionId: string,
+/**
+ * Display title at the decision.
+ */
+title: string,
+/**
+ * Guard class.
+ */
+guard: GuardKind,
+/**
+ * Short plain refusal, with no command input values.
+ */
+what: string,
+/**
+ * History entry or tool-call id; absent outside a chat step.
+ */
+stepId: string | null,
+/**
+ * Unix milliseconds (within JavaScript integer precision).
+ */
+at: number,
+/**
+ * Run-local identity, retained during subscription replay.
+ */
+refusalId: string, } | { "type": "protectedChange",
+/**
+ * Review without complete file contents.
+ */
+proposal: ProtectedChangeView, } | { "type": "readAloud",
+/**
+ * First-speech receipt, answered only by the listening window.
+ */
+requestId: string,
+/**
+ * The credential's session.
+ */
+sessionId: string,
+/**
+ * Its chat title, also when a different chat is shown.
+ */
+title: string,
+/**
+ * The final reply or requested part, at most 10,000 characters before speech cleanup.
+ */
+text: string,
+/**
+ * End with a spoken notice that the rest is on screen.
+ */
+truncated: boolean, } | { "type": "panelRead",
+/**
+ * Answered once, by the first window that has the panel.
+ */
+requestId: string,
+/**
+ * The credential's session: only its own panel is read.
+ */
+sessionId: string, } | { "type": "githubReads",
+/**
+ * Current account and opt-in, never credentials.
+ */
+view: GithubReadsView, } | { "type": "keepAwake",
+/**
+ * Current app-wide view.
+ */
+view: KeepAwakeView, } | { "type": "secretScan",
 /**
  * Complete value-free scanner view.
  */
@@ -110,7 +206,15 @@ stuck: boolean,
 /**
  * The session `continueInNewSession` started for it, when there is one.
  */
-continuedIn: string | null, } | { "type": "sessionHolder",
+continuedIn: string | null, } | { "type": "queueReturned",
+/**
+ * The session.
+ */
+sessionId: string,
+/**
+ * Vibe's queued items as they were (`id`, `createdAt`, `entries`), oldest first.
+ */
+items: Array<JsonValue>, } | { "type": "sessionHolder",
 /**
  * The session.
  */
@@ -136,9 +240,9 @@ reason: string, } | { "type": "keyStatusChanged", } | { "type": "vibeInstall",
  */
 view: InstallView, } | { "type": "rateLimits",
 /**
- * What that answer said.
+ * What that answer said, or none after changing the active key.
  */
-limits: RateLimitsView, } | { "type": "terminal",
+limits: RateLimitsView | null, } | { "type": "terminal",
 /**
  * What happened.
  */
@@ -190,7 +294,23 @@ sessionId: string | null, } | { "type": "pagesChanged",
 /**
  * The session.
  */
-sessionId: string | null, } | { "type": "projectsChanged", } | { "type": "secretsChanged", } | { "type": "filesChanged",
+sessionId: string | null, } | { "type": "pageMenu",
+/**
+ * The session.
+ */
+sessionId: string,
+/**
+ * Left of the click in the page area.
+ */
+x: number,
+/**
+ * Top of the click in the page area.
+ */
+y: number,
+/**
+ * The click was on selected text.
+ */
+selected: boolean, } | { "type": "projectsChanged", } | { "type": "secretsChanged", } | { "type": "filesChanged",
 /**
  * The session.
  */
@@ -233,3 +353,5 @@ parentSessionId: string,
  * Vibe's callback entry (`callback/call` params' `callback`: id, title, detail, choices, state).
  */
 entry: JsonValue, };
+
+export type GuardKind = "ask" | "git" | "folder" | "network" | "process" | "safetyRule" | "protectedFolderDeclined";

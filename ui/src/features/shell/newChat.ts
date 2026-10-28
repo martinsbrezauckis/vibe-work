@@ -6,7 +6,7 @@
  * Depends on: home (leaving pages), composerFocus, the session summaries. Called by: Rail, shell actions (Ctrl N),
  * SessionList, the `ui/rail` route.
  * Invariants: never reuses or reopens a conversation; the previous session is left exactly as it was (its draft,
- * scroll, panel); a folder a Debug API client put on the chip is replaced only when the user leaves a session for
+ * scroll, panel); while a terminal or a page is open on the New chat screen its folder stays (`app.newChat`); a folder a Debug API client put on the chip is replaced only when the user leaves a session for
  * New chat (its mark then ends, `newFolderBy` "session").
  */
 import { NEW_CHAT } from "../../state/newChatKey";
@@ -37,7 +37,8 @@ export function openNewChat(app: App): void {
   if (s.selected !== null) {
     const cwd = folderOf(app, s.selected);
     shell.actions.selectSession(null);
-    if (cwd !== null) shell.actions.setNewFolder(cwd, "session");
+    // A terminal or a page open there: the screen comes back unchanged, its folder included.
+    if (cwd !== null && app.newChat?.holds() !== true) shell.actions.setNewFolder(cwd, "session");
   } else if (s.newFolder === null) {
     const cwd = newestFolder(app);
     if (cwd !== null) shell.actions.setNewFolder(cwd, "session");

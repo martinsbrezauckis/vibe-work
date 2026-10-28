@@ -32,18 +32,51 @@ const SMALL_CAP: u64 = 4 * 1024 * 1024;
 // Forty media filenames plus the fixed capture files need more room than a page-read receipt.
 const ANSWER_BUDGET: usize = 8_000;
 
-/// The smallest view (device pixels of our own snapshot) a layout-dependent capture runs in. A browser
+/// The smallest view (CSS px of the page's layout viewport) a layout-dependent capture runs in. A browser
 /// that is not on screen is parked at the size it would have when shown (or 1280 x 800), so a background session
 /// captures like a shown one; this check stays for an engine that cannot do that (a webview stuck at its smallest
-/// size would describe a tiny page, not the site). Our snapshot, not the page's own numbers (a page can redefine
-/// `innerWidth`), decides.
+/// size would describe a tiny page, not the site). See [`check_view`].
 const MIN_VIEW: (u32, u32) = (200, 120);
+
+/// Refuses a layout-dependent capture of a page whose view has no usable size. `view` is the layout viewport from the
+/// engine's native frame and the zoom it was placed with (`PreviewService::layout_viewport`), never pixels: pixel
+/// screenshots are kept to a preview the user sees, and a background session's page is parked at the size it would have
+/// when shown, so a hidden page passes here like a shown one (a check that took a screenshot refused every page not
+/// on screen). Not the page's own numbers either: a page can redefine `innerWidth` (the
+/// capture fixture's /liar reports 1 x 1).
+fn check_view(view: Option<(f64, f64)>, request: &Request) -> Result<(), ActError> {
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    let (width, height) = view.map_or((0, 0), |(w, h)| {
+        (w.max(0.0).floor() as u32, h.max(0.0).floor() as u32)
+    });
+    if width < MIN_VIEW.0 || height < MIN_VIEW.1 {
+        return Err(refused(format!(
+            "this session's browser has no usable size ({width} x {height} px), so a {} capture would \
+             measure a tiny page: ask the user to show this session's Browser tab, then capture again (media \
+             and the page's text formats work without it)",
+            request.what.name()
+        )));
+    }
+    Ok(())
+}
+
+/// True when the request's output includes a picture of the page (a PNG, the compare shots, the bundle's page.png).
+fn takes_pixels(request: &Request) -> bool {
+    match request.what {
+        What::Before | What::After | What::Bundle => true,
+        What::Page => request.formats.iter().any(|f| matches!(f, PageFormat::Png)),
+        What::Design | What::Structure | What::Media => false,
+    }
+}
 
 /// True when the request measures layout (sizes, boxes, pictures), so the page must have a real size.
 fn needs_layout(request: &Request) -> bool {
     match request.what {
         What::Media => false,
-        What::Page => request.formats.contains(&PageFormat::Png),
+        What::Page => request
+            .formats
+            .iter()
+            .any(|f| matches!(f, PageFormat::Png | PageFormat::Pdf)),
         _ => true,
     }
 }
@@ -60,19 +93,6 @@ fn folder_name_source(title: &str, url: &str, host: &str) -> String {
     } else {
         title.to_owned()
     }
-}
-
-/// Width and height of a PNG from its header (`None`: not a PNG).
-fn png_size(png: &[u8]) -> Option<(u32, u32)> {
-    if png.len() < 24 || &png[..8] != b"\x89PNG\r\n\x1a\n" || &png[12..16] != b"IHDR" {
-        return None;
-    }
-    let read = |at: usize| {
-        png.get(at..at + 4)
-            .and_then(|b| b.try_into().ok())
-            .map(u32::from_be_bytes)
-    };
-    Some((read(16)?, read(20)?))
 }
 
 /// What one capture produced so far.
@@ -181,6 +201,7 @@ impl Browser {
         by: Actor,
         target: Target<'_>,
     ) -> Result<Value, ActError> {
+        let _capture = self.captures().begin(session_id).map_err(refused)?;
         let what = request.what.name();
         if by == Actor::Agent && self.sessions().stopped(session_id) {
             let error = refused(STOPPED);
@@ -234,6 +255,28 @@ impl Browser {
             .end(session_id, by, "capture", what, outcome, &detail);
     }
 
+    /// The checks before a capture writes anything: a request whose output is pixels is refused as a screenshot
+    /// is, and a layout capture needs a usable view ([`check_view`]).
+    async fn admit(&self, session_id: &str, request: &Request) -> Result<(), ActError> {
+        if takes_pixels(request) {
+            self.service()
+                .pixels_admitted(session_id)
+                .map_err(|error| match error {
+                    vw_preview::PreviewError::ScreenshotHidden(_) => refused(error.to_string()),
+                    other => failed(other.to_string()),
+                })?;
+        }
+        if needs_layout(request) {
+            let view = self
+                .service()
+                .layout_viewport(session_id)
+                .await
+                .map_err(|error| failed(error.to_string()))?;
+            check_view(view, request)?;
+        }
+        Ok(())
+    }
+
     async fn capture_inner(
         &self,
         session_id: &str,
@@ -243,9 +286,7 @@ impl Browser {
         let head = shot::step(self, session_id, "metrics", 0.0)
             .await
             .map_err(refused)?;
-        if needs_layout(request) {
-            self.check_view(session_id, request).await?;
-        }
+        self.admit(session_id, request).await?;
         let (folder_stamp, captured_at) = stamp(SystemTime::now());
         let host = url::Url::parse(&head.url)
             .ok()
@@ -295,22 +336,18 @@ impl Browser {
             before: None,
         };
         let what = request.what;
+        let one_file = what == What::Page
+            && request
+                .formats
+                .iter()
+                .any(|f| matches!(f, PageFormat::Pdf | PageFormat::SingleHtml));
+        if one_file {
+            return self
+                .capture_one_file(session_id, request, target, run)
+                .await;
+        }
         let all = matches!(what, What::Bundle);
-        if (all || what == What::Design)
-            && let Err(e) = self.capture_design(session_id, &mut run).await
-        {
-            run.skip("design", &e);
-        }
-        if (all || what == What::Structure)
-            && let Err(e) = self.capture_structure(session_id, &mut run).await
-        {
-            run.skip("structure", &e);
-        }
-        if (all || what == What::Media)
-            && let Err(e) = self.capture_media(session_id, &mut run, target).await
-        {
-            run.skip("media", &e);
-        }
+        self.capture_parts(session_id, &mut run, target, what).await;
         if all || what == What::Page {
             for format in &request.formats {
                 if let Err(e) = self
@@ -337,26 +374,78 @@ impl Browser {
         Ok(answer(&run, what))
     }
 
-    /// Refuses a layout-dependent capture of a page whose view has no usable size.
-    async fn check_view(&self, session_id: &str, request: &Request) -> Result<(), ActError> {
-        let png = self
-            .service()
-            .screenshot_png(session_id)
-            .await
-            .map_err(|error| match error {
-                vw_preview::PreviewError::ScreenshotHidden(_) => refused(error.to_string()),
-                other => failed(other.to_string()),
-            })?;
-        let (width, height) = png_size(&png).unwrap_or((0, 0));
-        if width < MIN_VIEW.0 || height < MIN_VIEW.1 {
-            return Err(refused(format!(
-                "this session's browser has no usable size ({width} x {height} px), so a {} capture would \
-                 measure a tiny page: ask the user to show this session's Browser tab, then capture again (media \
-                 and the page's text formats work without it)",
-                request.what.name()
-            )));
+    async fn capture_parts(
+        &self,
+        session_id: &str,
+        run: &mut Run,
+        target: &Target<'_>,
+        what: What,
+    ) {
+        let all = what == What::Bundle;
+        if (all || what == What::Design)
+            && let Err(e) = self.capture_design(session_id, run).await
+        {
+            run.skip("design", &e);
         }
-        Ok(())
+        if (all || what == What::Structure)
+            && let Err(e) = self.capture_structure(session_id, run).await
+        {
+            run.skip("structure", &e);
+        }
+        if (all || what == What::Media)
+            && let Err(e) = self.capture_media(session_id, run, target).await
+        {
+            run.skip("media", &e);
+        }
+    }
+
+    async fn capture_one_file(
+        &self,
+        session_id: &str,
+        request: &Request,
+        target: &Target<'_>,
+        mut run: Run,
+    ) -> Result<Value, ActError> {
+        let what = request.what;
+        // One-file choices do not add a manifest. Produce everything before committing any output.
+        let mut outputs = Vec::new();
+        let mut kept = 0;
+        for format in &request.formats {
+            let (bytes, links) = super::one_file::produce(
+                self,
+                session_id,
+                *format,
+                target.fetch,
+                &run.source.url,
+                &run.source.captured_at,
+            )
+            .await
+            .map_err(failed)?;
+            let name = format.file();
+            outputs.push((name, bytes));
+            kept += links;
+        }
+        for (name, bytes) in outputs {
+            run.folder
+                .write_atomic(name, &bytes, super::single_html::MAX_TOTAL as u64)
+                .map_err(failed)?;
+        }
+        let mut result = answer(&run, what);
+        result["keptAsLinks"] = json!(kept);
+        if let [file] = run.folder.written() {
+            result["path"] = json!(run.folder.path.join(&file.name).display().to_string());
+        }
+        result[OUTCOME_KEY] = json!(format!(
+            "saved {} to {}/",
+            run.folder
+                .written()
+                .iter()
+                .map(|f| f.name.as_str())
+                .collect::<Vec<_>>()
+                .join(", "),
+            run.folder.relative
+        ));
+        Ok(result)
     }
 
     async fn capture_design(&self, session_id: &str, run: &mut Run) -> Result<(), String> {
@@ -483,7 +572,15 @@ impl Browser {
                     TEXT_CAP
                 };
                 let w = run.folder.write(f.file(), body.as_bytes(), cap)?;
-                json!({"file": w.name, "bytes": w.bytes, "cut": cut})
+                let mut entry = json!({"file": w.name, "bytes": w.bytes, "cut": cut});
+                if f == page::Format::Html {
+                    // Said in the answer too, not only inside the file.
+                    entry["note"] = json!(page::OPENS_SITE.trim());
+                }
+                entry
+            }
+            PageFormat::Pdf | PageFormat::SingleHtml => {
+                return Err("one-file formats require a page capture".into());
             }
             PageFormat::Png => {
                 let full = shot::full_page(self, session_id, method).await?;
@@ -495,6 +592,8 @@ impl Browser {
         let key = match format {
             PageFormat::Text(f) => f.file(),
             PageFormat::Png => "page.png",
+            PageFormat::Pdf => "page.pdf",
+            PageFormat::SingleHtml => "page-one-file.html",
         };
         page[key] = entry;
         Ok(())

@@ -87,7 +87,7 @@
   color: var(--text-2);
   cursor: pointer;
   padding: 3px 5px;
-  border-radius: 5px;
+  border-radius: var(--radius-5);
 }
 .gb-more summary:focus-visible {
   outline: 2px solid var(--text-2);

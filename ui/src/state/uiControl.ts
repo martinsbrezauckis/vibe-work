@@ -8,9 +8,13 @@
  * message, never a hung request); an unknown name is a `notFound` reply; the loop never throws
  * and backs off after a transport error; in the real app it only polls while the Debug API is on;
  * slow handlers and tracked commands acknowledge within `REPLY_MS` with a pending id; their final reply follows
- * on the same transport. Pure state reads remain available; another action answers busy until completion.
- * The capability stays attached to that one action through its awaits and command drain, for at most `LEASE_MS`:
- * a wait nobody ends (a native dialog with no person at it) lets go then, like the host's lease does.
+ * on the same transport. Pure state reads remain available; another action answers busy until completion, for at
+ * most `ACTION_SLOT_MS`: a wait nobody ends (a native dialog with no person at it) lets go then, as the host forgets
+ * the request.
+ * Authority: none lives here. A request carries only its id, route and body; the commands a handler sends are the
+ * window's, like a click's (the host decides in Rust which few of them a request's grants let run as the Debug API,
+ * `crates/vw-host/src/ui_grants.rs`). The action key below only groups an action's commands so its reply waits for
+ * them; it is never sent anywhere.
  */
 import type {
   UiControlReply,
@@ -19,7 +23,8 @@ import type {
 } from "../protocol/client/types";
 import { createCommandTrace } from "./commandTrace";
 import { createWalkthrough } from "./walkthrough";
-import type { ErrorCode } from "../protocol/core";
+import type { CoreError, ErrorCode } from "../protocol/core";
+import { toCallError } from "../protocol/client/types";
 
 /** A handler's failure with a machine-readable code (the Debug API maps it to a status). */
 export class UiControlError extends Error {
@@ -42,13 +47,12 @@ export const DRAIN_MS = 3_000;
 /** A slow action acknowledges within this budget and completes through the same transport later. */
 export const REPLY_MS = 50;
 /**
- * How long an acknowledged action keeps the one busy slot and its capability. The host drops both after
- * `JOB_LIMIT` (`crates/vw-host/src/bridge.rs`, ten minutes, started a moment after this one): it refuses the
- * capability and discards the answer from then on. The window must let go no later, or every command it sends
- * (its own clicks included: they are marked with the serving capability) would be refused as a dead claim and every
- * other action would answer busy until the app restarts. A test keeps the two in step.
+ * How long an acknowledged action keeps the one busy slot. The host forgets the request after `JOB_LIMIT`
+ * (`crates/vw-host/src/bridge.rs`, ten minutes, started a moment after this one) and discards a later answer; the
+ * window lets go no later, or every other action would answer busy until the app restarts. A test keeps the two in
+ * step.
  */
-export const LEASE_MS = 10 * 60_000;
+export const ACTION_SLOT_MS = 10 * 60_000;
 
 /** Creates a registry of handlers. */
 export function createUiControl() {
@@ -57,28 +61,22 @@ export function createUiControl() {
   let requestTrigger: string | null = null;
   const handlers = new Map<string, { handler: UiHandler; readOnly: (body: unknown) => boolean }>();
   let active: string | null = null;
-  // The capabilities of the requests being served right now (the newest last); while any is, the core
-  // controller marks every command as the Debug API's and passes the capability (logs, refusal events
-  // and the transcript say who acted; the host accepts the Debug API origin, which
-  // acts as the user without native dialogs, only with the capability of a request still pending, so a script in
-  // the window cannot claim it). A user click in that moment is marked too.
+  // The actions being served right now (page-local keys, the newest last). Commands the app sends meanwhile are
+  // recorded under the newest one so its reply follows their answers (a Debug API client that reads right after
+  // the reply sees what the action did). The key carries no authority and never leaves the page.
   const serving: string[] = [];
-  // Commands sent with a request's capability that the host has not answered yet. The reply waits for
-  // them: the host accepts the capability only while the request is pending, and Tauri does not keep invokes in
-  // order, so a command sent before the reply could reach the host after it and be refused.
+  let nextAction = 0;
+  // Commands of an action that the host has not answered yet; the reply waits for them (bounded by `DRAIN_MS`).
   const inflight = new Map<string, Set<Promise<unknown>>>();
   // Whole actions include deferred commands, such as the prepare/show native menu handoff.
   const actions = new Map<string, Set<Promise<unknown>>>();
-  // `over` turns true once the action let go (its lease ended): the wait stops, so no timer runs on for it.
-  const drain = async (
-    capability: string,
-    bounded: boolean,
-    over: () => boolean,
-  ): Promise<void> => {
+  const failures = new Map<string, CoreError>();
+  // `over` turns true once the action let go (its slot ended): the wait stops, so no timer runs on for it.
+  const drain = async (action: string, bounded: boolean, over: () => boolean): Promise<void> => {
     const deadline = Date.now() + DRAIN_MS;
     for (;;) {
-      const pending = inflight.get(capability);
-      const actionPending = (actions.get(capability)?.size ?? 0) > 0;
+      const pending = inflight.get(action);
+      const actionPending = (actions.get(action)?.size ?? 0) > 0;
       const left = bounded && !actionPending ? deadline - Date.now() : DRAIN_MS;
       if (over() || pending === undefined || pending.size === 0 || left <= 0) return;
       let timer: ReturnType<typeof setTimeout> | undefined;
@@ -107,35 +105,37 @@ export function createUiControl() {
       return clicked ?? requestTrigger;
     },
     /**
-     * Records a command the core controller sent with `capability`; the request's reply waits for it (bounded by
-     * [`DRAIN_MS`]). Whole actions (`untilComplete`) retain the capability through deferred commands.
+     * Records a command the core controller sent while `action` was served; the action's reply waits for it (bounded
+     * by [`DRAIN_MS`]). Whole actions (`untilComplete`) keep the reply open through deferred commands.
      * Returns `promise` unchanged.
      */
-    track<T>(capability: string, promise: Promise<T>, untilComplete = false): Promise<T> {
-      let set = inflight.get(capability);
+    track<T>(action: string, promise: Promise<T>, untilComplete = false): Promise<T> {
+      let set = inflight.get(action);
       if (set === undefined) {
         set = new Set();
-        inflight.set(capability, set);
+        inflight.set(action, set);
       }
       const entry: Promise<unknown> = promise.then(
         () => undefined,
-        () => undefined,
+        (thrown: unknown) => {
+          if (serving.includes(action) && !failures.has(action))
+            failures.set(action, toCallError(thrown).error);
+        },
       );
       set.add(entry);
-      let actionSet = actions.get(capability);
+      let actionSet = actions.get(action);
       if (untilComplete) {
         if (actionSet === undefined) {
           actionSet = new Set();
-          actions.set(capability, actionSet);
+          actions.set(action, actionSet);
         }
         actionSet.add(entry);
       }
       void entry.then(() => {
         set.delete(entry);
         actionSet?.delete(entry);
-        if (actionSet?.size === 0 && actions.get(capability) === actionSet)
-          actions.delete(capability);
-        if (set.size === 0 && inflight.get(capability) === set) inflight.delete(capability);
+        if (actionSet?.size === 0 && actions.get(action) === actionSet) actions.delete(action);
+        if (set.size === 0 && inflight.get(action) === set) inflight.delete(action);
       });
       return promise;
     },
@@ -143,12 +143,9 @@ export function createUiControl() {
     serving(): boolean {
       return serving.length > 0;
     },
-    /**
-     * The capability of the request being served (the newest when several are), `null` when none is. A request
-     * from a transport without capabilities (a browser UI) gives `""`, which the app's host would refuse.
-     */
-    servingCapability(): string | null {
-      return serving.length > 0 ? (serving[serving.length - 1] ?? "") : null;
+    /** The page-local key of the action being served (the newest when several are), `null` when none is. */
+    servingAction(): string | null {
+      return serving.length > 0 ? (serving[serving.length - 1] ?? null) : null;
     },
     /** Registers `name`; returns the function that removes it. Throws on a duplicate. */
     register(
@@ -187,18 +184,20 @@ export function createUiControl() {
           value: { pendingId: active, state: "busy", poll: "/ui/requests" },
         };
       }
-      const capability = request.capability ?? "";
-      // A pure read cannot send commands or take another action's capability.
-      if (!readOnly) serving.push(capability);
-      // Gives up the capability and the busy slot. Runs once: when the action finishes or when its lease ends.
+      nextAction += 1;
+      const action = `action-${String(nextAction)}`;
+      // A pure read does not collect commands for its reply.
+      if (!readOnly) serving.push(action);
+      // Gives up the busy slot. Runs once: when the action finishes or when its slot time ends.
       let held = true;
       const release = (): void => {
         if (!held) return;
         held = false;
         if (!readOnly) {
-          serving.splice(serving.lastIndexOf(capability), 1);
+          serving.splice(serving.lastIndexOf(action), 1);
           if (serving.length === 0) requestTrigger = null;
         }
+        failures.delete(action);
         if (active === request.id) active = null;
       };
       const work = (async (): Promise<UiControlReply> => {
@@ -206,13 +205,27 @@ export function createUiControl() {
         try {
           reply = { id: request.id, ok: true, value: await route.handler(request.body) };
         } catch (thrown) {
-          const code = thrown instanceof UiControlError ? thrown.code : "internal";
-          const message = thrown instanceof Error ? thrown.message : "the UI route failed";
-          reply = { id: request.id, ok: false, error: { code, message } };
+          const error = toCallError(thrown).error;
+          reply = {
+            id: request.id,
+            ok: false,
+            error: {
+              code: error.code,
+              message: error.message,
+              ...(error.serverCode === null ? {} : { serverCode: error.serverCode }),
+            },
+          };
         }
         try {
           // Still serving while it waits: a command a pending one starts is marked and waited for too.
-          if (!readOnly) await drain(capability, completed === undefined, () => !held);
+          if (!readOnly) await drain(action, completed === undefined, () => !held);
+          const failure = failures.get(action);
+          if (request.name === "click" && reply.ok && failure !== undefined)
+            reply = {
+              id: request.id,
+              ok: false,
+              error: { code: failure.code, message: failure.message },
+            };
         } finally {
           release();
         }
@@ -230,17 +243,17 @@ export function createUiControl() {
       ]);
       clearTimeout(timer);
       if (reply !== null) return reply;
-      active = request.id;
-      // The wait may never end (a native dialog nobody answers). At the lease's end the window lets go and drops the
+      if (!readOnly) active = request.id;
+      // The wait may never end (a native dialog nobody answers). At the slot's end the window lets go and drops the
       // late answer: the host no longer has the request, so it would refuse it anyway.
       let expired = false;
-      const lease = setTimeout(() => {
+      const slot = setTimeout(() => {
         expired = true;
         release();
-      }, LEASE_MS);
+      }, ACTION_SLOT_MS);
       void work
         .then((done) => {
-          clearTimeout(lease);
+          clearTimeout(slot);
           return expired ? undefined : completed(done);
         })
         .catch(() => undefined);

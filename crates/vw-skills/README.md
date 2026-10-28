@@ -4,7 +4,7 @@ This crate depends on serde and typed errors. A future app adapter supplies its
 transport and session id; the crate sends Vibe requests and projects returned
 data without reading skills directories or owning a process.
 
-`SkillsClient<T>` exposes the thirteen `skills/*` methods from Vibe v2.26.1.
+`SkillsClient<T>` exposes the thirteen `skills/*` methods from Vibe 3.0.0.
 `SkillsTransport::request` returns the unwrapped JSON-RPC result, or
 `TransportError::Reply(ProtocolError)` for an error reply. Its future is `Send`.
 The trait uses Rust's native return-position future, so no async-trait dependency
@@ -56,7 +56,7 @@ folder validation messages.
 UI's notification lifetime instead of polling it as a persistent update status;
 the catalog's `updates` map is the persistent signal for frozen pins.
 
-Wire types and JSON fixtures come from the tagged Pydantic models, including
+Wire types and JSON fixtures come from the installed Pydantic models, including
 nonempty default factories and the MCP display-name validator. Unknown extra
 fields are ignored, nullable missing fields are `None`, declared defaults match
 Vibe, and missing required fields or wrong known types fail deserialization.
@@ -65,12 +65,12 @@ Requests do not validate inputs a second time.
 Regenerate/check with the pinned Vibe environment:
 
 ```sh
-data/venv/bin/python crates/vw-skills/tools/generate.py --write
-data/venv/bin/python crates/vw-skills/tools/generate.py --check
+vibe_pin=$(cat tools/public/codegen/vibe.pin)
+"${VIBE_PYTHON:-data/vibe-$vibe_pin/venv/bin/python}" crates/vw-skills/tools/generate.py --write
+"${VIBE_PYTHON:-data/vibe-$vibe_pin/venv/bin/python}" crates/vw-skills/tools/generate.py --check
 ```
 
-The generator archives `data/mistral-vibe` at **v2.26.1**, independent of checkout
-HEAD. Fixture requests/results are model-written examples, not captured user
+The generator checks that the interpreter has **mistral-vibe 3.0.2** installed. Fixture requests/results are model-written examples, not captured user
 sessions. The schema fixtures preserve upstream JSON Schema for contract tests;
 JSON fixtures use valid JSON without comment headers.
 
@@ -81,7 +81,8 @@ cargo fmt --all --check
 VW_SKILLS_LIVE=1 cargo test -p vw-skills --test live -- --nocapture
 ```
 
-The opt-in live test needs `data/venv` and the local Vibe tag. It starts the actual
-tagged legacy server with a disposable home/project, a keyless local model
+The opt-in live test uses `VIBE_PYTHON`, otherwise `data/vibe-<vibe.pin>/venv/bin/python`
+(`Scripts/python.exe` on Windows), reading the version from `tools/public/codegen/vibe.pin`. It starts the actual
+installed server with a disposable home/project, a keyless local model
 configuration, no inherited environment, and an audit hook rejecting Internet
 sockets. It submits no model turn. Without the switch it reports `SKIPPED`.

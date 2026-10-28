@@ -1,9 +1,11 @@
 /**
  * The transcript of one session: the session's history as rows (`model/build.ts`) in a
  * virtualised list (`virtua` 0.53.3 `VList`), the pinned todo strip, "Jump to latest", the link
- * dialog and a polite live region that says when Vibe waits for an answer.
- * Depends on: model (memo, todos), rows/RowView, useFollow, TodoStrip, LinkDialog, the core and
- * transcript stores. Called by: the shell's content area (keyed by session id, so switching sessions
+ * dialog and Quote in reply for a selection in an answer (`useQuoteMenu`). Prompts are announced by the
+ * app's announcer (`features/ask/askAnnouncements.ts`), not here; a card that "Go to the waiting prompt" asks
+ * for is scrolled into view.
+ * Depends on: model (memo, todos), rows/RowView, useFollow, TodoStrip, LinkDialog, the ask card focus requests,
+ * the core and transcript stores. Called by: the shell's content area (keyed by session id, so switching sessions
  * starts fresh).
  * Invariants: the component reads the store only; a session the app knows only from the listing is
  * loaded once (`ensureLoaded`); rows are rebuilt on every store change but unchanged rows keep their
@@ -21,6 +23,7 @@ import { FileRefsProvider } from "../files/FileRef";
 import { useApp } from "../shell/AppContext";
 import { useCoreState } from "../shell/hooks";
 import { useTranscriptUi } from "./hooks";
+import { useStepTarget } from "./useStepTarget";
 import { FindBar } from "./FindBar";
 import { LinkDialog } from "./LinkDialog";
 import { SourcesPanel } from "./SourcesPanel";
@@ -30,7 +33,11 @@ import { subagentRows } from "./model/subagentRows";
 import { latestTodos } from "./model/todos";
 import { RowView } from "./rows/RowView";
 import { TodoStrip } from "./TodoStrip";
+import { onCardFocusRequest, pendingCardFocus } from "../ask/cardFocus";
+import { protectedChangeOf } from "./model/protectedChange";
+import { obj, str } from "./model/entries";
 import { useFollow } from "./useFollow";
+import { useQuoteMenu } from "./useQuoteMenu";
 
 const NONE: readonly JsonValue[] = [];
 
@@ -38,17 +45,30 @@ function list(value: JsonValue | undefined): readonly JsonValue[] {
   return Array.isArray(value) ? value : NONE;
 }
 
-/** What the live region says: an open callback first, else the running group's status. */
-function liveText(rows: readonly Row[]): string {
-  if (rows.some((row) => row.kind === "callback")) return "Vibe is waiting for your answer.";
-  const last = rows[rows.length - 1];
-  return last?.kind === "steps" && last.live ? last.statusText || "Working" : "";
+/** True for a row that waits for the user's answer (a card, or an open Chrome Control card). */
+function waiting(row: Row): boolean {
+  if (row.kind === "callback") return true;
+  if (row.kind === "protectedChange") return protectedChangeOf(row.entry)?.status === "pending";
+  if (row.kind !== "chromeAsk") return false;
+  const card = row.entry["chromeAsk"];
+  return typeof card === "object" && card !== null && !Array.isArray(card) && card["open"] === true;
+}
+
+/** The AskCard id a row holds (`AskCard`'s `id`), if it is a card. */
+function cardIdOfRow(row: Row): string | null {
+  if (row.kind === "protectedChange") return row.key;
+  if (row.kind === "callback") return str(row.entry["callbackId"]);
+  if (row.kind === "chromeAsk") return str(obj(row.entry["chromeAsk"])?.["askId"]);
+  return null;
 }
 
 /** Renders the transcript of `sessionId`. */
 export function Transcript({ sessionId }: { sessionId: string }): ReactElement {
   const covered = useCoveredByPage();
-  const { transcript, find } = useApp();
+  const app = useApp();
+  const { transcript, find } = app;
+  // Quote in reply: a right click on text selected in one of Vibe's answers.
+  const quote = useQuoteMenu(app, sessionId);
   const finding = useStore(find.store, (s) => s.conversation?.sessionId === sessionId);
   const entry = useCoreState((s) => s.sessions[sessionId]);
   const loading = useTranscriptUi((s) => s.loading[sessionId] === true);
@@ -69,8 +89,19 @@ export function Transcript({ sessionId }: { sessionId: string }): ReactElement {
   );
   const todos = useMemo(() => latestTodos(history), [history]);
   const listRef = useRef<VListHandle>(null);
-  const attention = rows.reduce((last, row, index) => (row.kind === "callback" ? index : last), -1);
+  const attention = rows.reduce((last, row, index) => (waiting(row) ? index : last), -1);
   const follow = useFollow(listRef, rows.length, rows, { paused: finding, attention });
+  useStepTarget(sessionId, rows, listRef, follow.pause);
+  // "Go to the waiting prompt": a card the list has not drawn is scrolled into view (it then takes the focus).
+  useEffect(() => {
+    const scroll = (id: string) => {
+      const index = rows.findIndex((row) => cardIdOfRow(row) === id);
+      if (index >= 0) listRef.current?.scrollToIndex(index, { align: "end" });
+    };
+    const waiting = pendingCardFocus();
+    if (waiting !== null) scroll(waiting);
+    return onCardFocusRequest(scroll);
+  }, [rows]);
   const unloaded = entry !== undefined && entry.state === null && !entry.localOnly;
 
   useEffect(() => {
@@ -86,7 +117,17 @@ export function Transcript({ sessionId }: { sessionId: string }): ReactElement {
   }
   return (
     <FileRefsProvider sessionId={sessionId}>
-      <div className="tx" {...follow.intent}>
+      <div
+        data-testid="transcript.view"
+        className="tx"
+        {...follow.intent}
+        onContextMenu={quote.onContextMenu}
+        onKeyDown={(event) => {
+          follow.intent.onKeyDown(event);
+          quote.onKeyDown(event);
+        }}
+      >
+        {quote.element}
         {/* find in this conversation (Ctrl F, or a message result of the global search). */}
         <FindBar sessionId={sessionId} rows={rows} listRef={listRef} />
         {todos !== null && todos.length > 0 ? <TodoStrip todos={todos} /> : null}
@@ -121,9 +162,6 @@ export function Transcript({ sessionId }: { sessionId: string }): ReactElement {
             Jump to latest
           </button>
         )}
-        <p className="sr" aria-live="polite">
-          {liveText(rows)}
-        </p>
         {/* Not while a page covers the work view: the page shows its own content. */}
         {!covered && <SourcesPanel />}
         {!covered && <LinkDialog />}

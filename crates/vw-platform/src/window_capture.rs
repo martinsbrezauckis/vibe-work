@@ -7,8 +7,10 @@
 //!   windows cover it; it hands back the display's ICC profile (`GetICMProfileW`), because `WebView2` renders in
 //!   the display's colour space and the caller converts to sRGB. [`own_windows`] lists this
 //!   process's visible top-level windows (the main window and native dialogs such as the confirmation box).
-//! - macOS: [`view_place`] reports where a `WKWebView` sits in its window (top-left origin, points), whether it
-//!   is hidden, and the window's backing scale, so the caller can compose the webviews' own snapshots.
+//! - macOS: [`view_place`] reports where a `WKWebView` sits in its window (top-left origin, points), where its
+//!   page's viewport starts ([`viewport_top`]: below the title bar for a webview that reaches under it), whether it
+//!   is hidden, and the window's backing scale, so the caller can compose the webviews' own snapshots and place
+//!   child webviews in the main page's coordinates.
 //!
 //! Feature `webview`. Depends on: windows (Windows), objc2 / objc2-app-kit (macOS). Called by: vw-webview
 //! (`window_shot`).
@@ -40,6 +42,20 @@ pub use windows_impl::{OwnWindow, own_windows, print_window};
 
 #[cfg(target_os = "macos")]
 pub use macos_impl::{ViewPlace, view_place};
+
+/// Top edge of a `WKWebView`'s page viewport in its window's content view (top-left origin, points).
+///
+/// `view_top` is the view's top edge there. `title_bar_bottom` is the bottom of the title bar in the same
+/// coordinates (the top of the window's `contentLayoutRect`) when the window has a full-size content view under an
+/// opaque title bar (Tauri's default macOS title bar style), `None` otherwise. In that case `WebKit` gives the view
+/// an automatic top content inset (`WebViewImpl::updateContentInsetsIfAutomatic`: the part of the view above the
+/// content layout rect), so the page's CSS `y = 0` is at the title bar's bottom, not at the view's top: the app's
+/// own page fills the content view from its top and starts 32 pt lower (the title bar), and a view parked
+/// 10,000 pt above the window got a 10,032 pt inset.
+#[must_use]
+pub fn viewport_top(view_top: f64, title_bar_bottom: Option<f64>) -> f64 {
+    title_bar_bottom.map_or(view_top, |bottom| view_top.max(bottom))
+}
 
 #[cfg(windows)]
 #[allow(unsafe_code)]
@@ -270,7 +286,7 @@ mod windows_impl {
 mod macos_impl {
     use std::ffi::c_void;
 
-    use objc2_app_kit::NSView;
+    use objc2_app_kit::{NSView, NSWindowStyleMask};
 
     /// Where a webview's view sits in its window.
     #[derive(Clone, Copy, Debug, PartialEq)]
@@ -283,6 +299,9 @@ mod macos_impl {
         pub width: f64,
         /// Height, points.
         pub height: f64,
+        /// Top edge of the page's viewport in the window's content (top-left origin), points: `y` plus the
+        /// automatic title bar inset `WebKit` gives a view that reaches under an opaque title bar ([`super::viewport_top`]).
+        pub viewport_top: f64,
         /// The content view's height, points (the composite's height).
         pub content_height: f64,
         /// The content view's width, points.
@@ -310,21 +329,54 @@ mod macos_impl {
             let bounds = view.bounds();
             let in_content = view.convertRect_toView(bounds, Some(&content));
             // AppKit's content view is not flipped: origin bottom-left. The composite uses top-left.
-            let top = if content.isFlipped() {
-                in_content.origin.y
-            } else {
-                content_frame.size.height - in_content.origin.y - in_content.size.height
+            let top_of = |origin_y: f64, height: f64| {
+                if content.isFlipped() {
+                    origin_y
+                } else {
+                    content_frame.size.height - origin_y - height
+                }
             };
+            let top = top_of(in_content.origin.y, in_content.size.height);
+            // WebKit's condition for the automatic inset: a full-size content view under an opaque title bar.
+            let title_bar_bottom = (window
+                .styleMask()
+                .contains(NSWindowStyleMask::FullSizeContentView)
+                && !window.titlebarAppearsTransparent())
+            .then(|| {
+                let layout = content.convertRect_fromView(window.contentLayoutRect(), None);
+                top_of(layout.origin.y, layout.size.height)
+            });
             Some(ViewPlace {
                 x: in_content.origin.x,
                 y: top,
                 width: in_content.size.width,
                 height: in_content.size.height,
+                viewport_top: super::viewport_top(top, title_bar_bottom),
                 content_height: content_frame.size.height,
                 content_width: content_frame.size.width,
                 hidden: view.isHiddenOrHasHiddenAncestor(),
                 scale: window.backingScaleFactor(),
             })
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::viewport_top;
+
+    #[test]
+    fn a_view_under_an_opaque_full_size_title_bar_starts_its_page_below_the_title_bar() {
+        // The app's own page: fills the content view from its top, the title bar is 32 pt.
+        assert!((viewport_top(0.0, Some(32.0)) - 32.0).abs() < f64::EPSILON);
+        // A view parked above the window: its page starts at the title bar too (the 10,032 pt inset).
+        assert!((viewport_top(-10_000.0, Some(32.0)) - 32.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn a_view_below_the_title_bar_or_without_one_starts_at_its_top() {
+        assert!((viewport_top(296.0, Some(32.0)) - 296.0).abs() < f64::EPSILON);
+        assert!((viewport_top(0.0, None)).abs() < f64::EPSILON);
+        assert!((viewport_top(-40.0, None) + 40.0).abs() < f64::EPSILON);
     }
 }

@@ -6,6 +6,7 @@
  * Invariants: tolerant of the two shapes `status` has been seen in (`{type: "running"}` from Vibe,
  * a bare string from the scripted test server); an unknown status is shown as idle, never thrown.
  */
+import { pendingHistoryAsks } from "../features/transcript/model/protectedChange";
 import type { JsonValue } from "../protocol/core";
 
 /** The badge shown next to a session, including failure state. */
@@ -38,6 +39,8 @@ export interface SessionSummary {
   /** Vibe's `bumpedAt` (last real activity), falling back to `updatedAt`: the list sort key. */
   bumpedAt: number;
   archived: boolean;
+  /** Loaded without a turn and not working: Vibe has no restorable chat to archive yet. */
+  neverRan: boolean;
   /** `pinnedAt` is set. */
   pinned: boolean;
   /** `parentSessionId` of a child (subagent) session; `null` for a top-level one. */
@@ -65,8 +68,12 @@ export interface SessionEntry {
   localOnly: boolean;
   /** The core's resolved access mode, available even before the session has a runtime. */
   accessMode?: string;
+  /** Ownership derived by the core from the parent's childSessions, never from ancestry alone. */
+  ownedByParent?: boolean;
   /** Callbacks (approvals, questions) currently open, from `callbacksChanged`. */
   openCallbackIds: readonly string[];
+  /** Open cards hosted for owned subagents, independent of the parent turn status. */
+  childCallbackIds?: readonly string[];
   /**
    * The latest `RuntimeSnapshot` (models, profiles, active agent) from `runtimeUpdated` or a reply that
    * carried one (the composer's pickers); absent until one arrived.
@@ -75,7 +82,7 @@ export interface SessionEntry {
 }
 
 function str(value: JsonValue | undefined): string | null {
-  return typeof value === "string" && value !== "" ? value : null;
+  return typeof value === "string" && value.trim() !== "" ? value : null;
 }
 
 /** The status tag of a session object (`running`, `blocked`, `idle`, ...). */
@@ -98,6 +105,8 @@ export function projectOf(cwd: string | null): string {
 /** The badge for a session entry (`stuck` wins: nothing can run until the user acts). */
 export function badgeOf(entry: SessionEntry, stuck: StuckMap = {}): Badge {
   if (entry.id in stuck) return "stuck";
+  if ((entry.childCallbackIds?.length ?? 0) > 0) return "input";
+  if (pendingHistoryAsks(entry.state?.["history"]).length > 0) return "input";
   const type = statusType(entry.session);
   // An open callback only counts while the session is working: the session's status decides, and an
   // idle session cannot be waiting for anything.
@@ -108,6 +117,11 @@ export function badgeOf(entry: SessionEntry, stuck: StuckMap = {}): Badge {
   return entry.session["isUnseen"] === true ? "done" : "idle";
 }
 
+/** The session's visible name while Vibe is still preparing its title. */
+export function sessionTitle(session: SessionEntry["session"] | undefined): string {
+  return str(session?.["title"]) ?? str(session?.["preview"]) ?? "Untitled session";
+}
+
 /** Derives the row for one entry. */
 export function summarize(entry: SessionEntry, stuck: StuckMap = {}): SessionSummary {
   const s = entry.session;
@@ -115,9 +129,11 @@ export function summarize(entry: SessionEntry, stuck: StuckMap = {}): SessionSum
   const updated = s["updatedAt"];
   const num = (v: JsonValue | undefined): number | null => (typeof v === "number" ? v : null);
   const roots = s["workspaceRoots"];
+  const turns = entry.state?.["turns"];
+  const working = ["running", "blocked"].includes(statusType(s));
   return {
     id: entry.id,
-    title: str(s["title"]) ?? str(s["preview"]) ?? "Untitled session",
+    title: sessionTitle(s),
     project: projectOf(cwd),
     cwd,
     badge: badgeOf(entry, stuck),
@@ -125,6 +141,7 @@ export function summarize(entry: SessionEntry, stuck: StuckMap = {}): SessionSum
     updatedAt: typeof updated === "number" ? updated : 0,
     bumpedAt: num(s["bumpedAt"]) ?? (typeof updated === "number" ? updated : 0),
     archived: statusType(s) === "archived" || num(s["archivedAt"]) !== null,
+    neverRan: Array.isArray(turns) && turns.length === 0 && !working,
     pinned: num(s["pinnedAt"]) !== null,
     parentId: str(s["parentSessionId"]),
     preview: typeof s["preview"] === "string" ? s["preview"] : "",

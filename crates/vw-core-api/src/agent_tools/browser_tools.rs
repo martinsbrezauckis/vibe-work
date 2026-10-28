@@ -1,6 +1,5 @@
 //! `browser_read` / `browser_act` behind a session credential: the session's own built-in browser only.
-//! `target` keeps the routed shape for the user's own Chrome: any value other than `builtin` is refused
-//! with a clear message.
+//! Only the built-in target runs here; old Chrome requests point to the separate Chrome tools.
 //!
 //! Depends on: `browser` (driver, navigation), vw-browser, vw-agent-tools (`wire`). Called by: `tools::call`.
 //! `browser_act` `fill` goes to `browser_fill` (a vault login into a sign-in field) before the driver.
@@ -17,14 +16,13 @@ use vw_browser::Actor;
 use crate::browser::{CoreNav, browser, read_options};
 use crate::core::Shared;
 
-fn target(args: &Value) -> Result<(), String> {
+fn target(chrome_available: bool, args: &Value) -> Result<(), String> {
+    if args["target"] == "chrome" && !chrome_available {
+        return Err("This version works in Vibe Work's own browser.".to_owned());
+    }
     match args.get("target").and_then(Value::as_str) {
         None | Some("builtin") => Ok(()),
-        Some("chrome") => Err(
-            "target 'chrome' (your own Chrome) is not available yet: use target 'builtin' (the default), the \
-             browser in Vibe Work next to the chat"
-                .to_owned(),
-        ),
+        Some("chrome") => Err("Use use_your_chrome for the user's Chrome.".to_owned()),
         Some(other) => Err(format!(
             "unknown target '{}': use 'builtin'",
             other.chars().take(20).collect::<String>()
@@ -55,6 +53,57 @@ fn agent_stopped(
             .any(|page| driver.sessions().stopped(page))
 }
 
+/// Checks consent before the MCP call starts; the returned action has no person-wait.
+pub(super) async fn prepare(
+    shared: &Arc<Shared>,
+    owner: &str,
+    args: &Value,
+) -> Result<Option<crate::ask::tool_calls::receipts::Execution>, String> {
+    target(shared.chrome_control.config.available(), args)?;
+    if args["action"] == "close_tab" {
+        return crate::browser_tab_tools::prepare_close(
+            shared,
+            owner,
+            args["tab"].as_str().unwrap_or_default(),
+        )
+        .await
+        .map(Some);
+    }
+    if args["action"] != "fill" {
+        return Ok(None);
+    }
+    let driver = browser(shared).map_err(|e| e.message)?;
+    let hub = crate::previews::hub(shared).map_err(|e| e.message)?;
+    let page = crate::browser_tabs::agent_page(&hub.service, owner, args["tab"].as_str())
+        .map_err(|e| e.message)?;
+    crate::browser_tabs::front_page(&hub.service, owner, &page)
+        .await
+        .map_err(|e| e.message)?;
+    let mut input = args.clone();
+    if let Some(input) = input.as_object_mut() {
+        input.remove("tab");
+    }
+    let action = crate::browser_fill::prepare(
+        shared,
+        driver,
+        &page,
+        &input,
+        Actor::Agent,
+        vw_gate::Requester::Agent,
+    )
+    .await?;
+    let shared = Arc::downgrade(shared);
+    let owner = owner.to_owned();
+    Ok(Some(Box::pin(async move {
+        let shared = shared.upgrade().ok_or("Browser closed.")?;
+        let mut receipt = action.await?;
+        check_current(&shared, &owner, &page)?;
+        attach_tab(&shared, &page, &mut receipt);
+        vw_browser::observe::fit(&mut receipt, vw_browser::observe::READ_BUDGET);
+        Ok(receipt)
+    })))
+}
+
 /// Runs one browser tool for `session_id`.
 #[allow(clippy::too_many_lines)]
 pub(crate) async fn call(
@@ -77,7 +126,7 @@ pub(crate) async fn call(
                 .to_owned(),
         );
     }
-    target(&args)?;
+    target(shared.chrome_control.config.available(), &args)?;
     let tab = match args.get("tab") {
         None => None,
         Some(Value::String(tab)) if !tab.trim().is_empty() => Some(tab.as_str()),
@@ -151,27 +200,6 @@ pub(crate) async fn call(
             }
             Ok(observation)
         }
-        names::BROWSER_ACT if args.get("action").and_then(Value::as_str) == Some("fill") => {
-            crate::agent_access::check(shared)?;
-            let mut args = args;
-            if let Value::Object(map) = &mut args {
-                map.remove("tab");
-            }
-            // A vault login into a sign-in field (the core's path: checks, grant, password, write).
-            let mut receipt = crate::browser_fill::fill(
-                shared,
-                driver,
-                &page,
-                &args,
-                Actor::Agent,
-                vw_gate::Requester::Agent,
-            )
-            .await?;
-            check_current(shared, session_id, &page)?;
-            attach_tab(shared, &page, &mut receipt);
-            vw_browser::observe::fit(&mut receipt, vw_browser::observe::READ_BUDGET);
-            Ok(receipt)
-        }
         names::BROWSER_ACT => {
             let mut args = args;
             if let Value::Object(map) = &mut args {
@@ -240,5 +268,18 @@ pub(crate) fn attach_tab(shared: &Shared, page: &str, answer: &mut Value) {
     } else {
         answer["tab"] = json!({"id": page, "site": null});
         answer["untrustedPageContent"]["tab"] = json!({"title": null, "url": null});
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn legacy_chrome_target_points_to_the_users_chrome_tools() {
+        assert_eq!(
+            target(true, &json!({"target": "chrome"})),
+            Err("Use use_your_chrome for the user's Chrome.".to_owned())
+        );
     }
 }

@@ -16,7 +16,7 @@ workspace = true
 # provider is aws-lc-rs, a heavier C build) and the OS trust store through rustls-platform-verifier.
 # Windows and macOS: the OS TLS stack (SChannel, Security.framework) through native-tls: OS trust
 # store and corporate CAs, and no C cross-compile (ring cannot be built for the msvc target from
-# WSL, which check-all's Windows lint needs). No decompression features: the model proxy passes
+# WSL, which the Windows cross-target lint needs). No decompression features: the model proxy passes
 # compressed bodies through untouched. Versions.
 reqwest = { version = "0.13.5", default-features = false, features = ["http2", "stream", "system-proxy"] }
 # base64 0.23.1 (already in the lock file): the OCR request carries the file as a data: URL.
@@ -37,6 +37,10 @@ sha2 = "0.10.9"
 # no aws-lc. 0.30.0 checked on crates.io.
 tokio-tungstenite = { version = "0.30", default-features = false, features = ["handshake"] }
 futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
+# image-rs TIFF 0.11.3 (MIT): bounded frame decoding before image OCR.
+# PNG 0.18.1 (MIT OR Apache-2.0, already used by image): lossless per-frame input.
+tiff = "0.11.3"
+png = "0.18.1"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 reqwest = { version = "0.13.5", default-features = false, features = ["rustls-no-provider"] }

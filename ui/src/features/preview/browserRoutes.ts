@@ -10,6 +10,8 @@
  * Invariants: bodies are validated (`invalidParams`); `sessionId` defaults to the selected session; crops are not
  * returned (their presence is).
  */
+import { writeClipboard } from "../../state/clipboard";
+import { panelOwner } from "../../state/shellState";
 import { UiControlError } from "../../state/uiControl";
 import type { App } from "../shell/AppContext";
 import { awayFromHome } from "../shell/home";
@@ -18,6 +20,7 @@ import { CAPTURE_KINDS, type Capture } from "./capture";
 import { addressToUrl, isLocalPage } from "./browserModel";
 import type { Previews } from "./store";
 import { pickPreviewVisibilityReason, previewVisibility } from "./visibility";
+import { pointPreview } from "../pages/point";
 
 function asObject(body: unknown): Record<string, unknown> {
   if (body === undefined || body === null) return {};
@@ -107,9 +110,46 @@ export function registerBrowserRoute(
   return app.uiControl.register("browser", async (body) => {
     const args = asObject(body);
     const sessionId =
-      typeof args["sessionId"] === "string" ? args["sessionId"] : app.shell.store.get().selected;
+      typeof args["sessionId"] === "string" ? args["sessionId"] : panelOwner(app.shell.store.get());
     if (sessionId === null) throw new UiControlError("invalidParams", "no session is selected");
     switch (args["action"] ?? "state") {
+      case "saveToVault":
+        if (app.core === null)
+          throw new UiControlError("serverUnavailable", "Vibe Work is not connected.");
+        return app.core.run({
+          type: "browser",
+          request: {
+            op: "chooseSecret",
+            sessionId,
+            tabId: text(args["tabId"], "tabId"),
+            mode: "selection",
+          },
+        });
+      case "pointAt":
+      case "copy": {
+        const tabId = text(args["tabId"], "tabId");
+        const target = args["target"];
+        if (typeof target !== "object" || target === null || Array.isArray(target))
+          throw new UiControlError(
+            "invalidParams",
+            "target must name an element and optional quote",
+          );
+        if (args["action"] === "pointAt") {
+          const result = await pointPreview(app, sessionId, "debug-api", target, tabId);
+          if (!result.ok) throw new UiControlError("invalidParams", result.reason);
+          return result;
+        }
+        if (app.core === null)
+          throw new UiControlError("serverUnavailable", "Vibe Work is not connected.");
+        const reply = await app.core.run({
+          type: "preview",
+          request: { op: "copyText", sessionId, tabId, target },
+        });
+        if (reply.type !== "preview" || reply.result.type !== "copied")
+          throw new UiControlError("internal", "the page did not answer Copy");
+        await writeClipboard(reply.result.text);
+        return { copied: reply.result.text };
+      }
       case "state":
         await Promise.all([
           browser.load(sessionId),

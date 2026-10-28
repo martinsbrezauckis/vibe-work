@@ -21,6 +21,7 @@ impl Browser {
         nav: &dyn Navigate,
         by: Actor,
     ) -> Result<(), String> {
+        let _retry_owner = (by == Actor::Agent).then(|| self.service.agent_navigation(session_id));
         nav.open(session_id, url).await?;
         let Some((target, reason)) = self.navigation_refusal(session_id, Some(url)) else {
             return Ok(());

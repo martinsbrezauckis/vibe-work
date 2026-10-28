@@ -46,7 +46,7 @@ export function useProjectActions(projectId: string, title: string) {
     },
     {
       id: "folder",
-      label: "Change main folder...",
+      label: "Change main folder…",
       run: () => void projects?.chooseFolder(projectId),
     },
     {
@@ -62,7 +62,7 @@ export function useProjectActions(projectId: string, title: string) {
     },
     {
       id: "delete",
-      label: "Delete project...",
+      label: "Delete project…",
       run: () => {
         projects?.groups.askDelete(projectId);
       },

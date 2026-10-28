@@ -22,7 +22,7 @@ const emptyView = (): DocView => ({
 });
 
 /** Portable Markdown basename; paths are never accepted by the name field. */
-export function instructionNameError(name: string): string | null {
+function instructionNameError(name: string): string | null {
   if (!/^[a-zA-Z0-9][a-zA-Z0-9_-]*\.md$/i.test(name) || name.length > 96)
     return "Use a Markdown file name, such as code-style.md (letters, numbers, - or _).";
   if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])\.md$/i.test(name))
@@ -33,16 +33,24 @@ export function instructionNameError(name: string): string | null {
 }
 
 /** Creates a controller bound to one saved project and main-folder identity. */
-export function createProjectInstructions(core: CoreController, projectId: string, folder: string) {
+function createProjectInstructions(core: CoreController, projectId: string, folder: string) {
   const store = createStore({
     files: [] as ProjectInstructionFile[],
     loading: false,
+    trust: null as string | null,
     error: null as string | null,
     name: null as string | null,
     view: emptyView(),
   });
   const patchView = (fields: Partial<DocView>) => {
     store.set((s) => ({ ...s, view: { ...s.view, ...fields } }));
+  };
+  const setTrust = (trust: string | null) => {
+    store.set((s) => ({
+      ...s,
+      trust,
+      view: s.trust === trust ? s.view : { ...s.view, notice: null },
+    }));
   };
   const run = async (request: ProjectInstructionsRequest) => {
     const result = await core.run({ type: "projectInstructions", request });
@@ -69,7 +77,25 @@ export function createProjectInstructions(core: CoreController, projectId: strin
   };
   const controller = {
     store,
+    async refreshTrust() {
+      try {
+        const reply = await core.run({
+          type: "call",
+          method: "workspace/trust/status",
+          params: { cwd: folder },
+        });
+        const result = reply.type === "reply" ? reply.result : null;
+        const status =
+          typeof result === "object" && result !== null && !Array.isArray(result)
+            ? result["status"]
+            : null;
+        setTrust(typeof status === "string" ? status : null);
+      } catch {
+        setTrust(null);
+      }
+    },
     async refresh() {
+      await controller.refreshTrust();
       store.set((s) => ({ ...s, loading: true, error: null }));
       try {
         const result = await run({ op: "list", projectId });
@@ -135,7 +161,8 @@ export function createProjectInstructions(core: CoreController, projectId: strin
       if (
         name === null ||
         view.doc === null ||
-        !view.reviewing ||
+        (!view.reviewing && view.draftBy === "debug-api") ||
+        !isDirty(view) ||
         view.busy !== "idle" ||
         view.stale
       )
@@ -149,6 +176,7 @@ export function createProjectInstructions(core: CoreController, projectId: strin
             : { op: "create", ...common },
         );
         if (result.type !== "doc") throw new Error("Unexpected save result.");
+        await controller.refreshTrust();
         patchView({
           doc: result.doc,
           draft: result.doc.text,
@@ -156,7 +184,11 @@ export function createProjectInstructions(core: CoreController, projectId: strin
           reviewing: false,
           notice:
             name === "AGENTS.md" || store.get().files.some((f) => f.name === name && f.linked)
-              ? "Saved. Open sessions use updated instructions on their next message."
+              ? store.get().trust === "trusted"
+                ? "Saved."
+                : store.get().trust === "untrusted"
+                  ? "Saved. Vibe will not read these project instructions until you trust this folder; then start a new chat."
+                  : "Saved. Check folder trust before starting a new chat to use these instructions."
               : "Saved. Link this file from AGENTS.md so the agent knows to read it.",
         });
         await controller.refresh();
@@ -175,7 +207,7 @@ export function createProjectInstructions(core: CoreController, projectId: strin
           doc: result.doc,
           draft: result.draft,
           busy: "idle",
-          notice: "Review this AGENTS.md change, then Save to apply it.",
+          notice: "Save to apply this AGENTS.md change.",
         });
       } catch (thrown) {
         error(thrown);

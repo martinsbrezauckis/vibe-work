@@ -7,6 +7,7 @@
  * effect (Vibe writes `logs/mcp-descriptors/` and plugin packages into the shared folder); the warning
  * shows only when both versions are known and differ; nothing is shown outside the app window.
  */
+import { Switch } from "../../components/Controls";
 import { useCallback, useEffect, useState } from "react";
 
 import type { CliSharingView } from "../../protocol/client/types";
@@ -18,6 +19,7 @@ export function CliSharingSettings() {
   const { core, toasts } = useApp();
   const available = core !== null && core.client.kind !== "debug-api";
   const [view, setView] = useState<CliSharingView | null>(null);
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (core === null || !available) return;
@@ -34,7 +36,8 @@ export function CliSharingSettings() {
   }, [core, available]);
 
   const flip = useCallback(() => {
-    if (core === null || view === null) return;
+    if (core === null || view === null || saving) return;
+    setSaving(true);
     core.client
       .cliSharing(!view.share)
       .then((v) => {
@@ -46,8 +49,11 @@ export function CliSharingSettings() {
           bellKind: "failure",
           text: toCallError(thrown).error.message,
         });
+      })
+      .finally(() => {
+        setSaving(false);
       });
-  }, [core, view, toasts]);
+  }, [core, view, toasts, saving]);
 
   if (!available) return null;
   return (
@@ -60,7 +66,8 @@ export function CliSharingSettings() {
             Off (default): Vibe Work and the Vibe command line share one session list. Vibe then
             also writes its <span className="mono">logs/mcp-descriptors/</span> and plugin packages
             into the shared folder. On: Vibe Work keeps its own sessions. Applies the next time Vibe
-            Work starts.
+            Work starts. Each choice shows a different chat list; chats in the other list are
+            hidden, not deleted, until you switch back.
           </span>
           {view !== null && !view.cliHomeFound && (
             <span className="d" data-testid="cli-sharing-nohome">
@@ -68,14 +75,11 @@ export function CliSharingSettings() {
             </span>
           )}
         </span>
-        <button
+        <Switch
           data-testid="settings.cli-sharing-settings-switch"
-          type="button"
-          className="switch"
-          role="switch"
           aria-label="Keep Vibe Work sessions separate from the CLI"
           aria-checked={view !== null && !view.share}
-          disabled={view === null}
+          disabled={view === null || saving}
           onClick={flip}
         />
       </div>

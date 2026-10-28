@@ -14,8 +14,25 @@ impl ClosedPort {
         let socket = tokio::net::TcpSocket::new_v4().unwrap();
         socket.bind((Ipv4Addr::LOCALHOST, 0).into()).unwrap();
         // Linux refuses connect() to a bound, non-listening socket. A listening socket would instead
-        // complete the handshake and hang the HTTP request. Windows/macOS behavior is not verified here.
+        // complete the handshake and hang the HTTP request. macOS sends no answer to a connect() to a bound,
+        // non-listening socket: the caller waits until its own timeout (see `refusing`).
         Self { socket }
+    }
+
+    /// An address where the system itself refuses a connect ("connection refused"), for checks of that answer.
+    ///
+    /// Linux refuses a connect to the held socket, so the hold is kept and returned. macOS gives no answer to a
+    /// connect to a bound, non-listening socket (a caller would only ever see a timeout) and refuses one to a port
+    /// where nothing is bound, so there the hold is released and `None` returned. Call it right before the
+    /// connect: a server that takes the released port in the gap makes the caller's check fail, never pass.
+    pub fn refusing(self) -> (SocketAddr, Option<Self>) {
+        let addr = self.addr();
+        if cfg!(target_os = "macos") {
+            drop(self);
+            (addr, None)
+        } else {
+            (addr, Some(self))
+        }
     }
 
     /// The held address; borrowing the guard does not release its reservation.

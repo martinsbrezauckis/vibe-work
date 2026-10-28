@@ -87,7 +87,7 @@ async fn read_result(
             session_id,
             options,
             screenshot.unwrap_or(false),
-            actor(origin),
+            actor(shared, origin),
         )
         .await?;
     crate::agent_tools::attach_tab(shared, session_id, &mut observation);
@@ -149,9 +149,10 @@ async fn read_request(
     read_result(shared, driver, &page, options, screenshot, origin).await
 }
 
-/// Who runs a `browser` command: the Debug API, or the user (the window).
-fn actor(origin: Origin) -> Actor {
-    if origin == Origin::DebugApi {
+/// Who runs a `browser` command: the Debug API (also for the window's commands while it drives the window, so its
+/// actions keep the Debug API's checks and log name), or the user (the window).
+fn actor(shared: &Shared, origin: Origin) -> Actor {
+    if crate::command_origin::debug_api_acts(shared, origin) {
         Actor::DebugApi
     } else {
         Actor::User
@@ -209,7 +210,7 @@ async fn capture_result(
     if shared.store.view(&owner).is_none() {
         return Err(CoreError::not_loaded(&owner));
     }
-    let mut capture = crate::browser_capture::run(shared, session_id, args, actor(origin))
+    let mut capture = crate::browser_capture::run(shared, session_id, args, actor(shared, origin))
         .await
         .map_err(|e| act_error(&e))?;
     crate::agent_tools::attach_tab(shared, session_id, &mut capture);
@@ -313,7 +314,13 @@ impl Core {
         let result = match request {
             BrowserRequest::Permissions {} => crate::browser_delegation::settings(shared, None)?,
             BrowserRequest::SetPermissions { permissions } => {
-                crate::browser_delegation::settings(shared, Some(permissions))?
+                // A disk-confirmed write: on the blocking pool, never on an async worker.
+                let owned = shared.clone();
+                tokio::task::spawn_blocking(move || {
+                    crate::browser_delegation::settings(&owned, Some(permissions))
+                })
+                .await
+                .map_err(|join| CoreError::new(ErrorCode::Internal, join.to_string()))??
             }
             BrowserRequest::EnginePool {} | BrowserRequest::SetEnginePool { .. } => {
                 pool_result(shared, &request).await?
@@ -333,7 +340,7 @@ impl Core {
                 tab_id,
                 args,
             } => {
-                if shared.store.view(&session_id).is_none() {
+                if !crate::new_chat::known_owner(shared, &session_id) {
                     return Err(CoreError::not_loaded(&session_id));
                 }
                 let page = crate::browser_tabs::user_page(
@@ -506,7 +513,7 @@ async fn act_receipt(
         strict: false,
     };
     let mut receipt = driver
-        .act(session_id, action, actor(origin), &nav)
+        .act(session_id, action, actor(shared, origin), &nav)
         .await
         .map_err(|error| act_error(&error))?;
     crate::agent_tools::attach_tab(shared, session_id, &mut receipt);
@@ -528,7 +535,7 @@ async fn fill_act(
         driver,
         session_id,
         args,
-        actor(origin),
+        actor(shared, origin),
         crate::command::requester(origin),
     )
     .await

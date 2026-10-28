@@ -65,7 +65,7 @@ fn start_folder(agent_config: &Value) -> Result<PathBuf, CoreError> {
         .ok_or_else(|| CoreError::new(ErrorCode::InvalidParams, "agentConfig.cwd names the folder"))
 }
 
-/// How long the copy of `.worktreeinclude` files waits for Vibe to make the folder (under 10 s).
+/// How long start waits for Vibe to make the folder and move the session into it.
 const FOLDER_WAIT: Duration = Duration::from_secs(20);
 /// How often it looks.
 const FOLDER_POLL: Duration = Duration::from_millis(100);
@@ -119,7 +119,6 @@ fn copy_record(session_id: String, planned: Planned, base: String, branch: Strin
         created_at_ms: vw_changes::now_ms(),
         decision: None,
         session_deleted: false,
-        session_archived: false,
     }
 }
 
@@ -188,14 +187,28 @@ impl Core {
     }
 
     /// Waits for the new copy before reading its root or applying included files.
-    async fn wait_for_copy(&self, session_id: &str) -> Option<PathBuf> {
+    async fn wait_for_copy(&self, origin: Origin, session_id: &str) -> Option<PathBuf> {
         let waited = tokio::time::Instant::now();
         loop {
             if let Ok(Some(info)) = self.worktree_info(session_id).await
                 && info.state == WorktreeState::Ready
                 && let Some(path) = info.path
             {
-                return Some(PathBuf::from(path));
+                // Vibe 3 announces the folder before moving the session's tool context into it.
+                // The captured project identity and the snapshot returned to the window must agree.
+                if let Ok(CommandResult::Session { snapshot, .. }) = self
+                    .session_call(origin, "session/read", json!({"sessionId": session_id}))
+                    .await
+                    && snapshot
+                        .state
+                        .pointer("/session/cwd")
+                        .and_then(Value::as_str)
+                        .and_then(|cwd| Path::new(cwd).canonicalize().ok())
+                        .zip(Path::new(&path).canonicalize().ok())
+                        .is_some_and(|(cwd, copy)| cwd.starts_with(copy))
+                {
+                    return Some(PathBuf::from(path));
+                }
             }
             if waited.elapsed() > FOLDER_WAIT {
                 return None;
@@ -214,18 +227,19 @@ impl Core {
         cause: vw_worktrees::WorktreeError,
     ) -> CoreError {
         let _ = records.recover(record);
-        let path = self.wait_for_copy(&record.session_id).await;
+        let path = self.wait_for_copy(origin, &record.session_id).await;
         let archive = self
-            .session_call(
+            .forward(
                 origin,
                 "session/archive",
                 json!({
                     "sessionId": record.session_id, "archived": true
                 }),
+                None,
             )
             .await;
-        // The archive updates recovery metadata as well. Check that its latest state is persisted,
-        // so a second write failure is never presented as durable recovery.
+        // Check that recovery metadata is persisted, so a second write failure is never
+        // presented as durable recovery.
         let durable = records
             .get(&record.session_id)
             .is_some_and(|current| records.recover(&current).is_ok());
@@ -417,14 +431,21 @@ impl Core {
         }
         // Copy the `.worktreeinclude` files into the new folder before the window sends the first
         // message (waits for Vibe to make the folder). A failure never fails the start (it is in the report).
-        let copy_path = self.wait_for_copy(&snapshot.session_id).await;
-        crate::entry_projects::finish_copy(
-            &self.shared,
-            &snapshot.session_id,
-            copy_path.as_deref(),
-        )
-        .await;
-        let include = Self::copy_includes(&main_root, copy_path.as_deref()).await;
+        let copy_path = self
+            .wait_for_copy(origin, &snapshot.session_id)
+            .await
+            .ok_or_else(|| {
+                CoreError::new(
+                    ErrorCode::Internal,
+                    format!(
+                        "Session {} has not entered its copy yet. Open the chat again before sending a message.",
+                        snapshot.session_id
+                    ),
+                )
+            })?;
+        crate::entry_projects::finish_copy(&self.shared, &snapshot.session_id, Some(&copy_path))
+            .await;
+        let include = Self::copy_includes(&main_root, Some(&copy_path)).await;
         // After the copy, so `info` already shows the folder when Vibe made it during the wait.
         let info = self
             .worktree_info(&snapshot.session_id)
@@ -432,11 +453,11 @@ impl Core {
             .ok_or_else(|| {
                 CoreError::new(ErrorCode::Internal, "the copy's record was not readable")
             })?;
-        let setup = copy_path.as_deref().and_then(setup_line);
+        let setup = setup_line(&copy_path);
         self.shared
             .emit(crate::event::CoreEvent::WorktreesChanged {});
         Ok(WorktreesResult::Started {
-            snapshot,
+            snapshot: crate::sessions::snapshot(&self.shared, &snapshot.session_id)?,
             info,
             include,
             setup,

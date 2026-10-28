@@ -4,7 +4,8 @@
 // values and links that look like an API key are hidden (`keyLike`). Text is the page's visible text (layout-aware innerText), one window of it per
 // call (`REQ.textOffset`, `REQ.maxText`).
 // Hidden text is returned separately (bounded) for the prompt guard only.
-// REQ: { page, maxRefs, maxText, textOffset }. Synchronous; the answer is untrusted page data.
+// REQ: { page, maxRefs, maxText, textOffset, find? }. Synchronous; the answer is untrusted page data.
+/* global ENV, KEY_TEXT, REQ, actionableCandidate, clip, collect, enabled, frameDoc, globalRect, hideKeys, inFrame, keyHolder, keyLike, labelOf, loginRole, refOf, rememberLabelledKeys, roleOf, secretKind, submitOrigins, vaultFilled, visible -- Supplied by the Rust script assembler and its shared prelude. */
 (() => {
   __VW_COMMON__
   const everything = collect();
@@ -12,10 +13,25 @@
   // The original address stays on the host for admission checks; only displayUrl goes into agent answers.
   const out = { url: String(location.href).slice(0, 2000), displayUrl: hideKeys(String(location.href)).slice(0, 2000), title: clip(hideKeys(document.title), 300), readyState: document.readyState };
   const { truncated, crossOriginFrames } = everything;
-  // Show usable controls before hidden tab/panel copies.
+  const needle = typeof REQ.find === "string" ? REQ.find.toLowerCase() : null;
+  // Search only redacted display fields, never the original value of a secret field.
+  const focusedMatch = item => needle === null ||
+    [item.name, item.role, item.value].some(value => String(value || "").toLowerCase().includes(needle));
+  const priority = el => {
+    if (!visible(el)) return -1;
+    const r = globalRect(el);
+    if (r.y + r.height <= 0 || r.y >= innerHeight || r.x + r.width <= 0 || r.x >= innerWidth) return 0;
+    for (let up = el; up; up = up.parentElement || up.getRootNode()?.host) {
+      if (up.matches('[role="dialog"], [aria-modal="true"], dialog[open]')) return 3;
+      const position = getComputedStyle(up).position;
+      if (position === "fixed" || position === "sticky") return 2;
+    }
+    return 1;
+  };
+  // Visible overlays precede body links, then offscreen and hidden controls.
   const elements = everything.elements.filter(actionableCandidate)
-    .map((el) => ({ el, shown: visible(el) }))
-    .sort((a, b) => Number(b.shown) - Number(a.shown)).map(({ el }) => el);
+    .map((el) => ({ el, rank: priority(el) }))
+    .sort((a, b) => b.rank - a.rank).map(({ el }) => el);
   const refs = [];
   const frames = [];
   const seen = new Set();
@@ -28,7 +44,7 @@
     seen.add(ref);
     const item = { ref, role: actionableCandidate(el) ? roleOf(el) : "text", name: hideKeys(labelOf(el), el), tag: el.localName, keyLike: true, value: KEY_TEXT };
     if (!visible(el)) item.visible = false;
-    refs.push(item);
+    if (focusedMatch(item)) refs.push(item);
   }
   for (const el of elements) {
     const ref = refOf(el);
@@ -39,11 +55,11 @@
     const item = { ref, role, name: hideKeys(label, el), tag: el.localName };
     if (keyLike(label, el)) item.keyLike = true;
     if (role === "iframe") {
-      let src = "";
+      let src;
       try {
         const u = new URL(el.getAttribute("src") || "about:blank", location.href);
         src = u.origin === "null" ? u.href : u.origin + u.pathname;
-      } catch (_) {
+      } catch {
         src = String(el.getAttribute("src") || "");
       }
       frames.push({ ref, name: item.name, src: clip(hideKeys(src), 200), sameOrigin: Boolean(frameDoc(el)), visible: visible(el) });
@@ -95,15 +111,15 @@
     if (tag === "a") {
       try {
         item.href = hideKeys(String(new URL(el.getAttribute("href"), location.href).href)).slice(0, 300);
-      } catch (_) {
+      } catch {
         item.href = clip(hideKeys(el.getAttribute("href")), 300);
       }
     }
-    refs.push(item);
+    if (focusedMatch(item)) refs.push(item);
   }
   // Visible page text, including any dialog text.
-  let text = "";
-  try { text = String(document.body?.innerText || ""); } catch (_) { text = ""; }
+  let text;
+  try { text = String(document.body?.innerText || ""); } catch { text = ""; }
   // Text that looks like a key is hidden (the element that shows it has a keyLike ref).
   text = hideKeys(text);
   const offset = Math.max(0, Math.min(Number(REQ.textOffset) || 0, text.length));
@@ -129,12 +145,12 @@
         hiddenLength += Math.min(value.length, 500);
       }
     }
-  } catch (_) {
+  } catch {
     // A page that blocks the walk only loses the hidden-text check for this observation.
   }
   out.hiddenText = hideKeys(hidden.join("\n")).slice(0, 3000);
   out.refs = refs;
-  out.allRefs = Array.from(seen).slice(0, 1000);
+  out.allRefs = Array.from(new Set([...refs.map(item => item.ref), ...seen])).slice(0, 1000);
   out.refCount = seen.size - frames.length;
   out.frames = frames.slice(0, 20);
   out.crossOriginFrames = crossOriginFrames;

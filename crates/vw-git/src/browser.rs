@@ -1,10 +1,9 @@
 //! Bounded, no-git discovery for the project browser. Depends on std; called by the core.
 //! Never follows symbolic links or walks external copies. External pointers are metadata, never action targets.
 
-use std::collections::{BTreeSet, VecDeque};
 use std::io::Read;
 use std::path::{Component, Path, PathBuf};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 /// Discovery budgets, shared by directory entries and worktree metadata.
 #[derive(Debug, Clone, Copy)]
@@ -13,7 +12,7 @@ pub struct Limits {
     pub depth: usize,
     /// Maximum entries inspected.
     pub entries: usize,
-    /// Wall-clock discovery budget.
+    /// Wall-clock budget per discovery slice; `discover` returns after the first slice.
     pub time: Duration,
 }
 impl Default for Limits {
@@ -71,6 +70,11 @@ pub fn skipped(name: &str) -> bool {
     )
 }
 /// Lexically normalize a pointer, then reject symbolic links in every existing component.
+///
+/// On Windows the drive or share part (`C:`, `\\?\C:`, `\\server\share`) is not a folder entry of its own and is
+/// not checked alone: the first entry checked is the drive's root folder (`C:\`, `\\?\C:\`). Checking the bare
+/// part asked about the drive's current folder for `C:` and failed outright for the `\\?\C:` form that
+/// `canonicalize` gives ("Incorrect function"), so a canonical folder was never readable.
 #[must_use]
 pub fn safe_path(base: &Path, value: &Path) -> Option<PathBuf> {
     let joined = base.join(value);
@@ -89,6 +93,10 @@ pub fn safe_path(base: &Path, value: &Path) -> Option<PathBuf> {
     let mut check = PathBuf::new();
     for part in clean.components() {
         check.push(part.as_os_str());
+        // The drive or share part is checked together with the root folder that follows it (see above).
+        if matches!(part, Component::Prefix(_)) {
+            continue;
+        }
         let meta = check.symlink_metadata().ok()?;
         if meta.file_type().is_symlink() {
             return None;
@@ -190,6 +198,27 @@ fn small_text(path: &Path) -> Option<String> {
     let value = String::from_utf8(bytes).ok()?;
     Some(value.trim_end_matches(['\r', '\n']).to_owned())
 }
+/// `path`, a location read from git's own pointer files (a `gitdir:` line, a `commondir` or a worktree record), in
+/// the project's spelling when it lies in `project`; otherwise `path` unchanged, so the caller treats it as outside.
+///
+/// Git writes absolute pointers in its own spelling of a folder: on Windows `C:/...` with long names and the on-disk
+/// case, whatever spelling the folder had when git ran. The project folder may be written with a short name or in
+/// another case. Both sides have passed [`safe_path`] (no symbolic link or junction in any component), so when the
+/// lexical comparison fails their canonical forms differ from them only in spelling: those are compared, and the
+/// inside part is joined to `project` and checked by [`safe_path`] again. A path that cannot be canonicalized, lies
+/// outside, or meets a link on the second check stays as git wrote it.
+fn in_project_spelling(path: PathBuf, project: &Path) -> PathBuf {
+    if path.starts_with(project) {
+        return path;
+    }
+    let (Ok(real), Ok(root)) = (path.canonicalize(), project.canonicalize()) else {
+        return path;
+    };
+    match real.strip_prefix(&root) {
+        Ok(rest) => safe_path(project, rest).unwrap_or(path),
+        Err(_) => path,
+    }
+}
 fn classify(folder: &Path, project: &Path) -> Option<Node> {
     let marker = folder.join(".git");
     let metadata = marker.symlink_metadata().ok()?;
@@ -209,7 +238,8 @@ fn classify(folder: &Path, project: &Path) -> Option<Node> {
             .and_then(|s| safe_path(folder, Path::new(&s)))
     } else {
         None
-    };
+    }
+    .map(|git_dir| in_project_spelling(git_dir, project));
     let Some(git_dir) = target else {
         node.restricted =
             Some("The repository pointer is missing, invalid, or a symbolic link.".into());
@@ -225,7 +255,9 @@ fn classify(folder: &Path, project: &Path) -> Option<Node> {
         return Some(node);
     }
     let common = if git_dir.join("commondir").symlink_metadata().is_ok() {
-        small_text(&git_dir.join("commondir")).and_then(|s| safe_path(&git_dir, Path::new(&s)))
+        small_text(&git_dir.join("commondir"))
+            .and_then(|s| safe_path(&git_dir, Path::new(&s)))
+            .map(|common| in_project_spelling(common, project))
     } else {
         Some(git_dir.clone())
     };
@@ -250,6 +282,7 @@ fn classify(folder: &Path, project: &Path) -> Option<Node> {
                 .is_some_and(|parent| parent == p.join("worktrees"))
                 && small_text(&git_dir.join("gitdir"))
                     .and_then(|s| safe_path(&git_dir, Path::new(&s)))
+                    .map(|marker| in_project_spelling(marker, project))
                     .as_deref()
                     == Some(marker.as_path())
         });
@@ -287,155 +320,13 @@ fn same_device(root: &std::fs::Metadata, path: &Path) -> bool {
 fn same_device(_: &std::fs::Metadata, _: &Path) -> bool {
     true
 }
-/// Find repositories without invoking git, with a hard total budget including linked-copy records.
-#[must_use]
-pub fn discover(project: &Path, limits: Limits) -> Discovery {
-    let mut out = Discovery::default();
-    let Some(root) = safe_path(Path::new(""), project) else {
-        out.truncated = true;
-        return out;
-    };
-    let Ok(metadata) = root.symlink_metadata() else {
-        out.truncated = true;
-        return out;
-    };
-    let start = Instant::now();
-    let mut remaining = limits.entries;
-    let mut stack = VecDeque::from([(root.clone(), 0)]);
-    let mut seen = BTreeSet::new();
-    while let Some((dir, depth)) = stack.pop_front() {
-        if remaining == 0 || start.elapsed() >= limits.time || out.nodes.len() >= 128 {
-            out.truncated = true;
-            break;
-        }
-        if !seen.insert(dir.clone()) {
-            continue;
-        }
-        // A queued child may have been replaced since read_dir reported its file type.
-        if !dir.starts_with(&root)
-            || safe_path(Path::new(""), &dir).as_deref() != Some(dir.as_path())
-            || !dir.is_dir()
-            || !same_device(&metadata, &dir)
-        {
-            out.truncated = true;
-            continue;
-        }
-        out.directories.push(dir.clone());
-        if let Some(node) = classify(&dir, &root) {
-            out.nodes.push(node);
-        }
-        let Some(entries) = directory_entries(&dir) else {
-            out.truncated = true;
-            continue;
-        };
-        for entry in entries {
-            if remaining == 0 || start.elapsed() >= limits.time {
-                out.truncated = true;
-                break;
-            }
-            remaining -= 1;
-            let Ok(entry) = entry else {
-                out.truncated = true;
-                continue;
-            };
-            if skipped(&entry.file_name().unwrap_or_default().to_string_lossy()) {
-                continue;
-            }
-            let Ok(kind) = entry.symlink_metadata().map(|m| m.file_type()) else {
-                out.truncated = true;
-                continue;
-            };
-            if kind.is_dir() && same_device(&metadata, &entry) {
-                if depth < limits.depth {
-                    stack.push_back((entry, depth + 1));
-                } else {
-                    out.truncated = true;
-                }
-            }
-        }
-    }
-    linked_copies(&root, &mut out, &mut remaining, start, limits);
-    out.nodes.sort_by(|a, b| a.path.cmp(&b.path));
-    out
-}
-
-fn linked_copies(
-    root: &Path,
-    out: &mut Discovery,
-    remaining: &mut usize,
-    start: Instant,
-    limits: Limits,
-) {
-    let common: BTreeSet<_> = out
-        .nodes
-        .iter()
-        .filter(|n| n.restricted.is_none())
-        .filter_map(|n| n.common_dir.clone())
-        .collect();
-    let mut paths: BTreeSet<_> = out.nodes.iter().map(|n| n.path.clone()).collect();
-    for common in common {
-        let Some(records) = safe_path(&common, Path::new("worktrees")) else {
-            continue;
-        };
-        let Some(entries) = directory_entries(&records) else {
-            continue;
-        };
-        for entry in entries {
-            if *remaining == 0 || start.elapsed() >= limits.time || out.nodes.len() >= 128 {
-                out.truncated = true;
-                break;
-            }
-            *remaining -= 1;
-            let Ok(entry) = entry else {
-                continue;
-            };
-            let Some(record) = safe_path(Path::new(""), &entry) else {
-                continue;
-            };
-            let Some(marker) =
-                small_text(&record.join("gitdir")).and_then(|s| safe_path(&record, Path::new(&s)))
-            else {
-                continue;
-            };
-            if marker.file_name().is_none_or(|n| n != ".git") {
-                continue;
-            }
-            let Some(folder) = marker.parent() else {
-                continue;
-            };
-            let outside = !folder.starts_with(root);
-            let node = if outside {
-                // The worktree record is the authority for an external location. Never read its marker.
-                Node {
-                    path: folder.into(),
-                    git_dir: Some(record.clone()),
-                    common_dir: Some(common.clone()),
-                    kind: "copy".into(),
-                    outside: true,
-                    restricted: None,
-                }
-            } else {
-                let Some(node) = classify(folder, root) else {
-                    continue;
-                };
-                if node.git_dir.as_ref() != Some(&record)
-                    || node.common_dir.as_ref() != Some(&common)
-                {
-                    continue;
-                }
-                node
-            };
-            if !paths.insert(folder.into()) {
-                continue;
-            }
-            out.nodes.push(node);
-        }
-    }
-}
+#[path = "browser_walk.rs"]
+mod walk;
+pub use walk::{discover, discover_complete};
 
 #[cfg(test)]
 mod tests {
-    use super::{Limits, discover, revalidate};
+    use super::{Limits, discover, discover_complete, revalidate};
     use std::fs;
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -511,6 +402,114 @@ mod tests {
         assert!(found.nodes.iter().any(|n| n.path == project.join("copy")
             && n.kind == "copy"
             && n.common_dir.as_deref() == Some(project.join("main/.git").as_path())));
+    }
+
+    #[test]
+    fn expired_slices_preserve_nested_repositories_and_linked_records() {
+        let fixture = Fixture::new();
+        let project = fixture.dir("project");
+        fixture.dir("project/.git/worktrees/outside");
+        fixture.dir("project/.git/worktrees/inside");
+        fixture.dir("project/nested/.git");
+        fixture.dir("project/inside");
+        fixture.dir("outside");
+        fixture.write("outside/.git", "not read outside scope\n");
+        fixture.write(
+            "project/.git/worktrees/outside/gitdir",
+            "../../../../outside/.git\n",
+        );
+        fixture.write(
+            "project/.git/worktrees/inside/gitdir",
+            "../../../inside/.git\n",
+        );
+        fixture.write("project/.git/worktrees/inside/commondir", "../..\n");
+        fixture.write("project/inside/.git", "gitdir: ../.git/worktrees/inside\n");
+        let limits = Limits {
+            time: Duration::ZERO,
+            ..Limits::default()
+        };
+        let partial = discover(&project, limits);
+        assert!(partial.truncated);
+        assert_eq!(partial.nodes.len(), 1);
+        assert_eq!(partial.nodes[0].path, project);
+
+        let complete = discover_complete(&project, limits);
+        let uninterrupted = scan(&project);
+        assert!(!complete.truncated, "{complete:?}");
+        assert_eq!(complete.nodes.len(), 4, "{complete:?}");
+        assert_eq!(complete.directories, uninterrupted.directories);
+        for (sliced, whole) in complete.nodes.iter().zip(&uninterrupted.nodes) {
+            assert_eq!(sliced.path, whole.path);
+            assert_eq!(sliced.git_dir, whole.git_dir);
+            assert_eq!(sliced.common_dir, whole.common_dir);
+            assert_eq!(sliced.kind, whole.kind);
+            assert_eq!(sliced.outside, whole.outside);
+            assert_eq!(sliced.restricted, whole.restricted);
+            if !sliced.outside {
+                assert!(revalidate(sliced, &project));
+            }
+        }
+        assert!(complete.directories.iter().all(|p| p.starts_with(&project)));
+    }
+
+    #[test]
+    fn resumed_discovery_shares_entry_and_depth_limits() {
+        let fixture = Fixture::new();
+        let project = fixture.dir("project");
+        for name in ["one", "two", "three"] {
+            fixture.dir(&format!("project/.git/worktrees/{name}"));
+            fixture.dir(name);
+            fixture.write(&format!("{name}/.git"), "not read\n");
+            fixture.write(
+                &format!("project/.git/worktrees/{name}/gitdir"),
+                &format!("../../../../{name}/.git\n"),
+            );
+        }
+        let found = discover_complete(
+            &project,
+            Limits {
+                entries: 2,
+                time: Duration::ZERO,
+                ..Limits::default()
+            },
+        );
+        assert!(found.truncated);
+        assert_eq!(
+            found.nodes.len(),
+            2,
+            "root entry and one worktree record: {found:?}"
+        );
+
+        fixture.dir("project/nested/.git");
+        let found = discover_complete(
+            &project,
+            Limits {
+                depth: 0,
+                time: Duration::ZERO,
+                ..Limits::default()
+            },
+        );
+        assert!(found.truncated);
+        assert_eq!(found.nodes.len(), 4);
+        assert_eq!(found.directories, vec![project]);
+    }
+
+    #[test]
+    fn resumed_discovery_keeps_the_node_limit() {
+        let fixture = Fixture::new();
+        let project = fixture.dir("project");
+        for i in 0..130 {
+            fixture.dir(&format!("project/repo-{i}/.git"));
+        }
+        let found = discover_complete(
+            &project,
+            Limits {
+                time: Duration::ZERO,
+                ..Limits::default()
+            },
+        );
+        assert!(found.truncated);
+        assert_eq!(found.nodes.len(), 128);
     }
 
     #[test]
@@ -685,3 +684,8 @@ mod tests {
         assert!(!revalidate(copy, &project));
     }
 }
+
+#[cfg(test)]
+#[cfg(windows)]
+#[path = "browser_windows_tests.rs"]
+mod windows_tests;

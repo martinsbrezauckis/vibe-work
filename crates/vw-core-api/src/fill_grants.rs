@@ -1,4 +1,4 @@
-//! Fill grants mirror `secret_grants` for "Always for this site":
+//! Fill grants store "Always for this site" in the vault; use counts live in `secret_uses`:
 //!
 //! - **Once:** never stored: the approval covers exactly the one fill the dialog showed.
 //! - **Always for this site:** a hidden vault record per (login, exact page origin) (`vw_vault::fill_grant`,
@@ -19,28 +19,29 @@ use vw_keys::{FillGrant, KeyService};
 use vw_vault::fill_grant::{id_for, is_grant_id};
 
 use crate::core::Shared;
-use crate::error::{CoreError, ErrorCode};
+use crate::error::CoreError;
 use crate::secrets_view::FillGrantView;
 
-/// Use counts of this run (grant id -> uses).
+/// Use counts and last use of this run (grant id -> (uses, last use ms)).
 #[derive(Default)]
-pub(crate) struct FillUses(Mutex<HashMap<String, u32>>);
+pub(crate) struct FillUses(Mutex<HashMap<String, (u32, i64)>>);
 
 impl FillUses {
-    /// Counts one use of grant `id`.
+    /// Counts one use of grant `id`, now.
     pub(crate) fn used(&self, id: &str) {
         let mut uses = self.0.lock().unwrap_or_else(PoisonError::into_inner);
-        let n = uses.entry(id.to_owned()).or_insert(0);
-        *n = n.saturating_add(1);
+        let entry = uses.entry(id.to_owned()).or_insert((0, 0));
+        entry.0 = entry.0.saturating_add(1);
+        entry.1 = now_ms();
     }
 
-    fn of(&self, id: &str) -> u32 {
+    /// Uses of grant `id` in this run, and the last one (ms; `None` before the first).
+    fn of(&self, id: &str) -> (u32, Option<i64>) {
         self.0
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .get(id)
-            .copied()
-            .unwrap_or(0)
+            .map_or((0, None), |(n, last)| (*n, Some(*last)))
     }
 }
 
@@ -158,11 +159,7 @@ pub(crate) async fn grant_always(
 /// # Errors
 /// `keyService` (no vault, locked, storage).
 pub(crate) async fn revoke(shared: &Shared, id: &str) -> Result<bool, CoreError> {
-    let keys = keys(shared).ok_or_else(|| {
-        let mut error = CoreError::new(ErrorCode::KeyService, "no vault is connected");
-        error.server_code = Some("notConfigured".to_owned());
-        error
-    })?;
+    let keys = keys(shared).ok_or_else(crate::keys::no_vault)?;
     if !is_grant_id(id) {
         return Ok(false);
     }
@@ -215,8 +212,10 @@ pub(crate) async fn views(shared: &Shared) -> Vec<FillGrantView> {
                 .iter()
                 .find(|l| l.id == g.login_id)
                 .map_or(g.login_name, |l| l.name.clone());
+            let (uses, last_used_ms) = shared.secret_uses.fill_uses.of(&g.id);
             FillGrantView {
-                uses: shared.secret_grants.fill_uses.of(&g.id),
+                uses,
+                last_used_ms,
                 id: g.id,
                 login_id: g.login_id,
                 login_name,

@@ -44,7 +44,8 @@ pub enum Decision {
     Removed,
 }
 
-/// One session copy.
+/// One session copy. Serde ignores unknown fields, including old `sessionArchived` flags;
+/// those flags no longer grant archive or removal authority.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Record {
@@ -70,9 +71,6 @@ pub struct Record {
     /// The session was deleted (its copy may be an orphan).
     #[serde(default)]
     pub session_deleted: bool,
-    /// The user archived this copy's session before Vibe saved its first turn.
-    #[serde(default)]
-    pub session_archived: bool,
 }
 
 /// The record folder.
@@ -248,7 +246,6 @@ impl Records {
         new.clone_into(&mut record.session_id);
         // Ending the old conversation grants no removal permission for its new owner.
         record.session_deleted = false;
-        record.session_archived = false;
         self.put(&record)?;
         if self.is_recovery(old) {
             self.remove_recovery(old)?;

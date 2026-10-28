@@ -46,8 +46,8 @@ export interface Timers {
 }
 
 /** How often and how long a Mistral connector sign-in is re-checked. */
-export const POLL_MS = 5000;
-export const POLL_MAX = 60;
+const POLL_MS = 5000;
+const POLL_MAX = 60;
 
 const FAILED_CODES: Readonly<Record<string, string>> = {
   auth_url_unavailable:
@@ -299,7 +299,10 @@ export function createSignIns(deps: {
       });
       try {
         await request(origin, { op: "signInServer", name: serverName });
-        update({ phase: "waiting" });
+        // The sign-in can finish before the command acknowledging its start reaches the window.
+        const current = store.get().signIn;
+        if (current?.kind === "server" && current.id === serverName && current.phase === "starting")
+          update({ phase: "waiting" });
       } catch (thrown) {
         const error = toCallError(thrown).error;
         if (error.code === "confirmationDeclined") set(null);

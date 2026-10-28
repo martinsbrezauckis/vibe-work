@@ -1,17 +1,18 @@
 /**
  * The update notice: a small card under the title bar whenever a newer version exists (available,
- * downloading, ready to install, or a failed download / install). It says what happens in plain words and offers
+ * downloading, ready to install, a failed download / install, or one that needs a newer system than this one). It says what happens in plain words and offers
  * the one next step; "Install and restart" is only a request to the host, which installs nothing without it.
  * the card sits at the top right, over the side panel, where a native view (preview,
  * viewers, agent browser) would paint over it; while it shows it reserves its rectangle (`nativeLayer`) and the
  * native views clip around it.
  * the update area also holds the Vibe card (`VibeUpdate.tsx`); both cards sit in one fixed stack, and
  * the stack (not each card) reserves its rectangle while it has content.
- * Depends on: AppContext, state/updates, hooks, components/nativeLayer, VibeUpdate, ReleaseHost. Called by: Shell.
- * Invariants: renders nothing in a build without an update channel, while idle, for a failed check, or after
- * "Later" for the same state; the card is a polite status region and never takes focus; its reservation lives
+ * Depends on: AppContext (updates, shell store), state/updates, hooks, components/nativeLayer, VibeUpdate, ReleaseHost. Called by: Shell.
+ * Invariants: renders nothing in a build without an update channel, while idle, for a failed check, after
+ * "Later" for the same state, or while Settings shows its Updates category (same state and buttons there); the card is a polite status region and never takes focus; its reservation lives
  * exactly as long as the card.
  */
+import { Button } from "../../components/Controls";
 import { Fragment, type RefObject, useLayoutEffect, useRef } from "react";
 
 import { reserve } from "../../components/nativeLayer";
@@ -31,14 +32,21 @@ const LABELS: Record<NoticeAction, string> = {
 
 /** The update area: the Vibe Work notice and the Vibe card (each renders nothing when it has nothing to say). */
 export function UpdateNotice() {
-  const { updates } = useApp();
+  const { updates, shell } = useApp();
   const stack = useRef<HTMLDivElement>(null);
   useReservation(stack);
+  // Settings > Updates shows the same state and the same buttons in its Status and Vibe rows, and the cards
+  // would sit over them (top right): there the stack stays empty, so it reserves nothing. Not a dismissal: any
+  // other page shows the cards again.
+  const onUpdatesPage = useStore(
+    shell.store,
+    (s) => s.settings.open && s.settings.query === "" && s.settings.category === "updates",
+  );
   return (
     // toasts keep clear of the update cards too (a top-right toast would cover them).
     <div className="update-notices" ref={stack} data-toast-avoid="updates">
-      {updates !== null && <Card updates={updates} />}
-      <VibeUpdateCard />
+      {!onUpdatesPage && updates !== null && <Card updates={updates} />}
+      {!onUpdatesPage && <VibeUpdateCard />}
     </div>
   );
 }
@@ -123,19 +131,17 @@ function Shown({
         <div className="update-notice-actions">
           {notice.actions.map((action) => (
             <Fragment key={action}>
-              <button
+              <Button
                 data-testid="updates.update-notice-act"
                 data-item-id={action}
                 type="button"
-                className={
-                  action === "install" || action === "download" ? "tb-btn primary" : "tb-btn"
-                }
+                variant={action === "install" || action === "download" ? "primary" : undefined}
                 onClick={() => {
                   act(action);
                 }}
               >
                 {LABELS[action]}
-              </button>
+              </Button>
               {action === "openReleasePage" && <ReleaseHost url={releasePage} />}
             </Fragment>
           ))}

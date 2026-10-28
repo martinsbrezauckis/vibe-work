@@ -13,7 +13,7 @@
 //! - any request whose `Authorization` contains `bad-key`: 401 (a revoked key);
 //! - `POST /v1/ocr` (the fixture): records the JSON body (`ocr_bodies`), waits `ocr_delay_ms`, answers
 //!   `ocr_status` when set (with a body that echoes a marker, to prove error texts never show bodies),
-//!   else pages: 2 for a PDF `document_url`, 1 otherwise, each `fake page <n> of <mime>, <bytes> bytes`
+//!   else validates the request/file and returns the actual PDF page count, 1 for images, each `fake page <n> of <mime>, <bytes> bytes`
 //!   (bytes = decoded length), the model `mistral-ocr-fake` and `usage_info.pages_processed`;
 //! - the speech paths (the fixture) and the realtime WebSocket: `fake_speech.rs`;
 //! - anything else: 200 with `{"ok":true,"path":...}`.
@@ -27,6 +27,9 @@ use axum::body::{Body, Bytes};
 use axum::extract::{Request, State};
 use axum::http::StatusCode;
 use axum::response::Response;
+
+#[path = "fake_ocr.rs"]
+mod ocr_contract;
 
 #[path = "fake_speech.rs"]
 pub mod speech;
@@ -52,6 +55,8 @@ pub struct OcrControl {
     pub delay_ms: Arc<std::sync::atomic::AtomicU64>,
     /// Status to answer with instead of pages (0: pages).
     pub status: Arc<std::sync::atomic::AtomicU16>,
+    /// Successful OCR with blank pages, for documents/images without readable text.
+    pub blank: Arc<std::sync::atomic::AtomicBool>,
 }
 
 /// The fake's shared state: requests seen, OCR and speech switches.
@@ -98,21 +103,24 @@ async fn ocr_answer(ocr: &OcrControl, body: &[u8]) -> Response {
             .body(Body::from(r#"{"message":"ECHOED-BODY-MARKER"}"#))
             .unwrap();
     }
-    let doc = &json["document"];
-    let url = doc["document_url"]
-        .as_str()
-        .or_else(|| doc["image_url"].as_str())
-        .unwrap_or_default();
-    let (mime, data) = url
-        .strip_prefix("data:")
-        .and_then(|rest| rest.split_once(";base64,"))
-        .unwrap_or(("?", ""));
-    let bytes = data.len() / 4 * 3 - data.bytes().rev().take_while(|&b| b == b'=').count();
-    let count = if mime == "application/pdf" { 2 } else { 1 };
+    let (mime, bytes, count) = match ocr_contract::validate(&json) {
+        Ok(input) => input,
+        Err(message) => return Response::builder()
+            .status(StatusCode::BAD_REQUEST)
+            .header("content-type", "application/json")
+            .body(Body::from(serde_json::json!({
+                "object":"error", "message":message, "type":"invalid_file", "param":null, "code":"1901"
+            }).to_string())).unwrap(),
+    };
     let pages: Vec<serde_json::Value> = (0..count)
         .rev()
         .map(|i| {
-            serde_json::json!({"index": i, "markdown": format!("fake page {} of {mime}, {bytes} bytes", i + 1),
+            let text = if ocr.blank.load(Ordering::SeqCst) {
+                String::new()
+            } else {
+                format!("fake page {} of {mime}, {bytes} bytes", i + 1)
+            };
+            serde_json::json!({"index": i, "markdown": text,
                 "images": [], "dimensions": null})
         })
         .collect();

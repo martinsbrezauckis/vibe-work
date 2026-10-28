@@ -328,6 +328,8 @@ impl VisualChecker {
             placement: None,
             parked: None,
             rules: None,
+            // Page viewer / checker pages never get WebRTC.
+            no_peer_connections: true,
         };
         bounded(self.engine_timeout, "check: mount", self.engine.mount(spec)).await?;
         Ok(id)

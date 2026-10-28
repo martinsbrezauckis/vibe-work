@@ -15,11 +15,18 @@ import { useApp } from "../shell/AppContext";
 const OFF: BrowserPermissions = { closeUserTabs: false };
 
 /** Optional task-scoped authority for routine browser controls. */
-export function BrowserDelegationSettings(): ReactElement | null {
+export function BrowserDelegationSettings({
+  onError,
+}: {
+  onError: (error: string | null) => void;
+}): ReactElement | null {
   const { core, shell } = useApp();
   const [permissions, setPermissions] = useState<BrowserPermissions | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    onError(error);
+  }, [error, onError]);
 
   useEffect(() => {
     if (core === null) return;
@@ -70,11 +77,6 @@ export function BrowserDelegationSettings(): ReactElement | null {
           Reading browser permissions…
         </p>
       )}
-      {error !== null && (
-        <p className="key-problem" role="alert">
-          {error}
-        </p>
-      )}
       <div className="check" data-setting="browser-close-user-tabs">
         <span title={term("browserPermissions", "closeUserTabs").tooltip}>
           {term("browserPermissions", "closeUserTabs").name}
@@ -113,7 +115,7 @@ export function BrowserDelegationSettings(): ReactElement | null {
         <Button
           data-testid="settings.browser-delegation-settings-open-settings"
           type="button"
-          small
+          shape="outlined"
           onClick={() => {
             shell.actions.openSettings("secrets");
           }}

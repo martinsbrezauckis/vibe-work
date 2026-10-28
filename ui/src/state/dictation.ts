@@ -32,7 +32,7 @@ import type { VoiceSettingsStore } from "./voiceSettings";
 const PERMISSION_LINE_AFTER_MS = 500;
 
 /** Where a dictation is. */
-export type DictationPhase = "idle" | "starting" | "recording" | "transcribing" | "error";
+type DictationPhase = "idle" | "starting" | "recording" | "transcribing" | "error";
 
 /** The dictation state the views and the route read. */
 export interface DictationState {
@@ -141,7 +141,6 @@ export function createDictation(deps: {
   const placed = createStore<CaretPlacement>(null);
   let capture: { stop(): void } | null = null;
   let chain: Promise<unknown> = Promise.resolve();
-  let origin: "ui" | "debug-api" = "ui";
   /** A stop asked for while the dictation was still starting (a short hold): honoured once recording. */
   let stopWanted = false;
   const stopRequested = (): boolean => stopWanted;
@@ -151,15 +150,12 @@ export function createDictation(deps: {
   let queuedStart: { sessionId: string; as: "ui" | "debug-api" } | null = null;
 
   const once = async (request: SpeechRequest): Promise<SpeechResult> => {
-    const result = await core.run(
-      { type: "speech", request },
-      origin === "debug-api" ? { origin } : undefined,
-    );
+    const result = await core.run({ type: "speech", request });
     if (result.type !== "speech") throw new Error("unexpected answer to a speech request");
     return result.result;
   };
-  // a window stream's append or stop marked as the Debug API's (a UI-control request served
-  // in that moment) is accepted by the core (the Debug API may act on every stream), so no retry is needed.
+  // Every append and stop is the window's (also for a dictation a Debug API request started), so no retry is
+  // needed.
   const run = once;
   const fail = (message: string): void => {
     capture?.stop();
@@ -230,7 +226,6 @@ export function createDictation(deps: {
       store.set((s) => ({ ...s, phase: "error", error: refused, sessionId }));
       return;
     }
-    origin = as;
     stopWanted = false;
     attempt += 1;
     const ticket = attempt;
@@ -471,6 +466,3 @@ export function createDictation(deps: {
     },
   };
 }
-
-/** The dictation controller. */
-export type Dictation = ReturnType<typeof createDictation>;

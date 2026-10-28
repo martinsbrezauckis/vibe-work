@@ -14,15 +14,29 @@ use crate::stderr_ring::{Redactions, StderrLimits};
 /// stopped server, so the supervisor restarts it and the turn does not wait without end.
 pub const DEFAULT_WEDGE_METHODS: &[&str] = &["callback/result"];
 
+/// Budget of a request that pins plugins (see [`DEFAULT_LONG_METHODS`]).
+pub const SESSION_OPEN_TIMEOUT: Duration = Duration::from_secs(120);
+
 /// Methods that need more than the ordinary 30 s request timeout.
 ///
 /// `mcp_catalog/login` (and its alias `mcp/login`) answers only after the user finished the sign-in in
 /// the browser: Vibe 2.26.0 waits up to 600 s for the OAuth callback (`core/auth/mcp_oauth.py:44`,
 /// `_CALLBACK_TIMEOUT_SECONDS`). 660 s leaves Vibe the time to answer its own timeout.
+///
+/// Opening a session with the current plugins (`session/start`, `session/continue`, `session/fork`) and re-pinning a
+/// chat's plugins (`plugin/reload`) make Vibe copy every plugin file not yet in its package store and flush each one
+/// to disk (`mistralai_vibe_local_harness/vibe/plugins/_store.py` `ingest`, one `fsync` per file and per folder),
+/// which happens on the first start in a fresh Vibe home and after plugin content changes. On a busy or slow disk that
+/// took 7-42 s on a loaded test machine; when the request gives up, Vibe cancels the open half way. 120 s leaves room
+/// for a slow disk without letting a wedged server hang a start for minutes.
 pub const DEFAULT_LONG_METHODS: &[(&str, Duration)] = &[
     // The model proxy bounds compaction at 60 s; leave time for Vibe to persist its result
     // and answer with either the summary or the explicit proxy failure.
     ("session/compact", Duration::from_secs(90)),
+    ("session/start", SESSION_OPEN_TIMEOUT),
+    ("session/continue", SESSION_OPEN_TIMEOUT),
+    ("session/fork", SESSION_OPEN_TIMEOUT),
+    ("plugin/reload", SESSION_OPEN_TIMEOUT),
     ("mcp_catalog/login", Duration::from_secs(660)),
     ("mcp/login", Duration::from_secs(660)),
 ];
@@ -31,6 +45,25 @@ pub const DEFAULT_LONG_METHODS: &[(&str, Duration)] = &[
 mod tests {
     use super::{ConnectionConfig, DEFAULT_LONG_METHODS};
     use std::time::Duration;
+
+    #[test]
+    fn requests_that_pin_plugins_outlast_a_slow_first_pin() {
+        let config = ConnectionConfig::default();
+        for method in [
+            "session/start",
+            "session/continue",
+            "session/fork",
+            "plugin/reload",
+        ] {
+            assert!(
+                config
+                    .method_timeouts
+                    .contains(&(method.to_owned(), Duration::from_secs(120))),
+                "{method}"
+            );
+        }
+        assert_eq!(config.default_timeout, Duration::from_secs(30));
+    }
 
     #[test]
     fn manual_compaction_waits_longer_than_the_model_proxy_deadline() {

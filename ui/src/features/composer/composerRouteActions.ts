@@ -10,11 +10,38 @@
  * Debug API content, so nothing it leaves behind runs later with the window's origin.
  */
 import { NEW_CHAT } from "../../state/newChatKey";
+import { pasteIntoDraft } from "../../state/composerPaste";
+import { lineCount, pastesIn } from "./model/pastes";
 import { UiControlError } from "../../state/uiControl";
 import type { App } from "../shell/AppContext";
 import { configuredModeId, currentModeId } from "./model/access";
 import { currentPick, newChatPick } from "./model/models";
 import { queuedTurns, runningTurnId } from "./model/session";
+import type { CodeRef } from "../files/model/context";
+
+/** Optional display location, using the same absolute paths accepted by file links. */
+function contextRef(value: unknown): CodeRef | undefined {
+  if (value === undefined) return undefined;
+  const ref = asObject(value);
+  const path = text(ref["path"], "ref.path");
+  const start = ref["start"];
+  const end = ref["end"];
+  if (
+    !/^(?:\/|[a-z]:[\\/]|\\\\)/i.test(path) ||
+    typeof start !== "number" ||
+    typeof end !== "number" ||
+    !Number.isInteger(start) ||
+    !Number.isInteger(end) ||
+    start < 0 ||
+    end < start ||
+    (start === 0 && end !== 0)
+  )
+    throw new UiControlError(
+      "invalidParams",
+      "ref must name an absolute path and a line range (or 0, 0 for the whole file)",
+    );
+  return { path, start, end };
+}
 
 function asObject(body: unknown): Record<string, unknown> {
   if (typeof body === "object" && body !== null && !Array.isArray(body))
@@ -83,10 +110,17 @@ export async function handleComposer(app: App, body: unknown): Promise<unknown> 
           }
         : {}),
       draft: s.drafts[sessionId] ?? "",
+      pastes: pastesIn(s.drafts[sessionId] ?? "", s.pastes[sessionId] ?? []).map((item) => ({
+        ...item,
+        lines: lineCount(item.text),
+      })),
       context: (s.context[sessionId] ?? []).map((c) => ({
         id: c.id,
         label: c.label,
         source: c.source,
+        text: c.text,
+        by: c.by,
+        ...(c.ref === undefined ? {} : { ref: c.ref }),
       })),
       images: (s.images[sessionId] ?? []).map((i) => ({
         id: i.id,
@@ -122,6 +156,24 @@ export async function handleComposer(app: App, body: unknown): Promise<unknown> 
       case "type":
         app.composer.setDraftFromDebugApi(sessionId, text(input["text"], "text", true));
         return read(sessionId);
+      case "paste": {
+        const value = text(input["text"], "text", true);
+        const draft = app.composer.store.get().drafts[sessionId] ?? "";
+        const start = input["start"] ?? draft.length;
+        const end = input["end"] ?? start;
+        if (
+          typeof start !== "number" ||
+          typeof end !== "number" ||
+          !Number.isInteger(start) ||
+          !Number.isInteger(end) ||
+          start < 0 ||
+          end < start ||
+          end > draft.length
+        )
+          throw new UiControlError("invalidParams", "start and end must name a range in the draft");
+        pasteIntoDraft(app.composer, sessionId, value, start, end, "debug-api");
+        return read(sessionId);
+      }
       case "send": {
         const mode = input["mode"] ?? "send";
         if (mode !== "send" && mode !== "steer" && mode !== "queue") {
@@ -131,13 +183,16 @@ export async function handleComposer(app: App, body: unknown): Promise<unknown> 
         // From the new-chat view, `outcome.started` names the session the send created.
         return { outcome: { ...outcome, result: undefined }, ...asObject(read(sessionId)) };
       }
-      case "insertContext":
+      case "insertContext": {
+        const ref = contextRef(input["ref"]);
         actions.insertContext(sessionId, {
           label: text(input["label"], "label"),
           source: text(input["source"], "source"),
           text: text(input["text"], "text"),
+          ...(ref === undefined ? {} : { ref }),
         });
         return read(sessionId);
+      }
       case "attachImage": {
         const name = text(input["name"], "name");
         const file = new File([bytesOf(text(input["data"], "data"))], name);

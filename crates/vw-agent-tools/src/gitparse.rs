@@ -25,10 +25,8 @@ pub enum GitKind {
 
 /// Reason for refusing credential commands.
 pub const CREDENTIAL_REASON: &str = "Not run: the agent cannot use the user's stored Git or GitHub sign-in. Continue without reading credentials; the user can push or create a PR in the Changes tab.";
-/// Reason for refusing a GitHub CLI command. Every `gh` command is refused for the
-/// agent, reads included: GitHub data comes through Mistral's GitHub connector (whose writes the model proxy refuses,
-/// subagents included), and pushing or creating a PR is the user's button.
-pub const GH_WRITE_REASON: &str = "Not run: the agent does not use the GitHub CLI in Vibe Work. For GitHub data use the GitHub connector; pushing and creating a pull request are the user's Push and Create PR buttons in the Changes tab.";
+/// Reason for refusing a GitHub CLI command while reads are off.
+pub const GH_WRITE_REASON: &str = "GitHub reads are off. The user can turn them on in Settings > General. For GitHub data use the GitHub connector.";
 
 /// One recognized Git or GitHub CLI operation.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

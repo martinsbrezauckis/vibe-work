@@ -2,15 +2,19 @@
  * The controls for a page's inputs (Handbook Format 1.2 §6.6: "the app shows the controls, keeps your
  * answers like comments"): one control per input the page FILE declares (pick one, tick any, put in order, a short
  * answer), the detached answers, and one "Send to Vibe" button that puts every answer of the page into the composer
- * as a single chip. Answers are kept in Vibe Work's data, never in the repository (the panel says so).
- * Depends on: inputs.ts (pure model), protocol types. Called by: PagesTab.
+ * as a single chip. By default only one line shows (how many questions, how many answered, Send to Vibe, Show
+ * answers); the caller holds that choice. Answers are kept in Vibe Work's data, never in the repository (the panel
+ * says so).
+ * Depends on: inputs.ts (pure model), protocol types, vocabulary. Called by: PagesTab.
  * Invariants: renders only; questions and option labels are page text shown as plain text; every change calls
  * `answer` (the core checks it against the page file); rank moves are buttons, so they work from the keyboard.
  */
-import { type ReactElement, memo, useState } from "react";
+import { Button } from "../../components/Controls";
+import { type ReactElement, memo, useId, useState } from "react";
 
 import { Selector } from "../../components/Selector";
 import type { AnswerValue, InputAnswer, PageAnswers } from "../../protocol/core";
+import { TEXT, wording } from "../../vocabulary";
 import { chosen, labelOf, moved, toggled } from "./inputs";
 
 type Answer = (input: string, value: AnswerValue | null) => void;
@@ -44,17 +48,17 @@ function TextAnswer({ item, answer }: { item: InputAnswer; answer: Answer }): Re
           setText(event.target.value);
         }}
       />
-      <button
+      <Button
         data-testid="pages.answers-panel-answer"
         type="button"
-        className="pages-btn"
+        appearance="page"
         disabled={text.trim() === stored.trim()}
         onClick={() => {
           answer(item.input.id, text.trim() === "" ? null : { type: "text", text });
         }}
       >
         Save answer
-      </button>
+      </Button>
     </div>
   );
 }
@@ -192,39 +196,78 @@ const InputBlock = memo(function InputBlock({
         <Options key={JSON.stringify(item.answer?.value ?? null)} item={item} answer={answer} />
       )}
       {item.answer !== null && input.kind !== "text" && (
-        <button
+        <Button
           data-testid="pages.answers-panel-answer-2"
           type="button"
-          className="pages-btn"
+          appearance="page"
           onClick={() => {
             answer(input.id, null);
           }}
         >
           Clear
-        </button>
+        </Button>
       )}
     </li>
   );
 });
 
-/** The panel for `page` (the shown page's inputs and answers). */
+/** "3 questions · 2 answered" (and "· sent to Vibe" once every answer was sent). */
+function countLine(page: PageAnswers): string {
+  const n = page.inputs.length;
+  const questions = wording(n === 1 ? TEXT.answersQuestionsOne : TEXT.answersQuestionsMany, {
+    n: String(n),
+  });
+  const line = wording(TEXT.answersCount, { questions, answered: String(page.answered) });
+  return page.answered > 0 && page.unsent === 0 ? `${line} · sent to Vibe` : line;
+}
+
+/**
+ * The panel for `page` (the shown page's inputs and answers): one line (the counts, "Send to Vibe" and the
+ * Show answers toggle), and every control while `shown`. The hidden controls stay mounted, so an unsaved short
+ * answer survives hiding them.
+ */
 export function AnswersPanel({
   page,
   answer,
   send,
+  shown,
+  onShownChange,
 }: {
   page: PageAnswers;
   answer: Answer;
   send: () => void;
+  shown: boolean;
+  onShownChange: (shown: boolean) => void;
 }): ReactElement {
-  const total = page.inputs.length;
+  const controls = useId();
   return (
     <section className="pages-answers" aria-label="Your input on this page">
-      <details open>
-        <summary data-testid="pages.answers-panel-summary">
-          This page asks for your input · {page.answered} of {total} answered
-          {page.answered > 0 && page.unsent === 0 && " · sent to Vibe"}
-        </summary>
+      <div className="pages-cbox-row">
+        <span className="pages-answers-count">{countLine(page)}</span>
+        <Button
+          data-testid="pages.answers-panel-pages-btn"
+          type="button"
+          appearance="page"
+          variant="primary"
+          disabled={page.answered === 0 && page.detached.length === 0}
+          onClick={send}
+        >
+          Send to Vibe
+        </Button>
+        <Button
+          data-testid="pages.answers-panel-toggle"
+          type="button"
+          appearance="page"
+          aria-expanded={shown}
+          aria-controls={controls}
+          onClick={() => {
+            onShownChange(!shown);
+          }}
+        >
+          {shown ? TEXT.answersHide : TEXT.answersShow}
+        </Button>
+      </div>
+      <div id={controls} hidden={!shown}>
         <ul className="pages-input-list">
           {page.inputs.map((item) => (
             <InputBlock key={item.input.id} item={item} answer={answer} />
@@ -236,21 +279,10 @@ export function AnswersPanel({
             fit the page (the input or an option changed); Send to Vibe still includes them.
           </p>
         )}
-        <div className="pages-cbox-row">
-          <button
-            data-testid="pages.answers-panel-pages-btn"
-            type="button"
-            className="pages-btn go"
-            disabled={page.answered === 0 && page.detached.length === 0}
-            onClick={send}
-          >
-            Send to Vibe
-          </button>
-          <span className="pages-note">
-            All answers in one message. Saved in Vibe Work, not in the repo.
-          </span>
-        </div>
-      </details>
+        <p className="pages-note">
+          All answers in one message. Saved in Vibe Work, not in the repo.
+        </p>
+      </div>
     </section>
   );
 }

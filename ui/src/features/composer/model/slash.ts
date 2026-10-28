@@ -15,7 +15,7 @@ import { type ClientCommand, CLIENT_COMMANDS } from "./slashNames";
 export interface SlashCommandRow {
   name: ClientCommand;
   description: string;
-  /** The underlying protocol method, or "in the app" for client-only commands. Tooltips use the description. */
+  /** The underlying core command or protocol method, or "in the app" for client-only commands. Tooltips use the description. */
   runs: string;
 }
 
@@ -49,7 +49,7 @@ export const SLASH_COMMANDS: readonly SlashCommandRow[] = [
   },
   { name: "model", description: TEXT.slashModel, runs: "config/model/write" },
   { name: "thinking", description: TEXT.slashThinking, runs: "config/model/write" },
-  { name: "reload", description: "Reload config and skills", runs: "config/reload" },
+  { name: "reload", description: "Reload config, skills and plugins", runs: "refreshPlugins" },
   {
     name: "status",
     description: "Model, context window, tokens and access mode",
@@ -62,7 +62,7 @@ export const SLASH_COMMANDS: readonly SlashCommandRow[] = [
   {
     name: "reload-plugins",
     description: "Reload this session's plugins and say what changed",
-    runs: "plugin/reload",
+    runs: "refreshPlugins",
   },
   { name: "plugins", description: "The plugins this session runs", runs: "plugin/info" },
   {
@@ -92,7 +92,9 @@ export interface SkillRow {
 
 /** One menu item. */
 export type MenuItem = (
-  { kind: "command"; row: SlashCommandRow } | { kind: "skill"; skill: SkillRow }
+  | { kind: "command"; row: SlashCommandRow }
+  | { kind: "skill"; skill: SkillRow }
+  | { kind: "manage" }
 ) & {
   /** Where the typed text sits inside the name (the letters the menu marks), or -1 when only the description matched. */
   hit: number;
@@ -100,16 +102,25 @@ export type MenuItem = (
 
 /** The name of a menu item. */
 export function itemName(item: MenuItem): string {
-  return item.kind === "command" ? item.row.name : item.skill.name;
+  return item.kind === "manage"
+    ? "Manage skills…"
+    : item.kind === "command"
+      ? item.row.name
+      : item.skill.name;
 }
 
 /** The one-line description of a menu item. */
 export function itemDescription(item: MenuItem): string {
-  return item.kind === "command" ? item.row.description : item.skill.description;
+  return item.kind === "manage"
+    ? "Open Skills"
+    : item.kind === "command"
+      ? item.row.description
+      : item.skill.description;
 }
 
 /** The tooltip of a menu item: the action a pick takes, in words, and the keys that pick it. */
 export function itemRuns(item: MenuItem): string {
+  if (item.kind === "manage") return "Manage skills…";
   if (item.kind === "skill")
     return `Insert /${item.skill.name} skill into the message (Enter or Tab)`;
   return `/${item.row.name}: ${item.row.description} (Enter or Tab)`;
@@ -177,6 +188,7 @@ export function menuItems(text: string, skills: readonly SkillRow[]): MenuItem[]
       hit,
     })),
     ...ranked(skills, query).map(({ row, hit }): MenuItem => ({ kind: "skill", skill: row, hit })),
+    ...("manage skills".includes(query) ? [{ kind: "manage" as const, hit: -1 }] : []),
   ];
 }
 

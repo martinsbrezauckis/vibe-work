@@ -7,6 +7,9 @@
 //! - Folders are stored canonicalised (symlinks resolved), and a candidate path is canonicalised
 //!   the same way before comparison, so `..` hops and symlinks out of a picked folder do not match.
 //! - A candidate that does not exist, is relative, or cannot be resolved never matches.
+//! - The spelling a folder was picked in (the dialog's, the Debug API's) is kept beside its canonical path when the
+//!   two differ (macOS `/tmp/x` is `/private/tmp/x`; a symlinked project folder), so the Files tab can recognise the
+//!   window's spelling without touching the disk ([`PickedFolders::spellings`]). It is never used for trust.
 //!
 //! Limitation (documented, not solved here): the path is checked and later used by Vibe as the
 //! string the caller sent; a local process that can rewrite the picked folder's contents between
@@ -19,7 +22,12 @@ use crate::error::GateError;
 
 /// The set of natively picked folders.
 #[derive(Default)]
-pub(crate) struct PickedFolders(Vec<PathBuf>);
+pub(crate) struct PickedFolders {
+    /// Canonical paths.
+    roots: Vec<PathBuf>,
+    /// `(spelling as picked, canonical path)` for picks whose spelling differs from the canonical path.
+    spellings: Vec<(PathBuf, PathBuf)>,
+}
 
 impl PickedFolders {
     /// Records a folder the user picked. It must exist and be a directory.
@@ -35,8 +43,14 @@ impl PickedFolders {
                 reason: "not a directory".to_owned(),
             });
         }
-        if !self.0.contains(&canonical) {
-            self.0.push(canonical);
+        if path.is_absolute() && path != canonical {
+            let spelling = (path.to_path_buf(), canonical.clone());
+            if !self.spellings.contains(&spelling) {
+                self.spellings.push(spelling);
+            }
+        }
+        if !self.roots.contains(&canonical) {
+            self.roots.push(canonical);
         }
         Ok(())
     }
@@ -49,7 +63,13 @@ impl PickedFolders {
     /// The picked folders (canonical), for callers that must compare a path lexically before touching the disk
     /// (a path outside every allowed folder is refused without any filesystem access).
     pub(crate) fn roots(&self) -> Vec<PathBuf> {
-        self.0.clone()
+        self.roots.clone()
+    }
+
+    /// The picks whose spelling differs from their canonical path, as `(spelling, canonical)`, for the same lexical
+    /// comparison as [`Self::roots`] in the spelling the window keeps.
+    pub(crate) fn spellings(&self) -> Vec<(PathBuf, PathBuf)> {
+        self.spellings.clone()
     }
 
     /// [`Self::contains`] for a path value.
@@ -60,7 +80,7 @@ impl PickedFolders {
         let Ok(real) = path.canonicalize() else {
             return false;
         };
-        self.0.iter().any(|picked| real.starts_with(picked))
+        self.roots.iter().any(|picked| real.starts_with(picked))
     }
 }
 

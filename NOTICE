@@ -63,6 +63,15 @@ tauri-apps/tauri pull request 16054). Every other file is unchanged (third_party
 the license texts are in third_party/tauri-runtime-wry/LICENSE-APACHE-2.0 and
 third_party/tauri-runtime-wry/LICENSE-MIT.
 
+wry 0.57.0 (Apache License 2.0 OR MIT), Copyright (c) 2020-2023 Ngo Iok Ui & Tauri Programme within The Commons Conservancy:
+a modified copy is built instead of the published crate (third_party/wry). Changes marked "VIBE WORK PATCH"
+in src/lib.rs and src/wkwebview/navigation.rs expose scoped main-frame context during the WK navigation
+callback through the added src/navigation_context.rs. MOBILE.md and src/proxy.rs use host placeholders in
+documentation examples for the export rules; SECURITY.md has trailing whitespace removed.
+Every other upstream file is unchanged; hashes are
+in third_party/wry/PROVENANCE.json. License texts are in third_party/wry/LICENSE-APACHE and
+third_party/wry/LICENSE-MIT.
+
 tauri-bundler 2.10.1 (Apache License 2.0 OR MIT), Copyright (c) 2017 - Present Tauri Apps Contributors:
 app/installer.nsi is adapted from its Windows NSIS template. Changes preserve user data during replacement
 installs and add separate opt-in removal of the private vault. The Tauri license texts are in

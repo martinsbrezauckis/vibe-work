@@ -1,14 +1,18 @@
 //! Small, bounded reads of ZIP containers (Office files): the entry names, and one small entry's text.
 //!
 //! Depends on: zip. Called by: `kind` (which Office kind), `pages` (DOCX page count, PPTX slides).
-//! Invariants: never inflates more than [`MAX_ENTRY_BYTES`] of one entry (a ZIP bomb stops there),
+//! Invariants: never inflates more than [`MAX_ENTRY_BYTES`] of one metadata entry or [`MAX_CONTENT_PART_BYTES`] of one
+//! content part (a ZIP bomb stops there),
 //! never lists more than [`MAX_ENTRIES`] names; [`inflates_within`] inflates a whole container at most once, into a
 //! counting sink (nothing kept), and stops at its limit.
 
 use std::io::{Cursor, Read};
 
-/// Most bytes read from one entry.
+/// Most bytes read from one small metadata entry (page counts, relationships).
 pub const MAX_ENTRY_BYTES: u64 = 4 * 1024 * 1024;
+/// Most bytes read from one content part a local reader parses (a Word body, a slide): about 1,500 heavily formatted
+/// pages; its parsed tree stays near 100 MB. The whole package is first checked by [`inflates_within`].
+pub const MAX_CONTENT_PART_BYTES: u64 = 16 * 1024 * 1024;
 /// Most entry names read.
 pub const MAX_ENTRIES: usize = 50_000;
 /// Most bytes all entries of one workbook may inflate to before it is parsed (see [`inflates_within`]).
@@ -59,11 +63,17 @@ pub fn entry_names(bytes: &[u8]) -> Result<Vec<String>, String> {
 /// unreadable, larger than the cap or not UTF-8.
 #[must_use]
 pub fn entry_text(bytes: &[u8], name: &str) -> Option<String> {
+    entry_text_within(bytes, name, MAX_ENTRY_BYTES)
+}
+
+/// [`entry_text`] with its own cap (at most `cap` bytes inflated, so a ZIP bomb stops there).
+#[must_use]
+pub fn entry_text_within(bytes: &[u8], name: &str, cap: u64) -> Option<String> {
     let mut archive = zip::ZipArchive::new(Cursor::new(bytes)).ok()?;
     let entry = archive.by_name(name).ok()?;
     let mut out = Vec::new();
-    entry.take(MAX_ENTRY_BYTES + 1).read_to_end(&mut out).ok()?;
-    if out.len() as u64 > MAX_ENTRY_BYTES {
+    entry.take(cap + 1).read_to_end(&mut out).ok()?;
+    if out.len() as u64 > cap {
         return None;
     }
     String::from_utf8(out).ok()

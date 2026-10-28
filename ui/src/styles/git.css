@@ -9,7 +9,7 @@
   margin: 0 0 12px;
   padding: 8px 10px;
   border: 1px solid var(--line);
-  border-radius: 10px;
+  border-radius: var(--radius-lg);
   background: var(--bg);
   min-width: 0;
 }
@@ -18,7 +18,7 @@
   flex-wrap: wrap;
   align-items: center;
   gap: 4px 10px;
-  font-size: 12px;
+  font-size: var(--text-12);
   color: var(--text-2);
   min-width: 0;
 }
@@ -35,18 +35,18 @@
   min-height: 28px;
   padding: 2px 5px;
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   color: var(--text);
   background: var(--bg);
   font: inherit;
 }
 .git-repo-name {
   color: var(--text);
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
 }
 .git-reasons {
   margin: 0;
-  font-size: 11px;
+  font-size: var(--text-11);
   color: var(--text-3);
 }
 .git-base,
@@ -63,26 +63,15 @@
 }
 .git-notice {
   margin: 0;
-  font-size: 12px;
+  font-size: var(--text-12);
   color: var(--text-2);
   overflow-wrap: anywhere;
-}
-.git-note,
-.git-sub {
-  margin: 0 0 10px;
-  font-size: 12.5px;
-  color: var(--text-2);
-  overflow-wrap: anywhere;
-}
-.git-from {
-  color: var(--text-3);
-  font-weight: 400;
 }
 .git-field {
   display: grid;
   gap: 4px;
   margin: 0 0 10px;
-  font-size: 12.5px;
+  font-size: var(--text-12-5);
   color: var(--text-2);
 }
 .git-field input,
@@ -91,14 +80,14 @@
   color: var(--text);
   background: var(--bg);
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   padding: 6px 8px;
   min-width: 0;
   resize: vertical;
 }
 .git-field textarea {
-  font-family: var(--mono);
-  font-size: 12.5px;
+  font-family: var(--font-mono);
+  font-size: var(--text-12-5);
 }
 .git-inline {
   grid-template-columns: auto minmax(0, 1fr);
@@ -111,12 +100,12 @@
   max-height: 220px;
   overflow: auto;
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
 }
 .git-files li {
   padding: 4px 8px;
   border-top: 1px solid var(--line);
-  font-size: 12px;
+  font-size: var(--text-12);
 }
 .git-files li:first-child {
   border-top: 0;
@@ -132,7 +121,7 @@
 }
 .git-st {
   color: var(--text-3);
-  font-size: 11px;
+  font-size: var(--text-11);
 }
 .git-check {
   display: grid;
@@ -140,7 +129,7 @@
   gap: 8px;
   align-items: start;
   margin: 0 0 8px;
-  font-size: 12.5px;
+  font-size: var(--text-12-5);
   color: var(--text-2);
 }
 .git-modal footer {
@@ -151,8 +140,8 @@
   gap: 6px;
   padding: 8px 10px;
   border: 1px solid var(--line);
-  border-radius: 8px;
-  font-size: 12px;
+  border-radius: var(--radius-md);
+  font-size: var(--text-12);
   color: var(--text-2);
   min-width: 0;
 }
@@ -175,9 +164,9 @@
   min-width: 0;
 }
 .pr-state {
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   padding: 1px 6px;
-  font-size: 11px;
+  font-size: var(--text-11);
   background: var(--active);
   color: var(--text);
 }
@@ -214,7 +203,7 @@
 }
 .pr-when {
   color: var(--text-3);
-  font-size: 11px;
+  font-size: var(--text-11);
 }
 .pr-chip {
   cursor: pointer;
@@ -228,7 +217,7 @@
 }
 .git-rule {
   margin: 0 0 10px;
-  font-size: 12.5px;
+  font-size: var(--text-12-5);
   color: var(--text-2);
 }
 .git-rule textarea {
@@ -238,7 +227,7 @@
   color: var(--text);
   background: var(--bg);
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   padding: 6px 8px;
   box-sizing: border-box;
   resize: vertical;

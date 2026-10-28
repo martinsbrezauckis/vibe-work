@@ -5,6 +5,7 @@
 //! - **Binary:** next to the app executable (a bundled sidecar), else in the cargo target folder of a
 //!   development build. Missing: the tools are off, the hook block is removed (a `strict` hook whose binary is
 //!   gone would deny every bash call), and the reason is returned for the log.
+//! - **Git Bash (Windows):** a copy of the binary runs Vibe's Git Bash in a kill-on-close job ([`crate::git_bash`]).
 //! - **`hooks.toml`:** Vibe Work owns this `VIBE_HOME`; our hook lives in a marked block that is replaced
 //!   on every start (new binary or data path) and anything outside it is kept. Hooks in a built-in plugin never
 //!   fire, so this file is the only place that works, also in auto-approve.
@@ -49,13 +50,34 @@ pub fn binary_next_to(exe: &Path) -> Option<PathBuf> {
     candidate.is_file().then_some(candidate)
 }
 
-/// Quotes a path for the hook's shell line (`sh` on Unix, `cmd` on Windows).
+/// Quotes a path for the Unix hook's shell line.
 fn shell_quote(path: &Path) -> String {
     let text = path.to_string_lossy();
-    if cfg!(windows) {
-        format!("\"{text}\"")
+    format!("'{}'", text.replace('\'', r"'\''"))
+}
+
+/// A fixed PowerShell launcher is parseable in both Git Bash and PowerShell.
+/// Paths stay inside its UTF-16 script, so neither outer shell expands path characters.
+fn hook_command(binary: &Path, endpoint: &Path, guard: Guard, windows: bool) -> String {
+    if windows {
+        use base64::Engine as _;
+        let quote = |path: &Path| format!("'{}'", path.to_string_lossy().replace('\'', "''"));
+        let script = format!(
+            "& {} guard {} --endpoint-file {}; exit $LASTEXITCODE",
+            quote(binary),
+            guard.arg(),
+            quote(endpoint)
+        );
+        let bytes: Vec<u8> = script.encode_utf16().flat_map(u16::to_le_bytes).collect();
+        let encoded = base64::engine::general_purpose::STANDARD.encode(bytes);
+        format!("powershell.exe -NoLogo -NoProfile -NonInteractive -EncodedCommand {encoded}")
     } else {
-        format!("'{}'", text.replace('\'', r"'\''"))
+        format!(
+            "{} guard {} --endpoint-file {}",
+            shell_quote(binary),
+            guard.arg(),
+            shell_quote(endpoint)
+        )
     }
 }
 
@@ -95,6 +117,9 @@ fn guard_description(guard: Guard) -> &'static str {
         Guard::Connector => {
             "Vibe Work: connector tools that change a repository on a code forge are the user's Push / Create PR buttons"
         }
+        Guard::Receipt => {
+            "Vibe Work: wait for permission and bind the decision to its originating agent and call"
+        }
     }
 }
 
@@ -105,17 +130,13 @@ fn guard_description(guard: Guard) -> &'static str {
 pub fn hook_block(binary: &Path, endpoint_file: &Path) -> String {
     let mut out = format!("{BEGIN}\n");
     for guard in Guard::ALL {
-        let command = format!(
-            "{} guard {} --endpoint-file {}",
-            shell_quote(binary),
-            guard.arg(),
-            shell_quote(endpoint_file)
-        );
+        let command = hook_command(binary, endpoint_file, guard, cfg!(windows));
         let _ = write!(
             out,
-            "[[hooks]]\nname = {}\ntype = \"pre_tool\"\nmatch = {}\nstrict = true\ntimeout = 300\ndescription = {}\ncommand = {}\n\n",
+            "[[hooks]]\nname = {}\ntype = \"pre_tool\"\nmatch = {}\nstrict = true\ntimeout = {}\ndescription = {}\ncommand = {}\n\n",
             toml_string(guard.hook_name()),
             toml_string(guard.matcher()),
+            guard.timeout_secs(),
             toml_string(guard_description(guard)),
             toml_string(&command)
         );
@@ -206,10 +227,18 @@ pub fn prepare(
             ));
         }
     }
+    // Windows: Vibe's Git Bash in a kill-on-close job (the copy is of this binary), or our shell line removed.
+    #[cfg(windows)]
+    let shell = format!(
+        "; {}",
+        crate::git_bash::prepare(supervisor, data_dir, binary.as_deref())
+    );
+    #[cfg(not(windows))]
+    let shell = String::new();
     let Some(binary) = binary else {
         write_hooks(&supervisor.vibe_home, None)?;
         let note = note_line(&supervisor.vibe_home, false);
-        return Ok(format!("agent tools off: {BINARY} not found{note}"));
+        return Ok(format!("agent tools off: {BINARY} not found{note}{shell}"));
     };
     let config = AgentToolsConfig::new(
         binary.clone(),
@@ -229,7 +258,7 @@ pub fn prepare(
         supervisor.extra_args.push(root.as_os_str().to_owned());
     }
     let note = note_line(&supervisor.vibe_home, plugin.is_some());
-    Ok(format!("agent tools on: {}{note}", binary.display()))
+    Ok(format!("agent tools on: {}{note}{shell}", binary.display()))
 }
 
 /// Writes or removes the Vibe Work note in `vibe_home/AGENTS.md`; the text to add to the log line (empty when all
@@ -238,5 +267,40 @@ fn note_line(vibe_home: &Path, on: bool) -> String {
     match vw_core_api::working_note::write(vibe_home, on) {
         Ok(_) => String::new(),
         Err(reason) => format!("; Vibe Work note not updated: {reason}"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Guard, Path, hook_command};
+    use base64::Engine as _;
+
+    #[test]
+    fn windows_hooks_keep_paths_out_of_both_outer_shells() {
+        let line = hook_command(
+            Path::new(r"C:\a b\$cash`tick'quote\vw-agent-tools.exe"),
+            Path::new(r"C:\a b\hook.json"),
+            Guard::Safety,
+            true,
+        );
+        let encoded = line.split_whitespace().last().unwrap();
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(encoded)
+            .unwrap();
+        let units: Vec<u16> = bytes
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|b| u16::from_le_bytes([b[0], b[1]]))
+            .collect();
+        let script = String::from_utf16(&units).unwrap();
+        assert_eq!(
+            script,
+            r"& 'C:\a b\$cash`tick''quote\vw-agent-tools.exe' guard safety --endpoint-file 'C:\a b\hook.json'; exit $LASTEXITCODE"
+        );
+        assert!(
+            line.bytes()
+                .all(|c| c.is_ascii_alphanumeric() || b" -+/=.".contains(&c))
+        );
     }
 }

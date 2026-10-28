@@ -5,6 +5,7 @@
  * Depends on: AppContext, the transcript store hooks, SourcesList. Called by: Transcript.
  * Invariants: render only; the sources are the snapshot the chip handed over (no fetching).
  */
+import { Button } from "../../components/Controls";
 import { type ReactElement, useEffect, useRef } from "react";
 
 import { useApp } from "../shell/AppContext";
@@ -57,16 +58,17 @@ export function SourcesPanel(): ReactElement | null {
     >
       <header>
         <h2 id="sources-panel-title">Sources ({String(sources.items.length)})</h2>
-        <button
+        <Button
           data-testid="transcript.sources-panel-mini"
           type="button"
-          className="mini sources-close"
+          appearance="compact"
+          placement="sources-close"
           aria-label="Close sources (Escape)"
           title="Close sources (Escape)"
           onClick={close}
         >
           Close
-        </button>
+        </Button>
       </header>
       <p className="d">
         Pages Mistral&apos;s web search used for this answer. Vibe Work does not open them; a click

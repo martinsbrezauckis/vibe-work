@@ -1,22 +1,40 @@
-//! Engine mount, unmount and suspended-preview restoration for the preview service.
+//! Engine mount, unmount, suspension (the console read first) and suspended-preview restoration for the preview
+//! service.
 //! Depends on URL classification, the pool admission state and engine calls; called by service operations.
 
 use super::{PreviewError, PreviewService};
 use crate::console;
 use crate::engine::{EngineError, MountId, MountSpec};
 use crate::layout::{self, Placement};
-use crate::state::{BrowserMountState, Mount};
+use crate::state::{BrowserMountState, Mount, MountState};
 use url::Url;
 
-fn initialization_script(accessor: &str, page: &str) -> String {
+fn initialization_script(accessor: &str, page: &str, theme: &str) -> String {
     format!(
         "{}\n{}",
         console::init_script(accessor),
-        crate::page_init::page_init_script(page)
+        crate::page_init::page_init_script_themed(page, theme)
     )
 }
 
+/// How long a suspension waits for the page's console before closing it anyway (a busy page loses its last
+/// entries rather than holding the engine pool).
+const SUSPEND_DRAIN: std::time::Duration = std::time::Duration::from_secs(1);
+
 impl PreviewService {
+    /// Sets the app's theme for pages loaded from now on (`light`; anything else is dark).
+    pub fn set_app_theme(&self, theme: &str) {
+        self.inner.lock().light_app = theme == "light";
+    }
+
+    fn app_theme(&self) -> &'static str {
+        if self.inner.lock().light_app {
+            "light"
+        } else {
+            "dark"
+        }
+    }
+
     pub(crate) fn mount_id(&self, session_id: &str, mount: &Mount) -> MountId {
         let _ = self;
         MountId {
@@ -87,7 +105,7 @@ impl PreviewService {
             if self.browser_protected(&session) {
                 continue;
             }
-            if self.unmount_in_pool(&session).await.is_ok() {
+            if self.suspend_in_pool(&session).await.is_ok() {
                 self.browser_released(&session);
             }
         }
@@ -123,7 +141,9 @@ impl PreviewService {
                 )
             };
             entry.mount = Some(Mount {
+                navigation: crate::navigation::Navigation::default(),
                 label: label.clone(),
+                state: MountState::Unready,
                 page: page.clone(),
                 class,
                 names_later: false,
@@ -163,14 +183,16 @@ impl PreviewService {
             url,
             storage,
             // The console and page environment start on every document.
-            console_script: initialization_script(&accessor, &page),
+            console_script: initialization_script(&accessor, &page, self.app_theme()),
             console_drain: console::drain_script(&accessor),
             context_menu: true,
             placement,
             parked: Some(parked),
             rules: Some(rules),
+            no_peer_connections: false,
         };
         if let Err(error) = self.bounded("mount", self.engine.mount(spec)).await {
+            self.cancel_pending_navigation(session_id);
             let id = MountId {
                 session_id: session_id.to_owned(),
                 label: label.clone(),
@@ -194,6 +216,23 @@ impl PreviewService {
             }
             return Err(error.into());
         }
+        if let Some(mount) = self.inner.lock().entry(session_id).mount.as_mut() {
+            mount.state = MountState::Ready;
+        }
+        Ok(())
+    }
+
+    /// An incomplete setup keeps its identity until close succeeds; it can never be reused.
+    pub(super) async fn close_unready(&self, session_id: &str) -> Result<(), PreviewError> {
+        let unready = self
+            .inner
+            .lock()
+            .entries
+            .get(session_id)
+            .is_some_and(|entry| entry.mount.is_some() && entry.ready_mount().is_none());
+        if unready {
+            self.unmount(session_id).await?;
+        }
         Ok(())
     }
 
@@ -214,19 +253,42 @@ impl PreviewService {
                 .over_cap(self.config.live_cap, keep)
                 .contains(&session)
             {
-                let _ = self.unmount(&session).await;
+                let _operation = self.pool_op.lock().await;
+                let _ = self.suspend_in_pool(&session).await;
             }
         }
     }
 
     /// Closes the mount of a session's preview, keeping its URL (suspended).
     pub(crate) async fn unmount(&self, session_id: &str) -> Result<(), PreviewError> {
+        self.cancel_pending_navigation(session_id);
         let _operation = self.pool_op.lock().await;
+        self.unmount_in_pool(session_id).await
+    }
+
+    /// Suspends a preview to free its engine (the cap, the pool or idleness, never the user's close): what its
+    /// page logged is read into the host ring first, so the console of the suspended preview still answers with
+    /// it (a 16 GB Mac admits 3 engines, so suspensions are common there). The read is bounded
+    /// by [`SUSPEND_DRAIN`] and its failure never stops the suspension.
+    /// Caller owns `pool_op` and the session operation lock, like [`Self::unmount_in_pool`].
+    pub(super) async fn suspend_in_pool(&self, session_id: &str) -> Result<(), PreviewError> {
+        match tokio::time::timeout(SUSPEND_DRAIN, self.drain_to_host(session_id, false)).await {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => {
+                tracing::info!(session = %session_id, %error, "preview console not read before suspending");
+            }
+            Err(_) => {
+                tracing::info!(session = %session_id, "preview console not read before suspending: no answer in time");
+            }
+        }
         self.unmount_in_pool(session_id).await
     }
 
     /// Caller owns `pool_op` and the session operation lock, including during failed-close recovery.
     pub(super) async fn unmount_in_pool(&self, session_id: &str) -> Result<(), PreviewError> {
+        if let Some(entry) = self.inner.lock().entries.get_mut(session_id) {
+            entry.cancel_navigation();
+        }
         let mount = {
             self.inner
                 .lock()
@@ -236,7 +298,10 @@ impl PreviewService {
         };
         if let Some(mount) = mount {
             let id = self.mount_id(session_id, &mount);
-            self.bounded("close", self.engine.close(&id)).await?;
+            match self.bounded("close", self.engine.close(&id)).await {
+                Ok(()) | Err(EngineError::NotMounted) => {}
+                Err(error) => return Err(error.into()),
+            }
             let mut state = self.inner.lock();
             state.by_label.remove(&mount.label);
             state.browser_overlays.remove(session_id);
@@ -255,6 +320,7 @@ impl PreviewService {
 
     /// The mount of a session, mounting a suspended preview again (hidden) when it has a URL.
     pub(super) async fn ensure_mounted(&self, session_id: &str) -> Result<MountId, PreviewError> {
+        self.close_unready(session_id).await?;
         let (mount, url) = {
             let state = self.inner.lock();
             let entry = state

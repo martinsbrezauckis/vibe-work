@@ -11,6 +11,7 @@
  * the column (`listDrop.ts`), which reads `data-drop-key` / `data-drop-id`. The compact chat-plus action and menu
  * share the project start path, which selects the new chat, expands its group and focuses its composer.
  */
+import { Button } from "../../components/Controls";
 import { TEXT } from "../../vocabulary";
 import { useState } from "react";
 
@@ -71,7 +72,7 @@ export function ProjectGroupView({
           },
           {
             id: "folder",
-            label: path === null ? "Choose main folder..." : "Change main folder...",
+            label: path === null ? "Choose main folder…" : "Change main folder…",
             run: () => void groups.chooseFolder(id),
           },
           {
@@ -105,7 +106,7 @@ export function ProjectGroupView({
     },
     {
       id: "trust",
-      label: "Trust this folder's hooks, agents and plugins...",
+      label: "Trust this folder's hooks, agents and plugins…",
       run: () => {
         setTrusting(true);
       },
@@ -117,7 +118,7 @@ export function ProjectGroupView({
       : [
           {
             id: "delete",
-            label: "Delete project...",
+            label: "Delete project…",
             run: () => {
               groups.askDelete(id);
             },
@@ -227,7 +228,7 @@ export function ProjectGroupView({
             icon="message-square-plus"
             iconSize={14}
             label={`${TEXT.newChat} in ${group.name}`}
-            className="proj-new-chat"
+            placement="project-new-chat"
             disabled={groups === null}
             onClick={newHere}
           />
@@ -264,25 +265,25 @@ export function ProjectGroupView({
           <div className="proj-empty">
             <span>
               No sessions here. Drag sessions here, or{" "}
-              <button
+              <Button
                 data-testid="sessions.project-group-view-link-btn"
                 type="button"
-                className="link-btn"
+                appearance="text-link"
                 onClick={newHere}
               >
                 start one
-              </button>
+              </Button>
               .
             </span>
             {path === null && (
-              <button
+              <Button
                 data-testid="sessions.project-group-view-choose-folder"
                 type="button"
-                className="link-btn"
+                appearance="text-link"
                 onClick={() => void groups?.chooseFolder(id)}
               >
-                Choose main folder...
-              </button>
+                Choose main folder…
+              </Button>
             )}
           </div>
         )}

@@ -154,12 +154,17 @@ fn plan_turns_and_calls(command: Command) -> Planned {
         Command::PickModel {
             session_id,
             model_alias,
+            model_name,
+            model_display_name,
             reasoning_effort,
         } => forward(
             "config/model/write",
             object(vec![
                 ("sessionId", Some(Value::String(session_id))),
+                ("sessionOnly", Some(Value::Bool(true))),
                 ("modelAlias", model_alias.map(Value::String)),
+                ("_modelName", model_name.map(Value::String)),
+                ("_modelDisplayName", model_display_name.map(Value::String)),
                 ("reasoningEffort", reasoning_effort.map(Value::String)),
             ]),
             None,

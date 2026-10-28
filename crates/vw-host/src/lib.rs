@@ -23,7 +23,8 @@
 //! - [`updates`]: whether this build may check for updates (fail closed) and the last update step's status.
 //! - [`update_flow`]: notify, download, then ask: the update state machine and the consent that gates
 //!   every install (`update_store`: the verified package on disk, `update_verify`: minisign check, `update_view`:
-//!   the view and the traits the app implements).
+//!   the view and the traits the app implements; `update_leftovers`: the Windows installer copies an update leaves
+//!   in the temp folder, removed at the next start; `update_os`: the oldest system a new version runs on).
 //! - [`navigation`]: the policy that keeps the main window on the app's own origin.
 //! - [`media`]: the one web permission the main window grants (the microphone, for dictation).
 //! - [`settings`]: the few persisted switches the host needs before the UI exists (Debug API).
@@ -36,9 +37,10 @@
 //! Invariants:
 //! - Starting never panics and never aborts the app: a failed or missing core is reported as a
 //!   [`Startup`] state and every command then fails with `serverUnavailable` and that reason.
-//! - Commands from this crate's callers are executed with [`Origin::Ui`](vw_core_api::Origin), or with
-//!   `Origin::DebugApi` when the window marks them as a Debug API client's AND the Debug API is on
-//!   (that origin acts as the user without dialogs); the origin is decided here, in Rust.
+//! - Window commands are executed with [`Origin::Ui`](vw_core_api::Origin). Only a window command that matches a
+//!   grant of a pending Debug API `ui/*` request runs with `Origin::DebugApi` (that origin acts as the user without
+//!   dialogs), once, while the Debug API is on; grants are built in Rust from the request alone ([`ui_grants`]).
+//!   Nothing the window sends can claim the Debug API origin.
 
 pub mod agent_tools;
 mod bridge;
@@ -50,21 +52,31 @@ mod documents;
 mod events;
 mod export;
 mod extension_paths;
+mod files_routes;
 mod forward;
+pub mod git_bash;
+pub mod hand_over;
 mod handle;
 mod host;
 pub mod instance;
 pub mod launch;
+mod launch_version;
 pub mod media;
 pub mod navigation;
 mod notify;
 pub mod product;
+pub mod send_to;
 pub mod settings;
 mod terminal;
 pub mod title_model;
+pub mod trust_store;
+pub mod ui_grants;
+pub mod update_appimage;
 mod update_consent;
 mod update_download;
 pub mod update_flow;
+pub mod update_leftovers;
+pub mod update_os;
 mod update_store;
 pub mod update_verify;
 mod update_view;
@@ -72,10 +84,11 @@ pub mod updates;
 
 pub use bridge::{UiBridge, UiOutcome, UiReply, UiReplyError, UiRequest};
 pub use confirm::{
-    AGENT_LINE, ALLOW_ONCE, CLOSE, CONTINUE, DEBUG_API_LINE, DIALOG_PARAMS_MAX_CHARS, DONT_ALLOW,
-    MAX_PAGES, NEXT_PART, PAGE_CHARS, SHORT_HEAD, SHORT_TAIL, SHOW_FULL, SharedConfirmer,
-    ShortOutcome, ShortStep, dialog_answer, dialog_buttons, dialog_text, full_pages,
-    shortened_answer, shortened_buttons, shortened_dialog_text,
+    AGENT_LINE, ALLOW_ONCE, CLOSE, CONTINUE, DEBUG_API_LINE, DIALOG_PARAMS_MAX_CHARS, DIALOG_TITLE,
+    DONT_ALLOW, MAX_PAGES, NEXT_PART, PAGE_CHARS, SHORT_HEAD, SHORT_TAIL, SHOW_FULL,
+    SharedConfirmer, ShortOutcome, ShortStep, dialog_answer, dialog_buttons, dialog_heading,
+    dialog_text, full_pages, shortened_answer, shortened_buttons, shortened_dialog_text,
+    system_dialog_order,
 };
 pub use documents::DocumentsPicked;
 pub use events::HostEvent;

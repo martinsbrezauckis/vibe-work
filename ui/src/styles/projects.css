@@ -79,7 +79,7 @@
   height: 32px;
   padding: 0 10px;
   border: 1px solid var(--line-2);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: var(--panel);
   color: var(--text-3);
 }
@@ -91,40 +91,13 @@
   width: 170px;
   font: inherit;
 }
-.pj-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: 32px;
-  padding: 0 12px;
-  border-radius: 8px;
-  border: 1px solid var(--line-2);
-  font-size: var(--text-13);
-  font-weight: var(--weight-medium);
-  color: var(--text);
-  background: var(--panel);
-  cursor: pointer;
-}
-.pj-btn:hover:not(:disabled) {
-  background: var(--hover);
-}
-.pj-btn.primary {
-  background: var(--primary-bg);
-  color: var(--primary-fg);
-  border-color: transparent;
-}
-.pj-btn.small {
-  height: 26px;
-  padding: 0 9px;
-  font-size: var(--text-12);
-}
 
 /* "Needs you": the one loud element of the page. */
 .pj-needs {
   margin: 20px 0 6px;
   border: 1px solid color-mix(in srgb, var(--orange) 45%, transparent);
   background: var(--orange-soft);
-  border-radius: 12px;
+  border-radius: var(--radius-xl);
   padding: 12px 14px;
 }
 .pj-needs h3 {
@@ -144,7 +117,7 @@
   line-height: normal;
   color: var(--accent-ink);
   background: var(--orange);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   padding: 1px 7px;
 }
 .pj-needs ul {
@@ -162,7 +135,7 @@
   align-items: center;
   text-align: left;
   padding: 7px 9px;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   border: 0;
   background: none;
   color: inherit;
@@ -184,7 +157,7 @@
   font-weight: var(--weight-semibold);
   color: var(--orange-2);
   border: 1px solid color-mix(in srgb, var(--orange) 50%, transparent);
-  border-radius: 5px;
+  border-radius: var(--radius-5);
   padding: 1px 6px;
 }
 .pj-needs .age {
@@ -214,27 +187,6 @@
   gap: 12px;
 }
 
-/* Project card. Hierarchy: name > current plan > sessions > handbook health > path. */
-.pj-card {
-  display: flex;
-  flex-direction: column;
-  container-type: inline-size;
-  gap: 12px;
-  padding: 14px 15px 12px;
-  border: 1px solid var(--line-2);
-  border-radius: 12px;
-  background: var(--panel);
-  cursor: pointer;
-  min-width: 0;
-}
-.pj-card:hover:where(:not(:disabled)) {
-  border-color: var(--line-3);
-  background: color-mix(in srgb, var(--panel) 70%, var(--raised));
-}
-.pj-card[data-selected="true"] {
-  border-color: var(--text-3);
-  box-shadow: 0 0 0 1px var(--text-3) inset;
-}
 .pj-heading {
   display: flex;
   align-items: center;
@@ -256,7 +208,7 @@
   height: 28px;
   padding: 0;
   border: 0;
-  border-radius: 7px;
+  border-radius: var(--radius-7);
   background: none;
   color: var(--text-2);
   cursor: pointer;
@@ -285,9 +237,6 @@
 .pj-chip:focus-visible,
 .pj-btn:focus-visible {
   outline: none;
-  box-shadow:
-    0 0 0 2px var(--bg),
-    0 0 0 4px var(--focus);
 }
 .pj-summary {
   color: var(--text-2);
@@ -302,7 +251,7 @@
   font-size: var(--text-11);
   color: var(--text-3);
   border: 1px solid var(--line-2);
-  border-radius: 5px;
+  border-radius: var(--radius-5);
   padding: 0 5px;
   margin-left: 6px;
   vertical-align: 2px;
@@ -338,7 +287,7 @@
 }
 .pj-bar {
   height: 5px;
-  border-radius: 3px;
+  border-radius: var(--radius-3);
   background: var(--active);
   overflow: hidden;
   display: flex;
@@ -373,7 +322,7 @@
   gap: 6px;
   font-size: var(--text-12);
   padding: 3px 8px;
-  border-radius: 7px;
+  border-radius: var(--radius-7);
   background: var(--raised);
   border: 1px solid var(--line);
   color: var(--text-2);
@@ -383,7 +332,7 @@
 .pj-chip .d {
   width: 7px;
   height: 7px;
-  border-radius: 50%;
+  border-radius: var(--radius-round);
   background: var(--text-3);
   flex: none;
 }
@@ -466,33 +415,17 @@
   color: var(--text-2);
   padding: 8px 10px;
   border: 1px dashed var(--line-3);
-  border-radius: 9px;
+  border-radius: var(--radius-9);
 }
 .pj-nohb-text {
   min-width: 0;
   flex: 1 1 130px;
 }
-.pj-nohb .pj-btn {
-  margin-left: auto;
-  flex: none;
-  max-width: 100%;
-  height: auto;
-  min-height: 26px;
-  padding-block: var(--space-control-gap);
-  white-space: normal;
-  text-wrap: balance;
-  line-height: 1.2;
-  text-align: center;
-}
+
 @container (max-width: 480px) {
   .pj-nohb {
     display: grid;
     grid-template-columns: 16px minmax(0, 1fr);
-  }
-  .pj-nohb .pj-btn {
-    grid-column: 1 / -1;
-    margin-left: 0;
-    justify-self: start;
   }
 }
 
@@ -509,7 +442,7 @@
   background: var(--chrome);
   padding: 14px 16px 10px;
   border-bottom: 1px solid var(--line);
-  z-index: 1;
+  z-index: var(--z-content);
 }
 .pj-dh .row {
   display: flex;
@@ -524,7 +457,7 @@
   flex-shrink: 0;
   width: 28px;
   height: 28px;
-  border-radius: 7px;
+  border-radius: var(--radius-7);
   display: grid;
   place-items: center;
   color: var(--text-2);
@@ -571,7 +504,7 @@
   gap: 8px;
   font-size: var(--text-13);
   padding: 4px 6px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   color: var(--text-2);
 }
 .pj-steps li[data-status="done"] {
@@ -593,7 +526,7 @@
   width: 14px;
   height: 14px;
   margin-top: 2px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   border: 1.5px solid var(--line-3);
 }
 .pj-steps li[data-status="done"] .m {

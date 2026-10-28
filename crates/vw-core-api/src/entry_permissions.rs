@@ -1,9 +1,9 @@
 //! Captured project authority for vault policies; Git metadata never changes an active session's identity.
 //!
 //! Depends on: `vw-platform`, `vw-worktrees`, `vw-keys`, `core::Shared`. Called by: session opening,
-//! `secrets`, and the secret-run/login-fill consumers. Never on either captured candidate wins.
+//! `secrets`, and the secret-run/login-fill consumers. Current User only on the default or either project candidate wins.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use crate::core::Shared;
@@ -15,28 +15,16 @@ pub(crate) struct Identity {
     pub(crate) plain: String,
     main: Option<String>,
     inherit: bool,
-    defaults_at_open: Option<BTreeMap<String, EntryPermission>>,
 }
 
 /// All candidate records, retained so even a change that leaves the effective policy unchanged refuses a use.
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) struct Policy {
     pub(crate) permission: EntryPermission,
-    records: Vec<(EntryPermission, i64)>,
+    records: Vec<Option<(EntryPermission, i64)>>,
 }
 
 impl Identity {
-    /// Seals the entry defaults observed before opening this session into its authority snapshot.
-    pub(crate) fn with_defaults(mut self, defaults: BTreeMap<String, EntryPermission>) -> Self {
-        self.defaults_at_open = Some(defaults);
-        self
-    }
-
-    /// Carries the original default snapshot into a newly created copy.
-    pub(crate) fn inherit_defaults(mut self, source: &Self) -> Self {
-        self.defaults_at_open.clone_from(&source.defaults_at_open);
-        self
-    }
     /// The only project whose Allowed record can authorize this identity.
     pub(crate) fn allowed_project(&self) -> &str {
         if self.inherit {
@@ -46,29 +34,15 @@ impl Identity {
         }
     }
 
-    /// Reads both candidates, refusing errors and taking Never before any Allowed or command/site grant.
+    /// Reads both candidates, refusing errors and taking User only before any Allowed or site grant.
     pub(crate) async fn policy(&self, keys: &KeyService, id: &str) -> Result<Policy, KeyError> {
         let current_default = keys.default_entry_permission(id).await?;
-        let captured = self.defaults_at_open.as_ref().map(|defaults| {
-            defaults
-                .get(id)
-                .copied()
-                .unwrap_or(EntryPermission::AskEachTime)
-        });
-        let default = match captured {
-            _ if current_default.0 == EntryPermission::Never => EntryPermission::Never,
-            Some(EntryPermission::Never) => EntryPermission::Never,
-            Some(EntryPermission::Allowed) if current_default.0 == EntryPermission::Allowed => {
-                EntryPermission::Allowed
-            }
-            None => current_default.0,
-            _ => EntryPermission::AskEachTime,
-        };
+        let default = current_default.0;
         let plain = keys.own_entry_permission(&self.plain, id).await?;
-        let mut records = vec![plain.unwrap_or((default, current_default.1))];
+        let mut records = vec![Some(current_default), plain];
         let selected = if let Some(main) = &self.main {
             let other = keys.own_entry_permission(main, id).await?;
-            records.push(other.unwrap_or((default, current_default.1)));
+            records.push(other);
             if self.inherit {
                 other.map_or(default, |p| p.0)
             } else {
@@ -78,11 +52,47 @@ impl Identity {
             plain.map_or(default, |p| p.0)
         };
         Ok(Policy {
-            permission: if records.iter().any(|(p, _)| *p == EntryPermission::Never) {
+            permission: if records
+                .iter()
+                .flatten()
+                .any(|(p, _)| *p == EntryPermission::Never)
+            {
                 EntryPermission::Never
             } else {
                 selected
             },
+            records,
+        })
+    }
+
+    /// Stores the person's Always answer without overwriting a concurrent project choice.
+    pub(crate) async fn allow(
+        &self,
+        keys: &KeyService,
+        id: &str,
+        policy: &Policy,
+    ) -> Result<Policy, String> {
+        if self.policy(keys, id).await.ok().as_ref() != Some(policy) {
+            return Err(
+                "Not run: an entry permission changed meanwhile; ask the user to try again"
+                    .to_owned(),
+            );
+        }
+        let selected = if self.inherit { 2 } else { 1 };
+        let stored = keys
+            .allow_entry_if_unchanged(
+                self.allowed_project().to_owned(),
+                id.to_owned(),
+                policy.records[selected],
+            )
+            .await
+            .map_err(|_| {
+                "Not run: the project permission changed or could not be stored".to_owned()
+            })?;
+        let mut records = policy.records.clone();
+        records[selected] = Some(stored);
+        Ok(Policy {
+            permission: EntryPermission::Allowed,
             records,
         })
     }
@@ -137,7 +147,6 @@ pub(crate) fn capture(folder: &str, registered: &BTreeSet<PathBuf>) -> Result<Id
         plain: plain.to_string_lossy().into_owned(),
         main: main.map(|p| p.to_string_lossy().into_owned()),
         inherit,
-        defaults_at_open: None,
     })
 }
 

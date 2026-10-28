@@ -58,6 +58,12 @@ RWRKv9BwMGPi2mz79c7PCU8rZVrQReQmKriKANljN+RWxvXflA1TPKDj
 Each update file has a matching `.sig` asset in the same release. The list of Vibe versions the app may install
 (`vibe-support.json`) is signed with the same key. The `.deb` is not updated by the app: install the next `.deb`.
 
+Before downloading, the app checks the offered version's system requirements. `latest.json` records
+`minimumSystemVersion` for macOS and Windows, and `minimumGlibc` for Linux. Windows releases require at least
+Windows 10 1809 (build `10.0.17763`); the macOS bundle requires 11.0 or later. The Linux minimum is measured from
+the AppImage's programs for each build. If the computer is too old, Settings > Updates shows the required version
+and does not download. An unreadable or ambiguous minimum makes the update check fail.
+
 ## Reporting a problem
 
 If a check fails, do not run the file. Report it as described in `SECURITY.md`.

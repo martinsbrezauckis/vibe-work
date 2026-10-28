@@ -30,19 +30,21 @@ function Actions({
   ];
   return (
     <>
+      {finding.redactable && (
+        <Button
+          shape="outlined"
+          data-testid="secrets.finding-redact"
+          data-item-id={findingId}
+          disabled={pending.includes(findingId)}
+          onClick={() => {
+            void scan.run({ op: "redact", findingId });
+          }}
+        >
+          Redact
+        </Button>
+      )}
       <Button
-        small
-        data-testid="secrets.finding-redact"
-        data-item-id={findingId}
-        disabled={pending.includes(findingId)}
-        onClick={() => {
-          void scan.run({ op: "redact", findingId });
-        }}
-      >
-        Redact
-      </Button>
-      <Button
-        small
+        shape="outlined"
         data-testid="secrets.finding-open-chat"
         data-item-id={findingId}
         onClick={() => {
@@ -58,7 +60,7 @@ function Actions({
       </Button>
       {logins.map((id) => (
         <Button
-          small
+          shape="outlined"
           key={id}
           data-testid="secrets.finding-change-password"
           data-item-id={id}

@@ -13,6 +13,7 @@ use vw_host::update_flow::{
     BoxFuture, InstallMode, Offer, Phase, Progress, UpdateBackend, UpdateConfig, UpdateHooks,
     UpdateManager, UpdateNotice,
 };
+use vw_host::update_os::OsTooOld;
 
 pub const CURRENT: &str = "1.0.0";
 
@@ -207,12 +208,20 @@ impl Rig {
             version: version.to_owned(),
             notes: Some("Faster start.".to_owned()),
             signature: signer.sign(package, signed_for),
+            os_too_old: None,
         })));
         *self.script.package.lock().unwrap() = package.to_vec();
     }
 
     pub fn announce(&self, version: &str, package: &[u8]) {
         self.announce_signed(version, package, &self.key, version);
+    }
+
+    /// Marks the announced release as needing a newer system than this computer has (the backend's finding).
+    pub fn require_os(&self, need: OsTooOld) {
+        if let Some(Ok(Some(offer))) = self.script.check.lock().unwrap().as_mut() {
+            offer.os_too_old = Some(need);
+        }
     }
 
     pub fn phase(&self) -> Phase {

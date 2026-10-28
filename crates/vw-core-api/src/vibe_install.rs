@@ -4,11 +4,11 @@
 //!
 //! Ops: `readStatus`, `prepare` (an offer: sources, checksums, commands, sizes), `confirm {offerId}` (starts the
 //! install of exactly that offer), `cancel`, `checkExisting` (finds other installs, reads their versions),
-//! `useExisting {path, acceptWarning}`. Vibe updates: `prepareUpdate` (the consent offer for the update
+//! `useExisting {path}`. Vibe updates: `prepareUpdate` (the consent offer for the update
 //! the last verified supported-Vibe check found), `confirmUpdate {offerId}` (installs it next to the running Vibe;
 //! it starts with Vibe Work's next start), `cancelUpdate`. The check itself runs only with the app's update check.
 //! Errors: code `vibeInstall` with a reason word in `serverCode`: `wrongState`, `staleOffer`, `unsupported`,
-//! `unknownExisting`, `needsAcceptance` (the warning text is the message), `disk`, `noUpdate`, `notConfigured`.
+//! `unknownExisting`, `unsupportedVersion`, `disk`, `noUpdate`, `notConfigured`.
 //! No secret exists in an install, so nothing here needs redaction.
 //!
 //! Depends on: vw-vibe-install. Called by: `dispatch`.
@@ -46,9 +46,6 @@ pub enum VibeRequest {
     UseExisting {
         /// Its path as the check listed it.
         path: String,
-        /// The user saw the version warning and accepts it (needed for another version).
-        #[serde(default)]
-        accept_warning: bool,
     },
     /// The consent offer for the available Vibe update.
     PrepareUpdate {},
@@ -67,7 +64,7 @@ fn refused(error: &InstallError) -> CoreError {
         InstallError::StaleOffer => "staleOffer",
         InstallError::Pin(_) => "unsupported",
         InstallError::UnknownExisting(_) => "unknownExisting",
-        InstallError::NeedsAcceptance(_) => "needsAcceptance",
+        InstallError::UnsupportedVersion(_) => "unsupportedVersion",
         InstallError::Disk(_) => "disk",
         InstallError::NoUpdate(_) => "noUpdate",
     };
@@ -119,11 +116,8 @@ pub async fn execute(
         VibeRequest::CheckExisting {} => {
             installer.check_existing().await;
         }
-        VibeRequest::UseExisting {
-            path,
-            accept_warning,
-        } => installer
-            .use_existing(&path, accept_warning)
+        VibeRequest::UseExisting { path } => installer
+            .use_existing(&path)
             .await
             .map_err(|e| refused(&e))?,
     }

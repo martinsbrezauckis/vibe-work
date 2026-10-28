@@ -3,7 +3,7 @@
  * Accessible names and tooltips are required.
  * Depends on: Icon, React button props. Called by: the browser toolbar, its save control and sidebar projects.
  */
-import type { ComponentProps, ReactElement } from "react";
+import type { ComponentProps, ReactElement, ReactNode } from "react";
 
 import { Icon, type IconName } from "./Icon";
 
@@ -12,16 +12,23 @@ export function IconButton({
   icon,
   iconSize = 16,
   label,
+  state,
+  children,
   text,
   title = label,
-  className = "",
+  tooltip = true,
+  placement,
   ...props
-}: Omit<ComponentProps<"button">, "children" | "aria-label"> & {
+}: Omit<ComponentProps<"button">, "children" | "aria-label" | "className"> & {
   "data-testid": string;
   icon: IconName;
   /** Smaller glyphs for dense row actions; the button retains its own hit area. */
   iconSize?: ComponentProps<typeof Icon>["size"];
   label: string;
+  tooltip?: boolean;
+  placement?: "project-new-chat";
+  state?: "locked" | "unlocked";
+  children?: ReactNode;
   /** Optional current state rendered beside the glyph. */
   text?: string;
 }): ReactElement {
@@ -30,12 +37,16 @@ export function IconButton({
       type="button"
       {...props}
       data-testid={props["data-testid"]}
-      className={`ibtn ${className}`}
+      className={`ibtn ${placement === "project-new-chat" ? "proj-new-chat" : ""}`}
+      data-state={state}
+      data-icon={icon}
+      data-has-text={text !== undefined ? "true" : undefined}
       aria-label={label}
-      title={title}
+      title={tooltip ? title : undefined}
     >
-      <Icon name={icon} size={iconSize} />
+      <Icon key={icon} name={icon} size={iconSize} />
       {text !== undefined && <span>{text}</span>}
+      {children}
     </button>
   );
 }

@@ -38,6 +38,12 @@ SEMVER = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+
 HEX64 = re.compile(r"^[0-9a-f]{64}$")
 
 
+# Published Vibe versions no Vibe Work may install, with the reason the refusal names.
+NEVER_OFFER = {
+    "3.0.1": "it cannot open sessions that Vibe 3.0.0 saved during a tool call (fixed in 3.0.2)",
+}
+
+
 class ManifestError(Exception):
     """A refused input (the message says which and why)."""
 
@@ -69,6 +75,17 @@ def load_entry(folder: Path, minimum: str, maximum: str | None, out: Path) -> di
     version = vibe["version"]
     if not PLAIN.match(version):
         raise ManifestError(f"{folder}: version {version!r} is not a plain version")
+    # The runtime/protocol migration is one-way: older apps cannot launch Vibe 3.
+    app_min = version_key(minimum.split("-")[0].split("+")[0])
+    app_max = version_key(maximum.split("-")[0].split("+")[0]) if maximum else None
+    if version in NEVER_OFFER:
+        raise ManifestError(f"Vibe {version} is never offered: {NEVER_OFFER[version]}")
+    if version_key(version) >= (3, 0, 0) and app_min < (0, 1, 2):
+        raise ManifestError("Vibe 3 needs min=0.1.2 or later")
+    if version == "2.26.1" and (app_max is None or app_max > (0, 1, 1)):
+        raise ManifestError("Vibe 2.26.1 needs max=0.1.1 or earlier")
+    if app_max is not None and app_max < app_min:
+        raise ManifestError("max must not be earlier than min")
     requirements = (folder / vibe.get("requirements", "vibe.requirements.txt")).read_bytes()
     digest = hashlib.sha256(requirements).hexdigest()
     if digest != vibe["requirementsSha256"]:

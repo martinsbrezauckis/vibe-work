@@ -1,6 +1,7 @@
 /**
- * The Changes tab's confirmations, each naming exactly what will happen: files a revert deletes, what an
- * undo restores and cannot restore (and that later turns go too), what `git init` + a first commit adds.
+ * The Changes tab's confirmations, each naming exactly what will happen: the file or lines a revert puts back,
+ * files a revert deletes, what an undo restores and cannot restore (and that later turns go too), what
+ * `git init` + a first commit adds.
  * Depends on: store.ts (pending confirmation, accept/cancel), hooks/useModalFocus. Called by: ChangesTab.
  * Invariants: nothing is sent until the confirm button is pressed; Escape and Cancel send nothing; file
  * names are text, never rendered markup.
@@ -10,7 +11,7 @@ import { type ReactElement, type ReactNode, useRef } from "react";
 
 import { useModalFocus } from "../../hooks/useModalFocus";
 import { useStore } from "../../state/createStore";
-import { fileNote } from "./model";
+import { fileNote, hunkRange } from "./model";
 import type { Confirm } from "./store";
 import type { Changes } from "./store";
 import { GitIdentityFields } from "../git/GitIdentityFields";
@@ -53,6 +54,12 @@ function content(confirm: Confirm): { title: string; action: string; body: React
         ),
       };
     case "revertFile":
+      if (confirm.deletes.length === 0)
+        return {
+          title: `Revert ${confirm.file.path}?`,
+          action: "Revert",
+          body: <p>The file goes back to how it was when the session started.</p>,
+        };
       return {
         title: `Delete ${confirm.file.path}?`,
         action: "Revert and delete",
@@ -64,6 +71,14 @@ function content(confirm: Confirm): { title: string; action: string; body: React
             </p>
             <Paths paths={confirm.deletes} />
           </>
+        ),
+      };
+    case "revertHunk":
+      return {
+        title: `Revert this change in ${confirm.file.path}?`,
+        action: "Revert",
+        body: (
+          <p>The change to {hunkRange(confirm.hunk)} is undone. The file's other changes stay.</p>
         ),
       };
     case "revertAll":
@@ -198,21 +213,21 @@ export function ConfirmBox({ changes }: { changes: Changes }): ReactElement | nu
           )}
         </section>
         <footer className="modal-actions">
-          <button
+          <Button
             data-testid="changes.confirm-box-cancel-2"
             type="button"
-            className="tb-btn"
+
             data-dialog-initial-focus="true"
             onClick={() => {
               changes.cancel();
             }}
           >
             Cancel
-          </button>
+          </Button>
           {confirm.kind !== "keepUnseen" && confirm.kind !== "history" ? (
             <Button
               data-testid="changes.confirm-box-accept"
-              small
+              shape="outlined"
               variant="danger"
               data-action="confirm"
               onClick={() => void changes.accept()}
@@ -220,16 +235,16 @@ export function ConfirmBox({ changes }: { changes: Changes }): ReactElement | nu
               {action}
             </Button>
           ) : (
-            <button
+            <Button
               data-testid="changes.confirm-box-accept"
               type="button"
-              className="btn-primary"
+              appearance="dialog"
               data-action="confirm"
               disabled={confirm.kind === "history" && !validIdentity(confirm.identity)}
               onClick={() => void changes.accept()}
             >
               {action}
-            </button>
+            </Button>
           )}
         </footer>
       </div>

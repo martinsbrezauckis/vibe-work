@@ -37,3 +37,36 @@ pub(crate) fn check(home: &Path, state: &Value, previous: Option<&Value>) -> Res
     }
     Ok(())
 }
+
+#[cfg(all(test, unix))]
+mod tests {
+    use serde_json::json;
+    #[test]
+    fn a_copy_cwd_cannot_resolve_outside_the_recorded_copy() {
+        let dir = std::env::temp_dir().join(format!("vw-copy-scope-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let home = dir.join("vibe-home");
+        let copy = dir.join("copy");
+        let cwd = copy.join("nested");
+        let outside = dir.join("outside");
+        for path in [&home, &cwd, &outside] {
+            std::fs::create_dir_all(path).unwrap();
+        }
+        let state = json!({"session":{"cwd":cwd,"worktree":{"path":copy}}});
+        let next = json!({"session":{"cwd":cwd}});
+        std::fs::remove_dir(&cwd).unwrap();
+        std::os::unix::fs::symlink(&outside, &cwd).unwrap();
+        for (input, previous) in [(&state, None), (&next, Some(&state))] {
+            assert!(
+                super::check(&home, input, previous)
+                    .unwrap_err()
+                    .contains("outside its copy")
+            );
+        }
+        std::fs::remove_file(&cwd).unwrap();
+        std::fs::create_dir(&cwd).unwrap();
+        assert!(super::check(&home, &state, None).is_ok());
+        assert!(super::check(&home, &next, Some(&state)).is_ok());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+}

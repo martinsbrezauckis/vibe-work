@@ -8,15 +8,20 @@
  * fresh snapshots that follow it by the subscription's rule.
  */
 import type {
+  Ask,
+  AskRecord,
+  ChromeControlView,
   CommandResult,
   CoreError,
   CoreEvent,
   CoreStatus,
   DebugApiFlag,
+  GrantOffer,
   JsonValue,
   Origin,
   RateLimitsView,
   ServerStatus,
+  SessionGrant,
   SessionRowView,
   SessionSnapshot,
 } from "../protocol/core";
@@ -25,7 +30,7 @@ import { type IndexState, initialIndex, mergeRows } from "./sessionIndex";
 import type { SessionEntry, StuckMap } from "./sessionSummary";
 
 /** What the status bar and header say about the Vibe server. */
-export type ServerView =
+type ServerView =
   | { phase: "connecting" }
   | { phase: "unavailable"; reason: string }
   | { phase: "starting" }
@@ -37,6 +42,16 @@ export type ServerView =
 
 /** The whole core model. */
 export interface CoreState {
+  /** Open permissions and the newest terminal receipts from the shared core service. */
+  asks: Readonly<Record<string, Ask>>;
+  askRecords: Readonly<Record<string, AskRecord>>;
+  /**
+   * The "Allow for this session" answers Vibe Work keeps, and what the session answer of each open card
+   * would keep (its covers line). Replaced whole by each `askGrants` event or result.
+   */
+  askGrants: AskGrantsView;
+  /** Settings › Browser › Your Chrome as the core last said (`chromeControl` event or result); `null` before. */
+  chromeControl: ChromeControlView | null;
   server: ServerView;
   debugApi: DebugApiFlag;
   /** Vibe Work's version as the core reports it (`status`); `null` until the first status arrives. */
@@ -70,6 +85,12 @@ export interface CoreState {
   subagentCards: Readonly<Record<string, SubagentCardEntry>>;
 }
 
+/** The session grants and the open cards' grant offers (`askGrants`). */
+interface AskGrantsView {
+  grants: readonly SessionGrant[];
+  offers: readonly GrantOffer[];
+}
+
 /** One subagent's open card: the child session to answer for, its parent, Vibe's callback entry. */
 export interface SubagentCardEntry {
   sessionId: string;
@@ -79,6 +100,10 @@ export interface SubagentCardEntry {
 
 /** The state before anything has arrived. */
 export const initialCore: CoreState = {
+  asks: {},
+  askRecords: {},
+  askGrants: { grants: [], offers: [] },
+  chromeControl: null,
   server: { phase: "connecting" },
   debugApi: { enabled: false, reason: "off" },
   appVersion: null,
@@ -95,7 +120,7 @@ export const initialCore: CoreState = {
 };
 
 /** Maps the core's server status to the view model. */
-export function serverView(status: ServerStatus): ServerView {
+function serverView(status: ServerStatus): ServerView {
   switch (status.state) {
     case "starting":
       return { phase: "starting" };
@@ -115,6 +140,7 @@ export function serverView(status: ServerStatus): ServerView {
 function entryFromSnapshot(
   snapshot: SessionSnapshot,
   previous: SessionEntry | undefined,
+  cards: CoreState["subagentCards"],
 ): SessionEntry {
   const state = snapshot.state;
   const object = typeof state === "object" && state !== null && !Array.isArray(state) ? state : {};
@@ -126,8 +152,12 @@ function entryFromSnapshot(
       typeof session === "object" && session !== null && !Array.isArray(session) ? session : {},
     state: object,
     localOnly: snapshot.localOnly,
+    ...(previous?.ownedByParent === undefined ? {} : { ownedByParent: previous.ownedByParent }),
     ...(accessMode === undefined ? {} : { accessMode }),
     openCallbackIds: previous?.openCallbackIds ?? [],
+    childCallbackIds: Object.entries(cards)
+      .filter(([, card]) => card.parentSessionId === snapshot.sessionId)
+      .map(([id]) => id),
     // A snapshot carries no runtime: keep the last one.
     ...(previous?.runtime === undefined ? {} : { runtime: previous.runtime }),
   };
@@ -141,14 +171,108 @@ function without(sessions: CoreState["sessions"], id: string): CoreState["sessio
   return Object.fromEntries(Object.entries(sessions).filter(([key]) => key !== id));
 }
 
+/** Open callback events carry ownership; a child's status can name only one of several waiting cards. */
+function withChildCards(state: CoreState, cards: CoreState["subagentCards"]): CoreState {
+  return {
+    ...state,
+    subagentCards: cards,
+    sessions: Object.fromEntries(
+      Object.entries(state.sessions).map(([id, entry]) => [
+        id,
+        {
+          ...entry,
+          childCallbackIds: Object.entries(cards)
+            .filter(([, card]) => card.parentSessionId === id)
+            .map(([key]) => key),
+        },
+      ]),
+    ),
+  };
+}
+
 /** Folds one core event into the model. */
 export function applyEvent(state: CoreState, event: CoreEvent): CoreState {
   switch (event.type) {
+    case "askOpened":
+      return { ...state, asks: { ...state.asks, [event.ask.id]: event.ask } };
+    case "askClosed": {
+      const asks = Object.fromEntries(
+        Object.entries(state.asks).filter(([id]) => id !== event.record.ask.id),
+      );
+      const records = Object.values(state.askRecords).filter(
+        (r) => r.ask.id !== event.record.ask.id,
+      );
+      return {
+        ...withChildCards(
+          state,
+          Object.fromEntries(
+            Object.entries(state.subagentCards).filter(
+              ([id]) => `callback:${id}` !== event.record.ask.id,
+            ),
+          ),
+        ),
+        asks,
+        askRecords: Object.fromEntries(
+          [...records, event.record].slice(-500).map((r) => [r.ask.id, r]),
+        ),
+      };
+    }
+
+    // The session grants Vibe Work keeps ("Allow for this session") and the open cards' offers: the session's
+    // grants chip, its list, the Allowed without asking page and each card's covers line read them.
+    case "askGrants":
+      return { ...state, askGrants: { grants: event.grants, offers: event.offers } };
+
+    // A Chrome Control card (or a Never refusal) joins its session's history, as the core weaves it into snapshots.
+    case "chromeAsk": {
+      const view = event.entry;
+      const entry = state.sessions[view.sessionId];
+      if (entry?.state === null || entry === undefined) return state;
+      const history = Array.isArray(entry.state["history"]) ? entry.state["history"] : [];
+      const id = `chrome:${view.askId}`;
+      const item = {
+        id,
+        type: "chrome_ask",
+        createdAt: view.createdAtMs,
+        turnId: view.turnId,
+        chromeAsk: view,
+      } as unknown as JsonValue;
+      const at = history.findIndex(
+        (e) => typeof e === "object" && e !== null && !Array.isArray(e) && e["id"] === id,
+      );
+      const next = at < 0 ? [...history, item] : history.map((e, i) => (i === at ? item : e));
+      return withSession(state, { ...entry, state: { ...entry.state, history: next } });
+    }
+    case "chromeControl":
+      return { ...state, chromeControl: event.view };
+    case "protectedChange": {
+      const p = event.proposal;
+      const entry = state.sessions[p.sessionId];
+      if (entry?.state === null || entry === undefined) return state;
+      const history = Array.isArray(entry.state["history"]) ? entry.state["history"] : [];
+      const item = {
+        id: `protected:${p.id}`,
+        type: "protected_change",
+        createdAt: p.createdAtMs,
+        turnId: p.turnId ?? null,
+        proposal: p,
+      } as unknown as JsonValue;
+      const id = `protected:${p.id}`;
+      const at = history.findIndex(
+        (e) => typeof e === "object" && e !== null && !Array.isArray(e) && e["id"] === id,
+      );
+      const next = at < 0 ? [...history, item] : history.map((e, i) => (i === at ? item : e));
+      return withSession(state, { ...entry, state: { ...entry.state, history: next } });
+    }
     case "snapshot":
       return {
         ...withSession(
           state,
-          entryFromSnapshot(event.snapshot, state.sessions[event.snapshot.sessionId]),
+          entryFromSnapshot(
+            event.snapshot,
+            state.sessions[event.snapshot.sessionId],
+            state.subagentCards,
+          ),
         ),
         lagged: false,
         needsRefresh: event.snapshot.resyncPending
@@ -160,8 +284,6 @@ export function applyEvent(state: CoreState, event: CoreEvent): CoreState {
       if (change.kind === "notice") return state;
       if (change.kind === "removed")
         return { ...state, sessions: without(state.sessions, change.sessionId) };
-      if (change.kind === "handedOff")
-        return { ...state, sessions: without(state.sessions, change.oldSessionId) };
       const entry = state.sessions[change.sessionId];
       if (entry === undefined) return state;
       const applied = applyChange(entry, change);
@@ -199,24 +321,20 @@ export function applyEvent(state: CoreState, event: CoreEvent): CoreState {
         Object.entries(state.subagentCards).filter(([id]) => id !== event.callbackId),
       );
       return {
-        ...state,
+        ...withChildCards(state, subagentCards),
         answeredBy: { ...state.answeredBy, [event.callbackId]: event.origin },
-        subagentCards,
       };
     }
     case "callbackOpened":
       if (event.subagent === undefined) return state;
-      return {
-        ...state,
-        subagentCards: {
-          ...state.subagentCards,
-          [event.callbackId]: {
-            sessionId: event.sessionId,
-            parentSessionId: event.subagent.parentSessionId,
-            entry: event.subagent.entry,
-          },
+      return withChildCards(state, {
+        ...state.subagentCards,
+        [event.callbackId]: {
+          sessionId: event.sessionId,
+          parentSessionId: event.subagent.parentSessionId,
+          entry: event.subagent.entry,
         },
-      };
+      });
     // Terminals have their own store (features/terminal), fed through `CoreController.listen`.
     // The setup and unlock UI handles key and vault events (`keyNeeded`, `keyStatusChanged`).
     // The Changes tab follows `changesUpdated` itself (features/changes/store.ts).
@@ -240,13 +358,20 @@ export function applyEvent(state: CoreState, event: CoreEvent): CoreState {
     case "previewShowRequested":
     case "browserChanged":
     case "pagesChanged":
+    case "pageMenu":
     case "filesChanged":
     case "lineCommentsChanged":
     case "projectsChanged":
     case "worktreesChanged":
     case "gitBrowserChanged":
+    case "githubReads":
+    case "keepAwake":
     case "secretScan":
     case "secretsChanged":
+    case "guardRefused":
+    case "readAloud":
+    case "panelRead":
+    case "queueReturned":
     case "dictation":
     case "connectorSignIn":
     case "marketInstall":
@@ -255,8 +380,8 @@ export function applyEvent(state: CoreState, event: CoreEvent): CoreState {
 }
 
 /**
- * The subagent cards the parent's transcript shows: those still open in Vibe's view of the parent (a
- * `childSessions` row of that child is blocked on that card), so a Stop or an answer given elsewhere hides them.
+ * Open cards for owned children. Status names at most one callback and can lag behind open/closed events;
+ * callbackAnswered or askClosed retires each card independently, including Stop and deadline expiry.
  */
 export function subagentCardsOf(
   cards: CoreState["subagentCards"],
@@ -264,24 +389,15 @@ export function subagentCardsOf(
   childSessions: JsonValue | undefined,
 ): readonly (SubagentCardEntry & { callbackId: string })[] {
   const rows = Array.isArray(childSessions) ? childSessions : [];
-  const waiting = new Set(
-    rows.flatMap((row) => {
-      if (row === null || typeof row !== "object" || Array.isArray(row)) return [];
-      const status = row["status"];
-      if (status === null || typeof status !== "object" || Array.isArray(status)) return [];
-      const id = row["id"] ?? row["sessionId"];
-      const callbackId = status["callbackId"];
-      return typeof id === "string" && typeof callbackId === "string"
-        ? [`${id}\u0000${callbackId}`]
-        : [];
-    }),
+  const children = new Set(
+    rows.flatMap((row) =>
+      row !== null && typeof row === "object" && !Array.isArray(row)
+        ? [row["id"] ?? row["sessionId"]]
+        : [],
+    ),
   );
   return Object.entries(cards)
-    .filter(
-      ([callbackId, card]) =>
-        card.parentSessionId === parentSessionId &&
-        waiting.has(`${card.sessionId}\u0000${callbackId}`),
-    )
+    .filter(([, card]) => card.parentSessionId === parentSessionId && children.has(card.sessionId))
     .map(([callbackId, card]) => ({ ...card, callbackId }));
 }
 
@@ -307,12 +423,18 @@ export function applyListing(state: CoreState, rows: readonly SessionRowView[]):
 /** Folds the result of any command that carries a session or a listing. */
 export function applyResult(state: CoreState, result: CommandResult): CoreState {
   switch (result.type) {
+    case "protectedChange":
+      return applyEvent(state, { type: "protectedChange", proposal: result.proposal });
     case "sessions":
       return applyListing(state, result.rows);
     case "session":
       return applyEvent(state, { type: "snapshot", snapshot: result.snapshot });
     case "status":
       return applyStatus(state, result.status);
+    case "askGrants":
+      return { ...state, askGrants: { grants: result.grants, offers: result.offers } };
+    case "chromeControl":
+      return { ...state, chromeControl: result.view };
     default:
       return state;
   }

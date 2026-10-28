@@ -1,5 +1,5 @@
 {
-  "_comment": "Method -> Pydantic model name table for Vibe app-server 2.26.1. Vibe has no central registry (the server dispatches with match statements), so this table is our own data, derived from the dispatch code and live-validated by the protocol bench. generate.py fails on drift: every name in protocol.SERVER_METHODS must be a key of `requests`, every key must be a real method, and every model name must exist. A null model means Vibe declares none for that side.",
+  "_comment": "Method -> Pydantic model name table for Vibe app-server 3.0.2. Vibe has no central registry (the server dispatches with match statements), so this table is our own data, derived from the dispatch code and live-validated by the protocol bench. generate.py fails on drift: every name in protocol.SERVER_METHODS must be a key of `requests`, every key must be a real method, and every model name must exist. A null model means Vibe declares none for that side.",
   "requests": {
     "initialize": {
       "params": "InitializeParams",
@@ -89,9 +89,9 @@
       "params": "ConnectorCatalogToggleParams",
       "result": "ConnectorCatalogMutationResponse"
     },
-    "diagnostics/list": {
-      "params": "DiagnosticsListParams",
-      "result": "DiagnosticsListResponse"
+    "connector_catalog/connect": {
+      "params": "ConnectorCatalogConnectParams",
+      "result": "ConnectorCatalogMutationResponse"
     },
     "diagnostics/logs/read": {
       "params": "DiagnosticsLogsReadParams",
@@ -338,7 +338,7 @@
       "result": "SessionReadResponse"
     },
     "session/ready/read": {
-      "params": "SessionReadyReadParams",
+      "params": null,
       "result": "SessionReadyReadResponse"
     },
     "session/ready/wait": {
@@ -380,6 +380,18 @@
     "session/stop": {
       "params": "SessionStopParams",
       "result": "SessionStopResponse"
+    },
+    "session/subagents/interrupt": {
+      "params": "SessionSubagentsInterruptParams",
+      "result": "SessionSubagentsInterruptResponse"
+    },
+    "session/subagents/read": {
+      "params": "SessionSubagentsReadParams",
+      "result": "SessionSubagentsReadResponse"
+    },
+    "session/subagents/wait": {
+      "params": "SessionSubagentsWaitParams",
+      "result": "SessionSubagentsWaitResponse"
     },
     "session/title/update": {
       "params": "SessionTitleUpdateParams",
@@ -461,17 +473,9 @@
       "params": "SkillsVersionsParams",
       "result": "SkillsVersionsResponse"
     },
-    "stats/read": {
-      "params": "StatsReadParams",
-      "result": "StatsReadResponse"
-    },
     "telemetry/record": {
       "params": "TelemetryRecordParams",
       "result": "EmptyResponse"
-    },
-    "tools/list": {
-      "params": "ToolsListParams",
-      "result": "ToolsListResponse"
     },
     "session/turn/enqueue": {
       "params": "TurnEnqueueParams",
@@ -569,14 +573,6 @@
       "params": "WorkspaceWorktreePruneParams",
       "result": "WorkspaceWorktreePruneResponse"
     },
-    "workspace/git/worktrees/reap": {
-      "params": "WorkspaceWorktreeReapParams",
-      "result": "WorkspaceWorktreeReapResponse"
-    },
-    "workspace/git/worktrees/reap/cancel": {
-      "params": "WorkspaceWorktreeReapCancelParams",
-      "result": "EmptyResponse"
-    },
     "workspace/git/worktrees/remove": {
       "params": "WorkspaceWorktreeRemoveConfirmParams",
       "result": "WorkspaceWorktreeRemoveResponse"
@@ -596,6 +592,34 @@
     "workspace/trust/status": {
       "params": "WorkspaceTrustStatusParams",
       "result": "WorkspaceTrustStatusResponse"
+    },
+    "imports/discover": {
+      "params": "ImportDiscoveryParams",
+      "result": "ImportDiscoveryResponse"
+    },
+    "imports/start": {
+      "params": "ImportJobStartParams",
+      "result": "ImportJobStartResponse"
+    },
+    "imports/read": {
+      "params": "ImportJobReadParams",
+      "result": "ImportJobReadResponse"
+    },
+    "session/turn/queue/edit/start": {
+      "params": "TurnQueueEditStartParams",
+      "result": "TurnQueueEditStartResponse"
+    },
+    "session/turn/queue/edit/save": {
+      "params": "TurnQueueEditSaveParams",
+      "result": "TurnQueueEditSaveResponse"
+    },
+    "session/turn/queue/edit/cancel": {
+      "params": "TurnQueueEditCancelParams",
+      "result": "TurnQueueEditCancelResponse"
+    },
+    "session/turn/queue/edit/abandon": {
+      "params": "TurnQueueEditAbandonParams",
+      "result": "TurnQueueEditAbandonResponse"
     }
   },
   "notifications": {
@@ -618,10 +642,12 @@
     "error": "ServerErrorParams",
     "mcp_catalog/authRequired": "MCPAuthRequiredParams",
     "mcp_catalog/authUrl": "MCPAuthUrlParams",
+    "mcp/authUrl": "MCPAuthUrlParams",
     "connector_catalog/authRequired": "ConnectorAuthRequiredParams",
     "connector_catalog/authUrl": "ConnectorAuthUrlParams",
     "connector_catalog/authFailed": "ConnectorAuthFailedParams",
-    "vibeCode/teleport/event": "TeleportEventParams"
+    "vibeCode/teleport/event": "TeleportEventParams",
+    "imports/updated": "ImportJobUpdatedParams"
   },
   "serverRequests": {
     "callback/call": {

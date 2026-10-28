@@ -7,8 +7,8 @@
 //! suspended, so the shell is assigned right after `CreateProcessW` returns. A process the shell
 //! starts in that window (before its own startup and profile have even run) is outside the job.
 //! Closing the pseudo console still ends console-attached processes. portable-pty keeps its attribute
-//! list private, so a fix needs our own `ConPTY` spawn with `PROC_THREAD_ATTRIBUTE_JOB_LIST` (
-//! §6). Proven on Windows 11 (`vw_terminal_windows.rs`): a `ping` the shell started is in the job
+//! list private, so a fix needs our own `ConPTY` spawn with `PROC_THREAD_ATTRIBUTE_JOB_LIST`.
+//! Proven on Windows 11 (`vw_terminal_windows.rs`): a `ping` the shell started is in the job
 //! and gone by pid after close.
 
 use std::sync::{Mutex, PoisonError};

@@ -1,17 +1,21 @@
 /**
  * The branch bar at the top of the Changes tab: `branch ← base · +N −M · files to
- * commit · [Commit] [Push] [Create PR]`, and for a session copy [Bring into <base>]. The buttons are always in
+ * commit · [Commit] [Push] [Create PR]`, and for a session copy [Bring into <base>] [Throw away this copy…]
+ * (archives the chat, then the copy's Keep / Throw away choice). The buttons are always in
  * the bar, never in an overflow menu; a button that cannot act now is disabled with the reason as
  * its title. Below it: the last result or error, and the PR card when one is known.
- * Depends on: state/git (controller), model.ts, PrCard, Icon. Called by: changes/ChangesTab.
+ * Depends on: state/git (controller), model.ts, PrCard, Icon, AppContext (sessions, worktrees). Called by:
+ * changes/ChangesTab.
  * Invariants: the bar shows for every discovered repository, including clean and blocked repositories
  * (`barShown`); every button calls the controller, which asks the core (and the core asks the native dialog
  * before anything leaves the machine).
  */
+import { Button } from "../../components/Controls";
 import type { ReactElement } from "react";
 
 import { Icon } from "../../components/Icon";
 import { useStore } from "../../state/createStore";
+import { useApp } from "../shell/AppContext";
 import type { Git } from "../../state/git";
 import { baseStat, barShown, branchOf, commitBlocked, prBlocked, pushBlocked } from "./model";
 import { PrCard } from "./PrCard";
@@ -24,6 +28,7 @@ export function BranchBar({
   git: Git;
   sessionId: string;
 }): ReactElement | null {
+  const { sessions, worktrees } = useApp();
   const status = useStore(git.store, (s) => s.status[sessionId]);
   const busy = useStore(git.store, (s) => s.busy[sessionId] === true);
   const notice = useStore(git.store, (s) => s.notice[sessionId] ?? null);
@@ -111,21 +116,21 @@ export function BranchBar({
       </div>
       {reasons.length > 0 && <p className="git-reasons">{reasons.join(" · ")}</p>}
       <div className="git-actions" role="group" aria-label="Git">
-        <button
+        <Button
           data-testid="git.branch-bar-open-commit"
           type="button"
-          className="mini"
+          appearance="compact"
           data-action="git-commit"
           disabled={busy || loadError !== null || commitWhy !== null}
           title={loadError ?? commitWhy ?? "Commit the changes in this folder"}
           onClick={() => void git.openCommit(sessionId)}
         >
           Commit
-        </button>
-        <button
+        </Button>
+        <Button
           data-testid="git.branch-bar-push"
           type="button"
-          className="mini"
+          appearance="compact"
           data-action="git-push"
           disabled={busy || loadError !== null || pushWhy !== null}
           title={
@@ -134,23 +139,23 @@ export function BranchBar({
           onClick={() => void git.push(sessionId)}
         >
           Push
-        </button>
-        <button
+        </Button>
+        <Button
           data-testid="git.branch-bar-open-pr"
           type="button"
-          className="mini"
+          appearance="compact"
           data-action="git-pr"
           disabled={busy || loadError !== null || prWhy !== null}
           title={loadError ?? prWhy ?? "Create a pull request for this branch"}
           onClick={() => void git.openPr(sessionId)}
         >
           Create PR
-        </button>
+        </Button>
         {copy && base !== null && (
-          <button
+          <Button
             data-testid="git.branch-bar-open-bring"
             type="button"
-            className="mini"
+            appearance="compact"
             data-action="git-bring"
             disabled={busy || loadError !== null || base.ahead === 0}
             title={
@@ -162,7 +167,20 @@ export function BranchBar({
             onClick={() => void git.openBring(sessionId)}
           >
             Bring into {base.name}
-          </button>
+          </Button>
+        )}
+        {copy && sessions !== null && worktrees !== null && (
+          <Button
+            data-testid="git.branch-bar-throw-away"
+            type="button"
+            appearance="compact"
+            data-action="git-throw-away"
+            disabled={busy}
+            title="Inspect and throw away this copy, then archive its chat"
+            onClick={() => void worktrees.throwAway(sessionId)}
+          >
+            Throw away this copy…
+          </Button>
         )}
       </div>
       {notice !== null && (
@@ -174,14 +192,14 @@ export function BranchBar({
         </p>
       )}
       {loadError !== null && (
-        <button
+        <Button
           data-testid="git.branch-bar-load"
           type="button"
-          className="mini"
+          appearance="compact"
           onClick={() => void git.load(sessionId)}
         >
           Retry
-        </button>
+        </Button>
       )}
       {loadError === null && <PrCard git={git} sessionId={sessionId} />}
     </div>

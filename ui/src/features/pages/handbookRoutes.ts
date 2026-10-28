@@ -6,6 +6,7 @@
  * - `answers {path?}`: the inputs with the user's answers (every page with inputs when nothing is shown);
  * - `answer {path?, input, value}` (`value` as the core's `AnswerValue`, `null` clears), `sendAnswers {path?}`: every
  *   answer of the page into the composer as ONE chip (Debug API facade), then marked sent;
+ * - `showAnswers {shown}`: what the panel's Show answers / Hide answers toggle does (the window's choice);
  * - `check {path?}`: the visual check now; `export {path?, destination?}`: the file's text, or written to
  *   `destination` (the Debug API's equivalent of the native save dialog, like its `pickFolder`).
  * `ui/plan` actions: `state` (default): the plan checklist (path, title, steps, progress); `open {step}`: what a click
@@ -22,7 +23,7 @@ import { planProgress } from "./model";
 import { insertChip, sessionChipFolder } from "./point";
 import type { Pages } from "./store";
 
-const ACTIONS = ["answers", "answer", "sendAnswers", "check", "export"];
+const ACTIONS = ["answers", "answer", "sendAnswers", "showAnswers", "check", "export"];
 
 /** True when `action` is one of this file's `ui/project` actions. */
 export function isHandbookAction(action: unknown): action is string {
@@ -85,6 +86,13 @@ export async function handbookAction(
       if (!outcome.ok) throw new UiControlError("invalidParams", outcome.reason);
       await pages.markAnswersSent(sessionId, path);
       return { chip: chip.label, text: chip.text };
+    }
+    case "showAnswers": {
+      const shown = input["shown"];
+      if (typeof shown !== "boolean")
+        throw new UiControlError("invalidParams", "shown must be true or false");
+      app.shell.actions.setAnswersShown(shown);
+      return { shown };
     }
     case "check":
       return pages.visualCheck(sessionId, pathOf(pages, sessionId, input));

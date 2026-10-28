@@ -23,6 +23,14 @@ sessionId: string,
 /**
  * The handle from `resolve`.
  */
+file: string, } | { "op": "readSaved", 
+/**
+ * The session.
+ */
+sessionId: string, 
+/**
+ * The handle from resolve.
+ */
 file: string, } | { "op": "stat", 
 /**
  * The session.
@@ -95,7 +103,19 @@ text: string,
 /**
  * The fingerprint of the content the edit started from.
  */
-fingerprint: string, };
+fingerprint: string, } | { "op": "panelAnswer", 
+/**
+ * The session the request named.
+ */
+sessionId: string, 
+/**
+ * The request's id.
+ */
+requestId: string, 
+/**
+ * The panel.
+ */
+panel: PanelView, };
 
 export type FilesResult = { "kind": "resolved", 
 /**
@@ -105,7 +125,15 @@ refs: Array<FileRefView>, } | { "kind": "content",
 /**
  * The file.
  */
-content: FileContent, } | { "kind": "stat", 
+content: FileContent, } | { "kind": "saved", 
+/**
+ * Complete text, never a truncated snapshot.
+ */
+text: string | null, 
+/**
+ * Why a comparison cannot be opened.
+ */
+note: string | null, } | { "kind": "stat", 
 /**
  * The file is still there (and still allowed).
  */
@@ -129,7 +157,11 @@ width: number,
 /**
  * Height in pixels.
  */
-height: number, } | { "kind": "done", } | { "kind": "written", 
+height: number, } | { "kind": "done", } | { "kind": "panelAnswered", 
+/**
+ * The agent got this answer.
+ */
+accepted: boolean, } | { "kind": "written", 
 /**
  * The file's fingerprint now.
  */
@@ -238,3 +270,91 @@ tooLarge: boolean,
 openClass: string, };
 
 export type FileKind = "text" | "markdown" | "html" | "image" | "pdf" | "binary";
+
+export type PanelView = { 
+/**
+ * The side panel is open.
+ */
+open: boolean, 
+/**
+ * Its tabs by label, in order (`Files`, `Changes`, `Terminal`, `Browser`, a file's short name).
+ */
+tabs: Array<string>, 
+/**
+ * The tab shown, by label.
+ */
+active: string | null, 
+/**
+ * The open editors.
+ */
+editors: Array<PanelEditor>, 
+/**
+ * The Files tab, when it is open.
+ */
+files: PanelFiles | null, };
+
+export type PanelEditor = { 
+/**
+ * The path the tab's tooltip shows (relative to the session folder when inside it).
+ */
+path: string, 
+/**
+ * The editor has focus (it receives the next opened file).
+ */
+focused: boolean, 
+/**
+ * `left` or `right` while two editors are side by side.
+ */
+side: string | null, 
+/**
+ * A read-only comparison side: `saved` (the last commit) or `disk`.
+ */
+savedVersion: string | null, 
+/**
+ * The editor holds edits not saved to disk.
+ */
+unsaved: boolean, 
+/**
+ * The editor's whole text, sent only when it differs from the file on disk (the user's own unsaved text).
+ */
+unsavedText: string | null, 
+/**
+ * The selected lines, when something is selected.
+ */
+selection: PanelSelection | null, 
+/**
+ * The cursor's line (1-based).
+ */
+cursorLine: number | null, 
+/**
+ * Lines marked as changed on disk while the file was open.
+ */
+changedLines: Array<number>, };
+
+export type PanelSelection = { 
+/**
+ * First selected line (1-based).
+ */
+startLine: number, 
+/**
+ * Last selected line.
+ */
+endLine: number, 
+/**
+ * The selected text.
+ */
+text: string, };
+
+export type PanelFiles = { 
+/**
+ * The folder it shows.
+ */
+folder: string | null, 
+/**
+ * `files` or `history`.
+ */
+view: string, 
+/**
+ * The text in its search field.
+ */
+search: string, };

@@ -6,6 +6,7 @@
  * Invariants: the press goes to the core's `bringIn` with the commits the dry run saw; the core asks the native
  * confirmation and refuses when either branch moved.
  */
+import { Button } from "../../components/Controls";
 import type { ReactElement } from "react";
 
 import type { BringDialog as Dialog, Git } from "../../state/git";
@@ -35,21 +36,21 @@ export function BringDialog({
       }}
       actions={
         <>
-          <button
+          <Button
             data-testid="git.bring-dialog-close"
             type="button"
-            className="tb-btn"
+
             onClick={() => {
               git.close();
             }}
           >
             {conflicts || blocked ? "Close" : "Cancel"}
-          </button>
+          </Button>
           {conflicts ? (
-            <button
+            <Button
               data-testid="git.bring-dialog-prepare"
               type="button"
-              className="btn-primary"
+              appearance="dialog"
               disabled={busy}
               data-action="bring-ask-vibe"
               onClick={() => {
@@ -59,26 +60,26 @@ export function BringDialog({
               }}
             >
               Ask Vibe to update the copy from {plan.base}
-            </button>
+            </Button>
           ) : (
             !blocked && (
-              <button
+              <Button
                 data-testid="git.bring-dialog-bring-in"
                 type="button"
-                className="btn-primary"
+                appearance="dialog"
                 disabled={busy}
                 data-action="bring-in"
                 onClick={() => void git.bringIn()}
               >
                 Bring into {plan.base}
-              </button>
+              </Button>
             )
           )}
         </>
       }
     >
       <p data-git-field="sentence">{sentence}</p>
-      <p className="git-sub">
+      <p className="ui-help" data-detail="paragraph">
         Details: from {plan.baseCommit.slice(0, 7)} to {plan.branchCommit.slice(0, 7)}
       </p>
       {conflicts && (

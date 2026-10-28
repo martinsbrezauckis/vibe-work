@@ -7,31 +7,62 @@
  * source only, never as editable text. A read document shows its facts and a Preview
  * button instead of its text.
  */
+import { Badge, Button } from "../../components/Controls";
 import type { ReactElement } from "react";
 
 import { Icon } from "../../components/Icon";
 import { Walker } from "../../components/Walker";
 import type { ContextItem, ImageItem } from "./model/message";
 import type { QueuedTurn } from "./model/session";
+import type { CodeRef } from "../files/model/context";
 
 /** The bar shown while a turn runs. */
-export function RunBar({ status, onStop }: { status: string; onStop: () => void }): ReactElement {
+export function RunBar({
+  status,
+  waiting = false,
+  inputWaiting = false,
+  onStop,
+  onShowPrompt,
+}: {
+  status: string;
+  waiting?: boolean;
+  inputWaiting?: boolean;
+  onStop: () => void;
+  /** While a prompt waits, the status is a button that goes to it (the next one on each press). */
+  onShowPrompt?: () => void;
+}): ReactElement {
   return (
     <div className="runbar" role="status">
-      <Walker />
+      {waiting ? <span className="px warn" aria-hidden="true" /> : <Walker />}
       <span className="runtext">
-        {status || "Working."} Enter steers, Tab queues the next prompt.
+        {waiting && onShowPrompt !== undefined ? (
+          <Button
+            data-testid="composer.run-bar-show-prompt"
+            appearance="text-link"
+            onClick={onShowPrompt}
+          >
+            {status}
+          </Button>
+        ) : (
+          status || "Working."
+        )}
+        {inputWaiting
+          ? " Enter or Tab sends your message now."
+          : waiting
+            ? ""
+            : " Enter steers, Tab queues the next prompt."}
       </span>
-      <button
+      <Button
         data-testid="composer.composer-parts-mini"
         type="button"
-        className="mini stop"
+        appearance="compact"
+        placement="stop"
         title="Stop the running turn"
         aria-label="Stop the running turn"
         onClick={onStop}
       >
         Stop
-      </button>
+      </Button>
     </div>
   );
 }
@@ -76,26 +107,26 @@ export function QueueList({
                   if (e.key === "Escape") onCancel();
                 }}
               />
-              <button
+              <Button
                 data-testid="composer.composer-parts-mini-2"
                 type="button"
-                className="mini"
+                appearance="compact"
                 title="Save queued message (Enter)"
                 aria-label="Save queued message (Enter)"
                 onClick={onSave}
               >
                 Save
-              </button>
-              <button
+              </Button>
+              <Button
                 data-testid="composer.composer-parts-mini-3"
                 type="button"
-                className="mini"
+                appearance="compact"
                 title="Cancel queued message edit (Escape)"
                 aria-label="Cancel queued message edit (Escape)"
                 onClick={onCancel}
               >
                 Cancel
-              </button>
+              </Button>
             </>
           ) : (
             <>
@@ -105,10 +136,10 @@ export function QueueList({
                   <span className="queue-extra"> +{String(item.extras)}</span>
                 ) : null}
               </span>
-              <button
+              <Button
                 data-testid="composer.composer-parts-on-edit"
                 type="button"
-                className="mini"
+                appearance="compact"
                 title="Edit queued message"
                 aria-label="Edit queued message"
                 onClick={() => {
@@ -116,7 +147,7 @@ export function QueueList({
                 }}
               >
                 Edit
-              </button>
+              </Button>
               <button
                 data-testid="composer.composer-parts-on-remove"
                 type="button"
@@ -138,7 +169,7 @@ export function QueueList({
 }
 
 /** The facts line of a read document's chip: "PDF · 3 pages · 4,210 characters". */
-export function docFacts(item: ContextItem): string {
+function docFacts(item: ContextItem): string {
   const doc = item.doc;
   if (doc === undefined) return "";
   const pages =
@@ -163,9 +194,9 @@ function DocContextChip({
   onPreview: () => void;
 }): ReactElement {
   return (
-    <span
+    <Badge
       data-item-id={item.id}
-      className="ctxchip docctx"
+      presentation="document-context"
       data-context-id={item.id}
       data-doc-uri={item.uri}
     >
@@ -175,16 +206,16 @@ function DocContextChip({
         {docFacts(item)}
         {item.doc?.kept === null ? "" : " · shortened"}
       </span>
-      <button
+      <Button
         data-testid="composer.composer-parts-mini-4"
         type="button"
-        className="mini"
+        appearance="compact"
         title={`Preview text from ${item.label}`}
         aria-label={`Preview text from ${item.label}`}
         onClick={onPreview}
       >
         Preview
-      </button>
+      </Button>
       <button
         data-testid="composer.composer-parts-button"
         type="button"
@@ -194,7 +225,7 @@ function DocContextChip({
       >
         <Icon name="x" />
       </button>
-    </span>
+    </Badge>
   );
 }
 
@@ -205,6 +236,7 @@ export function ChipsRow({
   onRemoveContext,
   onRemoveImage,
   onPreview,
+  onOpenRef,
 }: {
   context: readonly ContextItem[];
   images: readonly ImageItem[];
@@ -212,20 +244,37 @@ export function ChipsRow({
   onRemoveImage: (id: string) => void;
   /** Opens the preview of a read document's chip. */
   onPreview?: (id: string) => void;
+  /** Opens a code chip's absolute file and range. */
+  onOpenRef?: (ref: CodeRef) => void;
 }): ReactElement | null {
   if (context.length === 0 && images.length === 0) return null;
   return (
     <div className="ctx-row" aria-label="Sent with the next message">
       {context.map((item) =>
         item.doc === undefined ? (
-          <span
+          <Badge
             data-item-id={item.id}
             key={item.id}
-            className="ctxchip"
+            presentation="context"
             data-context-id={item.id}
             title={item.text}
           >
-            <b>{item.label}</b>
+            {item.ref === undefined ? (
+              <b>{item.label}</b>
+            ) : (
+              <Button
+                data-testid="composer.composer-parts-open-context"
+                type="button"
+                appearance="file-reference"
+                title={`Open ${item.label} in the File tab`}
+                aria-label={`Open ${item.label} in the File tab`}
+                onClick={() => {
+                  if (item.ref !== undefined) onOpenRef?.(item.ref);
+                }}
+              >
+                <b>{item.label}</b>
+              </Button>
+            )}
             <span className="mono">{item.text}</span>
             <button
               data-testid="composer.composer-parts-on-remove-context"
@@ -238,7 +287,7 @@ export function ChipsRow({
             >
               <Icon name="x" />
             </button>
-          </span>
+          </Badge>
         ) : (
           <DocContextChip
             key={item.id}
@@ -288,17 +337,17 @@ export function RetryRow({
       <span>
         {problem === "interrupted" ? "The last turn was stopped." : "The last turn failed."}
       </span>
-      <button
+      <Button
         data-testid="composer.composer-parts-mini-5"
         type="button"
-        className="mini"
+        appearance="compact"
         disabled={disabled}
         title="Retry the last stopped or failed turn"
         aria-label="Retry the last stopped or failed turn"
         onClick={onRetry}
       >
         <Icon name="rotate-ccw" /> Retry
-      </button>
+      </Button>
     </div>
   );
 }

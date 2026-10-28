@@ -37,27 +37,6 @@ export function problem(thrown: unknown): string {
   return toCallError(thrown).error.message;
 }
 
-/** A use-log decision in plain words. */
-export function decisionText(decision: string): string {
-  switch (decision) {
-    case "entryAllowed":
-      return "allowed for this project";
-    case "allowedOnce":
-      return "allowed once";
-    case "allowedAlways":
-      return "allowed always for this command";
-    case "grant":
-      return "used an always grant";
-    case "declined":
-      return "not allowed";
-    case "refused":
-      // the user allowed, but the run was stopped (revoked meanwhile, or "always" could not be stored).
-      return "not run (revoked meanwhile or not stored)";
-    default:
-      return decision;
-  }
-}
-
 /** A time as the user's local date and time. */
 export function when(ms: number): string {
   return new Date(ms).toLocaleString();

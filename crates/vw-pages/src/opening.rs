@@ -56,15 +56,25 @@ impl PagesService {
         {
             let mut state = self.shared.lock();
             let viewer = state.viewers.entry(session.to_owned()).or_default();
-            *viewer = Viewer {
+            let previous = if viewer.project == project && viewer.path == path {
+                viewer.clone()
+            } else {
+                Viewer::default()
+            };
+            let mut next = Viewer {
                 project: project.to_path_buf(),
                 pages_dir: server.root().to_path_buf(),
                 port: server.port(),
                 base_url: server.base_url(),
                 path,
                 anchor,
-                ..Viewer::default()
+                ..previous
             };
+            // Loading from the reset on, by `show()`'s own navigate rule (as `open_file`): the page stays loading
+            // until it reports loaded, whether `show()` runs below (viewer shown) or at the next layout (hidden now).
+            // A page the mount already shows is not navigated again and keeps its own state.
+            next.loading |= crate::service::navigates(state.mount.as_ref(), session, &next);
+            state.viewers.insert(session.to_owned(), next);
         }
         let shown = self.shared.lock().shown.clone();
         if let Some((shown_session, rect)) = shown.filter(|(s, _)| s == session) {

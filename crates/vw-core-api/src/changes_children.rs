@@ -11,7 +11,12 @@ use crate::changes_facts::{Facts, facts};
 use crate::changes_view::ChangesSubagent;
 use crate::core::Shared;
 
-fn children(state: &Value) -> Vec<ChangesSubagent> {
+struct Child {
+    source: ChangesSubagent,
+    updated_at: Option<i64>,
+}
+
+fn children(state: &Value) -> Vec<Child> {
     state
         .get("childSessions")
         .and_then(Value::as_array)
@@ -22,14 +27,17 @@ fn children(state: &Value) -> Vec<ChangesSubagent> {
             if id.is_empty() {
                 return None;
             }
-            Some(ChangesSubagent {
-                session_id: id.to_owned(),
-                name: row
-                    .get("name")
-                    .and_then(Value::as_str)
-                    .filter(|name| !name.trim().is_empty())
-                    .unwrap_or("Subagent")
-                    .to_owned(),
+            Some(Child {
+                source: ChangesSubagent {
+                    session_id: id.to_owned(),
+                    name: row
+                        .get("name")
+                        .and_then(Value::as_str)
+                        .filter(|name| !name.trim().is_empty())
+                        .unwrap_or("Subagent")
+                        .to_owned(),
+                },
+                updated_at: row.get("updatedAt").and_then(Value::as_i64),
             })
         })
         .collect()
@@ -44,11 +52,22 @@ pub(crate) async fn include_children(shared: &Shared, id: &str, session: &mut Fa
     pending.reverse();
     let mut visited = HashSet::from([id.to_owned()]);
     while let Some(child) = pending.pop() {
+        let updated_at = child.updated_at;
+        let child = child.source;
         if !visited.insert(child.session_id.clone()) {
             continue;
         }
-        if shared.store.view(&child.session_id).is_none() {
-            // Children stream on the parent's channel; reading a snapshot also replays their early events.
+        let stale = shared.store.view(&child.session_id).is_none_or(|view| {
+            updated_at.is_some_and(|newer| {
+                view.state
+                    .pointer("/session/updatedAt")
+                    .and_then(Value::as_i64)
+                    .is_none_or(|loaded| newer > loaded)
+            })
+        });
+        if stale {
+            // Native child rows advance on the parent channel without streaming every child effect.
+            // Reuse snapshots only while they cover the parent's latest child timestamp.
             crate::pump::refresh(shared, &child.session_id).await;
         }
         let Some(view) = shared.store.view(&child.session_id) else {
@@ -72,7 +91,7 @@ pub(crate) fn ancestors(store: &SessionStore, id: &str) -> Vec<String> {
             if !visited.contains(&view.session_id)
                 && children(&view.state)
                     .iter()
-                    .any(|child| child.session_id == child_id)
+                    .any(|child| child.source.session_id == child_id)
             {
                 visited.insert(view.session_id.clone());
                 parents.push(view.session_id.clone());

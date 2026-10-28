@@ -1,5 +1,5 @@
 //! Reading a handbook folder: every page file (HTML and Markdown) read for validation, every other file named (for
-//! HB-I03), and the folder of a project resolved (`docs/handbook/`, else an existing pre-1.0 `docs/pages/`, §2).
+//! HB-I03), under the project's configured handbook folder (§2).
 //!
 //! Depends on: `page`, `lite`, `paths`, `handbook::format`. Called by: `handbook::validate`, `hub`,
 //! `handbook::overview`, `settings`, tests.

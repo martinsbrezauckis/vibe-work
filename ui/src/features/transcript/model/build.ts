@@ -38,7 +38,7 @@ import { isWebSearch } from "./sources";
 import { hookLine, isHookNotice, transcriptEntries } from "./hookNotices";
 
 /** The `searches` of an answer without web searches (one shared list: rows stay comparable). */
-export const NO_SEARCHES: readonly Obj[] = Object.freeze([]);
+const NO_SEARCHES: readonly Obj[] = Object.freeze([]);
 
 /** One item inside a steps group. */
 export type StepItem =
@@ -77,6 +77,9 @@ export type Row =
       /**: a subagent's card shown in its parent's transcript: the child session that answers it. */
       answerFor?: string;
     }
+  | { kind: "protectedChange"; key: string; entry: Obj }
+  /** A Chrome Control card, or its audit row (a `chrome_ask` entry the core weaves into the history). */
+  | { kind: "chromeAsk"; key: string; entry: Obj }
   | { kind: "notice"; key: string; entry: Obj }
   | { kind: "hook"; key: string; entry: Obj; text: string; error: boolean }
   | { kind: "divider"; key: string; entry: Obj }
@@ -87,7 +90,7 @@ export type Row =
 const ENDED = new Set(["completed", "failed", "interrupted"]);
 
 /** True for a callback Vibe still waits on. */
-export function callbackOpen(entry: Obj): boolean {
+function callbackOpen(entry: Obj): boolean {
   const status = statusOf(entry);
   return status === "open" || (status === "" && inProgress(entry));
 }
@@ -231,6 +234,14 @@ function segmentRows(segment: readonly Obj[], byId: Map<string, Obj>, rows: Row[
   segment.forEach((entry, i) => {
     const id = entryId(entry);
     switch (entryType(entry)) {
+      case "protected_change":
+        flush();
+        rows.push({ kind: "protectedChange", key: `protected:${id}`, entry });
+        return;
+      case "chrome_ask":
+        flush();
+        rows.push({ kind: "chromeAsk", key: id, entry });
+        return;
       case "effect":
         group.push({ kind: "effect", entry });
         if (isWebSearch(entry)) searches.push(entry);
@@ -312,9 +323,20 @@ function blockRows(block: Block, info: TurnInfo | undefined, byId: Map<string, O
  */
 export function buildRows(history: readonly JsonValue[], turns: readonly JsonValue[]): Row[] {
   const entries = dedupe(history);
-  const byId = new Map(entries.map((entry) => [entryId(entry), entry]));
   const table = turnTable(turns);
-  return blocksOf(transcriptEntries(entries), table).flatMap((block) =>
+  const settled = entries.map((entry) => {
+    if (
+      entryType(entry) !== "checkpoint" ||
+      entry["kind"] !== "compaction" ||
+      entry["generationStatus"] !== "in_progress"
+    )
+      return entry;
+    const turn = table.get(str(entry["turnId"]) ?? "");
+    if (turn === undefined || !ENDED.has(str(turn.turn["status"]) ?? "")) return entry;
+    return { ...entry, generationStatus: "completed", message: "Context compaction interrupted" };
+  });
+  const byId = new Map(settled.map((entry) => [entryId(entry), entry]));
+  return blocksOf(transcriptEntries(settled), table).flatMap((block) =>
     blockRows(block, block.turnId === null ? undefined : table.get(block.turnId), byId),
   );
 }

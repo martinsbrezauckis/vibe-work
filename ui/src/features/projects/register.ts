@@ -4,7 +4,7 @@
  * side lists the route (`crates/vw-host/src/host.rs` PAGES_ROUTES).
  * Route actions (body `{action,...}`): `state` (default: the page's projects with their cards and health, the cards
  * by folder as before, the filter, the selection), `open`, `close`, `refresh`, `select {projectId|null}`,
- * `filter {status}`, `query {text}`, `openHandbook {projectId, path?}`, `start {projectId}`, `migrate {projectId}`,
+ * `filter {status}`, `query {text}`, `openHandbook {projectId, path?}`, `start {projectId}`,
  * `newSession {projectId, folder?}` (for a project without a main folder `folder` names where to run, a path, or it is
  * `invalidParams`: the native folder picker cannot be answered remotely), `reveal {projectId}`, `chooseFolder {projectId, folder}` (`folder` is required: a path, or
  * `null` to clear), `newProject {name}`. A project is named by `projectId`; `project`
@@ -144,9 +144,6 @@ export function registerProjects(app: App): () => void {
         case "start":
           await projects.startHandbook(project());
           return { session: app.shell.store.get().selected, ...state() };
-        case "migrate":
-          await projects.migrate(project());
-          return { session: app.shell.store.get().selected, ...state() };
         case "newSession": {
           const id = project();
           // A project without a main folder would open the native folder picker, which no remote caller can answer:
@@ -155,6 +152,19 @@ export function registerProjects(app: App): () => void {
           await projects.newSession(id, folder);
           return { session: app.shell.store.get().selected, ...state() };
         }
+        case "openFiles": {
+          const id = project();
+          const chosen = groups()?.projects.find((item) => item.id === id);
+          if (chosen === undefined) throw new UiControlError("notFound", "no such project");
+          if (chosen.mainFolder === null)
+            throw new UiControlError("invalidParams", "the project has no main folder");
+          projects.openFiles(id);
+          return { folder: app.shell.store.get().newFolder, ...state() };
+        }
+        case "openTerminal":
+          // The project card's "Open terminal": the New chat screen in the project's folder with its Terminal tab.
+          projects.openTerminal(project());
+          return { folder: app.shell.store.get().newFolder, ...state() };
         case "reveal":
           await projects.reveal(project());
           return state();
@@ -169,7 +179,15 @@ export function registerProjects(app: App): () => void {
             );
           if (folder !== null && typeof folder !== "string")
             throw new UiControlError("invalidParams", "folder must be a path or null");
-          await projects.chooseFolder(project(), folder);
+          const id = project();
+          if (!projects.groups.store.get().data?.projects.some((p) => p.id === id))
+            throw new UiControlError("notFound", "The project no longer exists.");
+          if (folder !== null) await app.core?.run({ type: "pickFolder", path: folder });
+          if (!(await projects.chooseFolder(id, folder)))
+            throw new UiControlError(
+              "denied",
+              "The project's main folder could not be changed. See the notification for the reason.",
+            );
           return state();
         }
         case "newProject":
@@ -177,7 +195,7 @@ export function registerProjects(app: App): () => void {
         default:
           throw new UiControlError(
             "invalidParams",
-            "action must be state, open, close, refresh, select, filter, query, openHandbook, start, migrate, newSession, reveal, chooseFolder or newProject",
+            "action must be state, open, close, refresh, select, filter, query, openHandbook, start, newSession, reveal, chooseFolder or newProject",
           );
       }
     }),

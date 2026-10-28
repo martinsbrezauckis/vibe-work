@@ -50,12 +50,15 @@ import "./styles/libraries.css";
 import "./styles/worktrees.css";
 import "./styles/git.css";
 import "./styles/git-browser.css";
+import "./styles/explorer.css";
 import "./styles/updates.css";
 import "./styles/settings-page.css";
+import "./styles/mistral-keys.css";
 import "./styles/shared-controls.css";
 import "./styles/search.css";
 // the shared motion and responses load last so they win over older per-feature rules.
 import "./styles/feel.css";
+import "./styles/editor-workspace.css";
 
 const container = document.getElementById("root");
 if (container === null) {
@@ -72,6 +75,7 @@ registerPagesTab(app);
 registerFilesTab(app);
 registerProjects(app);
 void app.core?.start();
+void app.newChat?.start();
 
 createRoot(container).render(
   <StrictMode>

@@ -20,6 +20,7 @@ import typing
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+from uuid import UUID
 
 from pydantic import BaseModel, JsonValue
 from pydantic.alias_generators import to_camel
@@ -239,7 +240,7 @@ class Introspector:
             return Prim("int"), False
         if t is float:
             return Prim("float"), False
-        if t is str or t is datetime:
+        if t in (str, datetime, UUID):
             return Prim("string"), False
         if inspect.isclass(t) and issubclass(t, enum.Enum):
             return self._enum(t), False

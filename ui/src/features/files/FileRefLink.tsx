@@ -1,10 +1,11 @@
-/** Resolved transcript file link, action menu or ambiguous chooser; shared RowMenu owns keyboard and focus. */
+/** Resolved transcript file link with the shared file menu, or the ambiguous chooser; RowMenu owns keyboard and focus. */
 import { type ReactNode, useState } from "react";
 import { createPortal } from "react-dom";
 import { RowMenu, type MenuItem } from "../../components/RowMenu";
 import type { RefState, Shown } from "../../state/files";
 import { useApp } from "../shell/AppContext";
 import { editableKind, runFileRefAction, type RefAction } from "./fileRefActions";
+import { type FileTarget, fileHeading, fileMenuItems } from "./fileMenu";
 
 /** A linked file name changes no text and never chooses between ambiguous files on its own. */
 export function FileRefLink({
@@ -23,9 +24,21 @@ export function FileRefLink({
   const app = useApp();
   const [at, setAt] = useState<{ x: number; y: number } | null>(null);
   const choose = state.status === "choices";
-  const heading = choose ? `${String(state.total)} files named ${path}` : undefined;
+  const linkTarget = (): FileTarget => {
+    const cwd = app.core?.store.get().sessions[sessionId]?.session["cwd"];
+    const ok = state.status === "ok" ? state : null;
+    return {
+      owner: sessionId,
+      folder: typeof cwd === "string" ? cwd : "",
+      path: ok?.display ?? path,
+      line,
+      kind: ok?.kind ?? null,
+      shown: ok === null ? null : { file: ok.file, display: ok.display, line },
+    };
+  };
+  const heading = choose ? `${String(state.total)} files named ${path}` : fileHeading(linkTarget());
   const hint = choose
-    ? `${heading ?? path}: click to choose`
+    ? `${heading}: click to choose`
     : `Open ${state.display}${line === null ? "" : ` at line ${String(line)}`} in the File tab`;
   const run = (target: Omit<Shown, "line">, item: RefAction) => {
     void runFileRefAction(app, sessionId, { ...target, line }, item).catch(() => undefined);
@@ -54,38 +67,7 @@ export function FileRefLink({
           },
         };
       })
-    : [
-        {
-          id: "open",
-          label: "Open",
-          run: () => {
-            run(state, "open");
-          },
-        },
-        {
-          id: "edit",
-          label: "Edit",
-          disabled: !editableKind(state.kind),
-          run: () => {
-            run(state, "edit");
-          },
-        },
-        {
-          id: "reveal",
-          label: "Show in folder",
-          run: () => {
-            run(state, "reveal");
-          },
-        },
-        {
-          id: "copy-path",
-          label: "Copy path",
-          separated: true,
-          run: () => {
-            run(state, "copy-path");
-          },
-        },
-      ];
+    : fileMenuItems(app, linkTarget(), "chat");
   const openMenu = (button: HTMLButtonElement, x?: number, y?: number) => {
     button.focus();
     const rect = button.getBoundingClientRect();
@@ -126,7 +108,7 @@ export function FileRefLink({
           <RowMenu
             testId={choose ? "files.ref-chooser" : "files.ref-menu"}
             at={at}
-            label={heading ?? `Actions for ${path}`}
+            label={choose ? heading : `Actions for ${path}`}
             heading={heading}
             footer={
               choose && state.total > state.choices.length

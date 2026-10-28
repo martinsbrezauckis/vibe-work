@@ -1,6 +1,6 @@
 /**
- * "On Mistral's website": a category's links to Mistral's own pages. Each row says in one line
- * what the page does (or that a web setting has no effect here) and opens the page in the system browser through the
+ * "On Mistral's website": a category's links to Mistral's own pages. Each row is the page's name (where on the page to
+ * go is the Open button's tooltip, not a visible line) and opens the page in the system browser through the
  * core's `openLink` (validated again in the host; never inside the app).
  * Depends on: AppContext, components/Icon, mistralLinks. Called by: SettingsPage.
  * Invariants: the link target is on the button as `data-href` (tests read it without opening anything); nothing is
@@ -32,14 +32,13 @@ export function MistralLinks({ category }: { category: string }): ReactElement |
                 <Badge>Web only</Badge>
               </>
             )}
-            <span className="d">{link.note}</span>
           </span>
           <LinkButton
             data-testid="settings.mistral-link-rows-open-link"
             type="button"
 
             data-href={link.url}
-            title={`Opens ${link.url} in your browser`}
+            title={`${link.note} Opens ${link.url} in your browser.`}
             aria-label={`Open ${link.label} on Mistral's website`}
             onClick={() => {
               core?.client.openLink(link.url).catch(() => {

@@ -52,7 +52,7 @@ pub async fn spawn_with_retry<T>(
 /// One command of the install.
 #[derive(Debug, Clone)]
 pub struct Step {
-    /// Shown name ("Install Python 3.12").
+    /// Shown name ("Install Python 3.14.8").
     pub name: String,
     /// The executable (absolute).
     pub program: PathBuf,

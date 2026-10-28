@@ -7,13 +7,12 @@
 //! - [`Host::start`] always returns a `Host`. When Vibe cannot be started the host records why in
 //!   [`Startup`] and every command fails with `serverUnavailable` carrying that reason, so the
 //!   window can open and say what is wrong instead of not opening at all.
-//! - Every command runs with `Origin::Ui`, except those the window runs for a Debug API `ui/*` request it is
-//!   serving ([`Host::execute_for_ui_control`]): they run with `Origin::DebugApi`, which acts as
-//!   the user without native dialogs, so it is the more privileged one. The claim is bound to the request: it
-//!   needs that request's capability ([`UiBridge`]) while the request is pending and the Debug API is on; any
-//!   other claim is refused (a flag set by the webview alone is insufficient). The Tauri
-//!   command that calls them is the only place the origin is chosen, and the Tauri capability lets only the main
-//!   window call it.
+//! - Every window command runs with `Origin::Ui` ([`Host::execute_window`]). The webview holds no Debug API
+//!   authority: a command runs with `Origin::DebugApi` (which acts as the user without native dialogs) only when it
+//!   matches a grant that a pending Debug API `ui/*` request got in Rust from its own route and body
+//!   ([`crate::ui_grants`]), once, while the Debug API is on. Nothing the window sends (a flag, a token, an id) can
+//!   claim that origin. While a request is served the core attributes window commands to the Debug API and holds
+//!   them to its vault rule ([`UiBridge::driving`]); that only restricts.
 //! - The Debug API is on in development builds and off in user builds unless the persisted
 //!   setting says otherwise; turning it off removes the socket and the descriptor.
 
@@ -48,7 +47,7 @@ pub const DEFAULT_UI_REPLY_TIMEOUT: Duration = Duration::from_secs(10);
 const CHANGES_ROUTES: &[(&str, &str)] = &[
     (
         "git-browser",
-        "The project's Git tree. Body: {action: read|click, projectId?, nodeId?, target?: primary|commit|push|pr|bring|new-chat|new-task|file, path?}. Read returns discovered repositories, copies and changed files with state words, primary action and disabled reasons. Click validates node and file identities and reuses the existing guarded actions. New chat/task only prepares the composer. Debug API origin is preserved.",
+        "The project's Git tree. Body: {action: read|click, projectId?, nodeId?, target?: primary|commit|push|pr|bring|new-chat|new-task|file, path?}. Read returns discovered repositories, copies and changed files with state words, primary action and disabled reasons. Click validates node and file identities and reuses the existing guarded actions. New chat/task only prepares the composer; the folder of the node named by nodeId counts as chosen (like ui/worktrees folder). A push runs with the Debug API origin: its native confirmation is answered as yours.",
     ),
     (
         "changes",
@@ -71,7 +70,7 @@ const PAGES_ROUTES: &[(&str, &str)] = &[
     ),
     (
         "project",
-        "The Project tab (the project handbook) of the shown session. Body: {action: state|hub|open|plan|back|forward|reload|pick|comment|send|delete|point|answers|answer|sendAnswers|check|export, ...}: open {path, anchor?} (anchor: a section or step id to scroll to); comment {path, section, text, quote?, send?}; send {id}; delete {id}; point {source: terminal|preview|page} (\"Point Vibe at this\": a context chip in the composer, never a command); answers {path?} (the page's inputs with the user's answers; every page with inputs without path and no page shown); answer {path?, input, value} (value: {type: choice, option} | {type: checklist, checked: [...]} | {type: rank, order: [...]} | {type: text, text} | null to clear; checked against the page file); sendAnswers {path?} (every answer of the page into the composer as one chip, never a command); check {path?} (the visual check now: desktop 1280 and phone 390 px, light and dark); export {path?, destination?} (the page as one self-contained HTML file: its text, or written to the absolute destination like the save dialog). path defaults to the shown page. `pick {section}` picks the named section of the shown page at once and `point` names its element with `target` ({selector} or {x, y}, source preview) or its `section` (source page): a Debug API request has no pointer, so each names what a person would have clicked, and without it the answer is invalidParams naming the missing field. Calls carry the Debug API origin (a label: no native dialog). Returns the tab state (hub with manifest, findings counts and groups, or page with steps, sections, comments, answers, visual check, prototype; the viewer) and the action's result.",
+        "The Project tab (the project handbook) of the shown session. Body: {action: state|hub|open|plan|back|forward|reload|pick|comment|send|delete|point|answers|answer|sendAnswers|check|export, ...}: open {path, anchor?} (anchor: a section or step id to scroll to); comment {path, section, text, quote?, send?}; send {id}; delete {id}; point {source: terminal|preview|page} (\"Point Vibe at this\": a context chip in the composer, never a command); answers {path?} (the page's inputs with the user's answers; every page with inputs without path and no page shown); answer {path?, input, value} (value: {type: choice, option} | {type: checklist, checked: [...]} | {type: rank, order: [...]} | {type: text, text} | null to clear; checked against the page file); sendAnswers {path?} (every answer of the page into the composer as one chip, never a command); check {path?} (the visual check now: desktop 1280 and phone 390 px, light and dark); export {path?, destination?} (the page as one self-contained HTML file: its text, or written to the absolute destination like the save dialog). path defaults to the shown page. `pick {section}` picks the named section of the shown page at once and `point` names its element with `target` ({selector} or {x, y}, source preview) or its `section` (source page): a Debug API request has no pointer, so each names what a person would have clicked, and without it the answer is invalidParams naming the missing field. Its calls are the window's, recorded as the Debug API's; an export with destination is written without the save dialog. Returns the tab state (hub with manifest, findings counts and groups, or page with steps, sections, comments, answers, visual check, prototype; the viewer) and the action's result.",
     ),
     (
         "pages",
@@ -83,18 +82,16 @@ const PAGES_ROUTES: &[(&str, &str)] = &[
     ),
 ];
 
-/// The File tab's route, registered by the tab itself (`ui/src/features/files/register.tsx`).
-const FILES_ROUTES: &[(&str, &str)] = &[(
-    "files",
-    "The File tab (files the agent mentions, previewed, and its editor) of a session, every action a click has (the Debug API acts as the user, no native dialogs). Body: {action: state|refs|open|ref-menu|switch|close|reload|mode|external|edit|openEdit|setText|saveEdit|cancelEdit|reloadEdit|keepEditing|compare|drop, sessionId?: string (default: the selected session), ...}: state = the shown file (name, path relative to the session folder), kind, size, status, mode, truncation, the text it shows (up to 65,536 characters), editNotice (why the editor did not open), the viewer, the recent list, the last drop report and editor (null when closed, else {text, textCut, dirty, conflict, problem, saving, compare, wrap, baselineFingerprint, diskFingerprint}); refs {entryId?} = the file references the transcript shows (text, path, line, state ok|no|pending; an ambiguous name carries its choices); open {text, line?} resolves a path as the transcript does (the window's scope: the session folder and picked folders), or open {file} a handle from refs or the recent list; ref-menu {text, item?: open|edit|reveal|copy-path, file?, line?} is a linked name's right-click menu: without item it answers the items and canEdit, or {choices: [{file, display, kind, size}], total} for an ambiguous name (at most 50; act on one by giving its file handle with the item; nothing ambiguous opens by itself); edit opens the editor (pictures and binary files have none), reveal shows the file in its folder, copy-path copies the path the tab shows; switch {file}; close; reload; mode {mode: rendered|source}; external {what: open|reveal} opens with the default app or shows in the folder (a program is never opened); drop {files: [{name, data (base64), folder?}]} routes files like a drop on the composer and answers the drop report and the composer's pictures, context chips and document chips. Known secrets in a file's text are hidden like in every answer (see the top of this page). edit {text} saves the shown text file with that whole text like the editor's Save: refused with `stale` when the file changed on disk since the tab read it; line endings and a byte-order mark are kept; the agent gets a context chip with the diff. The editor, like the window's: openEdit opens the shown complete text file in it (nothing is saved); setText {text} replaces the editor's text (LF line endings; an empty string is allowed); saveEdit answers outcome saved|unchanged|stale (a stale save keeps the draft and shows the conflict, it never overwrites the newer file on disk; the file's line endings and byte-order mark are kept); cancelEdit drops the draft; reloadEdit drops the draft and reads the file again; keepEditing hides the conflict banner; compare opens a read-only Mine/Disk comparison.",
-)];
-
 /// The Browser tab's agent-browser route.
 const BROWSER_ROUTES: &[(&str, &str)] = &[(
     "browser",
     "The Browser tab's agent browser of the selected (or given) session, every action the tab has. Body: {action: state|tabs|openTab|switchTab|closeTab|stop|resume|annotate|cancel|note|remove|send|recheck|capture|address, sessionId?: string, ...}: state = the open URL, web tabs and selected tab, whether notes are offered (the app preview only: pages of the session's own local servers), the agent strip (agentActive, inFlight, stopped), the action log (who: agent|debugApi|user, action, target, outcome, detail), the collected notes (id, mode, role, name, route, note, status draft|sent|changed|unchanged|missing, source hint, whether a crop exists), a running pick and the last error; stop / resume = the strip's buttons (Stop cancels the agent's browser action in flight and refuses more until Resume or the session's next message); annotate {mode: element|box, target} annotates the element or area `target` names and answers the new note at once (a Debug API request has no pointer: target is {ref}, {selector}, {x, y}, or {rect: {x, y, width, height}} in box mode; without it the answer is invalidParams naming the missing field); cancel stops a pick; note {id, text}; remove {id}; send puts every draft note into the composer (a context chip and a cropped picture each, never a command) and answers how many; recheck {reload?: bool} reloads the preview and sets each sent note to changed / unchanged / missing; tabs lists web tabs; openTab {url?} opens one; switchTab/closeTab {tabId} act on a tab; capture {kind} starts a Browser capture; address {url} opens a URL like the address bar (the same navigation policy as the agent's).",
 )];
 const SHELL_ROUTES: &[(&str, &str)] = &[
+    (
+        "controls",
+        "Read visible main-window controls or the elements a selector names: testId, itemId, label, text, value, checked, pressed, expanded, selected and disabled. Secret fields are withheld; selectors run with their values emptied. Native pages and editor shadow controls use their typed routes.",
+    ),
     (
         "walkthrough",
         "Debug walkthrough caption. Body: {action: read|start|step|pause|finish|stop, total?, step?, label?}. Escape pauses pacing; finish hides the caption after three seconds.",
@@ -109,15 +106,19 @@ const SHELL_ROUTES: &[(&str, &str)] = &[
     ),
     (
         "click",
-        "Clicks an element like the mouse does (every control is reachable, also those without a route of their own). Body: {selector: CSS selector, index?: n-th match}. A hidden or disabled element is refused (denied). Answers right after the click; an action that waits (a native folder picker) keeps running.",
+        "Clicks an element like the mouse does (every control is reachable, also those without a route of their own). Body: {selector: CSS selector, index?: n-th match}. A hidden or disabled element is refused (denied). Answers right after the click; an action that waits (a native folder picker) keeps running. The click is the window's: a native confirmation it leads to opens as the window's (GET /asks lists it, POST /asks/{id} answers it; a vault confirmation waits for a person). Routes of their own answer their confirmations as yours.",
     ),
     (
         "key",
-        "Presses a key like the keyboard does. Body: {key: e.g. Escape|Enter|k, selector?: CSS selector to focus first, ctrl?, shift?, alt?, meta?}. Without a selector the key goes to the focused element.",
+        "Presses a key like the keyboard does. Body: {key: e.g. Escape|Enter|k, selector?: CSS selector to focus first, ctrl?, shift?, alt?, meta?}. Without a selector the key goes to the focused element. Like ui/click, a native confirmation it leads to opens as the window's (POST /asks/{id}).",
+    ),
+    (
+        "menu",
+        "The app's action menus (right-click menus, the menu key, Shift F10 and a row's ⋯ open the same menu). Body: {action: state|open|choose|close, selector?, index?, item?}: state (default) = the open menu or {open: false}: its testId, label, heading (the line naming the target: a path, path:line, a commit) and items (id, label, keys as shown, disabled, danger) in the order shown; open {selector, index?} right-clicks that element like the mouse does (a hidden element is refused) and answers the menu it opened; choose {item} runs an item exactly as a click does (a disabled item is refused; a native confirmation it leads to opens as the window's, POST /asks/{id}) and closes the menu; close = Escape. The menu key is ui/key {key: ContextMenu} or {key: F10, shift: true}; a row's ⋯ is ui/click.",
     ),
     (
         "palette",
-        "The command palette, like the keyboard uses it. Body: {action: list|open|close|run, query?, id?}: list (default) returns the commands (id, label, section) the query matches; open/close show or hide it; run {id} runs one exactly as Enter does.",
+        "The command palette, like the keyboard uses it. Body: {action: list|open|close|run, query?, id?}: list (default) returns the commands (id, label, section) the query matches; open/close show or hide it; run {id} runs one exactly as Enter does (like ui/click: a native confirmation it leads to opens as the window's, POST /asks/{id}).",
     ),
     (
         "toasts",
@@ -169,7 +170,7 @@ const SHELL_ROUTES: &[(&str, &str)] = &[
     ),
     (
         "transcript",
-        "Read or act on the transcript like a click does. Body: {action: read|open|answer|link|sources, sessionId?: string (default: the selected session)}: read returns the rows as rendered (kinds, keys, entry ids, card state, web sources per answer and search step); open {key, open?: bool} opens or closes a group, step or show-all; answer {callbackId, decision?: approve|approve_for_session|approve_permanently|deny|cancel_turn, scope?, feedback?, answers?: [{labels: [string], other?: string}], cancel?: bool} answers a card exactly as its buttons do; link {url} shows the link dialog; sources {key, open?: bool} opens or closes the side list of an answer's web sources.",
+        "Read or act on the transcript like a click does. Body: {action: read|open|answer|protected|grants|grantsOpen|revokeGrant|grantsAllowed|link|sources, sessionId?: string (default: the selected session)}: read returns the rows as rendered (kinds, keys, entry ids, a card's question, buttons with their keys and covers words, web sources); open {key, open?: bool} opens or closes a group, step or show-all; answer {callbackId, choice?: once|session|always|no, decision?: approve|approve_for_session|deny, feedback?, answers?: [{labels: [string], other?: string}], cancel?: bool} answers a card with a button it shows (Vibe Work keeps a session answer itself and sends Vibe approve; no Always allow); protected {proposalId, choice: once|no, note?}; grants, grantsOpen {open?}, revokeGrant {id}, grantsAllowed drive the session header's grants chip and list; link {url} shows the link dialog; sources {key, open?: bool} opens or closes the side list of an answer's web sources.",
     ),
     (
         "composer",
@@ -189,7 +190,7 @@ const SHELL_ROUTES: &[(&str, &str)] = &[
     ),
     (
         "voice",
-        "Read or drive dictation, narration and voice chat like the mic button, the narration bar and the Voice chat button do. Body: {action: read|start|stop|cancel|narrateLast|stopNarration|skipNarration|settings|voiceChat|voiceChatEnd, sessionId?: string (default: the selected session)}: read returns the dictation state (state, streamId, mode, seconds, live text, last inserted text, error, micPending, permissionWait), narration (enabled, playing, queue, last played: chars, bytes, seconds) and voiceChat (on, owner, phase: off|listening|sending|thinking|waiting|speaking|error, micPending, partial, heard, endedBy: button|pause|limit, lastSpoken {text, chars, seconds, kind}, spoken, note, error, autoEnd, pauseMs, latency); start turns the microphone on and answers once it records, failed, or waits for the microphone permission (micPending; an OS prompt has no time limit, poll read); stop inserts the text at the caret of the session's text box (marked as text from an external client); narrateLast narrates the session's last finished turn; settings {narration?, voice?, language?, micId?, voiceChatAutoEnd?, voiceChatPauseMs?} changes the Settings screen's voice choices; voiceChat {on: true|false} turns voice chat on for the session (moving it from another session) or off; voiceChatEnd ends the user's turn now, like pressing the button while it listens.",
+        "Read or drive dictation, narration and voice chat like the mic button, the narration bar and the Voice chat button do. Body: {action: read|start|stop|cancel|readAloud|narrateLast|stopNarration|skipNarration|settings|voiceChat|voiceChatEnd, sessionId?: string (default: the selected session)}: read returns the dictation state (state, streamId, mode, seconds, live text, last inserted text, error, micPending, permissionWait), narration (enabled, playing, queue, last played: chars, bytes, seconds) and voiceChat (on, owner, phase: off|listening|sending|thinking|waiting|speaking|error, micPending, partial, heard, endedBy: button|pause|limit, lastSpoken {text, chars, seconds, kind}, spoken, note, error, autoEnd, pauseMs, latency); start turns the microphone on and answers once it records, failed, or waits for the microphone permission (micPending; an OS prompt has no time limit, poll read); stop inserts the text at the caret of the session's text box (marked as text from an external client); readAloud {text?} reads the last finished reply or the requested text once, without changing voice settings, and returns before audio finishes; narrateLast narrates the session's last finished turn; settings {narration?, voice?, language?, micId?, voiceChatAutoEnd?, voiceChatPauseMs?} changes the Settings screen's voice choices; voiceChat {on: true|false} turns voice chat on for the session (moving it from another session) or off; voiceChatEnd ends the user's turn now, like pressing the button while it listens.",
     ),
     (
         "connectors",
@@ -197,7 +198,11 @@ const SHELL_ROUTES: &[(&str, &str)] = &[
     ),
     (
         "marketplace",
-        "Read or act on the Tools page's Marketplace tab like clicks do. Body: {action: read|open|connectors|reload|filter|search|select|install|cancel|remove|addServer|turnOnPlugin|turnOffPlugin|removePlugin, id?, path?, filter?: all|installed|updates, text?}: read (default) returns the tab, filter, selection, note, the install in progress, the platform, every shown entry (plugins, skill packs, MCP servers) with its status words, installed version, update flag, access class for servers and its state in the viewed session, and discovered: the plugins outside the catalog (name, path, scope, managed, off, components, state in the viewed session); install {id} installs or updates a pack or plugin from the reviewed, pinned catalog (runs in the background; follow the marketInstall events), cancel stops it, remove {id} removes it, addServer {id} adds a catalog MCP server through the Connectors flow (sign-in finishes in a browser); turnOffPlugin, turnOnPlugin and removePlugin {path} take the exact path from discovered and change only plugin folders Vibe Work may change (managed): turn off moves the folder to plugins-off/ and turn on moves it back (a plugin of the Vibe home loses its approval on turn off and gets it on turn on), remove deletes the folder; open chats reload their plugins. Changes run without the native confirmation (the Debug API acts as the user).",
+        "Read or act on the Tools page's Marketplace tab like clicks do. Body: {action: read|open|connectors|reload|filter|search|select|install|offer|installOffer|cancelOffer|cancel|remove|addServer|turnOnPlugin|turnOffPlugin|removePlugin, id?, path?, filter?: all|installed|updates, text?}: read (default) returns the tab, filter, selection, note, the install in progress, the platform, every shown entry (plugins, skill packs, MCP servers) with its status words, installed version, update flag, access class for servers and its state in the viewed session, and discovered: the plugins outside the catalog (name, path, scope, managed, off, components, state in the viewed session); install {id} installs or updates a pack or plugin from the reviewed, pinned catalog without an offer (runs in the background; follow the marketInstall events); offer {id} is the card's Install… (selects the card and shows the install offer in the detail: name, version, publisher, from, licence, what it runs), installOffer {id} is the detail's Install (installs exactly the shown offer, or shows the offer first when none is shown; a stale offer is answered with a fresh one and the notice, never installed by itself) and cancelOffer {id} closes it; read lists them under offers (phase, offerId, facts with their Changed marks, confirm words, notice, read failures); cancel stops it, remove {id} removes it, addServer {id} adds a catalog MCP server through the Connectors flow (sign-in finishes in a browser); turnOffPlugin, turnOnPlugin and removePlugin {path} take the exact path from discovered and change only plugin folders Vibe Work may change (managed): turn off moves the folder to plugins-off/ and turn on moves it back (a plugin of the Vibe home loses its approval on turn off and gets it on turn on), remove deletes the folder; open chats reload their plugins. Changes run without the native confirmation (the Debug API acts as the user).",
+    ),
+    (
+        "skills",
+        "Read or act on the Tools page's Skills tab like clicks do. Body: {action: state|open|reload|search|disclose|install|update|confirm|cancel|enable, name?, text?, enabled?}: state (default) returns whether the tab shows, loading, the list error, note, search, busy, each row (name, group installed|catalog, version, latestVersion, updateAvailable, skillId, enabled, locked, expanded, error) and offers (each open install offer: target, mode install|update, phase reading|shown|installing, offerId, expiresAt, heading, facts with label and value, confirm words, notice and noticeKind changed|ranOut; read failures; the focus request); open shows the tab; disclose {name} opens or closes a row; install {name} is a catalog row's Install… and update {name} an installed row's Update to vN…: both show the offer (what the click installs); confirm {name} is the offer's Install vN / Update to vN and sends that offer's id (a used or changed offer is refused as staleOffer, an expired one as offerExpired: the fresh offer shows like any offer with one sentence above the buttons, This offer changed and was refreshed. Check the details above, then install again. or This offer expired and was refreshed. Check the details above, then install again. (an update offer ends then update again.), and is never sent by itself); cancel {name} closes it; enable {name, enabled} is the row's switch. No native dialog (the Debug API acts as the user); Remove keeps its window dialog (ui/click).",
     ),
     (
         "libraries",
@@ -219,7 +224,7 @@ const SHELL_ROUTES: &[(&str, &str)] = &[
     ),
     (
         "updates",
-        "Read or act on the update flow like the notice and the Settings section do. Body: {action: read|check|download|install|autoDownload|later, enabled?: bool}: read (default) returns whether this build has an update channel, the flow's view (phase: idle|checking|available|downloading|ready|installing|restarting|failed, version, notes, progress, mode inApp|linkOnly, autoDownload, releasePage), the status line and the notice text; check asks the update server now; download and install carry the Debug API origin (logged; no dialog: the request is the user's agreement); install only works for a downloaded and verified (ready) update and restarts the app; autoDownload {enabled} is the Settings switch; later hides the notice.",
+        "Read or act on the update flow like the notice and the Settings section do. Body: {action: read|check|download|install|autoDownload|later, enabled?: bool}: read (default) returns whether this build has an update channel, the flow's view (phase: idle|checking|available|osTooOld|downloading|ready|installing|restarting|failed, version, notes, progress, mode inApp|linkOnly, autoDownload, releasePage; osTooOld = the new version needs a newer system, nothing is downloaded: os, minimum and this computer's current version), the status line and the notice text; check asks the update server now; download and install click the same buttons as the window (no dialog either way: the request is the user's agreement); install only works for a downloaded and verified (ready) update and restarts the app; autoDownload {enabled} is the Settings switch; later hides the notice.",
     ),
     // UI route (`ui/src/features/worktrees/worktreeRoutes.ts`, registered by the shell wiring).
     (
@@ -296,7 +301,7 @@ pub struct Host {
     notifier: Arc<dyn Notifier>,
     limiter: RateLimit,
     events: HostEvents,
-    settings_path: PathBuf,
+    pub(crate) settings_path: PathBuf,
     descriptor_dir: PathBuf,
     dev_build: bool,
     keys: Option<Arc<vw_keys::KeyService>>,
@@ -362,7 +367,7 @@ impl Host {
             .chain(crate::terminal::TERMINAL_ROUTES)
             .chain(CHANGES_ROUTES)
             .chain(PAGES_ROUTES)
-            .chain(FILES_ROUTES)
+            .chain(crate::files_routes::FILES_ROUTES)
             .chain(BROWSER_ROUTES)
         {
             if let Err(error) = ui.register_route(&routes, name, description) {
@@ -398,6 +403,10 @@ impl Host {
             }
         };
         if let Some(core) = &core {
+            // Grants pin catalog facts; the core attributes window commands to the Debug API while it drives.
+            ui.set_facts(Arc::new(crate::ui_grants::CoreFacts(core.clone())));
+            let bridge = ui.clone();
+            core.set_window_drive(move || bridge.driving());
             for folder in &config.picked_folders {
                 if let Err(error) = core.register_picked_folder(folder) {
                     warn!(%error, "picked folder not registered");
@@ -498,39 +507,32 @@ impl Host {
         self.execute_as(Origin::Ui, command).await
     }
 
-    /// Executes one command the window runs for a Debug API `ui/<name>` request it is serving: `Origin::DebugApi`
-    /// (logs, refusal events and the transcript say who acted; that origin acts as the user,
-    /// without native dialogs). The claim is bound to the request: `capability` must
-    /// be the one [`UiBridge`] handed out with a request that is still pending (not answered, not timed out), and
-    /// the Debug API must be on. Any other claim (none, made up, of an answered or timed-out request, or with the
-    /// Debug API off) is refused outright, logged with the command name only: a script in the window cannot
-    /// borrow the Debug API's standing.
+    /// Executes one command the main window sent (the Tauri `core_execute`): `Origin::Ui`, unless it matches an unused
+    /// grant of a pending Debug API `ui/*` request while the Debug API is on; then that one command runs with
+    /// `Origin::DebugApi` and the grant is used up (module docs). Logged with the grant's name and the request id.
     ///
     /// # Errors
-    /// `denied` for a claim without a live capability; otherwise as [`Host::execute`].
-    pub async fn execute_for_ui_control(
-        &self,
-        command: Command,
-        capability: Option<&str>,
-    ) -> Result<CommandResult, CoreError> {
-        if !self.ui_control_claim_holds(capability).await {
-            warn!(
-                command = command.name(),
-                "a Debug API claim without a live UI-control request: refused"
-            );
-            return Err(CoreError::new(
-                ErrorCode::Denied,
-                "this command claims a Debug API request that is not being served",
-            ));
+    /// As [`Host::execute`].
+    pub async fn execute_window(&self, command: Command) -> Result<CommandResult, CoreError> {
+        let granted = if self.debug.lock().await.is_some() {
+            serde_json::to_value(&command)
+                .ok()
+                .and_then(|value| self.ui.take_grant(&value))
+        } else {
+            None
+        };
+        match granted {
+            Some((request, grant)) => {
+                info!(
+                    command = command.name(),
+                    grant,
+                    request,
+                    "a window command runs as the Debug API under its request's grant"
+                );
+                self.execute_as(Origin::DebugApi, command).await
+            }
+            None => self.execute_as(Origin::Ui, command).await,
         }
-        self.execute_as(Origin::DebugApi, command).await
-    }
-
-    /// True when `capability` belongs to a pending UI-control request and the Debug API is on (the rule of
-    /// [`Host::execute_for_ui_control`]; the update commands use it too).
-    pub async fn ui_control_claim_holds(&self, capability: Option<&str>) -> bool {
-        let live = capability.is_some_and(|c| self.ui.capability_live(c));
-        live && self.debug.lock().await.is_some()
     }
 
     async fn execute_as(
@@ -685,13 +687,15 @@ impl Host {
         let _ = self.events.publisher().send(HostEvent::OpenUpdates);
     }
 
-    /// Delivers a native browser context-menu click as metadata only; the core still consumes the choice and
-    /// requires native confirmation before storing anything.
-    pub fn browser_context_menu(&self, session_id: String) {
-        let _ = self
-            .events
-            .publisher()
-            .send(HostEvent::BrowserSaveContext { session_id });
+    /// Delivers a native browser context-menu click as metadata only: Save to vault (the core still consumes the
+    /// choice and requires native confirmation before storing anything) or, with `point`, Point Vibe at this.
+    pub fn browser_context_menu(&self, session_id: String, point: bool) {
+        let event = if point {
+            HostEvent::BrowserPointContext { session_id }
+        } else {
+            HostEvent::BrowserSaveContext { session_id }
+        };
+        let _ = self.events.publisher().send(event);
     }
 
     /// Persists the Debug API switch and applies it now: starts the API when turned on, stops it
@@ -709,6 +713,8 @@ impl Host {
         settings.debug_api = Some(enabled);
         settings.save(&self.settings_path)?;
         let running = self.debug.lock().await.take();
+        // Off or restarting: no window command runs as the Debug API under an earlier request's grant.
+        self.ui.revoke_grants();
         if let Some(api) = running {
             if let Some(guard) = self.core.as_ref().and_then(Core::network_guard) {
                 guard.remove_internal_port(api.port());

@@ -6,7 +6,7 @@
 /* Adapted from ShellX's browser: the chrome anchors an absolute menu dock. */
 .browser-chrome-shell {
   position: relative;
-  z-index: 90;
+  z-index: var(--z-browser-menu);
   flex: 0 0 auto;
   min-width: 0;
 }
@@ -22,13 +22,18 @@
 }
 .browser-overlay-page {
   position: fixed;
-  z-index: 25;
+  z-index: var(--z-floating);
   display: grid;
   place-items: center;
   overflow: hidden;
   background: var(--raised);
   color: var(--text-2);
   font-size: var(--text-12);
+}
+.browser-overlay-shot {
+  width: 100%;
+  height: 100%;
+  object-fit: fill;
 }
 body[data-browser-overlay="preparing"] [data-browser-overlay-menu],
 body[data-browser-overlay="restoring"] [data-browser-overlay-menu] {
@@ -82,7 +87,7 @@ body[data-browser-overlay="restoring"] [data-browser-overlay-menu] {
 .browser-strip-dot {
   width: 7px;
   height: 7px;
-  border-radius: 50%;
+  border-radius: var(--radius-round);
   background: var(--orange-2);
   flex: none;
 }
@@ -125,7 +130,7 @@ body[data-browser-overlay="restoring"] [data-browser-overlay-menu] {
   top: 100%;
   left: 0;
   right: 0;
-  z-index: 120;
+  z-index: var(--z-browser-address);
   display: flex;
   justify-content: flex-end;
   padding: 8px 14px 10px;
@@ -156,14 +161,14 @@ body[data-browser-overlay="restoring"] [data-browser-overlay-menu] {
 .browser-overflow-items,
 .browser-controls-content[data-collapsed="true"] {
   position: absolute;
-  z-index: 30;
+  z-index: var(--z-popover);
   top: calc(100% + 5px);
   right: 0;
   width: min(300px, calc(100vw - 32px));
   max-height: 70vh;
   overflow: auto;
   padding: 5px;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: var(--raised);
   box-shadow: var(--shadow);
 }
@@ -173,7 +178,7 @@ body[data-browser-overlay="restoring"] [data-browser-overlay-menu] {
   gap: 6px;
   width: 100%;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   padding: 7px 9px;
   text-align: left;
   color: var(--text);
@@ -273,7 +278,7 @@ body[data-browser-overlay="restoring"] [data-browser-overlay-menu] {
   margin-block: 4px;
 }
 .preview-toolbar .preview-save-control > .ibtn {
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
 }
 .preview-toolbar .preview-save-control > .preview-save-more {
   width: 22px;

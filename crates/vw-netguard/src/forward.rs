@@ -100,6 +100,7 @@ async fn read_head(reader: &mut (impl AsyncRead + Unpin)) -> Option<(Vec<u8>, Ve
 
 /// Sends the request (head, `rest` up to `body` bytes, then the remaining body from the client) and relays the
 /// answer; returns when the exchange is over (both sockets are dropped by the caller).
+/// An empty proxy refusal gets a plain reason; response bodies from the proxy/origin are otherwise retained.
 pub async fn exchange(
     mut client: TcpStream,
     mut upstream: TcpStream,
@@ -107,6 +108,7 @@ pub async fn exchange(
     rest: &[u8],
     body: u64,
     upgrade: bool,
+    proxied: bool,
 ) {
     let early = usize::try_from(body).map_or(rest.len(), |b| b.min(rest.len()));
     if upstream.write_all(request_head).await.is_err()
@@ -123,6 +125,10 @@ pub async fn exchange(
         return;
     }
     let Some((head, after)) = read_head(&mut upstream).await else {
+        if proxied {
+            crate::serve::answer(&mut client, "502 Bad Gateway", "The checked address could not be reached through your proxy: it did not answer the request.").await;
+            return;
+        }
         let _ = client
             .write_all(
                 b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
@@ -130,6 +136,17 @@ pub async fn exchange(
             .await;
         return;
     };
+    if proxied && let Some(code) = empty_refusal(&head) {
+        crate::serve::answer(
+            &mut client,
+            &format!("{code} Request refused"),
+            &format!(
+                "The request to the checked address was refused through your proxy (status {code})."
+            ),
+        )
+        .await;
+        return;
+    }
     if upgrade && status(&head) == Some(101) {
         let mut whole = head;
         whole.extend_from_slice(b"\r\n\r\n");
@@ -159,4 +176,17 @@ pub async fn exchange(
 async fn drain(reader: &mut (impl AsyncRead + Unpin)) {
     let mut sink = [0u8; 4096];
     while matches!(reader.read(&mut sink).await, Ok(n) if n > 0) {}
+}
+
+/// A proxy/origin error with explicitly no body needs a readable explanation, never a hostname retry.
+fn empty_refusal(head: &[u8]) -> Option<u16> {
+    let code = status(head).filter(|code| (400..600).contains(code))?;
+    let text = String::from_utf8_lossy(head);
+    text.split("\r\n")
+        .any(|line| {
+            line.split_once(':').is_some_and(|(name, value)| {
+                name.eq_ignore_ascii_case("content-length") && value.trim() == "0"
+            })
+        })
+        .then_some(code)
 }

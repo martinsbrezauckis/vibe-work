@@ -16,8 +16,9 @@ import { openHit } from "./openHit";
 import { Highlight } from "../../components/Highlight";
 import { Icon } from "../../components/Icon";
 import { useApp } from "../shell/AppContext";
-import { useShellState } from "../shell/hooks";
+import { useCoreState, useShellState } from "../shell/hooks";
 import { useOfferedCategories } from "./availability";
+import { chromeAvailable } from "./chrome/chromeRows";
 import { searchSettings, settingPath } from "./catalog";
 
 /** The id of the search field (SettingsPage focuses it on Ctrl F). */
@@ -31,7 +32,8 @@ export function SettingsNav(): ReactElement {
   const list = useRef<HTMLDivElement>(null);
   const offered = useOfferedCategories();
   const shownCategory = offered.find((c) => c.id === view.category) ?? offered[0];
-  const results = searchSettings(view.query).filter((r) =>
+  const chrome = useCoreState((s) => s.chromeControl);
+  const results = searchSettings(view.query, chromeAvailable(chrome)).filter((r) =>
     offered.some((c) => c.id === r.category),
   );
   const searching = view.query.trim() !== "";
@@ -115,27 +117,24 @@ export function SettingsNav(): ReactElement {
           aria-label="Matching settings"
           role="group"
         >
-          {results.length === 0 ? (
-            <p className="col-note">No setting matches.</p>
-          ) : (
-            results.map((r) => (
-              <button
-                data-testid="settings.settings-nav-open-hit"
-                data-item-id={r.id}
-                key={r.id}
-                type="button"
-                className="set-result"
-                onClick={() => {
-                  openHit(app, r);
-                }}
-              >
-                <span className="set-result-label">
-                  <Highlight text={r.label} query={view.query} />
-                </span>
-                <span className="set-result-path">{settingPath(r).join(" › ")}</span>
-              </button>
-            ))
-          )}
+          {/* No hits: the page beside this list says so once, with how to search more widely. */}
+          {results.map((r) => (
+            <button
+              data-testid="settings.settings-nav-open-hit"
+              data-item-id={r.id}
+              key={r.id}
+              type="button"
+              className="set-result"
+              onClick={() => {
+                openHit(app, r);
+              }}
+            >
+              <span className="set-result-label">
+                <Highlight text={r.label} query={view.query} />
+              </span>
+              <span className="set-result-path">{settingPath(r).join(" › ")}</span>
+            </button>
+          ))}
         </div>
       ) : (
         <nav

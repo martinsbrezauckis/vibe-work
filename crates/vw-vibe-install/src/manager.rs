@@ -98,9 +98,9 @@ pub enum InstallError {
     /// `useExisting` named a path that the last check did not find, or that did not answer.
     #[error("{0} was not found by the last check (or did not answer as Vibe): check again")]
     UnknownExisting(String),
-    /// `useExisting` of another version needs `acceptWarning: true` after the user saw the warning.
+    /// An existing install must match the supported version.
     #[error("{0}")]
-    NeedsAcceptance(String),
+    UnsupportedVersion(String),
     /// No Vibe update can be offered now (no verified offer, the user's own install, an update running).
     #[error("{0}")]
     NoUpdate(String),
@@ -113,6 +113,8 @@ pub(crate) struct State {
     pub(crate) phase: InstallPhase,
     pub(crate) existing: Vec<ExistingView>,
     pub(crate) checked_existing: bool,
+    /// The older app-owned version an app update's install replaces ([`crate::InstallView::replacing`]).
+    pub(crate) replacing: Option<String>,
     pub(crate) cancel: Option<watch::Sender<bool>>,
     /// The Vibe update install.
     pub(crate) update: VibeUpdatePhase,
@@ -147,10 +149,23 @@ impl VibeInstaller {
             Err(_) => Sources::pinned_version().unwrap_or_default(),
         };
         let layout = Layout::new(config.root.clone(), &pinned);
+        let mut existing = Vec::new();
         let phase = layout
             .as_ref()
             .map_or(InstallPhase::NotInstalled {}, |layout| {
                 if let Some(choice) = layout.choice() {
+                    if choice.version != pinned {
+                        existing.push(ExistingView {
+                            path: choice.path.display().to_string(),
+                            warning: Some(crate::existing::version_warning(
+                                &choice.version,
+                                &pinned,
+                            )),
+                            version: Some(choice.version),
+                            supported: false,
+                        });
+                        return InstallPhase::NotInstalled {};
+                    }
                     let warning = (choice.version != pinned)
                         .then(|| crate::existing::version_warning(&choice.version, &pinned));
                     InstallPhase::Installed {
@@ -176,8 +191,9 @@ impl VibeInstaller {
             });
         let state = State {
             phase,
-            existing: Vec::new(),
-            checked_existing: false,
+            checked_existing: !existing.is_empty(),
+            existing,
+            replacing: None,
             cancel: None,
             update: VibeUpdatePhase::Idle {},
             support: crate::update::SupportState::default(),
@@ -338,7 +354,9 @@ impl VibeInstaller {
             &layout.root,
         )
         .await;
-        let _ = std::fs::remove_dir_all(layout.probe_dir());
+        if let Err(error) = vw_platform::remove_owned_tree(&layout.root, &layout.probe_dir()) {
+            tracing::warn!(%error, "existing Vibe probe homes could not be removed");
+        }
         let mut state = self.inner.lock();
         state.existing.clone_from(&found);
         state.checked_existing = true;
@@ -346,13 +364,12 @@ impl VibeInstaller {
         found
     }
 
-    /// Uses an existing install the last check found. Another version needs `accept_warning` (the user saw the
-    /// warning). Starts Vibe from it.
+    /// Uses a supported existing install the last check found. Starts Vibe from it.
     ///
     /// # Errors
-    /// [`InstallError::UnknownExisting`], [`InstallError::NeedsAcceptance`], [`InstallError::WrongState`],
+    /// [`InstallError::UnknownExisting`], [`InstallError::UnsupportedVersion`], [`InstallError::WrongState`],
     /// [`InstallError::Disk`].
-    pub async fn use_existing(&self, path: &str, accept_warning: bool) -> Result<(), InstallError> {
+    pub async fn use_existing(&self, path: &str) -> Result<(), InstallError> {
         let layout = self.layout()?;
         let (choice, warning) = {
             let state = self.inner.lock();
@@ -369,8 +386,13 @@ impl VibeInstaller {
                 .iter()
                 .find(|e| e.path == path && e.version.is_some())
                 .ok_or_else(|| InstallError::UnknownExisting(path.to_owned()))?;
-            if let (Some(warning), false) = (&found.warning, accept_warning) {
-                return Err(InstallError::NeedsAcceptance(warning.clone()));
+            if !found.supported {
+                return Err(InstallError::UnsupportedVersion(
+                    crate::existing::version_warning(
+                        found.version.as_deref().unwrap_or("unknown"),
+                        &self.inner.pinned,
+                    ),
+                ));
             }
             let choice = Choice {
                 path: PathBuf::from(&found.path),
@@ -425,6 +447,7 @@ fn snapshot(pinned: &str, state: &State) -> InstallView {
         phase: state.phase.clone(),
         existing: state.existing.clone(),
         checked_existing: state.checked_existing,
+        replacing: state.replacing.clone(),
         update: Box::new(VibeUpdateView {
             available: state
                 .support

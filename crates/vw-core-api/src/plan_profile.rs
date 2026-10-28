@@ -1,6 +1,6 @@
 //! The app-owned `vw-plan` access mode keeps `VIBE_HOME/agents/vw-plan.toml` naming the plan
 //! handbook folder of every project Vibe Work knows, and rewrites it BEFORE a session of a new project is opened (Vibe
-//! reads custom profiles when a session opens: `_runtime.py:1485`, §1).
+//! reads custom profiles when a session opens: `_runtime.py:1485`).
 //!
 //! Depends on: vw-pages (`plan_profile_toml`, handbook folders), `core::Shared` (names, handbook settings),
 //! `routing::needs_channel`.
@@ -66,7 +66,7 @@ impl PlanProfile {
 }
 
 /// The handbook folders whose `plans/` a project's `vw-plan` session may write: the folder the user chose, else
-/// `docs/handbook` and, while it exists, the pre-1.0 `docs/pages` (a migration in progress keeps working).
+/// `docs/handbook`.
 fn plan_folders(shared: &Shared, project: &str) -> Vec<String> {
     let settings = shared
         .pages
@@ -74,18 +74,7 @@ fn plan_folders(shared: &Shared, project: &str) -> Vec<String> {
         .map(|hub| hub.service.settings(Path::new(project)));
     match settings {
         Some(s) if s.custom => vec![s.folder],
-        _ => {
-            let mut folders = vec![vw_pages::DEFAULT_FOLDER.to_owned()];
-            let legacy = vw_pages::handbook::format::LEGACY_FOLDER;
-            if legacy
-                .split('/')
-                .fold(PathBuf::from(project), |p, s| p.join(s))
-                .is_dir()
-            {
-                folders.push(legacy.to_owned());
-            }
-            folders
-        }
+        _ => vec![vw_pages::DEFAULT_FOLDER.to_owned()],
     }
 }
 

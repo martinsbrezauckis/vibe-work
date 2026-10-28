@@ -38,7 +38,7 @@ fn offered(config: &Value, alias: &str) -> bool {
         })
 }
 
-fn read(path: &Path) -> Result<String, CoreError> {
+pub(crate) fn read(path: &Path) -> Result<String, CoreError> {
     let metadata = std::fs::symlink_metadata(path)
         .map_err(|_| failed("Vibe Work's model config could not be read"))?;
     if metadata.len() > MAX_CONFIG_BYTES || !metadata.file_type().is_file() {
@@ -47,23 +47,28 @@ fn read(path: &Path) -> Result<String, CoreError> {
     std::fs::read_to_string(path).map_err(|_| failed("Vibe Work's model config could not be read"))
 }
 
+fn editable(path: &Path) -> Result<(String, DocumentMut), CoreError> {
+    let before = read(path)?;
+    let config: DocumentMut = before
+        .parse()
+        .map_err(|_| failed("Vibe Work's model config is not valid TOML"))?;
+    if config.contains_key("active_model")
+        && config.get("active_model").and_then(Item::as_str).is_none()
+    {
+        return Err(failed("Vibe Work's model config cannot be edited safely"));
+    }
+    Ok((before, config))
+}
+
 fn write(path: &Path, alias: &str) -> Result<(), CoreError> {
     for _ in 0..2 {
-        let before = read(path)?;
-        let mut config: DocumentMut = before
-            .parse()
-            .map_err(|_| failed("Vibe Work's model config is not valid TOML"))?;
+        let (before, mut config) = editable(path)?;
         if config
             .get("active_model")
             .and_then(Item::as_str)
             .is_some_and(|current| current == alias)
         {
             return Ok(());
-        }
-        if config.contains_key("active_model")
-            && config.get("active_model").and_then(Item::as_str).is_none()
-        {
-            return Err(failed("Vibe Work's model config cannot be edited safely"));
         }
         let decor = config
             .get("active_model")
@@ -100,6 +105,8 @@ pub(crate) async fn set(shared: &Shared, alias: &str) -> Result<(), CoreError> {
     if alias.is_empty() || alias.len() > 128 {
         return Err(refused("Choose a model offered by Vibe"));
     }
+    let path = shared.instructions.own_home.join("config.toml");
+    editable(&path)?;
     let reply = shared
         .gate
         .call("config/read", json!({}), None)
@@ -108,5 +115,5 @@ pub(crate) async fn set(shared: &Shared, alias: &str) -> Result<(), CoreError> {
     if !offered(&reply.result, alias) {
         return Err(refused("Choose a model offered by Vibe"));
     }
-    write(&shared.instructions.own_home.join("config.toml"), alias)
+    write(&path, alias)
 }

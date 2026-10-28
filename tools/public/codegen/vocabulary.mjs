@@ -42,6 +42,8 @@ const sections = {
   browserPermissions: "Browser delegation permissions",
   locks: "Agent access and vault lock",
   workNames: "Projects and sessions",
+  builtinPlugins: "Built-in plugins",
+  builtinSkills: "Built-in skills",
 };
 const cell = (value) => value.replaceAll("|", "\\|").replaceAll("\n", " ");
 const tables = Object.entries(sections).map(([group, heading]) => {

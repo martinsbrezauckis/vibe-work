@@ -1,8 +1,5 @@
-//! The pump: feeds server notifications from the lobby and from every session channel into the
-//! store, carries out the store's resync requests, keeps the gate's callback book and model aliases
-//! current, follows server restarts (and resumes the sessions that had a channel), closes idle
-//! channels, and answers `callback/call` server requests.
-//!
+//! Feeds channel notifications into the store, resyncs, maintains callbacks and model aliases,
+//! restores sessions after server restarts, closes idle channels and answers `callback/call`.
 //! Depends on: vw-rpc (subscriptions, server requests), vw-session (store), vw-gate (callbacks,
 //! aliases), `core::Shared`, `channels`, `event`, `view`, `recovery`. Called by: `core` (spawns `run`,
 //! installs `callback_handler` on the supervisor).
@@ -20,10 +17,11 @@
 //!   the server restarts or a session's channel dies, those callbacks are closed (they died with it).
 //! - A lagged or gapped channel leads to a resync of its session; a lagged or gapped lobby to a
 //!   resync of every loaded session.
-//! - A hand-off Vibe announces (`Change::HandedOff`) moves the channel at once and the session's resources in an
-//!   owned task (`handoff`).
 //! - One approval per call (`one_ask`): an approval card for a bash call whose guard dialog the user approved moments before is
 //!   answered "approve" (once) here and never shown; every other card is shown and remembered for its answer.
+//! - Session grants (`ask::grants`): an approval whose tool and required permissions equal a grant the user made
+//!   with "Allow for this session" earlier in the same session is answered "approve" (once) here and never shown.
+//!   Grants end when their session leaves the store and follow a hand-off; a server restart keeps them.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::atomic::Ordering;
@@ -50,18 +48,23 @@ use crate::view::ServerStatus;
 /// `{callbackId, accepted: true}` (the answer itself comes later as
 /// `callback/result`). A callback the gate cannot register, or one that arrives on a channel other
 /// than the one carrying its session, is refused with `invalid_params`. A card the user already
-/// answered in a guard's dialog is answered by the core (`carry_answer`) instead of being shown.
+/// answered in a guard's dialog, or the sound-only read-aloud tool, is answered by the core
+/// (`carry_answer`) instead of being shown.
 pub(crate) fn callback_handler(
     slot: Arc<OnceLock<Weak<Shared>>>,
 ) -> impl Fn(ServerRequest) -> std::future::Ready<Result<Value, HandlerError>> + Send + Sync + 'static
 {
-    move |request: ServerRequest| {
+    move |mut request: ServerRequest| {
         let Some(shared) = slot.get().and_then(Weak::upgrade) else {
             return std::future::ready(Err(HandlerError::new(
                 ProtocolErrorCode::InternalError,
                 "the client core is not ready",
             )));
         };
+        crate::agent_tools::shell_commands::project(&shared, &mut request.params);
+        if let Err(error) = crate::agent_tools::shell_commands::verified(&request.params) {
+            return std::future::ready(Err(error));
+        }
         let callback = request.params.get("callback");
         let text = |key: &str| {
             callback
@@ -99,34 +102,41 @@ pub(crate) fn callback_handler(
         let outcome = match shared.gate.register_callback(&request.params) {
             Ok(kind) => {
                 let entry = callback.cloned().unwrap_or(Value::Null);
+                // A grant made on a subagent's card ends with the parent session that carries it.
+                let owner = subagent
+                    .as_ref()
+                    .map_or_else(|| session_id.clone(), |s| s.parent_session_id.clone());
+                if crate::stop_tree::cancel_late(&shared, &session_id, &owner)
+                    || crate::ask::tool_calls::dispatch_transport(&shared, &entry, &owner)
+                {
+                    return std::future::ready(Ok(
+                        json!({"callbackId":callback_id,"accepted":true}),
+                    ));
+                }
+                crate::ask::callback_opened(&shared, &entry, kind.as_str(), &owner);
                 let handle = tokio::runtime::Handle::try_current().ok();
-                match handle {
-                    // The user already approved this exact bash call in the guard's dialog (the hook runs
-                    // before Vibe's card): the core gives Vibe that answer and the card is not shown.
-                    Some(handle)
-                        if crate::one_ask::of(&shared)
-                            .is_some_and(|l| l.answer_for_card(&entry)) =>
-                    {
-                        handle.spawn(carry_answer(
-                            shared.clone(),
-                            session_id,
-                            callback_id.clone(),
-                            kind.as_str().to_owned(),
-                            subagent,
-                        ));
+                // Only with a runtime to answer on (the guard answer is consumed by the check).
+                let carried = handle
+                    .as_ref()
+                    .and_then(|_| carried_for(&shared, &session_id, &entry, kind.as_str()));
+                if let (Some(handle), Some(carried)) = (handle, carried) {
+                    handle.spawn(carry_answer(
+                        shared.clone(),
+                        session_id,
+                        callback_id.clone(),
+                        carried,
+                    ));
+                } else {
+                    // remembered so the user's answer counts for the guard inside our own tool.
+                    if let Some(ledger) = crate::one_ask::of(&shared) {
+                        ledger.card_opened(&entry);
                     }
-                    _ => {
-                        // remembered so the user's answer counts for the guard inside our own tool.
-                        if let Some(ledger) = crate::one_ask::of(&shared) {
-                            ledger.card_opened(&entry);
-                        }
-                        shared.emit(CoreEvent::CallbackOpened {
-                            session_id,
-                            callback_id: callback_id.clone(),
-                            kind: kind.as_str().to_owned(),
-                            subagent,
-                        });
-                    }
+                    shared.emit(CoreEvent::CallbackOpened {
+                        session_id,
+                        callback_id: callback_id.clone(),
+                        kind: kind.as_str().to_owned(),
+                        subagent,
+                    });
                 }
                 Ok(json!({"callbackId": callback_id, "accepted": true}))
             }
@@ -142,27 +152,112 @@ pub(crate) fn callback_handler(
     }
 }
 
-/// Answers Vibe's approval card `callback_id` with "approve" (once) for the user, who approved this exact call in a
-/// guard's native dialog moments before (`one_ask`). The audit row says the user answered in the app
-/// (`Origin::Ui`: the native dialog is the app's). When the gate refuses the answer (nothing was sent), the card is shown after all.
+/// Whether the core answers this card itself, checked in this order: a session grant ("Allow for this session"
+/// earlier in this session, for this tool and exactly these permissions), the sound-only read-aloud tool, or the
+/// user's guard answer for the same call (`one_ask`, which consumes it).
+fn carried_for(
+    shared: &Arc<Shared>,
+    session_id: &str,
+    entry: &Value,
+    kind: &str,
+) -> Option<Carried> {
+    // A removed connector's card is shown instead (its tool's grants ended with it; this covers a card that arrived
+    // between the pre-tool hook's check and the removal): the user's yes there becomes a refusal.
+    let removed = entry["detail"]["effect"]["toolName"]
+        .as_str()
+        .is_some_and(|tool| shared.connectors.removed_tool(tool));
+    if kind == "approval"
+        && !removed
+        && let Some(grant) = shared.ask_grants.matching(session_id, entry)
+    {
+        return Some(Carried::Grant(grant.id));
+    }
+    if shared.agent_tools.is_some() && crate::read_aloud::approve_without_dialog(entry) {
+        return Some(Carried::ReadAloud);
+    }
+    if shared.agent_tools.is_some() && crate::on_demand::approve_without_dialog(entry) {
+        return Some(Carried::OnDemand);
+    }
+    crate::one_ask::of(shared)
+        .is_some_and(|l| l.answer_for_card(entry))
+        .then_some(Carried::GuardAnswer)
+}
+
+/// Why the core answers an approval card itself instead of showing it.
+#[derive(Clone)]
+enum Carried {
+    /// The user's yes in a guard's dialog for the same call (`one_ask`).
+    GuardAnswer,
+    /// The sound-only read-aloud tool (`read_aloud`).
+    ReadAloud,
+    /// A call that only turns tools on for the chat (`on_demand`): it does nothing itself.
+    OnDemand,
+    /// A session grant Vibe Work keeps ("Allow for this session" earlier, same tool and permissions); its id.
+    Grant(String),
+}
+
+impl Carried {
+    fn source(&self) -> &'static str {
+        match self {
+            Self::GuardAnswer => "user's guard answer",
+            Self::ReadAloud => "read-aloud playback policy",
+            Self::OnDemand => "turning tools on for the chat",
+            Self::Grant(_) => "session grant",
+        }
+    }
+    /// The ask record: a grant's answer is `Allowed { Session, Grant }` (the audit row "Allowed for this session
+    /// (earlier answer)"); the other two answer this one call for the core.
+    fn outcome(&self) -> vw_ask::Outcome {
+        match self {
+            Self::Grant(_) => {
+                crate::ask::allowed(vw_ask::AnsweredBy::Grant, vw_ask::Scope::Session)
+            }
+            Self::GuardAnswer | Self::ReadAloud | Self::OnDemand => {
+                crate::ask::allowed(vw_ask::AnsweredBy::Core, vw_ask::Scope::Once)
+            }
+        }
+    }
+}
+
+/// Answers Vibe's approval card `callback_id` once (`approve`): the user's earlier guard answer, the read-aloud
+/// playback policy, or a session grant. The audit row records the app origin and the ask record why. When the
+/// send fails, the audit says the answer was not confirmed; a claimed callback cannot be offered again.
 async fn carry_answer(
     shared: Arc<Shared>,
     session_id: String,
     callback_id: String,
-    kind: String,
-    subagent: Option<crate::event::SubagentCard>,
+    carried: Carried,
 ) {
+    let source = carried.source();
+    shared.ask_grants.forget_callback(&callback_id);
+    let Some(delivery) = shared.asks.reserve(
+        &format!("callback:{callback_id}"),
+        match &carried {
+            Carried::Grant(_) => vw_ask::AnsweredBy::Grant,
+            _ => vw_ask::AnsweredBy::Core,
+        },
+    ) else {
+        return;
+    };
     match shared
         .gate
         .answer_callback(&session_id, &callback_id, crate::one_ask::approve_once())
         .await
     {
         Ok(_) => {
+            delivery.confirmed(carried.outcome());
             tracing::info!(
                 session = %session_id,
                 callback = %callback_id,
-                "approval card answered with the user's yes from the guard dialog (one ask per call)"
+                source,
+                "approval card answered once by the app"
             );
+            // the grant's use count and last use (the Allowed page and the session's grant list show them).
+            if let Carried::Grant(grant) = &carried
+                && shared.ask_grants.record_use(grant, shared.asks.now_ms())
+            {
+                shared.emit(crate::ask::grants::event(&shared));
+            }
             shared.emit(CoreEvent::CallbackAnswered {
                 session_id,
                 callback_id,
@@ -170,13 +265,7 @@ async fn carry_answer(
             });
         }
         Err(problem) => {
-            warn!(reason = %problem, callback = %callback_id, "could not carry the guard's yes to the card; shown");
-            shared.emit(CoreEvent::CallbackOpened {
-                session_id,
-                callback_id,
-                kind,
-                subagent,
-            });
+            warn!(reason = %problem, callback = %callback_id, "automatic approval answer not confirmed");
         }
     }
 }
@@ -201,10 +290,12 @@ struct Pump {
     generation: u64,
     items: mpsc::Sender<Item>,
     resyncs: JoinSet<Resynced>,
-    /// Session hand-offs being carried out (`handoff`); owned here, so they end with the pump.
-    handoffs: JoinSet<()>,
     /// Browser releases after terminal turn updates; cancelled when the pump ends.
     browser_releases: JoinSet<()>,
+    /// Delayed re-reads the store asked for (`Action::NeedsResync { delayed: true }`): one per session at a time,
+    /// each a single resync through the budget after [`DELAYED_RESYNC`], never a loop.
+    later: JoinSet<String>,
+    later_ids: BTreeSet<String>,
     in_flight: BTreeSet<String>,
     queued: BTreeSet<String>,
     open_callbacks: BTreeMap<String, Vec<String>>,
@@ -257,8 +348,9 @@ pub(crate) async fn run(
         generation,
         items,
         resyncs: JoinSet::new(),
-        handoffs: JoinSet::new(),
         browser_releases: JoinSet::new(),
+        later: JoinSet::new(),
+        later_ids: BTreeSet::new(),
         in_flight: BTreeSet::new(),
         queued: BTreeSet::new(),
         open_callbacks: BTreeMap::new(),
@@ -289,8 +381,14 @@ pub(crate) async fn run(
                 };
                 pump.after_apply(&shared, &applied);
             }
-            Some(_) = pump.handoffs.join_next(), if !pump.handoffs.is_empty() => {}
             Some(_) = pump.browser_releases.join_next(), if !pump.browser_releases.is_empty() => {}
+            Some(Ok(id)) = pump.later.join_next(), if !pump.later.is_empty() => {
+                pump.later_ids.remove(&id);
+                let Some(shared) = pump.weak.upgrade() else {
+                    return;
+                };
+                pump.resync(&shared, &id);
+            }
             Some(done) = pump.resyncs.join_next(), if !pump.resyncs.is_empty() => {
                 if let Ok(done) = done
                     && !pump.resynced(&done) {
@@ -324,7 +422,7 @@ impl Pump {
             shared.channels.touch(key);
         }
         match item.inbound {
-            Some(Inbound::Notification(n)) => {
+            Some(Inbound::Notification(mut n)) => {
                 // Names and ids only (never params): enough to reconstruct an event order.
                 let session = n.params.get("sessionId").and_then(Value::as_str);
                 let event_id = n.params.get("eventId").and_then(Value::as_u64);
@@ -350,6 +448,7 @@ impl Pump {
                         shared.access.observe_runtime(sid, &n.params["runtime"]);
                     }
                 }
+                crate::agent_tools::shell_commands::project(&shared, &mut n.params);
                 let applied = shared.store.apply(Notification::new(n.method, n.params));
                 self.after_apply(&shared, &applied);
             }
@@ -389,10 +488,12 @@ impl Pump {
                 // session from the lobby to show what Vibe stored.
                 if let Some(id) = shared.channels.lost(key) {
                     warn!(channel = key.1, "a session channel ended on its own");
+                    shared.asks.cancel_session(Some(&id), "the session closed");
                     shared.gate.session_closed(&id);
                     self.open_callbacks.remove(&id);
                     self.resync(shared, &id);
                 }
+                crate::keep_awake::reconcile(shared);
             }
         }
     }
@@ -416,6 +517,9 @@ impl Pump {
         let Some(shared) = self.weak.upgrade() else {
             return false;
         };
+        if !matches!(state, SupervisorState::Ready { .. }) {
+            shared.keep_awake.working(false);
+        }
         shared.emit(CoreEvent::Server {
             status: ServerStatus::from(state),
         });
@@ -424,6 +528,9 @@ impl Pump {
         {
             self.generation = *generation;
             for view in shared.store.views() {
+                shared
+                    .asks
+                    .cancel_session(Some(&view.session_id), "Vibe restarted");
                 shared.gate.session_closed(&view.session_id);
             }
             self.open_callbacks.clear();
@@ -492,7 +599,11 @@ impl Pump {
     /// Carries out the actions of one store update and keeps the callback book in step.
     fn after_apply(&mut self, shared: &Arc<Shared>, applied: &Applied) {
         for change in &applied.changes {
+            crate::guard_refusals::observe(shared, change);
             self.browser_changed(shared, change);
+            crate::on_demand::observe(shared, change);
+            crate::queue_return::observe(shared, change);
+            crate::stops::observe(shared, change);
             if let Change::CallbacksChanged {
                 session_id,
                 open_callback_ids,
@@ -507,42 +618,49 @@ impl Pump {
                     .insert(session_id.clone(), open_callback_ids.clone())
                     .unwrap_or_default();
                 for closed in before.iter().filter(|id| !open_callback_ids.contains(id)) {
+                    crate::ask::callback_closed(shared, closed);
                     shared.gate.callback_closed(closed);
                     shared.channels.forget_callback(closed);
                 }
             }
             if let Change::Removed { session_id } = change {
                 self.open_callbacks.remove(session_id);
+                shared
+                    .asks
+                    .cancel_session(Some(session_id), "the session closed");
                 shared.gate.session_closed(session_id);
-            }
-            // Vibe announced a hand-off (`session/compacted` / `session/contextCleared` inside a turn).
-            // The channel moves now, so the next command for the new id reaches it; the session's resources
-            // follow in an owned task (`handoff`; some steps block on files).
-            if let Change::HandedOff {
-                old_session_id,
-                new_session_id,
-            } = change
-            {
-                let rebound = shared.channels.rebind(old_session_id, new_session_id);
-                let (shared, old, new) = (
-                    shared.clone(),
-                    old_session_id.clone(),
-                    new_session_id.clone(),
-                );
-                self.handoffs.spawn(async move {
-                    if let Err(error) = rebound {
-                        tracing::warn!(%error, "session hand-off could not claim ownership");
-                        shared.channels.close(&old).await;
-                        return;
-                    }
-                    crate::handoff::handed_off(&shared, &old, &new).await;
-                });
+                crate::ask::grants::session_ended(shared, session_id);
             }
         }
+        if applied.changes.iter().any(|change| {
+            matches!(
+                change,
+                Change::Replaced { .. }
+                    | Change::Removed { .. }
+                    | Change::SessionPatched { .. }
+                    | Change::TurnUpserted { .. }
+                    | Change::ChildUpserted { .. }
+                    | Change::CallbacksChanged { .. }
+            )
+        }) {
+            crate::keep_awake::reconcile(shared);
+        }
         for action in &applied.actions {
-            let Action::NeedsResync { session_id, reason } = action;
-            debug!(session_id, reason, "store asked for a resync");
-            self.resync(shared, session_id);
+            let Action::NeedsResync {
+                session_id,
+                reason,
+                delayed,
+            } = action;
+            debug!(session_id, reason, delayed, "store asked for a resync");
+            if !*delayed {
+                self.resync(shared, session_id);
+            } else if self.later_ids.insert(session_id.clone()) {
+                let id = session_id.clone();
+                self.later.spawn(async move {
+                    tokio::time::sleep(DELAYED_RESYNC).await;
+                    id
+                });
+            }
         }
     }
 
@@ -611,21 +729,14 @@ impl Pump {
 pub(crate) async fn refresh(shared: &Shared, session_id: &str) -> Option<Applied> {
     shared.resync_reads.fetch_add(1, Ordering::Relaxed);
     let params = json!({"sessionId": session_id});
-    let reply = shared.gate.call("session/read", params.clone(), None).await;
-    let mut state = match crate::session_end::missing_reply(shared, "session/read", &params, reply)
-    {
+    let reply = shared.gate.call("session/read", params, None).await;
+    let state = match reply {
         Ok(reply) => reply.result.get("state").cloned(),
         Err(error) => {
             warn!(session_id, %error, "resync read failed");
             return None;
         }
     };
-    if let Some(state) = &mut state
-        && let Err(error) = crate::session_end::reconcile_archive(shared, state, LoadKind::Read)
-    {
-        warn!(session_id, %error, "resync archive state could not be loaded");
-        return None;
-    }
     let loaded = state.map(|s| shared.store.load(s, LoadKind::Read));
     match loaded {
         Some(Ok(applied)) => Some(applied),
@@ -640,5 +751,12 @@ pub(crate) async fn refresh(shared: &Shared, session_id: &str) -> Option<Applied
     }
 }
 
+/// How long a delayed re-read waits (the safety net after a read that could not settle a held event).
+pub(crate) const DELAYED_RESYNC: Duration = Duration::from_secs(3);
+
 /// Lets the pump's idle tick be at most this coarse.
 pub(crate) const MAX_IDLE_CHECK: Duration = Duration::from_secs(30);
+
+#[cfg(test)]
+#[path = "ask/delivery_tests.rs"]
+mod delivery_tests;

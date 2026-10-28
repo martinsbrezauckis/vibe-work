@@ -6,11 +6,34 @@
 
 /* Approval and question cards */
 .approval {
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
   margin: 4px 0 22px;
   border: 1px solid color-mix(in srgb, var(--orange) 55%, transparent);
-  border-radius: 12px;
+  border-radius: var(--radius-xl);
   background: var(--panel);
-  overflow: hidden;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+/* Keep controls at their natural height. If wrapped chrome exceeds a short viewport, the card itself scrolls. */
+.approval > :not(.ask-body) {
+  flex-shrink: 0;
+}
+.approval .ask-body {
+  /* Leave room to read the payload before answering, even in the minimum-height window. */
+  min-height: 120px;
+  display: flex;
+  flex-direction: column;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+.approval .ask-body > .why {
+  flex-shrink: 0;
+}
+/* A shell payload already shows the exact command; do not spend its reading space repeating the summary. */
+.approval .ask-body:has(> pre.cmd) .summary {
+  display: none;
 }
 .approval .ah {
   display: flex;
@@ -22,34 +45,59 @@
 }
 .approval .ah .sub {
   color: var(--text-3);
-  font-size: 12.5px;
+  font-size: var(--text-12-5);
 }
 .approval .why {
   display: grid;
   gap: 4px;
-  font-size: 12.5px;
+  font-size: var(--text-12-5);
   color: var(--text-2);
   padding: 10px 14px 0;
 }
 .approval .why .summary {
-  font-family: var(--mono);
+  font-family: var(--font-mono);
   color: var(--text);
   overflow-wrap: anywhere;
 }
 .approval .why .reason {
   color: var(--orange-3);
 }
+/* The covers line's patterns and the audit row's code pieces. */
+.approval .why .perms code,
+.audit code {
+  font-family: var(--font-mono);
+}
 .approval pre.cmd {
+  min-height: 48px;
+  overflow: auto;
   margin: 10px 14px;
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: var(--bg);
+}
+/* A waiting decision gets the reading space in a short window. The composer keeps all its controls reachable
+   through its own scroll, and returns to its usual height as soon as the card closes. */
+@media (max-height: 700px) {
+  .approval .ah {
+    row-gap: 4px;
+  }
+  .approval .ah .sub {
+    min-width: 0;
+    max-width: 100%;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .view-tx:has(.approval) .composer-wrap {
+    max-height: 80px;
+    overflow-y: auto;
+  }
 }
 .approval .diff,
 .approval .show-all {
   margin: 10px 14px;
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
 }
 .choices {
   display: flex;
@@ -58,42 +106,20 @@
   padding: 10px 14px 10px;
 }
 /* Tight enough that all five approval choices share a row at a 700 px chat column. */
-.cbtn {
-  border: 1px solid var(--line-2);
-  background: var(--raised);
-  border-radius: 8px;
-  padding: 6px 9px;
-  cursor: pointer;
-  font-size: 13px;
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  white-space: nowrap;
-}
-.cbtn:hover:not(:disabled) {
-  border-color: var(--line-3);
-}
-.cbtn.go {
-  background: var(--primary-bg);
-  color: var(--primary-fg);
-  border-color: transparent;
-  font-weight: 600;
-}
-.feedback,
+
 .q-other {
   display: grid;
   gap: 4px;
   padding: 0 14px 10px;
-  font-size: 12.5px;
+  font-size: var(--text-12-5);
   color: var(--text-3);
 }
-.feedback input,
 .q-other input {
   font: inherit;
   color: var(--text);
   background: var(--bg);
   border: 1px solid var(--line-2);
-  border-radius: 7px;
+  border-radius: var(--radius-7);
   padding: 6px 8px;
 }
 .scopes {
@@ -102,7 +128,7 @@
   padding: 0 14px 6px;
   display: flex;
   gap: 14px;
-  font-size: 12.5px;
+  font-size: var(--text-12-5);
   color: var(--text-2);
 }
 .scopes legend {
@@ -113,7 +139,7 @@
 .card-state {
   margin: 0;
   padding: 0 14px 12px;
-  font-size: 12.5px;
+  font-size: var(--text-12-5);
   color: var(--orange-3);
 }
 .card-state:empty {
@@ -127,16 +153,16 @@
   gap: 6px;
 }
 .q legend {
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   padding: 0;
   margin-bottom: 6px;
 }
 .q-tag {
-  font-size: 11px;
-  font-weight: 500;
+  font-size: var(--text-11);
+  font-weight: var(--weight-medium);
   color: var(--text-3);
   border: 1px solid var(--line-2);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   padding: 0 6px;
   margin-right: 8px;
 }
@@ -145,12 +171,12 @@
   grid-template-columns: auto 1fr;
   gap: 2px 8px;
   align-items: baseline;
-  font-size: 13.5px;
+  font-size: var(--text-13-5);
   cursor: pointer;
 }
 .q-desc {
   grid-column: 2;
-  font-size: 12px;
+  font-size: var(--text-12);
   color: var(--text-3);
 }
 .q-other {
@@ -159,14 +185,14 @@
 .q-footer {
   margin: 0;
   padding: 6px 14px 0;
-  font-size: 12px;
+  font-size: var(--text-12);
   color: var(--text-3);
 }
 
 /* Inline diff */
 .diff {
-  font-family: var(--mono);
-  font-size: 12px;
+  font-family: var(--font-mono);
+  font-size: var(--text-12);
   line-height: 1.65;
   overflow-x: auto;
 }
@@ -186,6 +212,10 @@
 }
 .fh-stat {
   white-space: nowrap;
+  margin-left: auto;
+}
+.diff .fh > .mini {
+  flex-shrink: 0;
 }
 .dl {
   display: grid;
@@ -226,7 +256,7 @@
 .md-code {
   margin: 4px 0 12px;
   border: 1px solid var(--line);
-  border-radius: 10px;
+  border-radius: var(--radius-lg);
   background: var(--panel);
   overflow: hidden;
 }
@@ -236,16 +266,16 @@
   align-items: center;
   padding: 2px 4px 2px 12px;
   border-bottom: 1px solid var(--line);
-  font-family: var(--mono);
-  font-size: 11px;
+  font-family: var(--font-mono);
+  font-size: var(--text-11);
   color: var(--text-3);
 }
 .md-code pre {
   margin: 0;
   padding: 10px 12px;
   overflow-x: auto;
-  font-family: var(--mono);
-  font-size: 12.5px;
+  font-family: var(--font-mono);
+  font-size: var(--text-12-5);
   line-height: 1.55;
 }
 .syn-token-keyword {
@@ -277,7 +307,7 @@
   font-style: italic;
 }
 .syn-bold {
-  font-weight: 700;
+  font-weight: var(--weight-bold);
 }
 .syn-underline {
   text-decoration: underline;
@@ -292,8 +322,8 @@
   border-bottom: 1px solid var(--line);
 }
 .todo-count {
-  font-family: var(--mono);
-  font-size: 12px;
+  font-family: var(--font-mono);
+  font-size: var(--text-12);
 }
 .todo-now {
   color: var(--text-2);
@@ -307,7 +337,7 @@
   padding: 0;
   display: grid;
   gap: 3px;
-  font-size: 13px;
+  font-size: var(--text-13);
 }
 .todo-list li {
   display: flex;
@@ -341,12 +371,12 @@
   overflow-wrap: anywhere;
   background: var(--bg);
   border: 1px solid var(--line-2);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   padding: 8px 10px;
   user-select: all;
 }
 .link-host {
-  font-family: var(--mono);
+  font-family: var(--font-mono);
 }
 .link-refused {
   color: var(--red);

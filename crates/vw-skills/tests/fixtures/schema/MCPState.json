@@ -32,6 +32,11 @@
       "default": null,
       "title": "Manageconnectorsurl"
     },
+    "privateConnectorsHidden": {
+      "default": false,
+      "title": "Privateconnectorshidden",
+      "type": "boolean"
+    },
     "sources": {
       "items": {
         "$ref": "#/$defs/MCPSourceSummary"

@@ -54,6 +54,16 @@ export function tileStatus(c: ConnectorView): TileStatus {
   return "unavailable";
 }
 
+/**
+ * Vibe 3's `needs_connect`: a connector that needs no sign-in, connected by one call (`connector_catalog/connect`)
+ * that the gate does not offer yet (roadmap: connectors-that-need-no-sign-in). Said plainly instead of "Unavailable".
+ */
+function noSignIn(c: ConnectorView): boolean {
+  return (c.sessionStatus ?? c.readiness) === "needs_connect";
+}
+
+const NO_SIGN_IN_REASON = "This connector needs no sign-in, but Vibe Work cannot connect it yet.";
+
 /** The tile of one connector. */
 export function tileOf(c: ConnectorView): Tile {
   const status = tileStatus(c);
@@ -61,14 +71,18 @@ export function tileOf(c: ConnectorView): Tile {
     alias: c.alias,
     meta: metaOf(c.alias, c.displayName),
     status,
-    statusText: STATUS_TEXT[status],
-    reason: status === "unavailable" ? (c.diagnostic ?? "Vibe gives no reason.") : null,
+    statusText: noSignIn(c) ? "Not connected" : STATUS_TEXT[status],
+    reason: noSignIn(c)
+      ? NO_SIGN_IN_REASON
+      : status === "unavailable"
+        ? (c.diagnostic ?? "Vibe gives no reason.")
+        : null,
     connector: c,
   };
 }
 
 /** True when `tile` passes `filter` and `search` (name, line, category, alias; case-insensitive). */
-export function matches(tile: Tile, filter: Filter, search: string): boolean {
+function matches(tile: Tile, filter: Filter, search: string): boolean {
   if (filter === "connected" && tile.status !== "connected") return false;
   if (filter === "signin" && tile.status !== "signin") return false;
   if (filter === "off" && tile.status !== "off") return false;
@@ -133,6 +147,8 @@ export function serverStatusText(s: ServerView): string {
       return "Needs setup";
     case "unavailable":
       return "Unavailable";
+    case "needs_connect":
+      return "Not connected";
     default:
       return s.status;
   }

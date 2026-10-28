@@ -95,6 +95,10 @@ pub struct MountSpec {
     /// content rules). `None`: the engine adds no URL rules (the page viewer and checker reach only their own
     /// server through their navigation hooks).
     pub rules: Option<vw_netguard::rules::RulePage>,
+    /// Remove WebRTC from every frame before page scripts run ([`crate::NO_PEER_CONNECTIONS_SCRIPT`]): the page
+    /// viewer and the page checker (a prototype page has no network by its CSP, which does not govern WebRTC).
+    /// `false`: the engine leaves WebRTC as the platform has it (previews: the user's own apps may use it).
+    pub no_peer_connections: bool,
 }
 
 /// A protection layer an engine put on a mount, reported for diagnostics and tests. The navigation
@@ -198,6 +202,10 @@ impl std::fmt::Debug for RequestCheck {
 pub trait PreviewHooks: Send + Sync {
     /// May the mount `label` navigate to `url`? Refused navigations never happen. Records a refusal.
     fn allow_navigation(&self, label: &str, url: &Url) -> bool;
+    /// A frame navigation: apply the same policy, but never replace or cancel a held top-level URL.
+    fn allow_frame_navigation(&self, label: &str, url: &Url) -> bool {
+        self.allow_navigation(label, url)
+    }
     /// The same decision as [`Self::allow_navigation`] without recording anything: asked by an engine whose
     /// navigation callback is not a request barrier (`WebView2` sends the GET of a cancelled navigation), for every
     /// document request (main frame and frames) before it is sent.
@@ -270,6 +278,23 @@ pub trait PreviewEngine: Send + Sync {
     fn mount(&self, spec: MountSpec) -> EngineFuture<'_, ()>;
     /// Loads `url` in a mounted webview.
     fn navigate(&self, id: &MountId, url: Url) -> EngineFuture<'_, ()>;
+    /// Queues a held personal navigation. Call `current` on the UI thread immediately before the
+    /// native load, with no second queue hop; false cancels it. Never run inline inside a navigation
+    /// hook. The normal navigation policy still applies. Engines lacking this guarantee fail closed.
+    ///
+    /// # Errors
+    /// Missing mount, unsupported dispatch, or failure to queue the operation.
+    fn continue_navigation(
+        &self,
+        id: &MountId,
+        url: Url,
+        current: Box<dyn FnOnce() -> bool + Send>,
+    ) -> Result<(), EngineError> {
+        let _ = (id, url, current);
+        Err(EngineError::Unsupported(
+            "this engine cannot continue a held navigation".to_owned(),
+        ))
+    }
     /// Back, forward or reload.
     fn history(&self, id: &MountId, step: HistoryStep) -> EngineFuture<'_, ()>;
     /// Shows the webview at `placement`, or hides it (`None`; a hidden webview keeps its last size).
@@ -303,6 +328,11 @@ pub trait PreviewEngine: Send + Sync {
     }
     /// A PNG of what the page shows now.
     fn screenshot(&self, id: &MountId) -> EngineFuture<'_, Vec<u8>>;
+    /// A viewport slice for full-page stitching, rendered at CSS size times screen DPR where supported.
+    /// Engines without a scaled snapshot keep their ordinary viewport capture as the fallback.
+    fn screenshot_slice(&self, id: &MountId) -> EngineFuture<'_, Vec<u8>> {
+        self.screenshot(id)
+    }
     /// A PNG of the whole document (`size`: its CSS width and height) in one render, `size` times the screen's
     /// device pixel ratio large with the page filling it, whatever zoom the preview is shown at (a device width wider
     /// than the panel is shown zoomed out). Default: unsupported (the caller then stitches viewport screenshots).
@@ -311,6 +341,16 @@ pub trait PreviewEngine: Send + Sync {
         Box::pin(async {
             Err(EngineError::Unsupported(
                 "this preview engine has no full-page capture".to_owned(),
+            ))
+        })
+    }
+    /// Silently prints the mounted document to a paginated PDF, including backgrounds and links.
+    /// Native output is staged privately; cancellation must never leave a partial capture file.
+    fn print_pdf(&self, id: &MountId) -> EngineFuture<'_, Vec<u8>> {
+        let _ = id;
+        Box::pin(async {
+            Err(EngineError::Unsupported(
+                "Not available on this system".into(),
             ))
         })
     }
@@ -335,6 +375,12 @@ pub trait PreviewEngine: Send + Sync {
                 "account cookies are unavailable in this engine".to_owned(),
             ))
         })
+    }
+    /// The mounted webview's native size in logical pixels (its frame, read from the platform, no pixels taken):
+    /// what a layout capture checks for a usable view without trusting page numbers. Default: unknown (`None`).
+    fn view_size(&self, id: &MountId) -> EngineFuture<'_, Option<(f64, f64)>> {
+        let _ = id;
+        Box::pin(async { Ok(None) })
     }
     /// Evaluates `script` natively in the mounted page (no IPC: the page cannot call back) and answers the JSON of
     /// its value. Used for the element/section pick (the element picker). The answer is untrusted page

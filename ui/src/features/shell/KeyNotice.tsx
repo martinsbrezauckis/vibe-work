@@ -4,6 +4,7 @@
  * Invariants: reads metadata only; recovery uses the existing setup or Account screens; copy and
  * send guards react to the same key state without remounting the chat or clearing its draft.
  */
+import { Button } from "../../components/Controls";
 import { keyReadiness, vaultReadiness } from "../../state/keyReadiness";
 import { useKeyUi } from "../setup/useKeys";
 import { useApp } from "./AppContext";
@@ -29,7 +30,9 @@ export function KeyNotice({
   const { keys, shell } = app;
   const state = useKeyReadiness(requirement);
   if (state === null) return null;
-  const visibleMessage = state.kind === "locked" ? state.message : (message ?? state.message);
+  const visibleMessage = ["locked", "unread"].includes(state.kind)
+    ? state.message
+    : (message ?? state.message);
   return (
     <section
       className={inSettings ? "check" : "key-notice"}
@@ -41,18 +44,23 @@ export function KeyNotice({
       ) : (
         <p>{visibleMessage}</p>
       )}
-      <button
+      <Button
         data-testid="shell.key-notice-go-home"
         type="button"
-        className={inSettings ? "tb-btn primary" : "btn-primary"}
+        appearance={inSettings ? undefined : "dialog"}
+        variant={inSettings ? "primary" : undefined}
         onClick={() => {
+          if (state.destination === "retry") {
+            void keys?.load();
+            return;
+          }
           goHome(app);
           if (state.destination === "setup") keys?.reopen();
           else shell.actions.openSettings("account", "mistral-key");
         }}
       >
         {state.action}
-      </button>
+      </Button>
     </section>
   );
 }

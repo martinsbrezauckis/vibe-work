@@ -3,10 +3,90 @@
 ; Invariant: tier 2 deletes only listed settings/preferences/caches. Only the
 ; separate tier-3 choice deletes managed sessions, browser sign-ins and the private/legacy vault.
 ; Every app-owned ancestor is checked; links/reparse points are never traversed.
+; "Send to Vibe Work": an interactive install asks once whether to add the Explorer right-click entries (the same keys
+; and shortcut the app's Settings > General > Right-click menus writes, crates/vw-platform/src/send_to_windows.rs);
+; the uninstall removes them, also when the switch removed them already. Updates keep them.
+; Program files: install and uninstall also delete the install-folder files earlier versions shipped and this one
+; does not (VIBE_DELETE_RETIRED_FILES), so an update leaves no stale file and an uninstall no install folder.
 
 Var DeleteSessionsVaultIncomplete
 
+; Files an earlier release installed under $INSTDIR that this version no longer ships. An update installs over the
+; old version without uninstalling it (/UPDATE) and the uninstaller deletes only its own version's files, so these
+; would stay forever and keep $INSTDIR after an uninstall. The list is exactly the files earlier releases installed
+; minus the files this version ships; a release check keeps it in step with the recorded file lists.
+; Files one by one (never a recursive delete under $INSTDIR), then their folders deepest first; RMDir without /r
+; removes a folder only when it is empty, so a folder this version still uses stays.
+!macro VIBE_DELETE_RETIRED_FILES
+  ; 0.1.0: the licenses moved to licenses\third_party\ in 0.1.1.
+  Delete "$INSTDIR\licenses\jsdiff\LICENSE"
+  Delete "$INSTDIR\licenses\remend\LICENSE"
+  ; 0.1.0: bytecode from the build machine, never shipped again (package_resources.reject_bytecode).
+  Delete "$INSTDIR\plugin\vw\skills\data-analysis\scripts\__pycache__\xlsx_to_csv.cpython-312.pyc"
+  RMDir "$INSTDIR\licenses\jsdiff"
+  RMDir "$INSTDIR\licenses\remend"
+  RMDir "$INSTDIR\plugin\vw\skills\data-analysis\scripts\__pycache__"
+  RMDir "$INSTDIR\plugin\vw\skills\data-analysis\scripts"
+  RMDir "$INSTDIR\plugin\vw\skills\data-analysis"
+  RMDir "$INSTDIR\plugin\vw\skills"
+  RMDir "$INSTDIR\plugin\vw"
+  RMDir "$INSTDIR\plugin"
+  RMDir "$INSTDIR\licenses"
+!macroend
+
+!define VIBE_SEND_TO_FILE_VERB "Software\Classes\*\shell\VibeWork.SendTo"
+!define VIBE_SEND_TO_FOLDER_VERB "Software\Classes\Directory\shell\VibeWork.SendTo"
+; Remembers that the question was asked (Yes or No), so a later manual install does not ask again; the app reads it
+; to know the installer asked (else its start screen asks once).
+!define VIBE_SEND_TO_ASKED "Software\VibeWork.SendTo"
+
+!macro VIBE_SEND_TO_VERB KEY
+  WriteRegStr HKCU "${KEY}" "" "Send to Vibe Work"
+  WriteRegStr HKCU "${KEY}" "Icon" "$INSTDIR\${MAINBINARYNAME}.exe"
+  WriteRegStr HKCU "${KEY}\command" "" '"$INSTDIR\${MAINBINARYNAME}.exe" --attach "%1"'
+!macroend
+
+; Interactive installs only: an update (/UPDATE), /P and /S never ask and never add.
+!macro VIBE_SEND_TO_ASK
+  ${If} $UpdateMode <> 1
+  ${AndIf} $PassiveMode <> 1
+  ${AndIfNot} ${Silent}
+    Push $0
+    ClearErrors
+    ReadRegStr $0 HKCU "${VIBE_SEND_TO_ASKED}" "Asked"
+    ${If} $0 == ""
+      WriteRegStr HKCU "${VIBE_SEND_TO_ASKED}" "Asked" "1"
+      MessageBox MB_YESNO|MB_ICONQUESTION "Add 'Send to Vibe Work' to the Windows right-click menu? You can change this later in Settings." /SD IDNO IDNO vibe_send_to_asked
+      !insertmacro VIBE_SEND_TO_VERB "${VIBE_SEND_TO_FILE_VERB}"
+      !insertmacro VIBE_SEND_TO_VERB "${VIBE_SEND_TO_FOLDER_VERB}"
+      SetShellVarContext current
+      CreateShortCut "$SENDTO\Vibe Work.lnk" "$INSTDIR\${MAINBINARYNAME}.exe" "--attach" "$INSTDIR\${MAINBINARYNAME}.exe" 0 SW_SHOWNORMAL "" "Send to Vibe Work"
+      vibe_send_to_asked:
+    ${EndIf}
+    Pop $0
+  ${EndIf}
+!macroend
+
+; Every uninstall except an update's: the entries point at the removed program.
+!macro VIBE_SEND_TO_REMOVE
+  ${If} $UpdateMode <> 1
+    DeleteRegKey HKCU "${VIBE_SEND_TO_FILE_VERB}"
+    DeleteRegKey HKCU "${VIBE_SEND_TO_FOLDER_VERB}"
+    DeleteRegKey HKCU "${VIBE_SEND_TO_ASKED}"
+    SetShellVarContext current
+    Delete "$SENDTO\Vibe Work.lnk"
+  ${EndIf}
+!macroend
+
+; After every install (fresh, replacement or /UPDATE): the new files are in place, the retired ones go.
+!macro NSIS_HOOK_POSTINSTALL
+  !insertmacro VIBE_DELETE_RETIRED_FILES
+  !insertmacro VIBE_SEND_TO_ASK
+!macroend
+
 !macro NSIS_HOOK_PREUNINSTALL
+  ; Before the template deletes this version's files and runs RMDir "$INSTDIR" (non-recursive).
+  !insertmacro VIBE_DELETE_RETIRED_FILES
   ${If} $UpdateMode = 1
   ${OrIf} $PassiveMode = 1
   ${OrIf} ${Silent}
@@ -16,6 +96,7 @@ Var DeleteSessionsVaultIncomplete
 !macroend
 
 !macro NSIS_HOOK_POSTUNINSTALL
+  !insertmacro VIBE_SEND_TO_REMOVE
   ${If} $UpdateMode <> 1
   ${AndIf} $PassiveMode <> 1
   ${AndIfNot} ${Silent}

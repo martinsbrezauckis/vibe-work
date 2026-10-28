@@ -5,10 +5,12 @@
 // fingerprint), DOM traversal (bounded traversal of documents, same-origin frames and open shadow
 // roots, global rects across frames), actionability (attached, visible, stable, enabled, receives
 // events, the covering element).
+/* global REQ -- Supplied by the Rust script assembler and its shared prelude. */
+/* exported actionRef, actionableCandidate, collect, consentSnapshot, describe, domPath, editable, findRef, globalRect, hideKeys, inFrame, keyHolder, loginRole, refOf, rememberLabelledKeys, secretKind, submitMethods, submitOrigins, vaultFilled */
 const ENV = (() => {
   try {
     return window[REQ.page] || null;
-  } catch (_) {
+  } catch {
     return null;
   }
 })();
@@ -84,10 +86,10 @@ const domPath = (el) => {
       parts.unshift(">>>");
       cur = root.host;
     } else if (root && root.nodeType === 9) {
-      let frame = null;
+      let frame;
       try {
         frame = root.defaultView && root.defaultView.frameElement;
-      } catch (_) {
+      } catch {
         frame = null;
       }
       if (!frame) break;
@@ -140,42 +142,70 @@ const frameDoc = (frame) => {
     const href = String(doc.location && doc.location.href);
     if (href === "about:blank" || href === "about:srcdoc") return doc;
     return new URL(href, location.href).origin === location.origin ? doc : null;
-  } catch (_) {
+  } catch {
     return null;
   }
 };
 // Every element of the page, its same-origin frames and open shadow roots (bounded); `truncated` when cut.
 const collect = () => {
-  const elements = [];
+  const elements = [], priorityElements = [];
   const queue = [{ root: document, frame: 0, shadow: 0 }];
   const seen = new WeakSet(), seenElements = new WeakSet();
   let roots = 0, truncated = false, crossOriginFrames = 0;
   const priorityLimit = Math.min(512, MAX_NODES);
   const priority = (el) => {
-    if (elements.length >= priorityLimit || seenElements.has(el) || !actionableCandidate(el)) return;
+    if (priorityElements.length >= priorityLimit || seenElements.has(el) || !actionableCandidate(el)) return;
     const state = visibilityState(el);
     if (!state.visible && !state.animating) return;
     seenElements.add(el);
-    elements.push(el);
+    priorityElements.push(el);
   };
+  // CMP regions can contain tens of thousands of hidden vendor rows before their visible buttons.
+  // Find rendered controls before the general node cap, pruning only subtrees that cannot paint.
+  // visibility:hidden is inherited but overridable, so it must not prune a subtree.
+  const overlays = (root) => {
+    const doc = root.nodeType === 9 ? root : root.ownerDocument;
+    const view = doc.defaultView;
+    let regions = 0, scanned = 0;
+    for (const region of root.querySelectorAll('dialog[open], [role="dialog"], [aria-modal="true"], [role="region"]')) {
+      // Ordinary article regions must not spend the overlay budget before a late fixed banner.
+      if (region.getAttribute("role") === "region" && !region.matches('[aria-modal="true"]')
+        && !["fixed", "sticky"].includes(view.getComputedStyle(region).position)) continue;
+      const rendered = (el) => {
+        const style = view.getComputedStyle(el);
+        return style.display !== "none" && style.contentVisibility !== "hidden";
+      };
+      if (!rendered(region)) continue;
+      if (++regions > 32 || scanned >= 2048 || priorityElements.length >= priorityLimit) break;
+      priority(region);
+      const walker = doc.createTreeWalker(region, 1, {
+        acceptNode: el => rendered(el) ? 1 : 2, // FILTER_ACCEPT / FILTER_REJECT (including children).
+      });
+      for (let el = walker.nextNode(); el; el = walker.nextNode()) {
+        priority(el);
+        if (++scanned >= 2048 || priorityElements.length >= priorityLimit) break;
+      }
+    }
+  };
+  overlays(document);
   const mainRegions = document.querySelectorAll('main, article, [role="main"]');
   let mainScanned = 0;
   for (const region of mainRegions) {
-    if (elements.length >= priorityLimit || mainScanned >= 2048) break;
+    if (priorityElements.length >= priorityLimit || mainScanned >= 2048) break;
     for (const el of region.querySelectorAll(INTERACTIVE)) {
       priority(el);
-      if (elements.length >= priorityLimit || ++mainScanned >= 2048) break;
+      if (priorityElements.length >= priorityLimit || ++mainScanned >= 2048) break;
     }
   }
   // Footer and menu controls often follow very large article trees. Reach them before the general node cap.
   const trailingRegions = document.querySelectorAll('footer, [role="contentinfo"], [role="menu"]');
   let trailingScanned = 0;
   for (const region of trailingRegions) {
-    if (elements.length >= priorityLimit || trailingScanned >= 2048) break;
+    if (priorityElements.length >= priorityLimit || trailingScanned >= 2048) break;
     priority(region);
     for (const el of region.querySelectorAll("*")) {
       priority(el);
-      if (elements.length >= priorityLimit || ++trailingScanned >= 2048) break;
+      if (priorityElements.length >= priorityLimit || ++trailingScanned >= 2048) break;
     }
   }
   while (queue.length > 0 && roots < MAX_ROOTS) {
@@ -184,9 +214,10 @@ const collect = () => {
     seen.add(ctx.root);
     roots += 1;
     const doc = ctx.root.nodeType === 9 ? ctx.root : ctx.root.ownerDocument;
+    if (ctx.root !== document) overlays(ctx.root);
     const walker = doc.createTreeWalker(ctx.root, 1);
     for (let el = walker.nextNode(); el; el = walker.nextNode()) {
-      if (elements.length >= MAX_NODES) {
+      if (elements.length + priorityElements.length >= MAX_NODES) {
         truncated = true;
         break;
       }
@@ -208,12 +239,12 @@ const collect = () => {
     }
   }
   if (queue.length > 0) truncated = true;
-  return { elements, truncated, crossOriginFrames };
+  return { elements: [...priorityElements, ...elements].slice(0, MAX_NODES), truncated, crossOriginFrames };
 };
 const matches = (el, selector) => {
   try {
     return el.matches(selector);
-  } catch (_) {
+  } catch {
     return false;
   }
 };
@@ -230,17 +261,17 @@ const composedParent = (el) => {
   if (el.parentElement) return el.parentElement;
   const root = el.getRootNode && el.getRootNode();
   if (root?.host) return root.host;
-  try { return root?.defaultView?.frameElement || null; } catch (_) { return null; }
+  try { return root?.defaultView?.frameElement || null; } catch { return null; }
 };
 const globalRect = (el) => {
   const r = el.getBoundingClientRect();
   let left = r.left, top = r.top, width = r.width, height = r.height;
   let doc = el.ownerDocument;
   for (let depth = 0; doc && depth < MAX_FRAME_DEPTH; depth += 1) {
-    let frame = null;
+    let frame;
     try {
       frame = doc.defaultView && doc.defaultView.frameElement;
-    } catch (_) {
+    } catch {
       frame = null;
     }
     if (!frame) break;
@@ -273,7 +304,7 @@ const visibilityState = (el) => {
         animating = cur.getAnimations({ subtree: false }).some((animation) => animation.playState === "running"
           && animation.effect?.getKeyframes?.().some((frame) =>
             ["opacity", "transform", "translate", "scale", "left", "top"].some((property) => property in frame)));
-      } catch (_) { /* An unavailable animation API cannot turn a hidden target into a click. */ }
+      } catch { /* An unavailable animation API cannot turn a hidden target into a click. */ }
     }
   }
   return { visible: hasBox && opacity > 0, animating };
@@ -311,7 +342,7 @@ const secretKind = (el) => {
   try {
     const masked = viewOf(el).getComputedStyle(el).webkitTextSecurity;
     if (masked && masked !== "none") return "password";
-  } catch (_) {
+  } catch {
     // No style (a detached element): judged by its attributes only.
   }
   if (/\bone-time-code\b/.test(auto)) return "otp";
@@ -366,7 +397,7 @@ const submitOrigins = (el) => {
     const text = String(raw === null || raw === undefined ? "" : raw).trim();
     try {
       return text === "" ? new URL(doc.URL).origin : new URL(text, doc.baseURI).origin;
-    } catch (_) {
+    } catch {
       return "invalid";
     }
   };

@@ -66,7 +66,7 @@ export function ModelSettings() {
   return (
     <section aria-labelledby="model-settings-title" data-setting="default-model">
       <h3 id="model-settings-title">{TEXT.defaultModel}</h3>
-      {list === null && error === null && <p className="key-line">Reading the models...</p>}
+      {list === null && error === null && <p className="key-line">Reading the models…</p>}
       {list !== null && list.models.length === 0 && (
         <p className="key-line">Vibe lists no models yet.</p>
       )}

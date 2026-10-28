@@ -4,6 +4,7 @@
  * Depends on: AppContext (`git`, `shell`), model.ts. Called by: shell/Content (header).
  * Invariant: read only; shows nothing without a known pull request.
  */
+import { Badge } from "../../components/Controls";
 import type { ReactElement } from "react";
 
 import { useStore } from "../../state/createStore";
@@ -36,10 +37,13 @@ function Chip({ git, sessionId }: { git: Git; sessionId: string }): ReactElement
     .filter((t) => t !== "")
     .join(" · ");
   return (
-    <button
+    <Badge
       data-testid="git.pr-chip-open-tab"
       type="button"
-      className={`chip pr-chip pr-${card.state}${card.checks.failed > 0 ? " bad" : ""}`}
+      presentation="pull-request"
+      state={card.state}
+      tone={card.checks.failed > 0 ? "bad" : "neutral"}
+      as="button"
       data-git="pr-chip"
       title={`Show PR #${String(card.number)} in Changes tab`}
       aria-label={`Show PR #${String(card.number)} in Changes tab`}
@@ -48,6 +52,6 @@ function Chip({ git, sessionId }: { git: Git; sessionId: string }): ReactElement
       }}
     >
       {text}
-    </button>
+    </Badge>
   );
 }

@@ -122,7 +122,7 @@ export function SignedInAccounts() {
               <Button
                 data-testid="settings.signed-in-accounts-change"
                 type="button"
-                small
+                shape="outlined"
                 disabled={core === null || busy}
                 onClick={() => void change(provider, false)}
               >
@@ -131,7 +131,7 @@ export function SignedInAccounts() {
               <Button
                 data-testid="settings.signed-in-accounts-change-2"
                 type="button"
-                small
+                shape="outlined"
                 // Presence is only a cookie hint, so clearing stays possible without a detected session; the red
                 // destructive look is kept for a session that is actually there.
                 {...(account?.present === false ? {} : { variant: "danger" as const })}
@@ -152,7 +152,7 @@ export function SignedInAccounts() {
         <Button
           data-testid="settings.signed-in-accounts-refresh"
           type="button"
-          small
+          shape="outlined"
           disabled={core === null || busy}
           onClick={() => void refresh().catch(problem)}
         >
@@ -171,7 +171,7 @@ export function SignedInAccounts() {
             <Button
               data-testid="settings.signed-in-accounts-finish"
               type="button"
-              small
+              shape="outlined"
               variant="primary"
               disabled={busy}
               onClick={() => void finish()}

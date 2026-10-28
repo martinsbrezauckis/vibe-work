@@ -4,6 +4,7 @@
 // REQ: { page, name (accessor of this annotation), op: start|poll|cancel|target, mode: element|box, target? }.
 // Adapted from Vibe Work's own pick script (vw-pages `pick.rs`): capture-phase listeners, default prevented,
 // the overlay removed when it answers.
+/* global INTERACTIVE, REQ, actionRef, clip, domPath, labelOf, matches, refOf, roleOf -- Supplied by the Rust script assembler and its shared prelude. */
 (() => {
   __VW_COMMON__
   const NAME = String(REQ.name);
@@ -55,7 +56,7 @@
   // area of a box, since no person can point. It answers at once with the answer a click or a drawn box gives.
   if (REQ.op === "target") {
     const at = REQ.target || {};
-    let el = null;
+    let el;
     let rect = null;
     try {
       if (REQ.mode === "box") {
@@ -64,7 +65,7 @@
       } else if (typeof at.ref === "string") el = actionRef(at.ref).target;
       else if (typeof at.selector === "string") el = document.querySelector(at.selector);
       else el = document.elementFromPoint(Number(at.x), Number(at.y));
-    } catch (e) {
+    } catch {
       return reply({ state: "invalid" });
     }
     if (!el || el.nodeType !== 1) return reply({ state: "notfound" });

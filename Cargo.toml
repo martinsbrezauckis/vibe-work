@@ -8,9 +8,9 @@ members = [
     "crates/vw-protocol",
     "crates/vw-rpc",
     "crates/vw-session",
-    "crates/vw-session-stats",
     "crates/vw-supervisor",
     "crates/vw-gate",
+    "crates/vw-ask",
     "crates/vw-vocabulary",
     "crates/vw-core-api",
     "crates/vw-debug-api",
@@ -34,7 +34,6 @@ members = [
     "crates/vw-preview",
     "crates/vw-netguard",
     "crates/vw-browser",
-    "crates/vw-desktop",
     "crates/vw-pages",
     "crates/vw-projects",
     "crates/vw-vibe-install",
@@ -48,7 +47,7 @@ members = [
 # The copied ShellX Vault crates have their own workspace manifest (third_party/shellx-vault/Cargo.toml)
 # and are compiled as path dependencies only. The patched tauri-runtime-wry copy (below) is third-party
 # code too: excluded from the workspace so our lints never apply to it.
-exclude = ["third_party/shellx-vault", "third_party/tauri-runtime-wry"]
+exclude = ["third_party/shellx-vault", "third_party/tauri-runtime-wry", "third_party/wry"]
 
 # tauri-runtime-wry 2.12.1 with one patch: on Windows it applies
 # `data_store_identifier` as a WebView2 profile name (tauri-apps/tauri PR #16054), so each session's preview
@@ -58,13 +57,15 @@ exclude = ["third_party/shellx-vault", "third_party/tauri-runtime-wry"]
 # a release contains the change; vw-webview's mount check refuses a Windows preview without its own profile.
 [patch.crates-io]
 tauri-runtime-wry = { path = "third_party/tauri-runtime-wry" }
+# NAV: retain WK frame context through Tauri's URL-only callback (see the copy's PROVENANCE.json).
+wry = { path = "third_party/wry" }
 
 [workspace.package]
-version = "0.1.1"
+version = "0.1.2"
 edition = "2024"
 license = "MIT"
 authors = ["Martins Brezauckis"]
-rust-version = "1.89"  # 1.89: std File::lock (vw-vault commit lock); keyring store crates need 1.88. Was 1.87 (process-wrap 10). Checked 2026-10-09
+rust-version = "1.89"  # std File::lock (vw-vault commit lock); keyring store crates need 1.88.
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

@@ -13,6 +13,7 @@
  * `state/shortcuts.ts`), except Ctrl+Shift+C / Ctrl+Shift+V (Cmd+C / Cmd+V on macOS) for copy and
  * paste, and Ctrl+` (Cmd+`) which moves focus out of the terminal (no keyboard trap).
  */
+import { writeClipboard } from "../../state/clipboard";
 import { FitAddon } from "@xterm/addon-fit";
 import { Unicode11Addon } from "@xterm/addon-unicode11";
 import { WebLinksAddon } from "@xterm/addon-web-links";
@@ -108,7 +109,7 @@ export function mountTerminal(host: HTMLElement, options: MountOptions): Mounted
     const text = term.getSelection();
     if (text === "") return;
     try {
-      await navigator.clipboard.writeText(text);
+      await writeClipboard(text);
     } catch {
       options.notice("Copy failed: the clipboard is not available here.");
     }

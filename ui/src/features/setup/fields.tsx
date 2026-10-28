@@ -1,7 +1,6 @@
 /**
  * Small form pieces the key screens share: a secret text field with show/hide, the password field
- * with its strength hint, the "remember on this computer" choice with its disclosure, and the
- * problem line.
+ * with its strength hint, and the problem line.
  * Depends on: state/keyText. Called by: the setup steps, KeySettings, PasswordAsk.
  * Invariants: secret inputs are `type="password"` until the user presses Show, have autocomplete
  * off and no spellcheck, and are controlled by the parent so it can clear them on submit; nothing
@@ -9,6 +8,7 @@
  * `data-secret`: the Debug API's element routes match selectors with its value emptied, window
  * screenshots blank it, and during a capture it shows dots with Show disabled (`shell/secretSafety.ts`).
  */
+import { Button } from "../../components/Controls";
 import { useId, useState } from "react";
 
 import { passwordHint } from "../../state/keyText";
@@ -57,10 +57,10 @@ export function SecretField(props: {
             props.onChange(e.target.value);
           }}
         />
-        <button
+        <Button
           data-testid={`${props.testId}.show`}
           type="button"
-          className="tb-btn"
+
           aria-pressed={shown}
           disabled={locked}
           onClick={() => {
@@ -68,7 +68,7 @@ export function SecretField(props: {
           }}
         >
           {shown ? "Hide" : "Show"}
-        </button>
+        </Button>
       </div>
       {props.hint !== undefined && (
         <p id={hintId} className="key-field-hint" data-level={props.hintLevel}>
@@ -96,51 +96,6 @@ export function NewPasswordField(props: {
       hintLevel={hint.level}
       autoComplete="new-password"
     />
-  );
-}
-
-/** "Remember on this computer", on by default, with a plain explanation behind a button. */
-export function RememberChoice(props: {
-  checked: boolean;
-  onChange: (checked: boolean) => void;
-  testId: string;
-}) {
-  const id = useId();
-  const [open, setOpen] = useState(false);
-  return (
-    <div className="key-remember">
-      <label className="key-check">
-        <input
-          type="checkbox"
-          data-testid={props.testId}
-          checked={props.checked}
-          onChange={(e) => {
-            props.onChange(e.target.checked);
-          }}
-        />
-        <span>Remember on this computer</span>
-      </label>
-      <button
-        data-testid={`${props.testId}.explanation`}
-        type="button"
-        className="key-link"
-        aria-expanded={open}
-        aria-controls={id}
-        onClick={() => {
-          setOpen(!open);
-        }}
-      >
-        What does this mean?
-      </button>
-      {open && (
-        <p id={id} className="key-field-hint remember-note">
-          Vibe Work keeps a code in your system&apos;s keychain that opens the vault, so you do not
-          type the password every time. Programs that run as you on this computer, including
-          commands an agent runs for you, could reach that code until Vibe Work runs agents in a
-          sandbox. Turn this off on a shared computer. You can change it later in Settings.
-        </p>
-      )}
-    </div>
   );
 }
 

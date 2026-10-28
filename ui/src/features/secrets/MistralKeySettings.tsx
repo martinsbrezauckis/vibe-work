@@ -4,17 +4,23 @@
  * The stored value is never read or copied; replacement input is cleared before the command
  * asks its native confirmation and writes the new key.
  */
-import { useId, useState } from "react";
+import { type ReactNode, useId, useState } from "react";
 import { TEXT } from "../../vocabulary";
 import { Badge, Button, LinkButton, RowDisclosure } from "../../components/Controls";
 
 import { when } from "../../state/secrets";
-import { vaultName } from "../../state/keyText";
 import { useKeyUi } from "../setup/useKeys";
 import { useApp } from "../shell/AppContext";
 
 /** The one metadata, test and replacement surface used by Account and Vault. */
-export function MistralKeyDetails({ location }: { location: "account" | "vault" }) {
+export function MistralKeyDetails({
+  location,
+  extra,
+}: {
+  location: "account" | "vault";
+  /** More actions on the same row (Account: Lock vault). */
+  extra?: ReactNode;
+}) {
   const { keys, shell } = useApp();
   const availability = useKeyUi((s) => s.availability);
   const status = useKeyUi((s) => s.status);
@@ -36,10 +42,14 @@ export function MistralKeyDetails({ location }: { location: "account" | "vault" 
   };
   return (
     <>
-      {location === "account" && ready && status.vaultSelected && (
-        <p className="key-line">Stored in your {vaultName(status.vaultKind)}.</p>
+      {ready && location === "account" && test.phase !== "idle" && (
+        <p className="key-line" role={test.phase === "failed" ? "alert" : "status"}>
+          {test.phase === "running" && "Testing…"}
+          {test.phase === "ok" && "Key works."}
+          {test.phase === "failed" && test.text}
+        </p>
       )}
-      {ready && (
+      {ready && location === "vault" && (
         <dl className="set-facts">
           <div className="check">
             <dt>Key in use</dt>
@@ -62,8 +72,7 @@ export function MistralKeyDetails({ location }: { location: "account" | "vault" 
             <dd role={test.phase === "failed" ? "alert" : "status"}>
               {test.phase === "idle" && "Not tested this session."}
               {test.phase === "running" && "Testing…"}
-              {test.phase === "ok" &&
-                `Key works. ${String(test.models)} ${test.models === 1 ? "model is" : "models are"} available.`}
+              {test.phase === "ok" && "Key works."}
               {test.phase === "failed" && test.text}
             </dd>
           </div>
@@ -73,25 +82,14 @@ export function MistralKeyDetails({ location }: { location: "account" | "vault" 
         <p className="key-line" role="status">
           {availability === "loading"
             ? "Reading key status…"
-            : availability === "none"
-              ? "This run uses a key from its environment; vault key details are unavailable."
-              : locked
-                ? "Unlock this vault to see the Mistral key in use."
-                : "No Mistral key is in use."}
+            : availability === "failed"
+              ? "Could not read the Mistral key status. Use Retry to read it again."
+              : availability === "none"
+                ? "This run uses a key from its environment; vault key details are unavailable."
+                : locked
+                  ? "Unlock this vault to see the Mistral key in use."
+                  : "No Mistral key is in use."}
         </p>
-      )}
-      {location === "account" && <p className="key-field-hint ui-help">Agents never see values.</p>}
-      {location === "account" && (
-        <Button
-          data-testid="secrets.mistral-key-settings-open-settings"
-          type="button"
-          small
-          onClick={() => {
-            shell.actions.openSettings("secrets", "vault-mistral-key");
-          }}
-        >
-          Manage in Vault
-        </Button>
       )}
       <div className="set-actions" role="group" aria-label="Mistral key actions">
         {location === "vault" && (
@@ -118,7 +116,7 @@ export function MistralKeyDetails({ location }: { location: "account" | "vault" 
           <>
             <Button
               data-testid="secrets.mistral-key-settings-test-key"
-              small
+              shape="outlined"
               type="button"
               disabled={busy}
               onClick={() => {
@@ -129,7 +127,7 @@ export function MistralKeyDetails({ location }: { location: "account" | "vault" 
             </Button>
             <Button
               data-testid="secrets.mistral-key-settings-clear-problem"
-              small
+              shape="outlined"
               type="button"
               disabled={busy}
               onClick={() => {
@@ -141,11 +139,22 @@ export function MistralKeyDetails({ location }: { location: "account" | "vault" 
             </Button>
           </>
         )}
+        {extra}
+        {location === "account" && (
+          <LinkButton
+            data-testid="secrets.mistral-key-settings-open-settings"
+            onClick={() => {
+              shell.actions.openSettings("secrets", "vault-mistral-key");
+            }}
+          >
+            Manage in Vault
+          </LinkButton>
+        )}
         {!ready && availability === "ready" && (
           <Button
             data-testid="secrets.mistral-key-settings-open-settings-4"
             type="button"
-            small
+            shape="outlined"
             onClick={() => {
               shell.actions.openSettings("account");
             }}
@@ -189,9 +198,6 @@ export function MistralKeyDetails({ location }: { location: "account" | "vault" 
               />
             </div>
           </div>
-          <p className="key-field-hint ui-help">
-            A native confirmation asks before replacing the key used by sessions.
-          </p>
           {problem !== null && (
             <p className="key-problem" role="alert">
               {problem.text}
@@ -201,7 +207,7 @@ export function MistralKeyDetails({ location }: { location: "account" | "vault" 
             <Button
               data-testid="secrets.mistral-key-settings-tb-btn"
               type="submit"
-              small
+              shape="outlined"
               variant="primary"
               disabled={busy || value.trim() === ""}
             >
@@ -210,7 +216,7 @@ export function MistralKeyDetails({ location }: { location: "account" | "vault" 
             <Button
               data-testid="secrets.mistral-key-settings-tb-btn-2"
               type="button"
-              small
+              shape="outlined"
               disabled={busy}
               onClick={close}
             >

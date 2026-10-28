@@ -24,7 +24,7 @@
   content: "";
   width: 7px;
   height: 7px;
-  border-radius: 50%;
+  border-radius: var(--radius-round);
   background: currentcolor;
 }
 /* "Needs you": a bold exclamation mark. */
@@ -72,7 +72,7 @@
 .unread {
   width: 7px;
   height: 7px;
-  border-radius: 50%;
+  border-radius: var(--radius-round);
   background: var(--orange);
   display: inline-block;
   flex: none;
@@ -87,7 +87,7 @@
   grid-template-columns: 14px minmax(0, 1fr) 8px 22px;
   align-items: center;
   gap: 4px;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   color: var(--text-2);
 }
 .srow:hover:where(:not(:disabled)),
@@ -116,7 +116,7 @@
   outline: none;
   /* Inset: the row sits flush in a scrolling column that would clip an outer ring. */
   box-shadow: inset 0 0 0 2px var(--focus);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
 }
 .srow .t {
   flex: 1;
@@ -139,7 +139,7 @@
   font-size: var(--text-10-5);
   color: var(--text-3);
   border: 1px solid var(--line-2);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   padding: 0 6px;
   line-height: 16px;
 }
@@ -168,10 +168,7 @@
 }
 .twist:focus-visible {
   outline: none;
-  border-radius: 3px;
-  box-shadow:
-    0 0 0 2px var(--bg),
-    0 0 0 4px var(--focus);
+  border-radius: var(--radius-3);
 }
 .srow-more {
   all: unset;
@@ -180,7 +177,7 @@
   place-items: center;
   width: 22px;
   height: 22px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
   color: var(--text-3);
   opacity: 0;
@@ -198,9 +195,6 @@
 }
 .srow-more:focus-visible {
   outline: none;
-  box-shadow:
-    0 0 0 2px var(--bg),
-    0 0 0 4px var(--focus);
 }
 .rename {
   flex: 1;
@@ -210,7 +204,7 @@
   color: var(--text);
   background: var(--bg);
   border: 1px solid var(--line-3);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   padding: 2px 6px;
 }
 .proj-bar {
@@ -222,7 +216,7 @@
   flex: none;
   width: 24px;
   height: 24px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   opacity: 0;
 }
 .proj-bar:hover:where(:not(:disabled)) .proj-new-chat,
@@ -267,7 +261,7 @@
   margin: 8px 0 0;
   padding: 7px;
   border: 1px dashed var(--line-3);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: none;
   color: var(--text-2);
   font-size: var(--text-12-5);
@@ -315,7 +309,7 @@
   place-items: center;
   width: 22px;
   height: 22px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
   color: var(--text-3);
 }
@@ -325,13 +319,10 @@
 }
 .sec-btn:focus-visible {
   outline: none;
-  box-shadow:
-    0 0 0 2px var(--bg),
-    0 0 0 4px var(--focus);
 }
 .proj {
   position: relative;
-  border-radius: 9px;
+  border-radius: var(--radius-9);
 }
 /* Sessions dragged over a project (or "Not in a project"): the whole group lights up as the target. */
 .proj[data-drop="into"] {
@@ -347,7 +338,7 @@
   left: 6px;
   right: 6px;
   height: 2px;
-  border-radius: 2px;
+  border-radius: var(--radius-2);
   background: var(--blue);
   pointer-events: none;
 }
@@ -401,22 +392,7 @@
   font-size: var(--text-12);
   color: var(--text-3);
 }
-.link-btn {
-  all: unset;
-  cursor: pointer;
-  color: var(--blue);
-  font-size: var(--text-12);
-  border-radius: 4px;
-}
-.link-btn:hover:where(:not(:disabled)) {
-  text-decoration: underline;
-}
-.link-btn:focus-visible {
-  outline: none;
-  box-shadow:
-    0 0 0 2px var(--bg),
-    0 0 0 4px var(--focus);
-}
+
 .proj-h.proj-rename {
   grid-template-columns: 16px 1fr;
   cursor: default;
@@ -435,15 +411,23 @@
 /* The new-chat view's folder chip row lights up after Send is pressed without a folder. */
 .folder-row {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   gap: 10px;
+  min-width: 0;
+}
+.folder-row > button,
+.folder-row > .temp-toggle {
+  flex-shrink: 0;
+}
+.folder-row > .folder-path {
+  flex: 0 1 auto;
   min-width: 0;
 }
 .folder-chip {
   padding: 3px 8px;
   border: 1px solid var(--line-2);
-  border-radius: 7px;
+  border-radius: var(--radius-7);
   background: var(--raised);
 }
 .new-session[data-ask-folder="true"] .folder-row .tb-btn {
@@ -470,4 +454,21 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+/* The New chat screen as a working place: the Files · Terminal · Browser row, its line and the open-here status. */
+.new-chat-work {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.new-chat-work-note {
+  margin: 0;
+  color: var(--text-2);
+  font-size: var(--text-12);
+  line-height: var(--leading-helper);
+}
+.new-chat-work-status.key-line {
+  margin: 0;
+  font-size: var(--text-12);
 }

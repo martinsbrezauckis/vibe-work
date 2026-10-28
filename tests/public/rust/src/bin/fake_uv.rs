@@ -1,7 +1,7 @@
 //! A stand-in for Astral's `uv` in the Vibe install tests (the fixture): it answers the three commands the installer
 //! runs (`python install`, `venv`, `pip install`) by building the layout the real ones leave (a Python folder,
-//! a venv with `mistral_vibe-<version>.dist-info` and a `vibe-app-server` executable copied from the fake Vibe
-//! server), and records every call so a test can check what the installer passed.
+//! a venv with `mistral_vibe-<version>.dist-info` and a `vibe-app-server` executable copied from the pinned real Vibe
+//! installation), and records every call so a test can check what the installer passed.
 //!
 //! Environment (the installer passes these through its test-only `extra_env`):
 //! - `FAKE_UV_LOG`: JSON lines `{argv, env: {UV_*/PIP_* names}, pid, cwd}` are appended here;

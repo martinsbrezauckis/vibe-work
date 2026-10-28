@@ -11,13 +11,15 @@
  * - History present when a session is first seen is never narrated (only turns finishing now).
  * - Never while dictating: `dictating()` true -> the turn is skipped (state says so); a dictation start
  *   calls `stopAll`. Never a session in voice chat: voice chat speaks those turns itself.
- * - One sound at a time; a queue of at most 3; Stop clears it, Skip plays the next.
+ * - One sound at a time; automatic narration queues at most 3; at most 2 requested readings outstanding.
+ *   Stop clears it, Skip skips the whole current reading and plays the next.
  * - What is sent to Mistral is the user's text and the turn's answer (capped), as the CLI narrator does.
  */
 import type { CoreEvent, JsonValue } from "../protocol/core";
 import { toCallError } from "../protocol/client/types";
 import type { Player } from "../features/voice/audioPlayer";
-import { stripEmphasis } from "../features/voice/voiceChatText";
+import { speakable, readingChunks } from "../features/voice/speechText";
+export { speakable } from "../features/voice/speechText";
 import {
   type Obj,
   arr,
@@ -33,14 +35,24 @@ import type { Shell } from "./shellStore";
 import type { VoiceSettingsStore } from "./voiceSettings";
 
 /** Longest assistant text sent for one summary (the CLI narrator sends the whole turn; we cap it). */
-export const MAX_ANSWER_CHARS = 8_000;
+const MAX_ANSWER_CHARS = 8_000;
 /** Most turns waiting to be narrated. */
 const MAX_QUEUE = 3;
+/** Requested readings include speech being prepared, queued audio and the current reading. */
+const MAX_READINGS = 2;
 
 /** One turn to narrate. */
 export interface NarrationItem {
   sessionId: string;
   turnId: string;
+  /** Present only for a requested one-time reading, never an automatic turn summary. */
+  reading?: {
+    text: string;
+    title: string;
+    chunks: readonly string[];
+    firstAudio: string;
+    voice: string | null;
+  };
 }
 
 /** The narration state the bar and the route read. */
@@ -80,20 +92,6 @@ export function turnTexts(
   return { user, answer: answer.join("\n\n").slice(0, MAX_ANSWER_CHARS) };
 }
 
-/** Plain words for speech: code blocks, links and Markdown marks removed. Adapted from ShellX voice chat. */
-export function speakable(text: string): string {
-  const plain = text
-    .replace(/```[\s\S]*?```/g, " ")
-    .replace(/`([^`]+)`/g, "$1")
-    .replace(/!\[[^\]]*\]\([^)]*\)/g, " ")
-    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
-    // marks only at line starts and word edges, so `snake_case` and `a > b` survive (was: every `*_#>|~`
-    // removed).
-    .replace(/^[ \t]*(?:#{1,6}[ \t]+|>[ \t]?|[-*+][ \t]+)/gm, "")
-    .replace(/^[ \t]*\|.*$/gm, " ");
-  return stripEmphasis(plain).replace(/\s+/g, " ").trim().slice(0, 2_000);
-}
-
 function decode(base64: string): Uint8Array {
   const binary = atob(base64);
   const out = new Uint8Array(binary.length);
@@ -128,6 +126,9 @@ export function createNarration(deps: {
   const seen = new Map<string, Set<string>>();
   let working = false;
   let generation = 0;
+  let readingGeneration = 0;
+  let preparing: Promise<void> = Promise.resolve();
+  const preparingReadings = new Set<object>();
   let noteTimer: ReturnType<typeof setTimeout> | null = null;
   /** Shows a note for 8 seconds (a skipped or failed turn). */
   const setNote = (note: string): void => {
@@ -151,11 +152,10 @@ export function createNarration(deps: {
     return true;
   };
 
-  /** Summarizes, speaks and plays one turn. With `origin: "debug-api"`, the speak carries that label. */
-  const narrate = async (item: NarrationItem, origin: "ui" | "debug-api"): Promise<void> => {
+  /** Summarizes, speaks and plays one turn. */
+  const narrate = async (item: NarrationItem): Promise<void> => {
     if (deps.canUseKey?.() === false) return;
     const mine = generation;
-    const opts = origin === "debug-api" ? { origin } : undefined;
     const { user, answer } = turnTexts(historyOf(item.sessionId), item.turnId);
     store.set((s) => ({
       ...s,
@@ -163,56 +163,70 @@ export function createNarration(deps: {
       current: { ...item, summary: null },
       note: null,
     }));
-    let summarized;
-    try {
-      summarized = await core.run(
-        {
+    let summary: string;
+    if (item.reading !== undefined) {
+      summary = speakable(item.reading.text, 10_000, true);
+    } else {
+      let summarized;
+      try {
+        summarized = await core.run({
           type: "call",
           method: "narration/summarize",
           params: { sessionId: item.sessionId, userMessage: user, assistantText: answer },
-        },
-        opts,
-      );
-    } catch (thrown) {
-      if (quietOnKeyLoss()) return;
-      throw thrown;
+        });
+      } catch (thrown) {
+        if (quietOnKeyLoss()) return;
+        throw thrown;
+      }
+      const value = summarized.type === "reply" ? obj(summarized.result) : null;
+      summary = speakable(str(value?.["summary"] ?? null) ?? "");
     }
-    const value = summarized.type === "reply" ? obj(summarized.result) : null;
-    const summary = speakable(str(value?.["summary"] ?? null) ?? "");
     if (mine !== generation || quietOnKeyLoss()) return;
     if (summary === "") {
       setNote("Vibe gave no summary for this turn.");
       return;
     }
     store.set((s) => ({ ...s, phase: "speaking", current: { ...item, summary } }));
-    const voice = settings.store.get().voice;
-    let spoken;
-    try {
-      spoken = await core.run(
-        { type: "speech", request: { op: "speak", text: summary, voice } },
-        opts,
-      );
-    } catch (thrown) {
+    const voice = item.reading === undefined ? settings.store.get().voice : item.reading.voice;
+    const chunks = item.reading?.chunks ?? [summary];
+    for (const [index, chunk] of chunks.entries()) {
+      if (mine !== generation) return;
+      store.set((s) => ({ ...s, phase: "speaking" }));
+      let encoded = index === 0 ? item.reading?.firstAudio : undefined;
+      if (encoded === undefined) {
+        let spoken;
+        try {
+          spoken = await core.run({ type: "speech", request: { op: "speak", text: chunk, voice } });
+        } catch (thrown) {
+          if (quietOnKeyLoss()) return;
+          throw thrown;
+        }
+        if (quietOnKeyLoss()) return;
+        if (mine !== generation || spoken.type !== "speech" || spoken.result.kind !== "speech")
+          return;
+        encoded = spoken.result.audio;
+      }
+      const audio = decode(encoded);
+      store.set((s) => ({ ...s, phase: "playing" }));
+      let played;
+      try {
+        played = await player.play(audio);
+      } catch (thrown) {
+        if (quietOnKeyLoss()) return;
+        throw thrown;
+      }
       if (quietOnKeyLoss()) return;
-      throw thrown;
+      if (mine !== generation) return;
+      store.set((s) => ({
+        ...s,
+        last: {
+          chars: Array.from(chunk).length,
+          bytes: audio.length,
+          seconds: played.seconds,
+          summary: chunk,
+        },
+      }));
     }
-    if (quietOnKeyLoss()) return;
-    if (mine !== generation || spoken.type !== "speech" || spoken.result.kind !== "speech") return;
-    const audio = decode(spoken.result.audio);
-    store.set((s) => ({ ...s, phase: "playing" }));
-    let played;
-    try {
-      played = await player.play(audio);
-    } catch (thrown) {
-      if (quietOnKeyLoss()) return;
-      throw thrown;
-    }
-    if (quietOnKeyLoss()) return;
-    if (mine !== generation) return;
-    store.set((s) => ({
-      ...s,
-      last: { chars: summary.length, bytes: audio.length, seconds: played.seconds, summary },
-    }));
   };
 
   /** Plays the queue one by one. */
@@ -225,7 +239,7 @@ export function createNarration(deps: {
         if (next === undefined) break;
         store.set((s) => ({ ...s, queue: s.queue.slice(1) }));
         try {
-          await narrate(next, "ui");
+          await narrate(next);
         } catch (thrown) {
           if (!quietOnKeyLoss()) setNote(`Narration failed: ${toCallError(thrown).error.message}`);
         }
@@ -243,7 +257,11 @@ export function createNarration(deps: {
       setNote("A turn finished while you were dictating; it was not read aloud.");
       return;
     }
-    store.set((s) => ({ ...s, queue: [...s.queue, item].slice(-MAX_QUEUE) }));
+    store.set((s) => {
+      const automatic = s.queue.filter((queued) => queued.reading === undefined);
+      const oldest = automatic.length >= MAX_QUEUE ? automatic[0] : undefined;
+      return { ...s, queue: [...s.queue.filter((queued) => queued !== oldest), item] };
+    });
     void pump();
   };
 
@@ -269,12 +287,95 @@ export function createNarration(deps: {
   };
   core.store.subscribe(scan);
   scan();
+  /** Prepare actual speech before accepting a reading, so an unavailable voice leaves the bar unchanged. */
+  const prepareReading = async (
+    event: Extract<CoreEvent, { type: "readAloud" }>,
+    mine: number,
+  ): Promise<void> => {
+    const chunks = readingChunks(event.text, event.truncated);
+    const voice = settings.store.get().voice;
+    let firstAudio: string | undefined;
+    try {
+      const first = chunks[0];
+      if (first !== undefined && mine === readingGeneration && deps.canUseKey?.() !== false) {
+        const spoken = await core.run({
+          type: "speech",
+          request: { op: "speak", text: first, voice },
+        });
+        if (spoken.type === "speech" && spoken.result.kind === "speech")
+          firstAudio = spoken.result.audio;
+      }
+    } catch {
+      // The tool receives the failure sentence; a failed request adds no bar or note.
+    }
+    const available =
+      firstAudio !== undefined && mine === readingGeneration && deps.canUseKey?.() !== false;
+    try {
+      const receipt = await core.run({
+        type: "speech",
+        request: { op: "readingReady", requestId: event.requestId, available },
+      });
+      if (
+        !available ||
+        mine !== readingGeneration ||
+        receipt.type !== "speech" ||
+        receipt.result.kind !== "reading" ||
+        receipt.result.status !== "accepted" ||
+        firstAudio === undefined
+      )
+        return;
+      const item: NarrationItem = {
+        sessionId: event.sessionId,
+        turnId: "",
+        reading: { text: event.text, title: event.title, chunks, firstAudio, voice },
+      };
+      store.set((s) => ({ ...s, queue: [...s.queue, item] }));
+      void pump();
+    } catch {
+      // A window receipt that could not reach the core must never start a late reading.
+    }
+  };
   core.listen((event: CoreEvent) => {
     if (event.type === "snapshot") scan();
+    if (event.type === "readAloud") {
+      const state = store.get();
+      const outstanding =
+        preparingReadings.size +
+        (state.current?.reading === undefined ? 0 : 1) +
+        state.queue.filter((item) => item.reading !== undefined).length;
+      if (outstanding >= MAX_READINGS) {
+        void core
+          .run({
+            type: "speech",
+            request: {
+              op: "readingReady",
+              requestId: event.requestId,
+              available: false,
+              busy: true,
+            },
+          })
+          .catch(() => {
+            // A disconnected receipt cannot start playback.
+          });
+        return;
+      }
+      const mine = readingGeneration;
+      const slot = {};
+      preparingReadings.add(slot);
+      preparing = preparing.then(async () => {
+        try {
+          await prepareReading(event, mine);
+        } finally {
+          preparingReadings.delete(slot);
+        }
+      });
+    }
   });
 
   /** Stops the sound and clears the queue. */
   const stopAll = (): void => {
+    readingGeneration += 1;
+    preparingReadings.clear();
     generation += 1;
     player.stop();
     store.set((s) => ({ ...s, queue: [], phase: "idle", current: null }));
@@ -291,18 +392,15 @@ export function createNarration(deps: {
     /**
      * Narrates the session's last completed turn now (also the `ui/voice` route). Rejects with the failure.
      */
-    async narrateLast(sessionId: string, origin: "ui" | "debug-api"): Promise<void> {
+    async narrateLast(sessionId: string): Promise<void> {
       const turns = completedTurns(core.store.get().sessions[sessionId]?.state);
       const turnId = turns[turns.length - 1];
       if (turnId === undefined) throw new Error("this session has no finished turn yet");
       try {
-        await narrate({ sessionId, turnId }, origin);
+        await narrate({ sessionId, turnId });
       } finally {
         store.set((s) => ({ ...s, phase: "idle", current: null }));
       }
     },
   };
 }
-
-/** The narration controller. */
-export type Narration = ReturnType<typeof createNarration>;

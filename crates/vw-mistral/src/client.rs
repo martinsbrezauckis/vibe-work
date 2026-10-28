@@ -35,6 +35,45 @@ pub fn proxy_client() -> Result<reqwest::Client, ClientError> {
     build(reqwest::redirect::Policy::none())
 }
 
+/// A key-bearing client that is built again when the network settings change in a run (they are applied after a
+/// vault unlock when the start could not check them). Clones share the slot.
+#[derive(Clone)]
+pub struct ClientSlot(std::sync::Arc<std::sync::RwLock<reqwest::Client>>);
+
+impl ClientSlot {
+    /// A slot with a [`proxy_client`].
+    ///
+    /// # Errors
+    /// [`ClientError`] when TLS cannot be set up.
+    pub fn new() -> Result<Self, ClientError> {
+        Ok(Self(std::sync::Arc::new(std::sync::RwLock::new(
+            proxy_client()?,
+        ))))
+    }
+
+    /// The client now (requests already sent keep the one they started with).
+    #[must_use]
+    pub fn get(&self) -> reqwest::Client {
+        self.0
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+
+    /// Builds the client again with the current network settings; on an error the old client stays.
+    ///
+    /// # Errors
+    /// [`ClientError`] when TLS cannot be set up.
+    pub fn rebuild(&self) -> Result<(), ClientError> {
+        let client = proxy_client()?;
+        *self
+            .0
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = client;
+        Ok(())
+    }
+}
+
 /// A client builder with this crate's TLS setup and nothing else (the capture's media fetcher adds its
 /// own resolver, redirect and proxy rules).
 pub fn tls_builder() -> reqwest::ClientBuilder {

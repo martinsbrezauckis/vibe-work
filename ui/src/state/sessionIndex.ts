@@ -56,7 +56,7 @@ function isObject(value: JsonValue | undefined): value is Record<string, JsonVal
 }
 
 /** The id inside a listing row, or `null` for a row without one. */
-export function rowId(row: SessionRowView): string | null {
+function rowId(row: SessionRowView): string | null {
   const session = row.session;
   if (!isObject(session)) return null;
   const id = session["id"];
@@ -70,12 +70,14 @@ function mergeRow(row: SessionRowView, known: SessionEntry | undefined): Session
   if (known?.state !== null && known !== undefined) {
     if (
       known.localOnly === row.localOnly &&
-      (row.accessMode === undefined || known.accessMode === row.accessMode)
+      (row.accessMode === undefined || known.accessMode === row.accessMode) &&
+      known.ownedByParent === row.ownedByParent
     )
       return known;
     return {
       ...known,
       localOnly: row.localOnly,
+      ...(row.ownedByParent === undefined ? {} : { ownedByParent: row.ownedByParent }),
       ...(row.accessMode === undefined ? {} : { accessMode: row.accessMode }),
     };
   }
@@ -84,8 +86,10 @@ function mergeRow(row: SessionRowView, known: SessionEntry | undefined): Session
     session,
     state: null,
     localOnly: row.localOnly,
+    ...(row.ownedByParent === undefined ? {} : { ownedByParent: row.ownedByParent }),
     ...(row.accessMode === undefined ? {} : { accessMode: row.accessMode }),
     openCallbackIds: known?.openCallbackIds ?? [],
+    ...(known?.runtime === undefined ? {} : { runtime: known.runtime }),
   };
 }
 
@@ -182,6 +186,13 @@ export function patchSessionFields<S extends IndexedSessions>(
 export function removeSession<S extends IndexedSessions>(state: S, id: string): S {
   return {
     ...state,
-    sessions: Object.fromEntries(Object.entries(state.sessions).filter(([key]) => key !== id)),
+    sessions: Object.fromEntries(
+      Object.entries(state.sessions)
+        .filter(([key]) => key !== id)
+        .map(([key, entry]) => [
+          key,
+          entry.session["parentSessionId"] === id ? { ...entry, ownedByParent: false } : entry,
+        ]),
+    ),
   };
 }

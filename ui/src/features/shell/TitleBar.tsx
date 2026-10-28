@@ -36,7 +36,7 @@ export function TitleBar() {
         <IconButton
           data-testid="shell.title-bar-panel-left"
           icon="panel-left"
-          aria-label="Open menu"
+          label="Open menu"
           title="Open menu"
           onClick={shell.actions.toggleDrawer}
         />
@@ -50,7 +50,7 @@ export function TitleBar() {
         <IconButton
           data-testid="shell.title-bar-set-overlay"
           icon="search"
-          aria-label="Search sessions, messages, files and settings"
+          label="Search sessions, messages, files and settings"
           title="Search"
           onClick={() => {
             shell.actions.setOverlay("palette");
@@ -78,13 +78,16 @@ export function TitleBar() {
           data-testid="shell.title-bar-open-settings"
           icon="key-round"
           data-rail="vault-narrow"
-          aria-label={TEXT.vault}
+          label={TEXT.vault}
           aria-current={vaultOpen ? "true" : undefined}
           title={TEXT.vault}
           onClick={() => {
             shell.actions.openSettings("secrets");
           }}
         />
+      )}
+      {Reflect.get(window, "__VW_TEST_PROFILE__") === true && (
+        <Badge title={TEXT.testProfileNotice}>Test profile</Badge>
       )}
       {debugOn && devBuild && (
         <button
@@ -105,7 +108,7 @@ export function TitleBar() {
         data-testid="shell.title-bar-close"
         id="notifications-trigger"
         icon="bell"
-        aria-label="Notifications"
+        label="Notifications"
         aria-describedby={unread > 0 ? "notifications-unread" : undefined}
         title="Notifications"
         aria-haspopup="dialog"
@@ -128,7 +131,7 @@ export function TitleBar() {
         data-testid="shell.title-bar-switch-theme"
         icon={theme === "dark" ? "sun" : "moon"}
         data-theme-switch="true"
-        aria-label="Switch theme"
+        label="Switch theme"
         title={theme === "dark" ? "Switch to the light theme" : "Switch to the dark theme"}
         onClick={() => {
           switchTheme(theme === "dark" ? "light" : "dark", shell.actions.setTheme);

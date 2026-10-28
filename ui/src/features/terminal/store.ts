@@ -26,6 +26,7 @@ import {
   type TerminalTabs,
   applyList,
   applyTerminalEvent,
+  handOver,
   initialTabs,
   setActive,
   setError,
@@ -104,6 +105,20 @@ export function createTerminals(core: CoreController) {
         return failed(sessionId, thrown);
       }
     },
+    /**
+     * The New chat screen's terminals become `to`'s (its first message started it): the same tabs, already read.
+     * The session gets no automatic first terminal when the New chat screen already had its own (its tabs move
+     * here, and one the user closed stays closed); when the screen never showed its Terminal tab, the session opens
+     * one on its first show like any other session (not "No terminal open.").
+     */
+    handOver(from: string, to: string): void {
+      if (autoOpened.has(from)) autoOpened.add(to);
+      store.set((s) => handOver(s, from, to));
+    },
+    /** Every terminal of `owner`, as the window knows them. */
+    count(owner: string): number {
+      return (store.get().bySession[owner] ?? []).length;
+    },
     /** Makes a tab active. */
     select(sessionId: string, terminalId: string): void {
       store.set((s) => setActive(s, sessionId, terminalId));
@@ -172,6 +187,6 @@ export type Terminals = ReturnType<typeof createTerminals>;
  * True for exactly one xterm focus report: `ESC [ I` (focus in) or `ESC [ O` (focus out), which xterm sends when the
  * program turned focus reporting on (ConPTY always does on Windows). Anything longer is input and keeps its origin.
  */
-export function isFocusReport(data: string): boolean {
+function isFocusReport(data: string): boolean {
   return data === "\x1b[I" || data === "\x1b[O";
 }

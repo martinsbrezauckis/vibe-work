@@ -7,12 +7,15 @@
  * mounting happen in `main.tsx` / `useShellWiring`); a missing client gives an app without a core
  * and without session actions, which renders the "no connection" state.
  */
+import { createNewChatDraft } from "../../state/newChatDraft";
+import { createChanges } from "../changes/store";
 import { createSecretScan } from "../../state/secretScan";
 import { createVibeInstall } from "../../state/vibeInstall";
 import type { CoreClient } from "../../protocol/client/types";
 import { createCommands } from "../../state/commands";
 import { createComposer } from "../../state/composer";
 import { createConnectors } from "../../state/connectors";
+import { createSkills } from "../../state/skills";
 import { createMarket } from "../../state/market";
 import { createCore } from "../../state/coreStore";
 import { createDocuments } from "../../state/documents";
@@ -100,10 +103,10 @@ export function createApp(options: CreateAppOptions): App {
       : createCore(
           options.client,
           (toast) => toasts.push(toast),
-          () => uiControl.servingCapability(),
-          (capability, promise) => uiControl.track(capability, promise),
+          () => uiControl.servingAction(),
+          (action, promise) => uiControl.track(action, promise),
           (command) => uiControl.trace.record(command, uiControl.trigger()),
-          (capability, promise) => uiControl.track(capability, promise, true),
+          (action, promise) => uiControl.track(action, promise, true),
         );
   const worktrees =
     core === null
@@ -128,9 +131,13 @@ export function createApp(options: CreateAppOptions): App {
           shell,
           toasts,
           afterDelete: (id) => leftRunning?.afterDelete(id) ?? Promise.resolve(null),
-          ended: (id, after) => worktrees?.ended(id, after) ?? Promise.resolve(),
         });
-  const keys = core === null ? null : createKeys(core);
+  const keys =
+    core === null
+      ? null
+      : createKeys(core, (text) => {
+          toasts.push({ kind: "info", bellKind: "security", text });
+        });
   const keyGuard = () => (keys === null ? null : (keyReadiness(keys.store.get())?.message ?? null));
   const canUseKey = () => keyGuard() === null;
   const canUseVault = () => keys === null || vaultReadiness(keys.store.get()) === null;
@@ -172,6 +179,30 @@ export function createApp(options: CreateAppOptions): App {
       ? null
       : createLibraries({ core, client: options.client, shell, keyReady: canUseKey });
   pagesExclusive(shell, projects, connectors, libraries);
+  const skills = core === null ? null : createSkills({ core, shell });
+  const files =
+    core === null
+      ? null
+      : createFiles(
+          core,
+          () => shell.store.get().openFilesIn === "tabs",
+          () => shell.store.get().openHtmlMarkdownAs,
+        );
+  const panelTabs = createPanelTabs();
+  const newChat =
+    core === null
+      ? null
+      : createNewChatDraft({
+          core,
+          shell,
+          toasts,
+          files,
+          persist: options.persist ?? true,
+          showFileTab: () => {
+            panelTabs.setHidden("file", false);
+          },
+        });
+  composer.setNewChatHandOver(newChat);
   return {
     core,
     secretScan: core === null ? null : createSecretScan(core, toasts),
@@ -184,17 +215,18 @@ export function createApp(options: CreateAppOptions): App {
         : createUpdates({
             client: options.client,
             toasts,
-            serving: () => uiControl.servingCapability(),
           }),
     transcript,
     connectors,
     libraries,
+    skills,
     market:
       core === null || connectors === null
         ? null
         : createMarket({ core, shell, connectors, toasts, persist: options.persist ?? true }),
     worktrees,
     git,
+    changes: core === null ? null : createChanges(core, { composer, toasts }),
     leftRunning,
     sessionTools: core === null ? null : createSessionTools({ core, shell, toasts }),
     find: createFind(),
@@ -202,7 +234,8 @@ export function createApp(options: CreateAppOptions): App {
     composer,
     projects,
     documents: core === null ? null : createDocuments({ core, composer, shell, toasts, canUseKey }),
-    files: core === null ? null : createFiles(core),
+    files,
+    newChat,
     voice:
       core === null
         ? null
@@ -222,6 +255,6 @@ export function createApp(options: CreateAppOptions): App {
     commands: createCommands(),
     shortcuts: options.shortcuts ?? createShortcuts(),
     uiControl,
-    panelTabs: createPanelTabs(),
+    panelTabs,
   };
 }

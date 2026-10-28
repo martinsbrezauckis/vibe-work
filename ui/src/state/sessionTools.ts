@@ -35,15 +35,6 @@ export const NO_SESSION_TOOLS = createStore<SessionToolsState>({
   newChatTemporary: false,
 });
 
-/** "12 messages, 30 steps, 4 file changes" plus the secrets sentence, for the toast. */
-export function exportSummary(view: SessionExportView): string {
-  const counts = `${String(view.messages)} messages, ${String(view.steps)} steps, ${String(view.diffs)} file changes`;
-  const secrets =
-    view.secretsReplaced.length === 0 ? "" : " Known secret values were replaced with a marker.";
-  const cut = view.cut ? " The oldest part was too long to include." : "";
-  return `${counts}.${secrets}${cut}`;
-}
-
 /** Creates the controller. */
 export function createSessionTools(deps: { core: CoreController; shell: Shell; toasts: Toasts }) {
   const { core, shell, toasts } = deps;
@@ -53,14 +44,8 @@ export function createSessionTools(deps: { core: CoreController; shell: Shell; t
     newChatTemporary: false,
   });
 
-  const run = async (
-    request: SessionToolsRequest,
-    origin?: "debug-api",
-  ): Promise<SessionToolsResult> => {
-    const result = await core.run(
-      { type: "sessionTools", request },
-      origin === undefined ? undefined : { origin },
-    );
+  const run = async (request: SessionToolsRequest): Promise<SessionToolsResult> => {
+    const result = await core.run({ type: "sessionTools", request });
     if (result.type !== "sessionTools") throw new Error(`unexpected answer ${result.type}`);
     return result.result;
   };
@@ -95,9 +80,9 @@ export function createSessionTools(deps: { core: CoreController; shell: Shell; t
      * Starts a temporary session in `cwd` and selects it; returns its id (`null` on failure, with a toast).
      * `origin` marks a start requested by a Debug API client.
      */
-    async startTemporary(cwd: string, origin?: "debug-api"): Promise<string | null> {
+    async startTemporary(cwd: string): Promise<string | null> {
       try {
-        const result = await run({ op: "startTemporary", agentConfig: { cwd } }, origin);
+        const result = await run({ op: "startTemporary", agentConfig: { cwd } });
         if (result.kind !== "started") return null;
         store.set((s) => ({
           ...s,

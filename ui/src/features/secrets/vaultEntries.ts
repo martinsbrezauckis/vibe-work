@@ -24,7 +24,7 @@ export type EntryPermission = NonNullable<ProjectSecretView["permission"]>;
 export type VaultAct = (request: SecretsRequest, done: string, saved?: () => void) => void;
 
 /** Selects the current session's folder, or the next session's chosen folder. */
-export function useVaultProject(): string | null {
+function useVaultProject(): string | null {
   const selected = useShellState((s) => s.selected);
   const newFolder = useShellState((s) => s.newFolder);
   const sessions = useSessionSummaries();
@@ -113,7 +113,10 @@ export function useVaultEntries() {
               return {
                 ...item,
                 defaultPermission: request.permission,
-                permission: item.projectPermission ?? request.permission,
+                permission:
+                  request.permission === "never" || item.projectPermission === "never"
+                    ? "never"
+                    : (item.projectPermission ?? request.permission),
               };
             if (request.op === "resetEntryPermission")
               return {
@@ -127,7 +130,7 @@ export function useVaultEntries() {
             return {
               ...item,
               projectPermission: request.permission,
-              permission: request.permission,
+              permission: item.defaultPermission === "never" ? "never" : request.permission,
               projectPermissions: [
                 ...item.projectPermissions.filter((p) => p.project !== request.project),
                 { project: request.project, permission: request.permission },

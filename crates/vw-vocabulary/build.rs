@@ -9,14 +9,17 @@ use std::path::PathBuf;
 
 use serde_json::Value;
 
-const GROUPS: [&str; 7] = [
+const GROUPS: [&str; 10] = [
     "accessModes",
     "thinkingLevels",
     "vaultKinds",
     "vaultPermissions",
     "browserPermissions",
+    "chromeControl",
     "locks",
     "workNames",
+    "builtinPlugins",
+    "builtinSkills",
 ];
 
 fn invalid(message: impl Into<String>) -> Error {

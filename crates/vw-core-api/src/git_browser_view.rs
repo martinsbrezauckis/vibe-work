@@ -14,6 +14,13 @@ use vw_git::browser_status::{BrowserFile, BrowserStatus};
     deny_unknown_fields
 )]
 pub enum GitBrowserRequest {
+    /// Browse a known folder without creating a session.
+    Explore {
+        /// Exact picked, project or recorded session folder.
+        folder: String,
+        /// Bounded operation.
+        request: crate::explorer_view::ExplorerRequest,
+    },
     /// Read only, no watch allocation.
     Read {
         /// Saved project id, never an arbitrary filesystem path.
@@ -83,6 +90,11 @@ pub struct GitBrowserSnapshot {
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum GitBrowserResult {
+    /// A bounded Files operation.
+    Explorer {
+        /// Operation result.
+        result: crate::explorer_view::ExplorerResult,
+    },
     /// Fresh browser snapshot.
     Snapshot {
         /// View.

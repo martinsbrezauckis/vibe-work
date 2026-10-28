@@ -17,7 +17,7 @@ import { registerPagesRoute, registerPlanRoute } from "./pagesRoutes";
 import { createPages, type Pages } from "./store";
 
 /** Opens the Project tab on the current plan of the selected session. */
-export function openPlan(app: App, pages: Pages): void {
+function openPlan(app: App, pages: Pages): void {
   const sessionId = app.shell.store.get().selected;
   if (sessionId === null) {
     app.shell.actions.openTab("project");

@@ -8,7 +8,7 @@
  */
 
 /** Whether a line is in both texts, only in the old one, or only in the new one. */
-export type DiffKind = "same" | "add" | "del";
+type DiffKind = "same" | "add" | "del";
 
 /** One line of the diff (without its newline). */
 export interface DiffLine {
@@ -20,7 +20,7 @@ export interface DiffLine {
 const WORK_LIMIT = 4_000_000;
 
 /** The marker line (as in `git diff`) for a text whose last line has no newline. */
-export const NO_NEWLINE = "\\ No newline at end of file";
+const NO_NEWLINE = "\\ No newline at end of file";
 
 /**
  * The lines of `text`; the empty text has none. A final newline ends the last line instead of starting

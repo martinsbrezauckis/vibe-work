@@ -4,6 +4,7 @@
  * Invariants: off by default; the preference is a per-computer display choice (it never changes what
  * Vibe or Mistral do), kept by `state/errorDetail`.
  */
+import { Switch } from "../../components/Controls";
 import { errorDetail, setErrorDetail } from "../../state/errorDetail";
 import { useStore } from "../../state/createStore";
 
@@ -21,11 +22,8 @@ export function ErrorDetailSetting() {
             line that says what happened.
           </span>
         </span>
-        <button
+        <Switch
           data-testid="settings.error-detail-setting-set-error-detail"
-          type="button"
-          className="switch"
-          role="switch"
           aria-label="Show the provider's own error text"
           aria-checked={mode === "details"}
           onClick={() => {

@@ -16,6 +16,7 @@ const NONE = createStore<ConnectorsState>({
   search: "",
   selected: null,
   addOpen: false,
+  removing: null,
   addPrefill: null,
   signIn: null,
   prompts: [],

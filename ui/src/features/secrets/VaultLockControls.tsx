@@ -1,16 +1,16 @@
 /**
- * Shared direct lock buttons for the Vault header, status bar and Account settings.
+ * Shared direct lock buttons for the Vault header, status bar and Account settings, and the help line shown where
+ * Lock is offered for a vault shared with ShellX (one vault file, so Lock also locks ShellX's copy at its next start).
  * Agent pause protects project secrets, website logins and MCP keys; vault lock also stops sessions.
  */
 import { Icon } from "../../components/Icon";
-import { IconButton } from "../../components/Controls";
+import { Button, IconButton } from "../../components/Controls";
 import { term, TEXT } from "../../vocabulary";
+import { useKeyUi } from "../setup/useKeys";
 import { useVaultAccess } from "./useVaultAccess";
 
 export type VaultLockMode = "agent" | "vault";
 export type VaultLockDisplay = "icon" | "status" | "button";
-
-export const AGENT_PAUSE_TIP = term("locks", "agentPause").tooltip;
 export const VAULT_LOCK_TIP = term("locks", "vaultLock").tooltip;
 
 /** Direct action; its label, icon and tooltip always describe the current state and click. */
@@ -58,7 +58,7 @@ export function VaultLockControls({
       <IconButton
         icon={icon}
         state={locked || recovery ? "locked" : "unlocked"}
-        aria-label={label}
+        label={label}
         aria-pressed={locked || recovery}
         aria-description={status}
         title={tip}
@@ -70,10 +70,10 @@ export function VaultLockControls({
       />
     );
   return (
-    <button
+    <Button
       type="button"
-      className={display === "status" ? "sb-vault" : "tb-btn"}
-      data-size={display === "button" ? "small" : undefined}
+      appearance={display === "status" ? "status" : undefined}
+      shape={display === "button" ? "outlined" : "ghost"}
       data-testid={
         display === "status" ? "secrets.statusbar-vault" : `secrets.vault-${mode}-${display}`
       }
@@ -86,6 +86,19 @@ export function VaultLockControls({
     >
       <Icon name={icon} size={display === "status" ? 14 : 16} />
       {display === "status" ? <span>{status}</span> : label}
-    </button>
+    </Button>
+  );
+}
+
+/** Where Lock is offered for an unlocked vault shared with ShellX: what Lock does there too. Nothing otherwise. */
+export function SharedVaultLockNote() {
+  const shared = useKeyUi(
+    (s) => s.status?.vaultKind === "shellx" && s.status.vaultState === "unlocked",
+  );
+  if (!shared) return null;
+  return (
+    <p className="key-field-hint ui-help" data-testid="secrets.vault-shared-lock-note">
+      {TEXT.vaultSharedLockNote}
+    </p>
   );
 }

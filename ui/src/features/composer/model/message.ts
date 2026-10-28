@@ -29,6 +29,7 @@ import type {
 import { VOICE_INSTRUCTION } from "../../voice/voiceChatText";
 import { parseLoopArgs } from "./loopArgs";
 import { isClientCommand } from "./slashNames";
+import type { CodeRef } from "../../files/model/context";
 
 /** Text the user inserted with "Point Vibe at this", a quote or a page comment: data, never a command. */
 export interface ContextItem {
@@ -39,8 +40,12 @@ export interface ContextItem {
   source: string;
   /** The quoted text. */
   text: string;
+  /** Display-only return location for code context. */
+  ref?: CodeRef;
   /** Optional model-facing text when the preview text is longer or differs from the safe prompt. */
   modelText?: string;
+  /** Saved attachment path for continuation instructions when message bounding cuts its text further. */
+  documentPath?: string;
   /** Inserted by a Debug API client (`ui/composer`): sends go out with the Debug API origin. */
   by?: "debug-api";
   /** The resource name to send it under (a read document: `vw://doc/<id>`); default `vw://context/<n>`. */
@@ -50,7 +55,7 @@ export interface ContextItem {
 }
 
 /** What a document chip shows about the document its text came from. */
-export interface DocFacts {
+interface DocFacts {
   /** "PDF", "Word document", ... */
   kindLabel: string;
   /** Pages read (OCR) or counted; `null` when not paged. */
@@ -111,7 +116,7 @@ export function classify(text: string, context: number, images: number, literal 
 }
 
 /** The `uri` of the n-th context item of a message. */
-export function contextUri(index: number): string {
+function contextUri(index: number): string {
   return `vw://context/${String(index + 1)}`;
 }
 
@@ -158,7 +163,12 @@ export function displayContent(
     host: "vibe-work",
     content: [
       ...(text.trim() === "" ? [] : [{ type: "text", text }]),
-      ...context.map((item) => ({ type: "vw.context", label: item.label, source: item.source })),
+      ...context.map((item) => ({
+        type: "vw.context",
+        label: item.label,
+        source: item.source,
+        ...(item.ref === undefined ? {} : { ref: { ...item.ref } }),
+      })),
       ...images.map((image) => ({ type: "vw.image", name: image.name })),
       ...(voice ? [{ type: "vw.voice" }] : []),
     ],

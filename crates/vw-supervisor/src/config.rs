@@ -17,32 +17,6 @@ use crate::backoff::Backoff;
 use crate::env::{EnvError, SecretError};
 use crate::handshake::default_initialize_params;
 
-/// How the server multiplexes sessions.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum ServerMode {
-    /// One stdio connection per process, with one attached session for the whole process. The app
-    /// uses a channel per session instead; kept for tests that
-    /// need a plain connection (`Supervisor::current` is then that connection).
-    Single,
-    /// `--multiplex` (the default): many isolated channels in one process, each its own
-    /// server with its own attached session, events and callbacks (Vibe `app_server/multiplex.py`). `Supervisor::current` is the "lobby" channel; `Supervisor::open_channel` opens more.
-    /// Started as `--multiplex --experimental-harness`: multiplexed stdio runs on the unified
-    /// harness, which the second flag selects explicitly (`stdio.py:49`).
-    #[default]
-    Multiplex,
-}
-
-impl ServerMode {
-    /// Server arguments this mode needs.
-    #[must_use]
-    pub fn args(self) -> Vec<OsString> {
-        match self {
-            Self::Single => Vec::new(),
-            Self::Multiplex => vec!["--multiplex".into(), "--experimental-harness".into()],
-        }
-    }
-}
-
 type LaunchCheck = dyn Fn(&Path) -> Result<(), String> + Send + Sync;
 
 /// Everything needed to run and restart one `vibe-app-server`.
@@ -54,8 +28,6 @@ pub struct SupervisorConfig {
     pub launcher: Vec<OsString>,
     /// Extra server arguments.
     pub extra_args: Vec<OsString>,
-    /// Session multiplexing mode (default [`ServerMode::Multiplex`]).
-    pub mode: ServerMode,
     /// `VIBE_HOME` for the server. Tests and dev runs use their own homes, never `~/.vibe`.
     pub vibe_home: PathBuf,
     /// `HOME` override (test isolation); `None` keeps the user's.
@@ -102,7 +74,6 @@ impl SupervisorConfig {
             program,
             launcher: Vec::new(),
             extra_args: Vec::new(),
-            mode: ServerMode::Multiplex,
             vibe_home,
             home: None,
             cwd,
@@ -188,8 +159,7 @@ pub enum SupervisorError {
     /// A core-owned prelaunch check refused to start the server.
     #[error("server startup check failed: {0}")]
     BeforeLaunch(String),
-    /// The requested feature is not available in this mode (e.g. channels on a single-connection
-    /// server).
+    /// The requested operation is unavailable in the current supervisor state.
     #[error("not supported: {0}")]
     Unsupported(&'static str),
     /// The secret provider failed.

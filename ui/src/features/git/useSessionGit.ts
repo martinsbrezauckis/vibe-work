@@ -23,7 +23,7 @@ const NO_GIT = createStore<GitUi>({
 const DISCOVERY_POLL = 1000;
 
 /** Whether the session folder itself is in Git, independent of a selected child repository. */
-export function sessionHasGit(status: GitStatusView | undefined): boolean {
+function sessionHasGit(status: GitStatusView | undefined): boolean {
   return status?.repos.some((repo) => repo.root === ".") === true;
 }
 

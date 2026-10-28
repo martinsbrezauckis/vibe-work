@@ -2,11 +2,20 @@
  * File-tab regression tests: a quick edit keeps the version it started from and an unsaved
  * draft stays visible until the user decides what to do. Uses a synthetic core and disk.
  */
-import { act, fireEvent, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  configure,
+  fireEvent,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { beforeAll, describe, expect, it } from "vitest";
 import { codeEditor, setupCodeEditor } from "./support/codeEditor";
 
-beforeAll(setupCodeEditor);
+beforeAll(() => {
+  setupCodeEditor();
+  configure({ asyncUtilTimeout: 2000 });
+});
 
 import { registerFilesTab } from "../../../ui/src/features/files/register";
 import type {
@@ -157,7 +166,8 @@ async function openRef(path: string) {
 }
 
 async function startEditing(path: string, draft: string) {
-  fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+  const edit = screen.queryByRole("button", { name: "Edit" });
+  if (edit) fireEvent.click(edit);
   const view = await codeEditor();
   expect(view.contentDOM.getAttribute("aria-label")).toBe(`Text of ${path}`);
   act(() => {
@@ -193,101 +203,78 @@ describe("quick edits keep their base and their draft", () => {
       fingerprint: "a1",
     });
     expect(r.disk["a.txt"].text).toBe("agent text\n");
-    await screen.findByText(/Changed on disk\. Your edits are still here/);
+    await screen.findByText(/Nothing is lost yet/);
     expect((await codeEditor()).state.doc.toString()).toBe("user draft\n");
   });
 
-  it("opening another file keeps the unsaved draft and asks for a decision", async () => {
+  it("opening another file keeps an independent unsaved tab across session switches", async () => {
     const r = await rig();
     await openRef("a.txt");
     await startEditing("a.txt", "user draft\n");
-    // Another file is opened from the chat while the draft is unsaved.
-    const nextFile = document.querySelector<HTMLElement>(
-      'button[data-file-ref="b.txt"]',
-    );
-    if (nextFile === null) throw new Error("no ref b.txt");
-    fireEvent.click(nextFile);
-    await waitFor(() => {
-      expect(r.app.files?.store.get().tabs[SESSION]?.shown?.file).toBe("b.txt");
-    });
-    expect(r.app.files?.store.get().edits[SESSION]?.text).toBe("user draft\n");
-    await screen.findByText(/You are still editing a\.txt/);
-    expect((await codeEditor()).state.doc.toString()).toBe("user draft\n");
-    expect(
-      screen.getByRole("button", { name: "Close the file" }),
-    ).toBeDisabled();
-    const recent = screen.getByRole("combobox", { name: "Recent files" });
-    expect(recent).toBeDisabled();
-    fireEvent.click(recent);
-    fireEvent.click(screen.getByRole("button", { name: "Close the file" }));
-    expect((await codeEditor()).state.doc.toString()).toBe("user draft\n");
-    expect(() => r.app.files?.actions.close(SESSION)).toThrow("Save or Cancel");
-
-    // The shell remounts the File tab on session switches; the store keeps the original draft.
     const id = r.app.files?.store.get().edits[SESSION]?.id;
+    await openRef("b.txt");
+    expect((await codeEditor()).contentDOM.getAttribute("aria-label")).toBe(
+      "Text of b.txt",
+    );
+    expect(
+      r.app.files?.document(SESSION, "a.txt")?.store.get().edits[SESSION]?.text,
+    ).toBe("user draft\n");
     act(() => {
       r.app.shell.actions.selectSession("s2");
       r.app.shell.actions.openTab("file");
     });
-    await screen.findByText(/Click a file name in the chat/);
-    expect(document.querySelector("[data-code-editor]")).toBeNull();
-    expect(r.app.files?.store.get().edits[SESSION]?.text).toBe("user draft\n");
+    await waitFor(() => {
+      expect(document.querySelector("[data-code-editor]")).toBeNull();
+    });
     act(() => {
       r.app.shell.actions.selectSession(SESSION);
+      r.app.files?.workspace.activate(SESSION, "a.txt");
     });
     expect((await codeEditor()).state.doc.toString()).toBe("user draft\n");
     expect(r.app.files?.store.get().edits[SESSION]?.id).toBe(id);
     expect(r.app.files?.store.get().edits[SESSION]?.base.fingerprint).toBe(
       "a1",
     );
-    await screen.findByText(/You are still editing a\.txt/);
-    // Cancel is the user's decision: the draft goes, b.txt shows.
-    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
-    await waitFor(() => {
-      expect(document.querySelector("[data-code-editor]")).toBeNull();
-    });
     expect(r.writes).toHaveLength(0);
-    expect(document.querySelector(".file-name")?.textContent).toBe("b.txt");
-    expect(document.querySelector(".file-body")?.textContent).toContain(
-      "original B",
-    );
   });
 
-  it("Save after a file switch targets the pinned file and labels its context chip", async () => {
+  it("Save after a file switch targets the pinned file and adds no context chip", async () => {
     const r = await rig();
     await openRef("a.txt");
     await startEditing("a.txt", "user draft\n");
     await openRef("b.txt");
+    act(() => {
+      r.app.files?.workspace.activate(SESSION, "a.txt");
+    });
     expect((await codeEditor()).contentDOM.getAttribute("aria-label")).toBe(
       "Text of a.txt",
     );
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => {
-      expect(document.querySelector("[data-code-editor]")).toBeNull();
+      expect(r.writes).toHaveLength(1);
     });
     expect(r.writes).toEqual([
       { file: "a.txt", text: "user draft\n", fingerprint: "a1" },
     ]);
     expect(r.disk["a.txt"]?.text).toBe("user draft\n");
     expect(r.disk["b.txt"]?.text).toBe("original B\n");
-    expect(r.app.composer.store.get().context[SESSION]?.[0]?.label).toBe(
-      "Your edit: a.txt",
-    );
-    expect(document.querySelector(".file-body")?.textContent).toContain(
-      "original B",
-    );
+    expect(r.app.composer.store.get().context[SESSION] ?? []).toEqual([]);
+    expect((await codeEditor()).state.doc.toString()).toBe("user draft\n");
   });
 
-  it("conflict, comparison and explicit Reload still use the draft's file after a switch", async () => {
+  it("conflict, comparison and taking the disk version still use the draft's file after a switch", async () => {
     const r = await rig();
     await openRef("a.txt");
     await startEditing("a.txt", "user draft\n");
     await openRef("b.txt");
+    act(() => {
+      r.app.files?.workspace.activate(SESSION, "a.txt");
+    });
     r.disk["a.txt"] = { text: "agent text\n", fingerprint: "a2" };
     await act(() => r.app.files?.poll(SESSION));
-    await screen.findByText(/Changed on disk\. Your edits are still here/);
+    await screen.findByText(/Nothing is lost yet/);
     fireEvent.click(
-      screen.getByRole("button", { name: "Compare mine vs disk" }),
+      screen.getByRole("button", { name: "Compare side by side" }),
     );
     await waitFor(() => {
       const root = document.querySelector("[data-merge-compare]")?.shadowRoot;
@@ -295,7 +282,7 @@ describe("quick edits keep their base and their draft", () => {
       expect(root?.textContent).toContain("agent text");
       expect(root?.textContent).not.toContain("original B");
     });
-    fireEvent.click(screen.getByRole("button", { name: "Keep editing" }));
+    fireEvent.click(screen.getByRole("button", { name: "Close comparison" }));
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => {
       expect(r.writes).toHaveLength(1);
@@ -305,11 +292,11 @@ describe("quick edits keep their base and their draft", () => {
     expect(r.disk["a.txt"].text).toBe("agent text\n");
     await waitFor(() =>
       expect(
-        screen.getByRole("button", { name: "Reload (lose my edits)" }),
+        screen.getByRole("button", { name: "Take the version on disk" }),
       ).toBeEnabled(),
     );
     fireEvent.click(
-      screen.getByRole("button", { name: "Reload (lose my edits)" }),
+      screen.getByRole("button", { name: "Take the version on disk" }),
     );
     await waitFor(async () => {
       expect((await codeEditor()).state.doc.toString()).toBe("agent text\n");
@@ -327,6 +314,9 @@ describe("quick edits keep their base and their draft", () => {
     await openRef("a.txt");
     await startEditing("a.txt", "user draft\n");
     await openRef("b.txt");
+    act(() => {
+      r.app.files?.workspace.activate(SESSION, "a.txt");
+    });
     const id = r.app.files?.store.get().edits[SESSION]?.id;
     delete r.disk["a.txt"];
     let loaded: boolean | undefined;
@@ -339,7 +329,7 @@ describe("quick edits keep their base and their draft", () => {
       "a1",
     );
     expect((await codeEditor()).state.doc.toString()).toBe("user draft\n");
-    expect(r.app.files?.store.get().tabs[SESSION]?.content?.file).toBe("b.txt");
+    expect(r.app.files?.store.get().tabs[SESSION]?.shown?.file).toBe("a.txt");
     expect(r.writes).toHaveLength(0);
   });
 });

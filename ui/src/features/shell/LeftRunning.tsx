@@ -123,7 +123,7 @@ function LeftRunningDialog({
                   <ActionButton
                     data-testid="shell.left-running-stop"
                     variant="danger"
-                    small
+                    shape="outlined"
                     disabled={state.stopping.includes(item.id)}
                     aria-label={`Stop ${processLabel(item)}`}
                     onClick={() => {

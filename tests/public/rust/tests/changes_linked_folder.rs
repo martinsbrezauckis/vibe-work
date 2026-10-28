@@ -14,7 +14,7 @@ use std::path::Path;
 use std::time::Duration;
 
 use changes::TempRepo;
-use common::core::{ScriptRig, script_core_with};
+use common::core::{ScriptRig, real_core};
 use serde_json::{Value, json};
 use vw_core_api::{
     ChangesMode, ChangesResult, ChangesView, Command, CommandResult, CoreError, CoreEvent, Origin,
@@ -22,10 +22,17 @@ use vw_core_api::{
 
 async fn rig(name: &str, data: &Path) -> ScriptRig {
     let data = data.to_path_buf();
-    script_core_with(name, &["--status-events", "--edit-files"], move |config| {
-        config.changes_dir = Some(data);
-    })
+    real_core(
+        name,
+        &[],
+        None,
+        common::real_vibe::edit_script(),
+        move |config| {
+            config.changes_dir = Some(data);
+        },
+    )
     .await
+    .0
 }
 
 async fn exec(rig: &ScriptRig, value: Value) -> Result<CommandResult, CoreError> {
@@ -83,14 +90,22 @@ async fn turn_with_edits(rig: &ScriptRig, sid: &str, text: &str) {
     .await
     .unwrap();
     let waited = tokio::time::timeout(Duration::from_secs(60), async {
+        let mut changed = false;
+        let mut idle = false;
         while let Some(event) = events.next().await {
-            if matches!(event, CoreEvent::ChangesUpdated { .. }) {
+            changed |= matches!(event, CoreEvent::ChangesUpdated { .. });
+            idle |= common::channel_rig::went_idle(&event);
+            if changed && idle {
                 return;
             }
         }
+        panic!("session event stream ended before changes and idle");
     })
     .await;
-    assert!(waited.is_ok(), "no changesUpdated event within 60 s");
+    assert!(
+        waited.is_ok(),
+        "no changesUpdated and idle events within 60 s"
+    );
 }
 
 /// Starts a session in the repository's real folder or through the link, lets its agent edit `a.txt`, then checks

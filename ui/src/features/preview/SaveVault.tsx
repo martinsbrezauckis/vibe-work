@@ -3,6 +3,7 @@
  * component receives only an opaque handle and display metadata, opens the name prompt, and reports the result.
  * Depends on: browser controller, SaveNameDialog, shared chrome overlay host, app toasts. Called by: PreviewTab.
  */
+import { Button } from "../../components/Controls";
 import { type ReactElement, useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
@@ -154,11 +155,12 @@ export function SaveVault({
   );
 
   useEffect(() => {
-    const off = onContextSave((clickedSession) => {
-      if (clickedSession === sessionId) choose("contextSelection");
+    // The click names its page: the session for the app preview, the page key for a web page.
+    const off = onContextSave((clickedPage) => {
+      if (clickedPage === (tabId ?? sessionId)) choose("contextSelection");
     });
     return off;
-  }, [choose, sessionId]);
+  }, [choose, sessionId, tabId]);
 
   const save = (name: string) => {
     const activeChoice = choiceRef.current;
@@ -205,10 +207,10 @@ export function SaveVault({
             }}
           />
         ) : (
-          <button
+          <Button
             data-testid="preview.save-vault-choose-2"
             type="button"
-            className="preview-btn"
+            appearance="preview"
             data-vault-save="selection"
             disabled={blocked || disabled || choosing || localChoice !== null}
             title="Save to vault"
@@ -218,12 +220,13 @@ export function SaveVault({
             }}
           >
             Save to vault
-          </button>
+          </Button>
         )}
-        <button
+        <Button
           data-testid="preview.save-vault-set-menu-open"
           type="button"
-          className={compact ? "ibtn preview-save-more" : "preview-btn preview-save-more"}
+          appearance={compact ? "icon" : "preview"}
+          placement="browser-save"
           data-vault-save="more"
           ref={more}
           aria-label="More ways to save"
@@ -236,7 +239,7 @@ export function SaveVault({
           }}
         >
           ▾
-        </button>
+        </Button>
         {menuOpen && !blocked && (
           <div
             data-testid="preview.save-vault-preview-save-menu"

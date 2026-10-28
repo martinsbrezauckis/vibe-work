@@ -47,6 +47,11 @@ impl PluginApprovals {
         Ok(approvals)
     }
 
+    /// The pinned Vibe's Python, for other read-only helpers (`vibe_rules`).
+    pub(crate) fn vibe_python(&self) -> Option<std::path::PathBuf> {
+        self.identity.python()
+    }
+
     pub(crate) fn before_launch(&self, program: &Path) -> Result<(), CoreError> {
         self.identity.set_program(program);
         self.sweep()
@@ -103,9 +108,20 @@ impl PluginApprovals {
                 std::io::Error::other(e.to_string()),
             )
         };
+        // The same pinned resolver and bounds used by Tools must accept the staged package
+        // before it is published or reported installed.
+        let name = self
+            .identity
+            .name(staging, &self.home)
+            .map_err(record_error)?
+            .ok_or_else(|| {
+                vw_market::MarketError::NotInstallable(
+                    "This package is not readable by Vibe; nothing was installed.".to_owned(),
+                )
+            })?;
         let mut approved = self.read().map_err(record_error)?;
         store.commit(id, staging)?;
-        approved.insert(id.to_owned(), id.to_owned());
+        approved.insert(id.to_owned(), name);
         if let Err(problem) = self.write(&approved) {
             let _ = crate::market_controls::move_plugin(&store.plugins_dir().join(id), false);
             return Err(record_error(problem));
@@ -116,10 +132,17 @@ impl PluginApprovals {
     /// Move every unapproved child, including invalid or linked plugin folders, before Vibe sees the root.
     /// Any failed move stops the loading request; existing destinations are never overwritten.
     pub(crate) fn sweep(&self) -> Result<(), CoreError> {
+        self.sweep_kept().map(drop)
+    }
+
+    /// [`Self::sweep`], returning the names of the folders it left in `plugins/` (all approved). A folder that
+    /// appears after this call is not in the list: readers use it to skip folders no sweep has checked yet.
+    pub(crate) fn sweep_kept(&self) -> Result<Vec<String>, CoreError> {
         let _held = self.lock.lock().unwrap_or_else(PoisonError::into_inner);
         let root = self.home.join("plugins");
+        let mut kept = Vec::new();
         match std::fs::symlink_metadata(&root) {
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(kept),
             Ok(m) if m.is_dir() && !m.file_type().is_symlink() => {}
             _ => return Err(error("the plugins root is not a plain folder")),
         }
@@ -139,10 +162,12 @@ impl PluginApprovals {
             } else {
                 false
             };
-            if !allowed {
+            if allowed {
+                kept.extend(entry.file_name().to_str().map(str::to_owned));
+            } else {
                 crate::market_controls::move_plugin(&folder, false)?;
             }
         }
-        Ok(())
+        Ok(kept)
     }
 }

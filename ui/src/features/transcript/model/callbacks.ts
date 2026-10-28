@@ -6,15 +6,17 @@
  * Depends on: entries.ts, protocol/core. Called by: the approval and question cards, the audit item,
  * the `ui/transcript` route.
  * Invariants: the offered decisions are Vibe's own `detail.choices` (all five when Vibe omits the
- * field, its model default); a multi-select answer joins the chosen labels with ", " and sets
+ * field, its model default) minus "Always allow", and "Allow for this session" only where the core offers it
+ * (`offeredDecisions`); a multi-select answer joins the chosen labels with ", " and sets
  * `isOther` when any part is free text (Vibe's own encoding, `vibe/acp/agent.py:254-262`).
  */
+import { toolText } from "./toolLabels";
 import type { JsonValue } from "../../../protocol/core";
 import { term } from "../../../vocabulary";
 import { type Obj, arr, detailOf, obj, stateOf, str } from "./entries";
 
 /** Vibe's approval decisions (`ApprovalDecisionType`, `models.py:302`) in display order. */
-export const DECISIONS = [
+const DECISIONS = [
   "approve",
   "approve_for_session",
   "approve_permanently",
@@ -25,39 +27,33 @@ export const DECISIONS = [
 /** One approval decision. */
 export type Decision = (typeof DECISIONS)[number];
 
-/** Button text per decision. */
-export const DECISION_LABEL: Record<Decision, string> = {
-  approve: "Allow once",
-  approve_for_session: "Allow for this session",
-  approve_permanently: "Always allow",
-  deny: "Deny",
-  cancel_turn: "Stop the turn",
-};
-
 /** Past-tense text per decision for the audit row. */
 const DECISION_DONE: Record<Decision, string> = {
   approve: "Allowed once",
   approve_for_session: "Allowed for this session",
   approve_permanently: "Always allowed",
-  deny: "Denied",
-  cancel_turn: "Stopped the turn",
+  deny: "Said No",
+  cancel_turn: "Stopped",
 };
 
 function isDecision(value: JsonValue | undefined): value is Decision {
   return typeof value === "string" && (DECISIONS as readonly string[]).includes(value);
 }
 
-/** The decisions this approval offers, in Vibe's order. */
-export function offeredDecisions(entry: Obj): Decision[] {
+/**
+ * The decisions an approval card offers, in Vibe's order: Vibe's own `detail.choices` (all
+ * five when Vibe omits the field, its model default) without "Always allow", which is never offered (Vibe would keep
+ * a lasting rule in Vibe Work's config for every project), and with "Allow for this session" only when the core's
+ * ask offers it (`offers` holds "session": Vibe Work can keep that grant; it sends Vibe a once-only allow). Unknown
+ * ask (`offers` undefined): no session answer.
+ */
+export function offeredDecisions(entry: Obj, offers: readonly string[] | undefined): Decision[] {
   const choices = detailOf(entry)["choices"];
-  if (!Array.isArray(choices)) return [...DECISIONS];
-  return choices.filter(isDecision);
-}
-
-/** Path scopes offered for a granting decision (`PathGrantScope`), if any. */
-export function offeredScopes(entry: Obj): string[] {
-  return arr(detailOf(entry)["pathScopeChoices"]).filter(
-    (s): s is string => s === "exact" || s === "directory_recursive",
+  const vibe = Array.isArray(choices) ? choices.filter(isDecision) : [...DECISIONS];
+  return vibe.filter(
+    (d) =>
+      d !== "approve_permanently" &&
+      (d !== "approve_for_session" || offers?.includes("session") === true),
   );
 }
 
@@ -170,34 +166,48 @@ export type AnswerOrigin = "ui" | "debug-api";
  * is "via the Debug API"), else Vibe's `approvalSource` on the gated effect. Anything else (the CLI,
  * or an answer from before the app started) is "answered outside this window".
  */
-export function answeredBy(
+function answeredBy(
   related: Obj | null,
   via: AnsweredVia | undefined,
   origin?: AnswerOrigin,
 ): string {
-  if (via === "window") return "by you, in this window";
+  if (via === "window") return "by you";
   if (via === "uiControl") return "by the Debug API (UI control)";
   if (origin === "debug-api") return "via the Debug API";
-  if (origin === "ui") return "by you, in the app";
+  if (origin === "ui") return "by you";
   const source = str(stateOf(related ?? {})["approvalSource"]);
   if (source !== null && source !== "user") return `by ${SOURCE[source] ?? source}`;
   return "answered outside this window";
 }
 
-/** The one-line audit text of a resolved callback. */
+/** What the core's ask record says about an allowed answer: for this session, and whether a kept grant gave it. */
+export interface AskAllowed {
+  scope: string;
+  by: string;
+}
+
+/**
+ * The one-line audit text of a resolved callback. `allowed` is the core's ask record outcome when it was an allow:
+ * Vibe always receives a once-only allow (Vibe Work keeps session grants itself), so "for this session" and "the
+ * earlier answer" come from the record, not from Vibe's entry.
+ */
 export function auditText(
   entry: Obj,
   related: Obj | null,
   via: AnsweredVia | undefined,
   origin?: AnswerOrigin,
+  allowed?: AskAllowed,
 ): string {
   const state = stateOf(entry);
   const status = str(state["status"]) ?? "";
   const detail = detailOf(entry);
-  const summary =
-    str(obj(approvalEffect(entry)["display"])?.["summary"]) ?? str(entry["title"]) ?? "request";
+  const summary = toolText(
+    str(approvalEffect(entry)["toolName"]) ?? "",
+    str(obj(approvalEffect(entry)["display"])?.["summary"]) ?? str(entry["title"]) ?? "request",
+    str(obj(approvalEffect(entry)["input"])?.["command"]),
+  );
   if (status === "cancelled" || status === "expired") {
-    const word = status === "cancelled" ? "Closed" : "Expired";
+    const word = status === "cancelled" ? "Closed" : "No answer in time";
     const reason = str(state["reason"]);
     return `${word}: ${summary}${reason !== null && reason !== "" ? ` (${reason})` : ""}`;
   }
@@ -212,6 +222,13 @@ export function auditText(
     return `Answered: ${answers.join(" · ") || "(empty)"} · ${answeredBy(null, via, origin)}`;
   }
   const decision = obj(output["decision"])?.["type"];
-  const done = isDecision(decision) ? DECISION_DONE[decision] : "Answered";
+  if (allowed?.scope === "session" && allowed.by === "grant")
+    return `${DECISION_DONE.approve_for_session} (your earlier answer): ${summary}`;
+  const done =
+    allowed?.scope === "session"
+      ? DECISION_DONE.approve_for_session
+      : isDecision(decision)
+        ? DECISION_DONE[decision]
+        : "Answered";
   return `${done}: ${summary} · ${answeredBy(related, via, origin)}`;
 }

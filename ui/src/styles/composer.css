@@ -13,7 +13,7 @@
   container-type: inline-size;
   margin-block: 0;
   border: 1px solid var(--line-2);
-  border-radius: 16px;
+  border-radius: var(--radius-dialog);
   background: var(--panel);
   position: relative;
   box-shadow: var(--shadow);
@@ -44,7 +44,7 @@
   align-items: center;
   gap: 10px;
   padding: 9px 14px 0;
-  font-size: 12.5px;
+  font-size: var(--text-12-5);
   color: var(--text-2);
 }
 .runbar .stop {
@@ -60,7 +60,7 @@
   resize: none;
   padding: 14px 16px 6px;
   color: var(--text);
-  font: 15px/1.5 var(--font-ui);
+  font: var(--text-15)/var(--leading-ui) var(--font-ui);
   min-height: 54px;
   outline: none;
 }
@@ -101,7 +101,7 @@
   cursor: pointer;
   background: none;
   font: inherit;
-  font-size: 12px;
+  font-size: var(--text-12);
 }
 .cchip:hover:where(:not(:disabled)) {
   background: var(--hover);
@@ -114,12 +114,12 @@
 }
 .cchip .effort {
   color: var(--text-3);
-  font-size: 11px;
+  font-size: var(--text-11);
 }
 .lv {
   width: 8px;
   height: 8px;
-  border-radius: 50%;
+  border-radius: var(--radius-round);
   flex: none;
   background: var(--text-3);
 }
@@ -140,7 +140,7 @@
   height: 32px;
   display: grid;
   place-items: center;
-  border-radius: 9px;
+  border-radius: var(--radius-9);
   border: 0;
   background: var(--primary-bg);
   color: var(--primary-fg);
@@ -164,7 +164,7 @@
   flex: none;
 }
 .ccorner .ibtn.mic {
-  border-radius: 50%;
+  border-radius: var(--radius-round);
   box-shadow: inset 0 0 0 1px var(--line-2);
 }
 .ccorner .ibtn.mic[aria-pressed="true"] {
@@ -204,32 +204,13 @@
     transform var(--t-ui) var(--ease-out),
     visibility 0s;
 }
-.mini {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  border: 1px solid var(--line-2);
-  background: var(--raised);
-  color: var(--text-2);
-  border-radius: 7px;
-  padding: 3px 9px;
-  font: 500 12px var(--font-ui);
-  cursor: pointer;
-}
-.mini:hover:not(:disabled) {
-  color: var(--text);
-  border-color: var(--line-3);
-}
-.mini[aria-checked="true"] {
-  color: var(--text);
-  border-color: var(--orange-2);
-}
+
 .ibtn.sm {
   width: 24px;
   height: 24px;
 }
 .hint {
-  font-size: 11.5px;
+  font-size: var(--text-11-5);
   color: var(--text-3);
   text-align: center;
   margin: 8px 0 0;
@@ -251,8 +232,8 @@
   align-items: center;
   gap: 7px;
   max-width: 100%;
-  font-size: 12px;
-  border-radius: 8px;
+  font-size: var(--text-12);
+  border-radius: var(--radius-md);
   color: var(--text-2);
   min-width: 0;
 }
@@ -263,12 +244,12 @@
 }
 .ctxchip b {
   color: var(--text);
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   white-space: nowrap;
 }
 .ctxchip .mono {
-  font-family: var(--mono);
-  font-size: 11px;
+  font-family: var(--font-mono);
+  font-size: var(--text-11);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -283,7 +264,7 @@
   width: 34px;
   height: 24px;
   object-fit: cover;
-  border-radius: 5px;
+  border-radius: var(--radius-5);
 }
 .att-name {
   overflow: hidden;
@@ -298,7 +279,7 @@
   border: 0;
   background: none;
   color: var(--text-3);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   cursor: pointer;
   display: grid;
   place-items: center;
@@ -309,6 +290,16 @@
 .att button:hover:where(:not(:disabled)) {
   background: var(--hover);
   color: var(--text);
+}
+/* A code chip's label is a text link, beside its existing remove button. */
+.ctxchip button.fref {
+  width: auto;
+  height: auto;
+  display: inline;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* Queued turns above the composer; Retry after a stopped or failed turn. */
@@ -327,17 +318,17 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 12.5px;
+  font-size: var(--text-12-5);
   color: var(--text-2);
   border: 1px dashed var(--line-2);
-  border-radius: 9px;
+  border-radius: var(--radius-9);
   padding: 4px 6px 4px 10px;
   min-width: 0;
 }
 .queue-n {
-  font-family: var(--mono);
+  font-family: var(--font-mono);
   color: var(--text-3);
-  font-size: 11px;
+  font-size: var(--text-11);
 }
 .queue-text {
   flex: 1;
@@ -356,14 +347,14 @@
   color: var(--text);
   background: var(--panel);
   border: 1px solid var(--line-3);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   padding: 3px 6px;
 }
 .retry-row {
   display: flex;
   align-items: center;
   gap: 10px;
-  font-size: 12.5px;
+  font-size: var(--text-12-5);
   color: var(--text-2);
 }
 
@@ -377,23 +368,23 @@
   position: absolute;
   left: 0;
   bottom: calc(100% + 8px);
-  z-index: 20;
+  z-index: var(--z-panel);
   width: min(340px, 86vw);
   max-height: 380px;
   overflow: auto;
   display: grid;
   padding: 6px;
   background: var(--raised);
-  border-radius: 12px;
+  border-radius: var(--radius-xl);
   box-shadow: var(--shadow);
 }
 .cmenu-sec {
-  font-size: 11.5px;
+  font-size: var(--text-11-5);
   color: var(--text-3);
   padding: 6px 10px 2px;
 }
 .cmenu-empty {
-  font-size: 12.5px;
+  font-size: var(--text-12-5);
   color: var(--text-3);
   padding: 6px 10px;
 }
@@ -404,9 +395,9 @@
   gap: 10px;
   align-items: flex-start;
   padding: 7px 10px;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   cursor: pointer;
-  font-size: 13px;
+  font-size: var(--text-13);
   color: var(--text-2);
 }
 .cmenu-item .lv {
@@ -423,7 +414,7 @@
   gap: 2px;
 }
 .cmenu-text .d {
-  font-size: 12px;
+  font-size: var(--text-12);
   color: var(--text-3);
 }
 .cmenu-levels {
@@ -445,17 +436,21 @@
   max-width: 560px;
   background: var(--raised);
   box-shadow: var(--shadow);
-  border-radius: 12px;
+  border-radius: var(--radius-xl);
   padding: 6px;
-  z-index: 20;
+  z-index: var(--z-popover);
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
 }
 .slash-list {
   /* Eight rows (34 px) plus the two section headings. */
   max-height: 324px;
+  min-height: 0;
   overflow: auto;
 }
 .slash .secl {
-  font-size: 11.5px;
+  font-size: var(--text-11-5);
   color: var(--text-3);
   padding: 6px 10px 2px;
 }
@@ -465,9 +460,9 @@
   gap: 10px;
   align-items: center;
   padding: 7px 10px;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   cursor: pointer;
-  font-size: 13px;
+  font-size: var(--text-13);
   color: var(--text-2);
 }
 .slash .it[aria-selected="true"] {
@@ -475,10 +470,10 @@
   color: var(--text);
 }
 .slash .it b {
-  font-family: var(--mono);
-  font-weight: 500;
+  font-family: var(--font-mono);
+  font-weight: var(--weight-medium);
   color: var(--orange-2);
-  font-size: 12.5px;
+  font-size: var(--text-12-5);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -486,7 +481,7 @@
 .slash .it mark {
   background: transparent;
   color: var(--text);
-  font-weight: 700;
+  font-weight: var(--weight-bold);
 }
 .slash .it > span {
   overflow: hidden;
@@ -495,22 +490,21 @@
 }
 .slash-empty {
   padding: 10px;
-  font-size: 13px;
+  font-size: var(--text-13);
   color: var(--text-3);
 }
 /* What the selected row runs: above the menu, so the scrolling list never clips it. */
 .slash-tip {
-  position: absolute;
-  right: 0;
-  bottom: calc(100% + 4px);
+  flex-shrink: 0;
+  align-self: flex-end;
   padding: 3px 8px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: var(--raised);
   box-shadow: var(--shadow);
-  font-family: var(--mono);
-  font-size: 10.5px;
+  font-family: var(--font-mono);
+  font-size: var(--text-10-5);
   color: var(--text-3);
-  white-space: nowrap;
+  overflow-wrap: anywhere;
   pointer-events: none;
 }
 
@@ -524,14 +518,14 @@
   color: var(--text);
 }
 .rewind-dialog .d {
-  font-size: 12.5px;
+  font-size: var(--text-12-5);
   color: var(--text-3);
   margin: 0;
 }
 .rewind-files {
   margin: 0;
   padding-left: 18px;
-  font-size: 12px;
+  font-size: var(--text-12);
   overflow-wrap: anywhere;
 }
 .rewind-acts {
@@ -559,7 +553,10 @@
 }
 
 .composer-plugin-reload {
-  display: block;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
   margin-top: 8px;
   text-align: center;
 }

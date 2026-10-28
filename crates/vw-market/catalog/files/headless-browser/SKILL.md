@@ -1,6 +1,6 @@
 ---
 name: headless-browser
-description: Use the headless browser plugin (Playwright tools such as browser_navigate, browser_snapshot, browser_click, browser_type) to open and read web pages the built-in browser does not open for you, such as sites on this computer or on the local network, and to work through multi-step pages. It has none of the built-in browser's address guards.
+description: Use the headless browser plugin (Playwright tools such as browser_navigate, browser_snapshot, browser_click, browser_type) to open and read web pages the built-in browser does not open for you, such as sites on this computer or on the local network, and to work through multi-step pages. It has none of the built-in browser's address guards. Call `use_headless_browser` first (its tools load only when needed).
 license: MIT
 ---
 
@@ -17,7 +17,9 @@ start (nothing is kept between runs). The user installed it on purpose from the 
 Prefer the built-in browser for ordinary public sites: it shows the user what you see and keeps its address guards.
 
 ## How to use it
-1. Find the tools: search your tools for `browser_navigate` (they come from this plugin's server).
+1. Turn the tools on first: call `tools.mcp_vw.use_headless_browser({})`. Its tools load only when needed and
+   arrive after your reply; Vibe Work then continues the chat by itself. After that, search your tools for
+   `browser_navigate` (they come from this plugin's server).
 2. `browser_navigate` with the full address, then `browser_snapshot` to read the page as an accessibility tree.
    Element references (`ref`) from the snapshot are what `browser_click` and `browser_type` take.
 3. After each action take a new snapshot before the next action; references change when the page changes.

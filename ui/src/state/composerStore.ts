@@ -24,6 +24,9 @@
  * - Drafts are stored on every change (when `persist`) WITH their provenance (`user` / `debug-api` /
  *   `literal`). The default reasoning preference is stored only on an explicit pick. Images and context
  *   stay in memory: they can be large and belong to one message. Unknown draft provenance loads as Debug API.
+ * - A long paste is held aside (`pastes`, in memory) behind a marker in the draft; `takeContent` puts the
+ *   full text back in place of each marker, so what is sent is the message as pasted. Only what the user
+ *   can see is a command: a message that starts with a marker is sent as text (`literal`).
  */
 import type { JsonValue } from "../protocol/core";
 import {
@@ -36,13 +39,25 @@ import {
 } from "../features/composer/model/drafts";
 import type { LoopRow } from "../features/composer/model/loops";
 import type { ContextItem, ImageItem } from "../features/composer/model/message";
+import { queuedBack } from "../features/composer/model/queuedBack";
+import {
+  type PasteItem,
+  expandPastes,
+  pasteMarker,
+  pastesIn,
+} from "../features/composer/model/pastes";
 import { createStore } from "./createStore";
 import { loadDefaultReasoning, saveDefaultReasoning } from "./defaultReasoning";
 
 /** Keys of a send that failed in transport, reused when the same content is sent again. */
 /** The plain note when Vibe refuses to load changed plugins into an open chat. */
 export const PLUGIN_RELOAD_REFUSED =
-  "This chat cannot load the new plugins. A new chat starts with them.";
+  "This chat could not refresh its plugins and still has its previous plugins.";
+
+/** Both the definitive refusal and the uncertain-reply message describe a held plugin refresh. */
+export const isPluginReloadFailure = (message: string): boolean =>
+  message.includes(PLUGIN_RELOAD_REFUSED) ||
+  message.includes("This chat could not finish refreshing its plugins");
 
 export interface ResendKeys {
   /** The content they belong to (`contentKey`). */
@@ -76,6 +91,8 @@ export interface ComposerState {
   drafts: Drafts;
   context: Readonly<Record<string, readonly ContextItem[]>>;
   images: Readonly<Record<string, readonly ImageItem[]>>;
+  /** Long pastes held behind a marker in the draft, until the message is sent or cleared. */
+  pastes: Readonly<Record<string, readonly PasteItem[]>>;
   /** Sessions with a send in flight. */
   sending: Readonly<Record<string, true>>;
   /** Manual context compaction in progress, cancellable through Stop. */
@@ -121,6 +138,8 @@ export interface NewChatHeld {
   trustedAccessPick: boolean;
   alias: string | null;
   effort: string | null;
+  modelName?: string;
+  modelDisplayName?: string;
   /** Who held a pick: `debug-api` once any held pick came from a Debug API client (provenance), `null`: none. */
   by: "ui" | "debug-api" | null;
   askFolder: boolean;
@@ -139,6 +158,7 @@ const EMPTY: ComposerState = {
   drafts: {},
   context: {},
   images: {},
+  pastes: {},
   sending: {},
   compacting: {},
   notes: {},
@@ -185,14 +205,18 @@ export function takeContent(composer: ComposerStore, sessionId: string): SentCon
   const s = composer.store.get();
   const context = s.context[sessionId] ?? [];
   const images = s.images[sessionId] ?? [];
-  const text = s.drafts[sessionId] ?? "";
+  const draft = s.drafts[sessionId] ?? "";
+  const pastes = pastesIn(draft, s.pastes[sessionId] ?? []);
+  const text = expandPastes(draft, pastes);
+  // The text a paste brings in is never the start of a `!cmd` or `/command` the user did not see.
+  const hidden = pastes.some((item) => draft.trimStart().startsWith(pasteMarker(item)));
   const fromApi =
     (s.draftBy[sessionId] === "debug-api" && text !== "") ||
     context.some((c) => c.by === "debug-api") ||
     images.some((i) => i.by === "debug-api");
   const content: SentContent = {
     // Debug API text is the user's (its `!cmd` runs); only a rewound message is literal.
-    literal: s.literal[sessionId] === true,
+    literal: s.literal[sessionId] === true || hidden,
     by: fromApi ? "debug-api" : "user",
     text,
     context,
@@ -258,7 +282,12 @@ export function createComposerStore(persist: boolean) {
     });
   }
   let counter = 0;
+  let prepareContext:
+    | ((sessionId: string, context: readonly ContextItem[]) => Promise<readonly ContextItem[]>)
+    | null = null;
   const taking = new Set<string>();
+  // Item ids outlive a pause and clearing/sending the draft: late partial events must remain harmless.
+  const returnedQueueItems = new Map<string, Set<string>>();
   const nextId = (prefix: string) => {
     counter += 1;
     return `${prefix}-${String(Date.now())}-${String(counter)}`;
@@ -269,6 +298,7 @@ export function createComposerStore(persist: boolean) {
       drafts: withDraft(s.drafts, sessionId, ""),
       context: setIn(s.context, sessionId, undefined),
       images: setIn(s.images, sessionId, undefined),
+      pastes: setIn(s.pastes, sessionId, undefined),
       literal: setIn(s.literal, sessionId, undefined),
       draftBy: setIn(s.draftBy, sessionId, undefined),
     }));
@@ -276,6 +306,17 @@ export function createComposerStore(persist: boolean) {
 
   return {
     store,
+    /** Documents install the save step for attachments held before a chat exists. */
+    setPrepareContext(prepare: typeof prepareContext): void {
+      prepareContext = prepare;
+    },
+    /** Saves staged attachments in the final session folder before their paths reach Vibe. */
+    prepareContext(
+      sessionId: string,
+      context: readonly ContextItem[],
+    ): Promise<readonly ContextItem[]> {
+      return prepareContext?.(sessionId, context) ?? Promise.resolve(context);
+    },
     /** True only while a send takes content out of the composer. */
     isTaking: (sessionId: string): boolean => taking.has(sessionId),
     take(sessionId: string): void {
@@ -337,6 +378,45 @@ export function createComposerStore(persist: boolean) {
       }));
       return true;
     },
+    /**
+     * Puts queued messages the core took back (a stopped or failed turn) into the composer: an empty draft
+     * becomes their text (literal, like a rewound message), a draft the user has keeps its text and gets theirs
+     * after a blank line; their images and context chips are added to the ones present.
+     */
+    takeBackQueued(sessionId: string, items: readonly JsonValue[]): boolean {
+      const seen = returnedQueueItems.get(sessionId) ?? new Set<string>();
+      const fresh = items.filter((item) => {
+        const id =
+          item !== null && typeof item === "object" && !Array.isArray(item) ? item["id"] : null;
+        if (typeof id !== "string" || seen.has(id)) return false;
+        seen.add(id);
+        return true;
+      });
+      if (fresh.length === 0) return false;
+      returnedQueueItems.set(sessionId, seen);
+      const back = queuedBack(fresh);
+      store.set((s) => {
+        const draft = s.drafts[sessionId] ?? "";
+        const text =
+          back.text === "" ? draft : draft === "" ? back.text : `${draft}\n\n${back.text}`;
+        const images = [
+          ...(s.images[sessionId] ?? []),
+          ...back.images.map((image) => ({ ...image, id: nextId("img") })),
+        ];
+        const context = [
+          ...(s.context[sessionId] ?? []),
+          ...back.context.map((item) => ({ ...item, id: nextId("ctx") })),
+        ];
+        return {
+          ...s,
+          drafts: withDraft(s.drafts, sessionId, text),
+          literal: draft === "" && back.text !== "" ? setIn(s.literal, sessionId, true) : s.literal,
+          images: setIn(s.images, sessionId, images.length > 0 ? images : undefined),
+          context: setIn(s.context, sessionId, context.length > 0 ? context : undefined),
+        };
+      });
+      return true;
+    },
     /** Adds a context chip (the text is data, shown as a chip, never put in the draft). */
     addContext(sessionId: string, item: Omit<ContextItem, "id">): ContextItem {
       const added: ContextItem = { ...item, id: nextId("ctx") };
@@ -351,6 +431,13 @@ export function createComposerStore(persist: boolean) {
         const left = (s.context[sessionId] ?? []).filter((c) => c.id !== id);
         return { ...s, context: setIn(s.context, sessionId, left.length > 0 ? left : undefined) };
       });
+    },
+    /** Holds a long paste aside; the caller puts its marker in the draft. */
+    addPaste(sessionId: string, item: PasteItem): void {
+      store.set((s) => ({
+        ...s,
+        pastes: setIn(s.pastes, sessionId, [...(s.pastes[sessionId] ?? []), item]),
+      }));
     },
     addImage(sessionId: string, image: ImageItem): void {
       store.set((s) => ({
@@ -368,7 +455,8 @@ export function createComposerStore(persist: boolean) {
     clear,
     /**
      * Puts a message back after a failed send, unless the user already typed something new (then the
-     * new text wins and the failed text is offered in the note).
+     * new text wins). `keepBoth` retains a held plugin send alongside newer typing, including attachments and
+     * provenance; a combined draft stays literal until explicitly adopted.
      */
     restore(
       sessionId: string,
@@ -377,13 +465,22 @@ export function createComposerStore(persist: boolean) {
       images: readonly ImageItem[],
       literal = false,
       by: "user" | "debug-api" = "user",
+      keepBoth = false,
     ): boolean {
       const s = store.get();
       const busy =
         (s.drafts[sessionId] ?? "") !== "" ||
         (s.context[sessionId] ?? []).length > 0 ||
         (s.images[sessionId] ?? []).length > 0;
-      if (busy) return false;
+      if (busy && !keepBoth) return false;
+      if (busy) {
+        text = [text, s.drafts[sessionId] ?? ""].filter(Boolean).join("\n\n");
+        context = [...context, ...(s.context[sessionId] ?? [])];
+        images = [...images, ...(s.images[sessionId] ?? [])];
+        // Combined drafts must stay text until explicitly adopted as a command.
+        literal = true;
+        if (s.draftBy[sessionId] === "debug-api") by = "debug-api";
+      }
       store.set((prev) => ({
         ...prev,
         drafts: withDraft(prev.drafts, sessionId, text),
@@ -412,15 +509,23 @@ export function createComposerStore(persist: boolean) {
       store.set((s) => ({
         ...s,
         notes: setIn(s.notes, sessionId, text ?? undefined),
-        pluginReloadFailed: setIn(s.pluginReloadFailed, sessionId, undefined),
+        pluginReloadFailed: setIn(
+          s.pluginReloadFailed,
+          sessionId,
+          text === null
+            ? undefined
+            : isPluginReloadFailure(text)
+              ? true
+              : s.pluginReloadFailed[sessionId],
+        ),
       }));
     },
     // Vibe's own reason ("cannot re-pin ... non-quiescent") is internal wording: it is logged, not shown.
-    pluginReloadRefused(sessionId: string): void {
+    pluginReloadRefused(sessionId: string, message = PLUGIN_RELOAD_REFUSED): void {
       store.set((s) => ({
         ...s,
         pluginReloadFailed: setIn(s.pluginReloadFailed, sessionId, true),
-        notes: setIn(s.notes, sessionId, PLUGIN_RELOAD_REFUSED),
+        notes: setIn(s.notes, sessionId, message),
       }));
     },
     pluginReloaded(sessionId: string): void {
@@ -483,11 +588,13 @@ export function createComposerStore(persist: boolean) {
     },
     /** Drops everything kept for sessions that were deleted. */
     forget(ids: readonly string[]): void {
+      for (const id of ids) returnedQueueItems.delete(id);
       store.set((s) => {
         const drafts = withoutDrafts(s.drafts, ids);
         let {
           context,
           images,
+          pastes,
           resend,
           skills,
           loops,
@@ -503,6 +610,7 @@ export function createComposerStore(persist: boolean) {
           draftBy = setIn(draftBy, id, undefined);
           context = setIn(context, id, undefined);
           images = setIn(images, id, undefined);
+          pastes = setIn(pastes, id, undefined);
           resend = setIn(resend, id, undefined);
           skills = setIn(skills, id, undefined);
           loops = setIn(loops, id, undefined);
@@ -516,6 +624,7 @@ export function createComposerStore(persist: boolean) {
           drafts,
           context,
           images,
+          pastes,
           resend,
           skills,
           loops,

@@ -1,11 +1,11 @@
 //! The `secrets` command: Settings > Project
 //! secrets and the Debug API list metadata; the window adds, renames, replaces, removes and copies secrets and
-//! website logins, generates values, switches agent access, and revokes command, MCP and fill grants. Rename and
+//! website logins, generates values, switches agent access, and revokes MCP and fill grants. Rename and
 //! replace retain the item id; copy sends a listed value to the native clipboard. The Debug API may only
 //! `list` (metadata, when agent access is open); all mutations and
 //! copies are refused to it by `vault_scope`.
 //!
-//! Depends on: vw-keys (project secrets), vw-platform (native clipboard), `secret_grants`, `secrets_view`, `keys`
+//! Depends on: vw-keys (project secrets), vw-platform (native clipboard), `secret_uses`, `secrets_view`, `keys`
 //! (error mapping). Called by: `dispatch` and `Core::start` (clipboard lifetime).
 //! Invariants: no result carries a value; `add`'s value is registered as a stored secret by vw-keys before it is
 //! stored; a change emits `secretsChanged`.
@@ -42,11 +42,11 @@ pub(crate) async fn execute(
     request: SecretsRequest,
 ) -> Result<SecretsResult, CoreError> {
     let keys = || {
-        shared.config.keys.as_ref().ok_or_else(|| {
-            let mut error = CoreError::new(ErrorCode::KeyService, "no vault is connected");
-            error.server_code = Some("notConfigured".to_owned());
-            error
-        })
+        shared
+            .config
+            .keys
+            .as_ref()
+            .ok_or_else(crate::keys::no_vault)
     };
     let map = |e: vw_keys::KeyError| crate::keys::key_error(&e);
     let result = match request {
@@ -152,9 +152,8 @@ pub(crate) async fn execute(
         }
         SecretsRequest::Remove { id } => {
             keys()?.remove_secret(id.clone()).await.map_err(map)?;
-            let revoked = crate::secret_grants::revoke_secret(shared, &id).await;
             let servers = crate::mcp_keys::revoke_secret(shared, &id).await;
-            tracing::info!(revoked, servers, "project secret removed with its grants");
+            tracing::info!(servers, "project secret removed with its grants");
             SecretsResult::Done {}
         }
         SecretsRequest::Rename { id, name } => {
@@ -175,21 +174,17 @@ pub(crate) async fn execute(
             return copy_to_clipboard(shared, keys()?, copy).await;
         }
         SecretsRequest::Revoke { grant_id } => {
-            // an MCP server's key grant has a binding id; every other id is a command grant.
-            let revoked = if vw_vault::fill_grant::is_grant_id(&grant_id) {
-                crate::fill_grants::revoke(shared, &grant_id).await?
-            } else if vw_vault::mcp_binding::is_binding_id(&grant_id) {
-                let done = crate::mcp_keys::revoke(shared, &grant_id).await?;
-                if done {
-                    crate::connectors::refresh_servers(shared).await;
-                }
-                done
-            } else {
-                crate::secret_grants::revoke(shared, &grant_id).await?
-            };
-            if !revoked {
-                return Err(CoreError::new(ErrorCode::NotFound, "no such grant"));
+            revoke_grants(shared, std::slice::from_ref(&grant_id)).await?;
+            SecretsResult::Done {}
+        }
+        SecretsRequest::RevokeMany { grant_ids } => {
+            if grant_ids.is_empty() || grant_ids.len() > 10_000 {
+                return Err(CoreError::new(
+                    ErrorCode::InvalidParams,
+                    "Name between 1 and 10000 grants to revoke.",
+                ));
             }
+            revoke_grants(shared, &grant_ids).await?;
             SecretsResult::Done {}
         }
         login @ (SecretsRequest::AddLogin { .. }
@@ -202,6 +197,36 @@ pub(crate) async fn execute(
     Ok(result)
 }
 
+/// Revokes every grant in `ids` (MCP server key, website fill), refreshing Vibe's servers once when a key
+/// grant went. Ids already gone are skipped.
+///
+/// # Errors
+/// `notFound` when none of them was revoked; the vault's errors (locked, storage) stop at the first.
+async fn revoke_grants(shared: &Shared, ids: &[String]) -> Result<(), CoreError> {
+    let mut revoked = 0usize;
+    let mut servers = false;
+    for id in ids {
+        // Only site and MCP grants remain; entry permission is edited directly.
+        let done = if vw_vault::fill_grant::is_grant_id(id) {
+            crate::fill_grants::revoke(shared, id).await?
+        } else if vw_vault::mcp_binding::is_binding_id(id) {
+            let done = crate::mcp_keys::revoke(shared, id).await?;
+            servers |= done;
+            done
+        } else {
+            false
+        };
+        revoked += usize::from(done);
+    }
+    if servers {
+        crate::connectors::refresh_servers(shared).await;
+    }
+    if revoked == 0 {
+        return Err(CoreError::new(ErrorCode::NotFound, "no such grant"));
+    }
+    Ok(())
+}
+
 /// Lists metadata and active grant views; a locked vault has no readable items or grants.
 async fn list(
     shared: &Shared,
@@ -212,32 +237,26 @@ async fn list(
         .map(|project| crate::entry_permissions::user_identity(shared, project))
         .transpose()?;
     let project = project.as_ref();
-    let uses = shared.secret_grants.log_entries();
+    let uses = shared.secret_uses.log_entries();
     let (unlocked, mut secrets): (bool, Vec<crate::secrets_view::ProjectSecretView>) =
         match keys.project_secrets().await {
             Ok(list) => (true, list.into_iter().map(Into::into).collect()),
             Err(e) if vw_keys::is_locked(&e) => (false, Vec::new()),
             Err(e) => return Err(crate::keys::key_error(&e)),
         };
-    // command grants are vault records too (empty while the vault is locked).
-    let (grants, server_grants, mut logins, fill_grants): (
-        _,
-        _,
-        Vec<crate::secrets_view::LoginView>,
-        _,
-    ) = if unlocked {
-        (
-            crate::secret_grants::views(shared).await,
-            crate::mcp_keys::grant_views(shared).await,
-            keys.logins()
-                .await
-                .map(|l| l.into_iter().map(Into::into).collect())
-                .unwrap_or_default(),
-            crate::fill_grants::views(shared).await,
-        )
-    } else {
-        (Vec::new(), Vec::new(), Vec::new(), Vec::new())
-    };
+    let (server_grants, mut logins, fill_grants): (_, Vec<crate::secrets_view::LoginView>, _) =
+        if unlocked {
+            (
+                crate::mcp_keys::grant_views(shared).await,
+                keys.logins()
+                    .await
+                    .map(|l| l.into_iter().map(Into::into).collect())
+                    .unwrap_or_default(),
+                crate::fill_grants::views(shared).await,
+            )
+        } else {
+            (Vec::new(), Vec::new(), Vec::new())
+        };
     if unlocked {
         let policies = keys
             .all_entry_permissions()
@@ -266,7 +285,6 @@ async fn list(
         unlocked,
         agent_access_locked: crate::agent_access::locked(shared),
         secrets,
-        grants,
         uses,
         server_grants,
         logins,

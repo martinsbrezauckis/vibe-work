@@ -1,5 +1,7 @@
 //! Rust-only scan inputs for all Vault secret fields, including hidden resources and website passwords.
-//! Depends on Vault item parsers; the core's background scanner calls this blocking read without prompting.
+//! Depends on Vault item parsers; the core's background scanner calls this blocking read without prompting, and the
+//! key service registers the same values for the Debug API each time it finds the vault open
+//! ([`open_and_registered`]).
 
 use vw_vault::SecretString;
 use vw_vault::items::{ResourceKind, VaultItem, VaultResource};
@@ -35,6 +37,39 @@ impl KeyService {
             .into_iter()
             .flat_map(inputs)
             .collect())
+    }
+}
+
+/// `Ok` when the vault is open, after its stored values are registered ([`register_stored`]); otherwise what the
+/// Mistral key needs. Every path that opens the vault (start with a kept or remembered key, create, unlock,
+/// remembered unlock) ends in the key service's `refresh_key`, which calls this before it reads the key.
+pub(crate) fn open_and_registered(vault: &vw_vault::Vault) -> Result<(), vw_keyproxy::KeyNeed> {
+    match vault.status() {
+        Ok(vw_vault::VaultStatus::Unlocked { .. }) => {}
+        Ok(vw_vault::VaultStatus::NoVault) => return Err(vw_keyproxy::KeyNeed::Setup),
+        _ => return Err(vw_keyproxy::KeyNeed::Unlock),
+    }
+    register_stored(vault);
+    Ok(())
+}
+
+/// Registers every stored secret value of the open `vault` (each field [`KeyService::scan_secrets`] reads: secret
+/// and concealed custom fields, website passwords, note text) as a stored vault value, so the Debug API withholds
+/// them in every answer from the moment the vault is open (vw-secrets; `docs/public/DEBUG_API.md`: "no route
+/// offers ... the values in your Vault"). Called by the key service each time it finds the vault open (start with a
+/// kept or remembered key, create, unlock), not only when something lists the vault, so after a restart a chat or
+/// terminal that holds a vault value is withheld before any listing. Values only, never logged; a vault that
+/// cannot be listed registers what it can (nothing) and logs the failure without detail.
+fn register_stored(vault: &vw_vault::Vault) {
+    if let Ok(items) = vault.list_items() {
+        for item in items {
+            // Registering is the side effect wanted here; the scan inputs themselves are dropped (zeroized).
+            drop(inputs(item));
+        }
+    } else {
+        tracing::warn!(
+            "could not list the vault to register its values for the Debug API's withholding"
+        );
     }
 }
 

@@ -16,6 +16,8 @@
 //!   `confirmer.rs` is the one choke point for this decision.
 //! - Handles (`file`) are random, bound to one session and one canonical path; every use re-checks that path
 //!   (`files_scope::recheck`): a file swapped for a symlink out of the folder after `resolve` is refused.
+//!   The first message of the New chat screen hands that screen's handles (its `files-workspace:<folder>` key) to
+//!   the session it started in the same folder (`hand_over`), as the window moves its open files there.
 //! - Errors never carry an absolute path.
 
 use std::collections::{HashMap, VecDeque};
@@ -79,6 +81,21 @@ impl Handles {
         self.order.push_back(token.clone());
         token
     }
+
+    /// Makes every handle of `from` a handle of `to` (same token, same path). Where `to` already has its own
+    /// token for a path, that one stays the path's token for later `resolve`s; the moved token keeps working.
+    fn hand_over(&mut self, from: &str, to: &str) {
+        for (token, handle) in &mut self.by_token {
+            if handle.session != from {
+                continue;
+            }
+            to.clone_into(&mut handle.session);
+            self.by_key.remove(&(from.to_owned(), handle.path.clone()));
+            self.by_key
+                .entry((to.to_owned(), handle.path.clone()))
+                .or_insert_with(|| token.clone());
+        }
+    }
 }
 
 fn new_token() -> String {
@@ -100,15 +117,26 @@ fn new_token() -> String {
 /// The File tab's state in the core.
 pub(crate) struct FilesState {
     handles: Mutex<Handles>,
+    pub(crate) searches: crate::explorer::Searches,
     listings: Arc<Mutex<crate::files_lookup::ListingCache>>,
     /// The files viewer (HTML, PDF), when the app gave a viewer engine.
     pub(crate) viewer: Option<Arc<PagesHub>>,
 }
 
 impl FilesState {
+    /// The New chat screen's handles (key `from`) become the started session's (`to`); every use still re-checks
+    /// the path against the session's own scope.
+    pub(crate) fn hand_over(&self, from: &str, to: &str) {
+        self.handles
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .hand_over(from, to);
+    }
+
     pub(crate) fn new(viewer: Option<Arc<PagesHub>>) -> Self {
         Self {
             handles: Mutex::new(Handles::default()),
+            searches: crate::explorer::Searches::default(),
             listings: Arc::default(),
             viewer,
         }
@@ -166,7 +194,9 @@ impl Core {
     /// The scope of `session_id` (see `files_scope`): the same for the window and the Debug API.
     fn files_scope(&self, session_id: &str) -> Result<Scope, CoreError> {
         Ok(Scope {
-            session: self.project_of(session_id)?,
+            session: self
+                .workspace_folder(session_id)?
+                .map_or_else(|| self.project_of(session_id), Ok)?,
             picked: self.shared.gate.picked_roots(),
             home: home(),
             hidden: true,
@@ -229,6 +259,12 @@ impl Core {
                     },
                 }))
             }
+            FilesRequest::ReadSaved { session_id, file } => {
+                let hit = self.checked(&session_id, &file).await?;
+                Ok(result(
+                    blocking(move || crate::files_saved::read(&hit.canonical)).await?,
+                ))
+            }
             FilesRequest::Stat { session_id, file } => {
                 let found = self.checked(&session_id, &file).await.ok();
                 // The same fingerprint a read gives (content hash included for files small enough to edit), so the
@@ -265,6 +301,16 @@ impl Core {
                     .await?;
                 Ok(result(FilesResult::Written { fingerprint, size }))
             }
+            FilesRequest::PanelAnswer {
+                session_id,
+                request_id,
+                panel,
+            } => Ok(result(FilesResult::PanelAnswered {
+                accepted: self
+                    .shared
+                    .panel_reads
+                    .answer(&session_id, &request_id, panel),
+            })),
             other => self.files_viewer(other).await,
         }
     }

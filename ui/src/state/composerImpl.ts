@@ -4,10 +4,10 @@
  * branch, and attaching images. Kept out of the main bundle (the main chunk was 528 kB).
  * Depends on: composerSend, composerSession, composerRewind, the image model, coreStore, composerStore,
  * shellStore, sessionActions, toastStore. Called by: `composer.ts` (dynamic import).
- * Invariants: the facade caches the user's, Debug API's and trusted button-click action sets;
- * `origin: "debug-api"` serves UI-control requests, while `origin: "window"` preserves a native click
- * through lazy loading and a queued send even when an unrelated Debug API read is pending;
- * they share the per-session send order.
+ * Invariants: the facade caches the user's, Debug API's and trusted button-click action sets; every command is the
+ * window's. The Debug API set's commands belong to the UI-control action being served (its reply waits for them),
+ * while `origin: "window"` keeps a native click out of it through lazy loading and a queued send even when an
+ * unrelated Debug API read is pending; they share the per-session send order.
  */
 import { fileBytes, imageFromBytes, isImage } from "../features/composer/model/images";
 import { createRewindActions } from "./composerRewind";
@@ -20,10 +20,13 @@ import type { Shell } from "./shellStore";
 import type { Toasts } from "./toastStore";
 import type { ComposerInitialization } from "./composerDefaults";
 
-/** A view of `core` whose `run` keeps the chosen origin through deferred work. */
+/**
+ * A view of `core` for one facade: the Debug API facade's commands belong to the action being served (its reply
+ * waits for them); the window facade's (`window`) never do. Both are the window's commands.
+ */
 function lowered(core: CoreController, origin: "debug-api" | "window"): CoreController {
   const view = Object.create(core) as CoreController & { run: CoreController["run"] };
-  view.run = (command) => core.run(command, { origin });
+  view.run = (command) => core.run(command, origin === "window" ? { origin } : undefined);
   return view;
 }
 

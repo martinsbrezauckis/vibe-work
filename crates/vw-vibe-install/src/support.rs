@@ -6,7 +6,7 @@
 //! Wire form (`vibe-support.json`, written by `tools/public/vibe-support/write_manifest.py`):
 //! ```json
 //! {"schema": 1, "sequence": 1760180000, "published": "2026-10-11T12:00:00Z", "pypiLatest": "2.27.0",
-//!  "versions": [{"version": "2.26.2", "python": "3.12", "minVibeWork": "0.1.0", "maxVibeWork": null,
+//!  "versions": [{"version": "2.26.2", "python": "3.14.8", "minVibeWork": "0.1.0", "maxVibeWork": null,
 //!                "requirements": "vibe-2.26.2.requirements.txt", "requirementsSha256": "<hex>",
 //!                "requirementsBytes": 80872, "packages": 101,
 //!                "wheels": {"x86_64-unknown-linux-gnu": {"filename": "...", "bytes": 1, "sha256": "<hex>"}}}]}
@@ -105,7 +105,7 @@ pub struct WheelInfo {
 pub struct SupportedVibe {
     /// The `mistral-vibe` version (plain dotted digits).
     pub version: String,
-    /// The Python version request for uv (`3.12`).
+    /// The Python version request for uv (`3.14.8`).
     pub python: String,
     /// The oldest Vibe Work version it was tested with (semver, inclusive).
     pub min_vibe_work: String,

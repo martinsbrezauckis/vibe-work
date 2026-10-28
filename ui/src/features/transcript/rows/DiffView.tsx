@@ -7,7 +7,8 @@
  * Depends on: model/diff, the transcript store. Called by: step bodies and the approval card; the
  * Changes tab uses `DiffView` for edits in folders without git and `DiffLineRow` for hunks.
  */
-import type { ReactElement } from "react";
+import { Button } from "../../../components/Controls";
+import type { ReactElement, ReactNode } from "react";
 
 import { useApp } from "../../shell/AppContext";
 import { useTranscriptUi } from "../hooks";
@@ -41,7 +42,15 @@ export function DiffLineRow({ line }: { line: DiffLine }): ReactElement {
 }
 
 /** Renders one file's diff. `id` keys its "show all" state. */
-export function DiffView({ diff, id }: { diff: FileDiff; id: string }): ReactElement {
+export function DiffView({
+  diff,
+  id,
+  headerActions,
+}: {
+  diff: FileDiff;
+  id: string;
+  headerActions?: ReactNode;
+}): ReactElement {
   const { transcript } = useApp();
   const key = `diff:${id}`;
   const full = useTranscriptUi((s) => s.open[key] === true);
@@ -63,15 +72,16 @@ export function DiffView({ diff, id }: { diff: FileDiff; id: string }): ReactEle
           {diff.path || "(no path)"}
         </span>
         <span className="fh-stat">{stat}</span>
+        {headerActions}
       </div>
       {lines.map((line, i) => (
         <DiffLineRow key={i} line={line} />
       ))}
       {hidden > 0 ? (
-        <button
+        <Button
           data-testid="transcript.diff-view-toggle"
           type="button"
-          className="show-all-btn"
+          appearance="expander"
           aria-label="Show full diff"
           title="Show full diff"
           onClick={() => {
@@ -79,7 +89,7 @@ export function DiffView({ diff, id }: { diff: FileDiff; id: string }): ReactEle
           }}
         >
           Show all ({String(hidden)} more lines)
-        </button>
+        </Button>
       ) : null}
     </div>
   );

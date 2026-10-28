@@ -6,8 +6,9 @@ mod common;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use common::fake::{fake_config, scratch};
+use common::core::local_server;
 use common::gate::FakeConfirmer;
+use common::processes::scratch;
 use common::vault::key_service_config;
 use serde_json::{Value, json};
 use vw_core_api::{Command, CommandResult, Core, CoreConfig, Origin};
@@ -15,7 +16,6 @@ use vw_gate::Confirmation;
 use vw_keys::KeyService;
 use vw_keys::existing::MemoryVibeKeyring;
 use vw_platform::clipboard::{ClipboardBackend, ClipboardError, ClipboardService};
-use vw_vault::command_grant::{CommandGrant, id_for};
 use vw_vault::fill_grant::{FillGrant, id_for as fill_id_for};
 use vw_vault::items::ResourcePermission;
 use vw_vault::location::VaultLocation;
@@ -87,9 +87,10 @@ async fn edits_keep_ids_grants_and_metadata_and_copy_returns_only_done() {
         .unwrap(),
     );
     let mut config = CoreConfig::default();
+    config.start_vibe = false;
     config.keys = Some(service.clone());
     config.clipboard = Some(clipboard);
-    let mut supervisor = fake_config("toy-vault-core", &["--script"]);
+    let mut supervisor = local_server(&dir);
     supervisor.vibe_home = dir.join("vibe-home");
     std::fs::create_dir_all(&supervisor.vibe_home).unwrap();
     let confirmer = FakeConfirmer::new();
@@ -101,11 +102,12 @@ async fn edits_keep_ids_grants_and_metadata_and_copy_returns_only_done() {
     )
     .await
     .unwrap();
+    assert!(core.status().server.pid.is_none());
     let mut events = core.subscribe(None);
     core.execute(
         Origin::Ui,
         serde_json::from_value(json!({"type":"keys","request":
-        {"op":"createVault","passphrase":pass.as_str(),"rememberDevice":false}}))
+        {"op":"createVault","passphrase":pass.as_str()}}))
         .unwrap(),
     )
     .await
@@ -134,25 +136,6 @@ async fn edits_keep_ids_grants_and_metadata_and_copy_returns_only_done() {
     )
     .await;
     let login_id = login["login"]["id"].as_str().unwrap().to_owned();
-    let project = "/tmp/toy-project".to_owned();
-    let fingerprint = "f".repeat(64);
-    let grant_id = id_for(&project, &fingerprint);
-    let grant = CommandGrant {
-        id: grant_id.clone(),
-        project,
-        fingerprint,
-        command: "tool".to_owned(),
-        bindings: vec!["TOKEN <- Old key".to_owned()],
-        secret_ids: vec![id.clone()],
-        always: true,
-        granted_ms: now_ms(),
-        revoked_ms: 0,
-        created_ms: now_ms(),
-    };
-    service
-        .update_command_grant(grant_id.clone(), move |_| Some(grant.clone()))
-        .await
-        .unwrap();
     let binding = McpBinding {
         id: vw_vault::mcp_binding::new_id(),
         server: "one".to_owned(),
@@ -228,8 +211,6 @@ async fn edits_keep_ids_grants_and_metadata_and_copy_returns_only_done() {
         "https://source.example.com"
     );
     assert_eq!(listed["secrets"][0]["fields"], json!(["value"]));
-    assert_eq!(listed["grants"][0]["id"], grant_id);
-    assert_eq!(listed["grants"][0]["bindings"][0], "TOKEN <- New key");
     assert_eq!(listed["serverGrants"][0]["id"], binding.id);
     assert_eq!(listed["serverGrants"][0]["secretName"], "New key");
     assert_eq!(listed["logins"][0]["id"], login_id);
@@ -389,9 +370,10 @@ async fn generated_values_are_one_way_and_agent_access_is_user_only() {
         .unwrap(),
     );
     let mut config = CoreConfig::default();
+    config.start_vibe = false;
     config.keys = Some(service.clone());
     config.clipboard = Some(clipboard);
-    let mut supervisor = fake_config("new-vault-core", &["--script"]);
+    let mut supervisor = local_server(&dir);
     supervisor.vibe_home = dir.join("vibe-home");
     std::fs::create_dir_all(&supervisor.vibe_home).unwrap();
     let confirmer = FakeConfirmer::new();
@@ -403,11 +385,12 @@ async fn generated_values_are_one_way_and_agent_access_is_user_only() {
     )
     .await
     .unwrap();
+    assert!(core.status().server.pid.is_none());
     let mut events = core.subscribe(None);
     core.execute(
         Origin::Ui,
         serde_json::from_value(json!({"type":"keys","request":
-        {"op":"createVault","passphrase":pass.as_str(),"rememberDevice":false}}))
+        {"op":"createVault","passphrase":pass.as_str()}}))
         .unwrap(),
     )
     .await
@@ -515,23 +498,6 @@ async fn generated_values_are_one_way_and_agent_access_is_user_only() {
             .bytes()
             .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit())
     );
-    let grant_id = id_for("/tmp/new-project", &"a".repeat(64));
-    let command_grant = CommandGrant {
-        id: grant_id.clone(),
-        project: "/tmp/new-project".to_owned(),
-        fingerprint: "a".repeat(64),
-        command: "tool".to_owned(),
-        bindings: vec!["TOKEN <- Generated".to_owned()],
-        secret_ids: vec![id.clone()],
-        always: true,
-        granted_ms: now_ms(),
-        revoked_ms: 0,
-        created_ms: now_ms(),
-    };
-    service
-        .update_command_grant(grant_id.clone(), move |_| Some(command_grant.clone()))
-        .await
-        .unwrap();
     let binding = McpBinding {
         id: vw_vault::mcp_binding::new_id(),
         server: "generated-key-server".to_owned(),
@@ -601,7 +567,6 @@ async fn generated_values_are_one_way_and_agent_access_is_user_only() {
     let listed = run(&core, json!({"op":"list"})).await;
     assert_eq!(listed["secrets"][0]["id"], id);
     assert_eq!(listed["logins"][0]["id"], login_id);
-    assert_eq!(listed["grants"][0]["id"], grant_id);
     assert_eq!(listed["serverGrants"][0]["id"], binding.id);
     assert_eq!(listed["fillGrants"][0]["id"], fill_id);
 
@@ -645,7 +610,7 @@ async fn generated_values_are_one_way_and_agent_access_is_user_only() {
         true
     );
     service
-        .unlock(SecretString::new(pass.as_str()), None, None)
+        .unlock(SecretString::new(pass.as_str()), None)
         .await
         .unwrap();
     run(&core, json!({"op":"setAgentAccess","locked":false})).await;
@@ -668,6 +633,7 @@ async fn generated_values_are_one_way_and_agent_access_is_user_only() {
     }
     core.shutdown().await;
     let mut config = CoreConfig::default();
+    config.start_vibe = false;
     config.keys = Some(service.clone());
     config.clipboard = Some(Arc::new(
         ClipboardService::with_backend(
@@ -676,7 +642,7 @@ async fn generated_values_are_one_way_and_agent_access_is_user_only() {
         )
         .unwrap(),
     ));
-    let mut supervisor = fake_config("new-restarted-core", &["--script"]);
+    let mut supervisor = local_server(&dir);
     supervisor.vibe_home = dir.join("vibe-home");
     let restarted = Core::start(
         supervisor,
@@ -686,6 +652,7 @@ async fn generated_values_are_one_way_and_agent_access_is_user_only() {
     )
     .await
     .unwrap();
+    assert!(restarted.status().server.pid.is_none());
     assert_eq!(
         run(&restarted, json!({"op":"list"})).await["agentAccessLocked"],
         false
@@ -695,7 +662,7 @@ async fn generated_values_are_one_way_and_agent_access_is_user_only() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn user_access_unlock_uses_remembered_key_then_requires_password_without_it() {
+async fn user_access_unlock_uses_a_kept_key_and_needs_the_password_after_lock() {
     let pass = format!("test-passphrase-{}", vw_vault::login::new_id());
     let fake = common::fake_mistral::start().await;
     let dir = scratch("new-remembered-access");
@@ -705,6 +672,7 @@ async fn user_access_unlock_uses_remembered_key_then_requires_password_without_i
     key_config.vault.device_store = device_store.clone();
     let service = KeyService::start(key_config).await.unwrap();
     let mut config = CoreConfig::default();
+    config.start_vibe = false;
     config.keys = Some(service.clone());
     config.clipboard = Some(Arc::new(
         ClipboardService::with_backend(
@@ -713,7 +681,7 @@ async fn user_access_unlock_uses_remembered_key_then_requires_password_without_i
         )
         .unwrap(),
     ));
-    let mut supervisor = fake_config("new-remembered-core", &["--script"]);
+    let mut supervisor = local_server(&dir);
     supervisor.vibe_home = dir.join("vibe-home");
     std::fs::create_dir_all(&supervisor.vibe_home).unwrap();
     let core = Core::start(
@@ -724,10 +692,11 @@ async fn user_access_unlock_uses_remembered_key_then_requires_password_without_i
     )
     .await
     .unwrap();
+    assert!(core.status().server.pid.is_none());
     core.execute(
         Origin::Ui,
         serde_json::from_value(json!({"type":"keys","request":
-        {"op":"createVault","passphrase":pass.as_str(),"rememberDevice":true}}))
+        {"op":"createVault","passphrase":pass.as_str()}}))
         .unwrap(),
     )
     .await
@@ -735,30 +704,37 @@ async fn user_access_unlock_uses_remembered_key_then_requires_password_without_i
     run(&core, json!({"op":"setAgentAccess","locked":true})).await;
     service.lock();
     assert_eq!(run(&core, json!({"op":"list"})).await["unlocked"], false);
+    assert!(
+        !common::vault::client(&dir.join("shellx-vault"), device_store.clone())
+            .unlock_remembered()
+            .unwrap(),
+        "Lock deleted the kept key"
+    );
+    // Another client of the same vault unlocks with the password and keeps the key (then quits).
     let background = common::vault::client(&dir.join("shellx-vault"), device_store.clone());
     background
-        .unlock(&SecretString::new(pass.as_str()), None, None)
+        .unlock(&SecretString::new(pass.as_str()), Some(true), None)
         .unwrap();
-    background.lock();
-    assert!(
-        !background.unlock_remembered().unwrap(),
-        "background unlock honors manual lock"
-    );
+    background.close();
     run(&core, json!({"op":"setAgentAccess","locked":false})).await;
-    assert_eq!(run(&core, json!({"op":"list"})).await["unlocked"], true);
-    service
-        .unlock(SecretString::new(pass.as_str()), Some(false), None)
-        .await
-        .unwrap();
+    assert_eq!(
+        run(&core, json!({"op":"list"})).await["unlocked"],
+        true,
+        "resuming agent access opens a locked vault with a kept key"
+    );
     run(&core, json!({"op":"setAgentAccess","locked":true})).await;
     service.lock();
     let unlock: Command = serde_json::from_value(json!({"type":"secrets","request":
         {"op":"setAgentAccess","locked":false}}))
     .unwrap();
     let error = core.execute(Origin::Ui, unlock).await.unwrap_err();
-    assert_eq!(error.server_code.as_deref(), Some("passwordRequired"));
+    assert_eq!(
+        error.server_code.as_deref(),
+        Some("passwordRequired"),
+        "after Lock no key is kept: the password is needed"
+    );
     service
-        .unlock(SecretString::new(pass.as_str()), Some(true), None)
+        .unlock(SecretString::new(pass.as_str()), None)
         .await
         .unwrap();
     run(&core, json!({"op":"setAgentAccess","locked":false})).await;

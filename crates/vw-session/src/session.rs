@@ -31,6 +31,14 @@ pub(crate) struct SessionEntry {
     pub(crate) runtime: Option<Value>,
     /// Recent event notifications in arrival order (applied or held back), newest last.
     pub(crate) log: VecDeque<Notification>,
+    /// The last history entry an update arrived for before its add (`reducer::on_entry_updated`); one resync per
+    /// entry, so an entry the reloaded state still lacks cannot start a resync per streamed update.
+    pub(crate) resynced_for_entry: Option<String>,
+    /// The last read that found a hole before a held event: (its watermark, the first event past the hole). A
+    /// second read with the same pair cannot help (see [`Self::replace_state`]).
+    pub(crate) hole_read: Option<(u64, u64)>,
+    /// Set when a read dropped held events past a hole: the load asks for ONE delayed re-read.
+    pub(crate) reread_later: bool,
 }
 
 /// Reads `state.eventId` as an unsigned integer (0 when absent: a fresh session has none).
@@ -50,6 +58,9 @@ impl SessionEntry {
             anomalies: Anomalies::default(),
             runtime: None,
             log: VecDeque::new(),
+            resynced_for_entry: None,
+            hole_read: None,
+            reread_later: false,
         }
     }
 
@@ -110,25 +121,42 @@ impl SessionEntry {
             .collect();
         backlog.sort_by_key(|(id, _)| *id);
         backlog.dedup_by_key(|(id, _)| *id);
+        // A held event past a hole (an event between the watermark and it never arrived) re-opens the gap when
+        // replayed, which asks for another read: right while Vibe's read is merely behind the live stream (the
+        // next read catches up). Vibe 3's deferred copy setup numbers events its reads do not reflect (reads stay
+        // at watermark 0 while event 2 was seen), and re-opening the same gap on every read would spend the resync
+        // budget until the session paused (`ResyncPaused`). So: the first read
+        // that finds a given hole replays as before; a second read that answers the same watermark for the same
+        // held event cannot help, and only the run continuing the watermark is replayed (the rest is dropped;
+        // the next live event continues the stream or asks for a fresh read).
+        let contiguous = backlog
+            .iter()
+            .zip(mark + 1..)
+            .take_while(|((id, _), want)| id == want)
+            .count();
+        let hole = backlog.get(contiguous).map(|(id, _)| (mark, *id));
+        if hole.is_some() && hole == self.hole_read {
+            backlog.truncate(contiguous);
+            self.hole_read = None;
+            // Safety net: a read that lagged twice catches up on one later read; Vibe's copy setup reads 0 again
+            // and settles with nothing held.
+            self.reread_later = true;
+        } else {
+            self.hole_read = hole;
+        }
         backlog.into_iter().map(|(_, n)| n).collect()
     }
 
-    /// Copies the active model alias of the stored runtime snapshot into `session.model`.
-    /// Returns the change when it differed. `reasoningEffort` is deliberately not folded: the
-    /// legacy harness reports `null` while its runtime says `"off"`, so the value
-    /// cannot be derived from the runtime reliably; readers take the effort from the runtime.
+    /// Folds the active runtime model, and for unified sessions the thinking setting and the
+    /// active agent, into the session.
+    /// Legacy sessions keep their native effort: their null does not mean thinking is off.
     pub(crate) fn fold_runtime_into_session(&mut self) -> Option<Change> {
-        let alias = self
-            .runtime
-            .as_ref()?
-            .pointer("/config/activeModel/alias")?
-            .as_str()?
-            .to_owned();
+        let runtime = self.runtime.as_ref()?;
         let session = self.state.get_mut("session")?;
-        if session.get("model").and_then(Value::as_str) == Some(alias.as_str()) {
+        let patch = runtime_patch(session, runtime);
+        if patch.is_empty() {
             return None;
         }
-        let patch = vec![json!({"op": "add", "path": "/model", "value": alias})];
         apply_patch(session, &patch).ok()?;
         Some(Change::SessionPatched {
             session_id: self.id().to_owned(),
@@ -219,6 +247,7 @@ pub(crate) fn merge_suffix(previous: &Value, current: &Value) -> (Value, bool) {
 /// Builds the state to adopt when a same-session snapshot or read arrives: the new state with
 /// the already-loaded history/turn prefix retained (`_apply_snapshot`).
 pub(crate) fn merged_with_prefix(previous: &Value, mut next: Value) -> Value {
+    retain_observations(previous, &mut next);
     let (history, kept) = merge_suffix(
         previous.get("history").unwrap_or(&Value::Null),
         next.get("history").unwrap_or(&Value::Null),
@@ -244,4 +273,81 @@ pub(crate) fn merged_with_prefix(previous: &Value, mut next: Value) -> Value {
     next["history"] = history;
     next["turns"] = turns;
     next
+}
+
+/// Runtime values omitted from session events by the unified server.
+///
+/// `agent`: a unified read carries the profile the chat runs on (Vibe 3.0.1+), while Vibe's turn-start
+/// `session/updated` replaces it with null and nothing sets it again; Vibe's own client takes it from the
+/// runtime's `activeAgent` (`client_state.py apply_runtime`). Legacy sessions keep their own reads' value.
+fn runtime_patch(session: &Value, runtime: &Value) -> Vec<Value> {
+    let mut patch = Vec::new();
+    for (key, path) in [
+        ("model", "/config/activeModel/alias"),
+        ("reasoningEffort", "/config/activeModel/thinking"),
+        ("agent", "/activeAgent"),
+    ] {
+        if key != "model" && session["harness"] != "unified" {
+            continue;
+        }
+        let wanted = |v: &&Value| {
+            if key == "agent" {
+                v.is_object()
+            } else {
+                v.is_string()
+            }
+        };
+        if let Some(value) = runtime.pointer(path).filter(wanted)
+            && session.get(key) != Some(value)
+        {
+            patch.push(json!({"op":"add", "path":format!("/{key}"), "value":value}));
+        }
+    }
+    patch
+}
+
+/// Keeps observations that native read pages omit, without replacing their authoritative entries.
+fn retain_observations(previous: &Value, next: &mut Value) {
+    if next["session"].get("contextFill").is_none()
+        && let Some(fill) = previous["session"].get("contextFill")
+    {
+        next["session"]["contextFill"] = fill.clone();
+    }
+    if next["session"]["workspaceRoots"]
+        .as_array()
+        .is_some_and(Vec::is_empty)
+        && let Some(roots) = previous["session"]["workspaceRoots"]
+            .as_array()
+            .filter(|r| !r.is_empty())
+    {
+        next["session"]["workspaceRoots"] = Value::Array(roots.clone());
+    }
+    let (Some(before), Some(history)) = (
+        previous["history"].as_array(),
+        next["history"].as_array_mut(),
+    ) else {
+        return;
+    };
+    // Closed approvals are transient in native reads. Retain them at their observed position next to an
+    // entry the read still contains; never resurrect an entry after a rewind/replacement.
+    for (at, entry) in before.iter().enumerate() {
+        if entry["type"] != "callback"
+            || entry.pointer("/state/status").and_then(Value::as_str) == Some("open")
+            || history.iter().any(|e| e["id"] == entry["id"])
+        {
+            continue;
+        }
+        if let Some(after) = before[at + 1..]
+            .iter()
+            .find_map(|known| history.iter().position(|e| e["id"] == known["id"]))
+        {
+            history.insert(after, entry.clone());
+        } else if let Some(prior) = before[..at]
+            .iter()
+            .rev()
+            .find_map(|known| history.iter().position(|e| e["id"] == known["id"]))
+        {
+            history.insert(prior + 1, entry.clone());
+        }
+    }
 }

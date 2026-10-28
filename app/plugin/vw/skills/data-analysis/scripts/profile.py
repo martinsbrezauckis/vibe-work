@@ -58,7 +58,7 @@ def load(path, sheet):
     notes = []
     if ext == ".xlsx":
         sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-        import xlsx_to_csv  # noqa: E402  (the sibling helper)
+        import xlsx_to_csv  # (the sibling helper)
         with zipfile.ZipFile(path) as book:
             found = xlsx_to_csv.sheets(book)
             notes.append("sheets: " + ", ".join(f"{i + 1}. {n}" for i, (n, _) in enumerate(found)))

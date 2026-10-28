@@ -27,7 +27,6 @@ enum Effect {
     Load(LoadKind),
     Delete,
     Archive,
-    Turn,
     None,
 }
 
@@ -41,7 +40,6 @@ fn effect(method: &str) -> Effect {
         "session/read" => Effect::Load(LoadKind::Read),
         "session/delete" => Effect::Delete,
         "session/archive" => Effect::Archive,
-        "turn/start" | "session/turn/enqueue" => Effect::Turn,
         _ => Effect::None,
     }
 }
@@ -71,14 +69,14 @@ pub(crate) async fn observe(
             shared.access.observe_runtime(id, runtime);
         }
     }
+    shared.model_choices.observe(method, params, result)?;
+    if method == "turn/start" {
+        crate::model_choices::turn_started(shared, params).await;
+    }
     match effect(method) {
         Effect::None => Ok(None),
         Effect::Archive => {
-            crate::session_end::archive_decision(shared, params, result).await?;
-            Ok(None)
-        }
-        Effect::Turn => {
-            crate::session_end::copy_reopened(shared, params).await?;
+            crate::session_end::archive_decision(shared, params).await;
             Ok(None)
         }
         Effect::Delete => {
@@ -89,7 +87,7 @@ pub(crate) async fn observe(
             Ok(None)
         }
         Effect::Load(kind) => {
-            let mut state = result
+            let state = result
                 .get("state")
                 .filter(|s| s.is_object())
                 .cloned()
@@ -106,7 +104,9 @@ pub(crate) async fn observe(
                 LoadKind::Replace if source.is_some_and(|s| s != id) => LoadKind::New,
                 other => other,
             };
-            crate::session_end::reconcile_archive(shared, &mut state, kind)?;
+            if kind == LoadKind::Resume {
+                crate::worktrees_restore::resumed(shared, &state).await?;
+            }
             if kind != LoadKind::Read {
                 let previous = shared.store.view(&id);
                 if let Err(reason) = crate::session_folders::check(
@@ -127,6 +127,13 @@ pub(crate) async fn observe(
             if kind != LoadKind::Read {
                 shared.supervisor.track_session(&id);
                 shared.access.observe_request(method, &id, params);
+                if crate::working_note::mcp_disabled(&shared.instructions.own_home) {
+                    shared.emit(crate::CoreEvent::Alert {
+                        session_id: Some(id.clone()),
+                        kind: crate::AlertKind::ToolsUnavailable,
+                        message: crate::working_note::MCP_DISABLED.to_owned(),
+                    });
+                }
             }
             // Bounded channel: waits if the pump is behind; fails only when the pump is gone,
             // which happens only during shutdown.
@@ -155,6 +162,10 @@ pub(crate) fn snapshot(shared: &Shared, id: &str) -> Result<SessionSnapshot, Cor
         .view(id)
         .map(|view| {
             let mut snapshot = SessionSnapshot::from(view);
+            super::agent_tools::shell_commands::project(shared, &mut snapshot.state);
+            shared.protected_changes.overlay(id, &mut snapshot.state);
+            shared.chrome_control.overlay(id, &mut snapshot.state);
+            crate::ask::tool_calls::overlay(shared, id, &mut snapshot.state);
             snapshot.access_mode =
                 crate::restore::display_mode(shared, id, &snapshot.state["session"]);
             snapshot
@@ -169,4 +180,37 @@ pub(crate) fn detail(result: &Value) -> Value {
         object.remove("state");
     }
     detail
+}
+
+/// Native unified snapshots omit accepted extra roots and transient client observations. Normalize before
+/// bookkeeping and before returning the reply, so the window and Debug API read the stream's meaning.
+pub(crate) fn project_result(shared: &Shared, method: &str, params: &Value, result: &mut Value) {
+    crate::provider_errors::value(result);
+    super::agent_tools::shell_commands::project(shared, result);
+    let Some(state) = result.get_mut("state").filter(|s| s.is_object()) else {
+        return;
+    };
+    if method == "session/read" {
+        *state = shared.store.project_read(std::mem::take(state));
+    } else if matches!(effect(method), Effect::Load(_)) {
+        let source = params["sessionId"]
+            .as_str()
+            .or_else(|| params["sourceSessionId"].as_str());
+        let roots = params
+            .pointer("/agentConfig/workspaceRoots")
+            .cloned()
+            .or_else(|| {
+                source
+                    .filter(|_| method != "session/resume")
+                    .and_then(|id| shared.store.view(id))
+                    .map(|v| v.state["session"]["workspaceRoots"].clone())
+            });
+        if state["session"]["workspaceRoots"]
+            .as_array()
+            .is_some_and(Vec::is_empty)
+            && let Some(roots) = roots.filter(Value::is_array)
+        {
+            state["session"]["workspaceRoots"] = roots;
+        }
+    }
 }

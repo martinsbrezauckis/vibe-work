@@ -1,4 +1,5 @@
 /** File-link actions shared by the transcript menu and Debug API; uses the files controller and app feedback. */
+import { writeClipboard } from "../../state/clipboard";
 import type { FileKind } from "../../protocol/core";
 import { toCallError } from "../../protocol/client/types";
 import type { Shown } from "../../state/files";
@@ -24,7 +25,7 @@ export async function runFileRefAction(
   const actions = origin === "ui" ? files.actions : files.debugApi;
   try {
     if (item === "copy-path") {
-      await navigator.clipboard.writeText(shown.display);
+      await writeClipboard(shown.display);
       app.toasts.feedback("Copied.");
     } else if (item === "reveal") {
       const error = await actions.external(sessionId, "reveal", shown.file);

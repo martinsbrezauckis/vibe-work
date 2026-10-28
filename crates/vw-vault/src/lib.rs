@@ -1,7 +1,7 @@
 //! Vibe Work's client of the Vault storage core: it selects a local
 //! vault, unlocks it (passphrase or ShellX's "remember this device" scheme), and reads and writes the
 //! few resources Vibe Work owns (the Mistral API key, the project secrets and the MCP server key
-//! bindings, the secret broker's command grants, and website logins and fill
+//! bindings, entry permissions, and website logins and fill
 //! grants).
 //!
 //! What is shared with Vault and what belongs to this crate:
@@ -27,7 +27,6 @@
 //!   `spawn_blocking`.
 
 pub mod chain;
-pub mod command_grant;
 pub mod entry_permission;
 mod error;
 pub mod fill_grant;

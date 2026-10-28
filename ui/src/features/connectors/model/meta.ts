@@ -112,7 +112,7 @@ export interface GatedVendor {
 }
 
 /** Vendors known to gate their MCP server on the client. */
-export const GATED: readonly GatedVendor[] = [
+const GATED: readonly GatedVendor[] = [
   {
     vendor: "Figma",
     hosts: ["mcp.figma.com"],

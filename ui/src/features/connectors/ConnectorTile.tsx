@@ -4,6 +4,8 @@
  * Depends on: CategoryIcon, model/view, hooks. Called by: ConnectorsPage.
  * Invariant: no vendor logo; the status words are Vibe's states in plain language (`model/view`).
  */
+import { Card } from "../../components/Card";
+import { Badge, Button } from "../../components/Controls";
 import type { ReactElement } from "react";
 
 import { CategoryIcon } from "./CategoryIcon";
@@ -16,9 +18,10 @@ export function ConnectorTile({ tile, selected }: { tile: Tile; selected: boolea
   const actions = useConnectorActions();
   const keyBlocked = useKeyReadiness() !== null;
   return (
-    <div
+    <Card
+      variant="connector"
       data-item-id={tile.alias}
-      className={`ctile ${selected ? "sel" : ""}`}
+      selected={selected}
       data-alias={tile.alias}
       data-status={tile.status}
     >
@@ -40,25 +43,27 @@ export function ConnectorTile({ tile, selected }: { tile: Tile; selected: boolea
         </span>
       </button>
       <div className="ctile-foot">
-        <span className={`cstat ${tile.status}`}>{tile.statusText}</span>
+        <Badge presentation="connector-status" state={tile.status}>
+          {tile.statusText}
+        </Badge>
         <span className="ctile-via">via Mistral</span>
         {tile.meta.experimental === true ? (
-          <span className="cstat">Experimental (Vibe)</span>
+          <Badge presentation="connector-status">Experimental (Vibe)</Badge>
         ) : null}
         {tile.status === "signin" ? (
-          <button
+          <Button
             data-testid="connectors.connector-tile-sign-in"
             type="button"
-            className="tb-btn primary"
+            variant="primary"
             disabled={keyBlocked}
             onClick={() => {
               void actions?.signIn(tile.alias);
             }}
           >
             Sign in
-          </button>
+          </Button>
         ) : null}
       </div>
-    </div>
+    </Card>
   );
 }

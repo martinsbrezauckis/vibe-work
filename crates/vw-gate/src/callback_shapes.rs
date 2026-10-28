@@ -5,6 +5,9 @@
 //! `UserInputCallbackOutput` (`models.py:346`). A wrong shape can cause no reply for 30 s
 //! and server exit code 1.
 //! Invariants:
+//! - Vibe Work never sends `approve_for_session` or `approve_permanently`: both make Vibe
+//!   keep a rule of its own (in memory, or in Vibe Work's `config.toml` for every project). Every yes is sent as
+//!   `approve`; the core keeps "Allow for this session" itself (`vw-core-api` `ask::grants`).
 //! - Objects are closed: a key that is not part of the shape makes the answer malformed.
 //! - Free text (feedback, answers) is only length-checked: newlines are normal in it.
 
@@ -20,6 +23,8 @@ const DECISIONS: &[&str] = &[
     "deny",
     "cancel_turn",
 ];
+/// Decisions that would make Vibe keep a rule of its own; refused on the wire (module invariants).
+const KEPT_BY_VIBE: &[&str] = &["approve_for_session", "approve_permanently"];
 /// Decisions that grant something and may carry a path scope.
 const GRANTING: &[&str] = &["approve", "approve_for_session", "approve_permanently"];
 /// Path scopes (`PathGrantScope`).
@@ -94,6 +99,11 @@ pub(crate) fn approval(output: &Value, offer: &ApprovalOffer) -> Result<(), Call
         .ok_or_else(|| malformed("`decision.type` must be a string"))?;
     if !DECISIONS.contains(&kind) {
         return Err(malformed("`decision.type` is not a known decision"));
+    }
+    if KEPT_BY_VIBE.contains(&kind) {
+        return Err(malformed(
+            "`decision.type` would make Vibe keep a rule; Vibe Work answers once and keeps session grants itself",
+        ));
     }
     if !offer.choices.is_empty() && !offer.choices.iter().any(|c| c == kind) {
         return Err(malformed(

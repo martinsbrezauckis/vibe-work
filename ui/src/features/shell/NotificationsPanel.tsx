@@ -14,9 +14,21 @@ import { reserve } from "../../components/nativeLayer";
 import { useStore } from "../../state/createStore";
 import { computeLayout } from "../../state/panelLayout";
 import { useApp } from "./AppContext";
+import { Selector } from "../../components/Selector";
+import type { BellKind } from "../../state/notifications";
+import { SecurityEntry } from "./SecurityEntry";
 import { goHome } from "./home";
+import { showChatPrompts } from "../ask/waiting";
 import { PluginNoticeText } from "./PluginNoticeText";
 
+const FILTERS = [
+  { value: "all", label: "All", empty: "No notifications" },
+  { value: "security", label: "Security", empty: "No security entries." },
+  { value: "approval", label: "Approvals", empty: "No approvals." },
+  { value: "finished", label: "Finished", empty: "No finished chats." },
+  { value: "failure", label: "Failures", empty: "No failures." },
+  { value: "worktrees", label: "Session copies", empty: "No session copies." },
+] as const;
 const RESERVATION = "notifications-panel";
 
 /** A nonmodal, top-layer popover; Show all and OS activation use the same header anchor. */
@@ -24,6 +36,8 @@ export function NotificationsPanel() {
   const app = useApp();
   const { toasts, sessions } = app;
   const history = useStore(toasts.history, (state) => state);
+  const filter = useStore(toasts.filter, (value) => value);
+  const visible = history.filter((notice) => filter === "all" || notice.bellKind === filter);
   const state = useStore(toasts.panel, (value) => value);
   const panel = useRef<HTMLDivElement>(null);
   const restoreFocus = useRef(true);
@@ -56,14 +70,12 @@ export function NotificationsPanel() {
       reserve(RESERVATION, element.getBoundingClientRect());
     };
     measure();
-    element
-      .querySelector<HTMLButtonElement>("[aria-label='Close']")
-      ?.focus({ preventScroll: true });
+    element.focus({ preventScroll: true });
     const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
     observer?.observe(element);
     if (trigger) observer?.observe(trigger);
     const keydown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
+      if (event.key === "Escape" && !document.querySelector("[data-selector-trigger]")) {
         event.preventDefault();
         event.stopImmediatePropagation();
         toasts.close();
@@ -73,6 +85,7 @@ export function NotificationsPanel() {
       if (
         event.target instanceof Node &&
         !element.contains(event.target) &&
+        !(event.target instanceof Element && event.target.closest("[data-selector-trigger]")) &&
         !trigger?.contains(event.target)
       ) {
         restoreFocus.current = false;
@@ -98,9 +111,11 @@ export function NotificationsPanel() {
     };
   }, [state.open, toasts]);
   useLayoutEffect(() => {
-    panel.current
-      ?.querySelector(`[data-notification-id="${String(state.selectedId)}"]`)
-      ?.scrollIntoView({ block: "start" });
+    const row = panel.current?.querySelector<HTMLElement>(
+      `[data-notification-id="${String(state.selectedId)}"]`,
+    );
+    row?.scrollIntoView({ block: "start" });
+    row?.querySelector<HTMLButtonElement>(".ui-disclosure")?.focus({ preventScroll: true });
   }, [state.open, state.selectedId]);
   if (!state.open) return null;
   return createPortal(
@@ -117,6 +132,10 @@ export function NotificationsPanel() {
         if (
           event.relatedTarget instanceof Node &&
           !event.currentTarget.contains(event.relatedTarget) &&
+          !(
+            event.relatedTarget instanceof Element &&
+            event.relatedTarget.closest("[data-selector-trigger]")
+          ) &&
           event.relatedTarget !== document.getElementById("notifications-trigger")
         ) {
           restoreFocus.current = false;
@@ -128,10 +147,23 @@ export function NotificationsPanel() {
         <h2 id="notifications-heading" className="ui-heading">
           Notifications
         </h2>
+        <label className="security-filter">
+          Show{" "}
+          <Selector<"all" | BellKind>
+            label="Show"
+            value={filter}
+            options={FILTERS}
+            onChange={(value) => {
+              toasts.filter.set(value);
+            }}
+            testId="shell.notifications-show"
+            compact
+          />
+        </label>
         <div className="toast-dialog-actions">
           <Button
             data-testid="shell.notifications-panel-focus"
-            small
+            shape="outlined"
             disabled={history.length === 0}
             onClick={() => {
               panel.current?.querySelector<HTMLButtonElement>("[aria-label='Close']")?.focus();
@@ -143,7 +175,7 @@ export function NotificationsPanel() {
           <IconButton
             data-testid="shell.notifications-panel-close"
             icon="x"
-            aria-label="Close"
+            label="Close"
             title="Close notifications"
             onClick={() => {
               toasts.close();
@@ -152,121 +184,137 @@ export function NotificationsPanel() {
         </div>
       </div>
       <div className="toast-dialog-body">
-        {history.length === 0 && (
+        {visible.length === 0 && (
           <EmptyState glyph="chat" small>
-            No notifications
+            {FILTERS.find((option) => option.value === filter)?.empty}
           </EmptyState>
         )}
-        {[...history].reverse().map((toast) => (
-          <article
-            data-item-id={toast.id}
-            className="toast-dialog-row ui-list-row"
-            key={toast.id}
-            data-kind={toast.kind}
-            data-notification-id={String(toast.id)}
-          >
-            <time
-              className="ui-caption"
-              dateTime={new Date(toast.createdAt).toISOString()}
-              title={new Date(toast.createdAt).toLocaleString()}
+        {[...visible]
+          .sort((a, b) => b.createdAt - a.createdAt)
+          .map((toast) => (
+            <article
+              data-item-id={toast.id}
+              className="toast-dialog-row ui-list-row"
+              key={toast.id}
+              data-kind={toast.kind}
+              data-notification-id={String(toast.id)}
             >
-              {new Date(toast.createdAt).toLocaleTimeString([], {
-                hour: "2-digit",
-                minute: "2-digit",
-              })}
-            </time>
-            <span className="toast-dialog-text ui-body">
-              {toast.plugin ? (
-                <PluginNoticeText text={toast.text} name={toast.plugin.name} />
-              ) : (
-                toast.text
-              )}
-            </span>
-            <div className="toast-dialog-actions">
-              {toast.secretLeak !== undefined && (
-                <SecretLeakActions findingId={toast.secretLeak.findingId} />
-              )}
-              {toast.plugin !== undefined &&
-                (toast.plugin.managed ? (
-                  <>
-                    <Button
-                      small
-                      data-testid="shell.notifications-plugin-on"
-                      onClick={() => {
-                        if (toast.plugin) void app.market?.actions.showPlugin(toast.plugin.path);
-                        toasts.close();
-                      }}
-                    >
-                      Turn on
-                    </Button>
-                    <Button
-                      variant="danger"
-                      small
-                      data-testid="shell.notifications-plugin-remove"
-                      onClick={() => {
-                        if (toast.plugin)
-                          void app.market?.actions
-                            .changePlugin("removePlugin", toast.plugin.path)
-                            .then((changed) => {
-                              if (changed) toasts.forget(toast.id);
-                            });
-                      }}
-                    >
-                      Remove
-                    </Button>
-                  </>
-                ) : (
-                  <span className="cmuted">Managed elsewhere</span>
-                ))}
-              {toast.action === "sessions" && (
-                <Button
-                  data-testid="shell.notifications-panel-go-home"
-                  small
-                  onClick={() => {
-                    goHome(app);
-                    app.shell.actions.selectSession(null);
-                    app.shell.actions.setFilter("");
-                    app.shell.actions.showList();
-                    if (computeLayout(app.shell.store.get(), window.innerWidth).drawer)
-                      app.shell.actions.setDrawer(true);
-                    void app.core?.setIncludeArchived(true);
-                    toasts.close();
-                  }}
-                >
-                  Sessions
-                </Button>
-              )}
-              {toast.sessionId !== undefined && (
-                <Button
-                  data-testid="shell.notifications-panel-open"
-                  small
-                  onClick={() => {
-                    if (toast.sessionId !== undefined) void sessions?.open(toast.sessionId);
-                    toasts.close();
-                  }}
-                >
-                  {term("workNames", "session").tooltip}
-                </Button>
-              )}
-              <Button
-                data-testid="shell.notifications-panel-closest"
-                small
-                aria-label={`Dismiss: ${toast.text}`}
-                onClick={(event) => {
-                  const row = event.currentTarget.closest("article");
-                  const adjacent = row?.nextElementSibling ?? row?.previousElementSibling;
-                  const next =
-                    adjacent?.querySelector<HTMLButtonElement>("[aria-label^='Dismiss:']") ??
-                    panel.current?.querySelector<HTMLButtonElement>("[aria-label='Close']");
-                  next?.focus();
-                  toasts.forget(toast.id);
-                }}
+              <time
+                className="ui-caption"
+                dateTime={new Date(toast.createdAt).toISOString()}
+                title={new Date(toast.createdAt).toLocaleString()}
               >
-                Dismiss
-              </Button>
-            </div>
-          </article>
-        ))}
+                {new Date(toast.createdAt).toLocaleTimeString([], {
+                  hour: "2-digit",
+                  minute: "2-digit",
+                })}
+              </time>
+              {toast.security === undefined ? (
+                <span className="toast-dialog-text ui-body">
+                  {toast.plugin ? (
+                    <PluginNoticeText text={toast.text} name={toast.plugin.name} />
+                  ) : (
+                    toast.text
+                  )}
+                </span>
+              ) : (
+                <SecurityEntry
+                  toast={toast}
+                  onNavigate={() => {
+                    restoreFocus.current = false;
+                  }}
+                />
+              )}
+              <div className="toast-dialog-actions">
+                {toast.secretLeak !== undefined && (
+                  <SecretLeakActions findingId={toast.secretLeak.findingId} />
+                )}
+                {toast.plugin !== undefined &&
+                  (toast.plugin.managed ? (
+                    <>
+                      <Button
+                        shape="outlined"
+                        data-testid="shell.notifications-plugin-on"
+                        onClick={() => {
+                          if (toast.plugin) void app.market?.actions.showPlugin(toast.plugin.path);
+                          toasts.close();
+                        }}
+                      >
+                        Turn on
+                      </Button>
+                      <Button
+                        variant="danger"
+                        shape="outlined"
+                        data-testid="shell.notifications-plugin-remove"
+                        onClick={() => {
+                          if (toast.plugin)
+                            void app.market?.actions
+                              .changePlugin("removePlugin", toast.plugin.path)
+                              .then((changed) => {
+                                if (changed) toasts.forget(toast.id);
+                              });
+                        }}
+                      >
+                        Remove
+                      </Button>
+                    </>
+                  ) : (
+                    <span className="cmuted">Managed elsewhere</span>
+                  ))}
+                {toast.action === "sessions" && (
+                  <Button
+                    data-testid="shell.notifications-panel-go-home"
+                    shape="outlined"
+                    onClick={() => {
+                      goHome(app);
+                      app.shell.actions.selectSession(null);
+                      app.shell.actions.setFilter("");
+                      app.shell.actions.showList();
+                      if (computeLayout(app.shell.store.get(), window.innerWidth).drawer)
+                        app.shell.actions.setDrawer(true);
+                      void app.core?.setIncludeArchived(true);
+                      toasts.close();
+                    }}
+                  >
+                    Sessions
+                  </Button>
+                )}
+                {toast.sessionId !== undefined && toast.security === undefined && (
+                  <Button
+                    data-testid="shell.notifications-panel-open"
+                    shape="outlined"
+                    onClick={() => {
+                      if (toast.sessionId !== undefined) {
+                        // Selecting another chat brings its prompt windows forward; the chat already shown needs it.
+                        const shownAlready = app.shell.store.get().selected === toast.sessionId;
+                        void sessions?.open(toast.sessionId);
+                        if (shownAlready) showChatPrompts(app, toast.sessionId);
+                      }
+                      toasts.close();
+                    }}
+                  >
+                    {term("workNames", "session").tooltip}
+                  </Button>
+                )}
+                <Button
+                  data-testid="shell.notifications-panel-closest"
+                  shape="outlined"
+                  aria-label={`Dismiss: ${toast.text}`}
+                  onClick={(event) => {
+                    const row = event.currentTarget.closest("article");
+                    const adjacent = row?.nextElementSibling ?? row?.previousElementSibling;
+                    const next =
+                      adjacent?.querySelector<HTMLButtonElement>("[aria-label^='Dismiss:']") ??
+                      panel.current?.querySelector<HTMLButtonElement>("[aria-label='Close']");
+                    next?.focus();
+                    toasts.forget(toast.id);
+                  }}
+                >
+                  Dismiss
+                </Button>
+              </div>
+            </article>
+          ))}
       </div>
     </div>,
     document.body,

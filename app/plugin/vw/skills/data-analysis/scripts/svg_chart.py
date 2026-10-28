@@ -74,7 +74,10 @@ def render(labels, series, values, kind, title, unit):
     out = [f'<figure class="hb-chart"><svg viewBox="0 0 {w} {h}" width="100%" role="img" aria-label="{title}" '
            f'xmlns="http://www.w3.org/2000/svg" style="max-width:{w}px;font:12px system-ui,sans-serif">',
            f"<title>{title}</title>"]
-    y = lambda v: up + ph - (v - low) / span * ph  # noqa: E731
+
+    def y(v):
+        return up + ph - (v - low) / span * ph
+
     for i in range(5):
         tick = low + span * i / 4
         out.append(f'<line x1="{left}" x2="{w - right}" y1="{y(tick):.1f}" y2="{y(tick):.1f}" style="stroke:var(--line)"/>')

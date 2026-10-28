@@ -155,7 +155,9 @@ pub fn open_mail_url(text: &str) -> Result<(), OpenUrlError> {
 /// Starts the platform opener for an already checked link and reaps it in the background.
 fn spawn_opener(url: &str) -> Result<(), OpenUrlError> {
     let (program, args) = LinkOpener::current().command(url);
-    let mut child = Command::new(program)
+    let mut command = Command::new(program);
+    crate::child_env::remove_own_run_settings(&mut command);
+    let mut child = command
         .args(args)
         .spawn()
         .map_err(|error| OpenUrlError::Spawn(error.to_string()))?;

@@ -44,6 +44,9 @@ impl TauriEngine {
         id: &MountId,
         script: String,
     ) -> Result<String, EngineError> {
+        // A cancelled Linux snapshot must finish restoring native zoom before the capture's page cleanup runs.
+        #[cfg(target_os = "linux")]
+        let _visibility = self.visibility.lock().await;
         let webview = self.webview(id)?;
         let (tx, rx) = tokio::sync::oneshot::channel::<String>();
         let tx = Mutex::new(Some(tx));

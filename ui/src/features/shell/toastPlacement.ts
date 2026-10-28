@@ -13,7 +13,7 @@
  * Invariants: the corner offsets mirror `overlays.css` (`.toasts[data-corner]`): 18 px from the
  * side edges, 40 px above the bottom (status bar, `BOTTOM`), 48 px below the top (title bar); a lift adds to the
  * bottom offset (the stack sets it inline).
- * A visible rail adds a minimum left edge; the painted stack and native reservation use that same edge.
+ * Visible rail and folded windows add a minimum left edge; the painted stack uses that same edge.
  */
 
 /** A rectangle in viewport coordinates. */
@@ -60,6 +60,11 @@ function overlap(a: Rect, b: Rect): number {
   const w = Math.min(a.right, b.right) - Math.max(a.left, b.left);
   const h = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top);
   return w > 0 && h > 0 ? w * h : 0;
+}
+
+/** Whether `rect` covers any of `others` (touching edges do not count). */
+export function coversAny(rect: Rect, others: readonly Rect[]): boolean {
+  return others.some((other) => overlap(rect, other) > 0);
 }
 
 function fits(rect: Rect, viewport: Viewport): boolean {

@@ -9,29 +9,49 @@ export type KeyRequest = { "op": "readStatus", } | { "op": "createVault",
 /**
  * The new passphrase.
  */
-passphrase: SecretInput, 
-/**
- * Remember this device (product default: on).
- */
-rememberDevice: boolean, } | { "op": "unlockVault", 
+passphrase: SecretInput, } | { "op": "unlockVault", 
 /**
  * The passphrase.
  */
 passphrase: SecretInput, 
 /**
- * Turn "remember this device" on or off (absent: keep).
- */
-rememberDevice?: boolean, 
-/**
  * Which vault, when two exist.
  */
-vault?: VaultChoice, } | { "op": "lockVault", } | { "op": "setupStoreKey", 
+vault?: VaultChoice, } | { "op": "lockVault", } | { "op": "setLockVaultOnQuit", 
+/**
+ * On: quitting locks the vault and deletes its kept key.
+ */
+on: boolean, } | { "op": "setupStoreKey", 
 /**
  * The key.
  */
-apiKey: SecretInput, } | { "op": "removeKey", } | { "op": "listKeyCandidates", } | { "op": "useExistingKey", 
+apiKey: SecretInput, } | { "op": "listKeyCandidates", } | { "op": "useExistingKey", 
 /**
  * Its vault item id.
+ */
+itemId: string, } | { "op": "listMistralKeys", } | { "op": "addMistralKey", 
+/**
+ * The vault display label.
+ */
+name: string, 
+/**
+ * One-way secret input.
+ */
+apiKey: SecretInput, } | { "op": "useMistralKey", 
+/**
+ * The chosen vault identity.
+ */
+itemId: string, } | { "op": "renameMistralKey", 
+/**
+ * Vault identity.
+ */
+itemId: string, 
+/**
+ * New label.
+ */
+name: string, } | { "op": "removeMistralKey", 
+/**
+ * Vault identity.
  */
 itemId: string, } | { "op": "testKey", } | { "op": "detectVibeKey", } | { "op": "importVibeKey", 
 /**
@@ -42,6 +62,38 @@ source: VibeKeySource, } | { "op": "removeVibeKeyOriginal",
  * Which one.
  */
 source: VibeKeySource, };
+
+export type MistralKeyView = { 
+/**
+ * Vault item identity.
+ */
+itemId: string, 
+/**
+ * Vault display label.
+ */
+label: string, 
+/**
+ * This credential is selected.
+ */
+inUse: boolean, 
+/**
+ * Latest completed test, or null before the first test.
+ */
+lastTest: MistralKeyTestView | null, };
+
+export type MistralKeyTestView = { 
+/**
+ * Number of available models on success.
+ */
+modelCount: number | null, 
+/**
+ * HTTP failure status, when an answer arrived.
+ */
+code: number | null, 
+/**
+ * Fixed explanation on failure; never a response body.
+ */
+text: string | null, };
 
 export type SecretInput = string;
 
@@ -68,9 +120,14 @@ vaultSelected: boolean,
  */
 vaultPath: string | null, 
 /**
- * This device is (or can be) unlocked without the passphrase.
+ * The vault's key is kept in this computer's credential store (it opens at the next start
+ * without the passphrase).
  */
 rememberedDevice: boolean, 
+/**
+ * "Lock the vault when Vibe Work quits" (absent in a status from before the switch: off).
+ */
+lockVaultOnQuit: boolean, 
 /**
  * `unknown` (locked), `missing`, `ready`.
  */

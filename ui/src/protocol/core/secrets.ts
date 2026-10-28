@@ -191,7 +191,11 @@ id: string, } | { "op": "revoke",
 /**
  * The grant's id.
  */
-grantId: string, } | { "op": "addLogin",
+grantId: string, } | { "op": "revokeMany",
+/**
+ * The grants' ids (at most 10 000).
+ */
+grantIds: Array<string>, } | { "op": "addLogin",
 /**
  * The name people and agents use (empty: the site's host).
  */
@@ -274,10 +278,6 @@ agentAccessLocked: boolean,
  * The secrets an agent may name, by name.
  */
 secrets: Array<ProjectSecretView>,
-/**
- * The "always" grants in force, newest first (vault records; empty while the vault is locked).
- */
-grants: Array<GrantView>,
 /**
  * The uses since Vibe Work started, newest first (at most 200 are kept; never stored).
  */
@@ -391,44 +391,6 @@ project: string,
  */
 permission: EntryPermissionView, };
 
-export type GrantView = {
-/**
- * Grant id.
- */
-id: string,
-/**
- * The command as the dialog showed it (resolved program and arguments).
- */
-command: string,
-/**
- * `VARIABLE <- secret name` per secret.
- */
-bindings: Array<string>,
-/**
- * The secrets' ids (removing a secret revokes its grants).
- */
-secretIds: Array<string>,
-/**
- * The project folder.
- */
-project: string,
-/**
- * The hash over everything the consent binds to (`agent_tools/secret_pin.rs`).
- */
-fingerprint: string,
-/**
- * When the user chose "always" for it (the latest time), ms.
- */
-createdMs: number,
-/**
- * Times it was used since Vibe Work started (counts are not stored).
- */
-uses: number,
-/**
- * Last use since Vibe Work started, ms.
- */
-lastUsedMs: number | null, };
-
 export type ServerGrantView = {
 /**
  * The binding's id (what `revoke` takes).
@@ -461,7 +423,15 @@ grant: string,
 /**
  * Requests forwarded with the key in this run.
  */
-uses: number, };
+uses: number,
+/**
+ * When the binding was made (the key was given to the server), ms.
+ */
+createdMs: number,
+/**
+ * The last request forwarded with the key in this run, ms; `None` before the first.
+ */
+lastUsedMs: number | null, };
 
 export type LoginView = {
 /**
@@ -525,7 +495,11 @@ grantedMs: number,
 /**
  * Fills since Vibe Work started.
  */
-uses: number, };
+uses: number,
+/**
+ * The last fill since Vibe Work started, ms; `None` before the first.
+ */
+lastUsedMs: number | null, };
 
 export type LoginPassword = string;
 

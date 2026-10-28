@@ -12,9 +12,8 @@
 use serde_json::Value;
 
 /// The profiles the app may select.
-pub(crate) const PROFILES: [&str; 7] = [
+pub(crate) const PROFILES: [&str; 6] = [
     "ask",
-    "plan",
     "accept-edits",
     "auto-approve",
     "explore",

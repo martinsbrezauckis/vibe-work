@@ -67,7 +67,6 @@ pub(crate) struct Inner {
     /// Agent processes whose session was deleted: listed for the user, never stopped automatically.
     pub(crate) deleted_session: Mutex<Vec<LedgerEntry>>,
     vibe_servers: Mutex<Vec<ProcessRef>>,
-    last: Mutex<Option<Arc<Snapshot>>>,
     pub(crate) ledger: Option<Ledger>,
 }
 
@@ -101,7 +100,6 @@ impl ProcMon {
                 adopted: Mutex::new(Vec::new()),
                 deleted_session: Mutex::new(Vec::new()),
                 vibe_servers: Mutex::new(Vec::new()),
-                last: Mutex::new(None),
                 ledger,
             }),
         })
@@ -184,21 +182,13 @@ impl ProcMon {
         }
     }
 
-    /// Scans the OS now and keeps the result as the latest snapshot. Blocking.
+    /// Scans the OS now. Blocking.
     ///
     /// # Errors
     /// [`ScanError`] when the OS tables cannot be read.
     pub fn scan(&self) -> Result<Arc<Snapshot>, ScanError> {
         self.inner.leases.reconcile_processes(os::is_alive);
-        let snapshot = Arc::new(os::snapshot()?);
-        *lock(&self.inner.last) = Some(snapshot.clone());
-        Ok(snapshot)
-    }
-
-    /// The latest snapshot (from a scan or the tick), if any.
-    #[must_use]
-    pub fn last_snapshot(&self) -> Option<Arc<Snapshot>> {
-        lock(&self.inner.last).clone()
+        Ok(Arc::new(os::snapshot()?))
     }
 
     /// A session's listeners (owned and contested), registered processes, re-attached processes,

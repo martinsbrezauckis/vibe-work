@@ -2,6 +2,8 @@
 
 #![allow(dead_code, unreachable_pub)]
 
+use vw_public_tests::test_paths;
+
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -37,7 +39,7 @@ impl TempRepo {
     /// root is prepared in the process).
     pub fn unprepared(files: &[(&str, &str)]) -> Self {
         let n = SEQ.fetch_add(1, Ordering::Relaxed);
-        let base = std::env::temp_dir().join(format!(
+        let base = test_paths::root().join(format!(
             "vw-changes-{}-{}-{n}",
             std::process::id(),
             vw_changes::now_ms()

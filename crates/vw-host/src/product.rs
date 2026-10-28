@@ -1,5 +1,6 @@
 //! The user-build launch: how an installed Vibe Work starts `vibe-app-server`, assembled
-//! here (not in the Tauri crate) so a test can run exactly this launch over a fake server and read what the
+//! here (not in the Tauri crate) so a test can run exactly this launch over the real Vibe with a scripted model
+//! and read what the
 //! server process got.
 //!
 //! What a user build gets:
@@ -10,7 +11,8 @@
 //!   finishes. Never a dev venv, never a binary from `PATH` the user did not choose.
 //! - **Own `VIBE_HOME`** under the app's data folder, its `.env` kept secret-free ([`ProductLaunch`]); its
 //!   `config.toml` names Mistral Medium 3.5 as the session-title model unless it names one already
-//!   ([`crate::title_model`]).
+//!   ([`crate::title_model`]), and Vibe verifies HTTPS with the OS certificate store unless it sets that itself
+//!   ([`crate::trust_store`]).
 //! - **Key:** only through the key service (model proxy + per-start placeholder); the parent's
 //!   `MISTRAL_API_KEY` never reaches the server (the supervisor filters the parent environment, and the
 //!   key service's provider replaces any other). If the key store cannot be located the launch fails
@@ -18,7 +20,7 @@
 //! - **No `PYTHON_KEYRING_BACKEND`:** Vibe keeps connector OAuth tokens in the OS keyring.
 //! - **Sessions shared with the Vibe CLI** by default (`settings.json` `shareCliSessions`):
 //!   `VIBE_SESSION_LOGGING__SAVE_DIR=<CLI home>/logs/session`.
-//! - **Flags:** `--multiplex --experimental-harness` (supervisor default) and
+//! - **Flags:** `--multiplex` (supervisor default) and
 //!   `--additional-builtin-plugin-root <resources>/plugin` (only from the app's own files).
 //! - **Session tools:** the bundled `vw-agent-tools` next to the app executable and the kill guard in our
 //!   `hooks.toml` ([`crate::agent_tools::prepare`]).
@@ -197,6 +199,11 @@ pub fn plan(inputs: ProductInputs, settings: &HostSettings, core: &mut CoreConfi
         .exe
         .as_deref()
         .and_then(crate::agent_tools::binary_next_to);
+    // Settings checks the expected resource folder and reports missing or changed shipped bytes.
+    core.chrome_control.bundled(&resources);
+    if let Some(chrome) = &core.chrome_control.package {
+        notes.push(format!("Chrome Control package: {}", chrome.display()));
+    }
     let plugin = plugin_root(&resources);
     match crate::agent_tools::prepare(
         &mut supervisor,

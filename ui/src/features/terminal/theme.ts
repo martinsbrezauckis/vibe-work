@@ -2,7 +2,7 @@
  * Terminal look from the design tokens: xterm needs concrete colour strings (its renderers do colour
  * maths and cannot resolve CSS variables), so the
  * `--term-*` tokens of the current theme are read with `getComputedStyle`.
- * Depends on: styles/tokens.css (`--term-*`, `--mono`). Called by: session.ts (at mount and on theme
+ * Depends on: styles/tokens.css (`--term-*`, `--font-mono`). Called by: session.ts (at mount and on theme
  * change).
  * Invariants: every value comes from a token (no literal colours here, `check_colors.mjs`); a missing
  * token leaves xterm's own default for that slot.
@@ -50,7 +50,7 @@ export function terminalLook(root: HTMLElement = document.documentElement): {
     if (value !== "") theme[slot] = value;
   }
   const size = Number.parseFloat(style.getPropertyValue("--term-font-size"));
-  const family = style.getPropertyValue("--mono").trim();
+  const family = style.getPropertyValue("--font-mono").trim();
   return {
     theme,
     fontFamily: family === "" ? "monospace" : family,

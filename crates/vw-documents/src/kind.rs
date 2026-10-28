@@ -48,7 +48,7 @@ pub enum DocKind {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ReadMethod {
-    /// Sent to Mistral OCR (spends the user's OCR quota; only after the user asks).
+    /// Sent to Mistral OCR (spends the user's OCR quota on attach).
     Ocr,
     /// Read on this computer (no quota, nothing leaves before the message is sent).
     Local,
@@ -61,7 +61,7 @@ impl DocKind {
     #[must_use]
     pub fn method(self) -> ReadMethod {
         match self {
-            Self::Xlsx | Self::Csv | Self::Text => ReadMethod::Local,
+            Self::Docx | Self::Pptx | Self::Xlsx | Self::Csv | Self::Text => ReadMethod::Local,
             Self::Binary => ReadMethod::File,
             _ => ReadMethod::Ocr,
         }

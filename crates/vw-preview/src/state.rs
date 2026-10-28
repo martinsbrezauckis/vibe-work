@@ -10,6 +10,7 @@
 
 use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 use tokio::sync::watch;
@@ -21,6 +22,36 @@ use crate::layout::{DeviceWidth, Rect};
 
 /// Refused navigations remembered per preview.
 pub const MAX_REFUSED: usize = 5;
+
+/// How long a refusal one hook reported waits for the other hook's report of the same navigation (`WebView2` reports
+/// one refused navigation twice, about 2 ms apart, see [`Seen`]). Longer than that pair, short enough that a later
+/// refusal of the same address through the other hook is its own refusal.
+pub(crate) const REFUSAL_PAIR_WINDOW: Duration = Duration::from_secs(1);
+
+/// Which engine hook reported a refused navigation. `WebView2` reports one refused main-frame navigation (and a
+/// redirect) to both: the navigation callback (wry's `NavigationStarting`, main frame only) and the document-request
+/// barrier (`WebResourceRequested`, main frame and frames, because `WebView2` still sends a cancelled navigation's
+/// GET). A frame's navigation reaches only the barrier, a non-web scheme (`tauri://`) only the callback.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Seen {
+    /// The navigation callback (`PreviewHooks::allow_navigation`).
+    Navigation,
+    /// The document-request barrier (`PreviewHooks::request_check` with `document`).
+    Document,
+    /// A sub-request's name check (`request_check` without `document`): never a navigation, never paired.
+    Request,
+}
+
+/// The last refusal recorded for a page, waiting for its other half (see [`Entry::second_report`]).
+#[derive(Clone, Debug)]
+pub(crate) struct RefusalMark {
+    url: String,
+    seen: Seen,
+    at: Instant,
+}
+
+/// Canaries of ended guard checks remembered per preview (two per check; a few remounts' worth).
+pub(crate) const ENDED_CANARIES: usize = 8;
 
 /// Whether an external browser may remount as layout updates arrive.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -98,10 +129,19 @@ pub(crate) struct DownloadRecord {
     pub(crate) name: String,
 }
 
+/// Only a completed setup permits use; an unready child is retained solely for close retries.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum MountState {
+    Unready,
+    Ready,
+}
+
 /// The current mount of an entry.
 #[derive(Clone, Debug)]
 pub(crate) struct Mount {
+    pub(crate) navigation: crate::navigation::Navigation,
     pub(crate) label: String,
+    pub(crate) state: MountState,
     /// The page environment's accessor of this mount (`page_init::page_accessor`).
     pub(crate) page: String,
     /// Fixed for the mount's life: a navigation to the other class gets a fresh mount.
@@ -120,6 +160,7 @@ pub(crate) struct Mount {
 
 /// One session's preview.
 pub(crate) struct Entry {
+    pub(crate) agent_navigation: usize,
     pub(crate) session_id: String,
     pub(crate) url: Option<Url>,
     pub(crate) title: Option<String>,
@@ -157,12 +198,20 @@ pub(crate) struct Entry {
     pub(crate) refused: VecDeque<String>,
     /// This page's refused URLs with their reasons.
     pub(crate) refused_why: VecDeque<(String, String)>,
+    /// Lifetime refusal count; action receipts must also see repeated refusals of the same URL.
+    pub(crate) refusals_seen: u64,
+    /// The last recorded refusal, until the other hook reports the same navigation (one record per refusal).
+    pub(crate) refusal_mark: Option<RefusalMark>,
     /// The network guard is proven active for the current mount: public hosts may load.
     pub(crate) guarded: bool,
     /// The protection layers the engine reported for the current mount, besides the navigation policy.
     pub(crate) layers: Vec<crate::engine::GuardLayer>,
     /// The loopback canary the engine is loading right now (allowed once, never recorded as the page).
     pub(crate) canary: Option<Url>,
+    /// Canaries the engine announced for checks that have ended, newest last, at most [`ENDED_CANARIES`]: the
+    /// engine can report a canary's load after its check ended (`WebKitGTK`), or ask about it once more (`WebKit`);
+    /// such a report is never the page and never shown as a refused page, and a navigation to it stays refused.
+    pub(crate) ended_canaries: VecDeque<Url>,
     /// The local-network host the USER opened: set, the page is a [`PageClass::Lan`] page; its
     /// mount reaches only this host, and the agent neither reads nor acts on it. Kept across a suspension.
     ///
@@ -178,6 +227,7 @@ pub(crate) struct Entry {
 impl Entry {
     pub(crate) fn new(session_id: &str) -> Self {
         Self {
+            agent_navigation: 0,
             session_id: session_id.to_owned(),
             url: None,
             title: None,
@@ -202,13 +252,23 @@ impl Entry {
             downloads_dir: None,
             refused: VecDeque::new(),
             refused_why: VecDeque::new(),
+            refusals_seen: 0,
+            refusal_mark: None,
             guarded: false,
             layers: Vec::new(),
             canary: None,
+            ended_canaries: VecDeque::new(),
             lan_host: None,
             loads: watch::Sender::new(0),
             shots_blocked_at: None,
         }
+    }
+
+    /// A mount that completed every required setup step and may be used by service operations.
+    pub(crate) fn ready_mount(&self) -> Option<&Mount> {
+        self.mount
+            .as_ref()
+            .filter(|mount| mount.state == MountState::Ready)
     }
 
     /// The page class of the current mount (`Web` when not mounted: nothing local is reachable then).
@@ -225,9 +285,66 @@ impl Entry {
             .flatten()
     }
 
+    /// Ends the pending canary (a new one is announced, or the check ended): remembered as ended, bounded.
+    pub(crate) fn end_canary(&mut self) {
+        if let Some(url) = self.canary.take() {
+            self.ended_canaries.retain(|u| u != &url);
+            self.ended_canaries.push_back(url);
+            while self.ended_canaries.len() > ENDED_CANARIES {
+                self.ended_canaries.pop_front();
+            }
+        }
+    }
+
+    /// True for a canary the engine announced for this preview: the pending one or one of an ended check.
+    pub(crate) fn announced_canary(&self, url: &Url) -> bool {
+        self.canary.as_ref() == Some(url) || self.ended_canaries.contains(url)
+    }
+
+    /// True for the engine's own `/favicon.ico` request of a canary page this preview showed (the same origin as an
+    /// announced canary: for the loopback canary, the guard's proxy port). `WebView2` sends it just after the check.
+    pub(crate) fn canary_favicon(&self, url: &Url) -> bool {
+        url.path() == "/favicon.ico"
+            && self
+                .canary
+                .iter()
+                .chain(self.ended_canaries.iter())
+                .any(|canary| canary.origin() == url.origin())
+    }
+
+    /// True when this refusal of `url` by hook `seen` is the other hook's report of the refusal recorded just before
+    /// (the same address without its fragment, the other hook, within [`REFUSAL_PAIR_WINDOW`]): the caller then
+    /// records nothing. Otherwise this refusal becomes the mark and the caller records it. A mark is used once, so
+    /// three reports are two refusals, and two reports by the same hook are two refusals.
+    pub(crate) fn second_report(&mut self, url: &Url, seen: Seen) -> bool {
+        if seen == Seen::Request {
+            return false;
+        }
+        let mut key = url.clone();
+        key.set_fragment(None);
+        let key: String = key.as_str().chars().take(200).collect();
+        if let Some(mark) = self.refusal_mark.take()
+            && mark.url == key
+            && mark.seen != seen
+            && mark.at.elapsed() < REFUSAL_PAIR_WINDOW
+        {
+            return true;
+        }
+        self.refusal_mark = Some(RefusalMark {
+            url: key,
+            seen,
+            at: Instant::now(),
+        });
+        false
+    }
+
     pub(crate) fn note_refused(&mut self, url: &str, reason: &str) {
+        if Url::parse(url).is_ok_and(|url| crate::policy::embedded_document(&url)) {
+            return;
+        }
         let url: String = url.chars().take(200).collect();
         self.refused.push_back(url.clone());
+        self.refusals_seen = self.refusals_seen.saturating_add(1);
         while self.refused.len() > MAX_REFUSED {
             self.refused.pop_front();
         }
@@ -264,7 +381,7 @@ impl Entry {
     }
 
     pub(crate) fn view(&self, shown: bool) -> PreviewView {
-        let state = match (&self.mount, shown) {
+        let state = match (self.ready_mount(), shown) {
             _ if self.server_status.is_some() => PreviewState::Stopped,
             (Some(_), true) => PreviewState::Live,
             (Some(_), false) => PreviewState::Hidden,
@@ -297,6 +414,8 @@ pub(crate) struct Shown {
 #[derive(Default)]
 pub(crate) struct State {
     pub(crate) entries: HashMap<String, Entry>,
+    /// The app's theme is light: the page's own menu falls back to it when the page shows no light or dark.
+    pub(crate) light_app: bool,
     /// Opaque web-page key -> owning Vibe session. The pinned app page uses its session id directly.
     pub(crate) page_owners: HashMap<String, String>,
     /// Pages admitted for close; ownership cannot change before native teardown finishes.

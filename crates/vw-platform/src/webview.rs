@@ -1,8 +1,8 @@
 //! Native webview calls the preview engine (vw-webview) needs and Tauri does not offer, each behind a
 //! safe function: a PNG of a `WebView2` webview (`DevTools` Protocol `Page.captureScreenshot`, the path ShellX
 //! uses on Windows), a PNG of a `WKWebView`
-//! (`takeSnapshotWithConfiguration:completionHandler:`), and the macOS major version (data store identifiers need
-//! macOS 14). For `WebView2`, this adds: what storage a webview really got ([`StorageFacts`]: the effective
+//! (`takeSnapshotWithConfiguration:completionHandler:`; a sharp one of a zoomed preview in `sharp_mac`, sized by
+//! [`sharp`]), and the macOS major version (identified data stores need macOS 14). For `WebView2`, this adds: what storage a webview really got ([`StorageFacts`]: the effective
 //! user data folder and profile, so the engine can refuse a preview without its own profile), and a request
 //! barrier for document requests ([`guard_requests`]): `WebView2` sends the GET of a navigation the
 //! host cancels in `NavigationStarting` (Microsoft Learn, `ICoreWebView2NavigationStartingEventArgs::put_Cancel`:
@@ -20,11 +20,34 @@
 //! - Every function answers through its callback exactly once (also on failure), so a waiting task never hangs.
 //! - `unsafe` is confined to the platform calls, each with its SAFETY comment.
 //!
-//! For `WebView2`, this also reports: whether a machine setting puts every environment into one shared user data folder
-//! ([`shared_user_data_folder`]: the environments then share one browser process and must use identical browser
-//! arguments). The macOS content rules live in `content_rules`.
+//! For `WebView2`, this also reports: whether a setting puts every environment of the app into one shared user data
+//! folder, and which ([`user_data_folder_override`]: the environments then share one browser process and must use
+//! identical browser arguments). The macOS content rules live in `content_rules`.
 
 mod full_clip;
+mod pdf;
+pub mod sharp;
+mod site_data;
+pub use pdf::PdfFile;
+pub use site_data::ClearDone;
+#[cfg(any(windows, target_os = "macos"))]
+pub use site_data::clear_service_workers;
+#[cfg(target_os = "macos")]
+#[allow(unsafe_code)]
+mod sharp_mac;
+#[cfg(target_os = "macos")]
+pub use sharp_mac::snapshot_png_sharp;
+
+#[cfg(windows)]
+#[allow(unsafe_code)]
+mod pdf_windows;
+#[cfg(windows)]
+pub use pdf_windows::print_pdf;
+#[cfg(target_os = "macos")]
+#[allow(unsafe_code)]
+mod pdf_macos;
+#[cfg(target_os = "macos")]
+pub use pdf_macos::print_pdf;
 
 pub use full_clip::{FullClip, full_clip};
 
@@ -78,12 +101,31 @@ pub type PostToUi = std::sync::Arc<dyn Fn(Box<dyn FnOnce() + Send>) + Send + Syn
 
 #[cfg(windows)]
 pub use windows_impl::{
-    capture_png, guard_requests, provider_accounts, shared_user_data_folder, sign_out_provider,
-    storage_facts,
+    arguments_change_proxy_at, capture_png, guard_requests, policy_arguments_change_proxy,
+    policy_names_folder_at, provider_accounts, shared_user_data_folder, sign_out_provider,
+    storage_facts, user_data_folder_override,
 };
 
+/// What puts every `WebView2` environment of the app into one user data folder (Windows,
+/// `user_data_folder_override`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FolderOverride {
+    /// The `WEBVIEW2_USER_DATA_FOLDER` environment variable.
+    Variable,
+    /// A `UserDataFolder` policy value for this app (machine or current user).
+    Policy,
+}
+
 #[cfg(target_os = "macos")]
-pub use macos_impl::{macos_major_version, provider_accounts, sign_out_provider, snapshot_png};
+pub use macos_impl::{provider_accounts, sign_out_provider, snapshot_png};
+
+/// The macOS major version ([`crate::system_version`]), `None` when it cannot be read. Identified website data
+/// stores need macOS 14 (the preview storage falls back below it).
+#[cfg(target_os = "macos")]
+#[must_use]
+pub fn macos_major_version() -> Option<u32> {
+    crate::system_version()?.1.split('.').next()?.parse().ok()
+}
 
 #[cfg(windows)]
 #[allow(unsafe_code)]
@@ -257,59 +299,103 @@ mod windows_impl {
         }
     }
 
-    /// True when a machine setting replaces every `WebView2` environment's user data folder with one folder (the
-    /// `WEBVIEW2_USER_DATA_FOLDER` variable, or a `UserDataFolder` policy value under
-    /// `Software\Policies\Microsoft\Edge\WebView2` in the current user's or the machine's registry; Microsoft Learn,
-    /// `CreateCoreWebView2EnvironmentWithOptions`). Every environment then shares one browser process, whose options
-    /// must match ("`ERROR_INVALID_STATE`"). Unreadable keys count as absent.
+    /// What replaces the user data folder of every `WebView2` environment of this app with one folder (Microsoft
+    /// Learn, `CreateCoreWebView2EnvironmentWithOptions` and the Win32 globals page, 2026-09): the
+    /// `WEBVIEW2_USER_DATA_FOLDER` variable (non-empty), else a `UserDataFolder` policy value for this app under
+    /// `Software\Policies\Microsoft\Edge\WebView2\UserDataFolder` in the machine's or the current user's
+    /// registry. `WebView2` looks that value up by the process's Application User Model ID, then by the exe name;
+    /// a `*` value "cannot be used for the userDataFolder option". Vibe Work sets no explicit `AppUserModelID`,
+    /// so the value named after its exe file (registry names ignore case) is the one that applies; a value for
+    /// another app is not this app's (any value under the key used to count). A setting missed here still
+    /// cannot give a preview other arguments: `WebView2` then refuses the preview's creation
+    /// (`ERROR_INVALID_STATE`), which the engine handles the same way. Unreadable keys count as absent.
+    #[must_use]
+    pub fn user_data_folder_override() -> Option<super::FolderOverride> {
+        if std::env::var_os("WEBVIEW2_USER_DATA_FOLDER").is_some_and(|v| !v.is_empty()) {
+            return Some(super::FolderOverride::Variable);
+        }
+        let exe = std::env::current_exe().ok()?;
+        let exe = exe.file_name()?.to_str()?;
+        [
+            windows_registry::LOCAL_MACHINE,
+            windows_registry::CURRENT_USER,
+        ]
+        .into_iter()
+        .any(|root| policy_names_folder(root, POLICY_KEY, exe))
+        .then_some(super::FolderOverride::Policy)
+    }
+
+    /// True when a `WebView2` `AdditionalBrowserArguments` policy for this app (machine or current user; the value
+    /// named after the exe, else `*`, which applies to every app for this option) carries a proxy switch
+    /// (`--proxy-server`, `--no-proxy-server`, `--proxy-bypass-list`, `--proxy-pac-url`, ...: any text with `proxy`,
+    /// case ignored). `WebView2` appends the policy's arguments to the app's and Chromium uses the last copy of a
+    /// switch, so such a policy takes previews off the network guard's proxy. Policy keys are written by
+    /// admins only (a standard user can read them); the `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS` variable, which the
+    /// user can set, is removed at startup instead (`webview2_env`). Unreadable keys count as absent.
+    #[must_use]
+    pub fn policy_arguments_change_proxy() -> bool {
+        let Some(exe) = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.file_name().and_then(|n| n.to_str()).map(str::to_owned))
+        else {
+            return false;
+        };
+        [
+            windows_registry::LOCAL_MACHINE,
+            windows_registry::CURRENT_USER,
+        ]
+        .into_iter()
+        .any(|root| arguments_change_proxy(root, ARGUMENTS_KEY, &exe))
+    }
+
+    /// The registry key of the `AdditionalBrowserArguments` policy (one value per app: name = app id, exe name or `*`).
+    const ARGUMENTS_KEY: &str =
+        "Software\\Policies\\Microsoft\\Edge\\WebView2\\AdditionalBrowserArguments";
+
+    /// True when `path` under `root` holds an arguments value for `exe` (or, without one, for `*`) that mentions a
+    /// proxy; a value that is not text counts as one (failing towards refusing previews).
+    fn arguments_change_proxy(root: &windows_registry::Key, path: &str, exe: &str) -> bool {
+        let Ok(key) = root.open(path) else {
+            return false;
+        };
+        let name = if key.get_type(exe).is_ok() { exe } else { "*" };
+        if key.get_type(name).is_err() {
+            return false;
+        }
+        key.get_string(name)
+            .map_or(true, |text| text.to_ascii_lowercase().contains("proxy"))
+    }
+
+    /// The arguments-policy lookup of [`policy_arguments_change_proxy`] on a key of the current user's registry of the
+    /// caller's choosing (`path`), for the tests (which must never write a real policy).
+    #[doc(hidden)]
+    #[must_use]
+    pub fn arguments_change_proxy_at(path: &str, exe: &str) -> bool {
+        arguments_change_proxy(windows_registry::CURRENT_USER, path, exe)
+    }
+
+    /// The registry key of the `UserDataFolder` policy (one value per app: name = app id or exe name).
+    const POLICY_KEY: &str = "Software\\Policies\\Microsoft\\Edge\\WebView2\\UserDataFolder";
+
+    /// True when `path` under `root` has a value named `exe` (any type: an empty or odd value still means a policy
+    /// for this app, so it counts; failing towards "forced" refuses previews, never opens one unguarded).
+    fn policy_names_folder(root: &windows_registry::Key, path: &str, exe: &str) -> bool {
+        root.open(path).and_then(|key| key.get_type(exe)).is_ok()
+    }
+
+    /// The policy lookup of [`user_data_folder_override`] on a key of the current user's registry of the caller's
+    /// choosing (`path`), for the tests (which must never write a real policy).
+    #[doc(hidden)]
+    #[must_use]
+    pub fn policy_names_folder_at(path: &str, exe: &str) -> bool {
+        policy_names_folder(windows_registry::CURRENT_USER, path, exe)
+    }
+
+    /// True when a setting replaces every `WebView2` environment's user data folder with one folder
+    /// ([`user_data_folder_override`]): the environments then share one browser process, whose options must match.
     #[must_use]
     pub fn shared_user_data_folder() -> bool {
-        use windows::Win32::System::Registry::{
-            HKEY, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_READ, RegCloseKey, RegOpenKeyExW,
-            RegQueryInfoKeyW,
-        };
-        if std::env::var_os("WEBVIEW2_USER_DATA_FOLDER").is_some_and(|v| !v.is_empty()) {
-            return true;
-        }
-        [HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE]
-            .into_iter()
-            .any(|root| {
-                let mut key = HKEY::default();
-                // SAFETY: a constant key path, a valid out-pointer; the key is closed below when it opened.
-                let opened = unsafe {
-                    RegOpenKeyExW(
-                        root,
-                        w!("Software\\Policies\\Microsoft\\Edge\\WebView2\\UserDataFolder"),
-                        None,
-                        KEY_READ,
-                        &raw mut key,
-                    )
-                };
-                if opened.is_err() {
-                    return false;
-                }
-                let mut values = 0u32;
-                // SAFETY: `key` is open; only the value count is asked for.
-                let counted = unsafe {
-                    RegQueryInfoKeyW(
-                        key,
-                        None,
-                        None,
-                        None,
-                        None,
-                        None,
-                        None,
-                        Some(&raw mut values),
-                        None,
-                        None,
-                        None,
-                        None,
-                    )
-                };
-                // SAFETY: `key` was opened above and is closed once.
-                let _ = unsafe { RegCloseKey(key) };
-                counted.is_ok() && values > 0
-            })
+        user_data_folder_override().is_some()
     }
 
     /// Reads the storage `WebView2` gave the webview of `controller` (call on the UI thread, inside Tauri's
@@ -658,23 +744,7 @@ mod macos_impl {
         }
     }
 
-    /// The macOS major version (`sw_vers -productVersion`), `None` when it cannot be read.
-    #[must_use]
-    pub fn macos_major_version() -> Option<u32> {
-        let output = std::process::Command::new("/usr/bin/sw_vers")
-            .arg("-productVersion")
-            .output()
-            .ok()?;
-        String::from_utf8(output.stdout)
-            .ok()?
-            .trim()
-            .split('.')
-            .next()?
-            .parse()
-            .ok()
-    }
-
-    fn png_of(image: &NSImage) -> Result<Vec<u8>, String> {
+    pub(super) fn png_of(image: &NSImage) -> Result<Vec<u8>, String> {
         let tiff = image.TIFFRepresentation().ok_or("snapshot has no bitmap")?;
         let rep = NSBitmapImageRep::imageRepWithData(&tiff).ok_or("snapshot bitmap unreadable")?;
         // SAFETY: an empty properties dictionary has the key and value types the method expects.

@@ -6,13 +6,15 @@
  * the event's trust through deferred work; no cost is shown (`model/models.ts`: Vibe's view has
  * no prices).
  */
-import { type ReactElement, useEffect, useRef } from "react";
+import { type ReactElement, useEffect, useLayoutEffect, useRef } from "react";
+
+import { createPortal } from "react-dom";
 
 import { Selector } from "../../components/Selector";
 
 import type { AccessMode } from "./model/access";
 import type { ModelChoice } from "./model/models";
-import { THINKING_LEVELS } from "./model/models";
+import { thinkingRequest, THINKING_LEVELS } from "./model/models";
 import { itemDescription, itemName, itemRuns, type MenuItem } from "./model/slash";
 import { modelTerm, TEXT, thinkingTerm, wording } from "../../vocabulary";
 
@@ -24,6 +26,7 @@ export function AccessMenu({
   onPick,
   onOpen,
   onClose,
+  defaultLabel,
 }: {
   modes: readonly AccessMode[];
   current: string | null;
@@ -31,6 +34,7 @@ export function AccessMenu({
   onPick: (id: string, trustedClick: boolean) => void;
   onOpen?: () => void;
   onClose?: () => void;
+  defaultLabel?: string;
 }): ReactElement {
   return (
     <Selector
@@ -39,6 +43,7 @@ export function AccessMenu({
       includeValueInName
       dataChip="access"
       label={TEXT.accessMode}
+      {...(defaultLabel === undefined ? {} : { hint: `New chats start in ${defaultLabel}` })}
       title={wording(TEXT.accessChoose, {
         name:
           currentLabel ?? modes.find((mode) => mode.id === current)?.label ?? TEXT.accessUnknown,
@@ -129,6 +134,10 @@ export function ModelMenu({
             value: level,
             label: thinkingTerm(level).name,
             tooltip: thinkingTerm(level).tooltip,
+            description: thinkingRequest(
+              models.find((model) => model.alias === alias),
+              level,
+            ),
           })),
         ]}
       />
@@ -175,6 +184,38 @@ export function SlashMenu({
   onPick: (item: MenuItem) => void;
   onHover: (index: number) => void;
 }): ReactElement {
+  const anchor = useRef<HTMLSpanElement>(null);
+  const overlay = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const place = () => {
+      const composer = anchor.current?.closest(".composer");
+      const menu = overlay.current;
+      if (!composer || !menu) return;
+      const box = composer.getBoundingClientRect();
+      const above = Math.max(0, box.top - 16);
+      const below = Math.max(0, window.innerHeight - box.bottom - 42);
+      const up = above >= 200 || above >= below;
+      const height = Math.min(372, up ? above : below);
+      menu.style.position = "fixed";
+      menu.style.maxHeight = `${String(height)}px`;
+      menu.style.top = `${String(Math.max(8, up ? box.top - height - 8 : Math.min(box.bottom + 8, window.innerHeight - height - 34)))}px`;
+      menu.style.left = `${String(Math.max(8, Math.min(box.left, window.innerWidth - 288)))}px`;
+      menu.style.width = `${String(Math.min(560, box.width, window.innerWidth - 16))}px`;
+      menu.style.bottom = "auto";
+      menu.style.right = "auto";
+    };
+    place();
+    const observer = new ResizeObserver(place);
+    const composer = anchor.current?.closest(".composer");
+    if (composer) observer.observe(composer);
+    window.addEventListener("resize", place);
+    window.addEventListener("scroll", place, true);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", place);
+      window.removeEventListener("scroll", place, true);
+    };
+  }, []);
   const selected = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     // jsdom has no scrollIntoView; a real webview keeps the arrow-key selection in sight.
@@ -182,9 +223,11 @@ export function SlashMenu({
     const scroll: unknown = row === null ? undefined : Reflect.get(row, "scrollIntoView");
     if (row !== null && typeof scroll === "function") scroll.call(row, { block: "nearest" });
   }, [index, items]);
-  if (items.length === 0) {
-    return (
+  const current = items[index];
+  const menu =
+    items.length === 0 ? (
       <div
+        ref={overlay}
         data-testid="composer.composer-menus-slash"
         className="slash"
         role="listbox"
@@ -194,57 +237,67 @@ export function SlashMenu({
           No command matches
         </div>
       </div>
-    );
-  }
-  const current = items[index];
-  return (
-    <div
-      data-testid="composer.composer-menus-slash-2"
-      className="slash"
-      role="listbox"
-      aria-label="Commands and skills"
-    >
-      {current === undefined ? null : (
-        <div className="slash-tip" role="tooltip" data-slash-tip={itemName(current)}>
-          {itemRuns(current)}
-        </div>
-      )}
-      <div className="slash-list">
-        {items.map((item, i) => {
-          const section = item.kind === "command" ? "Vibe commands" : "Skills";
-          const first = i === 0 || items[i - 1]?.kind !== item.kind;
-          const heading = first ? <div className="secl">{section}</div> : null;
-          const name = itemName(item);
-          return (
-            <div data-item-id={`${item.kind}:${name}`} key={`${item.kind}:${name}`}>
-              {heading}
-              <div
-                data-testid="composer.composer-menus-it"
-                className="it"
-                role="option"
-                aria-selected={i === index}
-                aria-description={itemRuns(item)}
-                aria-label={itemRuns(item)}
-                title={itemRuns(item)}
-                ref={i === index ? selected : undefined}
-                data-slash={name}
-                onMouseDown={(e) => {
-                  e.preventDefault();
-                  onPick(item);
-                }}
-                onMouseMove={() => {
-                  if (i !== index) onHover(i);
-                }}
-              >
-                <b>
-                  <MarkedName name={name} hit={item.hit} length={query.length} />
-                </b>
-                <span>{itemDescription(item)}</span>
+    ) : (
+      <div
+        ref={overlay}
+        data-testid="composer.composer-menus-slash-2"
+        className="slash"
+        role="listbox"
+        aria-label="Commands and skills"
+      >
+        {current === undefined ? null : (
+          <div className="slash-tip" role="tooltip" data-slash-tip={itemName(current)}>
+            {itemRuns(current)}
+          </div>
+        )}
+        <div className="slash-list">
+          {items.map((item, i) => {
+            const section = item.kind === "command" ? "Vibe commands" : "Skills";
+            const first = i === 0 || items[i - 1]?.kind !== item.kind;
+            const heading = first ? <div className="secl">{section}</div> : null;
+            const name = itemName(item);
+            return (
+              <div data-item-id={`${item.kind}:${name}`} key={`${item.kind}:${name}`}>
+                {heading}
+                <div
+                  data-testid="composer.composer-menus-it"
+                  className="it"
+                  role="option"
+                  aria-selected={i === index}
+                  aria-description={itemRuns(item)}
+                  aria-label={itemRuns(item)}
+                  title={itemRuns(item)}
+                  ref={i === index ? selected : undefined}
+                  data-slash={name}
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                  }}
+                  onClick={() => {
+                    onPick(item);
+                  }}
+                  onMouseMove={() => {
+                    if (i !== index) onHover(i);
+                  }}
+                >
+                  <b>
+                    {item.kind === "manage" ? (
+                      "Manage skills…"
+                    ) : (
+                      <MarkedName name={name} hit={item.hit} length={query.length} />
+                    )}
+                  </b>
+                  <span>{itemDescription(item)}</span>
+                </div>
               </div>
-            </div>
-          );
-        })}
+            );
+          })}
+        </div>
       </div>
-    </div>
+    );
+  return (
+    <>
+      <span ref={anchor} hidden />
+      {createPortal(menu, document.body)}
+    </>
   );
 }

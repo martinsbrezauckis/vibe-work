@@ -7,6 +7,7 @@
  * Depends on: react. Called by: NewChatPanel.
  * Invariants: renders only; the caller owns the state (`sessionTools.newChatTemporary`).
  */
+import { Switch } from "../../components/Controls";
 import { term } from "../../vocabulary";
 import type { ReactElement } from "react";
 
@@ -20,11 +21,8 @@ export function TemporarySwitch({
 }): ReactElement {
   return (
     <span className="temp-toggle" data-temporary={on ? "true" : "false"}>
-      <button
+      <Switch
         data-testid="sessions.temporary-switch-on-change"
-        type="button"
-        className="switch"
-        role="switch"
         aria-label="Temporary chat"
         aria-describedby={on ? "temp-chat-note" : undefined}
         aria-checked={on}

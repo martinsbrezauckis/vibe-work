@@ -19,6 +19,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use serde::{Deserialize, Serialize};
 use vw_vault::SecretString;
+use vw_vault::remember::{CALL_TIMEOUT, bounded};
 
 /// Vibe's keyring service.
 pub const VIBE_KEYRING_SERVICE: &str = "ai.mistral.vibe";
@@ -93,24 +94,27 @@ impl OsVibeKeyring {
     }
 }
 
+// Each call has the OS store's deadline (`vw_vault::remember::bounded`): a silent keyring answers "did not answer".
 impl VibeKeyring for OsVibeKeyring {
     fn get(&self, service: &str) -> Result<Option<SecretString>, String> {
-        match self.entry(service)?.get_password() {
-            Ok(value) => {
-                let key = SecretString::new(value);
-                key.register_as(vw_secrets::SecretKind::MistralKey);
-                Ok(Some(key))
-            }
+        let entry = self.entry(service)?;
+        let found = bounded(CALL_TIMEOUT, move || match entry.get_password() {
+            Ok(value) => Ok(Some(SecretString::new(value))),
             Err(keyring_core::Error::NoEntry) => Ok(None),
             Err(error) => Err(error.to_string()),
+        })?;
+        if let Some(key) = &found {
+            key.register_as(vw_secrets::SecretKind::MistralKey);
         }
+        Ok(found)
     }
 
     fn delete(&self, service: &str) -> Result<(), String> {
-        match self.entry(service)?.delete_credential() {
+        let entry = self.entry(service)?;
+        bounded(CALL_TIMEOUT, move || match entry.delete_credential() {
             Ok(()) | Err(keyring_core::Error::NoEntry) => Ok(()),
             Err(error) => Err(error.to_string()),
-        }
+        })
     }
 }
 

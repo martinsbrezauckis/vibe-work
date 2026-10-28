@@ -17,7 +17,7 @@ fn denied(message: impl Into<String>) -> CoreError {
 }
 
 fn loaded(shared: &Shared, owner: &str) -> Result<(), CoreError> {
-    if shared.store.view(owner).is_some() {
+    if crate::new_chat::known_owner(shared, owner) {
         Ok(())
     } else {
         Err(CoreError::not_loaded(owner))

@@ -40,7 +40,7 @@ impl EntryPermission {
     }
 }
 
-/// Match the project spelling used by command grants across case-insensitive hosts.
+/// Normalize project spelling across case-insensitive hosts.
 fn project_key(project: &str) -> String {
     if cfg!(any(windows, target_os = "macos")) {
         project.to_lowercase()

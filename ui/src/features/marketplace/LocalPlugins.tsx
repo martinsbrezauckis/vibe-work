@@ -1,12 +1,56 @@
-/** Plugins Vibe discovers outside the catalog, with their folder, contents and the open chat's pinned state.
+/** Plugins Vibe discovers outside the catalog, with their version, author, folder, contents and the open chat's
+ * pinned state.
  * Depends on marketplace hooks and the typed core view. Called by MarketplacePage.
  */
 import { term } from "../../vocabulary";
 import { PathLine } from "../../components/PathLine";
-import { Button } from "../../components/Controls";
+import { Button, RowDisclosure } from "../../components/Controls";
+import { builtinPluginText, builtinSkillText } from "../../state/builtinToolsText";
 import { displayPluginName } from "../../state/pluginText";
-import type { ReactElement } from "react";
+import { type ReactElement, type ReactNode, useState } from "react";
 import { useMarket, useMarketActions } from "./hooks";
+
+/** Version and author as the plugin's manifest gives them: with the folder below, what tells plugins apart. */
+function versionLine(version: string | null, author: string | null): string {
+  if (version === null && author === null) return "No version or author given";
+  const parts = [version === null ? "No version given" : `Version ${version}`];
+  if (author !== null) parts.push(`by ${author}`);
+  return parts.join(" · ");
+}
+
+/** "14 skills · 1 MCP server": what a folded contents list holds. */
+function contentsLine(kinds: readonly string[]): string {
+  const count = (kind: string) => kinds.filter((k) => k === kind).length;
+  const part = (n: number, one: string, many: string) => `${String(n)} ${n === 1 ? one : many}`;
+  const parts = [
+    count("skill") > 0 ? part(count("skill"), "skill", "skills") : null,
+    count("mcp_server") > 0 ? part(count("mcp_server"), "MCP server", "MCP servers") : null,
+    kinds.length - count("skill") - count("mcp_server") > 0
+      ? part(kinds.length - count("skill") - count("mcp_server"), "other part", "other parts")
+      : null,
+  ];
+  return parts.filter((x) => x !== null).join(" · ");
+}
+
+/** A plugin's contents, folded until the person opens them (a long list pushed the other plugins away). */
+function Contents({ kinds, children }: { kinds: readonly string[]; children: ReactNode }) {
+  const [open, setOpen] = useState(false);
+  if (kinds.length === 0) return null;
+  return (
+    <>
+      <RowDisclosure
+        data-testid="marketplace.local-plugin-contents"
+        aria-expanded={open}
+        onClick={() => {
+          setOpen(!open);
+        }}
+      >
+        {contentsLine(kinds)}
+      </RowDisclosure>
+      {open && <ul className="ctools">{children}</ul>}
+    </>
+  );
+}
 
 /** The local plugin inventory. */
 export function LocalPlugins(): ReactElement | null {
@@ -18,7 +62,9 @@ export function LocalPlugins(): ReactElement | null {
   const plugins = view.discovered.filter(
     (p) =>
       filter !== "updates" &&
-      `${p.name} ${p.description} ${p.path}`.toLowerCase().includes(search.trim().toLowerCase()),
+      `${builtinPluginText(p.name, p.scope)?.name ?? ""} ${builtinPluginText(p.name, p.scope)?.description ?? ""} ${p.name} ${p.description} ${p.path}`
+        .toLowerCase()
+        .includes(search.trim().toLowerCase()),
   );
   if (plugins.length === 0 && !view.discoveryError && view.dropped.length === 0) return null;
   return (
@@ -43,9 +89,20 @@ export function LocalPlugins(): ReactElement | null {
         {plugins.map((p) => (
           <article key={p.path} data-item-id={p.path} className="local-plugin">
             <h4>
-              <bdi>{displayPluginName(p.name)}</bdi>
+              <bdi>{builtinPluginText(p.name, p.scope)?.name ?? displayPluginName(p.name)}</bdi>
             </h4>
-            <p>{p.description || "No description provided."}</p>
+            <p>
+              {builtinPluginText(p.name, p.scope)?.description ??
+                (p.description || "No description provided.")}
+            </p>
+            <p className="cmuted">
+              {builtinPluginText(p.name, p.scope) ? (
+                <>
+                  <code>{p.name}</code> ·{" "}
+                </>
+              ) : null}
+              {versionLine(p.version, p.author)}
+            </p>
             <p className="cmuted">
               {p.scope === "project" ? term("workNames", "projectTab").name : "This computer"} ·{" "}
               {p.off
@@ -64,19 +121,25 @@ export function LocalPlugins(): ReactElement | null {
                   ? "Runs in this session"
                   : "Does not run in this session"}
             </p>
-            <ul className="ctools">
+            <Contents kinds={p.components.filter((c) => c.kind !== "tool").map((c) => c.kind)}>
               {p.components
                 .filter((c) => c.kind !== "tool")
                 .map((c) => (
                   <li key={`${c.kind}:${c.name}`}>
                     {c.kind === "skill" ? "Skill" : c.kind === "mcp_server" ? "MCP server" : c.kind}{" "}
-                    · {c.name}
+                    · {builtinSkillText({ name: c.name, source: p.scope })?.name ?? c.name}
+                    {builtinSkillText({ name: c.name, source: p.scope }) ? (
+                      <>
+                        {" "}
+                        · <code>{c.name}</code>
+                      </>
+                    ) : null}
                     {c.kind === "mcp_server"
                       ? ` · ${String(p.servers.find((s) => s.name === c.name)?.tools ?? "Unknown")} tools`
                       : ""}
                   </li>
                 ))}
-            </ul>
+            </Contents>
             {[...new Set([...p.issues, ...(p.inSession?.issues ?? [])])].map((issue) => (
               <p className="server-note" role="status" key={issue}>
                 {issue}
@@ -84,19 +147,19 @@ export function LocalPlugins(): ReactElement | null {
             ))}
             {p.managed ? (
               <div className="cactions">
-                <button
+                <Button
                   type="button"
-                  className="tb-btn"
+
                   data-testid="marketplace.local-plugin-toggle"
                   onClick={() =>
                     void actions?.changePlugin(p.off ? "turnOnPlugin" : "turnOffPlugin", p.path)
                   }
                 >
                   {p.off ? "Turn on" : "Turn off"}
-                </button>
+                </Button>
                 <Button
                   type="button"
-                  small
+                  shape="outlined"
                   variant="danger"
                   data-testid="marketplace.local-plugin-remove"
                   onClick={() => void actions?.changePlugin("removePlugin", p.path)}

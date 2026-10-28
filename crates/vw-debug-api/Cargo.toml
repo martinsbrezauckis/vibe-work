@@ -20,6 +20,7 @@ e2e-script = []
 vault-e2e = ["vw-core-api/vault-e2e"]
 
 [dependencies]
+vw-ask = { path = "../vw-ask" }
 vw-core-api = { path = "../vw-core-api" }
 vw-platform = { path = "../vw-platform" }
 vw-secrets = { path = "../vw-secrets" }

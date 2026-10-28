@@ -112,7 +112,6 @@ fn count_only_extant_recorded_linked_copies() {
                 created_at_ms: 1,
                 decision,
                 session_deleted: deleted,
-                session_archived: false,
             })
             .unwrap();
     }
@@ -125,8 +124,8 @@ fn count_only_extant_recorded_linked_copies() {
 #[test]
 fn native_git_action_names_session_and_keeps_entire_summary() {
     let text = format!("Push {}?", "long-target/".repeat(200));
-    let summary = with_session(&text, "s1", Some("Important session"));
-    assert!(summary.starts_with("Session \"Important session\" (ID \"s1\")"));
+    let summary = with_session(&text, "Important session");
+    assert!(summary.starts_with("Session \"Important session\""));
     assert!(summary.ends_with(&text));
 }
 
@@ -169,7 +168,6 @@ fn recorded_copy_is_recognized_only_at_its_exact_live_folder() {
         created_at_ms: 1,
         decision: None,
         session_deleted: true,
-        session_archived: false,
     };
     records.put(&record).unwrap();
     assert_eq!(records.all().len(), 1);

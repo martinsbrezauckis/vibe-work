@@ -7,7 +7,7 @@ use std::path::Path;
 
 use changes::TempRepo;
 use common::core::{ScriptRig, script_core_with};
-use common::fake::scratch;
+use common::processes::scratch;
 use serde_json::{Value, json};
 use vw_core_api::{
     ChangesResult, Command, CommandResult, CoreError, ErrorCode, FilesResult, Origin,
@@ -536,4 +536,97 @@ async fn a_same_size_rewrite_with_the_old_time_is_still_stale() {
         "{refused:?}"
     );
     assert_eq!(std::fs::read_to_string(&path).unwrap(), "gamma beta\n");
+}
+
+/// Comparing uses the last commit and leaves both the current file and index untouched.
+#[tokio::test]
+async fn saved_comparison_reads_the_commit_and_rechecks_session_handles() {
+    let repo = TempRepo::with_files(&[("space ü.txt", "saved\n")]);
+    repo.write("space ü.txt", "working\n");
+    repo.write("new.txt", "new\n");
+    let rig = script_core_with("saved-comparison", &[], |_| {}).await;
+    let session = start(&rig, &repo.root).await;
+    let (file, _) = open(&rig, &session, "space ü.txt").await;
+    let before_index = std::fs::read(repo.root.join(".git/index")).unwrap();
+    assert_eq!(
+        files(
+            &rig,
+            json!({"op":"readSaved", "sessionId":session, "file":file})
+        )
+        .await
+        .unwrap(),
+        FilesResult::Saved {
+            text: Some("saved\n".into()),
+            note: None
+        }
+    );
+    assert_eq!(repo.read("space ü.txt"), "working\n");
+    assert_eq!(
+        std::fs::read(repo.root.join(".git/index")).unwrap(),
+        before_index
+    );
+    let (new, _) = open(&rig, &session, "new.txt").await;
+    assert!(matches!(
+        files(
+            &rig,
+            json!({"op":"readSaved", "sessionId":session,"file":new})
+        )
+        .await
+        .unwrap(),
+        FilesResult::Saved {
+            text: None,
+            note: Some(_)
+        }
+    ));
+    let other = start(&rig, &repo.root).await;
+    assert!(
+        files(
+            &rig,
+            json!({"op":"readSaved","sessionId":other,"file":file})
+        )
+        .await
+        .is_err()
+    );
+    rig.core.shutdown().await;
+}
+
+/// Saved comparisons reject oversized and non-text blobs without truncating them into editable text.
+#[tokio::test]
+async fn saved_comparison_bounds_text_and_reports_a_plain_folder() {
+    let large = "x".repeat(256 * 1024 + 1);
+    let repo = TempRepo::with_files(&[("large.txt", &large), ("binary.txt", "a\0b")]);
+    let rig = script_core_with("saved-comparison-limits", &[], |_| {}).await;
+    let session = start(&rig, &repo.root).await;
+    for name in ["large.txt", "binary.txt"] {
+        let (file, _) = open(&rig, &session, name).await;
+        assert!(matches!(
+            files(
+                &rig,
+                json!({"op":"readSaved","sessionId":session,"file":file})
+            )
+            .await
+            .unwrap(),
+            FilesResult::Saved {
+                text: None,
+                note: Some(_)
+            }
+        ));
+    }
+    let plain = scratch("saved-comparison-plain");
+    std::fs::write(plain.join("note.txt"), "plain\n").unwrap();
+    let other = start(&rig, &plain).await;
+    let (file, _) = open(&rig, &other, "note.txt").await;
+    assert!(matches!(
+        files(
+            &rig,
+            json!({"op":"readSaved","sessionId":other,"file":file})
+        )
+        .await
+        .unwrap(),
+        FilesResult::Saved {
+            text: None,
+            note: Some(_)
+        }
+    ));
+    rig.core.shutdown().await;
 }

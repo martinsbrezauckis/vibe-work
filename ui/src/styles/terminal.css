@@ -43,8 +43,8 @@ vw-xterm-style {
   background: none;
   color: var(--text-3);
   padding: 4px 10px;
-  border-radius: 6px;
-  font: 12px var(--mono);
+  border-radius: var(--radius-sm);
+  font: var(--text-12) var(--font-mono);
   white-space: nowrap;
   cursor: pointer;
 }
@@ -71,9 +71,9 @@ vw-xterm-style {
   border: 0;
   background: none;
   color: var(--text-2);
-  font-size: 12px;
+  font-size: var(--text-12);
   padding: 4px 8px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
 }
 .vw-term-tool:hover:where(:not(:disabled)) {
@@ -85,7 +85,7 @@ vw-xterm-style {
   align-items: center;
   gap: 10px;
   padding: 6px 12px;
-  font-size: 12px;
+  font-size: var(--text-12);
   border-bottom: 1px solid var(--line);
 }
 .vw-term-exited {

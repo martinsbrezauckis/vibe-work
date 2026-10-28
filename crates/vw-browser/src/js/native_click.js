@@ -1,5 +1,7 @@
 // Prepare a native pointer point, without dispatching DOM events. Depends on common helpers;
 // act.js calls this only for host-authorized clicks/checks. Native engines validate their own target window.
+/* global ENV, MAX_FRAME_DEPTH, MAX_SHADOW_DEPTH, enabled, frameDoc, viewOf, visible -- Supplied by the Rust script assembler and its shared prelude. */
+/* exported nativeClickPoint */
 const nativeClickPoint = (el, admittedPoint = null) => {
   const fail = (reason) => ({ failed: [reason] });
   const axisAligned = (node) => {

@@ -12,7 +12,7 @@ publish = false
 workspace = true
 
 [dependencies]
-# Versions checked on crates.io 2026-10-09.
+# Pinned document-parser versions.
 # calamine 0.36.1 (MIT): XLSX read locally (exact values, no OCR quota). `dates`: date cells as ISO text.
 calamine = { version = "0.36.1", default-features = false, features = ["dates"] }
 # zip 8.6.0 (MIT): DOCX/PPTX/XLSX are ZIP files; the same features calamine asks for, so one build.
@@ -22,3 +22,6 @@ flate2 = "1.1"
 getrandom = "0.3"
 serde = { version = "1", features = ["derive"] }
 thiserror = "2"
+
+# MIT; reuse calamine's small XML parser for bounded Word/PowerPoint parts.
+quick-xml = "0.41.0"

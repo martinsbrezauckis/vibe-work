@@ -13,6 +13,8 @@ pub(crate) const MAX_CHAT_BODY: usize = 128 * 1024 * 1024;
 #[derive(Default)]
 pub(crate) struct ChatShape {
     pub(crate) compaction: bool,
+    /// Only the new user input, never history or a follow-up after tool/assistant output.
+    pub(crate) new_attachment: bool,
     pub(crate) images: usize,
     pub(crate) attachment_notes: usize,
     pub(crate) image_url_bytes: usize,
@@ -33,12 +35,13 @@ fn is_attachment_note(text: &str) -> bool {
     false
 }
 
-/// Inspect a provider request, removing only compaction image parts. A non-compaction request is
-/// returned byte-for-byte, including malformed JSON, so this guard never changes agent calls.
+/// Inspect a provider request: explicit Off on known Mistral models and compaction image removal.
+/// Other requests, including malformed JSON, are returned byte-for-byte.
 pub(crate) fn prepare(bytes: &[u8]) -> (Option<Vec<u8>>, ChatShape) {
     let Ok(mut request) = serde_json::from_slice::<Value>(bytes) else {
         return (None, ChatShape::default());
     };
+    let explicit_off = crate::reasoning::explicit_off(&mut request);
     let compaction_prompt = request
         .get("messages")
         .and_then(Value::as_array)
@@ -77,7 +80,8 @@ pub(crate) fn prepare(bytes: &[u8]) -> (Option<Vec<u8>>, ChatShape) {
     let Some(messages) = request.get_mut("messages").and_then(Value::as_array_mut) else {
         return (None, shape);
     };
-    for message in messages {
+    let last = messages.len().saturating_sub(1);
+    for (index, message) in messages.iter_mut().enumerate() {
         if message.get("role").and_then(Value::as_str) != Some("user") {
             continue;
         }
@@ -87,6 +91,7 @@ pub(crate) fn prepare(bytes: &[u8]) -> (Option<Vec<u8>>, ChatShape) {
             .is_some_and(is_attachment_note)
         {
             shape.attachment_notes += 1;
+            shape.new_attachment |= index == last;
         }
         let Some(parts) = message.get_mut("content").and_then(Value::as_array_mut) else {
             continue;
@@ -98,6 +103,7 @@ pub(crate) fn prepare(bytes: &[u8]) -> (Option<Vec<u8>>, ChatShape) {
                 .is_some_and(is_attachment_note)
             {
                 shape.attachment_notes += 1;
+                shape.new_attachment |= index == last;
             }
             if part.get("type").and_then(Value::as_str) != Some("image_url") {
                 continue;
@@ -108,6 +114,7 @@ pub(crate) fn prepare(bytes: &[u8]) -> (Option<Vec<u8>>, ChatShape) {
             if !url.starts_with("data:image/") {
                 continue;
             }
+            shape.new_attachment |= index == last;
             shape.images += 1;
             shape.image_url_bytes += url.len();
             if shape.compaction {
@@ -119,7 +126,7 @@ pub(crate) fn prepare(bytes: &[u8]) -> (Option<Vec<u8>>, ChatShape) {
             }
         }
     }
-    if shape.omitted == 0 {
+    if shape.omitted == 0 && !explicit_off {
         return (None, shape);
     }
     (serde_json::to_vec(&request).ok(), shape)
@@ -255,6 +262,33 @@ mod tests {
     }
 
     #[test]
+    fn only_the_request_bringing_the_attachment_is_bounded() {
+        for content in [
+            json!("Attached file: report.pdf\nAbsolute path: /tmp/report.pdf"),
+            json!([{"type":"image_url","image_url":{"url":"data:image/png;base64,AA=="}}]),
+        ] {
+            let mut body = json!({"stream":true,"messages":[{"role":"user","content":content}]});
+            assert!(
+                prepare(&serde_json::to_vec(&body).unwrap())
+                    .1
+                    .new_attachment
+            );
+            for followup in [
+                json!({"role":"assistant","content":"I will read it."}),
+                json!({"role":"tool","content":"Document text"}),
+                json!({"role":"user","content":"Now write a long answer."}),
+            ] {
+                body["messages"].as_array_mut().unwrap().push(followup);
+                assert!(
+                    !prepare(&serde_json::to_vec(&body).unwrap())
+                        .1
+                        .new_attachment
+                );
+            }
+        }
+    }
+
+    #[test]
     fn attachment_notes_are_recognized_only_in_user_text() {
         let bytes = serde_json::to_vec(&json!({
             "stream": true,
@@ -270,6 +304,7 @@ mod tests {
         .unwrap();
         let (rewritten, shape) = prepare(&bytes);
         assert!(rewritten.is_none());
+        assert!(!shape.new_attachment);
         assert_eq!(shape.attachment_notes, 2);
         assert_eq!(shape.images, 0);
     }

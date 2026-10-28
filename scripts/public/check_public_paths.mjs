@@ -101,18 +101,31 @@ function markerPattern(marker) {
 }
 
 /** The maintainers' extra markers (see the header), or none when the file is absent. */
-function extraMarkers() {
-  if (!existsSync(EXTRA_MARKERS_PATH)) return [];
-  const extra = JSON.parse(readFileSync(EXTRA_MARKERS_PATH, "utf8")).forbiddenPublicMarkers;
+function extraPolicy() {
+  if (!existsSync(EXTRA_MARKERS_PATH)) return { markers: [], lines: {} };
+  const policy = JSON.parse(readFileSync(EXTRA_MARKERS_PATH, "utf8"));
+  const extra = policy.forbiddenPublicMarkers;
   if (!Array.isArray(extra)) {
     console.error("public-paths check FAILED: release/private/forbidden-markers.json has no array \"forbiddenPublicMarkers\"");
     process.exit(1);
   }
-  return extra;
+  const lines = policy.allowedMarkerLines ?? {};
+  if (
+    typeof lines !== "object" || lines === null || Array.isArray(lines) ||
+    Object.values(lines).some((value) => !Array.isArray(value) ||
+      value.some((line) => typeof line !== "string" || line.includes("\n") || line.includes("\r")))
+  ) {
+    console.error("public-paths check FAILED: invalid exact-line exceptions in the extra marker policy");
+    process.exit(1);
+  }
+  return { markers: extra, lines };
 }
 
-const allMarkers = [...config.forbiddenPublicMarkers, ...extraMarkers()];
-const markers = allMarkers.map((m) => ({ text: m, re: markerPattern(m) }));
+const extra = extraPolicy();
+const markers = [
+  ...config.forbiddenPublicMarkers.map((m) => ({ text: m, re: markerPattern(m), extra: false })),
+  ...extra.markers.map((m) => ({ text: m, re: markerPattern(m), extra: true })),
+];
 
 /** True when `path` matches a neverExport pattern (see the header for the matching rule). */
 function matchesNeverExport(path) {
@@ -162,8 +175,12 @@ for (const path of projectFiles) {
       .filter((line) => !HASH_LINE.test(line))
       .join("\n");
   }
-  for (const { text: marker, re } of markers) {
-    if (re.test(text)) errors.push(`${path}: contains forbidden marker "${marker}"`);
+  // Only the maintainers' extra markers can exempt an exact upstream wire declaration.
+  // All other lines in the file and all mandatory public markers are still scanned.
+  const allowedLines = extra.lines[path] ?? [];
+  const extraText = text.split("\n").filter((line) => !allowedLines.includes(line)).join("\n");
+  for (const { text: marker, re, extra: isExtra } of markers) {
+    if (re.test(isExtra ? extraText : text)) errors.push(`${path}: contains forbidden marker "${marker}"`);
   }
 }
 

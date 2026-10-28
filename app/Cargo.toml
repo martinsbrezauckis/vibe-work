@@ -24,14 +24,15 @@ e2e-script = ["vw-debug-api/e2e-script", "vw-core-api/e2e-script"]
 # The vault test switch (private e2e debug builds only; refused in release builds by vw-core-api and
 # vw-debug-api). Also enables the app startup's local marketplace fixture input.
 vault-e2e = ["vw-debug-api/vault-e2e"]
+# The macOS preview network guard (vw-webview `macos-proxy`; needs macOS 14, off until 0.1.3 raises the minimum).
+macos-proxy = ["vw-webview/macos-proxy"]
 
 [dependencies]
 # Tauri's standard data folder, resolved before a second launch initializes the GUI runtime.
 dirs = "7"
 tauri = { version = "2.12.1", features = [] }
 # Native dialogs (folder picker, delete confirmation), used from Rust only: the webview gets no plugin
-# permission (capabilities/main.json lists bridge commands only). Pinned exactly (checked 2026-10-08:
-# latest stable). Notifications use vw-platform (notify-rust), see its notify.rs for why.
+# permission (capabilities/main.json lists bridge commands only). Pinned exactly. Notifications use vw-platform (notify-rust), see its notify.rs for why.
 tauri-plugin-dialog = "=2.8.1"
 # `tauri::generate_context!` emits `serde_json` values for a build whose config has plugin settings (the
 # updater channel of a release or test overlay), so the crate must name it.
@@ -61,11 +62,13 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "env-filter", "std"] }
 
 # Updates: registered only for builds whose config carries an accepted update channel
-# (vw_host::updates). Pinned exactly (checked 2026-10-09: latest stable 2.13.2, 2026-10-07). TLS follows
+# (vw_host::updates). Pinned exactly. TLS follows
 # vw-mistral: rustls (ring) on Linux, the OS's native TLS on Windows and macOS (the plugin's default rustls
 # would also build ring for Windows, which the cross-target lint on WSL cannot compile).
 [dev-dependencies]
 tempfile = "3"
+# Tauri's mock runtime for the Linux confirmation window tests (`dialogs/linux_confirmation.rs`).
+tauri = { version = "2.12.1", features = ["test"] }
 # The release manifest tool: its output must parse with the updater plugin (`updater::manifest_format`).
 make-latest-json = { path = "../tools/public/update-manifest" }
 

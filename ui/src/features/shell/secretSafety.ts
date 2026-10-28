@@ -20,9 +20,9 @@
 import { createStore, useStore } from "../../state/createStore";
 
 /** Elements whose content is a secret. */
-export const SECRET_SELECTOR = '[data-secret], input[type="password"]';
+const SECRET_SELECTOR = '[data-secret], input[type="password"]';
 /** Longest a capture lock lasts when nobody releases it. */
-export const LOCK_MAX_MS = 15_000;
+const LOCK_MAX_MS = 15_000;
 
 /** The capture lock: `epoch` counts lock changes (a re-check compares it). */
 const lock = createStore<{ locked: boolean; epoch: number }>({ locked: false, epoch: 0 });

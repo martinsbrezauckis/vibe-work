@@ -36,8 +36,8 @@
   color: var(--text-3);
 }
 .tx-time {
-  font-family: var(--mono);
-  font-size: 11px;
+  font-family: var(--font-mono);
+  font-size: var(--text-11);
   color: var(--text-3);
 }
 
@@ -48,9 +48,9 @@
   position: relative;
   background: var(--panel);
   border: 1px solid var(--line);
-  border-radius: 14px;
-  font-weight: 500;
-  font-size: 14.5px;
+  border-radius: var(--radius-14);
+  font-weight: var(--weight-medium);
+  font-size: var(--text-14-5);
 }
 .u::before {
   content: "›";
@@ -58,8 +58,8 @@
   left: 15px;
   top: 10px;
   color: var(--orange-2);
-  font-weight: 700;
-  font-size: 18px;
+  font-weight: var(--weight-bold);
+  font-size: var(--text-18);
   line-height: 1.2;
 }
 .u-meta {
@@ -70,10 +70,10 @@
   margin-bottom: 2px;
 }
 .u-tag {
-  font-size: 11px;
+  font-size: var(--text-11);
   color: var(--orange-3);
   border: 1px solid var(--line-2);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   padding: 0 6px;
 }
 .u-text {
@@ -89,7 +89,7 @@
 .u-img {
   max-width: 220px;
   max-height: 160px;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   border: 1px solid var(--line-2);
   object-fit: contain;
   background: var(--bg);
@@ -101,11 +101,11 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 12px;
-  font-weight: 400;
+  font-size: var(--text-12);
+  font-weight: var(--weight-regular);
   color: var(--text-2);
   border: 1px solid var(--line-2);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   padding: 2px 8px;
 }
 .ctx-chips {
@@ -113,6 +113,11 @@
   flex-wrap: wrap;
   gap: 6px;
   margin-bottom: 8px;
+}
+button.ctx-chip {
+  background: none;
+  font-family: inherit;
+  cursor: pointer;
 }
 .u .acts2 {
   position: absolute;
@@ -122,9 +127,9 @@
   gap: 2px;
   background: var(--raised);
   box-shadow: var(--shadow);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   padding: 2px;
-  z-index: 3;
+  z-index: var(--z-overlay);
 }
 .u:hover:where(:not(:disabled)) .acts2,
 .u:focus-within .acts2 {
@@ -134,7 +139,7 @@
 /* Assistant message */
 .a-msg {
   margin: 4px 0 22px;
-  font-size: 15px;
+  font-size: var(--text-15);
   line-height: 1.65;
   overflow-wrap: anywhere;
 }
@@ -143,12 +148,12 @@
 }
 .a-msg code,
 .narr code {
-  font-family: var(--mono);
-  font-size: 12.5px;
+  font-family: var(--font-mono);
+  font-size: var(--text-12-5);
   background: var(--raised);
   border: 1px solid var(--line);
   padding: 1px 5px;
-  border-radius: 5px;
+  border-radius: var(--radius-5);
 }
 .a-msg pre code,
 .narr pre code {
@@ -179,7 +184,7 @@
   margin: 8px 0;
   padding: 0;
   border: 1px solid var(--line-2);
-  border-radius: 10px;
+  border-radius: var(--radius-lg);
   background: var(--panel);
   cursor: zoom-in;
   max-width: min(100%, 520px);
@@ -200,9 +205,9 @@
   border: 0;
   background: none;
   color: var(--text-3);
-  font-size: 12px;
+  font-size: var(--text-12);
   padding: 3px 7px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
 }
 .copy-btn:hover:where(:not(:disabled)) {
@@ -223,10 +228,10 @@
   border: 0;
   background: none;
   color: var(--text-3);
-  font-size: 13px;
+  font-size: var(--text-13);
   padding: 4px 8px;
   margin-left: -8px;
-  border-radius: 7px;
+  border-radius: var(--radius-7);
   cursor: pointer;
   text-align: left;
 }
@@ -244,7 +249,7 @@
 }
 .caret {
   display: inline-block;
-  font-weight: 700;
+  font-weight: var(--weight-bold);
   transition: transform 0.15s;
 }
 [aria-expanded="true"] > .caret {
@@ -297,7 +302,7 @@
   background: none;
   padding: 6px 8px;
   margin-left: -8px;
-  border-radius: 7px;
+  border-radius: var(--radius-7);
   cursor: pointer;
   text-align: left;
 }
@@ -306,8 +311,8 @@
 }
 .verb {
   color: var(--orange-2);
-  font-weight: 600;
-  font-size: 13.5px;
+  font-weight: var(--weight-semibold);
+  font-size: var(--text-13-5);
 }
 .step.done .verb,
 .step.fail .verb,
@@ -315,38 +320,38 @@
   color: var(--text);
 }
 .target {
-  font-family: var(--mono);
-  font-size: 12.5px;
+  font-family: var(--font-mono);
+  font-size: var(--text-12-5);
   color: var(--text-2);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 .smeta {
-  font-family: var(--mono);
-  font-size: 11.5px;
+  font-family: var(--font-mono);
+  font-size: var(--text-11-5);
   color: var(--text-3);
   white-space: nowrap;
 }
 .step-b {
   margin: 2px 0 10px;
   border: 1px solid var(--line);
-  border-radius: 10px;
+  border-radius: var(--radius-lg);
   overflow: hidden;
   background: var(--panel);
 }
 .step-note {
   margin: 0;
   padding: 6px 12px;
-  font-size: 12.5px;
+  font-size: var(--text-12-5);
   color: var(--orange-3);
 }
 pre.out,
 pre.cmd {
   margin: 0;
   padding: 9px 12px;
-  font-family: var(--mono);
-  font-size: 12px;
+  font-family: var(--font-mono);
+  font-size: var(--text-12);
   line-height: 1.55;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -362,23 +367,16 @@ pre.out.in {
 }
 pre.out.plain {
   padding: 0;
-  font-size: 13px;
+  font-size: var(--text-13);
 }
-.show-all-btn {
-  border: 0;
-  background: none;
-  color: var(--blue);
-  font-size: 12px;
-  padding: 6px 12px;
-  cursor: pointer;
-}
+
 .kv {
   display: grid;
   grid-template-columns: auto 1fr;
   gap: 4px 12px;
   margin: 0;
   padding: 9px 12px;
-  font-size: 13px;
+  font-size: var(--text-13);
 }
 .kv dt {
   color: var(--text-3);
@@ -391,7 +389,7 @@ pre.out.plain {
 }
 .thought-body {
   color: var(--text-3);
-  font-size: 13px;
+  font-size: var(--text-13);
   border-left: 2px solid var(--line-2);
   padding: 2px 0 2px 12px;
   margin: 0 0 10px;
@@ -399,7 +397,7 @@ pre.out.plain {
   overflow-wrap: anywhere;
 }
 .narr {
-  font-size: 13.5px;
+  font-size: var(--text-13-5);
   color: var(--text-2);
   margin: 4px 0;
 }
@@ -410,7 +408,7 @@ pre.out.plain {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 12.5px;
+  font-size: var(--text-12-5);
   color: var(--text-3);
   margin: 4px 0;
 }
@@ -446,7 +444,7 @@ pre.out.plain {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 12.5px;
+  font-size: var(--text-12-5);
   color: var(--text-3);
   margin: 0 0 16px;
 }
@@ -461,9 +459,9 @@ pre.out.plain {
   color: var(--orange-3);
 }
 .other-type {
-  font-family: var(--mono);
+  font-family: var(--font-mono);
   border: 1px solid var(--line-2);
-  border-radius: 5px;
+  border-radius: var(--radius-5);
   padding: 0 5px;
 }
 .tx-divider {
@@ -471,7 +469,7 @@ pre.out.plain {
   align-items: center;
   gap: 12px;
   color: var(--text-3);
-  font-size: 12px;
+  font-size: var(--text-12);
   margin: 6px 0 20px;
 }
 .tx-divider::before,
@@ -492,12 +490,17 @@ pre.out.plain {
   border: 1px solid var(--line-2);
   background: var(--raised);
   color: var(--text);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   padding: 5px 14px;
-  font-size: 12px;
+  font-size: var(--text-12);
   box-shadow: var(--shadow);
   cursor: pointer;
-  z-index: 4;
+  z-index: var(--z-toolbar);
+}
+
+/* A background scroll shortcut must not paint over a modal in another column. */
+[inert] .jump-latest {
+  visibility: hidden;
 }
 
 /* Narrow windows use a 16 px side gutter instead of 32 px. */
@@ -508,4 +511,46 @@ pre.out.plain {
     padding-left: 16px;
     padding-right: 16px;
   }
+}
+
+/* Protected reviews use the approval frame and keep long relative paths and choices usable. */
+.protected-change .choices {
+  flex-wrap: wrap;
+}
+.protected-change .ah {
+  flex-wrap: wrap;
+}
+.protected-change .fh {
+  flex-wrap: wrap;
+}
+.protected-change .fh-path {
+  overflow-wrap: anywhere;
+  white-space: normal;
+  min-width: 0;
+}
+.protected-file > .fh {
+  display: flex;
+  align-items: center;
+  gap: var(--space-control-gap);
+  padding: 0 14px;
+}
+.protected-change .reason {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.protected-change .card-state.err {
+  color: var(--red);
+}
+.protected-file {
+  margin-block: 12px;
+}
+
+/* A finished Chrome Control step's outcome line, under its header, always visible (what really happened). */
+.step-outcome {
+  margin: 2px 0 4px 22px;
+  font-size: var(--text-12-5);
+  color: var(--text-2);
+}
+.step.fail .step-outcome {
+  color: var(--red);
 }

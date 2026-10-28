@@ -4,21 +4,27 @@
 //! (`http://<token>.vw-guard.invalid/`) lets the engine prove that a webview really uses the proxy before any public
 //! page is allowed in it.
 //!
-//! Who is asking: a webview that sends its loopback traffic through the proxy (`WebKitGTK` does) gets
-//! a listener of its OWN, per mount ([`NetGuard::proxy_url_for`], keyed by the webview label), so the proxy knows the
-//! webview from the port the connection arrived on, never from anything the page sends. A mount keeps one page class
-//! for its life (a page from the web, or a page of the session's own server: vw-preview remounts when a navigation
-//! crosses classes), so the old page can never use the new page's rights. The core answers per mount whether a
-//! loopback port may be reached ([`PageContext`]); Vibe Work's own ports ([`NetGuard::internal_ports`], every
-//! listener of the guard) are refused first, whoever asks. The shared listener ([`NetGuard::proxy_url`]) knows no
-//! webview: loopback refused.
+//! Who is asking: the proxy knows the webviews behind a connection from the listener (port) it arrived on, never from
+//! anything the page sends. A mount keeps one page class for its life (a page from the web, or a page of the
+//! session's own server: vw-preview remounts when a navigation crosses classes), so the old page can never use the
+//! new page's rights. The core answers per mount whether a loopback port may be reached ([`PageContext`]); Vibe
+//! Work's own ports ([`NetGuard::internal_ports`], every listener of the guard) are refused first, whoever asks. The
+//! shared listener ([`NetGuard::proxy_url`]) knows no webview: loopback refused.
 //!
-//! An engine that cannot give each webview its own proxy (`WebView2` needs identical browser arguments for
-//! every environment that shares a browser process) uses the app-wide listener ([`NetGuard::proxy_url_all`]). It
-//! answers with the union of the live mounts' rights ([`PageContext::mounts`]): a loopback port passes when some
-//! mount may reach it, a local-network host when it is some mount's user-opened page. That engine's per-webview
-//! request barrier keeps every mount to its own rights; the listener adds the connection to exactly the checked
-//! addresses and refuses what no mount may reach.
+//! Every engine keeps the proxy setting on something several webviews share, so the guard has a listener per STORE
+//! ([`NetGuard::proxy_url_for_store`]): the website data store on macOS 14+ (`WKWebsiteDataStore`
+//! `proxyConfigurations`), the user data folder on Windows (`WebView2` takes the proxy from the browser arguments of
+//! the folder's one browser process, which every environment on that folder must share), the data folder on Linux
+//! (`WebKitGTK` keeps the proxy on the folder's web context). One store can serve
+//! several mounts at once (the shared public-web store serves every session's web pages), and a store's proxy cannot
+//! change while it is in use (`WebKit` bug 316948: pooled connections; `WebView2`: the browser process keeps its
+//! arguments), so the store keeps one port for its life. It grants only what EVERY mount registered on that store
+//! may reach (a store shared by a session's own-server page and the local-network page
+//! the user opened must not let either use the other's rights; the shared web store's members are web pages:
+//! nothing on this computer or the local network; no members: nothing). A mount is a member of one store at a time.
+//! Each engine keeps every mount to its own rights for what passes around or unread through the proxy where it can
+//! (macOS: URL content rules for address literals, which `WebKit` sends around the proxy; Windows: the per-webview
+//! request barrier for HTTP; Linux: everything goes through the proxy).
 //!
 //! Depends on: tokio, `serve`, `decide`, `resolve`, getrandom. Called by: the app (bind at startup), the core (serve,
 //! context, refusal lookups, internal ports), vw-webview (proxy URLs, canary), vw-host (internal ports), tests.
@@ -73,6 +79,11 @@ pub struct Refusal {
 
 /// The core's answer for loopback requests of one webview mount.
 pub trait PageContext: Send + Sync {
+    /// A final request refusal, after policy and owner checks; never includes URL paths or bodies.
+    fn refused(&self, key: Option<&str>, reason: &str) {
+        let _ = (key, reason);
+    }
+
     /// `Ok` when the webview mounted as `key` (its label) may reach `127.0.0.1:<port>` now (its page class and the
     /// port's owner); else the reason. Vibe Work's own ports never reach this question.
     fn loopback<'a>(&'a self, key: &'a str, port: u16) -> ScopeFuture<'a>;
@@ -83,12 +94,6 @@ pub trait PageContext: Send + Sync {
         let _ = key;
         None
     }
-
-    /// The keys (webview labels) of every live mount, for the app-wide listener's union of rights. Default: none
-    /// (the app-wide listener then reaches nothing on this computer or the local network).
-    fn mounts(&self) -> Vec<String> {
-        Vec::new()
-    }
 }
 
 /// Whose rights a listener applies.
@@ -96,29 +101,23 @@ pub trait PageContext: Send + Sync {
 pub(crate) enum Who {
     /// No webview: nothing on this computer or the local network.
     Nobody,
-    /// One mount (its webview label).
-    Mount(String),
-    /// Every live mount: the union of their rights (the app-wide listener).
-    AnyMount,
+    /// The mounts registered on one website data store (its key): only what every one of them may reach.
+    Store(String),
 }
 
-impl Who {
-    /// The mount key refusals are recorded under.
-    pub(crate) fn key(&self) -> Option<&str> {
-        match self {
-            Self::Mount(key) => Some(key),
-            Self::Nobody | Self::AnyMount => None,
-        }
-    }
+/// One data store's listener: its port, accept loop and the mounts (webview labels) that use the store now.
+struct StoreListener {
+    port: u16,
+    task: JoinHandle<()>,
+    members: HashSet<String>,
 }
 
 pub(crate) struct Inner {
     pub(crate) resolver: Arc<dyn Resolve>,
     shared: Mutex<Option<std::net::TcpListener>>,
     shared_addr: SocketAddr,
-    sessions: Mutex<HashMap<String, (u16, JoinHandle<()>)>>,
-    /// The app-wide listener (`proxy_url_all`), bound on first use.
-    all: Mutex<Option<(u16, JoinHandle<()>)>>,
+    /// The listeners per website data store (`proxy_url_for_store`), by store key.
+    stores: Mutex<HashMap<String, StoreListener>>,
     tasks: Mutex<Vec<JoinHandle<()>>>,
     context: OnceLock<Arc<dyn PageContext>>,
     internal: Mutex<HashSet<u16>>,
@@ -129,6 +128,8 @@ pub(crate) struct Inner {
     seen: Mutex<VecDeque<String>>,
     seen_changed: Notify,
     pub(crate) slots: Arc<Semaphore>,
+    /// The user's proxy for public requests ([`NetGuard::set_upstream`]; the system's until then).
+    pub(crate) upstream: std::sync::RwLock<Arc<crate::Upstream>>,
 }
 
 pub(crate) fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
@@ -151,6 +152,10 @@ impl Inner {
         });
         while log.len() > LOG_CAP {
             log.pop_front();
+        }
+        drop(log);
+        if let Some(context) = self.context.get() {
+            context.refused(session, reason);
         }
     }
 
@@ -179,12 +184,48 @@ impl Inner {
         }
     }
 
+    /// The user's proxy hop for a public `host:port` (`tls`: a tunnel), `None` for a direct connection.
+    pub(crate) fn upstream_route(
+        &self,
+        tls: bool,
+        host: &str,
+        port: u16,
+    ) -> Option<crate::upstream::Route> {
+        self.upstream
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .route(tls, host, port)
+    }
+
     /// True for a port of Vibe Work itself: a registered internal port or a listener of this guard.
     fn is_internal(&self, port: u16) -> bool {
         port == self.shared_addr.port()
             || lock(&self.internal).contains(&port)
-            || lock(&self.sessions).values().any(|(p, _)| *p == port)
-            || lock(&self.all).as_ref().is_some_and(|(p, _)| *p == port)
+            || lock(&self.stores).values().any(|s| s.port == port)
+    }
+
+    /// The mounts registered on the store `key` now (a snapshot); empty when there are more than [`MEMBER_LIMIT`]
+    /// (never a partial list: every member must be asked, so too many grant nothing).
+    fn store_members(&self, key: &str) -> Vec<String> {
+        lock(&self.stores)
+            .get(key)
+            .filter(|s| s.members.len() <= MEMBER_LIMIT)
+            .map_or_else(Vec::new, |s| s.members.iter().cloned().collect())
+    }
+
+    /// The mount key a refusal on `who`'s listener is recorded under: the mount, or a store's only member
+    /// (several members: none, the request cannot be told apart).
+    pub(crate) fn refusal_key(&self, who: &Who) -> Option<String> {
+        match who {
+            Who::Store(store) => {
+                let members = self.store_members(store);
+                match members.as_slice() {
+                    [only] => Some(only.clone()),
+                    _ => None,
+                }
+            }
+            Who::Nobody => None,
+        }
     }
 }
 
@@ -194,8 +235,8 @@ pub(crate) struct ListenerScope {
     pub(crate) who: Who,
 }
 
-/// The most mounts the app-wide listener asks about per request (the core keeps far fewer alive).
-const UNION_LIMIT: usize = 64;
+/// The most members a store listener asks about per request (the core keeps far fewer alive; more grant nothing).
+const MEMBER_LIMIT: usize = 64;
 
 impl Scope for ListenerScope {
     fn loopback(&self, port: u16) -> ScopeFuture<'_> {
@@ -210,17 +251,17 @@ impl Scope for ListenerScope {
                 return Err(nobody());
             };
             match &self.who {
-                Who::Mount(key) => context.loopback(key, port).await,
                 Who::Nobody => Err(nobody()),
-                Who::AnyMount => {
-                    for key in context.mounts().iter().take(UNION_LIMIT) {
-                        if context.loopback(key, port).await.is_ok() {
-                            return Ok(());
-                        }
+                Who::Store(store) => {
+                    // Every member must have the right (never one mount's right used by another).
+                    let members = self.inner.store_members(store);
+                    if members.is_empty() {
+                        return Err(nobody());
                     }
-                    Err(format!(
-                        "port {port} is not a server any open preview may reach"
-                    ))
+                    for key in &members {
+                        context.loopback(key, port).await?;
+                    }
+                    Ok(())
                 }
             }
         })
@@ -232,13 +273,14 @@ impl Scope for ListenerScope {
         };
         let same = |own: String| own.trim_end_matches('.').eq_ignore_ascii_case(host);
         match &self.who {
-            Who::Mount(key) => context.lan_host(key).is_some_and(same),
             Who::Nobody => false,
-            Who::AnyMount => context
-                .mounts()
-                .iter()
-                .take(UNION_LIMIT)
-                .any(|key| context.lan_host(key).is_some_and(same)),
+            Who::Store(store) => {
+                let members = self.inner.store_members(store);
+                !members.is_empty()
+                    && members
+                        .iter()
+                        .all(|key| context.lan_host(key).is_some_and(same))
+            }
         }
     }
 }
@@ -271,8 +313,7 @@ impl NetGuard {
                 resolver,
                 shared: Mutex::new(Some(listener)),
                 shared_addr,
-                sessions: Mutex::new(HashMap::new()),
-                all: Mutex::new(None),
+                stores: Mutex::new(HashMap::new()),
                 tasks: Mutex::new(Vec::new()),
                 context: OnceLock::new(),
                 internal: Mutex::new(HashSet::new()),
@@ -281,8 +322,19 @@ impl NetGuard {
                 seen: Mutex::new(VecDeque::new()),
                 seen_changed: Notify::new(),
                 slots: Arc::new(Semaphore::new(MAX_CONNECTIONS)),
+                upstream: std::sync::RwLock::new(Arc::new(crate::Upstream::system())),
             }),
         })
+    }
+
+    /// Sets the user's proxy for public requests (Settings > Network; the system's proxy is used until this is
+    /// called). Takes effect for the next connection.
+    pub fn set_upstream(&self, upstream: crate::Upstream) {
+        *self
+            .inner
+            .upstream
+            .write()
+            .unwrap_or_else(PoisonError::into_inner) = Arc::new(upstream);
     }
 
     /// The shared proxy URL (`http://127.0.0.1:<port>`): no session, loopback refused.
@@ -311,52 +363,87 @@ impl NetGuard {
         }
     }
 
-    /// The proxy URL of the listener of the webview mount `session` (its label; created on first use; needs a Tokio
-    /// runtime).
+    /// The proxy URL of the listener of the website data store `store` (its key), with the mount `label` registered
+    /// on it and on no other store (created on first use, then the same port for the store's life; needs a Tokio
+    /// runtime): for an engine whose proxy setting belongs to the store (`WKWebsiteDataStore`). It grants only what
+    /// every mount registered on the store may reach; [`Self::forget_session`] removes a mount,
+    /// [`Self::forget_store`] the listener.
     ///
     /// # Errors
     /// The bind error.
-    pub fn proxy_url_for(&self, session: &str) -> std::io::Result<String> {
-        let mut sessions = lock(&self.inner.sessions);
-        if let Some((port, _)) = sessions.get(session) {
-            return Ok(format!("http://127.0.0.1:{port}"));
+    pub fn proxy_url_for_store(&self, store: &str, label: &str) -> std::io::Result<String> {
+        self.store_url(store, Some(label))
+    }
+
+    /// The proxy URL of the listener of the store `store` for a webview that only holds the store and never loads a
+    /// page (no member is added: the listener's rights stay those of its members; created on first use, as
+    /// [`Self::proxy_url_for_store`]).
+    ///
+    /// # Errors
+    /// The bind error.
+    pub fn store_proxy_url(&self, store: &str) -> std::io::Result<String> {
+        self.store_url(store, None)
+    }
+
+    fn store_url(&self, store: &str, label: Option<&str>) -> std::io::Result<String> {
+        let mut stores = lock(&self.inner.stores);
+        // One store per mount: a label left on another store (a mount that moved) never keeps rights there.
+        if let Some(label) = label {
+            for (key, listener) in stores.iter_mut() {
+                if key != store {
+                    listener.members.remove(label);
+                }
+            }
+        }
+        if let Some(listener) = stores.get_mut(store) {
+            if let Some(label) = label {
+                listener.members.insert(label.to_owned());
+            }
+            return Ok(format!("http://127.0.0.1:{}", listener.port));
         }
         let std_listener = std::net::TcpListener::bind(("127.0.0.1", 0))?;
         std_listener.set_nonblocking(true)?;
         let port = std_listener.local_addr()?.port();
         let listener = TcpListener::from_std(std_listener)?;
         let task =
-            crate::serve::accept_loop(self.inner.clone(), listener, Who::Mount(session.to_owned()));
-        sessions.insert(session.to_owned(), (port, task));
+            crate::serve::accept_loop(self.inner.clone(), listener, Who::Store(store.to_owned()));
+        stores.insert(
+            store.to_owned(),
+            StoreListener {
+                port,
+                task,
+                members: label.map(str::to_owned).into_iter().collect(),
+            },
+        );
         Ok(format!("http://127.0.0.1:{port}"))
     }
 
-    /// The proxy URL of the app-wide listener (created on first use, then the same for the app's life;
-    /// needs a Tokio runtime): for an engine that sends every webview through one proxy (`WebView2`). It applies
-    /// the union of the live mounts' rights ([`PageContext::mounts`]); the engine's per-webview request barrier keeps
-    /// each mount to its own.
-    ///
-    /// # Errors
-    /// The bind error.
-    pub fn proxy_url_all(&self) -> std::io::Result<String> {
-        let mut all = lock(&self.inner.all);
-        if let Some((port, _)) = all.as_ref() {
-            return Ok(format!("http://127.0.0.1:{port}"));
-        }
-        let std_listener = std::net::TcpListener::bind(("127.0.0.1", 0))?;
-        std_listener.set_nonblocking(true)?;
-        let port = std_listener.local_addr()?.port();
-        let listener = TcpListener::from_std(std_listener)?;
-        let task = crate::serve::accept_loop(self.inner.clone(), listener, Who::AnyMount);
-        *all = Some((port, task));
-        Ok(format!("http://127.0.0.1:{port}"))
-    }
-
-    /// Closes the listener of mount `session` (its webview closed).
+    /// Removes the mount `session` (its webview label; the webview closed) from its data store's listener (that
+    /// listener stays: the store keeps its proxy setting).
     pub fn forget_session(&self, session: &str) {
-        if let Some((_, task)) = lock(&self.inner.sessions).remove(session) {
-            task.abort();
+        for listener in lock(&self.inner.stores).values_mut() {
+            listener.members.remove(session);
         }
+    }
+
+    /// Closes the listener of the website data store `store` (the store was deleted; a later store with the same key
+    /// starts fresh, on a new port).
+    pub fn forget_store(&self, store: &str) {
+        if let Some(listener) = lock(&self.inner.stores).remove(store) {
+            listener.task.abort();
+        }
+    }
+
+    /// Closes the listeners of every store whose key starts with `prefix` (a folder and the folders inside it were
+    /// deleted; see [`Self::forget_store`]).
+    pub fn forget_stores_under(&self, prefix: &str) {
+        lock(&self.inner.stores).retain(|key, listener| {
+            let keep = !key.starts_with(prefix);
+            if !keep {
+                listener.task.abort();
+            }
+            keep
+        });
     }
 
     /// Stops every listener (quit).
@@ -364,11 +451,8 @@ impl NetGuard {
         for task in lock(&self.inner.tasks).drain(..) {
             task.abort();
         }
-        for (_, (_, task)) in lock(&self.inner.sessions).drain() {
-            task.abort();
-        }
-        if let Some((_, task)) = lock(&self.inner.all).take() {
-            task.abort();
+        for (_, listener) in lock(&self.inner.stores).drain() {
+            listener.task.abort();
         }
     }
 
@@ -393,8 +477,7 @@ impl NetGuard {
     pub fn internal_ports(&self) -> Vec<u16> {
         let mut ports: Vec<u16> = lock(&self.inner.internal).iter().copied().collect();
         ports.push(self.inner.shared_addr.port());
-        ports.extend(lock(&self.inner.sessions).values().map(|(p, _)| *p));
-        ports.extend(lock(&self.inner.all).as_ref().map(|(p, _)| *p));
+        ports.extend(lock(&self.inner.stores).values().map(|s| s.port));
         ports.sort_unstable();
         ports.dedup();
         ports

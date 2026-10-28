@@ -33,7 +33,7 @@ export type TraceOutcome =
   { status: "pending" } | { status: "succeeded" } | { status: "failed"; code: CoreError["code"] };
 
 /** One attempted dispatch, including commands the core refused. */
-export interface TraceEntry {
+interface TraceEntry {
   seq: number;
   time: string;
   type: Command["type"];

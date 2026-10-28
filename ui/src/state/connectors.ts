@@ -26,8 +26,6 @@ import type { Toasts } from "./toastStore";
 import type { Transcript } from "./transcriptStore";
 import { type SignIn, type Timers, createSignIns } from "./connectorSignIn";
 
-export type { SignIn } from "./connectorSignIn";
-
 /** Everything the page shows. */
 export interface ConnectorsState {
   /** The page is shown in the content area. */
@@ -42,6 +40,8 @@ export interface ConnectorsState {
   selected: string | null;
   /** The add dialog is open. */
   addOpen: boolean;
+  /** The server whose Remove asks for confirmation (its name), or `null`. */
+  removing: string | null;
   /** What the add dialog starts with (a marketplace entry that needs a key), or `null`. */
   addPrefill: AddPrefill | null;
   /** The sign-in in progress (one at a time). */
@@ -77,6 +77,7 @@ const INITIAL: ConnectorsState = {
   search: "",
   selected: null,
   addOpen: false,
+  removing: null,
   addPrefill: null,
   signIn: null,
   prompts: [],
@@ -116,15 +117,13 @@ export function createConnectors(deps: {
 
   /** One `connectors` request with `origin`. */
   const request = async (
-    origin: "ui" | "debug-api",
+    // Whose action it is (the facade); the command is the window's either way.
+    _origin: "ui" | "debug-api",
     req: ConnectorsRequest,
   ): Promise<ConnectorsResult> => {
     if (!canUseKey() && ["refresh", "signIn", "setConnectorOff"].includes(req.op))
       throw new Error("Mistral key required for hosted connectors");
-    const result = await core.run(
-      { type: "connectors", request: req },
-      origin === "debug-api" ? { origin } : undefined,
-    );
+    const result = await core.run({ type: "connectors", request: req });
     if (result.type !== "connectors") throw new Error("unexpected answer to a connectors request");
     return result.result;
   };
@@ -199,7 +198,7 @@ export function createConnectors(deps: {
         await load();
       },
       close(): void {
-        patch({ open: false, addOpen: false, addPrefill: null });
+        patch({ open: false, addOpen: false, addPrefill: null, removing: null });
       },
       load,
       /** Asks Mistral for the catalog again. */
@@ -295,6 +294,11 @@ export function createConnectors(deps: {
       signInServer: (serverName: string) => signIns.server(origin, serverName),
       signOutServer: (serverName: string) =>
         run({ op: "signOutServer", name: serverName }, `Signed out of ${serverName}.`),
+      /** Opens (a server name) or closes (`null`) the confirmation before a server is removed. */
+      askRemoveServer(serverName: string | null): void {
+        patch({ removing: serverName });
+      },
+      /** Removes the server at once; the window asks first (`askRemoveServer`), the Debug API does not. */
       async removeServer(serverName: string): Promise<boolean> {
         const ok = await run({ op: "removeServer", name: serverName }, `${serverName} removed.`);
         if (ok && store.get().selected === `s:${serverName}`) patch({ selected: null });
@@ -317,7 +321,7 @@ export function createConnectors(deps: {
   shell.store.subscribe(() => {
     const now = shell.store.get().selected;
     if (now !== selected && store.get().open)
-      patch({ open: false, addOpen: false, addPrefill: null });
+      patch({ open: false, addOpen: false, addPrefill: null, removing: null });
     selected = now;
   });
 

@@ -298,12 +298,30 @@ fn subcommand(sub: &str, rest: &[&str], away: bool, switched: &mut bool, sink: &
     }
 }
 
-/// Every `gh` command is refused for the agent: GitHub data comes through
-/// Mistral's GitHub connector. Commands that would print the user's token keep their own credential refusal. The
-/// former read allowance for commands such as `gh pr view` is removed; any future broker must read through
-/// the user's login without exposing credentials to the agent.
+/// Local help/version needs no account. Other commands reach the core, which knows the opt-in.
 pub(crate) fn gh(args: &[&str], mut sink: Sink<'_>) {
-    let pos = positionals(args, &["-R", "--repo", "--hostname", "-h"]);
+    let text = format!("gh {}", args.join(" "));
+    // The words without redirects (`2>/dev/null`, `> out.txt`): they name the command; a redirect is never one.
+    let mut words: Option<Vec<String>> = None;
+    if !text.contains('`') && !text.contains("$(") {
+        let parsed = crate::killparse_shell::segments(&text);
+        if parsed.len() == 1 {
+            let plain: Vec<String> = parsed[0]
+                .words
+                .iter()
+                .skip(1)
+                .map(|w| w.text.clone())
+                .collect();
+            if vw_gh_broker::entry::local_command(&plain) {
+                return;
+            }
+            words = Some(plain);
+        }
+    }
+    let plain: Vec<&str> = words
+        .as_ref()
+        .map_or_else(|| args.to_vec(), |w| w.iter().map(String::as_str).collect());
+    let pos = positionals(&plain, &["-R", "--repo", "--hostname", "-h"]);
     let group = pos.first().copied().unwrap_or("");
     let action = pos.get(1).copied().unwrap_or("");
     // Fail closed so the user's GitHub token never reaches the agent.
@@ -317,7 +335,7 @@ pub(crate) fn gh(args: &[&str], mut sink: Sink<'_>) {
     }
     let what = match (group, action) {
         ("pr", "create") => "gh pr create (the Create PR button does this for the user)".to_owned(),
-        // A bare `gh` or `gh --version` still names the CLI after "gh " (`GitScan::forge_write` matches that prefix).
+        // A bare `gh` still names the CLI after "gh " (`GitScan::forge_write` matches that prefix).
         ("", _) => "gh (the GitHub CLI)".to_owned(),
         _ => format!("gh {group} {action}").trim().to_owned(),
     };

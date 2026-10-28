@@ -5,6 +5,7 @@
  * Depends on: AppContext, the voice hooks, turnEnd (range). Called by: settings/VoiceSettings.
  * Invariants: changing a choice never starts anything; the pause is always within 0.8-2.5 s (`voiceSettings` checks).
  */
+import { Switch } from "../../components/Controls";
 import type { ReactElement } from "react";
 
 import { Selector } from "../../components/Selector";
@@ -51,11 +52,8 @@ export function VoiceChatSettings(): ReactElement | null {
             button to send.
           </span>
         </span>
-        <button
+        <Switch
           data-testid="settings.voice-chat-settings-update"
-          type="button"
-          className="switch"
-          role="switch"
           aria-label="End my turn after a pause"
           aria-checked={auto}
           onClick={() => {

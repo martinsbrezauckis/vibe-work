@@ -3,13 +3,11 @@
  * or the composer's shared picker/paste/drop router
  * (the window reads the files' bytes and sends them with `addDropped`; Tauri's own drop handling is off); the
  * webview receives a project path only after `documents/save` has written original bytes. Every file
- * becomes a path context chip. An OCR kind also has an optional Read text chip; small extracted text
- * joins the path in model context, while large text and binary files remain path only.
+ * becomes a context chip. OCR starts on attach and every successful reader supplies model text. New chat holds attachments until its final folder exists.
  * Depends on: coreStore, composer (context chips, images, send guard), shellStore (selected session),
  * toastStore, composer image model, protocol types. Called by: createApp, the document views, the
  * `ui/documents` route.
- * Invariants: the path context may be sent without OCR. Every command a Debug API route triggers carries
- * the Debug API origin (`actions("debug-api")`); an extract from that origin asks the core for native confirmation.
+ * Invariants: sending waits for the attachment read; failures carry their plain reason, never guessed text.
  */
 import type { CoreEvent, DocumentView, DocumentsRequest, DocumentsResult } from "../protocol/core";
 import { toCallError } from "../protocol/client/types";
@@ -20,6 +18,8 @@ import { createStore } from "./createStore";
 import { NEW_CHAT } from "./newChatKey";
 import type { Shell } from "./shellStore";
 import type { Toasts } from "./toastStore";
+import { documentModelText as modelText, boundDocumentContext } from "./documentsText";
+import type { ContextItem } from "../features/composer/model/message";
 
 /** The document state of the composers. */
 export interface DocumentsState {
@@ -87,19 +87,18 @@ export function createDocuments(deps: {
   const store = createStore<DocumentsState>(EMPTY);
   const saved = new Map<
     string,
-    { sessionId: string; path: string; contextId: string; pending: boolean; inFlight: boolean }
+    {
+      sessionId: string;
+      path: string | null;
+      contextId: string;
+      pending: boolean;
+      inFlight: boolean;
+      document: DocumentView;
+      body: string | null;
+    }
   >();
   const replacing = new Set<string>();
-
-  const modelText = (doc: DocumentView, path: string, body: string | null): string => {
-    const lead = `Attached file: ${doc.name}\nAbsolute path: ${path}`;
-    return (doc.kind === "text" || doc.kind === "csv") &&
-      doc.size <= 16 * 1024 &&
-      body !== null &&
-      new TextEncoder().encode(body).length <= 16 * 1024
-      ? `${lead}\n\nExtracted text:\n${body}`
-      : `${lead}\nRead the file at this path when its content is needed.`;
-  };
+  const reading = new Map<string, Promise<DocumentView | null>>();
 
   const sessionOf = (id: string): string | null => {
     for (const [sid, list] of Object.entries(store.get().chips)) {
@@ -128,24 +127,22 @@ export function createDocuments(deps: {
 
   /** Runs one documents request with the origin of the action set. */
   const request = async (
-    origin: "ui" | "debug-api",
+    // Whose action it is (the facade); the command is the window's either way.
+    _origin: "ui" | "debug-api",
     req: DocumentsRequest,
   ): Promise<DocumentsResult> => {
-    const result = await core.run(
-      { type: "documents", request: req },
-      origin === "debug-api" ? { origin } : undefined,
-    );
+    const result = await core.run({ type: "documents", request: req });
     if (result.type !== "documents") throw new Error("unexpected answer to a documents request");
     return result.result;
   };
 
-  /** Gives the agent the saved absolute path and, for small text, the extracted content. */
+  /** Gives the agent the attachment path and the extracted document content when available. */
   const toContext = async (
     origin: "ui" | "debug-api",
     sessionId: string,
     doc: DocumentView,
     text: string | null,
-    path: string,
+    path: string | null,
   ): Promise<void> => {
     let body = text;
     if (body === null && doc.status === "ready") {
@@ -153,6 +150,14 @@ export function createDocuments(deps: {
       body = read.kind === "document" ? read.text : null;
     }
     const old = saved.get(doc.id);
+    if (old?.inFlight === true) {
+      old.document = doc;
+      old.body = body;
+      old.pending = doc.status !== "ready";
+      if (doc.status === "ready") dropChip(sessionId, doc.id);
+      else putChip(sessionId, doc);
+      return;
+    }
     if (old !== undefined) {
       replacing.add(doc.id);
       composer.removeContext(old.sessionId, old.contextId);
@@ -160,8 +165,9 @@ export function createDocuments(deps: {
     const item = composer.addContext(sessionId, {
       label: doc.name,
       source: "document",
-      text: body ?? `Original file saved at ${path}. Use Read text for OCR if needed.`,
+      text: body ?? doc.error ?? "Reading document text…",
       modelText: modelText(doc, path, body),
+      ...(path === null ? {} : { documentPath: path }),
       uri: `vw://doc/${doc.id}`,
       doc: {
         kindLabel: doc.kindLabel,
@@ -177,11 +183,14 @@ export function createDocuments(deps: {
       contextId: item.id,
       pending: doc.status !== "ready",
       inFlight: false,
+      document: doc,
+      body,
     });
     replacing.delete(doc.id);
     if (doc.status === "ready") {
       dropChip(sessionId, doc.id);
-      await request(origin, { op: "remove", id: doc.id }).catch(() => undefined);
+      if (path !== null)
+        await request(origin, { op: "release", id: doc.id }).catch(() => undefined);
     }
   };
 
@@ -191,10 +200,18 @@ export function createDocuments(deps: {
     const refused: { name: string; reason: string }[] = [];
     for (const doc of docs) {
       try {
+        if (sessionId === NEW_CHAT) {
+          await toContext(origin, sessionId, doc, null, null);
+          if (doc.status !== "ready") putChip(sessionId, doc);
+          if (doc.status === "waiting") void actions(origin).extract(sessionId, doc.id);
+          added.push(doc);
+          continue;
+        }
         const result = await request(origin, { op: "save", id: doc.id, sessionId });
         if (result.kind !== "saved") throw new Error("unexpected attachment save result");
         await toContext(origin, sessionId, doc, null, result.path);
         if (doc.status !== "ready") putChip(sessionId, doc);
+        if (doc.status === "waiting") void actions(origin).extract(sessionId, doc.id);
         added.push(doc);
       } catch (error) {
         refused.push({ name: doc.name, reason: toCallError(error).error.message });
@@ -215,6 +232,10 @@ export function createDocuments(deps: {
 
   /** One origin's actions (the window's own controls, or the `ui/documents` route). */
   const actions = (origin: "ui" | "debug-api") => ({
+    /** Places documents admitted by a native hand-over, using the same save and read-on-attach path. */
+    attach(sessionId: string, docs: DocumentView[]) {
+      return place(origin, sessionId, docs);
+    },
     /** Opens the native picker (Rust) and puts the chosen documents into `sessionId`'s composer. */
     async pick(sessionId: string): Promise<number> {
       try {
@@ -246,26 +267,43 @@ export function createDocuments(deps: {
       return { added: placed.added, refused: [...result.refused, ...placed.refused] };
     },
     /** Reads a waiting (or failed) document with Mistral OCR, then makes it a context chip. */
-    async extract(sessionId: string, id: string): Promise<DocumentView | null> {
-      if (deps.canUseKey?.() === false) return null;
+    extract(_sessionId: string, id: string): Promise<DocumentView | null> {
+      const existing = reading.get(id);
+      if (existing !== undefined) return existing;
       setBusy(id, true);
-      try {
-        const result = await request(origin, { op: "extract", id });
-        if (result.kind !== "document") return null;
-        if (result.document.status === "ready") {
-          const path = saved.get(id)?.path;
-          if (path === undefined) throw new Error("attachment path is unavailable");
-          await toContext(origin, sessionId, result.document, result.text, path);
-        } else putChip(sessionId, result.document);
-        return result.document;
-      } catch (thrown) {
-        if (deps.canUseKey?.() === false) return null;
-        const error = toCallError(thrown).error;
-        if (error.code !== "confirmationDeclined") composer.note(sessionId, error.message);
-        throw toCallError(thrown);
-      } finally {
-        setBusy(id, false);
-      }
+      const pending = (async () => {
+        try {
+          if (deps.canUseKey?.() === false)
+            throw new Error("Add or unlock your Mistral key in Settings, then try again.");
+          const result = await request(origin, { op: "extract", id });
+          if (result.kind !== "document")
+            throw new Error("The document reader returned no result.");
+          const item = saved.get(id);
+          if (item === undefined) return null;
+          await toContext(origin, item.sessionId, result.document, result.text, item.path);
+          if (result.document.status !== "ready") putChip(item.sessionId, result.document);
+          return result.document;
+        } catch (thrown) {
+          const item = saved.get(id);
+          if (item === undefined) return null;
+          const doc = {
+            ...item.document,
+            status: "failed",
+            error:
+              deps.canUseKey?.() === false
+                ? "Add or unlock your Mistral key in Settings, then try again."
+                : toCallError(thrown).error.message,
+          };
+          await toContext(origin, item.sessionId, doc, null, item.path);
+          putChip(item.sessionId, doc);
+          return doc;
+        } finally {
+          setBusy(id, false);
+          reading.delete(id);
+        }
+      })();
+      reading.set(id, pending);
+      return pending;
     },
     /** Removes a document chip (and the core's copy). */
     async remove(sessionId: string, id: string): Promise<void> {
@@ -277,26 +315,34 @@ export function createDocuments(deps: {
     },
     /** Puts a PNG/JPEG/WebP/GIF document into the message as a picture instead of reading it. */
     async asPicture(sessionId: string, id: string): Promise<boolean> {
-      const result = await request(origin, { op: "takePicture", id });
-      if (result.kind !== "picture") return false;
-      const already = (composer.store.get().images[sessionId] ?? []).length;
-      const image = imageFromBytes(
-        result.name,
-        decode(result.data),
-        composer.nextId("img"),
-        already,
-      );
-      if (!isImage(image)) {
-        composer.note(sessionId, `Not attached: ${image.name}: ${image.reason}`);
+      try {
+        const result = await request(origin, { op: "takePicture", id });
+        if (result.kind !== "picture") throw new Error("The document reader returned no picture.");
+        const already = (composer.store.get().images[sessionId] ?? []).length;
+        const image = imageFromBytes(
+          result.name,
+          decode(result.data),
+          composer.nextId("img"),
+          already,
+        );
+        if (!isImage(image)) {
+          composer.note(sessionId, `Not attached: ${image.name}: ${image.reason}`);
+          return false;
+        }
+        const item = saved.get(id);
+        saved.delete(id);
+        if (item !== undefined) composer.removeContext(item.sessionId, item.contextId);
+        composer.addImage(
+          sessionId,
+          origin === "debug-api" ? { ...image, by: "debug-api" } : image,
+        );
+        dropChip(sessionId, id);
+        await request(origin, { op: "remove", id }).catch(() => undefined);
+        return true;
+      } catch (thrown) {
+        composer.note(sessionId, `Not attached as a picture: ${toCallError(thrown).error.message}`);
         return false;
       }
-      const item = saved.get(id);
-      saved.delete(id);
-      if (item !== undefined) composer.removeContext(item.sessionId, item.contextId);
-      composer.addImage(sessionId, origin === "debug-api" ? { ...image, by: "debug-api" } : image);
-      dropChip(sessionId, id);
-      await request(origin, { op: "remove", id }).catch(() => undefined);
-      return true;
     },
     /** Shows (or with `null` hides) the preview of a document context chip. */
     preview(target: DocumentsState["preview"]): void {
@@ -304,16 +350,57 @@ export function createDocuments(deps: {
     },
   });
 
-  /** Saved paths can be sent immediately; OCR is optional. */
+  /** Sending waits in prepareContext for reads already started on attach. */
   const blocking = (): string | null => null;
   composer.setSendGuard(blocking);
 
-  const release = (id: string, item: { sessionId: string; pending: boolean }): void => {
-    saved.delete(id);
-    if (item.pending) {
-      dropChip(item.sessionId, id);
-      void request("ui", { op: "remove", id }).catch(() => undefined);
+  composer.setPrepareContext(async (sessionId, context) => {
+    const prepared: ContextItem[] = [];
+    for (const chip of context) {
+      const id = chip.uri?.startsWith("vw://doc/") ? chip.uri.slice("vw://doc/".length) : null;
+      let item = id === null ? undefined : saved.get(id);
+      if (id === null || item === undefined) {
+        prepared.push(chip);
+        continue;
+      }
+      await reading.get(id);
+      const latest = saved.get(id);
+      if (latest === undefined) throw new Error("The attachment was removed while reading.");
+      item = latest;
+      const path = item.path;
+      const result =
+        path === null
+          ? await request("ui", { op: "save", id, sessionId })
+          : { kind: "saved" as const, path };
+      if (result.kind !== "saved")
+        throw new Error("The attachment could not be saved. Try sending again.");
+      const body = latest.body;
+      prepared.push({
+        ...chip,
+        text: body ?? latest.document.error ?? chip.text,
+        modelText: modelText(latest.document, result.path, body),
+        documentPath: result.path,
+      });
+      if (item.pending) {
+        dropChip(item.sessionId, id);
+        putChip(sessionId, item.document);
+      }
+      item.sessionId = sessionId;
+      item.path = result.path;
+      if (!item.pending && path === null)
+        await request("ui", { op: "release", id }).catch(() => undefined);
     }
+    return boundDocumentContext(prepared);
+  });
+
+  const release = (
+    id: string,
+    item: { sessionId: string; pending: boolean; path: string | null },
+    sent = false,
+  ): void => {
+    saved.delete(id);
+    dropChip(item.sessionId, id);
+    void request("ui", { op: sent ? "release" : "remove", id }).catch(() => undefined);
   };
   composer.setContentTaken((sessionId, context) => {
     for (const item of saved.values())
@@ -322,17 +409,24 @@ export function createDocuments(deps: {
   });
   composer.setContentSettled((sessionId, context, sent) => {
     for (const [id, item] of saved) {
-      if (item.sessionId !== sessionId || !context.some((chip) => chip.id === item.contextId))
-        continue;
+      if (!context.some((chip) => chip.id === item.contextId)) continue;
+      if (item.sessionId !== sessionId) {
+        if (item.pending) {
+          dropChip(item.sessionId, id);
+          putChip(sessionId, item.document);
+        }
+        item.sessionId = sessionId;
+      }
       const restored = (composer.store.get().context[sessionId] ?? []).some(
         (chip) => chip.id === item.contextId,
       );
       item.inFlight = false;
-      if (sent || !restored) release(id, item);
+      if (sent || !restored) release(id, item, sent);
+      else void toContext("ui", sessionId, item.document, item.body, item.path);
     }
   });
 
-  // A sent or removed path chip no longer needs the pending OCR copy. The project file stays.
+  // Removing a context chip revokes its saved path; sending releases only the pending copy.
   composer.store.subscribe(() => {
     for (const [id, item] of saved) {
       if (replacing.has(id)) continue;
@@ -349,14 +443,7 @@ export function createDocuments(deps: {
     if (event.type === "documentsAdded" && event.via === "drop") {
       const selected = shell.store.get().selected;
       refusedToast(event.refused);
-      if (selected === null) {
-        composer.note(NEW_CHAT, "Open a session first, then drop the files on it.");
-        for (const doc of event.added) {
-          void request("ui", { op: "remove", id: doc.id }).catch(() => undefined);
-        }
-        return;
-      }
-      void place("ui", selected, event.added).then((placed) => {
+      void place("ui", selected ?? NEW_CHAT, event.added).then((placed) => {
         refusedToast(placed.refused);
       });
     } else if (event.type === "documentChanged") {

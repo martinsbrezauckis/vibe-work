@@ -8,6 +8,7 @@
  * Invariants: modal (inert background, Escape closes, focus returns); nothing opens without a click on
  * "Open in browser".
  */
+import { Button } from "../../components/Controls";
 import { type ReactElement, useCallback, useRef } from "react";
 
 import { CopyButton } from "../../components/CopyButton";
@@ -60,22 +61,22 @@ function OpenDialog({ url }: { url: string }): ReactElement {
             text={check.url}
             label="Copy link"
           />
-          <button
+          <Button
             data-testid="transcript.link-dialog-tb-btn"
             type="button"
-            className="tb-btn"
+
             data-dialog-initial-focus="true"
             aria-label="Cancel opening link (Escape)"
             title="Cancel opening link (Escape)"
             onClick={close}
           >
             Cancel
-          </button>
+          </Button>
           {check.ok ? (
-            <button
+            <Button
               data-testid="transcript.link-dialog-open-link"
               type="button"
-              className="btn-primary"
+              appearance="dialog"
               aria-label="Open link in browser"
               title="Open link in browser"
               onClick={() => {
@@ -83,7 +84,7 @@ function OpenDialog({ url }: { url: string }): ReactElement {
               }}
             >
               Open in browser
-            </button>
+            </Button>
           ) : null}
         </footer>
       </div>

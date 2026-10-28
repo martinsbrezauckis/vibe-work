@@ -5,8 +5,9 @@
 //! [`MAX_HOPS`]) checked with the session's mount policy (`PreviewService::fetch_allowed`: public hosts for every
 //! page; loopback only the session's own ports; the Lan page's own host), public host names resolved by
 //! [`PublicOnly`], which refuses a name if ANY answer is not a public address and hands the checked addresses to the
-//! connection (no second lookup, so DNS rebinding cannot swap them). No cookies, no credentials, no proxy, bounded
-//! size and time.
+//! connection (no second lookup, so DNS rebinding cannot swap them). The one exception: the local-network page the
+//! user opened by NAME has its own host's media fetched from that name's private answers
+//! (`PreviewService::lan_media_addresses`). No cookies, no credentials, no proxy, bounded size and time.
 //!
 //! Depends on: vw-browser (`capture`), vw-preview (policy), vw-netguard (address classes), vw-mistral (TLS setup),
 //! reqwest, `agent_tools::session` (the session folder), `previews::hub`. Called by: `browser` (command),
@@ -63,15 +64,29 @@ impl reqwest::dns::Resolve for PublicOnly {
     }
 }
 
+// HTTP libraries wrap DNS errors; inspect the source chain without exposing its addresses or values.
+fn refused_lookup(mut error: &(dyn std::error::Error + 'static)) -> bool {
+    loop {
+        if error.to_string().contains("refused:") {
+            return true;
+        }
+        let Some(source) = error.source() else {
+            return false;
+        };
+        error = source;
+    }
+}
+
 /// The capture's media fetcher.
 pub(crate) struct CoreFetch {
+    shared: std::sync::Weak<Shared>,
     service: PreviewService,
     client: reqwest::Client,
 }
 
 impl CoreFetch {
     /// A fetcher over the session previews' policy.
-    pub(crate) fn new(service: PreviewService) -> Result<Self, String> {
+    pub(crate) fn new(shared: &Arc<Shared>, service: PreviewService) -> Result<Self, String> {
         let client = vw_mistral::tls_builder()
             .redirect(reqwest::redirect::Policy::none())
             .no_proxy()
@@ -80,7 +95,25 @@ impl CoreFetch {
             .timeout(Duration::from_secs(8))
             .build()
             .map_err(|e| format!("the media fetcher could not start: {e}"))?;
-        Ok(Self { service, client })
+        Ok(Self {
+            shared: Arc::downgrade(shared),
+            service,
+            client,
+        })
+    }
+
+    /// A client like [`Self::new`]'s whose lookup of `url`'s host answers exactly `addrs` (checked by the caller).
+    fn lan_client(url: &Url, addrs: &[SocketAddr]) -> Result<reqwest::Client, String> {
+        let host = url.host_str().ok_or("refused: no host")?;
+        vw_mistral::tls_builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .no_proxy()
+            .dns_resolver(Arc::new(PublicOnly))
+            .resolve_to_addrs(host, addrs)
+            .connect_timeout(Duration::from_secs(5))
+            .timeout(Duration::from_secs(8))
+            .build()
+            .map_err(|e| format!("the media fetcher could not start: {e}"))
     }
 
     async fn fetch_inner(
@@ -101,15 +134,24 @@ impl CoreFetch {
                 // The resolver accepts public answers only; a session port is reached by its literal address.
                 let _ = current.set_host(Some("127.0.0.1"));
             }
-            let mut response = self
-                .client
+            // Media of the user's local-network page opened by NAME are fetched from exactly the
+            // addresses its name has (private answers accepted for that one host only, like the navigation policy).
+            let lan_client = match self.service.lan_media_addresses(session_id, &current).await {
+                None => None,
+                Some(Ok(addrs)) => Some(Self::lan_client(&current, &addrs)?),
+                Some(Err(reason)) => return Err(format!("refused: {reason}")),
+            };
+            let mut response = lan_client
+                .as_ref()
+                .unwrap_or(&self.client)
                 .get(current.clone())
                 .header(reqwest::header::ACCEPT, "*/*")
                 .send()
                 .await
                 .map_err(|e| {
+                    let denied = refused_lookup(&e);
                     let text = e.without_url().to_string();
-                    if text.contains("refused:") {
+                    if denied {
                         "refused: the host resolves to a non-public address".to_owned()
                     } else {
                         format!("the request failed: {text}")
@@ -159,7 +201,25 @@ impl CoreFetch {
 
 impl Fetch for CoreFetch {
     fn fetch<'a>(&'a self, session_id: &'a str, url: &'a str, max_bytes: u64) -> FetchFuture<'a> {
-        Box::pin(self.fetch_inner(session_id, url, max_bytes))
+        Box::pin(async move {
+            self.fetch_inner(session_id, url, max_bytes)
+                .await
+                .map_err(|reason| {
+                    if reason.starts_with("refused:")
+                        && let Some(shared) = self.shared.upgrade()
+                        && let Some(owner) = self.service.owner_session_id(session_id)
+                    {
+                        return crate::guard_refusals::record(
+                            &shared,
+                            &owner,
+                            crate::GuardKind::Network,
+                            crate::guard_refusals::step(&shared, &owner, None),
+                            &reason,
+                        );
+                    }
+                    reason
+                })
+        })
     }
 }
 
@@ -187,7 +247,7 @@ pub(crate) async fn run(
     let folder = folders
         .first()
         .ok_or_else(|| refused("this session has no folder".to_owned()))?;
-    let fetch = CoreFetch::new(hub.service.clone()).map_err(refused)?;
+    let fetch = CoreFetch::new(shared, hub.service.clone()).map_err(refused)?;
     hub.browser
         .capture(
             session_id,
@@ -199,4 +259,30 @@ pub(crate) async fn run(
             },
         )
         .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::refused_lookup;
+    #[derive(Debug)]
+    struct Wrapped(std::io::Error);
+    impl std::fmt::Display for Wrapped {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str("request failed")
+        }
+    }
+    impl std::error::Error for Wrapped {
+        fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+            Some(&self.0)
+        }
+    }
+    #[test]
+    fn a_wrapped_dns_guard_refusal_is_not_mistaken_for_a_connection_failure() {
+        assert!(refused_lookup(&Wrapped(std::io::Error::other(
+            "refused: private address"
+        ))));
+        assert!(!refused_lookup(&Wrapped(std::io::Error::other(
+            "connection reset"
+        ))));
+    }
 }

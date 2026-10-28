@@ -155,7 +155,8 @@ pub enum PreviewRequest {
     /// "Point Vibe at this": lets the user point at an element of the session's preview (the
     /// selection, else the next click; Escape cancels) and answers what it is (untrusted page data). With `target`
     /// the element is named instead and the answer is immediate; a Debug API request must name it (`selector`, or
-    /// `x` and `y`): there is no person to click.
+    /// `x` and `y`): there is no person to click. With `tab_id` (a web page of the session's Browser tab, after
+    /// its own menu's Point Vibe at this) only the page's selection is read: no overlay, no waiting for a click.
     Pick {
         /// The session.
         session_id: String,
@@ -163,6 +164,19 @@ pub enum PreviewRequest {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[cfg_attr(feature = "ts", ts(optional))]
         target: Option<PickTarget>,
+        /// A web page of the session's Browser tab (its page key), instead of the app preview.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[cfg_attr(feature = "ts", ts(optional))]
+        tab_id: Option<String>,
+    },
+    /// Reads text for the Browser page's Copy action from a named target, without a synthetic page event.
+    CopyText {
+        /// The owning session.
+        session_id: String,
+        /// A web page of this session's Browser tab.
+        tab_id: String,
+        /// The element and optional exact selected text.
+        target: PickTarget,
     },
     /// Cancels a running pick in the session's preview.
     CancelPick {
@@ -178,6 +192,10 @@ pub enum PreviewRequest {
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct PickTarget {
+    /// Exact selected text within the element (preview picks and Copy only). A missing match is refused.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
+    pub quote: Option<String>,
     /// A CSS selector.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "ts", ts(optional))]
@@ -275,6 +293,11 @@ pub struct BusyPortView {
     rename_all_fields = "camelCase"
 )]
 pub enum PreviewResult {
+    /// Text read for the page menu's Copy action, preserving line breaks (at most 100,000 characters).
+    Copied {
+        /// Untrusted page text.
+        text: String,
+    },
     /// `list`.
     Previews {
         /// The session's preview (`None` before anything was opened).

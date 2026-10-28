@@ -47,7 +47,7 @@ impl Core {
                         // The record must be durable before the start is answered: a window told "started" sends
                         // its first message, and a session missing from the record would then survive a crash as
                         // an ordinary, kept chat. When the record cannot be written the session is ended again.
-                        if let Err(why) = self.shared.temporary.add(&session_id) {
+                        if let Err(why) = self.shared.temporary.add_saved(&session_id).await {
                             return Err(self.refuse_unrecorded(&session_id, &why).await);
                         }
                         Ok(SessionToolsResult::Started { session_id })

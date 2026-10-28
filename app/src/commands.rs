@@ -4,11 +4,11 @@
 //! Capability: `capabilities/main.json` grants exactly these commands to the `main` window
 //! (`build.rs` lists them). Called by: the UI (`ui/src/protocol/client/tauriClient.ts`).
 //! Invariants:
-//! - `core_execute` runs every command with `origin = ui`. A command the UI runs for a Debug API `ui/*` request
-//!   it is serving carries that request's capability (`debug_api_capability`) and runs as `debug-api`, which
-//!   acts as the user without native dialogs; the host accepts the claim only while that exact request
-//!   is pending (`vw_host::Host::execute_for_ui_control`) and refuses any other. Trusting a boolean set by
-//!   the webview would let any script in the window skip every confirmation.
+//! - `core_execute` runs every command as the window's (`origin = ui`). The webview cannot claim the Debug API
+//!   origin (which acts as the user without native dialogs): no argument of these commands carries such a claim,
+//!   and any extra argument a script adds is ignored. Only the host turns one window command into the Debug API's,
+//!   when it matches a grant a pending Debug API `ui/*` request got in Rust from its own route and body
+//!   (`vw_host::Host::execute_window`, `vw_host::ui_grants`). The update commands are always the window's.
 //! - No command returns a secret, a token or the Debug API descriptor.
 
 use tauri::ipc::{Channel, InvokeResponseBody};
@@ -20,27 +20,16 @@ use vw_host::{HostEvent, HostHandle, NotifyRequest, TerminalAttached, UiReply, U
 use crate::dialogs;
 use crate::updater::UpdatesHandle;
 
-/// Executes one core command for the window (`origin = ui`). With `debug_api_capability` (the capability of the
-/// Debug API `ui/*` request the UI is serving) it runs as `origin = debug-api` instead, if the host finds that
-/// request still pending; otherwise it is refused (module docs).
+/// Executes one core command for the window (`origin = ui`; the host's grants aside, module docs).
 ///
 /// # Errors
-/// The core's [`CoreError`] (serialized to the JS side as the rejection value); `denied` for a claim without a
-/// live request.
+/// The core's [`CoreError`] (serialized to the JS side as the rejection value).
 #[tauri::command]
 pub async fn core_execute(
     host: State<'_, HostHandle>,
     command: Command,
-    debug_api_capability: Option<String>,
 ) -> Result<CommandResult, CoreError> {
-    let host = host.get().await;
-    match debug_api_capability {
-        Some(capability) => {
-            host.execute_for_ui_control(command, Some(&capability))
-                .await
-        }
-        None => host.execute(command).await,
-    }
+    host.get_for_window().await.execute_window(command).await
 }
 
 /// Starts (or restarts) the event stream into `events`: first a snapshot of every loaded session,
@@ -158,7 +147,7 @@ pub async fn host_subscribe(
     host.get().await.subscribe_host(move |event| {
         // A clicked notification should bring the window forward; Windows and macOS already do
         // it, a Linux desktop often does not.
-        if let Some(window) = app.get_webview_window("main") {
+        if let Some(window) = crate::main_window(&app) {
             let _ = window.unminimize();
             let _ = window.set_focus();
         }
@@ -328,6 +317,16 @@ pub async fn notify_session(
     host.get().await.notify(&request)
 }
 
+/// Brings the waiting confirmation window of ask `ask_id` (an agent's request, a window of its own) to the front;
+/// false when none is open. It only moves a window: nothing is answered, and the webview never sees its text.
+///
+/// # Errors
+/// None; the signature allows the bridge's error type like its siblings.
+#[tauri::command]
+pub async fn show_prompt(ask_id: String) -> Result<bool, CoreError> {
+    Ok(dialogs::raise_prompt(&ask_id))
+}
+
 /// Attaches the window's terminal view to a terminal's output: the scrollback, then live output, as
 /// raw bytes on `output` (an `ArrayBuffer` per chunk in JS; no JSON number arrays, ShellX
 /// `terminal.rs:658-668`). Flow control: the view acknowledges rendered bytes with `terminal_ack`.
@@ -384,36 +383,6 @@ fn updates(handle: &UpdatesHandle) -> Result<&UpdateManager, CoreError> {
     })
 }
 
-/// Who the update flow treats the caller as: the window, or the Debug API when the call carries the capability of
-/// a `ui/*` request that is still pending (same rule as `core_execute`).
-///
-/// # Errors
-/// `denied` for a capability without a live request.
-async fn requester(
-    host: &HostHandle,
-    debug_api_capability: Option<String>,
-) -> Result<UpdateRequester, CoreError> {
-    let Some(capability) = debug_api_capability else {
-        return Ok(UpdateRequester::Window);
-    };
-    if host
-        .get()
-        .await
-        .ui_control_claim_holds(Some(&capability))
-        .await
-    {
-        Ok(UpdateRequester::DebugApi)
-    } else {
-        tracing::warn!(
-            "a Debug API claim on an update command without a live UI-control request: refused"
-        );
-        Err(CoreError::new(
-            ErrorCode::Denied,
-            "this command claims a Debug API request that is not being served".to_owned(),
-        ))
-    }
-}
-
 /// Starts the stream of update views into `events` (the current one first, then every change) and says whether
 /// this build has an update channel at all (`false`: the UI shows no update section).
 ///
@@ -453,39 +422,29 @@ pub async fn update_check(handle: State<'_, UpdatesHandle>) -> Result<(), CoreEr
     updates(&handle)?.check().await.map_err(CoreError::from)
 }
 
-/// Downloads the offered update (the "ask before downloading" mode, or a retry). With `debug_api_capability` the
-/// call is the Debug API's (the request it serves is its consent).
+/// Downloads the offered update (the "ask before downloading" mode, or a retry). A `ui/updates download` request is
+/// carried out through this same window command: the request is the Debug API's agreement as the click is the user's.
 ///
 /// # Errors
 /// `denied`, `confirmationDeclined` (dialog declined), `internal` (the download failed).
 #[tauri::command]
-pub async fn update_download(
-    handle: State<'_, UpdatesHandle>,
-    host: State<'_, HostHandle>,
-    debug_api_capability: Option<String>,
-) -> Result<(), CoreError> {
-    let requester = requester(&host, debug_api_capability).await?;
+pub async fn update_download(handle: State<'_, UpdatesHandle>) -> Result<(), CoreError> {
     updates(&handle)?
-        .download(requester)
+        .download(UpdateRequester::Window)
         .await
         .map_err(CoreError::from)
 }
 
-/// "Install and restart": records the user's agreement and installs. From the window the click is the
-/// agreement; with `debug_api_capability` the Debug API request it serves supplies that agreement. The core installs
-/// nothing without a recorded agreement (`vw_host::update_flow`).
+/// "Install and restart": records the user's agreement and installs. The click is the agreement (a
+/// `ui/updates install` request clicks it). The core installs nothing without a recorded agreement
+/// (`vw_host::update_flow`).
 ///
 /// # Errors
 /// `denied` (nothing ready, busy, no agreement), `confirmationDeclined`, `internal` (the install failed).
 #[tauri::command]
-pub async fn update_install(
-    handle: State<'_, UpdatesHandle>,
-    host: State<'_, HostHandle>,
-    debug_api_capability: Option<String>,
-) -> Result<(), CoreError> {
-    let requester = requester(&host, debug_api_capability).await?;
+pub async fn update_install(handle: State<'_, UpdatesHandle>) -> Result<(), CoreError> {
     updates(&handle)?
-        .request_install(requester)
+        .request_install(UpdateRequester::Window)
         .await
         .map_err(CoreError::from)
 }
@@ -521,4 +480,39 @@ pub async fn update_open_release_page(handle: State<'_, UpdatesHandle>) -> Resul
     };
     vw_platform::open_web_url(&url)
         .map_err(|error| CoreError::new(ErrorCode::InvalidParams, error.to_string()))
+}
+
+/// Tells the window (an empty message) whenever hand-overs wait, at once when some already do. A second call
+/// replaces the first (a reload).
+#[tauri::command]
+pub async fn hand_over_subscribe(
+    inbox: State<'_, std::sync::Arc<vw_host::hand_over::HandOverInbox>>,
+    events: Channel<()>,
+) -> Result<(), CoreError> {
+    inbox.subscribe(move || events.send(()).is_ok());
+    Ok(())
+}
+
+/// Takes every waiting hand-over, oldest first.
+#[tauri::command]
+pub async fn hand_over_take(
+    host: State<'_, HostHandle>,
+    inbox: State<'_, std::sync::Arc<vw_host::hand_over::HandOverInbox>>,
+) -> Result<Vec<vw_host::hand_over::HandOverView>, CoreError> {
+    host.get().await.take_hand_overs(&inbox).await
+}
+
+/// Reads or changes the "Right-click menus" switch, or answers the one-time question.
+///
+/// # Errors
+/// `internal` with the sentence the window shows when an entry could not be written or removed.
+#[tauri::command]
+pub async fn send_to(
+    host: State<'_, HostHandle>,
+    request: vw_host::send_to::SendToRequest,
+) -> Result<vw_host::send_to::SendToView, CoreError> {
+    let host = host.get().await;
+    tauri::async_runtime::spawn_blocking(move || host.send_to(request))
+        .await
+        .map_err(|error| CoreError::new(ErrorCode::Internal, error.to_string()))?
 }

@@ -19,3 +19,7 @@ url = "2"
 getrandom = "0.3"
 # The content-rule JSON for macOS webviews (same version as the other crates).
 serde_json = "1"
+# The user's proxy rules (environment, Windows/macOS system settings, NO_PROXY), the same matcher reqwest uses for
+# the core's clients; 0.1.21 and its system-proxy dependencies are already in the lock file.
+hyper-util = { version = "0.1.21", default-features = false, features = ["client-proxy", "client-proxy-system"] }
+http = "1"

@@ -35,3 +35,34 @@ fn collect(word: &str, root: &str, out: &mut Vec<String>) {
         out.push(word[at..].to_owned());
     }
 }
+
+/// `roots` plus, on Windows, each drive root's Git Bash spelling (`C:\a` as `/c/a` and `/C/a`): the agent's commands
+/// run in Git Bash and often name paths that way.
+pub(super) fn with_bash_spellings(mut roots: Vec<String>) -> Vec<String> {
+    if cfg!(windows) {
+        let extra: Vec<String> = roots
+            .iter()
+            .filter_map(|root| {
+                let plain = root.strip_prefix(r"\\?\").unwrap_or(root);
+                let (drive, rest) = plain.split_once(":\\")?;
+                let rest = rest.replace('\\', "/");
+                (drive.len() == 1).then(|| {
+                    [drive.to_ascii_lowercase(), drive.to_ascii_uppercase()]
+                        .map(|d| format!("/{d}/{rest}"))
+                })
+            })
+            .flatten()
+            .collect();
+        roots.extend(extra);
+    }
+    roots
+}
+
+/// A Git Bash drive path (`/c/a`) as the Windows path it names; other text, and every path off Windows, unchanged.
+pub(super) fn native(text: &str) -> std::borrow::Cow<'_, str> {
+    #[cfg(windows)]
+    if let Some(native) = crate::msys_paths::native_drive(text) {
+        return std::borrow::Cow::Owned(native);
+    }
+    std::borrow::Cow::Borrowed(text)
+}

@@ -3,6 +3,7 @@
  * new private Vibe Work vault. A local choice is only committed when creation or unlock succeeds.
  * Depends on: key status, CreateStep, UnlockStep. Called by: SetupScreen.
  */
+import { Button } from "../../components/Controls";
 import { useState } from "react";
 
 import type { VaultChoice } from "../../protocol/core";
@@ -27,16 +28,16 @@ export function VaultStartStep() {
   if (choice !== null) {
     return (
       <div className="setup-step">
-        <button
+        <Button
           data-testid="setup.vault-start-step-choose"
           type="button"
-          className="key-link"
+          appearance="key-link"
           onClick={() => {
             choose(null);
           }}
         >
           Choose another vault
-        </button>
+        </Button>
         {choice === "create" ? <CreateStep /> : <UnlockStep choice={choice} />}
       </div>
     );
@@ -100,14 +101,14 @@ export function VaultStartStep() {
         )}
       </div>
       {available.length === 0 && <p className="key-field-hint">{TEXT.vaultChoiceEmpty}</p>}
-      <button
+      <Button
         data-testid="setup.vault-start-step-dismiss"
         type="button"
-        className="key-link"
+        appearance="key-link"
         onClick={() => keys?.dismiss()}
       >
         Not now
-      </button>
+      </Button>
     </div>
   );
 }

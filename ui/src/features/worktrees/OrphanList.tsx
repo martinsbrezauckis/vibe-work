@@ -1,8 +1,10 @@
 /**
  * The existing welcome list of Vibe Work copies without a live session: kept and leftover copies.
  * Depends on: worktrees state, AppContext and new-chat navigation. Called by: shell/Content.
- * Review uses the existing inspection and native removal dialog; New chat here reuses this folder.
+ * Throw away opens the existing inspection and native removal dialog (Cancel leaves the copy alone); New chat
+ * here reuses this folder.
  */
+import { Button } from "../../components/Controls";
 import { TEXT } from "../../vocabulary";
 import { type ReactElement, useEffect } from "react";
 
@@ -43,28 +45,27 @@ function List({ worktrees }: { worktrees: Worktrees }): ReactElement | null {
               <span className="d mono">{copy.branch}</span>
             </span>
             <span className="cactions">
-              <span className="wt-status">{copy.kept ? "Kept" : "Leftover"}</span>
-              <button
-                data-testid="worktrees.orphan-list-review"
+              <Button
+                data-testid="worktrees.orphan-list-throw-away"
                 type="button"
-                className="tb-btn"
+                shape="outlined"
                 onClick={() => void worktrees.review(copy)}
               >
-                Review…
-              </button>
+                Throw away…
+              </Button>
               {copy.path !== null && (
-                <button
+                <Button
                   data-testid="worktrees.orphan-list-open-new-chat"
                   type="button"
-                  className="tb-btn"
+                  shape="outlined"
                   onClick={() => {
                     openNewChat(app);
-                    if (copy.path !== null) worktrees.newChatHere(copy.path);
+                    if (copy.path !== null) void worktrees.newChatHere(copy.path);
                     document.querySelector(".new-session")?.scrollIntoView({ block: "center" });
                   }}
                 >
                   {TEXT.newChat} here
-                </button>
+                </Button>
               )}
             </span>
           </li>

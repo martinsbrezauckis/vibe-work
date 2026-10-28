@@ -4,6 +4,8 @@
  * opens the details. The "Add MCP server" button opens the add dialog.
  * Depends on: hooks, CategoryIcon, model/view. Called by: ConnectorsPage.
  */
+import { builtinServerText } from "../../state/builtinToolsText";
+import { Badge, Button } from "../../components/Controls";
 import type { ReactElement } from "react";
 
 import { CategoryIcon } from "./CategoryIcon";
@@ -20,14 +22,14 @@ export function ServerList(): ReactElement {
     <section className="cgroup cservers" aria-labelledby="cservers-h">
       <div className="cgroup-head">
         <h3 id="cservers-h">Your MCP servers</h3>
-        <button
+        <Button
           data-testid="connectors.server-list-show-add"
           type="button"
-          className="tb-btn primary"
+          variant="primary"
           onClick={() => actions?.showAdd(true)}
         >
           Add MCP server
-        </button>
+        </Button>
       </div>
       {list.length === 0 ? (
         <p className="cmuted">
@@ -38,6 +40,7 @@ export function ServerList(): ReactElement {
           {list.map((s) => {
             const id = `s:${s.name}`;
             const tone = serverTone(s);
+            const display = builtinServerText(s);
             return (
               <li data-item-id={s.name} key={s.name}>
                 <button
@@ -49,11 +52,20 @@ export function ServerList(): ReactElement {
                   onClick={() => actions?.select(selected === id ? null : id)}
                 >
                   <CategoryIcon name="server" />
-                  <span className="srow-name">{s.displayName}</span>
-                  <span className="srow-addr mono">
-                    {s.address ?? (s.plugin === null ? "this computer" : `plugin ${s.plugin}`)}
+                  <span className="ctile-text">
+                    <span className="srow-name">{display?.name ?? s.displayName}</span>
+                    {display ? <span className="ctile-line">{display.description}</span> : null}
                   </span>
-                  <span className={`cstat ${tone}`}>{serverStatusText(s)}</span>
+                  <span className={`srow-addr${display ? "" : " mono"}`}>
+                    {display ? (
+                      <code>{s.name}</code>
+                    ) : (
+                      (s.address ?? (s.plugin === null ? "this computer" : `plugin ${s.plugin}`))
+                    )}
+                  </span>
+                  <Badge presentation="connector-status" state={tone}>
+                    {serverStatusText(s)}
+                  </Badge>
                 </button>
               </li>
             );

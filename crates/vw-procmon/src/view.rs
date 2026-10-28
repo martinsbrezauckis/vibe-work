@@ -15,7 +15,6 @@
 use serde::{Deserialize, Serialize};
 
 use crate::attribution::{Attributed, AttributedListener, Confidence, Evidence, Owner};
-use crate::ledger::LedgerEntry;
 use crate::registry::{OwnProcess, ProcessClass};
 use crate::stop::StopOutcome;
 use crate::types::{ProcessInfo, Snapshot, StartToken};
@@ -90,25 +89,6 @@ impl ProcessView {
             cwd: None,
             ports: Vec::new(),
             class: None,
-        }
-    }
-
-    /// View of a ledger entry (no live process data).
-    #[must_use]
-    pub fn from_ledger(entry: &LedgerEntry) -> Self {
-        Self {
-            pid: entry.process.pid,
-            start: Some(entry.process.start),
-            name: entry.name.clone(),
-            ppid: None,
-            pgid: match entry.group {
-                crate::registry::ProcessGroup::Unix { pgid } => Some(pgid),
-                _ => None,
-            },
-            arg_count: Some(entry.arg_count),
-            cwd: None,
-            ports: entry.ports.clone(),
-            class: Some(entry.class),
         }
     }
 }

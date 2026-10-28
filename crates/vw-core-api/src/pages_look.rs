@@ -60,10 +60,10 @@ pub(crate) fn queue_checks(shared: &Arc<Shared>, project: &Path, pages: Vec<Stri
     }));
 }
 
-/// The HTML pages of a hub worth checking, newest first (Markdown and pre-1.0 pages are shown by the app's own
+/// The HTML pages of a hub worth checking, newest first (Markdown pages are shown by the app's own
 /// frame; the live index is the app's).
 pub(crate) fn pages_to_check(hub: &vw_pages::Hub) -> Vec<String> {
-    let mut pages: Vec<&vw_pages::HubPage> = hub.pages().filter(|p| !p.lite && !p.legacy).collect();
+    let mut pages: Vec<&vw_pages::HubPage> = hub.pages().filter(|p| !p.lite).collect();
     pages.sort_by_key(|p| std::cmp::Reverse(p.modified_ms));
     pages.into_iter().map(|p| p.path.clone()).collect()
 }

@@ -47,12 +47,16 @@ impl CoreSubscription {
         let waker = wake.clone();
         store.set_waker(move || waker.notify_one());
         let mut cleanup_notices = shared.temporary.notices();
+        cleanup_notices.extend(shared.asks.replay());
         if shared
             .network_notice
             .load(std::sync::atomic::Ordering::Relaxed)
         {
-            cleanup_notices.push(crate::network::rejection_notice());
+            cleanup_notices.push(crate::network::rejection_notice(
+                shared.config.keys.as_deref(),
+            ));
         }
+        cleanup_notices.extend(shared.guard_refusals.events().into_iter().rev());
         cleanup_notices.push(CoreEvent::SecretScan {
             view: shared.secret_scan.view(),
         });
@@ -115,6 +119,14 @@ impl CoreSubscription {
         };
         match &mut event {
             CoreEvent::Snapshot { snapshot } => {
+                crate::agent_tools::shell_commands::project(&shared, &mut snapshot.state);
+                shared
+                    .protected_changes
+                    .overlay(&snapshot.session_id, &mut snapshot.state);
+                shared
+                    .chrome_control
+                    .overlay(&snapshot.session_id, &mut snapshot.state);
+                crate::ask::tool_calls::overlay(&shared, &snapshot.session_id, &mut snapshot.state);
                 snapshot.access_mode = crate::restore::display_mode(
                     &shared,
                     &snapshot.session_id,
@@ -154,6 +166,13 @@ impl CoreSubscription {
             .filter(|e| self.wanted(e))
             .collect();
         if let Some(shared) = self.shared.upgrade() {
+            snapshots.extend(
+                shared
+                    .guard_refusals
+                    .events()
+                    .into_iter()
+                    .filter(|event| self.wanted(event)),
+            );
             snapshots.extend(
                 shared
                     .holders

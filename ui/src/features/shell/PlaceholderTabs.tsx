@@ -11,7 +11,7 @@ const TEXT: Record<TabKind, string> = {
   project: WORDS.handbookPlaceholder,
   plan: "The plan's steps will show here.",
   browser: "The browser will show here.",
-  git: "Choose a project folder to see its repositories and copies.",
+  git: "Choose a folder to see its files.",
   changes: "File changes will show here.",
   terminal: "The terminal will show here.",
   file: "Click a file name in the chat to preview it here.",

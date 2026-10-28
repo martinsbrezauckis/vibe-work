@@ -49,19 +49,19 @@ export function DeleteProjectDialog() {
           </p>
         </section>
         <footer className="modal-actions">
-          <button
+          <Button
             data-testid="sessions.delete-project-dialog-tb-btn"
             type="button"
-            className="tb-btn"
+
             data-dialog-initial-focus="true"
             onClick={close}
           >
             Cancel
-          </button>
+          </Button>
           <Button
             data-testid="sessions.delete-project-dialog-close"
             type="button"
-            small
+            shape="outlined"
             variant="danger"
             onClick={() => {
               close();

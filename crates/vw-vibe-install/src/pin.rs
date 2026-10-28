@@ -94,7 +94,7 @@ pub struct UvAsset {
 pub struct Sources {
     /// `mistral-vibe` version that gets installed (the generated protocol types match it).
     pub vibe_version: String,
-    /// Python version request for uv (`3.12`).
+    /// Python version request for uv (`3.14.8`).
     pub python: String,
     /// uv version and its archive for this OS.
     pub uv_version: String,

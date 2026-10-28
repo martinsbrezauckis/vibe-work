@@ -64,9 +64,8 @@ pub struct EndpointFile {
     pub credential: String,
 }
 
-/// How long the hook waits for the core: a held command waits for the user's answer in a native dialog.
-/// Below the `timeout` our `hooks.toml` block gives Vibe (300 s), so the core's answer (or our deny) wins.
-pub const HOLD_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(280);
+/// Person-waits have no transport deadline. Stop closes their connection by killing the hook.
+pub const HOLD_TIMEOUT: Option<std::time::Duration> = None;
 
 /// The folder guard's answers of one hook run: copy -> the core's answer.
 type Answers = Vec<(std::path::PathBuf, Result<(), String>)>;
@@ -102,16 +101,19 @@ pub enum Guard {
     Folder,
     /// The connector guard: forge-writing connector tools.
     Connector,
+    /// Binds an MCP call to the Vibe source and call ID, using the private hook credential.
+    Receipt,
 }
 
 impl Guard {
     /// Every guard, in the order the hook block lists them (the first refusal wins in Vibe).
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 6] = [
         Self::Safety,
         Self::Process,
         Self::Folder,
         Self::Git,
         Self::Connector,
+        Self::Receipt,
     ];
 
     /// The name on the command line (`vw-agent-tools guard <arg>`).
@@ -123,6 +125,7 @@ impl Guard {
             Self::Git => "git",
             Self::Folder => "folder",
             Self::Connector => "connector",
+            Self::Receipt => "receipt",
         }
     }
 
@@ -141,6 +144,7 @@ impl Guard {
             Self::Git => "vibe-work git guard",
             Self::Folder => "vibe-work folder guard",
             Self::Connector => "vibe-work connector guard",
+            Self::Receipt => "vibe-work tool receipt",
         }
     }
 
@@ -161,28 +165,58 @@ impl Guard {
             // Unknown tools fail closed.
             Self::Safety | Self::Process | Self::Git | Self::Folder => "*",
             Self::Connector => "re:connector_.+|mcp_.+",
+            Self::Receipt => "mcp_vw.*",
+        }
+    }
+
+    /// Person-waits have no timeout; Vibe cancels their process when the turn stops.
+    #[must_use]
+    pub const fn timeout_secs(self) -> f64 {
+        match self {
+            Self::Process | Self::Git | Self::Receipt => f64::INFINITY,
+            _ => 25.0,
         }
     }
 
     /// Decides one hook call for this guard. `None` = allow (print nothing).
     #[must_use]
     pub fn decide(self, payload: &str, endpoint_file: &Path) -> Option<String> {
-        match self {
+        let answer = match self {
             Self::Safety => decide_safety(payload, endpoint_file),
             Self::Process => decide_kill(payload, endpoint_file),
             Self::Git => decide_git(payload, endpoint_file),
             Self::Folder => decide_folder(payload, endpoint_file),
             Self::Connector => decide_connector(payload, endpoint_file),
-        }
+            // The core records its own outcomes (a Never in the bell, the user's No only in the session).
+            Self::Receipt => return crate::receipt_hook::decide(payload, endpoint_file),
+        };
+        answer.map(|answer| report_refusal(self, payload, endpoint_file, answer))
     }
 }
 
 /// Decides one hook call with every guard in order. Returns the stdout to print: `None` = allow (print nothing).
 #[must_use]
 pub fn decide(payload: &str, endpoint_file: &Path) -> Option<String> {
-    Guard::ALL
-        .into_iter()
-        .find_map(|guard| guard.decide(payload, endpoint_file))
+    let mut payload = payload.to_owned();
+    let mut rewritten = None;
+    for guard in Guard::ALL {
+        if let Some(answer) = guard.decide(&payload, endpoint_file) {
+            // Fail closed: an answer that is not a rewrite (or cannot be read as one) is printed as it is.
+            let Ok(output) = serde_json::from_str::<Value>(&answer) else {
+                return Some(answer);
+            };
+            let Some(input) = output.pointer("/hook_specific_output/tool_input") else {
+                return Some(answer);
+            };
+            let Ok(mut next) = serde_json::from_str::<Value>(&payload) else {
+                return Some(answer);
+            };
+            next["tool_input"] = input.clone();
+            payload = next.to_string();
+            rewritten = Some(answer);
+        }
+    }
+    rewritten
 }
 
 /// The folder guard's half: Vibe's file tools and bash paths inside another session's copy.
@@ -192,6 +226,20 @@ fn decide_folder(payload: &str, endpoint_file: &Path) -> Option<String> {
     // Our own `mcp_vw.*` tools run only inside the session's folders (`session::inside` in the core).
     if tool.starts_with(&format!("mcp_{}.", crate::wire::SERVER_NAME)) {
         return None;
+    }
+    // Windows: a file tool's Git Bash paths (`/c/Users/...`) are rewritten as Windows paths (`C:\Users\...`).
+    // Return the same input the folder guard checked, using the receipt hook's rewrite protocol.
+    #[cfg(windows)]
+    let rewritten = crate::msys_paths::rewrite(tool, &payload["tool_input"]);
+    #[cfg(not(windows))]
+    let rewritten: Option<Value> = None;
+    if rewritten.is_some()
+        && (payload["cwd"].as_str().is_none_or(str::is_empty)
+            || std::env::var_os("VIBE_HOME").is_none())
+    {
+        return Some(deny(
+            "Not run: the folder guard could not check the native Windows path.",
+        ));
     }
     let cwd = payload
         .get("cwd")
@@ -207,7 +255,7 @@ fn decide_folder(payload: &str, endpoint_file: &Path) -> Option<String> {
         }
     };
     let leaf = tool.rsplit('.').next().unwrap_or(tool);
-    let input = payload.get("tool_input")?;
+    let input = rewritten.as_ref().or_else(|| payload.get("tool_input"))?;
     let access = match leaf {
         "read_file" => folders::Access::Read,
         "write_file" | "edit" | "search_replace" => folders::Access::Write,
@@ -260,7 +308,9 @@ fn decide_folder(payload: &str, endpoint_file: &Path) -> Option<String> {
                 folders::check_command(&layout, command, home.as_deref(), &permits)
             });
     }
-    refusal.map(|text| deny(&text))
+    refusal.map(|text| deny(&text)).or_else(|| {
+        rewritten.map(|input| json!({"hook_specific_output":{"tool_input":input}}).to_string())
+    })
 }
 
 /// True when Vibe's Mistral provider is our loopback model proxy (`VIBE_PROVIDERS` set by vw-keys `vibe_env`):
@@ -311,8 +361,8 @@ fn decide_connector(payload: &str, endpoint_file: &Path) -> Option<String> {
     }
 }
 
-/// The safety reminders' part of [`decide`]: no core call, the settings file next to the endpoint
-/// file. Our own `mcp_vw.*` tools are checked by the core itself.
+/// The safety reminders and exact command observation before Vibe's display projection.
+/// Our own `mcp_vw.*` tools are checked by the core itself.
 fn decide_safety(payload: &str, endpoint_file: &Path) -> Option<String> {
     let payload = serde_json::from_str::<Value>(payload).ok()?;
     let own_tool = format!("mcp_{}.", crate::wire::SERVER_NAME);
@@ -326,6 +376,12 @@ fn decide_safety(payload: &str, endpoint_file: &Path) -> Option<String> {
     let command = payload
         .pointer("/tool_input/command")
         .and_then(Value::as_str)?;
+    // A failed observation grants nothing: a projected search card without its command is refused.
+    let _ = read_endpoint(endpoint_file).and_then(|file| wire::call(
+        &file.endpoint, &file.credential, tools::SHELL_COMMAND,
+        json!({"sessionId":payload["session_id"], "toolCallId":payload["tool_call_id"], "command":command}),
+        std::time::Duration::from_secs(2),
+    ));
     let cwd = payload
         .get("cwd")
         .and_then(Value::as_str)
@@ -354,13 +410,18 @@ fn decide_git(payload: &str, endpoint_file: &Path) -> Option<String> {
     if !found.needs_core() {
         return None;
     }
-    if found.forge_write() {
-        return Some(deny(gitparse::GH_WRITE_REASON));
-    }
-    if found.denied() {
+    if found
+        .ops
+        .iter()
+        .any(|op| op.kind == gitparse::GitKind::Deny && !op.what.starts_with("gh "))
+    {
         return Some(deny(PUSH_REASON));
     }
-    if found.credential_read() {
+    if found
+        .ops
+        .iter()
+        .any(|op| op.kind == gitparse::GitKind::Credential && !op.what.starts_with("gh "))
+    {
         return Some(deny(gitparse::CREDENTIAL_REASON));
     }
     let args = json!({
@@ -393,7 +454,7 @@ fn decide_git(payload: &str, endpoint_file: &Path) -> Option<String> {
     }
 }
 
-fn read_endpoint(endpoint_file: &Path) -> Result<EndpointFile, String> {
+pub(crate) fn read_endpoint(endpoint_file: &Path) -> Result<EndpointFile, String> {
     std::fs::read_to_string(endpoint_file)
         .map_err(|e| format!("endpoint file unreadable: {e}"))
         .and_then(|text| {
@@ -469,4 +530,46 @@ fn decide_kill(payload: &str, endpoint_file: &Path) -> Option<String> {
             "Vibe Work could not check which processes this kill command targets ({problem}). {ADVICE}"
         ))),
     }
+}
+
+// Report only the final decision: core-assisted checks must not publish a second event.
+fn report_refusal(guard: Guard, payload: &str, endpoint_file: &Path, answer: String) -> String {
+    let Ok(payload) = serde_json::from_str::<Value>(payload) else {
+        return answer;
+    };
+    let Ok(mut decision) = serde_json::from_str::<Value>(&answer) else {
+        return answer;
+    };
+    if decision["decision"] != "deny" {
+        return answer;
+    }
+    let kind = match guard {
+        Guard::Git => "git",
+        Guard::Connector
+            if payload
+                .get("tool_name")
+                .and_then(Value::as_str)
+                .and_then(forge::refuses_tool_name)
+                == Some(true) =>
+        {
+            "git"
+        }
+        Guard::Connector | Guard::Safety => "safetyRule",
+        Guard::Folder => "folder",
+        Guard::Process => "process",
+        Guard::Receipt => return answer,
+    };
+    let result = read_endpoint(endpoint_file).and_then(|file| wire::call(
+        &file.endpoint, &file.credential, tools::GUARD_REFUSED,
+        json!({ "sessionId": payload["session_id"].as_str().unwrap_or(""), "parentSessionId": payload["parent_session_id"],
+          "guard": kind, "toolCallId": payload["tool_call_id"], "reason": decision["reason"] }), COPY_TIMEOUT));
+    match result {
+        Ok(value) => {
+            if let Some(reason) = value.get("reason").and_then(Value::as_str) {
+                decision["reason"] = Value::String(reason.to_owned());
+            }
+        }
+        Err(error) => eprintln!("guard refusal could not be published: {error}"),
+    }
+    decision.to_string()
 }

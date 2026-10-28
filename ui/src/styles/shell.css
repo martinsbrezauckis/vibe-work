@@ -7,7 +7,8 @@
 .app {
   height: 100vh;
   display: grid;
-  grid-template-rows: 38px 1fr 26px;
+  /* Title bar, the update cards (empty: no height), the body, the status bar. */
+  grid-template-rows: 38px auto 1fr 26px;
   grid-template-columns: minmax(0, 1fr);
 }
 .sr {
@@ -35,7 +36,7 @@ kbd {
   color: var(--text-3);
   border: 1px solid var(--line-2);
   border-bottom-width: 2px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   padding: 0 5px;
   background: var(--raised);
 }
@@ -94,7 +95,7 @@ kbd {
   overflow: hidden;
   min-width: 0;
   padding: 4px 10px;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   border: 1px solid var(--line);
   background: var(--panel);
   color: var(--text-3);
@@ -120,7 +121,7 @@ kbd {
   background: none;
   color: var(--text-2);
   padding: 5px 8px;
-  border-radius: 7px;
+  border-radius: var(--radius-7);
   cursor: pointer;
   font-size: var(--text-12-5);
 }
@@ -139,7 +140,7 @@ kbd {
   color: var(--accent-ink);
   background: var(--orange-3);
   border: 0;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   padding: 2px 9px;
   cursor: pointer;
   white-space: nowrap;
@@ -167,8 +168,9 @@ kbd {
 .body.no-col.has-panel {
   grid-template-columns: 56px 0 minmax(380px, 1fr) var(--pw);
 }
+/* Maximized: the list and the chat fold to their strips. */
 .body.has-panel.panel-max {
-  grid-template-columns: 56px 0 0 1fr;
+  grid-template-columns: 56px 48px 48px minmax(0, 1fr);
 }
 .body.dragging {
   transition: none;
@@ -199,7 +201,7 @@ kbd {
 .rbtn {
   width: 40px;
   height: 40px;
-  border-radius: 10px;
+  border-radius: var(--radius-lg);
   border: 0;
   background: none;
   color: var(--text-3);
@@ -252,29 +254,13 @@ kbd {
   display: grid;
   gap: 8px;
 }
-.btn-primary {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  height: 34px;
-  border: 0;
-  border-radius: 9px;
-  background: var(--primary-bg);
-  color: var(--primary-fg);
-  font-weight: var(--weight-semibold);
-  cursor: pointer;
-  padding: 0 14px;
-}
-.btn-primary:hover:where(:not(:disabled)) {
-  filter: brightness(0.94);
-}
+
 .filter {
   display: flex;
   align-items: center;
   gap: 8px;
   padding: 6px 9px;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   border: 1px solid var(--line);
   color: var(--text-3);
   font-size: var(--text-13);
@@ -316,7 +302,7 @@ kbd {
   background: var(--orange-soft);
   color: var(--text);
   padding: 7px 9px;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   cursor: pointer;
   text-align: left;
   font-size: var(--text-13);
@@ -345,7 +331,7 @@ kbd {
   border: 0;
   background: none;
   padding: 7px 8px;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   cursor: pointer;
   color: var(--text);
   text-align: left;
@@ -513,7 +499,7 @@ kbd {
   background: none;
   color: var(--text-2);
   padding: 8px 10px;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   cursor: pointer;
   font-size: var(--text-13-5);
 }
@@ -527,9 +513,20 @@ kbd {
 
 /* A path that loses its start, not its end (components/PathText, UX-14). */
 .path-start {
-  direction: rtl;
-  text-align: left;
+  display: flex;
   overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
+}
+.path-tail {
+  min-width: 0;
+  overflow: hidden;
+  text-align: left;
+}
+.path-start > [aria-hidden] {
+  flex-shrink: 0;
+}
+
+/* An inline box keeps WebKit's leading ellipsis visible around the isolated path. */
+.path-tail > bdi {
+  display: inline-block;
 }

@@ -8,6 +8,7 @@
  * nothing is sent without a button press; hook output appears after the commit (and as the error when a hook
  * stops it).
  */
+import { Button } from "../../components/Controls";
 import { useId, type ReactElement } from "react";
 
 import type { CommitDialog as Dialog, Git } from "../../state/git";
@@ -67,20 +68,20 @@ export function CommitDialog({
       }}
       actions={
         <>
-          <button
+          <Button
             data-testid="git.commit-dialog-close"
             type="button"
-            className="tb-btn"
+
             onClick={() => {
               git.close();
             }}
           >
             Cancel
-          </button>
-          <button
+          </Button>
+          <Button
             data-testid="git.commit-dialog-commit"
             type="button"
-            className="tb-btn"
+
             disabled={!can}
             data-action="commit-pr"
             onClick={() => {
@@ -88,11 +89,11 @@ export function CommitDialog({
             }}
           >
             Commit and create PR
-          </button>
-          <button
+          </Button>
+          <Button
             data-testid="git.commit-dialog-commit-2"
             type="button"
-            className="tb-btn"
+
             disabled={!can}
             data-action="commit-push"
             onClick={() => {
@@ -100,11 +101,11 @@ export function CommitDialog({
             }}
           >
             Commit and push
-          </button>
-          <button
+          </Button>
+          <Button
             data-testid="git.commit-dialog-commit-3"
             type="button"
-            className="btn-primary"
+            appearance="dialog"
             disabled={!can}
             data-action="commit"
             onClick={() => {
@@ -112,11 +113,11 @@ export function CommitDialog({
             }}
           >
             Commit
-          </button>
+          </Button>
         </>
       }
     >
-      <p className="git-note">
+      <p className="ui-help" data-detail="paragraph">
         Saves a version of the ticked files on {plan.branch}. The list shows every changed file in
         this folder, also changes you made yourself; untick what should not be saved.
       </p>
@@ -125,11 +126,15 @@ export function CommitDialog({
           {blocked}
         </p>
       )}
-      {dialog.repo !== "." && <p className="git-note">Repository: {dialog.repo}</p>}
+      {dialog.repo !== "." && (
+        <p className="ui-help" data-detail="paragraph">
+          Repository: {dialog.repo}
+        </p>
+      )}
       <KeyNotice message="Drafting a commit message uses your Mistral key; you can still write and commit a message yourself." />
       {needsAuthor && (
         <>
-          <p className="git-note">
+          <p className="ui-help" data-detail="paragraph">
             Enter your name and email for this commit. They are saved only in this repository.
           </p>
           <GitIdentityFields
@@ -143,7 +148,7 @@ export function CommitDialog({
       <label className="git-field">
         <span>Message</span>
         {fallback && (
-          <span className="git-from" id={messageNoteId}>
+          <span className="ui-help" data-detail="source" id={messageNoteId}>
             Written from the chat title. The automatic message is not available:{" "}
             {(dialog.messageNote ?? "").replace(/[.\s]+$/, "")}.
           </span>
@@ -167,7 +172,7 @@ export function CommitDialog({
           }}
         />
       </label>
-      <p className="git-sub">
+      <p className="ui-help" data-detail="paragraph">
         {chosen.length} of {plan.files.length} {plan.files.length === 1 ? "file" : "files"}
         {plan.author !== null && <> · author {plan.author}</>}
       </p>

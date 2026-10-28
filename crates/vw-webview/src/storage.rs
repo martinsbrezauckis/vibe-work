@@ -2,7 +2,8 @@
 //!
 //! - Linux (`WebKitGTK`) and Windows (`WebView2`): `data_directory(<storage root>/<key hex>)`: Tauri keys a `WebKitGTK`
 //!   web context / a `WebView2` environment by that folder. Web pages share a browser key; Local/Lan pages keep
-//!   per-session keys. Wry 0.57 configures a persistent text cookie jar in that Linux directory
+//!   per-session keys (the local-network page the user opened uses a folder inside its session's folder,
+//!   `engine::folder_guard`, deleted with it). Wry 0.57 configures a persistent text cookie jar in that Linux directory
 //!   (`webkitgtk/web_context.rs:30-48`); session-only cookies may expire when its process ends.
 //! - Windows also: `data_store_identifier(<key>)`, which the patched tauri-runtime-wry (`third_party/`)
 //!   applies as the `WebView2` profile name. `WEBVIEW2_USER_DATA_FOLDER` and the `UserDataFolder` policy replace
@@ -11,6 +12,8 @@
 //!   mount and refuses a preview without it.
 //! - macOS 14+: `data_store_identifier(<key>)` (`WKWebsiteDataStore(forIdentifier:)`). Below 14, public browser
 //!   pages use the persistent default store (also used by the trusted main window); local/LAN pages are incognito.
+//!   With the feature `macos-proxy` (0.1.3, minimum macOS 14) always the identified store, never the default one:
+//!   the store carries the network guard's proxy (`engine` `proxy_for`, one listener per store).
 //!
 //! Depends on: tauri, vw-platform (user-only folders), vw-preview (`Storage`). Called by: `engine`.
 //! Invariants:
@@ -29,10 +32,10 @@ pub(crate) fn with_storage(builder: WebviewBuilder<Wry>, storage: &Storage) -> W
     {
         // The installed app profile keeps these
         // webviews ephemeral: WKWebsiteDataStore has no custom folder API.
-        if std::env::var_os("VW_LIVE_SETUP_PROFILE").is_some() {
+        if test_profile() {
             return builder.incognito(true);
         }
-        if vw_platform::webview::macos_major_version().is_some_and(|major| major >= 14) {
+        if identified_stores() {
             builder.data_store_identifier(storage.key.bytes())
         } else if storage.is_shared_web() {
             builder
@@ -54,6 +57,13 @@ pub(crate) fn with_storage(builder: WebviewBuilder<Wry>, storage: &Storage) -> W
     }
 }
 
+/// macOS: whether previews get identified data stores (macOS 14+, always with the guard's proxy).
+#[cfg(target_os = "macos")]
+fn identified_stores() -> bool {
+    cfg!(feature = "macos-proxy")
+        || vw_platform::webview::macos_major_version().is_some_and(|major| major >= 14)
+}
+
 /// Deletes a session's website data after its webview closed. `foreign_profile` is the session's `WebView2`
 /// profile folder when it lies outside its own folder (an overridden user data folder, see the module header).
 /// Returns what is still there.
@@ -63,8 +73,8 @@ pub(crate) async fn wipe(
     foreign_profile: Option<PathBuf>,
 ) -> Vec<PathBuf> {
     #[cfg(target_os = "macos")]
-    if vw_platform::webview::macos_major_version().is_some_and(|major| major >= 14)
-        && std::env::var_os("VW_LIVE_SETUP_PROFILE").is_none()
+    if identified_stores()
+        && !test_profile()
         && let Err(error) = app.remove_data_store(storage.key.bytes()).await
     {
         tracing::warn!(%error, "preview data store could not be removed");
@@ -101,6 +111,42 @@ async fn remove_with_retries(dir: &PathBuf, attempts: u32) {
                 tokio::time::sleep(Duration::from_millis(300)).await;
             }
             Err(error) => tracing::info!(%error, "preview storage still in use"),
+        }
+    }
+}
+
+#[cfg(test)]
+#[path = "storage_readonly_tests.rs"]
+mod readonly_tests;
+
+#[cfg(any(test, target_os = "macos"))]
+fn test_profile() -> bool {
+    vw_platform::live_profile::root().ok().flatten().is_some()
+}
+
+#[cfg(test)]
+mod profile_tests {
+    #[test]
+    fn unrelated_or_invalid_profile_does_not_change_storage() {
+        if std::env::var_os("VW_STORAGE_PROFILE_CHILD").is_some() {
+            assert!(!super::test_profile());
+            return;
+        }
+        for value in ["", "unrelated", "/does-not-exist/vw-profile"] {
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "storage::profile_tests::unrelated_or_invalid_profile_does_not_change_storage",
+                ])
+                .env("VW_STORAGE_PROFILE_CHILD", "1")
+                .env("VW_LIVE_SETUP_PROFILE", value)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stdout)
+            );
         }
     }
 }

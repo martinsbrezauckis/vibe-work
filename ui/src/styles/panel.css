@@ -24,7 +24,7 @@
   bottom: 0;
   width: 6px;
   cursor: col-resize;
-  z-index: 5;
+  z-index: var(--z-sticky);
   touch-action: none;
 }
 /* the grip shows a blue hairline on hover and while dragging (the panel follows the pointer at once). */
@@ -47,6 +47,7 @@
   align-items: center;
   gap: 2px;
   padding: 7px 8px 7px 12px;
+  min-height: var(--header-height);
   border-bottom: 1px solid var(--line);
   min-width: 0;
   overflow-x: auto;
@@ -54,7 +55,7 @@
 .ptab-group {
   display: inline-flex;
   align-items: center;
-  border-radius: 7px;
+  border-radius: var(--radius-7);
 }
 .ptab-group:hover:where(:not(:disabled)) {
   background: var(--hover);
@@ -70,7 +71,7 @@
   background: none;
   color: var(--text-3);
   padding: 5px 4px 5px 10px;
-  border-radius: 7px;
+  border-radius: var(--radius-7);
   cursor: pointer;
   font-size: var(--text-13);
   white-space: nowrap;
@@ -85,7 +86,7 @@
   margin-right: 6px;
   display: grid;
   place-items: center;
-  border-radius: 5px;
+  border-radius: var(--radius-5);
   color: var(--text-3);
   border: 0;
   background: none;
@@ -106,7 +107,7 @@
   height: 32px;
   display: grid;
   place-items: center;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   border: 0;
   background: none;
   color: var(--text-2);

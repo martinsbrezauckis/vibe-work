@@ -4,6 +4,7 @@
  * Depends on: hooks, model, MarketCard, MarketDetail, ToolsTabs, the transcript's LinkDialog. Called by: Content.
  * Invariants: components render, the marketplace controller decides; no vendor logos.
  */
+import { Button } from "../../components/Controls";
 import type { ReactElement } from "react";
 
 import { Selector } from "../../components/Selector";
@@ -60,14 +61,14 @@ function Progress(): ReactElement | null {
           Installing {name}: {progressText(installing)}
         </span>
         <div className="csignin-acts">
-          <button
+          <Button
             data-testid="marketplace.marketplace-page-cancel"
             type="button"
-            className="tb-btn"
+
             onClick={() => void actions?.cancel()}
           >
             Stop
-          </button>
+          </Button>
         </div>
       </div>
     </div>

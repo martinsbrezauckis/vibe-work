@@ -272,3 +272,48 @@ export function turn(
     ...extra,
   };
 }
+
+/**
+ * The core's `askOpened` event for an approval card: `offers` are the answers the core takes; "session" only
+ * where Vibe Work can keep a session grant. The card hides "Allow for this session" without it.
+ */
+export function askOpened(
+  callbackId: string,
+  offers: string[] = ["once", "session", "no"],
+): JsonValue {
+  return {
+    type: "askOpened",
+    ask: {
+      id: `callback:${callbackId}`,
+      kind: "approval",
+      session: "s1",
+      requester: "agent",
+      surface: "card",
+      title: "this tool call",
+      openedAt: 1,
+      deadline: 4_102_444_800_000,
+      minutes: 10,
+      offers,
+      personOnly: false,
+      everyCall: false,
+      alwaysSetting: null,
+    },
+  };
+}
+
+/**
+ * The core's `askGrants` event with the grant offer of card `callbackId`: what its "Allow for this
+ * session" covers. The card offers the session answer only together with these words.
+ */
+export function grantOffer(
+  callbackId: string,
+  covers: { text: string; code: boolean }[] = [
+    { text: "only this exact command", code: false },
+  ],
+): JsonValue {
+  return {
+    type: "askGrants",
+    grants: [],
+    offers: [{ callbackId, session: "s1", covers }],
+  };
+}

@@ -3,6 +3,7 @@
  * bridge; the generated value stays in the core. Depends on React and the shared Settings field/control
  * styles. Called by the secrets and logins settings forms and the replacement editor.
  */
+import { Button } from "../../components/Controls";
 import { type ReactNode, useId, useState, useSyncExternalStore } from "react";
 
 /** The options sent to the vault generator. */
@@ -62,10 +63,10 @@ export function GeneratorOptions(props: {
     <div className="generator-options key-field" data-generator-options="true">
       <div className="key-actions">
         {props.children}
-        <button
+        <Button
           data-testid="secrets.generator-options-set-disclosure-expanded"
           type="button"
-          className="tb-btn"
+
           aria-expanded={expanded}
           aria-controls={expanded ? panelId : undefined}
           onClick={() => {
@@ -73,7 +74,7 @@ export function GeneratorOptions(props: {
           }}
         >
           Options
-        </button>
+        </Button>
       </div>
       {expanded && (
         <div id={panelId} className="key-offer" role="group" aria-label="Generation options">

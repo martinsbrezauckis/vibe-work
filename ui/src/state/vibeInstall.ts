@@ -42,6 +42,22 @@ export function vibeCovers(s: VibeUi): boolean {
   return s.availability === "ready" && s.view !== null && s.view.phase.state !== "installed";
 }
 
+/** The setup screen's heading for the install: Update when an app update replaces an older app-owned Vibe. */
+export function installTitle(view: InstallView | null): string {
+  return view?.replacing === undefined ? "Install Vibe" : "Update Vibe";
+}
+
+/**
+ * The status bar's words while the server is not installed: an install that runs says so (the replaced version is
+ * named after an app update), else Vibe is not installed yet. Null when no install runs.
+ */
+export function installStatus(view: InstallView | null): string | null {
+  if (view?.phase.state !== "installing") return null;
+  return view.replacing === undefined
+    ? "Installing Vibe…"
+    : `Updating Vibe ${view.replacing} to ${view.pinnedVersion}…`;
+}
+
 /** The controller. */
 export interface VibeInstall {
   readonly store: Store<VibeUi>;
@@ -53,7 +69,7 @@ export interface VibeInstall {
   confirm(offerId: string): Promise<boolean>;
   cancel(): Promise<boolean>;
   checkExisting(): Promise<boolean>;
-  useExisting(path: string, acceptWarning: boolean): Promise<boolean>;
+  useExisting(path: string): Promise<boolean>;
   /** The offer for the available Vibe update (the dialog shows it). */
   prepareUpdate(): Promise<boolean>;
   /** The user's click on "Update Vibe" in that dialog. */
@@ -103,7 +119,7 @@ export function createVibeInstall(core: CoreController): VibeInstall {
     confirm: (offerId) => send({ op: "confirm", offerId }),
     cancel: () => send({ op: "cancel" }),
     checkExisting: () => send({ op: "checkExisting" }),
-    useExisting: (path, acceptWarning) => send({ op: "useExisting", path, acceptWarning }),
+    useExisting: (path) => send({ op: "useExisting", path }),
     prepareUpdate: () => send({ op: "prepareUpdate" }),
     confirmUpdate: (offerId) => send({ op: "confirmUpdate", offerId }),
     cancelUpdate: () => send({ op: "cancelUpdate" }),

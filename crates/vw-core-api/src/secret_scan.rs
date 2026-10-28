@@ -184,11 +184,24 @@ pub(crate) fn status(shared: &Shared, status: SecretScanStatus) {
     publish(shared);
 }
 
+/// True while a chat works. A chat whose tree waits for the person (an open card in it or in one of its subagents) is
+/// not working: cards do not expire, so waiting on it would hold the check until someone answers.
 pub(crate) fn busy(shared: &Shared) -> bool {
+    let mut waiting = std::collections::HashSet::new();
+    for session in shared.asks.list().into_iter().filter_map(|ask| ask.session) {
+        if let Some(root) = crate::stop_tree::owner(shared, &session) {
+            waiting.insert(root);
+        }
+        waiting.insert(session);
+    }
     shared.store.views().iter().any(|view| {
-        view.state["turns"]
-            .as_array()
-            .is_some_and(|turns| turns.iter().any(|turn| turn["status"] == "in_progress"))
+        !waiting.contains(&view.session_id)
+            && view.state["activeCallbacks"]
+                .as_array()
+                .is_none_or(Vec::is_empty)
+            && view.state["turns"]
+                .as_array()
+                .is_some_and(|turns| turns.iter().any(|turn| turn["status"] == "in_progress"))
     })
 }
 

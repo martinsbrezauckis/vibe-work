@@ -73,6 +73,7 @@ impl PagesService {
             state: std::sync::Mutex::new(State::default()),
             changes: tokio::sync::broadcast::channel(64).0,
             loads: tokio::sync::watch::channel(0).0,
+            menus: tokio::sync::broadcast::channel(8).0,
             pdf: config.pdf,
         });
         engine.attach(Arc::new(ViewerHooks(shared.clone())));
@@ -174,10 +175,7 @@ impl PagesService {
         match mount {
             Some(mount) => {
                 let id = mount_id(&mount);
-                let navigate = mount.session != session
-                    || mount.port != viewer.port
-                    || mount.path != viewer.path
-                    || mount.anchor != viewer.anchor;
+                let navigate = navigates(Some(&mount), session, &viewer);
                 if navigate {
                     self.flush_inline(&mount).await?;
                 }
@@ -253,7 +251,10 @@ impl PagesService {
             placement: Some(placement),
             parked: None,
             rules: None,
+            // Page viewer / checker pages never get WebRTC.
+            no_peer_connections: true,
         };
+        tracing::debug!(label = %label, path = ?viewer.path, "page viewer mounts");
         if let Err(error) =
             bounded(self.config.engine_timeout, "mount", self.engine.mount(spec)).await
         {
@@ -261,7 +262,8 @@ impl PagesService {
             return Err(error.into());
         }
         if !self.config.pdf {
-            self.start_inline(label);
+            self.start_inline(label.clone());
+            self.start_menu_poll(label);
         }
         Ok(())
     }
@@ -508,6 +510,18 @@ pub(crate) fn mount_id(mount: &Mount) -> MountId {
         session_id: mount.session.clone(),
         label: mount.label.clone(),
     }
+}
+
+/// Whether showing `viewer` for `session` sends a navigation (or mounts the first webview): the mount shows something
+/// else. `show()` navigates by this rule, and `open_file` marks the new file loading by the same rule, so a reader never
+/// sees a file "loaded" that no navigation has drawn yet.
+pub(crate) fn navigates(mount: Option<&Mount>, session: &str, viewer: &Viewer) -> bool {
+    mount.is_none_or(|mount| {
+        mount.session != session
+            || mount.port != viewer.port
+            || mount.path != viewer.path
+            || mount.anchor != viewer.anchor
+    })
 }
 
 /// Marks `session`'s viewer as loading a navigation the service is about to send (before the engine reports it), so

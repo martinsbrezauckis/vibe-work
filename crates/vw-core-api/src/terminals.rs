@@ -5,8 +5,8 @@
 //! `terminal_view`, `error`. Called by: `dispatch` (`Command::Terminal`), `core` (construction,
 //! shutdown, attach/ack for the UI host), `sessions`/`dispatch` (close on delete and archive).
 //! Invariants:
-//! - A terminal's folder is the session's folder from the core's own record (store or listing),
-//!   never a path from the client.
+//! - A terminal's folder is the session's folder from the core's own record (store or listing), or for the
+//!   New chat screen the folder `new_chat` checked (else the home folder); never a path from the client.
 //! - Input from every origin is written directly (the Debug API acts as the user; its dialog
 //!   is gone).
 //! - Terminal input never appears in logs or refusal events (only its length).
@@ -127,21 +127,31 @@ impl Core {
                 cols,
                 rows,
             } => {
-                let cwd = self.shared.names.cwd_of(&self.shared.store, &session_id).ok_or_else(|| {
-                    CoreError::new(
-                        ErrorCode::NotFound,
-                        format!("session {session_id} is not known to the core (list or open it first)"),
-                    )
-                })?;
+                let draft = crate::new_chat::is_draft(&self.shared, &session_id);
+                let cwd = if draft {
+                    crate::new_chat::terminal_folder(&self.shared)?
+                } else {
+                    self.shared.names.cwd_of(&self.shared.store, &session_id).ok_or_else(|| {
+                        CoreError::new(
+                            ErrorCode::NotFound,
+                            "The session's folder is not available. Open the session from the list and try again.",
+                        )
+                    })?.into()
+                };
                 let info = terminals
                     .open(OpenRequest {
                         session_id,
-                        cwd: cwd.into(),
+                        cwd,
                         cols: cols.unwrap_or(DEFAULT_SIZE.0),
                         rows: rows.unwrap_or(DEFAULT_SIZE.1),
                     })
                     .await
-                    .map_err(|e| core_error(&e))?;
+                    .map_err(|e| match e {
+                        TerminalError::TooMany { max, .. } if draft => {
+                            crate::new_chat::too_many(max)
+                        }
+                        e => core_error(&e),
+                    })?;
                 TerminalResult::Terminal {
                     terminal: info.into(),
                 }

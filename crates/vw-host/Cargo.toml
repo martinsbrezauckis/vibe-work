@@ -32,7 +32,7 @@ serde_json = { version = "1", features = ["float_roundtrip"] }
 thiserror = "2"
 tokio = { version = "1.53", features = ["macros", "process", "rt", "sync", "time"] }
 tracing = "0.1"
-# UI-control capabilities: 256 bits from the OS RNG; getrandom 0.3 is already in the
+# Random instance ids (`instance.rs`): getrandom 0.3 is already in the
 # lock file (vw-gate, vw-debug-api, ...).
 getrandom = "0.3"
 # URL parsing for the navigation guard; already in the tree through tauri (MIT/Apache-2.0).
@@ -48,3 +48,7 @@ semver = "1"
 # already in the tree (vw-core-api, tauri).
 toml = "1"
 toml_edit = { version = "0.25", default-features = false, features = ["parse", "display"] }
+
+[dev-dependencies]
+# Scratch folders for the hand-over checks (`hand_over_tests.rs`); already in the lockfile.
+tempfile = "3"

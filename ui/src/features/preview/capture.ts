@@ -20,12 +20,28 @@ export interface CaptureKind {
   args: { what: string; formats?: string[] };
   /** Starts a group (a separator above it). */
   group?: boolean;
+  /** Caption above this group; never a menu item. */
+  caption?: string;
 }
 
 /** The menu, in order. */
 export const CAPTURE_KINDS: readonly CaptureKind[] = [
   {
+    id: "pdf",
+    label: "PDF",
+    hint: "page.pdf · as you see it, links work",
+    args: { what: "page", formats: ["pdf"] },
+    caption: "One file",
+  },
+  {
+    id: "single_html",
+    label: "One-file web page",
+    hint: "page-one-file.html · styles and pictures inside",
+    args: { what: "page", formats: ["single_html"] },
+  },
+  {
     id: "design",
+    group: true,
     label: "Design system",
     hint: "DESIGN.md and tokens.json",
     args: { what: "design" },
@@ -94,6 +110,7 @@ export interface CaptureView {
   files: number;
   fileNames: string[];
   skipped: number;
+  keptAsLinks: number;
 }
 
 /** The Capture menu's state. */
@@ -141,6 +158,10 @@ export function captureView(kind: string, answer: JsonValue): CaptureView {
         })
       : [],
     skipped: list("skipped"),
+    keptAsLinks:
+      typeof field(answer, "keptAsLinks") === "number"
+        ? Math.max(0, Number(field(answer, "keptAsLinks")))
+        : 0,
   };
 }
 
@@ -175,7 +196,10 @@ export function createCapture(core: CoreController) {
         set(sessionId, { error: "A capture is already running in this session." });
         return null;
       }
-      set(sessionId, { busy: kind.label, error: null });
+      set(sessionId, {
+        busy: kind.id === "single_html" ? "one-file web page" : kind.label,
+        error: null,
+      });
       try {
         const result: BrowserResult = await core
           .run({
@@ -196,7 +220,14 @@ export function createCapture(core: CoreController) {
         set(sessionId, { last: view, busy: undefined });
         return view;
       } catch (thrown) {
-        set(sessionId, { busy: undefined, error: toCallError(thrown).error.message });
+        const reason = toCallError(thrown).error.message;
+        const name =
+          kind.id === "pdf" ? "PDF" : kind.id === "single_html" ? "one-file web page" : null;
+        set(sessionId, {
+          busy: undefined,
+          error:
+            name === null ? reason : `Could not save the ${name}: ${reason.replace(/\.+$/, "")}.`,
+        });
         return null;
       }
     },

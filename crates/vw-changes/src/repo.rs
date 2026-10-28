@@ -107,9 +107,11 @@ pub fn discover(folder: &Path) -> Result<Option<Repo>, ChangesError> {
             .timeout(Duration::from_secs(10))
             .output()?;
         if ignored.ok() {
+            // git prints the top level with `/` on Windows too (`C:/Users/...`); the sentence names the folder the way
+            // the rest of the app shows it (rebuilt from its components: `\` on Windows, unchanged elsewhere).
             return Err(ChangesError::Refused(format!(
                 "Ignored by the {} repository",
-                root.display()
+                root.components().collect::<PathBuf>().display()
             )));
         }
     }

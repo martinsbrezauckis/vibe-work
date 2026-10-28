@@ -27,9 +27,6 @@ export interface LoopRow {
   nextFireAt: number;
 }
 
-/** Most loops Vibe keeps for one session (`MAX_LOOPS_PER_SESSION`). */
-export const MAX_LOOPS = 50;
-
 /** One loop from a reply, or `null` when it lacks an id or a time. */
 export function loopRow(value: JsonValue | undefined): LoopRow | null {
   const o = obj(value);

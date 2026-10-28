@@ -46,7 +46,7 @@ import {
 /** Sessions per `session/list` page (Vibe allows up to 500). */
 export const PAGE_SIZE = 100;
 /** The window regaining focus refreshes the list only when the last refresh is older than this. */
-export const FOCUS_REFRESH_MIN_MS = 5000;
+const FOCUS_REFRESH_MIN_MS = 5000;
 /** Delay before the refresh that follows a turn on a local-only session. */
 export const LOCAL_REFRESH_DELAY_MS = 1500;
 /** Most pages the search loads on its own for one query (the rest is a "load more" click). */
@@ -75,9 +75,8 @@ export interface CoreController {
   /** Keeps a reply's runtime. Only an accepted access switch supplies a new display mode. */
   setRuntime(id: string, runtime: JsonValue, accessMode?: string): void;
   /**
-   * Sends a command; the result is folded into the model. Rejects with `CoreCallError`. `options.origin`
-   * lowers this one call to the Debug API origin, decided by the caller at call time (content and
-   * actions that came from a Debug API UI-control request).
+   * Sends a command; the result is folded into the model. Rejects with `CoreCallError`. Every command is the
+   * window's; `options.origin: "window"` only keeps it out of a served Debug API action's reply wait.
    */
   run(command: Command, options?: ExecuteOptions): Promise<CommandResult>;
   /** Keeps a UI-control action's request open through preparation and lazy-loading awaits. */
@@ -99,47 +98,34 @@ export interface CoreController {
 
 /**
  * Creates the controller. `notify` receives the toasts the events call for. `serving` (the UI-control
- * registry's `servingCapability`) gives the capability of the Debug API request being served, `null` when none is;
- * `track` (the registry's `track`) records each command sent with one, so the request's reply waits for it.
+ * registry's `servingAction`) gives the page-local key of the Debug API action being served, `null` when none is;
+ * `track` (the registry's `track`) records each command sent meanwhile, so the action's reply waits for it.
  * `observe` captures dispatch metadata and returns the callback that records this call's completion.
  */
 export function createCore(
   rawClient: CoreClient,
   notify: (toast: ToastSpec) => void,
   serving: () => string | null = () => null,
-  track: <T>(capability: string, promise: Promise<T>) => Promise<T> = (_capability, promise) =>
-    promise,
+  track: <T>(action: string, promise: Promise<T>) => Promise<T> = (_action, promise) => promise,
   observe: (
     command: Command,
   ) => ((outcome: Exclude<TraceOutcome, { status: "pending" }>) => void) | undefined = () =>
     undefined,
-  trackAction: <T>(capability: string, promise: Promise<T>) => Promise<T> = track,
+  trackAction: <T>(action: string, promise: Promise<T>) => Promise<T> = track,
 ): CoreController {
-  // Every command, including those features send through `core.client` directly (the terminal store),
-  // goes out with the Debug API origin while a UI-control request is served, and every
-  // Debug API command carries the served request's capability (the host accepts the
-  // Debug API origin only for a pending request and refuses any other claim). A command marked as the Debug
-  // API's while no request is served (the user saves a draft a client wrote, a dictation a client started goes
-  // on) is the user's own action now: it goes out as the window's, with the window's confirmations.
+  // Every command goes out as the window's, also while a Debug API UI-control request is served: the page holds
+  // no Debug API authority (the host grants the few owner-only effects a request promises from the request itself,
+  // `crates/vw-host/src/ui_grants.rs`). While an action is served, its commands, including those features send
+  // through `core.client` directly (the terminal store), are recorded so its reply follows their answers.
   // A view of the client that differs only in `execute` (everything else is looked up on the client
   // itself at call time, so a later change to it is seen).
   const client = Object.create(rawClient) as CoreClient & { execute: CoreClient["execute"] };
   const dispatch: CoreClient["execute"] = (command, options) => {
-    // What the view sends by itself (a terminal's focus report when a Debug API request moves focus) stays the
-    // window's: it is not the client's input.
-    if (options?.origin === "window") return rawClient.execute(command);
-    const capability = serving();
-    // Every command sent with a capability is tracked: the request's reply waits until the host answered it
-    // (`uiControl.ts` tracks them), so it never reaches the host after the request was answered.
-    if (options?.origin === "debug-api") {
-      const served = options.capability ?? capability;
-      return served === null
-        ? rawClient.execute(command)
-        : track(served, rawClient.execute(command, { ...options, capability: served }));
-    }
-    if (options === undefined && capability !== null)
-      return track(capability, rawClient.execute(command, { origin: "debug-api", capability }));
-    return rawClient.execute(command, options);
+    // What the view sends by itself (a terminal's focus report when a Debug API request moves focus) is not part
+    // of the action.
+    if (options?.origin === "window") return rawClient.execute(command, options);
+    const action = serving();
+    return action === null ? rawClient.execute(command) : track(action, rawClient.execute(command));
   };
   client.execute = async (command, options) => {
     const complete = observe(command);
@@ -218,6 +204,13 @@ export function createCore(
       fail(thrown);
       return;
     }
+    // The session grants are kept in the core's memory; after a reload the window reads them again. A core
+    // without them (an older test double) leaves the list empty.
+    try {
+      fold(await client.execute({ type: "askGrants", request: { op: "list" } }));
+    } catch {
+      // No grants to show: the chip stays hidden.
+    }
     await list(Math.max(1, store.get().index.pages));
     refreshedAt = Date.now();
   };
@@ -242,7 +235,7 @@ export function createCore(
     if (event.type === "change" && event.change.kind === "turnUpserted") {
       if (store.get().sessions[event.change.sessionId]?.localOnly === true) refreshSoon();
     }
-    const toast = notificationFor(event);
+    const toast = notificationFor(event, store.get());
     if (toast !== null) notify(toast);
     if (event.type === "lagged" || (event.type === "server" && event.status.state === "running")) {
       void refresh();
@@ -253,9 +246,9 @@ export function createCore(
   return {
     store,
     client,
-    trackAction<T>(action: Promise<T>): Promise<T> {
-      const capability = serving();
-      return capability === null ? action : trackAction(capability, action);
+    trackAction<T>(work: Promise<T>): Promise<T> {
+      const action = serving();
+      return action === null ? work : trackAction(action, work);
     },
     async start() {
       try {

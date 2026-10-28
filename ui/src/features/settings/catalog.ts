@@ -11,6 +11,7 @@
 import type { IconName } from "../../components/Icon";
 import { term, TEXT } from "../../vocabulary";
 import { MISTRAL_LINKS } from "./mistralLinks";
+import { chromeCatalog } from "./chrome/chromeRows";
 
 /** A category of the Settings page. */
 export interface SettingsCategory {
@@ -29,6 +30,8 @@ export const SETTINGS_CATEGORIES: readonly SettingsCategory[] = [
   { id: "models", label: "Models and agent", icon: "cpu" },
   { id: "browser", label: "Browser", icon: "globe" },
   { id: "safety", label: "Safety", icon: "triangle-alert" },
+  // All permissions live together directly under Safety.
+  { id: "allowed", label: "Allowed without asking", icon: "list-checks" },
   { id: "instructions", label: "Instructions", icon: "scroll-text" },
   { id: "voice", label: "Voice", icon: "audio-lines" },
   { id: "notifications", label: "Notifications", icon: "bell" },
@@ -38,9 +41,6 @@ export const SETTINGS_CATEGORIES: readonly SettingsCategory[] = [
   { id: "developer", label: "Developer", icon: "code" },
   { id: "about", label: "About", icon: "info" },
 ];
-
-/** The category ids (for validation). */
-export const SETTINGS_CATEGORY_IDS: readonly string[] = SETTINGS_CATEGORIES.map((c) => c.id);
 
 /** One setting in the index. */
 export interface SettingEntry {
@@ -57,6 +57,38 @@ export interface SettingEntry {
 
 /** Every setting, in page order. */
 export const SETTINGS_INDEX: readonly SettingEntry[] = [
+  {
+    id: "ask-allowed",
+    category: "safety",
+    label: "What you have allowed without asking",
+    description:
+      "How many answers, earlier rules and vault grants let Vibe act without asking; Review lists them.",
+    keywords: "allowed without asking always grants revoke approved",
+  },
+  {
+    id: "allowed-sessions",
+    category: "allowed",
+    label: "Answers in open sessions",
+    description:
+      "“Allow for this session” answers, per open session; revoke one to be asked again.",
+    keywords: "always allow earlier rules vault grant command site mcp key revoke session answers",
+  },
+  {
+    id: "allowed-earlier",
+    category: "allowed",
+    label: "Earlier “Always allow” rules",
+    description:
+      "Rules saved by the “Always allow” button of Vibe Work 0.1.0 and 0.1.1; revoke them here.",
+    keywords: "always allow earlier rules vault grant command site mcp key revoke",
+  },
+  {
+    id: "allowed-vault",
+    category: "allowed",
+    label: "Vault: lasting “Always” answers",
+    description:
+      "Commands that may use a secret, sites where a login may be filled, MCP servers that get a key.",
+    keywords: "always allow earlier rules vault grant command site mcp key revoke secret login",
+  },
   {
     id: "git-identity",
     category: "general",
@@ -87,11 +119,65 @@ export const SETTINGS_INDEX: readonly SettingEntry[] = [
     keywords: "errors details provider message raw debug",
   },
   {
+    id: "save-before-send",
+    category: "general",
+    label: "Save open files before Vibe works",
+    description:
+      "When you send a message, edited files open in the editor are saved first, so the file on disk is what you see.",
+    keywords: "editor save unsaved files send message disk before",
+  },
+  {
+    id: "gh-reads",
+    category: "general",
+    label: "Let Vibe read GitHub with your gh login",
+    description:
+      "Read pull requests, issues, runs and the GitHub API with your gh login. Vibe never sees your token and cannot write.",
+    keywords: "github gh pull request issue ci run api token read",
+  },
+  {
+    id: "keep-awake",
+    category: "general",
+    label: "Keep this computer awake while Vibe is working",
+    description: "While a chat is working, your computer does not go to sleep on its own.",
+    keywords: "sleep awake power idle battery screen lock lid",
+  },
+  {
+    id: "send-to",
+    category: "general",
+    label: "Right-click menus",
+    description:
+      'Adds "Send to Vibe Work" to the right-click menus of your file manager (and on a Mac "Ask Vibe Work" for selected text).',
+    keywords:
+      "send to vibe work right click context menu explorer finder file manager files folders services selected text ask",
+  },
+  {
     id: "theme",
     category: "appearance",
     label: "Theme",
     description: "Dark or light.",
     keywords: "dark light mode colour color appearance",
+  },
+  {
+    id: "open-files-in",
+    category: "appearance",
+    label: "Open files in",
+    description: "Open files in separate tabs or one File tab with a picker.",
+    keywords: "editor files tabs separate single picker",
+  },
+  {
+    id: "open-html-markdown-as",
+    category: "appearance",
+    label: "Open HTML and Markdown as",
+    description: "Preview, code, or code with its preview beside it.",
+    keywords: "editor preview markdown html code side split render",
+  },
+  {
+    id: "mark-vibe-lines",
+    category: "appearance",
+    label: "Mark lines Vibe changes in open files",
+    description:
+      "The editor marks the lines Vibe changed while the file was open, until you press Got it.",
+    keywords: "editor highlight changed lines agent orange marks",
   },
   {
     id: "status-usage",
@@ -115,11 +201,27 @@ export const SETTINGS_INDEX: readonly SettingEntry[] = [
     keywords: "plan pro subscription key type workspace organization name",
   },
   {
+    id: "mistral-keys",
+    category: "account",
+    label: "Mistral keys",
+    description: "Keep a personal and a work key and switch between them.",
+    keywords: "account workspace switch key personal work organization",
+  },
+  {
     id: "mistral-key",
     category: "account",
     label: "Mistral key",
-    description: "Test, replace, remove or lock the key; remember this computer.",
-    keywords: "api key vault password lock unlock remember forget token",
+    description: "Test, replace or lock the key.",
+    keywords: "api key vault password lock unlock token",
+  },
+  {
+    id: "vault-lock-on-quit",
+    category: "account",
+    label: "Lock the vault when Vibe Work quits",
+    description:
+      "When off, an unlocked vault stays unlocked after a restart: its key is kept in this computer's credential store.",
+    keywords:
+      "vault lock quit exit restart start password keychain credential store remember forget shared computer",
   },
   {
     id: "secret-scan",
@@ -230,6 +332,7 @@ export const SETTINGS_INDEX: readonly SettingEntry[] = [
       "How many page tabs can keep a browser engine open; background tabs pause at the limit. Auto adjusts to available memory.",
     keywords: "browser tabs pool parallel memory capacity auto",
   },
+  ...chromeCatalog(),
   {
     id: "browser-close-user-tabs",
     category: "browser",
@@ -251,20 +354,6 @@ export const SETTINGS_INDEX: readonly SettingEntry[] = [
     label: "A silent answer counts as stalled after",
     description: "How long Vibe waits in a silent answer before it retries.",
     keywords: "timeout stall stream idle network retry",
-  },
-  {
-    id: "model-top-p",
-    category: "models",
-    label: "Sampling (top p)",
-    description: "Nucleus sampling of the default model.",
-    keywords: "top p sampling temperature model",
-  },
-  {
-    id: "model-max-output",
-    category: "models",
-    label: "Longest answer",
-    description: "A cap on the tokens of one answer of the default model.",
-    keywords: "max output tokens length cap model",
   },
   {
     id: "image-generation",
@@ -480,7 +569,7 @@ export function categoryOf(id: string): SettingsCategory {
 }
 
 /** The words of a query (lower case, empty words dropped). */
-export function queryWords(query: string): string[] {
+function queryWords(query: string): string[] {
   return query
     .toLowerCase()
     .split(/\s+/)
@@ -491,10 +580,11 @@ export function queryWords(query: string): string[] {
  * Settings matching `query`: every word must appear in the label, description, keywords or category name. Label hits
  * first, then the rest, each in page order. An empty query matches nothing.
  */
-export function searchSettings(query: string): SettingEntry[] {
+export function searchSettings(query: string, chromeAvailable = true): SettingEntry[] {
   const words = queryWords(query);
   if (words.length === 0) return [];
   const hits = SEARCH_INDEX.filter((e) => {
+    if (!chromeAvailable && e.id.startsWith("chrome-control")) return false;
     const hay =
       `${e.label} ${e.description} ${e.keywords} ${categoryOf(e.category).label}`.toLowerCase();
     return words.every((w) => hay.includes(w));

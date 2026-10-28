@@ -81,6 +81,8 @@ pub(crate) struct Tracker {
     /// Whether `review` was looked up (a stored baseline loaded, git asked): an unopened tracker was just
     /// created and is opened by the first `ensure` that holds its lock.
     pub(crate) opened: bool,
+    /// Whether the session folder had its own Git entry at the last discovery.
+    local_git: bool,
 }
 
 impl Tracker {
@@ -93,6 +95,7 @@ impl Tracker {
             observed: HashMap::new(),
             last: None,
             opened: false,
+            local_git: folder.join(".git").symlink_metadata().is_ok(),
         }
     }
 }
@@ -109,6 +112,7 @@ pub(crate) struct Hub {
     signals: mpsc::UnboundedSender<String>,
     receiver: Mutex<Option<mpsc::UnboundedReceiver<String>>>,
     task: Mutex<Option<JoinHandle<()>>>,
+    stop: Arc<tokio::sync::Notify>,
 }
 
 impl Drop for Hub {
@@ -153,7 +157,32 @@ impl Hub {
             signals,
             receiver: Mutex::new(Some(receiver)),
             task: Mutex::new(None),
+            stop: Arc::default(),
         }
+    }
+
+    /// Stops scheduling refreshes and joins the current refresh, including its blocking git work.
+    pub(crate) async fn shutdown(&self) {
+        let task = self
+            .task
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take();
+        self.stop.notify_one();
+        if let Some(task) = task {
+            let _ = task.await;
+        }
+        // Watchers can be reading git's ignored list on their own threads. Drop and join them off the runtime.
+        let trackers = self.watch_trackers();
+        let _ = tokio::task::spawn_blocking(move || {
+            for tracker in trackers {
+                let mut guard = tracker.lock().unwrap_or_else(PoisonError::into_inner);
+                if let Some(Review::Git { watcher, .. }) = &mut guard.review {
+                    drop(watcher.take());
+                }
+            }
+        })
+        .await;
     }
 
     /// Blocking: the tracker of `session_id` for `folder`, created when missing and opened once (a stored
@@ -178,27 +207,34 @@ impl Hub {
             }
             let mut guard = tracker.lock().unwrap_or_else(PoisonError::into_inner);
             let moved = guard.opened && guard.folder != folder;
+            let local_git = folder.join(".git").symlink_metadata().is_ok();
+            let initialized = guard.opened
+                && !guard.local_git
+                && local_git
+                && !matches!(guard.review, Some(Review::Lost { .. }));
+            let rediscover = moved || initialized;
             let take = claim.is_some()
                 && !matches!(guard.review, Some(Review::Git { .. } | Review::Lost { .. }));
-            if guard.opened && !moved && !take {
+            if guard.opened && !rediscover && !take {
                 drop(guard);
                 return tracker;
             }
             // Only a claim holder writes the baseline folder; a reader that sees a move claims it itself, and
             // never loads a stored baseline while someone else is writing it.
-            let own_claim = if claim.is_none() && moved {
+            let own_claim = if claim.is_none() && rediscover {
                 self.claim(session_id)
             } else {
                 None
             };
-            if claim.is_none() && own_claim.is_none() && (moved || self.claimed(session_id)) {
+            if claim.is_none() && own_claim.is_none() && (rediscover || self.claimed(session_id)) {
                 drop(guard);
                 return tracker;
             }
             let writer = claim.is_some() || own_claim.is_some();
-            let review = if moved {
+            let review = if rediscover {
                 // The session moved on its first turn in a Vibe worktree: review the new folder from
                 // its HEAD (a fresh checkout), never against the old folder's baseline.
+                // A newly initialized repository also starts at HEAD so existing edits remain visible.
                 self.open_review(session_id, folder, true, true)
             } else {
                 self.open_review(session_id, folder, claim.is_some(), false)
@@ -207,13 +243,14 @@ impl Hub {
                 hooks.before_install(session_id);
             }
             let installed = self.install(session_id, generation, &tracker, writer, || {
-                if moved {
+                if rediscover {
                     guard.observed.clear();
                     guard.last = None;
                 }
                 guard.folder = folder.to_path_buf();
                 guard.review = review;
                 guard.opened = true;
+                guard.local_git = local_git;
             });
             drop(guard);
             if installed {
@@ -325,6 +362,7 @@ impl Hub {
             guard.review = Some(review);
             guard.folder = folder.to_path_buf();
             guard.opened = true;
+            guard.local_git = folder.join(".git").symlink_metadata().is_ok();
             guard.observed.clear();
             guard.last = None;
         });
@@ -381,7 +419,12 @@ impl Hub {
             return;
         }
         let subscription = CoreSubscription::new(shared, None);
-        let task = tokio::spawn(run(Arc::downgrade(shared), subscription, receiver));
+        let task = tokio::spawn(run(
+            Arc::downgrade(shared),
+            subscription,
+            receiver,
+            self.stop.clone(),
+        ));
         *self.task.lock().unwrap_or_else(PoisonError::into_inner) = Some(task);
     }
 }
@@ -406,11 +449,14 @@ async fn run(
     weak: Weak<Shared>,
     mut subscription: CoreSubscription,
     mut signals: mpsc::UnboundedReceiver<String>,
+    stop: Arc<tokio::sync::Notify>,
 ) {
     let mut due: HashMap<String, Instant> = HashMap::new();
     loop {
         let next = due.values().min().copied();
         tokio::select! {
+            biased;
+            () = stop.notified() => break,
             event = subscription.next() => {
                 let Some(event) = event else { break };
                 let Some(shared) = weak.upgrade() else { break };
@@ -536,6 +582,9 @@ pub(crate) async fn refresh_and_emit(shared: &Arc<Shared>, session_id: &str) {
     let hub_owner = shared.clone();
     let id = session_id.to_owned();
     let result = tokio::task::spawn_blocking(move || {
+        if let Some(hooks) = &hub_owner.changes.hooks {
+            hooks.before_refresh(&id);
+        }
         let tracker = hub_owner.changes.ensure(&id, &folder, None);
         let mut guard = tracker.lock().unwrap_or_else(PoisonError::into_inner);
         let before = guard.fingerprint.clone();
@@ -548,6 +597,10 @@ pub(crate) async fn refresh_and_emit(shared: &Arc<Shared>, session_id: &str) {
         Err(error) => warn!(session_id, %error, "changes: refresh task failed"),
     }
 }
+
+#[cfg(test)]
+#[path = "changes_shutdown_tests.rs"]
+mod shutdown_tests;
 
 /// Sends `changesUpdated` for `view` when `changed`. Every refresh reports its own change, whoever asked
 /// for it (a client's read must not swallow the event other clients wait for).

@@ -1,14 +1,37 @@
 {
   "additionalProperties": false,
+  "description": "Without a session, lists what a session opened in ``cwd`` would offer.",
   "properties": {
+    "cwd": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Cwd"
+    },
     "sessionId": {
-      "title": "Sessionid",
-      "type": "string"
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Sessionid"
+    },
+    "trustWorkspace": {
+      "default": false,
+      "title": "Trustworkspace",
+      "type": "boolean"
     }
   },
-  "required": [
-    "sessionId"
-  ],
   "title": "SkillsListParams",
   "type": "object"
 }

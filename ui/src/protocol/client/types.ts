@@ -40,18 +40,16 @@ export interface UiControlRequest {
   id: string;
   name: string;
   body: unknown;
-  /**
-   * The request's capability: commands run for this request pass it, and the host
-   * accepts the Debug API origin only while this exact request is pending. Absent from transports that do not
-   * need it (a browser UI already talks to the Debug API itself).
-   */
-  capability?: string;
 }
 
 /** The answer to one UI-control request. */
 export type UiControlReply =
   | { id: string; ok: true; value: unknown; pending?: true }
-  | { id: string; ok: false; error: { code: CoreError["code"]; message: string } };
+  | {
+      id: string;
+      ok: false;
+      error: { code: CoreError["code"]; message: string; serverCode?: string | null };
+    };
 
 /** How the UI receives and answers Debug API `ui/*` requests. */
 export interface UiControlTransport {
@@ -65,13 +63,16 @@ export interface UiControlTransport {
 export type HostEvent =
   | { type: "openSession"; sessionId: string; notificationId?: number }
   | { type: "openUpdates" }
-  | { type: "browserSaveContext"; sessionId: string };
+  | { type: "browserSaveContext"; sessionId: string }
+  | { type: "browserPointContext"; sessionId: string };
 
 /** Where the update flow is (mirrors `vw_host::update_flow::Phase`). */
 export type UpdatePhase =
   | { type: "idle" }
   | { type: "checking" }
   | { type: "available"; version: string; notes: string | null }
+  /** The new version needs a newer system than this computer has; nothing is downloaded. */
+  | { type: "osTooOld"; version: string; os: string; minimum: string; current: string }
   | {
       type: "downloading";
       version: string;
@@ -109,13 +110,10 @@ export interface UpdatesClient {
   subscribe(onView: (view: UpdateView) => void): Promise<boolean>;
   /** Checks now. Resolves when the check (and an automatic download) finished. */
   check(): Promise<void>;
-  /**
-   * Downloads the offered update. `origin: "debug-api"` with the served request's `capability` marks it as the
-   * Debug API's (its request is the consent); the host refuses the mark without a live request.
-   */
-  download(options?: ExecuteOptions): Promise<void>;
-  /** "Install and restart"; same origin rule as `download`. The core refuses without a recorded agreement. */
-  install(options?: ExecuteOptions): Promise<void>;
+  /** Downloads the offered update (the window's click; a `ui/updates download` request clicks it). */
+  download(): Promise<void>;
+  /** "Install and restart" (the click is the agreement). The core refuses without a recorded agreement. */
+  install(): Promise<void>;
   /** Saves "Download updates automatically". */
   setAutoDownload(enabled: boolean): Promise<void>;
   /** Opens the offered version's release page in the system browser. */
@@ -134,16 +132,11 @@ export interface OsNotification {
 /** Per-call options of `CoreClient.execute`. */
 export interface ExecuteOptions {
   /**
-   * `debug-api`: run for a Debug API request. `window`: the client's own origin even while a Debug API `ui/*`
-   * request is being served (what the view sends by itself, such as a terminal's focus report).
-   * Omitted = the client's own origin, marked as the Debug API's by the core controller while a request is served.
+   * `window`: what the view sends by itself (such as a terminal's focus report), not part of a Debug API action
+   * being served, so the action's reply does not wait for it. Every command is the window's either way: no option
+   * can claim the Debug API origin (`crates/vw-host/src/ui_grants.rs` decides that in Rust).
    */
-  origin?: "debug-api" | "window";
-  /**
-   * With `origin: "debug-api"` in the app: the capability of the `ui/*` request being served (filled in by the
-   * core controller). The host refuses a Debug API claim without a live one.
-   */
-  capability?: string;
+  origin?: "window";
 }
 
 /**
@@ -164,9 +157,8 @@ export interface CoreClient {
   /** Which transport this is (shown in diagnostics and tests). */
   readonly kind: "tauri" | "debug-api" | "fake";
   /**
-   * Executes one command with `origin = ui` (Tauri) or `debug-api` (browser dev mode). `origin:
-   * "debug-api"` with `capability` runs a Tauri call for the Debug API `ui/*` request being served.
-   * That origin acts as the user, so the host accepts it only while that exact request is pending.
+   * Executes one command with `origin = ui` (Tauri; the host's grants aside) or `debug-api` (browser dev mode: the
+   * dev proxy is the owner, `ui/vite.dev-bridge.ts`, development only).
    */
   execute(command: Command, options?: ExecuteOptions): Promise<CommandResult>;
   /**
@@ -225,8 +217,23 @@ export interface CoreClient {
   openMailLink(url: string): Promise<void>;
   /** Shows an OS notification; a click arrives through `onHostEvent`. Unsupported in dev mode. */
   notifyOs(notification: OsNotification): Promise<void>;
+  /**
+   * Brings an agent's waiting confirmation window (ask `askId`) to the front; false when none is open. It never
+   * answers. Absent in browser dev mode.
+   */
+  showPrompt?(askId: string): Promise<boolean>;
   /** Starts the host event stream; returns the function that stops listening. */
   onHostEvent(onEvent: (event: HostEvent) => void): Promise<() => void>;
+  /**
+   * "Send to Vibe Work": files, folders and text other programs handed over (absent in browser dev mode).
+   * `subscribe` calls `onWaiting` whenever hand-overs wait (at once when some already do); `take` takes them all.
+   */
+  handOver?: {
+    subscribe(onWaiting: () => void): Promise<() => void>;
+    take(): Promise<HandOverView[]>;
+  };
+  /** The "Right-click menus" switch and its one-time question (absent in browser dev mode). */
+  sendTo?(request: SendToRequest): Promise<SendToView>;
   /**
    * The CLI session-sharing switch: saves `share` first when given, then returns the switch,
    * whether the Vibe CLI's home exists and both Vibe versions. A change applies at the next start.
@@ -271,6 +278,27 @@ export function toCallError(thrown: unknown): CoreCallError {
     summary: null,
     serverCode: null,
   });
+}
+
+/** One native hand-over: admitted document facts and source paths, folders, text, and refusals. */
+export interface HandOverView {
+  files: { path: string; document: DocumentView }[];
+  folders: string[];
+  text: { text: string; from?: string } | null;
+  refused: { name: string; reason: string }[];
+}
+
+/** A request of the "Right-click menus" switch (`vw_host::send_to::SendToRequest`). */
+export type SendToRequest = { op: "read" } | { op: "set"; on: boolean } | { op: "notNow" };
+
+/** The switch as the host reports it (`vw_host::send_to::SendToView`). */
+export interface SendToView {
+  system: "windows" | "macos" | "linux" | "other";
+  supported: boolean;
+  on: boolean;
+  underMoreOptions: boolean;
+  /** Show the one-time question. */
+  offer: boolean;
 }
 
 /** What `cli_sharing` answers (`vw_host::cli_sharing::CliSharingView`). */

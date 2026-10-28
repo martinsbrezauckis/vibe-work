@@ -22,8 +22,8 @@
     },
     "plan": {
       "name": "Plan first",
-      "description": "Vibe plans before it changes files. Not read-only: shell commands can still change files.",
-      "tooltip": "Use Plan first access mode"
+      "description": "Retired in Vibe 3. Saved sessions reopen in Ask; use Plan on a page to plan.",
+      "tooltip": "Plan first was retired in Vibe 3"
     },
     "vw-plan": {
       "name": "Plan on a page",
@@ -82,19 +82,19 @@
   },
   "vaultPermissions": {
     "askEachTime": {
-      "name": "Ask each time",
-      "description": "Ask before agent use; commands and sites you already granted remain allowed.",
-      "tooltip": "Ask before agent use; commands and sites you already granted remain allowed."
+      "name": "Ask",
+      "description": "Ask before secret commands. Saved site and MCP server permissions keep their own scope.",
+      "tooltip": "Ask before secret commands. Saved site and MCP server permissions keep their own scope."
     },
     "allowed": {
-      "name": "Allowed",
+      "name": "Always",
       "description": "Standing permission during delegated tasks. Local sign-ins still ask each time; MCP forwarding also needs its server grant.",
       "tooltip": "Standing permission during delegated tasks. Local sign-ins still ask each time; MCP forwarding also needs its server grant."
     },
     "never": {
-      "name": "Never",
-      "description": "Refuse agent use.",
-      "tooltip": "Refuse agent use. MCP forwarding is blocked while this entry's default or any project refuses."
+      "name": "User only",
+      "description": "Hidden from the agent in this project.",
+      "tooltip": "Hidden from the agent. MCP forwarding is blocked while the default or any project is User only."
     }
   },
   "browserPermissions": {
@@ -112,6 +112,68 @@
       "name": "Allow",
       "description": "Let the agent close tabs you opened or took over during your task.",
       "tooltip": "The agent may close tabs you opened or took over during your task without asking again."
+    }
+  },
+  "chromeControl": {
+    "browse": {
+      "name": "Basic browser control",
+      "description": "Vibe reads pages and sees your open tabs, goes to sites, clicks, scrolls and types into text fields, never password fields.",
+      "tooltip": "Vibe reads pages and sees your open tabs, goes to sites, clicks, scrolls and types into text fields, never password fields."
+    },
+    "fill": {
+      "name": "Advanced",
+      "description": "Everything in Basic, plus filling in forms without sending them, downloading files and uploading a file you picked.",
+      "tooltip": "Everything in Basic, plus filling in forms without sending them, downloading files and uploading a file you picked."
+    },
+    "act": {
+      "name": "Full: works on your behalf",
+      "description": "Everything in Advanced, plus sending forms and confirming (buy, book, delete), signing in with a vault login you allowed, changing cookies and site data and running page scripts.",
+      "tooltip": "Everything in Advanced, plus sending forms and confirming (buy, book, delete), signing in with a vault login you allowed, changing cookies and site data and running page scripts."
+    },
+    "read": {
+      "name": "Read pages and see your tabs",
+      "description": "Read pages, take screenshots, and see the titles and addresses of your open tabs.",
+      "tooltip": "Read pages, take screenshots, and see the titles and addresses of your open tabs."
+    },
+    "navigate": {
+      "name": "Go to sites, click and type",
+      "description": "Go to sites, open and close the tabs Vibe opened, click, scroll, press keys and type into text fields. Never password fields.",
+      "tooltip": "Go to sites, open and close the tabs Vibe opened, click, scroll, press keys and type into text fields. Never password fields."
+    },
+    "forms": {
+      "name": "Fill in forms and handle files",
+      "description": "Fill in forms without sending them, download files, and upload a file you picked.",
+      "tooltip": "Fill in forms without sending them, download files, and upload a file you picked."
+    },
+    "send": {
+      "name": "Send forms and confirm",
+      "description": "Send forms and confirm: buy, book, delete.",
+      "tooltip": "Send forms and confirm: buy, book, delete."
+    },
+    "signIn": {
+      "name": "Sign in with saved logins",
+      "description": "Sign in with a vault login you allowed for the agent. Vibe does not see the password.",
+      "tooltip": "Sign in with a vault login you allowed for the agent. Vibe does not see the password."
+    },
+    "siteData": {
+      "name": "Change cookies and site data",
+      "description": "Read and change cookies and what sites store in your Chrome.",
+      "tooltip": "Read and change cookies and what sites store in your Chrome."
+    },
+    "scripts": {
+      "name": "Run page scripts",
+      "description": "Run scripts on a page.",
+      "tooltip": "Run scripts on a page."
+    },
+    "bookmarks": {
+      "name": "Bookmarks",
+      "description": "Read and change your bookmarks.",
+      "tooltip": "Read and change your bookmarks."
+    },
+    "history": {
+      "name": "Browsing history",
+      "description": "Read and delete entries in your history.",
+      "tooltip": "Read and delete entries in your history."
     }
   },
   "locks": {
@@ -137,6 +199,7 @@
     }
   },
   "texts": {
+    "testProfileNotice": "Test profile: this window uses a separate test folder, not your normal data.",
     "accessMode": "Access mode",
     "accessUnknown": "Access",
     "accessChoose": "Choose access mode: {name}",
@@ -178,6 +241,7 @@
     "agentAvailableStatus": "Agent secrets: available",
     "vaultLockedStatus": "Vault: locked",
     "vaultUnlockedStatus": "Vault: unlocked",
+    "vaultSharedLockNote": "Lock also locks this vault in ShellX the next time it starts.",
     "permissionNeedsProject": "Choose a project to change permissions.",
     "browserDelegationTitle": "Delegation permissions",
     "browserDelegationHint": "Tab closing permissions apply only while the agent does a task you gave it. Ask me asks before closing one of your tabs.",
@@ -187,9 +251,30 @@
     "browserPermissionAuthority": "Permission: {name}",
     "browserConfirmedAuthority": "Confirmed by you",
     "newChat": "New chat",
+    "askRestoreFolderSubject": "the saved New chat folder",
     "handbookPlaceholder": "The project handbook will show here.",
+    "answersQuestionsOne": "{n} question",
+    "answersQuestionsMany": "{n} questions",
+    "answersCount": "{questions} · {answered} answered",
+    "answersShow": "Show answers",
+    "answersHide": "Hide answers",
     "thisSession": "This session",
-    "findInSession": "Find in this session"
+    "findInSession": "Find in this session",
+    "askSending": "Sending your answer…",
+    "askNativeWaiting": "Waiting for your answer in the Vibe Work confirmation window…",
+    "askNativeCancelled": "Not changed. Choose an answer on this card.",
+    "askNotOffered": "Vibe has not offered this request for an answer. If the turn does not go on, stop it.",
+    "askGoTo": "Go to the waiting prompt",
+    "askNoneWaiting": "No prompt is waiting.",
+    "askWaitingHint": "A prompt is waiting · {shortcut}",
+    "askWaitingMany": "{count} prompts are waiting · {shortcut}",
+    "askArrived": "Vibe asks you in “{session}”: {question} {summary}. Press {shortcut} to go there.",
+    "askKeysHint": "Press {keys}, or Tab to the buttons.",
+    "chromeLevelTitle": "What Vibe may do in your Chrome",
+    "chromeLevelHelp": "Anything above your choice, Vibe asks you about first, in the chat. For your bookmarks and browsing history Vibe always asks.",
+    "chromeSaved": "Saved. Applies from Vibe's next action in Chrome.",
+    "chromeReading": "Reading Chrome Control's permissions…",
+    "chromeSaveFailed": "Could not save Chrome Control's permissions: {reason}. Nothing changed. Try again, or restart Vibe Work if it keeps failing."
   },
   "workNames": {
     "projectTab": {
@@ -216,6 +301,105 @@
       "name": "chat",
       "description": "Starting an interaction with Vibe, as in New chat or voice chat.",
       "tooltip": "Start a chat"
+    }
+  },
+  "builtinPlugins": {
+    "vw": {
+      "name": "Vibe Work tools",
+      "description": "Lets Vibe use Vibe Work’s browser, capture and data tools in chats.",
+      "tooltip": "Lets Vibe use Vibe Work’s browser, capture and data tools in chats."
+    },
+    "vibe": {
+      "name": "Vibe essentials",
+      "description": "Adds skills for setting up Vibe and creating plugins and skills.",
+      "tooltip": "Adds skills for setting up Vibe and creating plugins and skills."
+    }
+  },
+  "builtinSkills": {
+    "vibe:create-plugin": {
+      "name": "Create a plugin",
+      "description": "Helps Vibe build a plugin with skills, tools and other features.",
+      "tooltip": "Helps Vibe build a plugin with skills, tools and other features."
+    },
+    "vibe:skill-creator": {
+      "name": "Create a skill",
+      "description": "Helps Vibe create and update reusable skills for your tasks.",
+      "tooltip": "Helps Vibe create and update reusable skills for your tasks."
+    },
+    "vibe:vibe": {
+      "name": "Vibe setup and help",
+      "description": "Helps Vibe explain and change its own setup.",
+      "tooltip": "Helps Vibe explain and change its own setup."
+    },
+    "vibe:worktree": {
+      "name": "Work in a separate copy",
+      "description": "Helps Vibe create and manage separate working copies of a Git project.",
+      "tooltip": "Helps Vibe create and manage separate working copies of a Git project."
+    },
+    "vw:browser": {
+      "name": "Browse the web",
+      "description": "Lets Vibe open pages, search and use web apps in Vibe Work’s browser.",
+      "tooltip": "Lets Vibe open pages, search and use web apps in Vibe Work’s browser."
+    },
+    "vw:capture": {
+      "name": "Capture a page",
+      "description": "Lets Vibe save a page’s design, content and images, or compare two captures.",
+      "tooltip": "Lets Vibe save a page’s design, content and images, or compare two captures."
+    },
+    "vw:data-analysis": {
+      "name": "Analyse data",
+      "description": "Helps Vibe turn spreadsheets and data files into findings, tables and charts.",
+      "tooltip": "Helps Vibe turn spreadsheets and data files into findings, tables and charts."
+    },
+    "vw:deep-research": {
+      "name": "Research a topic",
+      "description": "Helps Vibe compare sources and write a report with references.",
+      "tooltip": "Helps Vibe compare sources and write a report with references."
+    },
+    "vw:editor": {
+      "name": "Work with open files",
+      "description": "Lets Vibe read and edit the files you have open in Vibe Work.",
+      "tooltip": "Lets Vibe read and edit the files you have open in Vibe Work."
+    },
+    "vw:git": {
+      "name": "Manage project changes",
+      "description": "Helps Vibe check changes, make commits and prepare pull requests.",
+      "tooltip": "Helps Vibe check changes, make commits and prepare pull requests."
+    },
+    "vw:handbook": {
+      "name": "Keep a project handbook",
+      "description": "Helps Vibe maintain your project’s plans, decisions, guides and reports.",
+      "tooltip": "Helps Vibe maintain your project’s plans, decisions, guides and reports."
+    },
+    "vw:images": {
+      "name": "Create and edit images",
+      "description": "Lets Vibe make or change images for your task.",
+      "tooltip": "Lets Vibe make or change images for your task."
+    },
+    "vw:libraries": {
+      "name": "Use your libraries",
+      "description": "Lets Vibe find answers in documents you keep in Vibe Work’s Libraries.",
+      "tooltip": "Lets Vibe find answers in documents you keep in Vibe Work’s Libraries."
+    },
+    "vw:meeting-prep": {
+      "name": "Prepare for a meeting",
+      "description": "Helps Vibe write a brief with context, an agenda and questions to ask.",
+      "tooltip": "Helps Vibe write a brief with context, an agenda and questions to ask."
+    },
+    "vw:preview": {
+      "name": "Check your web app",
+      "description": "Lets Vibe run and check your web app in the Browser tab.",
+      "tooltip": "Lets Vibe run and check your web app in the Browser tab."
+    },
+    "vw:processes": {
+      "name": "Run servers and commands",
+      "description": "Lets Vibe start, check and stop servers and other long-running commands.",
+      "tooltip": "Lets Vibe start, check and stop servers and other long-running commands."
+    },
+    "vw:secrets": {
+      "name": "Use saved keys",
+      "description": "Lets Vibe use saved keys and tokens when a task needs them.",
+      "tooltip": "Lets Vibe use saved keys and tokens when a task needs them."
     }
   }
 }

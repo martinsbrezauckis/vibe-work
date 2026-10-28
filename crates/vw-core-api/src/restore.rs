@@ -8,7 +8,7 @@
 //! record of it (`PublicSession.agent`, from the store or a `session/read` before the resume; it may
 //! be empty), else `ask`. There is no "nothing to restore" path.
 //!
-//! Depends on: `core` (`Core`, `Shared`), `access`, `dispatch` (`check_bypass`), `sessions`, `channels`.
+//! Depends on: `core` (`Core`, `Shared`), `access`, `sessions`, `channels`.
 //! Called by: `recovery::open_session` and `dispatch::forward` (a client's resume).
 //! Invariants:
 //! - While a restore runs the session counts as having no channel (`Channels::begin_restore`): a
@@ -32,7 +32,6 @@ use tracing::warn;
 use crate::access::FALLBACK_PROFILE;
 use crate::command::Origin;
 use crate::core::{Core, Shared};
-use crate::dispatch::switches_profile;
 use crate::error::{CoreError, ErrorCode};
 use crate::event::{AlertKind, CoreEvent};
 use crate::sessions;
@@ -43,6 +42,7 @@ pub(crate) struct Restoring {
     session_id: String,
     /// The profile to put back, resolved before the resume is sent.
     wanted: String,
+    model: Option<crate::model_choices::Choice>,
     /// `wanted` came from this app's own record (`access.rs`: memory or `access.json` in the app's data
     /// folder), not from Vibe's session file or a caller. Only then is Full access put back without a dialog.
     ours: bool,
@@ -72,14 +72,6 @@ impl Restoring {
             FALLBACK_PROFILE
         }
     }
-}
-
-/// `PublicSession.agent.name` in a session state, if Vibe recorded one.
-fn recorded(state: &Value) -> Option<String> {
-    state
-        .pointer("/session/agent/name")
-        .and_then(Value::as_str)
-        .map(str::to_owned)
 }
 
 /// A session's resolved display mode, from the app's record first. This does not grant a usable
@@ -132,12 +124,20 @@ impl Core {
         let attached = self.shared.channels.has_channel(session_id);
         self.shared.channels.begin_restore(session_id);
         let remembered = self.shared.access.remembered(session_id);
+        let recorded = self.recorded_session(session_id).await;
+        let model = recorded.as_ref().and_then(crate::model_choices::recorded);
         let (wanted, ours) = match (asked, remembered) {
             (Some(agent), _) => (agent, false),
             (None, Some(agent)) => (agent, true),
             (None, None) => (
-                self.recorded_profile(session_id)
-                    .await
+                recorded
+                    .as_ref()
+                    .and_then(|session| {
+                        session
+                            .pointer("/agent/name")
+                            .and_then(Value::as_str)
+                            .map(str::to_owned)
+                    })
                     .unwrap_or_else(|| FALLBACK_PROFILE.to_owned()),
                 false,
             ),
@@ -146,27 +146,26 @@ impl Core {
             shared: self.shared.clone(),
             session_id: session_id.to_owned(),
             wanted,
+            model,
             ours,
             _held: held,
             attached,
         }
     }
 
-    /// Vibe's record of the session's profile: from the store's copy when it has one (a `null` there
-    /// is Vibe's answer too), else from a `session/read` with one-item pages. `None` when Vibe
-    /// has none or the read fails.
-    async fn recorded_profile(&self, session_id: &str) -> Option<String> {
-        if let Some(view) = self.shared.store.view(session_id) {
-            return recorded(&view.state);
-        }
-        // The smallest pages Vibe allows: only `state.session` is needed.
+    /// Read stored pins before resume skips unavailable model overrides.
+    /// This read grants no access; the profile still requires the verified switch below.
+    async fn recorded_session(&self, session_id: &str) -> Option<Value> {
         let page = json!({"limit": 1});
         let params = json!({"sessionId": session_id, "history": page, "turns": page});
         match self.shared.gate.call("session/read", params, None).await {
-            Ok(reply) => reply.result.get("state").and_then(recorded),
+            Ok(reply) => reply.result.pointer("/state/session").cloned(),
             Err(error) => {
-                warn!(session_id, %error, "reading the session's recorded profile failed");
-                None
+                warn!(session_id, %error, "reading the session's recorded profile/model failed");
+                self.shared
+                    .store
+                    .view(session_id)
+                    .map(|view| view.state["session"].clone())
             }
         }
     }
@@ -180,6 +179,14 @@ impl Core {
         origin: Origin,
         restore: Restoring,
     ) -> Result<(), CoreError> {
+        let mut restore = restore;
+        let actual = self.shared.channels.canonical(&restore.session_id);
+        if actual != restore.session_id {
+            crate::handoff::handed_off(&self.shared, &restore.session_id, &actual).await;
+            self.shared.channels.end_restore(&restore.session_id);
+            self.shared.channels.begin_restore(&actual);
+            restore.session_id = actual;
+        }
         let id = restore.session_id.clone();
         let wanted = restore.wanted.clone();
         let method = "session/agent/update";
@@ -227,7 +234,7 @@ impl Core {
             .result
             .pointer("/runtime/activeAgent/name")
             .and_then(Value::as_str);
-        if active != Some(agent) {
+        if !reports_agent(&reply.result, agent) {
             warn!(
                 session_id = id,
                 asked = agent,
@@ -237,28 +244,36 @@ impl Core {
             return Err(self.fail_closed(restore, agent).await);
         }
         sessions::observe(&self.shared, method, &params, &reply.result).await?;
+        let runtime = crate::model_choices::restore(
+            &self.shared,
+            &id,
+            reply.result["runtime"].clone(),
+            restore.model.clone(),
+        )
+        .await;
         // Publish the verified runtime even when Vibe only returns it in the switch's reply.
         let applied = self.shared.store.apply(vw_session::Notification::new(
             "runtime/updated",
-            json!({"sessionId": id, "runtime": reply.result["runtime"]}),
+            json!({"sessionId": id, "runtime": runtime}),
         ));
         let _ = self.shared.loads.send(applied).await;
-        if switches_profile(method, &params) {
-            self.check_bypass(origin, &params).await;
-        }
+        // No full-access alert here: reopening puts back the mode the session had; the alert belongs to
+        // the user's own switch up (`full_access_alert.rs`).
         drop(restore);
         if lowered {
             warn!(
+                origin = origin.as_str(),
                 session_id = id,
                 from = wanted,
                 "a resumed session was put in ask instead of its profile"
             );
             self.shared.emit(CoreEvent::Alert {
-                session_id: Some(id),
+                session_id: Some(id.clone()),
                 kind: AlertKind::AccessModeLowered,
                 message: format!(
-                    "{} was reopened and now asks before running tools again (it ran in {wanted}). Switch the access mode back if you want.",
-                    vw_vocabulary::text("thisSession").unwrap_or_default()
+                    "“{}” was reopened in Ask. Choose the access again in the chat if you want to change it.{}",
+                    self.shared.names.title_of(&self.shared.store, &id).unwrap_or_else(|| "Untitled session".to_owned()),
+                    if wanted == "plan" { format!("\nPlan first is gone in Vibe 3; {} is Vibe Work’s planning mode.", vw_vocabulary::label("accessModes", "vw-plan")) } else { String::new() }
                 ),
             });
         }
@@ -271,15 +286,97 @@ impl Core {
         let id = restore.session_id.clone();
         self.shared.channels.close(&id).await;
         drop(restore);
+        warn!(
+            session_id = id,
+            mode = agent,
+            "access restore failed; channel closed and nothing sent"
+        );
+        let title = self
+            .shared
+            .names
+            .title_of(&self.shared.store, &id)
+            .unwrap_or_else(|| "Untitled session".to_owned());
+        let mode = vw_vocabulary::term("accessModes", agent)
+            .map_or("the previous access mode", |mode| mode.name);
+        let message = format!(
+            "Couldn't set “{title}” back to {mode}. Nothing was sent. Choose the access again in the chat."
+        );
         self.shared.emit(CoreEvent::Alert {
-            session_id: Some(id.clone()),
+            session_id: Some(id),
             kind: AlertKind::AccessModeUnverified,
-            message: "Couldn't restore this session's access mode, so it was closed and nothing was sent. Try again.".to_owned(),
+            message: message.clone(),
         });
-        CoreError::new(
-            ErrorCode::AccessModeUnverified,
-            format!("couldn't restore the access mode ({agent}) of session {id}; nothing was sent"),
+        CoreError::new(ErrorCode::AccessModeUnverified, message).with_method("session/agent/update")
+    }
+}
+
+fn reports_agent(result: &Value, wanted: &str) -> bool {
+    result
+        .pointer("/runtime/activeAgent/name")
+        .and_then(Value::as_str)
+        == Some(wanted)
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    #[test]
+    fn profile_verification_rejects_wrong_missing_and_malformed_names() {
+        for value in [
+            json!({"runtime":{"activeAgent":{"name":"auto-approve"}}}),
+            json!({}),
+            json!({"runtime":{"activeAgent":{"name":42}}}),
+        ] {
+            assert!(!super::reports_agent(&value, "ask"), "{value}");
+        }
+        assert!(super::reports_agent(
+            &json!({"runtime":{"activeAgent":{"name":"ask"}}}),
+            "ask"
+        ));
+    }
+    struct Decline;
+    impl vw_gate::Confirmer for Decline {
+        fn confirm(
+            &self,
+            _: &vw_gate::ConfirmationRequest,
+        ) -> impl std::future::Future<Output = vw_gate::Confirmation> + Send {
+            std::future::ready(vw_gate::Confirmation::Declined)
+        }
+    }
+    #[tokio::test]
+    async fn foreign_metadata_is_shown_with_full_and_unknown_access_lowered_without_vibe() {
+        let dir = std::env::temp_dir().join(format!("vw-metadata-policy-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let config = crate::CoreConfig {
+            start_vibe: false,
+            ..crate::CoreConfig::default()
+        };
+        let core = crate::Core::start(
+            vw_supervisor::SupervisorConfig::new(
+                dir.join("no-server-requested"),
+                dir.join("vibe-home"),
+                dir.clone(),
+            ),
+            std::sync::Arc::new(vw_supervisor::NoSecret),
+            Decline,
+            config,
         )
-        .with_method("session/agent/update")
+        .await
+        .unwrap();
+        for (recorded, wanted) in [("plan", "ask"), ("auto-approve", "ask"), ("custom", "ask")] {
+            assert_eq!(
+                super::display_mode(
+                    &core.shared,
+                    "external",
+                    &json!({"agent":{"name":recorded}})
+                )
+                .as_deref(),
+                Some(wanted)
+            );
+        }
+        assert!(core.status().server.pid.is_none());
+        core.shutdown().await;
+        std::fs::remove_dir_all(dir).unwrap();
     }
 }

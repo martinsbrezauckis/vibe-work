@@ -5,7 +5,8 @@
  * Depends on: store.ts, TerminalPanel, terminalUiControl, AppContext types. Called by: main.tsx
  * (after the placeholders), the UI test rig.
  * Invariants: without a core there is nothing to register (the placeholder stays); the returned
- * function undoes every registration and stops following core events.
+ * function undoes every registration and stops following core events. The New chat screen's terminals are counted
+ * for its status line and follow the session its first message starts (`app.newChat`).
  */
 import type { App } from "../shell/AppContext";
 import { TerminalPanel } from "./TerminalPanel";
@@ -22,10 +23,22 @@ export function registerTerminalTab(app: App): () => void {
     <TerminalPanel terminals={terminals} />
   ));
   const removeRoute = registerTerminalRoute(app, terminals);
+  // The New chat screen's terminals: counted for its status line and moved to the session its first message starts.
+  const draft = app.newChat;
+  const stopHandOver = draft?.onHandOver((from, to) => {
+    terminals.handOver(from, to);
+  });
+  const count = () => {
+    const owner = app.shell.store.get().newChatOwner;
+    draft?.report("terminals", owner === null ? 0 : terminals.count(owner));
+  };
+  const stopCount = [terminals.store.subscribe(count), app.shell.store.subscribe(count)];
   const removeOpener = setLinkOpener((url) => {
     app.transcript.askLink(url);
   });
   return () => {
+    stopHandOver?.();
+    for (const stop of stopCount) stop();
     removeOpener();
     removeRoute();
     removeBody();

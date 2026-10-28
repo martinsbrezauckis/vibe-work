@@ -6,6 +6,7 @@
  * register.tsx. The Rust side lists the route (`crates/vw-host/src/terminal.rs`).
  * Invariants: bodies are validated (`invalidParams` otherwise); `selection` only reads.
  */
+import { panelOwner } from "../../state/shellState";
 import { UiControlError } from "../../state/uiControl";
 import type { App } from "../shell/AppContext";
 import { activeOf } from "./model";
@@ -21,7 +22,7 @@ function asObject(body: unknown): Record<string, unknown> {
 /** Registers `ui/terminal`; returns the function that removes it. */
 export function registerTerminalRoute(app: App, terminals: Terminals): () => void {
   const state = () => {
-    const sessionId = app.shell.store.get().selected;
+    const sessionId = panelOwner(app.shell.store.get());
     const tabs = terminals.store.get();
     const shown = shownTerminal();
     return {
@@ -43,7 +44,7 @@ export function registerTerminalRoute(app: App, terminals: Terminals): () => voi
   };
   return app.uiControl.register("terminal", async (body) => {
     const { action, terminalId } = asObject(body);
-    const sessionId = app.shell.store.get().selected;
+    const sessionId = panelOwner(app.shell.store.get());
     switch (action) {
       case "state":
         return state();

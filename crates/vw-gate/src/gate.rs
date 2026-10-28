@@ -52,6 +52,12 @@ pub const TRUSTED_SURFACE_METHODS: &[&str] = &[
     "mcp_catalog/login",
 ];
 
+/// Installs the window may confirm with an install offer it showed first: skills Install and Update.
+/// The core mints the token through [`Gate::request_offered_confirmation`] only after taking the single-use offer
+/// the user saw (name, source, licence, what runs); without an offer these keep the native dialog. Turning a
+/// plugin on and every delete are not here.
+pub const OFFERED_INSTALL_METHODS: &[&str] = &["skills/import", "skills/setVersion"];
+
 /// Tuning of a gate. `Default` gives production values.
 #[derive(Clone)]
 #[non_exhaustive]
@@ -172,14 +178,68 @@ impl<T: Transport, C: Confirmer> Gate<T, C> {
         result
     }
 
+    /// Like [`Gate::call`], but when the server refuses the forwarded request with an error `retry` accepts, the
+    /// SAME request is sent once more after `pause`: the user's confirmation covered that request, so it is spent
+    /// once, never redeemed again (a second [`Gate::call`] would be refused as "token already used"). For a
+    /// refusal the server reports as passing (on Windows a file of the session read by someone else for a moment).
+    ///
+    /// # Errors
+    /// As [`Gate::call`]; the second answer is returned when there was one.
+    pub async fn call_with_retry<F, P, Fut>(
+        &self,
+        method: &str,
+        params: Value,
+        token: Option<&ConfirmationToken>,
+        retry: F,
+        pause: P,
+    ) -> Result<Reply, GateError>
+    where
+        F: Fn(&GateError) -> bool,
+        P: FnOnce() -> Fut,
+        Fut: std::future::Future<Output = ()>,
+    {
+        let result = async {
+            let plan = self.authorise(method, &params, token)?;
+            let first = self.transport.request(method, plan.params.clone()).await;
+            let result = match first.map_err(GateError::from) {
+                Err(error) if retry(&error) => {
+                    warn!(method, %error, "gate: the server refused for a moment; the same request once more");
+                    pause().await;
+                    self.transport.request(method, plan.params.clone()).await?
+                }
+                other => other?,
+            };
+            Ok(self.answered(method, plan, result))
+        }
+        .await;
+        if let Err(error) = &result {
+            log_refusal("call", method, error);
+        }
+        result
+    }
+
     async fn call_unlogged(
         &self,
         method: &str,
         params: Value,
         token: Option<&ConfirmationToken>,
     ) -> Result<Reply, GateError> {
-        let plan = self.plan(method, &params)?;
-        if let Some(summary) = plan.confirm {
+        let plan = self.authorise(method, &params, token)?;
+        debug!(method, "gate: forwarding");
+        let result = self.transport.request(method, plan.params.clone()).await?;
+        Ok(self.answered(method, plan, result))
+    }
+
+    /// The plan for a call the gate will forward: shape and policy checked, and its confirmation token redeemed
+    /// (spent) when the call needs one.
+    fn authorise(
+        &self,
+        method: &str,
+        params: &Value,
+        token: Option<&ConfirmationToken>,
+    ) -> Result<Plan, GateError> {
+        let plan = self.plan(method, params)?;
+        if let Some(summary) = plan.confirm.clone() {
             let Some(token) = token else {
                 return Err(GateError::ConfirmationRequired {
                     method: method.to_owned(),
@@ -190,19 +250,38 @@ impl<T: Transport, C: Confirmer> Gate<T, C> {
             // Bound to the caller's params, not the adjusted ones: that is what the user saw.
             self.state()
                 .vault
-                .redeem(method, &params, token, now)
+                .redeem(method, params, token, now)
                 .map_err(|fault| GateError::ConfirmationRejected {
                     method: method.to_owned(),
                     fault,
                 })?;
         }
-        debug!(method, "gate: forwarding");
-        let result = self.transport.request(method, plan.params).await?;
+        Ok(plan)
+    }
+
+    /// The reply for a forwarded call's result (and what the gate learns from it).
+    fn answered(&self, method: &str, plan: Plan, result: Value) -> Reply {
         self.learn_from_result(method, &result);
-        Ok(Reply {
+        Reply {
             result,
             client_user_message_id: plan.client_user_message_id,
             user_entry_ids: plan.user_entry_ids,
+        }
+    }
+
+    /// Sends a request the gate itself built from a typed handler (`tool_rules`), skipping the client table.
+    /// Crate-internal: no client command reaches it.
+    pub(crate) async fn send_unchecked(
+        &self,
+        method: &str,
+        params: Value,
+    ) -> Result<Reply, GateError> {
+        debug!(method, "gate: forwarding a gate-built request");
+        let result = self.transport.request(method, params).await?;
+        Ok(Reply {
+            result,
+            client_user_message_id: None,
+            user_entry_ids: Vec::new(),
         })
     }
 
@@ -339,6 +418,40 @@ impl<T: Transport, C: Confirmer> Gate<T, C> {
         result
     }
 
+    /// Mints the confirmation token for one exact install WITHOUT the native dialog, for a window click that
+    /// confirmed an install offer the window showed first. Only [`OFFERED_INSTALL_METHODS`] qualify; the
+    /// core vouches that the offer was shown and taken (`vw-core-api` `install_offers`). Bound to the exact
+    /// method and params and single use, like any other token.
+    ///
+    /// # Errors
+    /// [`GateError::Denied`] for any other method; the same refusals as [`Gate::call`] for the params.
+    pub fn request_offered_confirmation(
+        &self,
+        method: &str,
+        params: &Value,
+    ) -> Result<ConfirmationToken, GateError> {
+        let result = if OFFERED_INSTALL_METHODS.contains(&method) {
+            self.plan(method, params).and_then(|plan| {
+                if plan.confirm.is_none() {
+                    return Err(GateError::ConfirmationNotApplicable {
+                        method: method.to_owned(),
+                    });
+                }
+                let now = self.clock.now();
+                self.state().vault.mint(method, params, now)
+            })
+        } else {
+            Err(denied(
+                method,
+                DenyReason::Policy("only a shown install offer may skip the dialog".to_owned()),
+            ))
+        };
+        if let Err(error) = &result {
+            log_refusal("request_offered_confirmation", method, error);
+        }
+        result
+    }
+
     fn trusted_confirmation_unlogged(
         &self,
         method: &str,
@@ -471,6 +584,14 @@ impl<T: Transport, C: Confirmer> Gate<T, C> {
         self.state().picked.roots()
     }
 
+    /// The picked folders whose spelling as picked (the folder dialog's, the Debug API's) differs from their canonical
+    /// path, as `(spelling, canonical)`: macOS `/tmp/x` for `/private/tmp/x`, a folder reached through a symbolic link.
+    /// For the same lexical comparison as [`Self::picked_roots`] in the spelling the window keeps; never for trust.
+    #[must_use]
+    pub fn picked_spellings(&self) -> Vec<(std::path::PathBuf, std::path::PathBuf)> {
+        self.state().picked.spellings()
+    }
+
     /// Registers the callback of an inbound `callback/call` (pass its `params`). The UI should be
     /// shown every registered callback, including kinds the gate will not answer.
     ///
@@ -531,7 +652,9 @@ impl<T: Transport, C: Confirmer> Gate<T, C> {
             "sessionId": session_id,
             "result": {"callbackId": callback_id, "output": output},
         });
-        match self.transport.request("callback/result", params).await {
+        let sent = self.transport.request("callback/result", params).await;
+        self.state().callbacks.sent(session_id);
+        match sent {
             Ok(result) => Ok(result),
             Err(error) => {
                 warn!(
@@ -557,6 +680,11 @@ impl<T: Transport, C: Confirmer> Gate<T, C> {
     #[must_use]
     pub fn open_callbacks(&self) -> Vec<OpenCallback> {
         self.state().callbacks.open()
+    }
+
+    /// True while an answer of this session is still being delivered.
+    pub fn answering(&self, session_id: &str) -> bool {
+        self.state().callbacks.sending(session_id)
     }
 }
 

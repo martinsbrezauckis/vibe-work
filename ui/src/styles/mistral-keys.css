@@ -1,0 +1,45 @@
+/* Account key rows: layout and truncation around shared controls. Loaded by main. */
+.mistral-key-list {
+  display: grid;
+  margin-block: 12px;
+}
+.mistral-key-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-block: 12px;
+  border-bottom: 1px solid var(--line);
+}
+.mistral-key-facts {
+  flex: 1 1 16ch;
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+.mistral-key-name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.mistral-key-test {
+  color: var(--text-2);
+}
+.mistral-key-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+/* The actions take their own line only where the row is too narrow for them beside the name. */
+@media (max-width: 640px) {
+  .mistral-key-row {
+    flex-wrap: wrap;
+  }
+  .mistral-key-actions {
+    flex-basis: 100%;
+  }
+}
+
+.mistral-key-actions .link-btn.danger {
+  color: var(--red);
+}

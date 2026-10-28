@@ -1,7 +1,8 @@
 //! The few switches the host must know before any UI exists, persisted as `settings.json` in the
 //! app's data directory. Today: the Debug API switch (on in development builds, off in
 //! user builds unless the user turns it on in Settings), the per-session terminal cap, and two
-//! user-build switches: sharing the Vibe CLI's sessions and downloading updates by itself.
+//! user-build switches: sharing the Vibe CLI's sessions and downloading updates by itself, and whether the question
+//! about the right-click menus was answered.
 //!
 //! Depends on: serde. Called by: [`crate::Host`] (reads at start, writes when the UI flips the
 //! switch). Other settings live in the core and UI; this file only holds host startup settings.
@@ -38,6 +39,10 @@ pub struct HostSettings {
     /// checks, whatever this says.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub auto_download: Option<bool>,
+    /// macOS and Linux: the one-time question about the right-click menus ("Send to Vibe Work") was answered,
+    /// or the switch was used. `None` = not yet (the setup or start screen asks once).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub send_to_asked: Option<bool>,
 }
 
 /// The highest per-session terminal cap the setting may ask for.
@@ -95,6 +100,7 @@ impl HostSettings {
             "terminalsPerSession",
             "shareCliSessions",
             "autoDownload",
+            "sendToAsked",
         ] {
             fields.entry(key).or_insert(serde_json::Value::Null);
         }

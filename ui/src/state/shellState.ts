@@ -8,6 +8,7 @@
  * (`"new"` for the new-session view), closed by default; opening a tab adds it once and makes it
  * active; the list collapses for wide tabs unless the user pinned it (see `ListChoice`).
  */
+import { type EditorLayout, editorLayoutOf, swapEditorSlot, unfoldChat } from "./editorLayout";
 import { term } from "../vocabulary";
 
 /**
@@ -22,7 +23,7 @@ export const TAB_META: Readonly<Record<TabKind, { label: string; size: "side" | 
   project: { label: term("workNames", "projectTab").name, size: "side" },
   plan: { label: "Plan", size: "side" },
   browser: { label: "Browser", size: "wide" },
-  git: { label: "Git", size: "side" },
+  git: { label: "Files", size: "side" },
   changes: { label: "Changes", size: "wide" },
   terminal: { label: "Terminal", size: "wide" },
   file: { label: "File", size: "side" },
@@ -73,7 +74,7 @@ export type Overlay = "palette" | null;
  * `category` is remembered while closed (the page reopens where it was). `query` is the search inside Settings
  * ("In: Settings"); `target` is a setting id to scroll to and light up once (from a search hit), cleared after.
  */
-export interface SettingsView {
+interface SettingsView {
   open: boolean;
   category: string;
   query: string;
@@ -86,6 +87,8 @@ export type Theme = "dark" | "light";
 /** Everything the shell remembers about its own screen. */
 export interface ShellState {
   theme: Theme;
+  /** Each session keeps its editor split and shared slot. */
+  editorLayouts: Readonly<Record<string, EditorLayout>>;
   /** Selected session id; `null` is the new-session (welcome) view. */
   selected: string | null;
   list: ListChoice;
@@ -99,18 +102,41 @@ export interface ShellState {
   collapsed: Readonly<Record<string, true>>;
   /** Parent sessions whose child (subagent) sessions are shown in the list. */
   expanded: Readonly<Record<string, true>>;
+  /**
+   * The Answers panel under a handbook page shows every control (not only its one line). One choice for the window,
+   * not per page; not saved across restarts.
+   */
+  answersShown: boolean;
   /** The folder for the next new session, or `null`. */
   newFolder: string | null;
   /** Who chose `newFolder` (`null` while there is none). */
   newFolderBy: NewFolderBy | null;
+  /**
+   * The core's owner id for what is open on the New chat screen (terminals, browser) before the first message;
+   * `null` until the core gave one. Internal: never shown.
+   */
+  newChatOwner: string | null;
   filter: string;
   overlay: Overlay;
   /** The status bar shows the open session's context readout (Settings › Appearance, default on). */
   showUsage: boolean;
+  /** Presentation of open files in the side panel. */
+  openFilesIn: "tabs" | "single";
   /** Show thinking blocks and their containing steps groups by default (Settings › Appearance). */
   showThinkingExpanded: boolean;
+  /** Mark the lines Vibe changes in open files (Settings › Appearance, default on). */
+  markVibeLines: boolean;
+  /**
+   * How HTML and Markdown files open in Separate tabs (Settings › Appearance): `preview` (default), `code`, or `side`
+   * (code with its preview beside, the two-editor split).
+   */
+  openHtmlMarkdownAs: "preview" | "code" | "side";
+  /** Save edited open files when a message is sent (Settings › General, default on). */
+  saveBeforeSend: boolean;
   /** The words the palette opens with (a search widened from a scoped field carries its words over). */
   paletteQuery: string;
+  /** The palette starts in its Files scope for quick open. */
+  paletteFiles: boolean;
   settings: SettingsView;
   /**
    * The session list as an overlay drawer. Only meaningful in narrow windows (the layout says
@@ -140,6 +166,7 @@ export function initialShell(
 ): ShellState {
   return {
     theme,
+    editorLayouts: {},
     selected: null,
     list: "auto",
     panels: {},
@@ -147,13 +174,20 @@ export function initialShell(
     maximized: false,
     collapsed: {},
     expanded: {},
+    answersShown: false,
     newFolder: null,
     newFolderBy: null,
+    newChatOwner: null,
     filter: "",
     overlay: null,
     paletteQuery: "",
+    paletteFiles: false,
     showUsage,
+    openFilesIn: "tabs",
     showThinkingExpanded,
+    markVibeLines: true,
+    saveBeforeSend: true,
+    openHtmlMarkdownAs: "preview",
     settings: { open: false, category: "general", query: "", target: null },
     drawer: false,
   };
@@ -161,17 +195,19 @@ export function initialShell(
 
 function withPanel(state: ShellState, panel: PanelState): ShellState {
   const next: ShellState = { ...state, panels: { ...state.panels, [panelKey(state)]: panel } };
-  // Closing the panel ends a "pinned" list: the next wide tab may collapse it.
+  // Closing the panel ends a "pinned" list (the next tab decides again whether it fits).
   if (!panel.open)
     return { ...next, maximized: false, list: state.list === "shown" ? "auto" : state.list };
   return next;
 }
 
-/** Opens `kind` (adding it once) and makes it the active tab. */
+/** Opens `kind` (adding it once) and makes it the active tab. Ends a pinned list's hold on the room: where list,
+ * chat and panel do not all fit, the panel shows again and the list folds (`computeLayout`). */
 export function openTab(state: ShellState, kind: TabKind): ShellState {
   const panel = panelOf(state);
   const tabs = panel.tabs.includes(kind) ? panel.tabs : [...panel.tabs, kind];
-  return withPanel(state, { open: true, tabs, active: kind });
+  const next = withPanel(state, { open: true, tabs, active: kind });
+  return next.list === "shown" ? { ...next, list: "auto" } : next;
 }
 
 /** Closes one tab; the last tab closing closes the panel. */
@@ -200,12 +236,23 @@ export function setWidth(state: ShellState, kind: TabKind, width: number): Shell
 
 /** The list button: hide it when visible, pin it shown when not. */
 export function toggleList(state: ShellState, visibleNow: boolean): ShellState {
+  if (editorLayoutOf(state).split && panelOf(state).open) return swapEditorSlot(state);
   return { ...state, list: visibleNow ? "hidden" : "shown" };
 }
 
 /** A rail click always shows the list, even over a wide tab (the panel shrinks). */
 export function showList(state: ShellState): ShellState {
-  return { ...state, list: "shown" };
+  if (editorLayoutOf(state).split && panelOf(state).open)
+    return {
+      ...state,
+      maximized: false,
+      editorLayouts: {
+        ...state.editorLayouts,
+        [panelKey(state)]: { ...editorLayoutOf(state), slot: "list", chatFolded: false },
+      },
+    };
+  // Also ends a maximized panel (the sessions strip is one of its folded columns).
+  return { ...state, list: "shown", maximized: false };
 }
 
 /**
@@ -214,7 +261,7 @@ export function showList(state: ShellState): ShellState {
  * setup screen) close Settings themselves.
  */
 export function selectSession(state: ShellState, id: string | null): ShellState {
-  return { ...state, selected: id, maximized: false, drawer: false };
+  return unfoldChat({ ...state, selected: id, maximized: false, drawer: false });
 }
 
 /** Toggles the panel's maximized state. */
@@ -237,14 +284,42 @@ export function setShowThinkingExpanded(state: ShellState, show: boolean): Shell
   return { ...state, showThinkingExpanded: show };
 }
 
+/** Turns the marks on lines Vibe changed in open files on or off. */
+export function setMarkVibeLines(state: ShellState, on: boolean): ShellState {
+  return { ...state, markVibeLines: on };
+}
+
+/** Sets how HTML and Markdown files open. */
+export function setOpenHtmlMarkdownAs(
+  state: ShellState,
+  openHtmlMarkdownAs: ShellState["openHtmlMarkdownAs"],
+): ShellState {
+  return { ...state, openHtmlMarkdownAs };
+}
+
+/** Turns saving edited open files before a message is sent on or off. */
+export function setSaveBeforeSend(state: ShellState, on: boolean): ShellState {
+  return { ...state, saveBeforeSend: on };
+}
+
 /** Sets the session filter text. */
 export function setFilter(state: ShellState, filter: string): ShellState {
   return { ...state, filter };
 }
 
 /** Shows or hides an overlay dialog; the palette opens with `query` typed (default empty). */
-export function setOverlay(state: ShellState, overlay: Overlay, query = ""): ShellState {
-  return { ...state, overlay, paletteQuery: overlay === "palette" ? query : "" };
+export function setOverlay(
+  state: ShellState,
+  overlay: Overlay,
+  query = "",
+  filesOnly = false,
+): ShellState {
+  return {
+    ...state,
+    overlay,
+    paletteQuery: overlay === "palette" ? query : "",
+    paletteFiles: filesOnly,
+  };
 }
 
 /**
@@ -311,6 +386,11 @@ export function toggleExpanded(state: ShellState, id: string): ShellState {
   return { ...state, expanded };
 }
 
+/** Shows the Answers panel's controls (`true`) or only its one line. */
+export function setAnswersShown(state: ShellState, shown: boolean): ShellState {
+  return state.answersShown === shown ? state : { ...state, answersShown: shown };
+}
+
 /** Remembers the folder for the next new session and who chose it (`null` folder: forget both). */
 export function setNewFolder(
   state: ShellState,
@@ -320,7 +400,62 @@ export function setNewFolder(
   return { ...state, newFolder: folder, newFolderBy: folder === null ? null : by };
 }
 
+/** The core's owner id for the New chat screen. */
+export function setNewChatOwner(state: ShellState, owner: string | null): ShellState {
+  return state.newChatOwner === owner ? state : { ...state, newChatOwner: owner };
+}
+
+/**
+ * Who the shown side panel's terminals and browser belong to: the selected session, else the New chat screen's
+ * owner (`null` until the core gave one).
+ */
+export function panelOwner(state: Pick<ShellState, "selected" | "newChatOwner">): string | null {
+  return state.selected ?? state.newChatOwner;
+}
+
+/**
+ * The first message started `sessionId`: the New chat screen's panel and editor layout become the session's, so
+ * the same tabs stay open (the New chat screen starts empty again). `filesKey` is the editor key the screen used.
+ */
+export function handOverNewChat(
+  state: ShellState,
+  sessionId: string,
+  filesKey: string | null,
+): ShellState {
+  const panels = { ...state.panels };
+  const panel = panels["new"];
+  Reflect.deleteProperty(panels, "new");
+  if (panel !== undefined) panels[sessionId] = panel;
+  const layouts = { ...state.editorLayouts };
+  const layout = layouts["new"] ?? (filesKey === null ? undefined : layouts[filesKey]);
+  Reflect.deleteProperty(layouts, "new");
+  if (filesKey !== null) Reflect.deleteProperty(layouts, filesKey);
+  if (layout !== undefined) layouts[sessionId] = layout;
+  return { ...state, panels, editorLayouts: layouts };
+}
+
 /** Opens or closes the list drawer (narrow windows). */
 export function setDrawer(state: ShellState, open: boolean): ShellState {
   return { ...state, drawer: open };
+}
+
+/** Sets the presentation of open files without closing their buffers. */
+export function setOpenFilesIn(
+  state: ShellState,
+  openFilesIn: ShellState["openFilesIn"],
+): ShellState {
+  return { ...state, openFilesIn };
+}
+
+/** Keeps a working-surface tab first without changing the active view. */
+export function pinTab(state: ShellState, kind: TabKind, id = panelKey(state)): ShellState {
+  const panel = state.panels[id];
+  if (!panel || panel.tabs[0] === kind) return state;
+  return {
+    ...state,
+    panels: {
+      ...state.panels,
+      [id]: { ...panel, tabs: [kind, ...panel.tabs.filter((k) => k !== kind)] },
+    },
+  };
 }

@@ -7,6 +7,7 @@
 // under a token, `chunk` answers a slice, `end` drops it.
 // REQ: { page, op: start|chunk|end, format: markdown|text|html, token, offset, maxChars, chunk }.
 // Synchronous; the answer is untrusted page data.
+/* global ENV, REQ, clip, secretKind, singleHtml, vaultFilled, viewOf -- Supplied by the Rust script assembler and its shared prelude. */
 (() => {
   __VW_COMMON__
   const head = { url: String(location.href).slice(0, 2000), title: clip(document.title, 300) };
@@ -24,7 +25,7 @@
     try {
       const u = new URL(String(value || ""), location.href);
       return /^(https?|mailto|tel):$/.test(u.protocol) ? u.href : "";
-    } catch (_) {
+    } catch {
       return "";
     }
   };
@@ -126,23 +127,26 @@
   };
 
   const plainText = () => {
-    let text = "";
+    let text;
     try {
       text = String((document.body && document.body.innerText) || "");
-    } catch (_) {
+    } catch {
       text = "";
     }
     return text;
   };
 
+  __VW_SINGLE_HTML__
   const html = () => {
     const root = document.documentElement;
     const copy = root.cloneNode(true);
+    const oneFile = REQ.format === "single_html";
     // Walk the original and the copy together (same shape) to blank secret values.
     const a = document.createTreeWalker(root, 1);
     const b = document.createTreeWalker(copy, 1);
     let x = a.currentNode, y = b.currentNode;
     for (let steps = 0; x && y && steps < 200000; steps += 1) {
+      if (oneFile) y.setAttribute("data-vw-pack-index", String(steps));
       const tag = x.localName;
       if (tag === "input" || tag === "textarea") {
         if (secretKind(x) || vaultFilled(x)) {
@@ -154,7 +158,10 @@
       y = b.nextNode();
     }
     const DROP = "script,noscript,iframe,frame,frameset,object,embed,applet,base,portal,meta[http-equiv],link[rel~=preload],link[rel~=modulepreload],link[rel~=prefetch],link[rel~=import],link[rel~=manifest],link[rel~=serviceworker]";
-    for (const el of Array.from(copy.querySelectorAll(DROP))) el.remove();
+    for (const el of Array.from(copy.querySelectorAll(DROP))) {
+      if (oneFile && el.localName === "meta" && /^(content-security-policy)$/i.test(el.httpEquiv)) continue;
+      el.remove();
+    }
     const URL_ATTRS = ["href", "src", "action", "formaction", "poster", "xlink:href", "data", "cite", "background", "ping"];
     for (const el of Array.from(copy.querySelectorAll("*"))) {
       for (const attr of Array.from(el.attributes)) {
@@ -168,8 +175,8 @@
           if (/^\s*(javascript|vbscript|data:text\/html|data:application)/i.test(value)) el.removeAttribute(attr.name);
           else if (value && !value.startsWith("#")) {
             try {
-              el.setAttribute(attr.name, new URL(value, location.href).href);
-            } catch (_) {
+              el.setAttribute(attr.name, new URL(value, document.baseURI).href);
+            } catch {
               el.removeAttribute(attr.name);
             }
           }
@@ -177,11 +184,12 @@
         if (name === "srcset") el.removeAttribute(attr.name);
       }
     }
-    return "<!DOCTYPE html>\n" + copy.outerHTML;
+    return oneFile ? singleHtml(copy, root) : "<!DOCTYPE html>\n" + copy.outerHTML;
   };
 
-  let text = REQ.format === "markdown" ? markdown() : REQ.format === "html" ? html() : plainText();
+  let text = REQ.format === "markdown" ? markdown() : (REQ.format === "html" || REQ.format === "single_html") ? html() : plainText();
   // Control characters other than tab and line ends would bloat the JSON answer (\u escapes): dropped.
+  // eslint-disable-next-line no-control-regex -- Strip nonprinting controls from captured page text.
   text = text.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, "");
   const cut = text.length > REQ.maxChars;
   if (cut) text = text.slice(0, REQ.maxChars);

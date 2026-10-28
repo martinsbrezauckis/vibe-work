@@ -60,7 +60,8 @@ impl PagesService {
     }
 
     /// Shows `path` (an HTML page or a PDF, relative to `root`) in `session`'s viewer of this service; loads it at
-    /// once when the session is shown and waits (bounded) for the load.
+    /// once when the session is shown and waits (bounded) for the load. The view reads `loading` from this call until
+    /// the file's page reports loaded (also while the viewer is hidden and the load waits for the next layout).
     ///
     /// # Errors
     /// [`PagesError::NoPage`] when the file is not there; server and engine failures.
@@ -78,14 +79,18 @@ impl PagesService {
         let mut loads = self.shared.loads.subscribe();
         {
             let mut state = self.shared.lock();
-            let viewer = state.viewers.entry(session.to_owned()).or_default();
-            *viewer = Viewer {
+            let mut viewer = Viewer {
                 pages_dir: server.root().to_path_buf(),
                 port: server.port(),
                 base_url: server.base_url(),
                 path: Some(path),
                 ..Viewer::default()
             };
+            // Loading from the reset on, by `show()`'s own navigate rule: the file stays loading until its page
+            // reports loaded, whether `show()` runs below (viewer shown) or at the window's next layout (hidden now).
+            // A file the mount already shows is not navigated again, so it is not marked loading.
+            viewer.loading = crate::service::navigates(state.mount.as_ref(), session, &viewer);
+            state.viewers.insert(session.to_owned(), viewer);
         }
         let shown = self.shared.lock().shown.clone();
         if let Some((shown_session, rect)) = shown.filter(|(s, _)| s == session) {

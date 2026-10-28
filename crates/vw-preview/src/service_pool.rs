@@ -252,7 +252,7 @@ impl PreviewService {
             .lock()
             .entries
             .get(session_id)
-            .and_then(|entry| entry.mount.clone());
+            .and_then(|entry| entry.ready_mount().cloned());
         if let Some(mount) = mount {
             self.bounded(
                 "park",
@@ -288,7 +288,7 @@ impl PreviewService {
                 .get(&session)
                 .is_some_and(|used| used.elapsed() >= IDLE_TIMEOUT);
             if still_idle && !self.browser_protected(&session) {
-                self.unmount_in_pool(&session).await?;
+                self.suspend_in_pool(&session).await?;
                 self.browser_released(&session);
             }
         }

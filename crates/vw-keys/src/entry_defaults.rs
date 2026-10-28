@@ -1,8 +1,6 @@
 //! Hidden entry-wide defaults, sealed by the same Vault snapshot as project policy records.
 //!
-//! Depends on: `vw-vault::entry_permission`, `service`. Called by core listing, session capture and agent checks.
-
-use std::collections::BTreeMap;
+//! Depends on: `vw-vault::entry_permission`, `service`. Called by core listing and agent checks.
 
 use vw_vault::entry_permission::{self, DefaultPolicy, EntryPermission};
 use vw_vault::{login, project_secret};
@@ -11,26 +9,6 @@ use crate::error::KeyError;
 use crate::service::{KeyService, blocking, now_ms};
 
 impl KeyService {
-    /// All valid defaults at this instant; malformed reserved slots fail closed.
-    ///
-    /// # Errors
-    /// Vault read failures or malformed default records are refused.
-    pub async fn entry_defaults(&self) -> Result<BTreeMap<String, EntryPermission>, KeyError> {
-        let vault = self.vault();
-        let items = blocking(move || vault.list_items_strict())
-            .await?
-            .map_err(KeyError::permissions_unreadable)?;
-        let mut defaults = BTreeMap::new();
-        for item in &items {
-            if item.id.starts_with(entry_permission::DEFAULT_ID_PREFIX) {
-                let policy = entry_permission::default_from_item(item)
-                    .ok_or(KeyError::PermissionsUnreadable)?;
-                defaults.insert(policy.entry_id, policy.permission);
-            }
-        }
-        Ok(defaults)
-    }
-
     /// The current entry-wide choice; missing records migrate to Ask each time.
     ///
     /// # Errors

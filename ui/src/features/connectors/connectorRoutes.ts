@@ -96,7 +96,7 @@ function keyOf(input: Record<string, unknown>): KeyChoice {
 }
 
 /** Runs one `ui/connectors` request. */
-export async function handleConnectors(app: App, body: unknown): Promise<unknown> {
+async function handleConnectors(app: App, body: unknown): Promise<unknown> {
   const input = asObject(body);
   const connectors = app.connectors;
   if (connectors === null) throw new UiControlError("serverUnavailable", "the app has no core");

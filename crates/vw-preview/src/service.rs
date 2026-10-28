@@ -21,6 +21,7 @@ use crate::engine_pool::PoolState;
 use crate::hooks::{Hooks, Inner};
 use crate::layout::{self, DeviceWidth, Rect};
 use crate::policy::UrlPolicy;
+pub use crate::preview_error::PreviewError;
 use crate::shot::{self, Shot};
 use crate::state::{BrowserMountState, PreviewView, Shown, State};
 use crate::visibility::VisibilityReport;
@@ -119,41 +120,6 @@ impl PreviewConfig {
     }
 }
 
-/// Why a preview operation failed.
-#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
-pub enum PreviewError {
-    /// Nothing is open in this session's preview.
-    #[error("this session has no preview open (open one first)")]
-    NothingOpen,
-    /// A hidden native webview can return a blank PNG even though its page is loaded.
-    #[error("Not run: {0}")]
-    ScreenshotHidden(String),
-    /// The URL was refused.
-    #[error(transparent)]
-    Refused(#[from] crate::policy::UrlRefusal),
-    /// Invalid layout input.
-    #[error("{0}")]
-    Layout(String),
-    /// The engine failed.
-    #[error(transparent)]
-    Engine(#[from] EngineError),
-    /// The screenshot could not be shaped.
-    #[error("{0}")]
-    Image(String),
-    /// The external browser cap has no free engine.
-    #[error("Not run: the browser is busy with another session; try again when it is free")]
-    BrowserBusy,
-    /// The pool setting is invalid.
-    #[error("browser pool setting: {0}")]
-    PoolSetting(String),
-    /// The pool setting could not be saved.
-    #[error("browser pool storage: {0}")]
-    PoolStorage(String),
-    /// A page key is unknown, belongs to another session or violates tab invariants.
-    #[error("browser tab: {0}")]
-    InvalidTab(String),
-}
-
 /// What `open` needs besides the URL.
 #[derive(Clone, Debug)]
 pub struct OpenRequest {
@@ -211,6 +177,8 @@ impl PreviewService {
     #[must_use]
     pub fn new(engine: Arc<dyn PreviewEngine>, config: PreviewConfig) -> Self {
         let inner = Arc::new(Inner {
+            engine: Arc::downgrade(&engine),
+            guard_refused: std::sync::Mutex::new(None),
             state: std::sync::Mutex::new(State::default()),
             policy: config.policy.clone(),
             changes: tokio::sync::broadcast::channel(64).0,
@@ -340,9 +308,11 @@ impl PreviewService {
     /// # Errors
     /// [`PreviewError`] when the URL's shape is refused or the engine fails.
     pub async fn open(&self, request: OpenRequest) -> Result<PreviewView, PreviewError> {
+        self.cancel_pending_navigation(&request.session_id);
         let _activity = self.session_lock(&request.session_id).await;
         let destination = self.preflight_page_open(&request)?;
         let session = request.session_id.clone();
+        self.close_unready(&session).await?;
         let lan_host = request
             .lan
             .then(|| request.url.host_str().map(str::to_owned))
@@ -384,6 +354,7 @@ impl PreviewService {
             let now = state.tick();
             let area = state.shown.clone();
             let entry = state.entry(&session);
+            entry.cancel_navigation();
             entry.reset_console();
             entry.pending_previous_url = entry.url.replace(request.url.clone());
             entry.title = None;
@@ -433,6 +404,7 @@ impl PreviewService {
     /// # Errors
     /// [`PreviewError::NothingOpen`], or the engine's failure.
     pub async fn history(&self, session_id: &str, step: HistoryStep) -> Result<(), PreviewError> {
+        self.cancel_pending_navigation(session_id);
         let _activity = self.session_lock(session_id).await;
         let id = self.ensure_mounted(session_id).await?;
         // Flush old-page messages before scheduling history. A no-target back/forward sends no
@@ -443,6 +415,7 @@ impl PreviewService {
         {
             let mut state = self.inner.lock();
             let entry = state.entry(session_id);
+            entry.cancel_navigation();
             entry.reset_console();
         }
         self.bounded("history", self.engine.history(&id, step))
@@ -467,7 +440,7 @@ impl PreviewService {
             let last_area = state.last_area;
             let entry = state.entry(session_id);
             entry.width = width;
-            match (shown, &entry.mount) {
+            match (shown, entry.ready_mount()) {
                 (Some(s), Some(m)) if s.session_id == session_id => layout::place(s.area, width)
                     .ok()
                     .map(|p| (m.clone(), p, true)),
@@ -510,6 +483,11 @@ impl PreviewService {
         rect: Option<Rect>,
     ) -> Result<(), PreviewError> {
         let _layout = self.layout_op.lock().await;
+        tracing::debug!(
+            page = page.as_deref().unwrap_or("-"),
+            ?rect,
+            "preview layout reported"
+        );
         let Some(page_key) = page else {
             if rect.is_some() {
                 return Err(PreviewError::InvalidTab(
@@ -531,6 +509,7 @@ impl PreviewService {
                 == page_key.as_str()
         };
         if !current {
+            tracing::debug!(page = %page_key, "layout ignored: the page is not its session's selected tab");
             return Ok(());
         }
         // A Browser panel reopening can reclaim an engine released while the page was away.
@@ -590,6 +569,11 @@ impl PreviewService {
             .shown
             .as_ref()
             .map(|s| s.session_id.clone());
+        tracing::debug!(
+            shown = shown.as_ref().map_or("-", |(page, _)| page.as_str()),
+            previously = previously_shown.as_deref().unwrap_or("-"),
+            "preview layout applied"
+        );
         if let Some(session) = previously_shown
             && shown.as_ref().is_none_or(|(next, _)| next != &session)
         {
@@ -621,7 +605,7 @@ impl PreviewService {
                 .values()
                 .filter(|e| shown.as_ref().is_none_or(|(s, _)| *s != e.session_id))
                 .filter_map(|e| {
-                    e.mount.as_ref().map(|m| MountId {
+                    e.ready_mount().map(|m| MountId {
                         session_id: e.session_id.clone(),
                         label: m.label.clone(),
                     })
@@ -687,6 +671,25 @@ impl PreviewService {
         .await?)
     }
 
+    /// A full-page capture's viewport slice, at the page's real resolution where supported.
+    ///
+    /// # Errors
+    /// Nothing open, a hidden/protected page, engine failures and timeouts.
+    pub async fn screenshot_slice_png(&self, session_id: &str) -> Result<Vec<u8>, PreviewError> {
+        let _activity = self.session_lock(session_id).await;
+        if self.shots_blocked(session_id) {
+            return Err(PreviewError::Image(crate::browse::SHOTS_BLOCKED.to_owned()));
+        }
+        self.require_visible_screenshot(session_id)?;
+        let id = self.ensure_mounted(session_id).await?;
+        Ok(bounded(
+            self.config.shot_timeout,
+            "viewport slice",
+            self.engine.screenshot_slice(&id),
+        )
+        .await?)
+    }
+
     /// The engine's PNG of the whole document of CSS size `size` in one render, `None` when the engine has no such
     /// capture (macOS; the caller stitches).
     ///
@@ -734,6 +737,7 @@ impl PreviewService {
     /// # Errors
     /// The engine's failure while closing.
     pub async fn close(&self, session_id: &str) -> Result<(), PreviewError> {
+        self.cancel_pending_navigation(session_id);
         let _activity = self.session_lock(session_id).await;
         self.unmount(session_id).await?;
         if let Some(entry) = self.inner.lock().entries.get_mut(session_id) {

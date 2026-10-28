@@ -87,7 +87,25 @@ impl Core {
             None
         };
         let id = preview_owner.as_deref().unwrap_or(id);
-        if let Some(pid) = self.session_holder(id).await? {
+        // The New chat screen's owner and a folder's own key (`files-workspace:<folder>`: the Files tab and its Commit
+        // dialog before any chat) are not Vibe sessions: there is no lease to hold and nothing to ask Vibe.
+        // Vibe's `session/read` refuses these folder keys as invalid session ids.
+        if crate::new_chat::is_draft(&self.shared, id) || id.starts_with(crate::explorer::WORKSPACE)
+        {
+            return Ok(None);
+        }
+        let deleting = matches!(command,
+            Command::Call { method, .. } | Command::RequestConfirmation { method, .. }
+                if method == "session/delete");
+        // A damaged store must still reach its Delete dialog and Vibe's own delete. Keep the app lease;
+        // Vibe remains responsible for refusing a genuinely held session. Other mutations still fail closed.
+        let holder = match self.session_holder(id).await {
+            Err(error) if deleting && error.server_code.as_deref() == Some("internal_error") => {
+                None
+            }
+            result => result?,
+        };
+        if let Some(pid) = holder {
             return Err(crate::session_holder::held_refusal(pid));
         }
         self.claim_session(id).await

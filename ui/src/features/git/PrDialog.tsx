@@ -6,6 +6,7 @@
  * Depends on: state/git, GitModal. Called by: GitDialogs.
  * Invariants: nothing leaves the machine from here; the press goes to the core's `createPr`.
  */
+import { Button } from "../../components/Controls";
 import type { ReactElement } from "react";
 
 import type { Git, PrDialog as Dialog } from "../../state/git";
@@ -41,37 +42,41 @@ export function PrDialog({
       }}
       actions={
         <>
-          <button
+          <Button
             data-testid="git.pr-dialog-close"
             type="button"
-            className="tb-btn"
+
             onClick={() => {
               git.close();
             }}
           >
             Cancel
-          </button>
-          <button
+          </Button>
+          <Button
             data-testid="git.pr-dialog-create-pr"
             type="button"
-            className="btn-primary"
+            appearance="dialog"
             disabled={!can}
             data-action="pr-create"
             onClick={() => void git.createPr()}
           >
             {action}
-          </button>
+          </Button>
         </>
       }
     >
-      {dialog.repo !== "." && <p className="git-note">Repository: {dialog.repo}</p>}
+      {dialog.repo !== "." && (
+        <p className="ui-help" data-detail="paragraph">
+          Repository: {dialog.repo}
+        </p>
+      )}
       {plan.existing !== null && (
         <p className="server-note" role="status">
           Pull request #{plan.existing.number} already exists for this branch; a new push updates
           it.
         </p>
       )}
-      <p className="git-note">
+      <p className="ui-help" data-detail="paragraph">
         {plan.via === "gh"
           ? `Made with gh on ${where}.`
           : plan.via === "browser"
@@ -80,7 +85,7 @@ export function PrDialog({
         {plan.ghNote !== null && ` ${plan.ghNote}`}
       </p>
       {plan.push !== null && (
-        <p className="git-note">
+        <p className="ui-help" data-detail="paragraph">
           First it pushes {plan.push.branch} ({plan.push.commits}{" "}
           {plan.push.commits === 1 ? "commit" : "commits"}) to {plan.push.remote} ({plan.push.url}).
         </p>
@@ -101,7 +106,10 @@ export function PrDialog({
         <span>
           Description
           {plan.template !== null && (
-            <span className="git-from"> (template from {plan.template})</span>
+            <span className="ui-help" data-detail="source">
+              {" "}
+              (template from {plan.template})
+            </span>
           )}
         </span>
         <textarea

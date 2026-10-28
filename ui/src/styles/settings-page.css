@@ -7,6 +7,7 @@
 
 @import "./vault-actions.css";
 @import "./vault-page.css";
+@import "./allowed.css";
 
 /* The column. The session list stays mounted under it (its scroll and folds kept), invisible and inert. */
 .column.is-settings {
@@ -40,7 +41,7 @@
   height: var(--control-height-search);
   padding: 0 8px 0 10px;
   border: 1px solid var(--line-2);
-  border-radius: 9px;
+  border-radius: var(--radius-9);
   background: var(--bg);
   color: var(--text-3);
   flex: none;
@@ -67,7 +68,7 @@
   height: 22px;
   padding: 0 8px;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: var(--active);
   color: var(--text);
   font-size: var(--text-11-5);
@@ -107,7 +108,7 @@
   height: 34px;
   padding: 0 10px;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: none;
   color: var(--text-2);
   font-size: var(--text-13-5);
@@ -144,7 +145,7 @@
   gap: 1px;
   padding: 7px 10px;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: none;
   text-align: left;
   cursor: pointer;
@@ -194,7 +195,7 @@
 .set-group {
   background: var(--raised);
   border: 1px solid var(--line-2);
-  border-radius: 12px;
+  border-radius: var(--radius-xl);
   padding: var(--space-toolbar-block) var(--space-card-inline) var(--space-card-bottom);
   margin-bottom: var(--space-card-gap);
 }
@@ -232,7 +233,7 @@
 }
 .set-cat-body .check {
   padding: var(--space-row-block) 0;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
 }
 .set-cat-body .check .d {
   font-weight: var(--weight-regular);
@@ -406,17 +407,6 @@
   display: flex;
   justify-content: space-between;
 }
-.pal-more button {
-  border: 0;
-  background: none;
-  color: var(--text-3);
-  font-size: var(--text-11-5);
-  padding: 2px 12px 6px;
-  cursor: pointer;
-}
-.pal-more button:hover:where(:not(:disabled)) {
-  color: var(--text);
-}
 .pal-empty {
   display: grid;
   gap: 6px;
@@ -450,7 +440,7 @@
   gap: 4px;
   padding: 10px 12px;
   border: 1px solid var(--line-2);
-  border-radius: 10px;
+  border-radius: var(--radius-lg);
   background: var(--raised);
 }
 .pv-card b {
@@ -485,7 +475,7 @@
   border: 0;
   background: none;
   padding: 0 4px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   font: inherit;
   color: var(--text-3);
   cursor: pointer;
@@ -561,24 +551,9 @@
   margin-top: 0;
 }
 
-/* the MCP tag, the All / MCP filter and the info sign (colours from the tokens: both themes). */
+/* The All / MCP filter. */
 .set-cat-body .secrets-filter {
   margin: 4px 0 8px;
-}
-.set-cat-body .mcp-info {
-  display: inline-flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-  max-width: 100%;
-}
-.set-cat-body .mcp-info-text {
-  flex-basis: 100%;
-  max-width: 52ch;
-  padding: 6px 10px;
-  border-radius: 8px;
-  background: var(--raised);
 }
 
 /* Metadata stays on one line; shared .check rows own typography, padding and separators. */
@@ -639,4 +614,9 @@
   display: grid;
   gap: var(--space-row-block);
   min-width: 0;
+}
+
+/* A category-wide failure sits above its section cards. */
+.set-cat-body > .key-problem {
+  margin-bottom: var(--space-card-gap);
 }

@@ -13,7 +13,7 @@ import { isMcp } from "./McpLabel";
 import { MistralKeyRow } from "./MistralKeySettings";
 import { VaultAddEntry } from "./VaultAddEntry";
 import { entryAddress, VaultEntryRow, type VaultEntry } from "./VaultEntryRow";
-import { VaultLockControls } from "./VaultLockControls";
+import { SharedVaultLockNote, VaultLockControls } from "./VaultLockControls";
 import { useVaultEntries } from "./vaultEntries";
 
 type Filter = "All" | "Secrets" | "Logins" | "MCP" | "Mistral key";
@@ -142,6 +142,7 @@ export function ProjectSecretsSettings() {
         <VaultLockControls mode="agent" display="icon" />
         <VaultLockControls mode="vault" display="icon" />
       </div>
+      <SharedVaultLockNote />
       <details className="vault-permission-scope-disclosure">
         <summary data-testid="secrets.project-secrets-settings-summary">Project exceptions</summary>
         <div className="secrets-toolbar vault-permission-scope" aria-label="Permission scope">
@@ -167,11 +168,11 @@ export function ProjectSecretsSettings() {
           <Button
             data-testid="secrets.project-secrets-settings-button"
             type="button"
-            small
+            shape="outlined"
             disabled={busy || blocked}
             onClick={chooseFolder}
           >
-            Choose folder...
+            Choose folder…
           </Button>
         </div>
       </details>

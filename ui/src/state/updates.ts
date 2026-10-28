@@ -6,14 +6,15 @@
  * (starts the stream), UpdateNotice, UpdateSettings, updatesRoutes.
  * Invariants:
  * - The UI never decides whether an update installs: "Install and restart" only asks the host, which refuses
- *   without a recorded agreement. While a Debug API UI-control request is served every call is marked with the
- *   `debug-api` origin (like the core controller does; a label for the host's log; no dialog).
+ *   without a recorded agreement. Every call is the window's, also for a Debug API UI-control request (the
+ *   request clicks the same buttons; no dialog either way).
  * - A build without an update channel (`subscribe` answers false) shows nothing: `available` stays false.
  * - "Later" hides the notice for the current state of one version only; a new state (downloaded, failed) shows
  *   it again.
  * - A failed check alone (offline) is not shown as a banner: only Settings mentions it.
+ * - A version that needs a newer system (`osTooOld`) is shown with the reason and a new check, never a download.
  */
-import type { CoreClient, ExecuteOptions, UpdateView } from "../protocol/client/types";
+import type { CoreClient, UpdateView } from "../protocol/client/types";
 import { toCallError } from "../protocol/client/types";
 import { createStore } from "./createStore";
 import type { Toasts } from "./toastStore";
@@ -62,6 +63,39 @@ function firstNotes(notes: string | null): string | null {
   return line.length > NOTES_MAX ? `${line.slice(0, NOTES_MAX - 1)}…` : line;
 }
 
+/**
+ * Why the offered version is not downloaded on this system, as headline and the next step. Each system in its own
+ * words: macOS by version, Windows by build (`10.0.19045`), Linux by the C library (glibc) the new version needs.
+ */
+function osTooOldText(phase: Extract<UpdateView["phase"], { type: "osTooOld" }>): {
+  headline: string;
+  detail: string;
+} {
+  const { version, os, minimum, current } = phase;
+  switch (os) {
+    case "macOS":
+      return {
+        headline: `Vibe Work ${version} needs macOS ${minimum} or later.`,
+        detail: `This Mac has macOS ${current}. Update macOS in System Settings, then check for updates again.`,
+      };
+    case "Windows":
+      return {
+        headline: `Vibe Work ${version} needs Windows build ${minimum} or later.`,
+        detail: `This computer has build ${current}. Update Windows, then check for updates again.`,
+      };
+    case "Linux":
+      return {
+        headline: `Vibe Work ${version} needs a newer Linux system (glibc ${minimum} or later; this computer has ${current}).`,
+        detail: "Update your system, then check again.",
+      };
+    default:
+      return {
+        headline: `Vibe Work ${version} needs ${os} ${minimum} or later.`,
+        detail: `This computer has ${os} ${current}. Update ${os}, then check for updates again.`,
+      };
+  }
+}
+
 /** The notice for `view`; plain words. `null` for idle, checking, a failed check, and the install in progress. */
 export function noticeFor(view: UpdateView): NoticeModel | null {
   const phase = view.phase;
@@ -72,7 +106,7 @@ export function noticeFor(view: UpdateView): NoticeModel | null {
         tone: "info",
         headline: `Vibe Work ${phase.version} is available.`,
         detail: linkOnly
-          ? "This copy was installed with a package manager, which also installs updates. You can read what is new on the release page."
+          ? "Vibe Work does not update this copy itself. Download the new version from the release page and install it the way you installed this one."
           : (firstNotes(phase.notes) ?? "You chose to be asked before updates download."),
         progress: null,
         actions: linkOnly
@@ -81,6 +115,14 @@ export function noticeFor(view: UpdateView): NoticeModel | null {
             : ["openReleasePage", "later"]
           : ["download", "later"],
         key: `available:${phase.version}`,
+      };
+    case "osTooOld":
+      return {
+        tone: "info",
+        ...osTooOldText(phase),
+        progress: null,
+        actions: ["retry", "later"],
+        key: `osTooOld:${phase.version}:${phase.current}`,
       };
     case "downloading":
       return {
@@ -152,6 +194,10 @@ export function statusLine(view: UpdateView): string {
       return "Checking for updates…";
     case "available":
       return `Version ${phase.version} is available.`;
+    case "osTooOld": {
+      const text = osTooOldText(phase);
+      return `${text.headline} ${text.detail}`;
+    }
     case "downloading":
       return `Downloading version ${phase.version}…`;
     case "ready":
@@ -175,20 +221,10 @@ export interface UpdatesState {
 }
 
 /** Creates the updates controller. */
-export function createUpdates(options: {
-  client: CoreClient;
-  toasts: Toasts;
-  /** The capability of the Debug API UI-control request being served, `null` when none is. */
-  serving: () => string | null;
-}) {
-  const { client, toasts, serving } = options;
+export function createUpdates(options: { client: CoreClient; toasts: Toasts }) {
+  const { client, toasts } = options;
   const store = createStore<UpdatesState>({ available: false, view: null, dismissed: null });
   let started = false;
-
-  const origin = (): ExecuteOptions | undefined => {
-    const capability = serving();
-    return capability === null ? undefined : { origin: "debug-api", capability };
-  };
 
   async function run(step: () => Promise<void>): Promise<void> {
     try {
@@ -226,8 +262,8 @@ export function createUpdates(options: {
       if (notice !== null) store.set((s) => ({ ...s, dismissed: notice.key }));
     },
     check: () => run(() => client.updates.check()),
-    download: () => run(() => client.updates.download(origin())),
-    install: () => run(() => client.updates.install(origin())),
+    download: () => run(() => client.updates.download()),
+    install: () => run(() => client.updates.install()),
     setAutoDownload: (enabled: boolean) => run(() => client.updates.setAutoDownload(enabled)),
     openReleasePage: () => run(() => client.updates.openReleasePage()),
   };

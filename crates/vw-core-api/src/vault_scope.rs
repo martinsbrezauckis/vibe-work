@@ -1,7 +1,7 @@
 //! The vault rule for the Debug API: outside the vault, the Debug API acts as the user.
 //! For vault operations, a Debug API request has the agent's rights and no more.
-//! Permission changes (grant, always, revoke), vault management (create, unlock, lock, passphrase, "remember this
-//! computer", setting, replacing or removing the Mistral key, adding or removing secrets with values) and raw values
+//! Permission changes (grant, always, revoke), vault management (create, unlock, lock, passphrase, "Lock the vault
+//! when Vibe Work quits", setting, replacing or removing the Mistral key, adding or removing secrets with values) and raw values
 //! are the user's, in the window, by hand. Reason: the vault will become the main ShellX Vault, which has no Debug
 //! access at all.
 //!
@@ -14,8 +14,9 @@
 //!   (`confirmer.rs` reads it): the Debug API may start such a flow, but the user's answer in the
 //!   window decides. A new vault dialog joins this list with one line.
 //! - [`admit`]: called by `Core::execute` for every command before it is dispatched, with the command's origin. A
-//!   window command run under a live Debug API UI-control capability arrives here as `Origin::DebugApi` too
-//!   (`vw-host` `execute_for_ui_control`), so a Revoke clicked through `ui/click` is refused the same way.
+//!   window command sent while the Debug API drives the window (a `ui/*` request is being served,
+//!   `command_origin::debug_api_acts`) is held to the same rule, so a Revoke clicked through `ui/click` is refused
+//!   the same way.
 //!
 //! Depends on: `command` (the commands), `keys`, `secrets_view`, `connectors_view`, `browser_view` (their request
 //! types), `mcp_keys` (bindings, dialog method), `connectors_config` (the configured servers), `browser_secret` and
@@ -23,7 +24,8 @@
 //! Invariants:
 //! - A user-only act from `Origin::DebugApi` is refused before anything runs: `denied`, reason word
 //!   [`VAULT_USER_ONLY`], never a partial change.
-//! - The window (`Origin::Ui`) is never restricted here; the agent never comes through here (agent tools ask the
+//! - The window (`Origin::Ui`) is restricted here only while the Debug API drives it (above); a person's act in the
+//!   window during a served request is refused then too and works again once the request is answered. The agent never comes through here (agent tools ask the
 //!   confirmer with requester `Agent`, which is never auto-approved).
 //! - Reads stay readable: names, states, grant lists are metadata the window shows
 //!   too; no route offers a value (the secret guard).
@@ -67,14 +69,21 @@ pub const ACTS: &[(&str, VaultAccess)] = &[
     // The Mistral key and the vault.
     ("keys.readStatus", VaultAccess::Read),
     ("keys.listKeyCandidates", VaultAccess::Read),
+    ("keys.listMistralKeys", VaultAccess::Read),
+    ("keys.addMistralKey", VaultAccess::UserOnly),
+    ("keys.useMistralKey", VaultAccess::UserOnly),
+    ("keys.renameMistralKey", VaultAccess::UserOnly),
+    ("keys.removeMistralKey", VaultAccess::UserOnly),
     ("keys.detectVibeKey", VaultAccess::Read),
     // A `GET /v1/models` with the key in use; answers ok or the failure, never the key (every agent turn uses it too).
     ("keys.testKey", VaultAccess::Read),
     ("keys.createVault", VaultAccess::UserOnly),
     ("keys.unlockVault", VaultAccess::UserOnly),
     ("keys.lockVault", VaultAccess::UserOnly),
+    // Whether the vault's key stays on this computer across a quit: a vault setting, the user's alone (the status
+    // read above carries it).
+    ("keys.setLockVaultOnQuit", VaultAccess::UserOnly),
     ("keys.setupStoreKey", VaultAccess::UserOnly),
-    ("keys.removeKey", VaultAccess::UserOnly),
     ("keys.useExistingKey", VaultAccess::UserOnly),
     ("keys.importVibeKey", VaultAccess::UserOnly),
     ("keys.removeVibeKeyOriginal", VaultAccess::UserOnly),
@@ -97,8 +106,10 @@ pub const ACTS: &[(&str, VaultAccess)] = &[
     ("secrets.rename", VaultAccess::UserOnly),
     ("secrets.replace", VaultAccess::UserOnly),
     ("secrets.copy", VaultAccess::UserOnly),
-    // A command grant, an MCP server's key grant, or a website fill grant.
+    // An MCP server's key grant or a website fill grant.
     ("secrets.revoke", VaultAccess::UserOnly),
+    // The same for several at once ("Revoke all" on the Allowed without asking page).
+    ("secrets.revokeMany", VaultAccess::UserOnly),
     // Website logins: a login carries a password.
     ("secrets.addLogin", VaultAccess::UserOnly),
     ("secrets.addLoginWithPermission", VaultAccess::UserOnly),
@@ -275,7 +286,7 @@ pub(crate) async fn admit(
     origin: Origin,
     command: &Command,
 ) -> Result<Origin, CoreError> {
-    if origin != Origin::DebugApi {
+    if !crate::command_origin::debug_api_acts(shared, origin) {
         return Ok(origin);
     }
     if matches!(

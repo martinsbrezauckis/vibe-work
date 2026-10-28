@@ -6,9 +6,9 @@ mod common;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 
-use common::fake::scratch;
+use common::processes::scratch;
 use common::support_rig::{
-    Channel, entry, install_fake, manifest, running_rig, sign_as, support, upload_requirements,
+    Channel, entry, install_marker, manifest, running_rig, sign_as, support, upload_requirements,
 };
 use common::update_rig::Key;
 use vw_vibe_install::{InstallError, SupportError, VibeUpdateView};
@@ -244,13 +244,13 @@ async fn versions_for_other_app_versions_or_without_a_wheel_here_are_not_offered
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_users_own_install_gets_a_notice_only() {
+async fn an_unsupported_own_install_stays_in_setup_with_the_required_version() {
     let channel = Channel::start().await;
     let key = Key::new();
     let dir = scratch("support-s9");
     let root = dir.join("data/vibe");
-    // The user chose their own Vibe 2.25.0 at setup (the fake server stands in for it).
-    install_fake(&dir.join("own"), "2.25.0");
+    // The recorded choice points to an executable path; support checks never launch it.
+    install_marker(&dir.join("own"), "2.25.0");
     let own = vw_vibe_install::layout::Layout::new(dir.join("own"), "2.25.0")
         .unwrap()
         .server();
@@ -272,10 +272,17 @@ async fn a_users_own_install_gets_a_notice_only() {
     let view = update(&rig);
     assert_eq!(view.available, None);
     assert_eq!(view.upcoming, None);
-    let notice = view.mismatch.expect("a version notice");
-    assert!(
-        notice.contains("2.25.0") && notice.contains("2.26.2"),
-        "{notice}"
+    let install = rig.installer.view();
+    assert!(matches!(
+        install.phase,
+        vw_vibe_install::InstallPhase::NotInstalled {}
+    ));
+    assert_eq!(install.existing.len(), 1);
+    let own = &install.existing[0];
+    assert!(!own.supported);
+    assert_eq!(
+        own.warning.as_deref(),
+        Some("This install is Vibe 2.25.0; Vibe Work needs Vibe 2.26.0.")
     );
     assert!(matches!(
         rig.installer.prepare_update(),

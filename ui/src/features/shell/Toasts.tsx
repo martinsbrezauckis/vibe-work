@@ -6,10 +6,17 @@
  * it goes, and the others glide into place.
  * Native views (`[data-toast-avoid="native"]`) paint above the page, so they are also protected.
  * Depends on: AppContext, state/createStore, toastPlacement, components/Icon, components/nativeLayer. Called by: Shell.
- * Invariants: the stack is a polite live region; moving focus into a field, or a native view appearing, moving or
- * going, re-places the stack; so does a region to keep clear changing size after a layout switch (at 390 px
- * the narrow layout settled after the `resize` event, and the stack stayed in a corner over the composer's Send); the
+ * Invariants: the stack is not a live region (the toast store says each toast once through the app's announcer);
+ * a native view appearing, moving or going, or the window resizing, re-places the stack. Between those, the stack
+ * keeps its corner and moves only when it now covers something it was placed clear of: a focused field, or a
+ * region to keep clear that appeared or changed size (at 390 px the narrow layout settled after the `resize`
+ * event, and the stack stayed in a corner over the composer's Send). Content the
+ * user scrolled under the stack does not count, including rows a long conversation mounts while it scrolls. The
  * floating placement never reserves native view space; an opened notification popover reserves its bounds.
+ * The conversation (`role="log"`) is content, not a control: it is focusable only so the keyboard can scroll it,
+ * and the stack may sit over it right above the message box. Its rows' own buttons stay protected. Without this,
+ * at 390 px a toast shown as a session's first message appeared ("The session started…") had no free spot and
+ * became a bare "Notice" in the status bar.
  */
 import { type CSSProperties, useEffect, useLayoutEffect, useRef, useState } from "react";
 
@@ -19,10 +26,17 @@ import { IconButton } from "../../components/Controls";
 import { NATIVE_LAYOUT_EVENT, nativeRects, reserve } from "../../components/nativeLayer";
 import { useStore } from "../../state/createStore";
 import { useApp } from "./AppContext";
-import { BOTTOM, type Corner, type Rect, placeToastsOver } from "./toastPlacement";
+import {
+  BOTTOM,
+  type Corner,
+  type Rect,
+  coversAny,
+  placeToastsOver,
+  stackRect,
+} from "./toastPlacement";
 
 const PROTECTED =
-  '.walkthrough-caption, [data-toast-avoid]:not([data-toast-avoid="native"]), input, textarea, select, button, a[href], label, summary, [contenteditable]:not([contenteditable="false"]), [role="button"], [role="link"], [role="tab"], [role="menuitem"], [role="checkbox"], [role="radio"], [role="switch"], [role="textbox"], [tabindex], h1, h2, h3, h4, h5, h6';
+  '.walkthrough-caption, [data-toast-avoid]:not([data-toast-avoid="native"]), input, textarea, select, button, a[href], label, summary, [contenteditable]:not([contenteditable="false"]), [role="button"], [role="link"], [role="tab"], [role="menuitem"], [role="checkbox"], [role="radio"], [role="switch"], [role="textbox"], [tabindex]:not([role="log"]), h1, h2, h3, h4, h5, h6';
 
 function rectOf(element: Element): Rect {
   const r = element.getBoundingClientRect();
@@ -56,8 +70,14 @@ function visibleRect(element: Element): Rect | null {
 /** The reservation key of the stack in `nativeLayer`. */
 const RESERVATION = "toasts";
 
-/** Visible rectangles that must stay uncovered right now (native views apart: `nativeRects`). */
-function rectsToAvoid(): Rect[] {
+/** A visible element to keep clear and the part of it that shows. */
+interface Region {
+  element: Element;
+  rect: Rect;
+}
+
+/** Visible elements that must stay uncovered right now (native views apart: `nativeRects`). */
+function regionsToAvoid(): Region[] {
   return Array.from(document.querySelectorAll(PROTECTED)).flatMap((element) => {
     if (
       !element.matches(".walkthrough-caption") &&
@@ -67,8 +87,43 @@ function rectsToAvoid(): Rect[] {
     const style = window.getComputedStyle(element);
     if (style.display === "none" || style.visibility === "hidden") return [];
     const rect = visibleRect(element);
-    return rect === null ? [] : [rect];
+    return rect === null ? [] : [{ element, rect }];
   });
+}
+
+/** A stable number per element, so a signature can tell the same region from a new one. */
+const identities = new WeakMap<Element, number>();
+let nextIdentity = 0;
+function identityOf(element: Element): number {
+  let id = identities.get(element);
+  if (id === undefined) {
+    nextIdentity += 1;
+    id = nextIdentity;
+    identities.set(element, id);
+  }
+  return id;
+}
+
+/**
+ * Which regions to keep clear exist and how big they are. Positions are left out: scrolling moves regions without
+ * changing the layout, and must not re-place the stack.
+ */
+function regionSignature(regions: readonly Region[]): string {
+  return regions
+    .map(({ element, rect }) =>
+      [identityOf(element), rect.right - rect.left, rect.bottom - rect.top]
+        .map(Math.round)
+        .join(","),
+    )
+    .join(";");
+}
+
+/** Whether `element` sits in a container the user scrolled (since the set was started). */
+function inScrolled(element: Element, scrolled: WeakSet<Element>): boolean {
+  if (scrolled.has(document.documentElement)) return true;
+  for (let parent = element.parentElement; parent !== null; parent = parent.parentElement)
+    if (scrolled.has(parent)) return true;
+  return false;
 }
 
 function nativeToAvoid(): Rect[] {
@@ -77,7 +132,7 @@ function nativeToAvoid(): Rect[] {
     .map((r) => ({ left: r.left, top: r.top, right: r.right, bottom: r.bottom }));
 }
 
-/** A comparable text of the regions to keep clear (placement re-runs only when it changes). */
+/** A comparable text of rectangles, positions included (native views move only with a layout event). */
 function signature(rects: readonly Rect[]): string {
   return rects.map((r) => [r.left, r.top, r.right, r.bottom].map(Math.round).join(",")).join(";");
 }
@@ -95,8 +150,12 @@ export function Toasts() {
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const dockedNow = useRef(false);
   const [tick, setTick] = useState(0);
-  /** The regions the last placement kept clear. */
+  /** The regions the last check saw (which ones, their sizes, the native views and the stack's size). */
   const placedFor = useRef("");
+  /** Where the floating stack was last placed (null: not floating). */
+  const placed = useRef<{ corner: Corner; lift: number; inset: number } | null>(null);
+  /** Containers scrolled since the last placement: what they hold moved under the stack by scrolling. */
+  const scrolled = useRef(new WeakSet<Element>());
   const measured = () => {
     const stack = ref.current?.getBoundingClientRect();
     const stackSize =
@@ -104,19 +163,63 @@ export function Toasts() {
         ? ""
         : `${String(Math.round(stack.width))},${String(Math.round(stack.height))}`;
     const native = nativeToAvoid();
-    return `${signature(rectsToAvoid())}|${signature(native)}|${stackSize}`;
+    return `${regionSignature(regionsToAvoid())}|${signature(native)}|${stackSize}`;
+  };
+  /**
+   * Whether the stack, where it was placed, now covers something it must keep clear: a native view, the focused
+   * element, or a region that is not content scrolled under it. Without a floating placement, it asks for one.
+   */
+  const coversSomething = () => {
+    const at = placed.current;
+    const stack = ref.current;
+    if (at === null || stack === null) return true;
+    const size = stack.getBoundingClientRect();
+    const viewport = { width: window.innerWidth, height: window.innerHeight, leftInset: at.inset };
+    const rect = stackRect(
+      at.corner,
+      viewport,
+      { width: size.width, height: size.height },
+      at.lift,
+    );
+    const focused = document.activeElement;
+    const keep = regionsToAvoid()
+      .filter(({ element }) => element === focused || !inScrolled(element, scrolled.current))
+      .map((region) => region.rect);
+    return coversAny(rect, [...keep, ...nativeToAvoid()]);
   };
 
   useEffect(() => {
     const bump = () => {
       setTick((n) => n + 1);
     };
+    // Focus moves the stack only when it now covers something to keep clear (the focused field counts even in
+    // scrolled content); elsewhere the stack stays where it is.
+    const check = () => {
+      if (!dockedNow.current && coversSomething()) bump();
+    };
     // Not on scroll: content scrolling under a toast is the user moving it, and re-placing on every scroll made
-    // the stack jump between corners. Focus, resize and layout changes still place it again.
-    const events = ["focusin", "focusout", "resize", NATIVE_LAYOUT_EVENT];
+    // the stack jump between corners. A scroll only marks its container, so what it holds no longer counts.
+    // Only containers the user can scroll are marked: a clipped frame that a focus change scrolls into view
+    // (the conversation view holding the message box) keeps its content protected.
+    const note = (event: Event) => {
+      const target = event.target;
+      if (!(target instanceof Element)) {
+        scrolled.current.add(document.documentElement);
+        return;
+      }
+      const style = window.getComputedStyle(target);
+      if (/auto|scroll|overlay/.test(`${style.overflowX} ${style.overflowY}`))
+        scrolled.current.add(target);
+    };
+    const events = ["resize", NATIVE_LAYOUT_EVENT];
+    const focus = ["focusin", "focusout"];
     for (const type of events) window.addEventListener(type, bump, true);
+    for (const type of focus) window.addEventListener(type, check, true);
+    window.addEventListener("scroll", note, true);
     return () => {
       for (const type of events) window.removeEventListener(type, bump, true);
+      for (const type of focus) window.removeEventListener(type, check, true);
+      window.removeEventListener("scroll", note, true);
       reserve(RESERVATION, null);
     };
   }, []);
@@ -130,24 +233,26 @@ export function Toasts() {
       return;
     }
     placedFor.current = measured();
+    scrolled.current = new WeakSet();
+    placed.current = null;
     if (dockedNow.current) {
       reserve(RESERVATION, null);
       return;
     }
-    const rail = document.querySelector('[data-toast-avoid="rail"]')?.getBoundingClientRect();
-    const visibleRail = document.querySelector('[data-toast-avoid="rail"]');
-    const inset =
-      rail !== undefined &&
-      rail.width > 0 &&
-      visibleRail !== null &&
-      window.getComputedStyle(visibleRail).visibility !== "hidden"
-        ? Math.max(18, rail.right + 8)
-        : 18;
+    const regions = regionsToAvoid();
+    const inset = Math.max(
+      18,
+      ...regions
+        .filter(({ element }) =>
+          element.matches('[data-toast-avoid="rail"], [data-toast-avoid="strip"]'),
+        )
+        .map(({ rect }) => rect.right + 8),
+    );
     const size = stack.getBoundingClientRect();
     const viewport = { width: window.innerWidth, height: window.innerHeight, leftInset: inset };
     const stackSize = { width: size.width, height: size.height };
     const native = nativeToAvoid();
-    const avoid = rectsToAvoid();
+    const avoid = regions.map((region) => region.rect);
     const placement = placeToastsOver(viewport, stackSize, avoid, native);
     if (placement.blocked) {
       dockedNow.current = true;
@@ -155,15 +260,16 @@ export function Toasts() {
       reserve(RESERVATION, null);
       return;
     }
+    placed.current = { corner: placement.corner, lift: placement.lift, inset };
     setCorner(placement.corner);
     setLift(placement.lift);
     setLeftInset(inset);
     reserve(RESERVATION, null);
   }, [list, tick]);
 
-  // while toasts show, a region to keep clear that changes size (the layout switching after a resize, the
-  // composer growing) places the stack again. Only a real change bumps: the observer's first report after
-  // `observe` finds the same regions, so this cannot loop.
+  // while toasts show, a region to keep clear that appears or changes size (the layout switching after a resize,
+  // the composer growing) is checked against the stack, which moves only if it now covers it. Only a real
+  // change checks: the observer's first report after `observe` finds the same regions, so this cannot loop.
   const showing = list.length > 0;
   useEffect(() => {
     if (!showing) return;
@@ -171,7 +277,7 @@ export function Toasts() {
       const next = measured();
       if (next !== placedFor.current) {
         placedFor.current = next;
-        setTick((n) => n + 1);
+        if (!dockedNow.current && coversSomething()) setTick((n) => n + 1);
       }
     };
     const observer =
@@ -252,7 +358,6 @@ export function Toasts() {
           ref={ref}
           data-corner={corner}
           data-docked={docked ? "true" : undefined}
-          aria-live="polite"
           style={
             {
               ...(!docked && lift > 0 ? { bottom: `${String(BOTTOM + lift)}px` } : {}),
@@ -263,9 +368,10 @@ export function Toasts() {
         >
           {docked && list.length > 1 && (
             <IconButton
+              tooltip={false}
               data-testid="shell.toasts-set-selected-id"
               icon="arrow-left"
-              aria-label="Previous notification"
+              label="Previous notification"
               onClick={() => {
                 setSelectedId(list[(activeIndex + list.length - 1) % list.length]?.id ?? null);
               }}
@@ -288,9 +394,10 @@ export function Toasts() {
           ))}
           {docked && list.length > 1 && (
             <IconButton
+              tooltip={false}
               data-testid="shell.toasts-set-selected-id-2"
               icon="chevron-right"
-              aria-label="Next notification"
+              label="Next notification"
               onClick={() => {
                 setSelectedId(list[(activeIndex + 1) % list.length]?.id ?? null);
               }}

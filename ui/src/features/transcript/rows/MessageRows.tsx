@@ -12,6 +12,7 @@
  * Depends on: model/entries, model/text, Markdown, CopyButton, Time, the transcript store.
  * Called by: RowView.
  */
+import { Button, Badge } from "../../../components/Controls";
 import { type ReactElement, memo } from "react";
 
 import { CopyButton } from "../../../components/CopyButton";
@@ -22,7 +23,7 @@ import { useApp } from "../../shell/AppContext";
 import { useTranscriptUi } from "../hooks";
 import {
   type Obj,
-  contextNames,
+  contextChips,
   createdAt,
   displayText,
   entryId,
@@ -32,16 +33,17 @@ import {
   messageText,
   spokenMessage,
 } from "../model/entries";
+import { openCodeRef } from "../../files/openCodeRef";
 import { gatherSources } from "../model/sources";
 import { safeHead } from "../model/text";
 import { Time } from "./Time";
 
 /** Longest assistant message rendered as Markdown before "Show all". */
-export const MESSAGE_CHARS = 100_000;
+const MESSAGE_CHARS = 100_000;
 
 /**
  * "Rewind to here" and "Branch from here": enabled only for messages Vibe can anchor on
- * (our own ids, MISTRAL #6); otherwise disabled with the reason as the title. Text buttons like Copy (no
+ * (our own client message ids); otherwise disabled with the reason as the title. Text buttons like Copy (no
  * SVG inside transcript rows: the trusted-surface test forbids `svg` there).
  */
 function MessageActions({
@@ -102,7 +104,8 @@ export const UserRow = memo(function UserRow({
 }): ReactElement {
   const text = displayText(entry) ?? messageText(entry);
   const { images, fileImages } = messageImages(entry);
-  const context = contextNames(entry);
+  const app = useApp();
+  const context = contextChips(entry);
   const loop = loopMessage(entry);
   return (
     <div
@@ -115,30 +118,48 @@ export const UserRow = memo(function UserRow({
         <CopyButton testId="transcript.message-rows-copybutton" text={text} label="Copy message" />
       </div>
       <div className="u-meta">
-        {steer ? <span className="u-tag">Steered</span> : null}
+        {steer ? <Badge presentation="user-label">Steered</Badge> : null}
         {loop === null ? null : (
-          <span
-            className="u-tag u-loop"
+          <Badge
+            presentation="loop-label"
             data-loop-id={loop}
             title={`Sent by a loop${loop === "" ? "" : ` (${loop})`} on its own: you did not type it`}
           >
             Loop
-          </span>
+          </Badge>
         )}
         {spokenMessage(entry) ? (
-          <span className="u-tag u-voice" title="Said in voice chat; the answer was read aloud">
+          <Badge presentation="voice-label" title="Said in voice chat; the answer was read aloud">
             voice
-          </span>
+          </Badge>
         ) : null}
         <Time ms={createdAt(entry)} />
       </div>
       {context.length > 0 ? (
         <div className="ctx-chips">
-          {context.map((name, i) => (
-            <span key={i} className="ctx-chip" title={name}>
-              {name}
-            </span>
-          ))}
+          {context.map((chip, i) =>
+            chip.ref === undefined ? (
+              <Badge key={i} presentation="context-label" title={chip.label}>
+                {chip.label}
+              </Badge>
+            ) : (
+              <Badge
+                as="button"
+                key={i}
+                type="button"
+                data-testid="transcript.message-rows-open-context"
+                data-item-id={chip.label}
+                presentation="context-label"
+                title={`Open ${chip.label} in the File tab`}
+                aria-label={`Open ${chip.label} in the File tab`}
+                onClick={() => {
+                  if (chip.ref !== undefined) void openCodeRef(app, sessionId, chip.ref);
+                }}
+              >
+                {chip.label}
+              </Badge>
+            ),
+          )}
         </div>
       ) : null}
       <div className="u-text">{text}</div>
@@ -148,9 +169,9 @@ export const UserRow = memo(function UserRow({
             <img key={i} src={image.src} alt={image.alt} className="u-img" />
           ))}
           {fileImages.map((name, i) => (
-            <span key={`f${String(i)}`} className="img-chip" title={name}>
+            <Badge key={`f${String(i)}`} presentation="image-label" title={name}>
               {name}
-            </span>
+            </Badge>
           ))}
         </div>
       ) : null}
@@ -166,10 +187,11 @@ function SourcesChip({ rowKey, searches }: { rowKey: string; searches: readonly 
   const sources = gatherSources(searches);
   if (sources.length === 0) return null;
   return (
-    <button
+    <Badge
       data-testid="transcript.message-rows-show-sources"
       type="button"
-      className="copy-btn sources-chip"
+      presentation="sources"
+      as="button"
       aria-expanded={open}
       aria-label={label}
       title={label}
@@ -179,7 +201,7 @@ function SourcesChip({ rowKey, searches }: { rowKey: string; searches: readonly 
       }}
     >
       Sources ({String(sources.length)})
-    </button>
+    </Badge>
   );
 }
 
@@ -217,10 +239,10 @@ export const AssistantRow = memo(function AssistantRow({
         />
       )}
       {big && !full ? (
-        <button
+        <Button
           data-testid="transcript.message-rows-toggle"
           type="button"
-          className="show-all-btn"
+          appearance="expander"
           aria-label="Show full message as plain text"
           title="Show full message as plain text"
           onClick={() => {
@@ -229,7 +251,7 @@ export const AssistantRow = memo(function AssistantRow({
         >
           Show all ({String(Math.round((text.length - MESSAGE_CHARS) / 1000))} KB more, as plain
           text)
-        </button>
+        </Button>
       ) : null}
       <div className="a-meta">
         <Time ms={createdAt(entry)} />

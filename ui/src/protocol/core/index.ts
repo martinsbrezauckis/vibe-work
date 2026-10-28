@@ -18,19 +18,25 @@ import type { WorktreesRequest, WorktreesResult } from "./worktrees";
 import type { FilesRequest, FilesResult } from "./files";
 import type { SecretsRequest, SecretsResult, SafetyRequest, SafetyResult } from "./secrets";
 import type { GitRequest } from "./git_request";
+import type { ProtectedChangeView } from "./proposals";
 import type { TerminalRequest, TerminalResult } from "./terminal";
-import type { KeyRequest, KeyStatusView, KeyCandidateView, VibeKeyView } from "./keys";
+import type { KeyRequest, MistralKeyView, KeyStatusView, KeyCandidateView, VibeKeyView } from "./keys";
 import type { InstructionsRequest, InstructionsResult, ProjectInstructionsRequest, ProjectInstructionsResult } from "./instructions";
 import type { DocumentsRequest, DocumentsResult } from "./documents";
 import type { SpeechRequest, SpeechResult } from "./speech";
 import type { ConnectorsRequest, ConnectorsResult } from "./connectors";
 import type { MarketRequest, MarketResult } from "./market";
+import type { SkillsRequest, SkillsResult } from "./skills";
 import type { NetworkRequest, NetworkResult } from "./network";
 import type { ProjectsRequest, ProjectsResult } from "./projects";
 import type { VibeRequest, InstallView } from "./vibe";
 import type { GitResult } from "./git";
 import type { GitBrowserRequest, GitBrowserResult } from "./git_browser";
 import type { LibrariesRequest, LibrariesResult, ImagesRequest, ImagesResult } from "./work";
+import type { GithubReadsView, GithubReadsRequest } from "./github_reads";
+import type { AskGrantsRequest, SessionGrant, GrantOffer, VibeRulesRequest, VibeRule, ChromeControlRequest, ChromeControlView } from "./ask";
+import type { KeepAwakeView, KeepAwakeRequest } from "./keep_awake";
+import type { NewChatRequest, NewChatView } from "./new_chat";
 import type { SecretScanRequest, SecretScanView } from "./secret_scan";
 export type * from "./sessions";
 export type * from "./status";
@@ -44,6 +50,7 @@ export type * from "./files";
 export type * from "./events";
 export type * from "./secrets";
 export type * from "./git_request";
+export type * from "./proposals";
 export type * from "./terminal";
 export type * from "./keys";
 export type * from "./instructions";
@@ -51,15 +58,24 @@ export type * from "./documents";
 export type * from "./speech";
 export type * from "./connectors";
 export type * from "./market";
+export type * from "./skills";
 export type * from "./network";
 export type * from "./projects";
 export type * from "./vibe";
 export type * from "./git";
 export type * from "./git_browser";
 export type * from "./work";
+export type * from "./github_reads";
+export type * from "./ask";
+export type * from "./keep_awake";
+export type * from "./new_chat";
 export type * from "./secret_scan";
 
-export type Command = { "type": "listSessions",
+export type Command = { "type": "copyText",
+/**
+ * The text to copy (at most one million bytes).
+ */
+text: string, } | { "type": "listSessions",
 /**
  * Page size (server default when absent).
  */
@@ -72,6 +88,10 @@ cursor?: string,
  * Also list archived sessions (Vibe's `includeArchived`; default false).
  */
 includeArchived?: boolean, } | { "type": "readSession",
+/**
+ * Session id.
+ */
+sessionId: string, } | { "type": "refreshPlugins",
 /**
  * Session id.
  */
@@ -173,6 +193,14 @@ sessionId: string,
  */
 modelAlias?: string,
 /**
+ * Provider identity from the selected row, retained while its availability is checked.
+ */
+modelName?: string,
+/**
+ * Display name from the selected row, for a notice if it has disappeared.
+ */
+modelDisplayName?: string,
+/**
  * `off`, `low`, `medium`, `high` or `max`.
  */
 reasoningEffort?: string, } | { "type": "setDefaultModel",
@@ -203,7 +231,23 @@ callbackId: string,
 /**
  * The `output` object, e.g. `{type: "approval", decision: {type: "approve"}}`.
  */
-output: JsonValue, } | { "type": "listCallbacks", } | { "type": "requestConfirmation",
+output: JsonValue, } | { "type": "listCallbacks", } | { "type": "decideProtectedChange",
+/**
+ * Owning live session.
+ */
+sessionId: string,
+/**
+ * Captured proposal identity.
+ */
+proposalId: string,
+/**
+ * Apply all captured files, or decline without writing.
+ */
+approve: boolean,
+/**
+ * Optional plain-text decline feedback.
+ */
+note: string | null, } | { "type": "requestConfirmation",
 /**
  * Method to confirm.
  */
@@ -311,7 +355,11 @@ request: FilesRequest, } | { "type": "connectors",
 /**
  * What to do.
  */
-request: ConnectorsRequest, } | { "type": "marketplace",
+request: ConnectorsRequest, } | { "type": "skills",
+/**
+ * The skills operation.
+ */
+request: SkillsRequest, } | { "type": "marketplace",
 /**
  * What to do.
  */
@@ -335,7 +383,31 @@ request: ProcessesRequest, } | { "type": "secrets",
 /**
  * What to do.
  */
-request: SecretsRequest, } | { "type": "secretScan",
+request: SecretsRequest, } | { "type": "githubReads",
+/**
+ * Read or set GitHub reads.
+ */
+request: GithubReadsRequest, } | { "type": "askGrants",
+/**
+ * List or remove.
+ */
+request: AskGrantsRequest, } | { "type": "vibeRules",
+/**
+ * List or remove.
+ */
+request: VibeRulesRequest, } | { "type": "chromeControl",
+/**
+ * What to do.
+ */
+request: ChromeControlRequest, } | { "type": "keepAwake",
+/**
+ * Read or save the preference.
+ */
+request: KeepAwakeRequest, } | { "type": "newChat",
+/**
+ * The operation.
+ */
+request: NewChatRequest, } | { "type": "secretScan",
 /**
  * Scanner operation.
  */
@@ -361,7 +433,11 @@ request: SessionToolsRequest, } | { "type": "search",
  */
 request: SearchRequest, };
 
-export type CommandResult = { "type": "sessions",
+export type CommandResult = { "type": "protectedChange",
+/**
+ * Final review state.
+ */
+proposal: ProtectedChangeView, } | { "type": "sessions",
 /**
  * Local-only sessions first (newest first), then the server's page in order.
  */
@@ -422,7 +498,11 @@ status: KeyStatusView, } | { "type": "keyCandidates",
 /**
  * Mistral credentials already in the vault (metadata).
  */
-candidates: Array<KeyCandidateView>, } | { "type": "keyTest",
+candidates: Array<KeyCandidateView>, } | { "type": "mistralKeys",
+/**
+ * Account rows without credential values.
+ */
+keys: Array<MistralKeyView>, } | { "type": "keyTest",
 /**
  * Models the key can use.
  */
@@ -490,7 +570,11 @@ result: ImagesResult, } | { "type": "connectors",
 /**
  * The connectors request's answer.
  */
-result: ConnectorsResult, } | { "type": "marketplace",
+result: ConnectorsResult, } | { "type": "skills",
+/**
+ * The skills response.
+ */
+result: SkillsResult, } | { "type": "marketplace",
 /**
  * The marketplace request's answer.
  */
@@ -514,7 +598,51 @@ result: ProcessesResult, } | { "type": "secrets",
 /**
  * The secrets request's answer.
  */
-result: SecretsResult, } | { "type": "secretScan",
+result: SecretsResult, } | { "type": "githubReads",
+/**
+ * Current GitHub reader state.
+ */
+view: GithubReadsView, } | { "type": "askGrants",
+/**
+ * The grants after the request.
+ */
+grants: Array<SessionGrant>,
+/**
+ * What "Allow for this session" would keep on each open card that offers it (its covers line).
+ */
+offers: Array<GrantOffer>,
+/**
+ * How many grants the request removed (0 for `list`).
+ */
+removed: number, } | { "type": "chromeControl",
+/**
+ * The rows, the level and the setup status.
+ */
+view: ChromeControlView,
+/**
+ * The set up offer the window shows before the click (`offerSetup` only).
+ */
+offer: ToolsInstallOffer | null, } | { "type": "vibeRules",
+/**
+ * Each rule: a tool-wide `always`, or one added allowlist pattern.
+ */
+rules: Array<VibeRule>,
+/**
+ * Vibe's default allowlists were read, so its shipped patterns are left out.
+ */
+defaultsKnown: boolean,
+/**
+ * How many rules the request removed (0 for `list`).
+ */
+removed: number, } | { "type": "keepAwake",
+/**
+ * Core-owned view.
+ */
+view: KeepAwakeView, } | { "type": "newChat",
+/**
+ * The current state.
+ */
+view: NewChatView, } | { "type": "secretScan",
 /**
  * Value-free scanner view.
  */
@@ -567,7 +695,45 @@ export type ErrorCode = "denied" | "invalidParams" | "confirmationRequired" | "c
 
 export type Origin = "ui" | "debug-api";
 
-export type AlertKind = "bypassToolPermissions" | "resyncPaused" | "accessModeLowered" | "accessModeUnverified" | "turnsInterrupted" | "reopenFailed" | "temporaryCleanupFailed" | "temporaryCleanupRecovered" | "remoteFileCleanupFailed" | "libraryListPartial" | "pluginReloadFailed" | "networkSettingsRejected";
+export type ToolsInstallOffer = { 
+/**
+ * Single-use id the click sends back.
+ */
+offerId: string, 
+/**
+ * `skill`, `skillUpdate` or `marketplace`.
+ */
+kind: string, 
+/**
+ * The name shown.
+ */
+name: string, 
+/**
+ * Who publishes it, when known.
+ */
+publisher: string | null, 
+/**
+ * Where it comes from (the skill registry and its id, or the reviewed Tools catalog).
+ */
+source: string, 
+/**
+ * Its licence, when the source states one.
+ */
+licence: string | null, 
+/**
+ * What it adds or runs, in plain words.
+ */
+runs: string, 
+/**
+ * The version installed by the click, when known.
+ */
+version: number | null, 
+/**
+ * Unix milliseconds after which the click is refused (ask the window for a fresh offer).
+ */
+expiresAt: number, };
+
+export type AlertKind = "bypassToolPermissions" | "resyncPaused" | "accessModeLowered" | "accessModeUnverified" | "turnsInterrupted" | "reopenFailed" | "modelChoiceNotRestored" | "temporaryCleanupFailed" | "temporaryCleanupRecovered" | "remoteFileCleanupFailed" | "libraryListPartial" | "pluginReloadFailed" | "networkSettingsRejected" | "toolsUnavailable";
 
 export type CallbackInfo = { 
 /**

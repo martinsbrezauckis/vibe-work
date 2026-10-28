@@ -11,6 +11,7 @@
  * out as the window's (the Debug API origin requires a request being served). The
  * answer comes once the dictation records, failed, or waits for the microphone (`micPending`, an OS prompt), so an unanswered prompt never holds the other `ui/*` requests;
  * - `stop` (waits for the text), `cancel`;
+ * - `readAloud {sessionId?, text?}`: queues a one-time reading through the core without changing settings.
  * - `narrateLast {sessionId?}`: narrates the session's last finished turn; `stopNarration`, `skipNarration`.
  * - `settings {narration?, voice?, language?, micId?, voiceChatAutoEnd?, voiceChatPauseMs?}`: the Settings screen's
  * voice choices (the Debug API acts as the user);
@@ -133,7 +134,7 @@ async function startUntilMicPending(
 }
 
 /** Runs one `ui/voice` request. */
-export async function handleVoice(app: App, body: unknown): Promise<unknown> {
+async function handleVoice(app: App, body: unknown): Promise<unknown> {
   const input = asObject(body);
   const voice = app.voice;
   if (voice === null) throw new UiControlError("serverUnavailable", "the app has no core");
@@ -159,9 +160,20 @@ export async function handleVoice(app: App, body: unknown): Promise<unknown> {
       case "cancel":
         voice.dictation.cancel();
         return readVoice(app);
+      case "readAloud": {
+        if (sessionId === null) throw new UiControlError("invalidParams", "no session is selected");
+        const text = input["text"];
+        if (text !== undefined && typeof text !== "string")
+          throw new UiControlError("invalidParams", "Reading aloud needs text in plain words.");
+        const answer = await app.core?.run({
+          type: "speech",
+          request: { op: "readAloud", sessionId, text: text ?? null },
+        });
+        return answer?.type === "speech" ? answer.result : null;
+      }
       case "narrateLast":
         if (sessionId === null) throw new UiControlError("invalidParams", "no session is selected");
-        await voice.narration.narrateLast(sessionId, "debug-api");
+        await voice.narration.narrateLast(sessionId);
         return readVoice(app);
       case "stopNarration":
         voice.narration.stopAll();

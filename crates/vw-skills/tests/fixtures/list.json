@@ -1,7 +1,9 @@
 {
   "method": "skills/list",
   "params": {
-    "sessionId": "session-skills"
+    "sessionId": "session-skills",
+    "cwd": null,
+    "trustWorkspace": false
   },
   "result": {
     "skills": [

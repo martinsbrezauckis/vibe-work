@@ -38,7 +38,7 @@ zbus-secret-service-keyring-store = { version = "=1.0.1", default-features = fal
 [target.'cfg(windows)'.dependencies]
 windows-native-keyring-store = "=1.1.0"
 # Rust-only BLAKE3 on Windows (same output; no C/asm build): the copied vault-core uses blake3, and
-# its C/assembly backends cannot be cross-built for the msvc target from WSL (check-all's Windows lint).
+# its C/assembly backends cannot be cross-built for the msvc target from WSL (the Windows cross-target lint).
 blake3 = { version = "1.8", features = ["pure"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]

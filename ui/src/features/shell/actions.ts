@@ -1,6 +1,6 @@
 /**
  * The shell's own actions, defined once and offered twice: as palette commands and as keyboard
- * shortcuts (new session, list toggle, tabs, theme and settings).
+ * shortcuts (new session, the waiting prompt, list toggle, tabs, theme and settings).
  * Depends on: AppContext types, state/panelLayout, state/shellState. Called by: useShellWiring.
  * Invariants: an action reads the current state when it runs (never a stale closure); the same
  * combo string drives the shortcut and the label shown in the palette.
@@ -11,6 +11,7 @@ import { TAB_META } from "../../state/shellState";
 import { switchTheme } from "../../state/themeSwitch";
 import type { App } from "./AppContext";
 import { openNewChat } from "./newChat";
+import { GO_TO_PROMPT_KEYS, goToWaitingPrompt } from "../ask/waiting";
 
 /** One shell action. */
 export interface ShellAction {
@@ -74,6 +75,13 @@ export function shellActions(app: App): ShellAction[] {
       },
     },
     {
+      id: "open-files",
+      label: `Open the ${TAB_META.git.label} tab`,
+      run: () => {
+        a.openTab("git");
+      },
+    },
+    {
       id: "open-changes",
       label: `Open the ${TAB_META.changes.label} tab`,
       run: () => {
@@ -89,6 +97,13 @@ export function shellActions(app: App): ShellAction[] {
       },
     },
     { id: "close-panel", label: "Close the side panel", run: a.closePanel },
+    {
+      id: "open-skills",
+      label: "Open Skills",
+      run: () => {
+        void app.market?.actions.showTab("skills");
+      },
+    },
     {
       id: "open-connectors",
       label: "Open connectors and MCP servers",
@@ -119,6 +134,16 @@ export function shellActions(app: App): ShellAction[] {
       keys: "Mod+,",
       run: () => {
         a.openSettings();
+      },
+    },
+    {
+      // The way back to a card for someone who cannot see where it is.
+      id: "go-to-prompt",
+      label: TEXT.askGoTo,
+      keys: GO_TO_PROMPT_KEYS,
+      keywords: "permission prompt approval card answer waiting ask question allow",
+      run: () => {
+        goToWaitingPrompt(app);
       },
     },
   ];

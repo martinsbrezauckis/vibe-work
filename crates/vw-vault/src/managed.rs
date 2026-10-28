@@ -3,7 +3,9 @@
 //! Depends on `layout`, `repo` and `private_location`; called by `Vault`. Startup relocates the older
 //! private profile with verification before rewriting its choice; shared choices remain binding.
 
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
 
@@ -13,6 +15,42 @@ use crate::location::VaultLocation;
 use crate::private_location::{Migration, check_path, private_vault_dir};
 use crate::repo::{create_private_dir_all, write_synced};
 use crate::vault::VaultKind;
+
+/// Private vault folders this process is creating right now. Creation writes repository data before its profile,
+/// so a status read in between must see "not created yet", not damage. After a crash nothing is listed here, and
+/// leftover data without a profile is still refused as damaged.
+static CREATING: Mutex<BTreeSet<PathBuf>> = Mutex::new(BTreeSet::new());
+
+/// Marks one private folder as being created until dropped.
+pub(crate) struct Creating(PathBuf);
+
+impl Creating {
+    /// `None` while another creation of the same folder is running.
+    pub(crate) fn begin(dir: &Path) -> Option<Self> {
+        let mut creating = CREATING
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        creating
+            .insert(dir.to_owned())
+            .then(|| Self(dir.to_owned()))
+    }
+}
+
+impl Drop for Creating {
+    fn drop(&mut self) {
+        CREATING
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(&self.0);
+    }
+}
+
+fn being_created(dir: &Path) -> bool {
+    CREATING
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .contains(dir)
+}
 
 fn private_vault_name() -> &'static str {
     vw_vocabulary::label("vaultKinds", "vibeWork")
@@ -232,6 +270,7 @@ impl ManagedVault {
                     path: self.private_dir.clone(),
                     vault,
                 }),
+                Detected::None if being_created(&self.private_dir) => {}
                 Detected::None => {
                     // A prior creation may have written encrypted repository data before its profile.
                     // Treat that as damaged, never initialize another keyfile over the same folder.
@@ -297,5 +336,45 @@ impl ManagedVault {
 
     pub(crate) fn has_record(&self) -> bool {
         Path::new(&self.selection_path).is_file()
+    }
+}
+
+#[cfg(test)]
+mod creating_tests {
+    use super::*;
+
+    #[test]
+    fn a_private_folder_being_created_is_not_reported_as_damaged() {
+        let root = std::env::temp_dir().join(format!("vw-vault-creating-{}", std::process::id()));
+        let data = root.join("app").join("data");
+        std::fs::create_dir_all(&data).unwrap();
+        let managed = ManagedVault::new(data).unwrap();
+        // What an interrupted (or still running) creation leaves: repository data, no profile yet.
+        std::fs::create_dir_all(managed.private_dir.join("repo")).unwrap();
+        std::fs::write(managed.private_dir.join("repo").join("keyfile"), b"{}").unwrap();
+        let shared = VaultLocation::explicit(root.join("shared"));
+        assert!(matches!(
+            managed.available(&shared),
+            Err(VaultError::Corrupt(_))
+        ));
+
+        let creating = Creating::begin(&managed.private_dir).unwrap();
+        assert!(
+            Creating::begin(&managed.private_dir).is_none(),
+            "a second creation of the same folder must not start"
+        );
+        let available = managed.available(&shared).unwrap();
+        assert!(
+            available
+                .iter()
+                .all(|vault| vault.kind != VaultKind::VibeWork)
+        );
+
+        drop(creating);
+        assert!(
+            matches!(managed.available(&shared), Err(VaultError::Corrupt(_))),
+            "after the creation ends, leftover data without a profile is damaged again"
+        );
+        std::fs::remove_dir_all(&root).ok();
     }
 }

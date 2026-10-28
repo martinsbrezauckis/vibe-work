@@ -34,7 +34,7 @@ export function scoreFuzzy(query: string, target: string): number {
 }
 
 /** Label match (fuzzy), or a plain substring hit in the keywords (ranked just below a label hit). */
-export function scoreItem(query: string, item: PaletteCommand): number {
+function scoreItem(query: string, item: PaletteCommand): number {
   const label = scoreFuzzy(query, item.label);
   if (item.keywords === undefined) return label;
   const words = query

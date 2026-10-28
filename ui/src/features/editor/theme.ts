@@ -21,7 +21,7 @@ export const editorTheme = EditorView.theme({
   "&": { height: "100%", minHeight: "0", backgroundColor: "var(--bg)", color: "var(--text)" },
   ".cm-scroller": {
     overflow: "auto",
-    fontFamily: "var(--mono)",
+    fontFamily: "var(--font-mono)",
     fontSize: "12.5px",
     lineHeight: "1.55",
   },
@@ -39,6 +39,11 @@ export const editorTheme = EditorView.theme({
     backgroundColor: "var(--term-selection)",
   },
   ".cm-searchMatch": { backgroundColor: "var(--mark)" },
+  // Lines Vibe changed while the file was open: a soft orange band with an orange edge.
+  ".cm-vibe-line": {
+    backgroundColor: "var(--orange-soft)",
+    boxShadow: "inset 2px 0 0 var(--orange)",
+  },
   ".cm-searchMatch.cm-searchMatch-selected": { backgroundColor: "var(--mark-on)" },
   ".cm-panels": {
     backgroundColor: "var(--panel)",
@@ -46,6 +51,12 @@ export const editorTheme = EditorView.theme({
     borderColor: "var(--line)",
   },
   ".cm-panels input": {
+    backgroundColor: "var(--raised)",
+    color: "var(--text)",
+    borderColor: "var(--line-2)",
+  },
+  ".cm-panels .cm-button": {
+    backgroundImage: "none",
     backgroundColor: "var(--raised)",
     color: "var(--text)",
     borderColor: "var(--line-2)",

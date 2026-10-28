@@ -223,7 +223,8 @@ fn thinking_levels_match_the_vibe_wire_values_in_both_directions() {
 
 #[test]
 fn missing_required_fields_and_wrong_known_types_are_rejected() {
-    assert!(serde_json::from_value::<SkillsListParams>(json!({})).is_err());
+    // Vibe 3.0.2: every `skills/list` field is optional (a session-less list), so only a wrong type fails.
+    assert!(serde_json::from_value::<SkillsListParams>(json!({"sessionId": 1})).is_err());
     assert!(serde_json::from_value::<SkillsListResponse>(json!({})).is_err());
     assert!(
         serde_json::from_value::<SkillsSetVersionParams>(

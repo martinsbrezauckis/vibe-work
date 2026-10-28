@@ -5,9 +5,8 @@
 //! `command`, `event`, `documents` (the handler), the UI through the generated TypeScript, vw-debug-api.
 //! Invariants:
 //! - Wire form: `{"op": "<camelCase>", ...camelCase fields}`, unknown fields refused.
-//! - **No operation adds a file.** Files come only from the native picker or an OS drop, handled in
-//!   Rust (`Core::add_documents`); no request carries a path or file bytes, so neither the webview nor
-//!   the Debug API can make the app read a file of its choosing (design §3).
+//! - Native pickers/drops supply paths through `Core::add_documents`; browser uploads supply bytes
+//!   through `addDropped`. Both use the same kind detection and size bounds.
 //! - No request carries a caller-supplied path. `save` resolves a known session's cwd in core and
 //!   returns the attachment path after its bytes are safely written there.
 
@@ -39,13 +38,18 @@ pub enum DocumentsRequest {
         /// Session whose project folder owns the attachment.
         session_id: String,
     },
-    /// Reads an OCR document with Mistral OCR (spends the user's OCR quota). From the Debug API origin
-    /// the window asks the native confirmation (the file leaves the computer); the Debug API's is answered by the core.
+    /// Reads an OCR document with Mistral OCR (spends the user's OCR quota). The composer calls this
+    /// automatically on attachment and when the user retries a failed read.
     Extract {
         /// The document.
         id: String,
     },
-    /// Removes a document (sent, or the user removed the chip).
+    /// Releases pending bytes after sending or reading, retaining saved paths for the chat.
+    Release {
+        /// The document.
+        id: String,
+    },
+    /// Removes a document and revokes its saved paths (the user removed the attachment).
     Remove {
         /// The document.
         id: String,
@@ -138,7 +142,7 @@ pub struct DocumentView {
     pub kind: String,
     /// "PDF", "Word document", ...
     pub kind_label: String,
-    /// `ocr` (Mistral OCR on request), `local` (read here), or `file` (path only).
+    /// `ocr` (Mistral OCR), `local` (read here), or legacy `file` (path only).
     pub method: String,
     /// File size in bytes (at most 50 MB).
     pub size: u32,

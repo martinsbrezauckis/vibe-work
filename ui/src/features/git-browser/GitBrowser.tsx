@@ -1,7 +1,9 @@
 /** Virtualized project git explorer. Depends on virtua and browser model; called by the Git panel adapter. */
+import { Button } from "../../components/Controls";
 import { useMemo, useRef, useState, type KeyboardEvent, type ReactElement } from "react";
 import { VList, type VListHandle } from "virtua";
 import { NodeActions } from "./NodeActions";
+import { FileActions } from "./FileActions";
 import {
   stateWords,
   fileWords,
@@ -13,21 +15,27 @@ import { treeRows, type BrowserRow } from "./tree";
 
 export type GitBrowserProps = {
   repos: BrowserRepo[];
+  inHistory?: boolean;
   selectedSessionId?: string | null;
   onAction: (target: BrowserTarget, action: BrowserAction) => void;
   onFile: (target: BrowserTarget, path: string) => void;
+  onPoint?: (target: BrowserTarget, path: string) => void;
   loading?: boolean;
   error?: string | null;
+  note?: string | null;
   onRetry?: () => void;
 };
 
 export function GitBrowser({
   repos,
+  inHistory = false,
   selectedSessionId = null,
   onAction,
   onFile,
+  onPoint,
   loading = false,
   error = null,
+  note = null,
   onRetry,
 }: GitBrowserProps): ReactElement {
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
@@ -100,19 +108,24 @@ export function GitBrowser({
         <div className="key-problem" role="alert">
           {error}
           {onRetry && (
-            <button
+            <Button
               data-testid="git-browser.retry"
-              className="mini"
+              appearance="compact"
               type="button"
               onClick={onRetry}
             >
               Retry
-            </button>
+            </Button>
           )}
         </div>
       )}
       {rows.length === 0 && !loading && error === null && (
         <p className="gb-message">No repositories found in this project.</p>
+      )}
+      {note !== null && (
+        <p className="server-note" role="status">
+          {note}
+        </p>
       )}
       {rows.length > 0 && (
         <VList
@@ -169,6 +182,20 @@ export function GitBrowser({
                 <span className="gb-name">{row.name}</span>
                 {row.file && <span className="gb-file-state">{fileWords(row.file.status)}</span>}
               </div>
+              {/* A copy outside the project offers only its chat; pointing at its files is always refused. */}
+              {row.file && !row.target.restricted && (
+                <FileActions
+                  target={row.target}
+                  path={row.file.path}
+                  onPoint={
+                    onPoint === undefined
+                      ? undefined
+                      : () => {
+                          if (row.file) onPoint(row.target, row.file.path);
+                        }
+                  }
+                />
+              )}
               {(row.kind === "repository" || row.kind === "copy") && (
                 <>
                   <p className="gb-state">
@@ -181,6 +208,7 @@ export function GitBrowser({
                   </p>
                   <NodeActions
                     target={row.target}
+                    inHistory={inHistory}
                     selectedSessionId={selectedSessionId}
                     onAction={onAction}
                   />

@@ -94,8 +94,8 @@ export function planInWords(view: Pick<AccountView, "plan" | "planKind">): strin
   // "[Subscription] Pro" -> "Pro"; "[API] Scale plan" -> "Scale plan".
   const name = view.plan.replace(/^\[[^\]]*\]\s*/, "").trim() || view.plan;
   const plan = /\bplan$/i.test(name) ? name : `${name} plan`;
-  if (view.planKind === "chat") return `${plan} · this key uses your plan's included usage`;
-  if (view.planKind === "api") return `${plan} · this is an API key`;
+  if (view.planKind === "chat") return plan;
+  if (view.planKind === "api") return `${plan} · API key`;
   return plan;
 }
 
@@ -110,9 +110,14 @@ export interface UsageView {
 }
 
 /** Usage from a session object of the store (`session.tokenUsage`, `session.contextUsage`). */
-export function usageOf(session: Record<string, JsonValue | undefined> | undefined): UsageView {
+export function usageOf(
+  session: Record<string, JsonValue | undefined> | undefined,
+  runtime?: JsonValue,
+): UsageView {
   const tokens = asObject(session?.["tokenUsage"]);
   const fill = asObject(session?.["contextFill"]);
+  const active = asObject(asObject(asObject(runtime)?.["config"])?.["activeModel"]);
+  const threshold = count(active?.["autoCompactThreshold"]);
   // The stats event's own reading is used when it is more than zero; Vibe's `session.contextUsage` (what the
   // current context weighs, kept fresh by session patches) fills in when the stats reading is zero or absent.
   const fromStats = count(fill?.["contextTokens"]);
@@ -122,7 +127,8 @@ export function usageOf(session: Record<string, JsonValue | undefined> | undefin
     outputTokens: count(tokens?.["outputTokens"]),
     totalTokens: count(tokens?.["totalTokens"]),
     contextTokens: fromStats !== null && fromStats > 0 ? fromStats : (fromSession ?? fromStats),
-    untilCompaction: count(fill?.["contextWindow"]),
+    untilCompaction:
+      threshold !== null && threshold > 0 ? threshold : count(fill?.["contextWindow"]),
   };
 }
 
@@ -181,7 +187,7 @@ export function formatTokens(value: number | null): string {
 }
 
 /** How long a rate-limit snapshot counts as current: the numbers are per minute. */
-export const RATE_LIMITS_FRESH_MS = 60_000;
+const RATE_LIMITS_FRESH_MS = 60_000;
 
 /** True while `limits` is recent enough to be shown as the current headroom (the status bar hides its warning otherwise). */
 export function rateLimitsFresh(limits: RateLimitsView, nowMs: number): boolean {
@@ -216,7 +222,7 @@ export function rateLimitsText(limits: RateLimitsView | null, nowMs: number): st
 }
 
 /** Below this share of the minute's tokens or requests left, the status bar warns. */
-export const RATE_WARN_BELOW = 0.2;
+const RATE_WARN_BELOW = 0.2;
 
 /**
  * The status bar's rate-limit warning: the smaller of "tokens left" and "requests left" as a whole percent, when it is

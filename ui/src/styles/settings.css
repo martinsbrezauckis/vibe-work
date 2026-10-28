@@ -20,7 +20,7 @@
   background: var(--bg);
   color: var(--text);
   border: 1px solid var(--line-2);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   padding: 8px 10px;
   font-family: var(--font-mono);
   font-size: var(--text-12-5);
@@ -28,9 +28,6 @@
 }
 .instr-text:focus-visible {
   outline: none;
-  box-shadow:
-    0 0 0 2px var(--bg),
-    0 0 0 4px var(--focus);
 }
 .tb-btn.primary,
 .set-cat-body .btn-primary {
@@ -52,7 +49,7 @@
   overflow: auto;
   background: var(--bg);
   border: 1px solid var(--line-2);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   font-family: var(--font-mono);
   font-size: var(--text-12-5);
   line-height: var(--leading-ui);
@@ -81,4 +78,28 @@
   height: 8px;
   margin: 8px 0 0;
   accent-color: var(--orange);
+}
+
+/* Settings › Browser › Your Chrome: the three level cards (the vault-choice card) side by side when there is room,
+   stacked on a narrow window; each lists what its level includes. */
+.vault-choices.chrome-levels {
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+}
+.chrome-levels .vault-choice {
+  align-content: start;
+}
+.chrome-levels .vault-choice strong {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+.chrome-levels .vault-choice:disabled {
+  cursor: default;
+  opacity: 0.7;
+}
+.chrome-level-list {
+  margin: 6px 0 0;
+  padding-left: 16px;
+  color: var(--text-3);
 }

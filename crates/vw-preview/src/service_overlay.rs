@@ -7,11 +7,16 @@ use crate::layout::{self, Rect};
 
 /// The selected native child's rectangle in window logical pixels.
 pub struct BrowserOverlayPrepared {
-    /// Kept for the typed command's compatibility; parked pages never expose copied pixels.
+    /// The page's last picture (a PNG data URL) for the cover while it is parked, so the panel keeps showing the
+    /// page instead of an empty block; `None` when it could not be taken in time or pictures of the page are
+    /// blocked (a secret was put into it since its last load), and the cover stays plain.
     pub snapshot: Option<String>,
     /// Native page bounds, which can be narrower than the Browser panel at a device width.
     pub bounds: Rect,
 }
+
+/// How long a menu waits for the page's picture before it opens over a plain cover.
+const OVERLAY_SHOT: std::time::Duration = std::time::Duration::from_millis(400);
 
 impl PreviewService {
     fn overlay_target(&self, owner: &str, page: &str) -> Result<(MountId, Rect), PreviewError> {
@@ -27,12 +32,17 @@ impl PreviewService {
             .and_then(|tabs| tabs.selected.as_deref())
             .unwrap_or(owner);
         if selected != page || !state.is_shown(page) {
-            return Err(PreviewError::InvalidTab(
-                "page is no longer selected and visible".to_owned(),
-            ));
+            tracing::debug!(
+                owner,
+                page,
+                selected,
+                shown = state.shown.as_ref().map(|s| s.session_id.as_str()),
+                "browser overlay refused: page not selected and shown"
+            );
+            return Err(PreviewError::NotInView);
         }
         let entry = state.entries.get(page).ok_or(PreviewError::NothingOpen)?;
-        let mount = entry.mount.as_ref().ok_or(PreviewError::NothingOpen)?;
+        let mount = entry.ready_mount().ok_or(PreviewError::NothingOpen)?;
         let area = state
             .shown
             .as_ref()
@@ -47,7 +57,8 @@ impl PreviewService {
     /// Pins the selected child identity and bounds before the chrome opens.
     ///
     /// # Errors
-    /// Returns an error when the page is no longer selected, mounted or placeable.
+    /// Returns an error when the page is not mounted or placeable; [`PreviewError::NotInView`] when it is no longer
+    /// the selected, shown page (a tab switch overtook the menu), which the caller answers as nothing to park.
     pub async fn prepare_browser_overlay(
         &self,
         owner: &str,
@@ -63,14 +74,28 @@ impl PreviewService {
             .get(page)
             .map(|entry| *entry.loads.borrow())
             .ok_or(PreviewError::NothingOpen)?;
+        let blocked = self
+            .inner
+            .lock()
+            .entries
+            .get(page)
+            .is_some_and(|entry| entry.shots_blocked_at == Some(loads));
+        // Taken while the page is still shown (parking hides it next); a slow picture is skipped, never waited for.
+        let snapshot = if blocked {
+            None
+        } else {
+            match tokio::time::timeout(OVERLAY_SHOT, self.engine.screenshot(&id)).await {
+                Ok(Ok(png)) => crate::shot::shape(&png)
+                    .ok()
+                    .map(|shot| format!("data:image/png;base64,{}", shot.base64())),
+                _ => None,
+            }
+        };
         self.inner
             .lock()
             .browser_overlay_prepared
             .insert(page.to_owned(), (id.label, loads, bounds));
-        Ok(BrowserOverlayPrepared {
-            snapshot: None,
-            bounds,
-        })
+        Ok(BrowserOverlayPrepared { snapshot, bounds })
     }
 
     /// Parks the selected native child without changing its document, scroll or registry ownership.

@@ -5,10 +5,12 @@
  * Invariants: process names, output lines, URLs and file names are untrusted text and only ever shown as text;
  * stopping a process is offered only where the core's explanation offers it (one of our sessions' processes).
  */
+import { Button } from "../../components/Controls";
 import { TEXT } from "../../vocabulary";
 import type { ReactElement } from "react";
 
 import type { BusyOption, BusyPortView, PreviewTarget, PreviewView } from "../../protocol/core";
+import { useShellState } from "../shell/hooks";
 import type { PreviewList, Previews } from "./store";
 
 function TargetRow({
@@ -42,15 +44,15 @@ function TargetRow({
       <span className="preview-who" title={tip}>
         {who}
       </span>
-      <button
+      <Button
         data-testid="preview.servers-preview-btn"
         type="button"
-        className="preview-btn"
+        appearance="preview"
         disabled={busy}
         onClick={onOpen}
       >
         {shown ? "Open again" : "Open"}
-      </button>
+      </Button>
     </li>
   );
 }
@@ -107,19 +109,19 @@ function BusyRow({
       {item.line !== null && <code className="preview-line">{item.line}</code>}
       <span className="preview-options">
         {item.options.map((option) => (
-          <button
+          <Button
             data-testid="preview.servers-act"
             data-item-id={optionLabel(option)}
             key={optionLabel(option)}
             type="button"
-            className="preview-btn"
+            appearance="preview"
             disabled={busy}
             onClick={() => {
               act(option);
             }}
           >
             {optionLabel(option)}
-          </button>
+          </Button>
         ))}
       </span>
     </li>
@@ -134,7 +136,10 @@ export function PreviewNotes({
   preview: PreviewView;
   showRefused?: boolean;
 }): ReactElement | null {
-  if (preview.downloads.length === 0 && (!showRefused || preview.refused.length === 0)) return null;
+  const refused = preview.refused.filter(
+    (url) => !/^(?:about:(?:srcdoc|blank)(?:[?#]|$)|data:)/i.test(url),
+  );
+  if (preview.downloads.length === 0 && (!showRefused || refused.length === 0)) return null;
   return (
     <div className="preview-notes">
       {preview.downloads.length > 0 && (
@@ -146,9 +151,10 @@ export function PreviewNotes({
           ))}
         </ul>
       )}
-      {showRefused && preview.refused.length > 0 && (
+      {showRefused && refused.length > 0 && (
         <p className="preview-refused">
-          Not opened (not this session's server): {preview.refused[preview.refused.length - 1]}
+          Not opened: {refused[refused.length - 1]}. Open a web address from the address bar or a
+          server from Browser options.
         </p>
       )}
     </div>
@@ -170,6 +176,8 @@ export function Servers({
   /** Page-only guidance; the toolbar popover contains server choices and busy-port actions. */
   emptyState?: boolean;
 }): ReactElement {
+  // The New chat screen has no agent yet: its servers are the ones the user starts in its terminal.
+  const beforeChat = useShellState((s) => s.newChatOwner === sessionId);
   const running = list.targets.filter((t) => t.listening);
   const shownPort = portOf(list.preview?.url ?? null);
   const free = list.targets.filter((t) => !t.listening);
@@ -202,7 +210,9 @@ export function Servers({
         </ul>
       ) : emptyState && (list.preview?.url ?? null) === null ? (
         <p className="empty">
-          No server of this session is running. Ask Vibe to start one; its ports are{" "}
+          {beforeChat
+            ? "No server is running here yet. Start one in the Terminal; its ports are "
+            : "No server of this session is running. Ask Vibe to start one; its ports are "}
           {free.map((t) => t.port).join(", ") || "not leased yet"}.
         </p>
       ) : null}

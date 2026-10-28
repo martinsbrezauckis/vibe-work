@@ -9,20 +9,24 @@
  * Adapted from ShellX.
  * Depends on: model/entries, Time, state/errorDetail. Called by: RowView.
  */
+import { Badge } from "../../../components/Controls";
 import { type ReactElement, memo } from "react";
 
 import { useErrorText } from "../../../state/errorDetail";
 import { TEXT } from "../../../vocabulary";
 import { type Obj, detailOf, entryId, entryType, num, obj, str } from "../model/entries";
+import { noticeText } from "../model/notices";
 import { formatElapsed } from "./Time";
 
 /** A notice pill; `level` (`info`, `warning`, `error`) sets its tone. */
 export const NoticeRow = memo(function NoticeRow({ entry }: { entry: Obj }): ReactElement {
   const level = str(entry["level"]) ?? "info";
-  const message = useErrorText(str(entry["message"]) ?? "");
+  const message = useErrorText(noticeText(entry));
   return (
-    <div
-      className={`notice-pill ${level}`}
+    <Badge
+      presentation="notice"
+      state={level}
+      as="div"
       data-entry-id={entryId(entry)}
       data-kind={str(detailOf(entry)["kind"]) ?? ""}
     >
@@ -32,7 +36,7 @@ export const NoticeRow = memo(function NoticeRow({ entry }: { entry: Obj }): Rea
       />
       {level === "error" ? <span className="sr">Error: </span> : null}
       {message}
-    </div>
+    </Badge>
   );
 });
 
@@ -45,9 +49,21 @@ const CHECKPOINT_TEXT: Record<string, string> = {
 };
 
 /** A checkpoint divider. */
-export const DividerRow = memo(function DividerRow({ entry }: { entry: Obj }): ReactElement {
+export const DividerRow = memo(function DividerRow({
+  entry,
+  text: display,
+}: {
+  entry: Obj;
+  text?: string;
+}): ReactElement {
   const kind = str(entry["kind"]) ?? "";
-  const text = str(entry["message"]) || CHECKPOINT_TEXT[kind] || "Checkpoint";
+  const text =
+    display ??
+    (kind === "model_change"
+      ? "Model changed"
+      : kind === "agent_change"
+        ? noticeText(entry)
+        : str(entry["message"]) || CHECKPOINT_TEXT[kind] || "Checkpoint");
   return (
     <div
       className="tx-divider"

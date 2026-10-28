@@ -4,6 +4,7 @@
 // applied to the live DOM instead of a source map.
 // Password, one-time-code, card and vault-filled fields never leave the page (as in the observation).
 // REQ: { page, maxElements }. Synchronous; the answer is untrusted page data, every string clipped.
+/* global INTERACTIVE, REQ, clip, collect, globalRect, inFrame, labelOf, matches, secretKind, vaultFilled, viewOf -- Supplied by the Rust script assembler and its shared prelude. */
 (() => {
   __VW_COMMON__
   const LANDMARK = new Set(["header", "nav", "main", "footer", "aside", "section", "article", "form"]);
@@ -99,7 +100,7 @@
     if (tag === "a") {
       try {
         item.href = String(new URL(el.getAttribute("href") || "", location.href).href).slice(0, 300);
-      } catch (_) {
+      } catch {
         item.href = clip(el.getAttribute("href"), 300);
       }
     }

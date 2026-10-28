@@ -171,9 +171,84 @@ pub(crate) fn merge_session_servers(servers: &mut Vec<ServerView>, read: &Value)
             tools: tools(source),
             error,
             plugin,
+            source: None,
             configured: false,
             key: None,
             name,
         });
+    }
+}
+
+/// Attaches the pinned plugin's origin, never inferring it from a server or plugin name.
+pub(crate) fn merge_plugin_sources(servers: &mut [ServerView], read: &Value) {
+    for server in servers {
+        server.source = server.plugin.as_ref().and_then(|name| {
+            read.pointer("/plugins/plugins")?
+                .as_array()?
+                .iter()
+                .find(|plugin| plugin["name"].as_str() == Some(name))
+                .and_then(|plugin| text(plugin, "scope"))
+        });
+    }
+}
+
+/// Marks only the app's injected stdio server, after the core confirms its session registration.
+pub(crate) fn mark_injected_server(servers: &mut [ServerView]) {
+    for server in servers {
+        if !server.configured
+            && server.plugin.is_none()
+            && server.name == vw_agent_tools::wire::SERVER_NAME
+            && server.transport == "stdio"
+        {
+            server.source = Some("builtin".to_owned());
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn server_origin_comes_from_its_pinned_plugin() {
+        for scope in [Some("builtin"), Some("global"), Some("project"), None] {
+            let mut servers = Vec::new();
+            merge_session_servers(
+                &mut servers,
+                &json!({"mcp": {"sources": [
+                    {"name": "vw", "pluginName": "vw"}, {"name": "personal"}
+                ]}}),
+            );
+            merge_plugin_sources(
+                &mut servers,
+                &json!({"plugins": {"plugins": [
+                    {"name": "vw", "scope": scope}
+                ]}}),
+            );
+            assert_eq!(servers[0].source.as_deref(), scope);
+            assert_eq!(servers[1].source, None);
+            assert_eq!(servers[0].name, "vw");
+        }
+    }
+    #[test]
+    fn injected_origin_does_not_label_a_configured_or_plugin_namesake() {
+        let mut servers = Vec::new();
+        merge_session_servers(
+            &mut servers,
+            &json!({"mcp": {"sources": [
+                {"name": "vw", "transport": "stdio"},
+                {"name": "personal", "transport": "stdio"},
+                {"name": "from-plugin", "transport": "stdio", "pluginName": "vw"}
+            ]}}),
+        );
+        mark_injected_server(&mut servers);
+        assert_eq!(servers[0].source.as_deref(), Some("builtin"));
+        assert_eq!(servers[1].source, None);
+        assert_eq!(servers[2].source, None);
+        servers[0].configured = true;
+        servers[0].source = None;
+        mark_injected_server(&mut servers);
+        assert_eq!(servers[0].source, None);
     }
 }

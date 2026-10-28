@@ -20,6 +20,24 @@ use serde::{Deserialize, Serialize};
     deny_unknown_fields
 )]
 pub enum SpeechRequest {
+    /// Window receipt after preparing the first speech call, before accepting audio into its queue.
+    ReadingReady {
+        /// The pending reading event's id.
+        request_id: String,
+        /// False when speech could not be made; no bar or audio is added.
+        available: bool,
+        /// True with unavailable when the window already holds two requested readings.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[cfg_attr(feature = "ts", ts(optional))]
+        busy: Option<bool>,
+    },
+    /// Queue a one-time reading of this session's latest finished reply or the supplied text.
+    ReadAloud {
+        /// The owner-selected session; session agents use the credential-scoped tool instead.
+        session_id: String,
+        /// A requested part, or None for the last finished reply.
+        text: Option<String>,
+    },
     /// Starts a dictation. The window asks the native confirmation (the microphone turns on and what it hears
     /// goes to Mistral); the Debug API's is answered by the core; the UI opens the microphone only after this succeeded.
     Start {
@@ -78,6 +96,13 @@ pub enum DictationMode {
     rename_all_fields = "camelCase"
 )]
 pub enum SpeechResult {
+    /// Whether a one-time reading started, with a plain sentence for the caller.
+    Reading {
+        /// started, nobodyListening, keyMissing, voiceUnavailable or noReply (accepted/expired for a window receipt).
+        status: String,
+        /// One plain sentence explaining the outcome.
+        message: String,
+    },
     /// `start`.
     Started {
         /// The new stream (random).

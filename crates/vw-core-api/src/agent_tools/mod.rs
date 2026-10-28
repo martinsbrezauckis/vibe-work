@@ -2,7 +2,8 @@
 //!
 //! - **Registration:** every `session/start`, `continue`, `resume` and `fork` that reaches Vibe gets our stdio MCP
 //!   server in `agentConfig.mcpServers` ([`AgentTools::inject`], called by `channels` AFTER the gate, which still
-//!   refuses a caller's own `mcpServers`), with the session's credential in the server's environment.
+//!   refuses a caller's own `mcpServers`), with the session's credential in the server's environment, and the
+//!   tool filter of the tool sets that load only when needed (`on_demand`).
 //! - **Channel:** a loopback listener (`server`) answers the `vw-agent-tools` binary: the session tools
 //!   (`tools`; the secret broker in `secret_run`) for a session credential, `kill_check` (`killcheck`) and `git_check` (`gitcheck`) for the
 //!   hook credential.
@@ -27,14 +28,19 @@ pub(crate) mod panel;
 mod preview_tools;
 mod process_reply;
 mod secret_dialog;
+pub(crate) mod secret_env;
 mod secret_exec;
-mod secret_pin;
 mod secret_run;
-pub(crate) use secret_run::permission_project_of;
+pub(crate) use secret_run::{permission_project_of, visible_logins};
+mod document_consent;
+mod document_tools;
+mod prepare;
 mod server;
 pub(crate) mod session;
+pub(crate) mod shell_commands;
 mod start;
 mod tools;
+pub(crate) use prepare::prepare;
 mod work_tools;
 
 /// The secret broker's dialog method (one of the vault's native-only dialogs, `vault_scope`).
@@ -71,19 +77,10 @@ pub struct AgentToolsConfig {
     pub start_wait: Duration,
     /// Live `process_start` processes per session. Default 8.
     pub max_per_session: usize,
-    /// Test switch: called with the program's path after `secret_run`'s final check, right before the
-    /// program starts, so a test can race a file swap into exactly that window. Default `None`.
-    pub secret_run_before_start: Option<BeforeStart>,
-}
-
-/// A test callback for [`AgentToolsConfig::secret_run_before_start`].
-#[derive(Clone)]
-pub struct BeforeStart(pub Arc<dyn Fn(&Path) + Send + Sync>);
-
-impl std::fmt::Debug for BeforeStart {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("BeforeStart(..)")
-    }
+    /// How long one `propose_protected_change` or `protected_change_status` call waits for the user's decision
+    /// before it answers Waiting (the review stays open). Default 40 s: below the tools program's call budget and
+    /// the time Vibe allows one session MCP tool call.
+    pub decision_wait: Duration,
 }
 
 impl AgentToolsConfig {
@@ -96,7 +93,7 @@ impl AgentToolsConfig {
             process_env: Self::process_env_from(std::env::vars_os().collect(), home),
             start_wait: Duration::from_secs(8),
             max_per_session: 8,
-            secret_run_before_start: None,
+            decision_wait: crate::protected_changes::DECISION_WAIT,
         }
     }
 
@@ -181,8 +178,13 @@ pub(crate) struct AgentTools {
     pub(crate) secret_runs: secret_run::SecretRuns,
     /// One approval per agent action (`one_ask`): a yes given in one ask answers the other ask of a call.
     pub(crate) one_ask: crate::one_ask::Ledger,
+    pub(crate) shell_commands: shell_commands::Commands,
+    pub(crate) tool_asks: crate::ask::tool_calls::Calls,
     /// Which session took which copy (one active session per copy, `copycheck`).
     pub(crate) copy_locks: copycheck::CopyLocks,
+    /// The tool sets that load only when needed and which sessions turned them on (`on_demand`).
+    pub(crate) on_demand: crate::on_demand::OnDemand,
+    chrome_package: bool,
     listener: Mutex<Option<std::net::TcpListener>>,
     pub(crate) task: Mutex<Option<JoinHandle<()>>>,
 }
@@ -193,7 +195,7 @@ impl AgentTools {
     /// # Errors
     /// A text reason when the folder, the listener or the random source fails (the core then runs without
     /// agent tools and logs why).
-    pub(crate) fn open(config: AgentToolsConfig) -> Result<Self, String> {
+    pub(crate) fn open(config: AgentToolsConfig, chrome_package: bool) -> Result<Self, String> {
         vw_platform::ensure_private_dir(&config.data_dir).map_err(|e| e.to_string())?;
         vw_platform::ensure_private_dir(&config.data_dir.join("output"))
             .map_err(|e| e.to_string())?;
@@ -204,6 +206,7 @@ impl AgentTools {
         write_endpoint_file(&config.endpoint_file(), &endpoint, &hook)?;
         let launches = launches::Launches::load(&config.data_dir.join("launches.json"));
         Ok(Self {
+            chrome_package,
             config,
             table,
             endpoint,
@@ -212,7 +215,10 @@ impl AgentTools {
             finished: Mutex::new(std::collections::VecDeque::new()),
             secret_runs: secret_run::SecretRuns::default(),
             one_ask: crate::one_ask::Ledger::default(),
+            shell_commands: shell_commands::Commands::default(),
+            tool_asks: crate::ask::tool_calls::Calls::default(),
             copy_locks: copycheck::CopyLocks::default(),
+            on_demand: crate::on_demand::OnDemand::default(),
             listener: Mutex::new(Some(listener)),
             task: Mutex::new(None),
         })
@@ -254,13 +260,25 @@ impl AgentTools {
         }
     }
 
-    /// The MCP server entry for a credential.
-    fn server_entry(&self, credential: &str) -> Value {
+    /// The MCP server entry for a credential. Vibe's session protocol accepts exactly `transport`, `name`, `command`,
+    /// `args`, `env` and `cwd` here and refuses the whole session-opening request for any other field; it applies its
+    /// default tool-call time to this server, so every tool answers within it (a long user decision answers Waiting
+    /// and is collected with a status tool).
+    fn server_entry(&self, credential: &str, session: Option<&str>) -> Value {
+        // Pass this chat's discovery state at launch. The distinct arguments also make Vibe refresh its
+        // persisted descriptors on first enable; each actual Chrome call still goes through the core's checks.
+        let args = if !self.chrome_package {
+            vec!["mcp", wire::WITHOUT_CHROME_ARG]
+        } else if session.is_some_and(|session| self.on_demand.chrome_allowed(session)) {
+            vec!["mcp", wire::CHROME_CATALOG_ARG]
+        } else {
+            vec!["mcp"]
+        };
         json!({
             "transport": "stdio",
             "name": wire::SERVER_NAME,
             "command": self.config.binary.to_string_lossy(),
-            "args": ["mcp"],
+            "args": args,
             "env": {
                 wire::ENV_ENDPOINT: self.endpoint.to_string(),
                 wire::ENV_CREDENTIAL: credential,
@@ -268,17 +286,23 @@ impl AgentTools {
         })
     }
 
-    /// Adds our MCP server to the `agentConfig` of a session-opening request (after the gate). Returns what to
-    /// settle when the answer arrives; `None` for any other method or when no credential could be minted.
+    /// Adds our MCP server to the `agentConfig` of a session-opening request (after the gate), and the tool filter
+    /// of every on-demand tool set that is not on for the session (`on_demand`: a new session, a continue or a fork
+    /// gets them all). Returns what to settle when the answer arrives; `None` for any other method or when no
+    /// credential could be minted.
     pub(crate) fn inject(&self, method: &str, params: &mut Value) -> Option<Ticket> {
-        let (ticket, credential) = match method {
+        let (ticket, credential, opened) = match method {
             "session/start" | "session/continue" | "session/fork" => {
                 let (entry, credential) = self.table.pending().ok()?;
-                (Ticket::Pending(entry), credential)
+                (Ticket::Pending(entry), credential, None)
             }
             "session/resume" => {
                 let id = params.get("sessionId").and_then(Value::as_str)?;
-                (Ticket::Known, self.table.for_session(id).ok()?)
+                (
+                    Ticket::Known,
+                    self.table.for_session(id).ok()?,
+                    Some(id.to_owned()),
+                )
             }
             _ => return None,
         };
@@ -292,8 +316,10 @@ impl AgentTools {
         if let Some(config) = config.as_object_mut() {
             config.insert(
                 "mcpServers".to_owned(),
-                Value::Array(vec![self.server_entry(&credential)]),
+                Value::Array(vec![self.server_entry(&credential, opened.as_deref())]),
             );
+            let patterns = self.on_demand.disabled_patterns(opened.as_deref());
+            crate::on_demand::add_patterns(config, &patterns);
         }
         Some(ticket)
     }
@@ -315,6 +341,7 @@ impl AgentTools {
     /// A deleted session's credentials stop working.
     pub(crate) fn session_deleted(&self, session_id: &str) {
         self.table.revoke_session(session_id);
+        self.on_demand.forget(session_id);
         tools::forget_finished(
             &mut self.finished.lock().unwrap_or_else(PoisonError::into_inner),
             session_id,
@@ -325,6 +352,7 @@ impl AgentTools {
     /// processes `process_start` started this run now belong to `new`.
     pub(crate) fn session_handed_off(&self, old: &str, new: &str) {
         let moved = self.table.hand_off(old, new);
+        self.on_demand.hand_off(old, new);
         self.launches.hand_off(old, new);
         for started in self
             .started
@@ -364,8 +392,9 @@ impl Drop for AgentTools {
 pub(crate) fn open(
     config: Option<AgentToolsConfig>,
     monitor: &vw_procmon::ProcMon,
+    chrome_package: bool,
 ) -> Option<Arc<AgentTools>> {
-    match AgentTools::open(config?) {
+    match AgentTools::open(config?, chrome_package) {
         Ok(tools) => {
             tools.launches.retain_alive(vw_procmon::is_alive);
             tools.restore_ports(monitor);

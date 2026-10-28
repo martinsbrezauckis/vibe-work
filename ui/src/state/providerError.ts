@@ -5,9 +5,10 @@
  * - Only text recognised as a model-provider failure is rewritten. Anything else (a tool failure, a
  *   limit, an unknown message) is shown as Vibe wrote it in both modes: hiding an unknown error would
  *   hide the problem.
- * - The details never include the endpoint (it is this computer's own proxy address), the request
+ * - Legacy details never include the endpoint (it is this computer's own proxy address), the request
  *   payload summary or the body excerpt; they show the status code, Vibe's/the provider's message, the
- *   model and the request id, which is what support asks for.
+ *   model and the request id, which is what support asks for. Vibe 3 SDK errors carry a status and body;
+ *   their details preserve that body after the core view has scrubbed stored secrets.
  * - Vibe's texts are the ones in `vibe/core/llm/exceptions.py` (`BackendError._fmt`): a one-line
  *   invalid-key text, a one-line rate-limit text, an invalid-model text, and the generic block
  *   `LLM backend error [provider]` with `key: value` lines.
@@ -45,6 +46,20 @@ function field(lines: string[], key: string): string | null {
 /** Recognises a provider failure in Vibe's error text; `null` for anything else. */
 export function parseProviderError(raw: string): ProviderFailure | null {
   const text = raw.trim();
+  // mistralai/client/errors/sdkerror.py (Vibe 3): Content-Type is included for non-JSON responses.
+  const sdk =
+    /^(?:API error occurred|Unexpected response received): Status (\d{3})(?: Content-Type [^\r\n]*?)?\. Body: ([\s\S]*)$/.exec(
+      text,
+    );
+  if (sdk !== null) {
+    return {
+      status: Number(sdk[1]),
+      statusLabel: sdk[1] ?? null,
+      message: sdk[2] ?? "",
+      model: null,
+      requestId: null,
+    };
+  }
   if (text.startsWith("Invalid API key")) {
     return {
       status: 401,

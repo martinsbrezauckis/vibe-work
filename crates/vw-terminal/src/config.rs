@@ -56,6 +56,8 @@ pub struct TerminalConfig {
     pub shell: Option<ShellCommand>,
     /// Where the inherited environment comes from.
     pub parent_env: ParentEnv,
+    /// App-supplied non-secret routing for agent-capable terminals, after parent filtering.
+    pub extra_env: Vec<(OsString, OsString)>,
 }
 
 impl Default for TerminalConfig {
@@ -70,6 +72,7 @@ impl Default for TerminalConfig {
             input_queue: 256,
             shell: None,
             parent_env: ParentEnv::Process,
+            extra_env: Vec::new(),
         }
     }
 }

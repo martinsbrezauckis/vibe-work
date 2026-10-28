@@ -1,6 +1,0 @@
-{"role":"user","content":"Hello","injected":false,"message_id":"first-user"}
-{"role":"assistant","content":"Hello","injected":false,"message_id":"first-answer"}
-{"role":"user","content":"Run tool","injected":false,"message_id":"failed-user"}
-{"role":"assistant","content":"","injected":false,"message_id":"failed-call","tool_calls":[{"id":"failed-bash","index":0,"type":"function","function":{"name":"bash","arguments":"{}"}}]}
-{"role":"tool","content":"<tool_error>bash failed: synthetic failure</tool_error>","injected":false,"name":"bash","tool_call_id":"failed-bash"}
-{"role":"assistant","content":"Partial answer","injected":false,"message_id":"interrupted-answer"}

@@ -326,7 +326,6 @@ fn serve(
     if segments.is_empty() && !root.join(INDEX).is_file() {
         let folder = crate::handbook::Folder {
             relative: String::new(),
-            legacy: false,
         };
         let hub = crate::hub::build(root, &folder);
         return Ok((

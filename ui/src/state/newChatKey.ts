@@ -10,8 +10,3 @@
 
 /** The composer key of the new-chat view. */
 export const NEW_CHAT = "new-chat";
-
-/** Whether `key` is the new-chat view's composer key. */
-export function isNewChat(key: string): boolean {
-  return key === NEW_CHAT;
-}

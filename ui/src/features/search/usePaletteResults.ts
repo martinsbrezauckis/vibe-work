@@ -9,7 +9,8 @@ import { formatKeys } from "../../state/shortcuts";
 import { categoryOf, searchSettings, settingPath } from "../settings/catalog";
 import { openHit } from "../settings/openHit";
 import { useApp } from "../shell/AppContext";
-import { useSessionSummaries } from "../shell/hooks";
+import { chromeAvailable } from "../settings/chrome/chromeRows";
+import { useCoreState, useSessionSummaries } from "../shell/hooks";
 import { coreRows } from "./coreRows";
 import { paletteQuery, reconcileRows, type ResultGroups } from "./paletteModel";
 import { GROUPS, type Result } from "./paletteTypes";
@@ -19,6 +20,7 @@ import type { CoreResults } from "./useCoreSearch";
 export function usePaletteResults(query: string, found: CoreResults): ResultGroups {
   const app = useApp();
   const sessions = useSessionSummaries();
+  const chrome = useCoreState((s) => s.chromeControl);
   const mode = paletteQuery(query).mode;
   const groups = useMemo((): ResultGroups => {
     const { mode, text } = paletteQuery(query);
@@ -53,7 +55,7 @@ export function usePaletteResults(query: string, found: CoreResults): ResultGrou
           });
     const setting: Result[] =
       mode === "text"
-        ? searchSettings(text).map((e) => ({
+        ? searchSettings(text, chromeAvailable(chrome)).map((e) => ({
             id: `setting:${e.id}`,
             kind: "setting",
             title: e.label,
@@ -83,7 +85,7 @@ export function usePaletteResults(query: string, found: CoreResults): ResultGrou
           }));
     const { message, file } = mode === "text" ? coreRows(app, found) : { message: [], file: [] };
     return { session, message, file, setting, action };
-  }, [app, sessions, query, found]);
+  }, [app, sessions, query, found, chrome]);
 
   // Guarded render-time adjustment keeps a single render's rows and selection consistent (no effect-frame jump).
   const [snapshot, setSnapshot] = useState({ source: groups, groups, mode });

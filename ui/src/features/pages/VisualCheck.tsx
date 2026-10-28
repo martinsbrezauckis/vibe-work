@@ -5,6 +5,7 @@
  * Depends on: protocol types. Called by: PagesTab; `VisualBadge` also by HubRows.
  * Invariants: renders only; element paths, texts and details are untrusted page text shown as plain text.
  */
+import { Badge, Button } from "../../components/Controls";
 import type { ReactElement } from "react";
 
 import type { VisualReport } from "../../protocol/core";
@@ -18,7 +19,7 @@ const KIND: Readonly<Record<string, string>> = {
 };
 
 /** The badge's words and tone for `report`. */
-export function visualSummary(report: VisualReport | undefined): { text: string; tone: string } {
+function visualSummary(report: VisualReport | undefined): { text: string; tone: string } {
   if (report === undefined) return { text: "Not checked yet", tone: "none" };
   if (report.error !== null) return { text: "Check failed", tone: "warn" };
   const n = report.issues.length;
@@ -31,13 +32,13 @@ export function VisualBadge({ report }: { report: VisualReport | undefined }): R
   if (report === undefined) return null;
   const { text, tone } = visualSummary(report);
   return (
-    <span
-      className="pages-visual-badge"
+    <Badge
+      presentation="page-check"
       data-tone={tone}
       title="Visual check at 1280 and 390 px, light and dark"
     >
       {text}
-    </span>
+    </Badge>
   );
 }
 
@@ -56,9 +57,9 @@ export function VisualCheck({
   return (
     <details className="pages-visual" data-tone={tone}>
       <summary data-testid="pages.visual-check-summary">
-        <span className="pages-visual-badge" data-tone={tone}>
+        <Badge presentation="page-check" data-tone={tone}>
           {text}
-        </span>
+        </Badge>
         <span className="pages-note">desktop and phone width, light and dark</span>
       </summary>
       {report?.error != null && (
@@ -84,15 +85,15 @@ export function VisualCheck({
           {note}
         </p>
       ))}
-      <button
+      <Button
         data-testid="pages.visual-check-pages-btn"
         type="button"
-        className="pages-btn"
+        appearance="page"
         disabled={checking}
         onClick={check}
       >
         Check again
-      </button>
+      </Button>
     </details>
   );
 }

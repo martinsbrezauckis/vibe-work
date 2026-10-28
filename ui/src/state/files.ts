@@ -5,13 +5,14 @@
  *
  * Depends on: coreStore (commands, events), createStore, protocol types. Called by: createApp, the transcript's
  * `FileRef` and step views, the File tab, the `ui/files` route.
- * Invariants (the "preview bugs out" class):
+ * Invariants:
  * - Every read carries a generation number per session; an answer for an older generation is dropped, so rapid
  *   switching never shows file A under B's name.
  * - The last good content stays on screen while a reload runs; a deleted file keeps it with a "deleted" notice.
  * - The core decides what is clickable; a refused path stays plain text and nothing tells why (no oracle).
  * - Actions built for the Debug API (`actions("debug-api")`) send every command with that origin.
  */
+import { createFileWorkspace } from "./fileWorkspace";
 import type {
   CoreEvent,
   FileContent,
@@ -44,6 +45,8 @@ export interface Shown {
   file: string;
   display: string;
   line: number | null;
+  /** Inclusive end of a code context range (absent for an ordinary file link). */
+  end?: number;
 }
 
 /** One session's File tab. */
@@ -53,6 +56,8 @@ export interface FileTab {
   recent: readonly Shown[];
   status: "idle" | "loading" | "ready" | "gone" | "error";
   error: string | null;
+  /** A reference that could not resolve; says nothing about why path checks returned no file. */
+  openNote?: string | null;
   editNotice: string | null;
   /** The last content read for `shown` (kept while reloading and after a delete). */
   content: FileContent | null;
@@ -99,22 +104,37 @@ export function tabOf(state: FilesState, sessionId: string): FileTab {
   return state.tabs[sessionId] ?? EMPTY_TAB;
 }
 
+/** `state` with everything kept under `from` moved to `to` (a New chat workspace becoming a session's). */
+export function moveFilesState(state: FilesState, from: string, to: string): FilesState {
+  const move = <T>(record: Readonly<Record<string, T>>): Readonly<Record<string, T>> => {
+    const value = record[from];
+    if (value === undefined) return record;
+    const next = { ...record, [to]: value };
+    Reflect.deleteProperty(next, from);
+    return next;
+  };
+  return {
+    refs: move(state.refs),
+    tabs: move(state.tabs),
+    drops: move(state.drops),
+    edits: move(state.edits),
+  };
+}
+
 /** True for kinds the isolated viewer shows. */
 export function viewerKind(kind: FileKind | null | undefined): boolean {
   return kind === "html" || kind === "pdf";
 }
 
 /** Creates the controller. */
-export function createFiles(core: CoreController) {
+export function createFileReader(core: CoreController) {
   const store = createStore<FilesState>({ refs: {}, tabs: {}, drops: {}, edits: {} });
   const queue = new Map<string, Set<string>>();
   let timer: ReturnType<typeof setTimeout> | null = null;
 
-  const run = async (origin: "ui" | "debug-api", request: FilesRequest): Promise<FilesResult> => {
-    const result = await core.run(
-      { type: "files", request },
-      origin === "debug-api" ? { origin } : undefined,
-    );
+  // `_origin`: whose action it is (the facade); the command is the window's either way.
+  const run = async (_origin: "ui" | "debug-api", request: FilesRequest): Promise<FilesResult> => {
+    const result = await core.run({ type: "files", request });
     if (result.type !== "files") throw new Error(`unexpected ${result.type} result`);
     return result.result;
   };
@@ -153,6 +173,15 @@ export function createFiles(core: CoreController) {
                 },
               },
             };
+      });
+    },
+    /** Applies a draft change the user chose (Got it, Undo merge, Keep yours, Take Vibe's). */
+    apply(sessionId: string, change: (draft: FileEdit) => FileEdit): void {
+      store.set((s) => {
+        const draft = s.edits[sessionId];
+        return draft === undefined || draft.saving
+          ? s
+          : { ...s, edits: { ...s.edits, [sessionId]: change(draft) } };
       });
     },
     cancel(sessionId: string): void {
@@ -366,6 +395,7 @@ export function createFiles(core: CoreController) {
       setTab(sessionId, (t) => ({
         ...t,
         shown,
+        openNote: null,
         recent: [shown, ...t.recent.filter((r) => r.file !== shown.file)].slice(0, RECENT),
         content: t.shown?.file === shown.file ? t.content : null,
         viewer: t.shown?.file === shown.file ? t.viewer : null,
@@ -412,11 +442,34 @@ export function createFiles(core: CoreController) {
       return state;
     },
     /** Resolves `text` with this origin's scope and shows it; false when it is not a file the app may show. */
-    async openText(sessionId: string, text: string, line: number | null = null): Promise<boolean> {
+    async openText(
+      sessionId: string,
+      text: string,
+      line: number | null = null,
+      end?: number,
+    ): Promise<boolean> {
       const result = await run(origin, { op: "resolve", sessionId, paths: [text] });
       const ref = result.kind === "resolved" ? result.refs[0] : undefined;
       if (ref?.ok !== true || ref.file === null || ref.display === null) return false;
-      await this.show(sessionId, { file: ref.file, display: ref.display, line });
+      await this.show(sessionId, {
+        file: ref.file,
+        display: ref.display,
+        line,
+        ...(end === undefined ? {} : { end }),
+      });
+      return true;
+    },
+    /** One note for an unresolved code reference, while retaining the current preview or empty view. */
+    note(sessionId: string, text: string | null): void {
+      setTab(sessionId, (tab) => ({ ...tab, openNote: text }));
+    },
+    /** Opens an applied change in read view at a line, retaining verified handles for deleted files. */
+    async openAt(sessionId: string, text: string, line: number): Promise<boolean> {
+      const known = store.get().refs[sessionId]?.[text];
+      if (known?.status === "ok")
+        await this.show(sessionId, { file: known.file, display: known.display, line });
+      else if (!(await this.openText(sessionId, text, line))) return false;
+      await this.setMode(sessionId, "source");
       return true;
     },
     /** Reads the shown file again. */
@@ -548,7 +601,7 @@ export function createFiles(core: CoreController) {
   };
 
   // a deleted session's entries go with it.
-  core.onSessionsGone((ids) => {
+  const stopPrune = core.onSessionsGone((ids) => {
     store.set((s) => pruneSessions(s, ["refs", "tabs", "drops", "edits"], ids));
   });
   /** Reads `sessionId`'s viewer state again (after `filesChanged`, or a missed one). */
@@ -589,10 +642,25 @@ export function createFiles(core: CoreController) {
     invalidate,
     poll,
     layout,
-    stop,
+    stop() {
+      stop();
+      stopPrune();
+    },
     actions: actions("ui"),
     debugApi: actions("debug-api"),
   } as const;
+}
+
+/** A single document reader, with its own draft and request generations. */
+export type FileReader = ReturnType<typeof createFileReader>;
+
+/** Creates the session document workspace over the typed file reader. */
+export function createFiles(
+  core: CoreController,
+  separate = () => true,
+  openAs: () => "preview" | "code" | "side" = () => "preview",
+) {
+  return createFileWorkspace(core, createFileReader(core), separate, openAs);
 }
 
 /** The files controller. */

@@ -47,11 +47,11 @@ pub struct HubPage {
     pub path: String,
     /// Title (the file name when the page has none).
     pub title: String,
-    /// The kind (`handbook.kind`, front matter `kind`, or a pre-1.0 page's kind mapped to 1.0), if known.
+    /// The kind (`handbook.kind` or front matter `kind`), if known.
     pub kind: Option<String>,
     /// Head status as written.
     pub status: Option<String>,
-    /// `dcterms.modified` (a pre-1.0 page: `vw-date`).
+    /// `dcterms.modified`.
     pub modified: Option<String>,
     /// `description`.
     pub description: Option<String>,
@@ -67,8 +67,6 @@ pub struct HubPage {
     pub inputs: u32,
     /// A Markdown (lite) page.
     pub lite: bool,
-    /// A pre-1.0 page (needs migration).
-    pub legacy: bool,
 }
 
 /// A group of the hub.
@@ -97,8 +95,6 @@ pub enum IndexHealth {
     NotManifest,
     /// The index misses pages or is older than the newest page (HB-W03, HB-W04).
     Stale,
-    /// Written by an earlier build of the app or a pre-1.0 page (HB-W16).
-    PreFormat,
 }
 
 /// The hub of one handbook folder.
@@ -108,8 +104,6 @@ pub enum IndexHealth {
 pub struct Hub {
     /// The folder, relative to the project.
     pub folder: String,
-    /// The folder or some pages are from an earlier build: a migration is suggested (§11).
-    pub legacy: bool,
     /// The manifest head, when `index.html` is a manifest.
     pub manifest: Option<Manifest>,
     /// The index's state.
@@ -131,44 +125,9 @@ impl Hub {
     }
 }
 
-/// The 1.0 kind a pre-1.0 page's `vw-kind` maps to (§11 step 2).
-fn legacy_kind(kind: &str, path: &str) -> Option<&'static str> {
-    match kind {
-        "plan" | "plans" => Some("plan"),
-        "ask" | "asks" | "request" => Some("request"),
-        "decision" | "decisions" | "adr" => Some("decision"),
-        "research" => Some("research"),
-        "report" | "reports" | "bench" => Some("report"),
-        _ => match path.split_once('/').map(|(top, _)| top) {
-            Some("plans") => Some("plan"),
-            Some("asks") => Some("request"),
-            Some("decisions") => Some("decision"),
-            Some("reports") => Some("report"),
-            Some("research") => Some("research"),
-            _ => None,
-        },
-    }
-}
-
-/// The group id and the kind of a page. In a pre-1.0 folder a page without any head is placed by its folder.
-fn place(found: &Found, legacy_folder: bool) -> (&'static str, Option<String>) {
+/// The group id and the kind of a page.
+fn place(found: &Found) -> (&'static str, Option<String>) {
     let facts = &found.scan.facts;
-    let path = found.path.as_str();
-    let headless = facts.kind.is_none() && facts.format.is_none() && !facts.lite;
-    if facts.is_pre_format() || (legacy_folder && headless) {
-        let legacy = facts.legacy.clone().unwrap_or_default();
-        let kind = legacy_kind(legacy.kind.as_deref().unwrap_or(""), path);
-        let status = legacy.status.unwrap_or_default().to_ascii_lowercase();
-        let closed = ["superseded", "done", "rejected", "abandoned", "declined"]
-            .iter()
-            .any(|s| status.starts_with(s));
-        let group = match kind.and_then(format::kind) {
-            _ if closed => "archive",
-            Some(spec) => spec.index_section.unwrap_or("other"),
-            None => "other",
-        };
-        return (group, kind.map(str::to_owned));
-    }
     let Some(spec) = facts.kind.as_deref().and_then(format::kind) else {
         return ("other", facts.kind.clone());
     };
@@ -200,11 +159,9 @@ pub fn build(root: &Path, folder: &Folder) -> Hub {
             pages: Vec::new(),
         })
         .collect();
-    let mut legacy = folder.legacy;
     for found in scanned.pages.iter().filter(|f| f.path.as_str() != INDEX) {
         let facts = &found.scan.facts;
-        legacy |= facts.is_pre_format();
-        let (group, kind) = place(found, folder.legacy);
+        let (group, kind) = place(found);
         let finished = facts
             .steps
             .iter()
@@ -217,21 +174,14 @@ pub fn build(root: &Path, folder: &Folder) -> Hub {
                 .clone()
                 .unwrap_or_else(|| found.path.to_string()),
             kind,
-            status: facts
-                .status
-                .clone()
-                .or_else(|| facts.legacy.as_ref().and_then(|l| l.status.clone())),
-            modified: facts
-                .modified
-                .clone()
-                .or_else(|| facts.legacy.as_ref().and_then(|l| l.date.clone())),
+            status: facts.status.clone(),
+            modified: facts.modified.clone(),
             description: facts.description.clone(),
             modified_ms: found.modified_ms,
             steps_done: u32::try_from(finished).unwrap_or(u32::MAX),
             steps_total: u32::try_from(facts.steps.len()).unwrap_or(u32::MAX),
             inputs: u32::try_from(facts.inputs.len()).unwrap_or(u32::MAX),
             lite: facts.lite,
-            legacy: facts.is_pre_format(),
         };
         if let Some(g) = groups.iter_mut().find(|g| g.id == group) {
             g.pages.push(page);
@@ -252,17 +202,12 @@ pub fn build(root: &Path, folder: &Folder) -> Hub {
     };
     let health = match index {
         None => IndexHealth::Missing,
-        Some(i) if i.scan.facts.is_pre_format() => {
-            legacy = true;
-            IndexHealth::PreFormat
-        }
         Some(i) if i.scan.facts.kind.as_deref() != Some("index") => IndexHealth::NotManifest,
         Some(_) if index_findings(&["HB-W03", "HB-W04"]) => IndexHealth::Stale,
         Some(_) => IndexHealth::Current,
     };
     Hub {
         folder: folder.relative.clone(),
-        legacy,
         manifest: index
             .filter(|i| i.scan.facts.kind.as_deref() == Some("index"))
             .map(|i| Manifest::of(&i.scan.facts)),

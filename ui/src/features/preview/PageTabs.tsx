@@ -3,6 +3,7 @@
  * Adapted from ShellX.
  * Depends on: the core's page-tab snapshot and the Browser controller. Called by PreviewTab.
  */
+import { Tabs, Tab, TabClose } from "../../components/Tabs";
 import {
   useEffect,
   useRef,
@@ -99,10 +100,10 @@ export function PageTabs({
   };
   return (
     <div className="browser-page-tabbar">
-      <div
+      <Tabs
         data-testid="preview.page-tabs-browser-page-tabs"
-        className="browser-page-tabs"
-        role="tablist"
+        variant="pages"
+
         aria-label="Browser pages"
         onKeyDown={onKeys}
       >
@@ -144,11 +145,10 @@ export function PageTabs({
                   void browser.closeTab(sessionId, tab.pageKey);
               }}
             >
-              <button
+              <Tab
                 data-testid="preview.page-tabs-switch-tab"
                 type="button"
-                role="tab"
-                className="browser-page-tab-select"
+
                 aria-selected={tab.active}
                 aria-label={label}
                 title={tab.preview?.url ?? label}
@@ -183,24 +183,24 @@ export function PageTabs({
                     Ⅱ
                   </span>
                 )}
-              </button>
+              </Tab>
               {web && (
-                <button
+                <TabClose
                   data-testid="preview.page-tabs-close-tab"
                   type="button"
-                  className="browser-page-tab-close"
+
                   aria-label={`Close ${label}`}
                   title={`Close ${label}`}
                   disabled={busy}
                   onClick={() => void browser.closeTab(sessionId, tab.pageKey)}
                 >
                   ×
-                </button>
+                </TabClose>
               )}
             </div>
           );
         })}
-      </div>
+      </Tabs>
       <button
         data-testid="preview.page-tabs-open-tab"
         type="button"

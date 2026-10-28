@@ -6,6 +6,7 @@
  * Depends on: protocol types. Called by: Hub.tsx, the Projects overview's detail pane (findings list).
  * Invariants: renders only; all page text is plain text; opening a page calls `open` (none: rows are not buttons).
  */
+import { Badge } from "../../components/Controls";
 import type { ReactElement } from "react";
 
 import type { Finding, HubGroup, HubPage, VisualReport } from "../../protocol/core";
@@ -55,12 +56,11 @@ function PageRow({
     <>
       <b>
         {page.title}
-        {page.lite && <span className="pages-tag">Markdown</span>}
-        {page.legacy && <span className="pages-tag">Earlier format</span>}
+        {page.lite && <Badge presentation="page-label">Markdown</Badge>}
         {page.kind === "prototype" && (
-          <span className="pages-tag" title="Its own script runs, isolated: no network">
+          <Badge presentation="page-label" title="Its own script runs, isolated: no network">
             Prototype
-          </span>
+          </Badge>
         )}
         <VisualBadge report={visual} />
       </b>

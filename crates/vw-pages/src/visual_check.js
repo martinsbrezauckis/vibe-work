@@ -161,7 +161,7 @@
   VIEWS.forEach(function (view) {
     chain = chain.then(function () { return load(view); }).then(function (loaded) {
       var win = loaded.frame.contentWindow, doc = null;
-      try { doc = loaded.frame.contentDocument; } catch (e) { doc = null; }
+      try { doc = loaded.frame.contentDocument; } catch { doc = null; }
       if (!loaded.ok || !doc || !doc.documentElement) { notes.push(view.name + ": the page did not load within " + WAIT + " ms"); return; }
       return settle(win).then(function () {
         var looks = THEMES.map(function (theme) { return measure(view.name, theme, win, doc); });

@@ -5,8 +5,9 @@
  * - `read` (default): the composer of a session as the user sees it (draft, chips, images, queue,
  *   running, access mode, model, note, rewind dialog, `heldByPid`: another Vibe process holding the session);
  * - `type {text}`: sets the draft (what typing does);
+ * - `paste {text, start?, end?}`: inserts at a draft range (default: append), folding long text into a chip;
  * - `send {mode?: send|steer|queue}`: what Enter / Tab does with the current content;
- * - `insertContext {label, source, text}`: what "Point Vibe at this" does (a chip, never typed text);
+ * - `insertContext {label, source, text, ref?}`: what "Point Vibe at this" does (a chip, never typed text);
  * - `attachImage {name, data}`: what pasting an image does (`data` = base64 of the file's bytes);
  * - `stop`, `retry {instructions?}`, `slash {name, args?}`, `access {mode}`, `model {alias?, effort?}`,
  *   `queueEdit {queueItemId, text}`, `queueRemove {queueItemId}`, `rewind {entryId, confirm?: here|new}`,

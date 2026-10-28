@@ -166,10 +166,7 @@ fn decide(
         return Err("Vibe Work cannot tell which session uses this copy".to_owned());
     }
     if let Some((busy, _)) = users.iter().find(|(id, on)| *on && id != caller) {
-        let title = shared
-            .names
-            .title_of(&shared.store, busy)
-            .unwrap_or_else(|| busy.clone());
+        let title = shared.names.display_title(&shared.store, busy);
         return Err(format!(
             "this copy is in use by the session \"{}\"; it can be used once that session is idle or closed",
             vw_gate::dialog_value(&title, 80)

@@ -4,7 +4,7 @@
 //! Depends on: vw-agent-tools (`wire`, `credential`), tokio, `tools`, `killcheck`, `core::Shared`. Called by:
 //! `core` (spawned at start, aborted at shutdown through `AgentTools::shutdown`).
 //! Invariants:
-//! - Bounded: one line of at most `wire::MAX_LINE` bytes, read within 10 s; at most 32 connections at once.
+//! - Bounded: one line of at most `wire::MAX_PROPOSAL_LINE` bytes, read within 10 s; at most 32 connections at once.
 //! - Authentication before anything else; an unknown, revoked or pending credential gets one fixed refusal
 //!   for every tool (it never learns whether a tool exists).
 //! - A session credential only ever acts on its own session; the hook credential only on its named checks.
@@ -74,14 +74,20 @@ async fn accept_loop(listener: TcpListener, shared: Weak<Shared>) {
 
 async fn serve_one(stream: TcpStream, shared: Weak<Shared>) {
     let (read, mut write) = stream.into_split();
-    let limit = u64::try_from(wire::MAX_LINE + 1).unwrap_or(u64::MAX);
+    let limit = u64::try_from(wire::MAX_PROPOSAL_LINE + 1).unwrap_or(u64::MAX);
     let mut reader = BufReader::new(read.take(limit));
     let mut line = String::new();
     let read = tokio::time::timeout(Duration::from_secs(10), reader.read_line(&mut line)).await;
     let (answer, browser_answer) = match read {
-        Ok(Ok(n)) if n > 0 && n <= wire::MAX_LINE && line.ends_with('\n') => {
+        Ok(Ok(n)) if n > 0 && n <= wire::MAX_PROPOSAL_LINE && line.ends_with('\n') => {
             match serde_json::from_str::<Request>(&line) {
-                Ok(request) => {
+                Ok(request)
+                    if n <= wire::MAX_LINE
+                        || request.tool == names::PROPOSE_PROTECTED_CHANGE
+                        || (request.tool == names::TOOL_RECEIPT
+                            && request.args["tool_name"]
+                                == format!("mcp_vw.{}", names::PROPOSE_PROTECTED_CHANGE)) =>
+                {
                     let browser_answer = names::BROWSER_TOOLS.contains(&request.tool.as_str());
                     let answer = if browser_answer {
                         // The socket owns this browser call. Dropping its future on EOF or timeout
@@ -96,7 +102,20 @@ async fn serve_one(stream: TcpStream, shared: Weak<Shared>) {
                             return;
                         };
                         answer
-                    } else if request.tool == names::GIT_CHECK {
+                    } else if names::CHROME_TOOLS.contains(&request.tool.as_str())
+                        || matches!(
+                            request.tool.as_str(),
+                            names::GIT_CHECK
+                                | names::TOOL_RECEIPT
+                                | names::KILL_CHECK
+                                | names::CHROME_CHECK
+                                | names::USE_YOUR_CHROME
+                                | names::PROCESS_START
+                                | names::PROCESS_RESTART
+                                | names::PROPOSE_PROTECTED_CHANGE
+                                | names::PROTECTED_CHANGE_STATUS
+                        )
+                    {
                         // A hook that has exited can no longer use this approval. Release its
                         // confirmation future and listener slot as soon as the client goes away.
                         let Some(answer) =
@@ -110,7 +129,7 @@ async fn serve_one(stream: TcpStream, shared: Weak<Shared>) {
                     };
                     (answer, browser_answer)
                 }
-                Err(_) => (Answer::Error("bad request".to_owned()), false),
+                Ok(_) | Err(_) => (Answer::Error("bad request".to_owned()), false),
             }
         }
         _ => (Answer::Error("bad request".to_owned()), false),
@@ -191,14 +210,31 @@ async fn answer(shared: &Weak<Shared>, request: Request) -> Answer {
     let holder = tools.table.holder(&request.credential);
     let tool = request.tool.as_str();
     let outcome = match holder {
-        Some(Holder::Session(session_id)) if names::SESSION_TOOLS.contains(&tool) => {
+        Some(Holder::Hook) if tool == names::TOOL_RECEIPT => {
+            crate::ask::tool_calls::receipts::issue(&shared, &request.args).await
+        }
+        Some(Holder::Session(session_id))
+            if (names::SESSION_TOOLS.contains(&tool) || tool == names::CHROME_TOOL_LIST) =>
+        {
             let outcome =
                 super::tools::call(&shared, &tools, &session_id, tool, request.args).await;
             log(tool, Some(&session_id), &outcome);
             outcome
         }
+        Some(Holder::Hook) if tool == names::GUARD_REFUSED => {
+            crate::guard_refusals::hook(&shared, request.args)
+        }
+        Some(Holder::Hook) if tool == names::SHELL_COMMAND => {
+            tools.shell_commands.record(&request.args)
+        }
         Some(Holder::Hook) if tool == names::KILL_CHECK => {
             let outcome = super::killcheck::check(&shared, request.args).await;
+            log(tool, None, &outcome);
+            outcome
+        }
+        // may this Chrome Control call run (the user's rows; a card in the session for Ask each time)?
+        Some(Holder::Hook) if tool == names::CHROME_CHECK => {
+            let outcome = crate::chrome_control::check::check(&shared, request.args).await;
             log(tool, None, &outcome);
             outcome
         }

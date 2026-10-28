@@ -49,21 +49,21 @@ export function LineCommentThread(props: {
       )}
       <span className="lc-text">{comment.text}</span>
       <span className="lc-acts">
-        <button
+        <Button
           data-testid="changes.line-comment-thread-send"
           type="button"
-          className="mini"
+          appearance="compact"
           data-action="send-comment"
           onClick={() => {
             send(comment.id);
           }}
         >
           Send to Vibe
-        </button>
+        </Button>
         <Button
           data-testid="changes.line-comment-thread-remove"
           type="button"
-          small
+          shape="outlined"
           variant="danger"
           data-action="delete-comment"
           onClick={() => {

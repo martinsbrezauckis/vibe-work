@@ -12,6 +12,7 @@ publish = false
 workspace = true
 
 [dependencies]
+vw-ask = { path = "../vw-ask" }
 vw-vocabulary = { path = "../vw-vocabulary" }
 vw-session = { path = "../vw-session" }
 vw-rpc = { path = "../vw-rpc" }

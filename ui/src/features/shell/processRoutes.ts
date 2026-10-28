@@ -23,7 +23,7 @@ function asObject(body: unknown): Record<string, unknown> {
 }
 
 /** The list as the window shows it. */
-export function leftRunningJson(app: App) {
+function leftRunningJson(app: App) {
   const state = app.leftRunning?.store.get();
   return {
     open: state?.open ?? false,

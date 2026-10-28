@@ -4,7 +4,7 @@
  * answered itself, and the link waiting in the link dialog. Rows unmount when virtualised away, so
  * their open/closed state lives here, not in components. Thinking and its containing groups
  * remember explicit choices across restarts; unspecified choices follow the shared display preference.
- * Depends on: createStore, coreStore (`CoreController`), toastStore, protocol types. Called by: the
+ * Depends on: createStore, coreStore (`CoreController`), toastStore, the announcer, protocol types. Called by: the
  * transcript views, the `ui/transcript` route, createApp.
  * Invariants:
  * - An answer goes through the core's `answerCallback` command only (the gate validates its shape and
@@ -17,9 +17,11 @@
  *   `openLink` (the core validates again). Web sources open the same dialog; the app never
  *   fetches a source page itself.
  */
-import type { JsonValue } from "../protocol/core";
+import type { Command, JsonValue } from "../protocol/core";
 import { toCallError } from "../protocol/client/types";
+import { announce } from "./announcer";
 import type { CoreController } from "./coreStore";
+import { reportMissingChat } from "./sessionOpenError";
 import { createStore } from "./createStore";
 import type { Toasts } from "./toastStore";
 
@@ -27,7 +29,14 @@ import type { Toasts } from "./toastStore";
 export type AnswerVia = "window" | "uiControl";
 
 /** The outcome of an answer that did not go through. */
-export interface AnswerProblem {
+/** What an "Always" click sets: the control's command and the words of what it did (`ask/model.ts`). */
+export interface AlwaysSet {
+  done: string;
+  after: string;
+  command: Command;
+}
+
+interface AnswerProblem {
   kind: "refused" | "error";
   message: string;
 }
@@ -42,6 +51,18 @@ export interface TranscriptUi {
   problems: Readonly<Record<string, AnswerProblem>>;
   /** Callbacks this window answered, by callback id. */
   answered: Readonly<Record<string, AnswerVia>>;
+  /**
+   * "Always: …" answers: what each click did to its Settings control and the control's state afterwards, by
+   * callback id or ask id (the core's record says "allowed once", so the audit row's "and turned on “{control}”"
+   * comes from here; so does "…, but the answer did not reach Vibe" when the card closed meanwhile).
+   */
+  always: Readonly<Record<string, { done: string; after: string }>>;
+  /** An "Always" answer whose control's native confirmation is open (`waiting`) or was cancelled, by callback id. */
+  native: Readonly<Record<string, "waiting" | "cancelled">>;
+  /** The session grants list: the grant being revoked, by session id. */
+  grantBusy: Readonly<Record<string, string>>;
+  /** The list's status line ("Revoked. Vibe asks again next time." or the core's message), by session id. */
+  grantStatus: Readonly<Record<string, string>>;
   /** The link waiting for confirmation in the link dialog. */
   link: string | null;
   /** Session ids whose stored state is being loaded. */
@@ -51,11 +72,14 @@ export interface TranscriptUi {
 }
 
 /** One web source in the side list (`features/transcript/model/sources.ts` `Source`). */
-export interface SourceItem {
+interface SourceItem {
   title: string;
   url: string;
   host: string | null;
 }
+
+/** The grants list's status after a revoke. */
+const GRANT_REVOKED = "Revoked. Vibe asks again next time.";
 
 const ANSWERED_KEY = "vw.answeredCallbacks";
 const DISCLOSURE_KEY = "vw.thinkingDisclosure";
@@ -137,12 +161,52 @@ export function createTranscript(deps: {
     sending: {},
     problems: {},
     answered: loadAnswered(persist),
+    always: {},
+    native: {},
+    grantBusy: {},
+    grantStatus: {},
     link: null,
     loading: {},
     sources: null,
   });
 
-  return {
+  /**
+   * The "Always: {control}" half of an answer: runs the Settings control's own command (the core
+   * shows the control's native confirmation where it has one). True when the control is set; the caller then answers
+   * once. A cancelled confirmation leaves the card open with nothing answered; a failure shows on the card.
+   */
+  const setAlways = async (key: string, control: AlwaysSet): Promise<boolean> => {
+    if (core === null || store.get().sending[key] === true) return false;
+    store.set((s) => ({
+      ...s,
+      native: { ...s.native, [key]: "waiting" },
+      problems: without(s.problems, key),
+    }));
+    try {
+      await core.run(control.command);
+    } catch (thrown) {
+      const error = toCallError(thrown).error;
+      store.set((s) =>
+        error.code === "confirmationDeclined"
+          ? { ...s, native: { ...s.native, [key]: "cancelled" } }
+          : {
+              ...s,
+              native: without(s.native, key),
+              problems: { ...s.problems, [key]: { kind: "error", message: error.message } },
+            },
+      );
+      return false;
+    }
+    // Kept before the answer goes out: if the card closed meanwhile, its audit row says the control is set anyway.
+    store.set((s) => ({
+      ...s,
+      native: without(s.native, key),
+      always: { ...s.always, [key]: { done: control.done, after: control.after } },
+    }));
+    return true;
+  };
+
+  const transcript = {
     store,
 
     /** Opens or closes `key` (`open` given: sets it; omitted: toggles). */
@@ -174,10 +238,7 @@ export function createTranscript(deps: {
       }));
       try {
         // An answer through the `ui/transcript` route is the Debug API's: lowered explicitly.
-        await core.run(
-          { type: "answerCallback", sessionId, callbackId, output },
-          via === "uiControl" ? { origin: "debug-api" } : undefined,
-        );
+        await core.run({ type: "answerCallback", sessionId, callbackId, output });
         store.set((s) => ({ ...s, answered: { ...s.answered, [callbackId]: via } }));
         saveAnswered(persist, store.get().answered);
         return true;
@@ -194,6 +255,126 @@ export function createTranscript(deps: {
       }
     },
 
+    /**
+     * The "Always: {control}" answer: runs the Settings control's own command first (the core
+     * shows the control's native confirmation where it has one), then answers Vibe once. A cancelled confirmation
+     * leaves the card open with nothing answered; a failure shows on the card. Never throws.
+     */
+    async answerAlways(
+      sessionId: string,
+      callbackId: string,
+      control: AlwaysSet,
+      output: JsonValue,
+      via: AnswerVia,
+    ): Promise<boolean> {
+      if (!(await setAlways(callbackId, control))) return false;
+      return transcript.answer(sessionId, callbackId, output, via);
+    },
+
+    /**
+     * Answers a Chrome Control card (`chromeControl answer`; the card's id is its ask id). Same states as
+     * [`answer`]. Never throws.
+     */
+    async answerChrome(
+      askId: string,
+      choice: "once" | "session" | "no",
+      note: string | null,
+      via: AnswerVia,
+    ): Promise<boolean> {
+      if (core === null || store.get().sending[askId] === true) return false;
+      store.set((s) => ({
+        ...s,
+        sending: { ...s.sending, [askId]: true },
+        problems: without(s.problems, askId),
+      }));
+      try {
+        await core.run({
+          type: "chromeControl",
+          request: { op: "answer", askId, answer: choice, note: choice === "no" ? note : null },
+        });
+        store.set((s) => ({ ...s, answered: { ...s.answered, [askId]: via } }));
+        saveAnswered(persist, store.get().answered);
+        return true;
+      } catch (thrown) {
+        const error = toCallError(thrown).error;
+        const problem: AnswerProblem =
+          error.message === "Already answered."
+            ? { kind: "refused", message: "Already answered." }
+            : { kind: "error", message: error.message };
+        store.set((s) => ({ ...s, problems: { ...s.problems, [askId]: problem } }));
+        return false;
+      } finally {
+        store.set((s) => ({ ...s, sending: without(s.sending, askId) }));
+      }
+    },
+
+    /** "Always: …" on a Chrome Control card: its control first (with its native confirmation), then once. */
+    async answerChromeAlways(askId: string, control: AlwaysSet, via: AnswerVia): Promise<boolean> {
+      if (!(await setAlways(askId, control))) return false;
+      return transcript.answerChrome(askId, "once", "", via);
+    },
+
+    /**
+     * Revokes one session grant from `sessionId`'s grants list. The core's event
+     * updates the list; the status line says what happened. One revoke at a time per list. Never throws.
+     */
+    async revokeGrant(sessionId: string, grantId: string): Promise<boolean> {
+      if (core === null || store.get().grantBusy[sessionId] !== undefined) return false;
+      store.set((s) => ({ ...s, grantBusy: { ...s.grantBusy, [sessionId]: grantId } }));
+      try {
+        await core.run({ type: "askGrants", request: { op: "remove", id: grantId } });
+        store.set((s) => ({ ...s, grantStatus: { ...s.grantStatus, [sessionId]: GRANT_REVOKED } }));
+        return true;
+      } catch (thrown) {
+        const message = toCallError(thrown).error.message;
+        store.set((s) => ({ ...s, grantStatus: { ...s.grantStatus, [sessionId]: message } }));
+        return false;
+      } finally {
+        store.set((s) => ({ ...s, grantBusy: without(s.grantBusy, sessionId) }));
+      }
+    },
+
+    /** Announces a closed card's audit row once (the app's announcer). */
+    announce(text: string): void {
+      announce(text);
+    },
+
+    /** Sends one owner decision through the typed core client; never applies optimistically. */
+    async decideProtectedChange(
+      sessionId: string,
+      proposalId: string,
+      approve: boolean,
+      note: string | null,
+    ): Promise<void> {
+      if (core === null) return;
+      const key = `protected:${proposalId}`;
+      if (store.get().sending[key]) return;
+      store.set((s) => ({
+        ...s,
+        sending: { ...s.sending, [key]: true },
+        problems: without(s.problems, key),
+      }));
+      try {
+        await core.run({
+          type: "decideProtectedChange",
+          sessionId,
+          proposalId,
+          approve,
+          note: approve ? null : note,
+        });
+      } catch (thrown) {
+        store.set((s) => ({
+          ...s,
+          problems: {
+            ...s.problems,
+            [key]: { kind: "error", message: toCallError(thrown).error.message },
+          },
+        }));
+      } finally {
+        store.set((s) => ({ ...s, sending: without(s.sending, key) }));
+      }
+    },
+
     /** Loads a session's stored history when the app only has its listing row. */
     async ensureLoaded(sessionId: string): Promise<void> {
       if (core === null || store.get().loading[sessionId] === true) return;
@@ -203,11 +384,12 @@ export function createTranscript(deps: {
       try {
         await core.run({ type: "refreshSession", sessionId });
       } catch (thrown) {
-        toasts.push({
-          kind: "error",
-          bellKind: "failure",
-          text: toCallError(thrown).error.message,
-        });
+        if (!reportMissingChat(thrown, toasts, sessionId))
+          toasts.push({
+            kind: "error",
+            bellKind: "failure",
+            text: toCallError(thrown).error.message,
+          });
       } finally {
         store.set((s) => ({ ...s, loading: without(s.loading, sessionId) }));
       }
@@ -240,6 +422,7 @@ export function createTranscript(deps: {
       }
     },
   };
+  return transcript;
 }
 
 /** The transcript state and actions of one app. */

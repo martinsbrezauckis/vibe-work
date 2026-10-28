@@ -62,9 +62,11 @@ impl Slots {
     }
 }
 
-/// Test hooks around the baseline taken before a session's first work (`CoreConfig::changes_test_hooks`).
-/// Both run on that baseline's blocking thread; production cores have none.
+/// Test hooks around baseline work and background refresh (`CoreConfig::changes_test_hooks`).
+/// They run on the work's blocking thread; production cores have none.
 pub trait ChangesTestHooks: Send + Sync {
+    /// Before a background refresh reads git state, on its blocking thread.
+    fn before_refresh(&self, _session_id: &str) {}
     /// Before the baseline is looked up or taken (blocking here makes it end past the deadline).
     fn before_take(&self, _session_id: &str) {}
     /// Inside the take, after the baseline was written and before it is installed (blocking here makes a
@@ -85,6 +87,11 @@ pub(crate) struct Claim {
 }
 
 impl Hub {
+    /// Snapshot the trackers without holding the slots lock while a watcher or git reader finishes.
+    pub(crate) fn watch_trackers(&self) -> Vec<Arc<Mutex<Tracker>>> {
+        self.slots().trackers.values().cloned().collect()
+    }
+
     pub(crate) fn slots(&self) -> MutexGuard<'_, Slots> {
         self.slots.lock().unwrap_or_else(PoisonError::into_inner)
     }

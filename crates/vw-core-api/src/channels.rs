@@ -26,7 +26,8 @@
 //!   attaches, a rewind or `/clear` that hands off to a new id) moves the channel to the new id; a
 //!   detached fork (`attach: false`) does not (`routing::may_hand_off`).
 //!
-//! Depends on: vw-supervisor (`open_channel`, `resume_on`, lobby), vw-rpc, `routing`. Called by:
+//! Depends on: vw-supervisor (`open_channel`, `resume_on`, lobby), vw-rpc, `routing`, `plugin_pins` (a reopened
+//! chat re-pinned when a pinned plugin was removed). Called by:
 //! `transport` (the gate's transport), `pump` (subscriptions, restarts, events), `recovery` (idle
 //! close, restore), `dispatch` (view, archive).
 //! Invariants:
@@ -56,16 +57,16 @@ use tracing::{debug, error, warn};
 use vw_rpc::{Connection, DeathCause, RpcError, Subscription};
 use vw_supervisor::{Supervisor, SupervisorError};
 
-use crate::routing::{Route, may_hand_off, route};
+use crate::routing::{Route, loads_plugins, may_hand_off, result_session, route};
 
-// Pinned Vibe builds full plugin contexts for lifecycle requests and stored-session config reads.
-// A config read without a session uses the host's plugin-free context; reload explicitly rescans.
-fn loads_plugins(method: &str, params: &Value) -> bool {
-    matches!(
-        method,
-        "session/start" | "session/resume" | "session/continue" | "session/fork" | "plugin/reload"
-    ) || (method == "config/read" && params.get("sessionId").and_then(Value::as_str).is_some())
-}
+#[path = "channels_children.rs"]
+mod children;
+#[path = "plugin_pins.rs"]
+mod plugin_pins;
+#[path = "channels_quiet.rs"]
+mod quiet;
+#[path = "channels_resume.rs"]
+mod resume;
 
 /// Identifies one channel across restarts: (server generation, channel id).
 pub(crate) type ChannelKey = (u64, u64);
@@ -92,9 +93,11 @@ impl Slot {
 #[derive(Default)]
 struct Inner {
     slots: HashMap<String, Slot>,
+    /// CLI histories import under a new id; requests already in flight follow that conversation.
+    imported: HashMap<String, String>,
     /// The session each client's main view shows (`Command::ViewSession`), by origin name.
     viewed: BTreeMap<&'static str, String>,
-    /// Sessions whose channel should close as soon as they are quiet (archived).
+    /// Sessions whose channel should close as soon as they are quiet (archive or runtime refresh).
     close_when_quiet: BTreeSet<String>,
 }
 
@@ -123,6 +126,7 @@ pub(crate) struct Channels {
     /// (`_callback_respond`: the child must belong to the channel's attached session); the lobby refuses it
     /// with "Start, resume, or continue a session". Ids are per server generation: `reset` clears them.
     guest_callbacks: Mutex<HashMap<String, u64>>,
+    child_controls: Mutex<HashMap<String, (String, usize)>>,
     /// adds the session's MCP server (with its credential) to every session-opening request,
     /// after the gate. `None` when the agent tools are off.
     agent_tools: Option<Arc<crate::agent_tools::AgentTools>>,
@@ -132,11 +136,6 @@ pub(crate) struct Channels {
 
 fn locked<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
-}
-
-/// The id of the session a result carries, if any.
-fn result_session(result: &Value) -> Option<&str> {
-    result.pointer("/state/session/id").and_then(Value::as_str)
 }
 
 /// Maps a supervisor failure to the transport's error: no ready server is `Timeout { id: 0 }`, which
@@ -184,6 +183,7 @@ impl Channels {
             restoring: Mutex::new(HashMap::new()),
             foreign: AtomicU64::new(0),
             guest_callbacks: Mutex::new(HashMap::new()),
+            child_controls: Mutex::new(HashMap::new()),
             agent_tools,
             leases,
             plugin_approvals,
@@ -196,8 +196,16 @@ impl Channels {
     pub(crate) async fn request(&self, method: &str, mut params: Value) -> Result<Value, RpcError> {
         if loads_plugins(method, &params) {
             let _held = self.plugin_approvals.mutations.lock().await;
-            self.plugin_approvals
-                .sweep()
+            // One pinned-Python check per approved plugin (about 0.2 s each): on the blocking pool.
+            let approvals = self.plugin_approvals.clone();
+            tokio::task::spawn_blocking(move || approvals.sweep())
+                .await
+                .map_err(|join| {
+                    local_error(
+                        method,
+                        crate::error::CoreError::new(crate::ErrorCode::Internal, join.to_string()),
+                    )
+                })?
                 .map_err(|e| local_error(method, e))?;
         }
         let ticket = self
@@ -221,6 +229,11 @@ impl Channels {
                 self.lobby(method).await?.request(method, params).await
             }
             Route::Session(id) => {
+                if method == "turn/interrupt"
+                    && let Some(conn) = self.child_control(&id)
+                {
+                    return conn.request(method, params).await;
+                }
                 let Some(conn) = self.bound(&id) else {
                     // A subagent's card is answered on the channel it arrived on (its parent's).
                     if let Some(conn) = (method == "callback/result")
@@ -319,37 +332,6 @@ impl Channels {
             Err(error) => {
                 conn.close_input().await;
                 Err(error)
-            }
-        }
-    }
-
-    /// `session/resume`: on the session's channel, or on a new one bound on success. Uses the
-    /// supervisor's resume (it publishes progress while a slow resume runs).
-    async fn resume(&self, id: &str, params: Value) -> Result<Value, RpcError> {
-        let lock = self.session_lock(id);
-        let _held = lock.lock().await;
-        let method = "session/resume";
-        let lease = self
-            .leases
-            .claim(id)
-            .map_err(|error| local_error(method, error))?;
-        if let Some(conn) = self.bound(id) {
-            return self
-                .supervisor
-                .resume_on(&conn, id, params)
-                .await
-                .map_err(|e| to_rpc(method, self.wait, e));
-        }
-        let (conn, key) = self.open(method).await?;
-        match self.supervisor.resume_on(&conn, id, params).await {
-            Ok(result) => {
-                self.leases.retain(id, lease);
-                self.bind(id, conn, key);
-                Ok(result)
-            }
-            Err(error) => {
-                conn.close_input().await;
-                Err(to_rpc(method, self.wait, error))
             }
         }
     }
@@ -472,6 +454,31 @@ impl Channels {
                 last_used: Instant::now(),
             },
         );
+    }
+
+    /// The id Vibe assigned when it imported this CLI history, else the caller's id.
+    pub(crate) fn canonical(&self, id: &str) -> String {
+        locked(&self.inner)
+            .imported
+            .get(id)
+            .cloned()
+            .unwrap_or_else(|| id.to_owned())
+    }
+
+    /// Test hook: Vibe imported conversation `from` as `to`.
+    #[cfg(test)]
+    pub(crate) fn imported_as(&self, from: &str, to: &str) {
+        locked(&self.inner).imported.insert(from.into(), to.into());
+    }
+
+    /// Attached requests follow an imported conversation; stored-history operations keep their own id.
+    pub(crate) fn canonical_params(&self, method: &str, params: &mut Value) {
+        if crate::routing::needs_channel(method, params).is_none() {
+            return;
+        }
+        if let Some(id) = params["sessionId"].as_str() {
+            params["sessionId"] = Value::String(self.canonical(id));
+        }
     }
 
     /// Moves a channel from `from` to `to` (the server handed the channel's session to a new id). A no-op when
@@ -666,35 +673,6 @@ impl Channels {
         ids
     }
 
-    /// Closes the session's channel as soon as it is quiet (archived sessions).
-    pub(crate) fn close_when_quiet(&self, id: &str) {
-        if self.has_channel(id) {
-            locked(&self.inner).close_when_quiet.insert(id.to_owned());
-        }
-    }
-
-    /// Sessions whose channel may close now: not viewed, and unused for `idle` (or archived), as
-    /// judged by `quiet` (no running turn, no open callback, ...).
-    pub(crate) fn idle(&self, idle: Duration, quiet: impl Fn(&str) -> bool) -> Vec<String> {
-        let candidates: Vec<String> = {
-            let inner = locked(&self.inner);
-            let viewed: BTreeSet<&String> = inner.viewed.values().collect();
-            inner
-                .slots
-                .iter()
-                .filter(|(id, slot)| {
-                    slot.alive()
-                        && !viewed.contains(id)
-                        && (inner.close_when_quiet.contains(*id)
-                            || slot.last_used.elapsed() >= idle)
-                })
-                .map(|(id, _)| id.clone())
-                .collect()
-        };
-        // `quiet` reads the store and the gate: called without the registry lock held.
-        candidates.into_iter().filter(|id| quiet(id)).collect()
-    }
-
     /// The open channels, for the status report.
     pub(crate) fn open_channels(&self) -> Vec<OpenChannel> {
         let mut open: Vec<OpenChannel> = locked(&self.inner)
@@ -755,5 +733,37 @@ mod tests {
 
         assert!(!channels.close_if("session", (1, 8)).await);
         assert_eq!(channels.key_of("session"), Some((2, 9)));
+    }
+
+    /// A conversation Vibe imported under a new id: the attached requests the window sends with the id it knows go
+    /// to the new id, an offered skill update included.
+    #[tokio::test]
+    async fn an_offered_skill_update_follows_an_imported_conversation() {
+        let path = std::env::current_exe().unwrap();
+        let config = SupervisorConfig::new(path.clone(), path.clone(), path.clone());
+        let supervisor = Arc::new(Supervisor::start_pending(
+            config,
+            Arc::new(NoSecret),
+            "unit test".to_owned(),
+        ));
+        let (feeds, _received) = mpsc::unbounded_channel();
+        let leases = Arc::new(crate::session_lease::Leases::new(&path, None).unwrap());
+        let approvals = Arc::new(crate::plugin_approvals::PluginApprovals::new(&path).unwrap());
+        let channels = Channels::new(
+            supervisor,
+            Duration::from_millis(10),
+            feeds,
+            None,
+            leases,
+            approvals,
+        );
+        super::locked(&channels.inner)
+            .imported
+            .insert("cli-id".into(), "imported-id".into());
+        for method in ["skills/setVersion", "skills/setLatest", "skills/installed"] {
+            let mut params = serde_json::json!({"sessionId": "cli-id", "name": "release-notes"});
+            channels.canonical_params(method, &mut params);
+            assert_eq!(params["sessionId"], "imported-id", "{method}");
+        }
     }
 }

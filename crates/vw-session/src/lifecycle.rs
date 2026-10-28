@@ -1,8 +1,7 @@
 //! Session lifecycle on the store: loading results, handoff, removal and list reconciliation.
 //!
 //! Responsibility: everything that replaces or creates a session's state from a request result
-//! (`session/start|resume|read|fork|rewind|compact`, `session/compacted` and `contextCleared`
-//! notifications) and the local-only session rules. After a load it replays the
+//! (`session/start|resume|read|fork|rewind|compact`) and the local-only session rules. After a load it replays the
 //! events that arrived around the response, so notifications overtaking a result are not lost.
 //! Depends on: `store`, `session`, `reducer`. Called by: the transport pump after each request.
 
@@ -55,6 +54,21 @@ impl SessionStore {
         self.with(|inner| inner.load(state, kind))
     }
 
+    /// Projects a native read into the same session view used by the event stream. Native entries and
+    /// watermarks win; observed approvals and context fill omitted by native reads remain available.
+    #[must_use]
+    pub fn project_read(&self, state: Value) -> Value {
+        self.with(|inner| {
+            let Some(entry) = session_id_of(&state).and_then(|id| inner.sessions.get(id)) else {
+                return state;
+            };
+            let mut projected = SessionEntry::new(merged_with_prefix(&entry.state, state), false);
+            projected.runtime.clone_from(&entry.runtime);
+            let _ = projected.fold_runtime_into_session();
+            projected.state
+        })
+    }
+
     /// Marks the listed turns of `session_id` `interrupted`, whatever status they have now, and
     /// publishes them as `TurnUpserted`. For turns the client knows were cut off, whatever status the
     /// server reports for them (the caller decides which). Unknown sessions or turn ids are skipped.
@@ -96,7 +110,8 @@ impl SessionStore {
     /// Drops a session (deleted or closed), e.g. after `session/delete`.
     pub fn remove(&self, session_id: &str) -> Applied {
         self.with(|inner| {
-            inner.pending.remove(session_id);
+            let _ = inner.take_pending(session_id);
+            let _ = inner.take_pending_runtime(session_id);
             if inner.sessions.remove(session_id).is_some() {
                 inner.emit_all(vec![Change::Removed {
                     session_id: session_id.to_owned(),
@@ -191,6 +206,16 @@ impl Inner {
                 out.actions.extend(applied.actions);
             }
         }
+        if let Some(entry) = self.sessions.get_mut(&sid)
+            && std::mem::take(&mut entry.reread_later)
+            && !entry.resync_pending
+        {
+            out.actions.push(Action::NeedsResync {
+                session_id: sid.clone(),
+                reason: "held events past a hole were dropped; one delayed re-read".to_owned(),
+                delayed: true,
+            });
+        }
         if kind == LoadKind::Read
             && let Some(entry) = self.sessions.get_mut(&sid)
             && !entry.resync_pending
@@ -209,8 +234,14 @@ impl Inner {
         kind: LoadKind,
     ) -> (Vec<Notification>, Vec<Value>) {
         let mut replay = self.take_pending(sid);
+        let early_runtime = self.take_pending_runtime(sid);
         let Some(entry) = self.sessions.get_mut(sid) else {
-            let entry = SessionEntry::new(state, kind == LoadKind::New);
+            let mut entry = SessionEntry::new(state, kind == LoadKind::New);
+            // A runtime that arrived before the load folds in now (the snapshot that follows the load carries it).
+            if early_runtime.is_some() {
+                entry.runtime = early_runtime;
+                let _ = entry.fold_runtime_into_session();
+            }
             let mark = entry.last_event_id;
             replay.retain(|n| n.params.get("eventId").and_then(Value::as_u64) > Some(mark));
             self.sessions.insert(sid.to_owned(), entry);
@@ -228,76 +259,12 @@ impl Inner {
             state
         };
         replay.extend(entry.replace_state(next));
+        let _ = entry.fold_runtime_into_session();
         let interrupted = if kind == LoadKind::Resume {
             entry.mark_interrupted(&previous_turns)
         } else {
             Vec::new()
         };
         (replay, interrupted)
-    }
-
-    /// `session/compacted` / `session/contextCleared`: the conversation moves to a new session id.
-    pub(crate) fn handoff(&mut self, n: &Notification) -> Applied {
-        let p = &n.params;
-        let new_id = p
-            .get("sessionId")
-            .and_then(Value::as_str)
-            .map(str::to_owned);
-        let old_id = p
-            .get("oldSessionId")
-            .and_then(Value::as_str)
-            .map(str::to_owned);
-        let state = p.get("state").filter(|s| s.is_object()).cloned();
-        let valid = match (&new_id, &old_id, &state) {
-            (Some(new), Some(old), Some(state)) => {
-                new != old
-                    && session_id_of(state) == Some(new.as_str())
-                    && state.get("eventId") == p.get("eventId")
-                    && p.get("eventId")
-                        .and_then(Value::as_u64)
-                        .is_some_and(|e| e > 0)
-            }
-            _ => false,
-        };
-        let (Some(new_id), Some(state), true) = (new_id.clone(), state, valid) else {
-            // Cannot trust the payload: note it on the old session and ask for a re-read.
-            let mut out = Applied::default();
-            if let Some(old) = old_id.as_deref().and_then(|o| self.sessions.get_mut(o)) {
-                old.anomalies.record(
-                    AnomalyKind::InconsistentEnvelope,
-                    None,
-                    format!("{}: invalid handoff payload", n.method),
-                );
-            }
-            if let Some(target) = new_id.or(old_id) {
-                out.actions.push(Action::NeedsResync {
-                    session_id: target,
-                    reason: format!("{}: invalid handoff payload", n.method),
-                });
-            }
-            return out;
-        };
-        let old = old_id.and_then(|o| self.sessions.remove(&o).map(|e| (o, e)));
-        let (mut out, carried) = match old {
-            Some((old_id, e)) => (
-                self.emit_all(vec![Change::HandedOff {
-                    old_session_id: old_id,
-                    new_session_id: new_id.clone(),
-                }]),
-                Some(e.anomalies),
-            ),
-            None => (Applied::default(), None),
-        };
-        match self.load(state, crate::lifecycle::LoadKind::Replace) {
-            Ok(loaded) => {
-                out.changes.extend(loaded.changes);
-                out.actions.extend(loaded.actions);
-            }
-            Err(_) => return out,
-        }
-        if let (Some(carried), Some(entry)) = (carried, self.sessions.get_mut(&new_id)) {
-            entry.anomalies = carried;
-        }
-        out
     }
 }

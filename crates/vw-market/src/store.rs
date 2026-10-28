@@ -20,11 +20,16 @@
 //! - Receipts list the SHA-256 of every file the marketplace wrote; [`Store::changed`] compares a pack against it.
 
 use std::collections::BTreeMap;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
 use crate::error::MarketError;
+
+#[cfg(test)]
+#[path = "receipt_reads_tests.rs"]
+mod tests;
 
 /// The receipt file inside an installed plugin folder.
 pub const RECEIPT: &str = ".vw-market.json";
@@ -43,6 +48,34 @@ pub struct Receipt {
     pub installed_at_ms: u64,
     /// Every file written, relative path -> SHA-256 (the receipt itself excluded).
     pub files: BTreeMap<String, String>,
+}
+
+impl Receipt {
+    /// Reads a receipt from a plain plugin folder, capped at 1 MiB like plugin manifests.
+    /// Invalid, linked, special or oversized receipts establish no installed identity.
+    #[must_use]
+    pub fn read_from(folder: &Path) -> Option<Self> {
+        const LIMIT: u64 = 1024 * 1024;
+        if !std::fs::symlink_metadata(folder).ok()?.is_dir() {
+            return None;
+        }
+        let path = folder.join(RECEIPT);
+        let bounded = |meta: &std::fs::Metadata| meta.file_type().is_file() && meta.len() <= LIMIT;
+        if !bounded(&std::fs::symlink_metadata(&path).ok()?) {
+            return None;
+        }
+        let file = std::fs::File::open(path).ok()?;
+        if !bounded(&file.metadata().ok()?) {
+            return None;
+        }
+        let mut bytes = Vec::new();
+        (&file).take(LIMIT + 1).read_to_end(&mut bytes).ok()?;
+        if bytes.len() as u64 > LIMIT || !bounded(&file.metadata().ok()?) {
+            return None;
+        }
+        let receipt: Self = serde_json::from_slice(&bytes).ok()?;
+        (folder.file_name()?.to_str()? == receipt.entry_id).then_some(receipt)
+    }
 }
 
 /// The marketplace's folders inside one Vibe home.
@@ -157,13 +190,8 @@ impl Store {
         if dir.is_symlink() || !dir.is_dir() {
             return Err(MarketError::Foreign(id.to_owned()));
         }
-        let text = std::fs::read_to_string(dir.join(RECEIPT))
-            .map_err(|_| MarketError::Foreign(id.to_owned()))?;
-        let receipt: Receipt =
-            serde_json::from_str(&text).map_err(|_| MarketError::Foreign(id.to_owned()))?;
-        if receipt.entry_id != id {
-            return Err(MarketError::Foreign(id.to_owned()));
-        }
+        let receipt =
+            Receipt::read_from(&dir).ok_or_else(|| MarketError::Foreign(id.to_owned()))?;
         Ok(Some(receipt))
     }
 

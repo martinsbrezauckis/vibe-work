@@ -9,7 +9,7 @@
 //! - [`dialog_value`] caps the length (an ellipsis marks the cut) and puts the value in double quotes;
 //!   a double quote inside becomes a single quote, so the value cannot close its quotes early.
 //! - [`dialog_quote`] preserves the complete identity of a value with visible escapes for hidden characters,
-//!   backslashes and quotes. Use it when no JSON or raw params are shown alongside the consent sentence.
+//!   quotes and ambiguous backslashes. Use it when no JSON or raw params accompany the consent sentence.
 //! - [`dialog_label`] is for a name that a dialog sentence places between quotation marks of any style: hidden
 //!   and quote-like characters ([`is_quote_char`]) are written as visible escapes, so the name can neither
 //!   end the surrounding quotation early nor add a sentence after it.
@@ -17,11 +17,7 @@
 /// True for characters a dialog never shows as they are (module docs).
 #[must_use]
 pub fn is_hidden_char(c: char) -> bool {
-    c.is_control()
-        || ('\u{202A}'..='\u{202E}').contains(&c)
-        || ('\u{2066}'..='\u{2069}').contains(&c)
-        || ('\u{200B}'..='\u{200F}').contains(&c)
-        || matches!(c, '\u{2028}' | '\u{2029}' | '\u{FEFF}' | '\u{061C}')
+    vw_ask::is_hidden_char(c)
 }
 
 /// True for characters that can open or close a quotation in some writing style: ASCII quotes and
@@ -70,24 +66,87 @@ pub fn dialog_value(text: &str, max: usize) -> String {
 
 /// A complete, visibly escaped value for a plain native confirmation sentence. Spaces and quotes remain
 /// distinguishable, while control and direction characters are written as Unicode escapes on one line.
+/// Ordinary path separators stay literal. Backslash runs double only before a visible escape, a quote,
+/// a hidden character (which becomes an escape), or the closing quotation mark. This is display text, not JSON.
 #[must_use]
 pub fn dialog_quote(text: &str) -> String {
     let mut quoted = String::with_capacity(text.len() + 2);
     quoted.push('"');
-    for ch in text.chars() {
-        if is_hidden_char(ch) {
+    escape_into(&mut quoted, text, Quotes::Ascii);
+    quoted.push('"');
+    quoted
+}
+
+/// A chat name in a native heading. Embedded ASCII quotes stay as typed inside curly outer quotes;
+/// other names keep the usual quotation. Hidden characters and ambiguous backslashes use [`dialog_quote`]'s rules.
+#[must_use]
+pub fn dialog_chat_quote(text: &str) -> String {
+    if !text.contains('"') {
+        return dialog_quote(text);
+    }
+    let mut quoted = String::with_capacity(text.len() + 2);
+    quoted.push('“');
+    escape_into(&mut quoted, text, Quotes::Curly);
+    quoted.push('”');
+    quoted
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Quotes {
+    None,
+    Ascii,
+    Curly,
+}
+
+/// A complete command for the block a dialog ends with (`Command:` and the command on the next line): as typed,
+/// quotes included, so the person reads what will run (a `\"` is part of the command), with hidden
+/// characters (line breaks too) as visible `\uXXXX` escapes on one line. A backslash run doubles only before an
+/// escape or a hidden character, so a typed `\u202E` and a real U+202E still differ. Only for a value no
+/// sentence text follows on its line.
+#[must_use]
+pub fn dialog_command(text: &str) -> String {
+    let mut shown = String::with_capacity(text.len());
+    escape_into(&mut shown, text, Quotes::None);
+    shown
+}
+
+/// Native display escaping, appended to `out`; the chosen delimiters and hidden characters stay unambiguous.
+fn escape_into(out: &mut String, text: &str, quotes: Quotes) {
+    let mut chars = text.chars();
+    while let Some(ch) = chars.next() {
+        if is_hidden_char(ch) || (quotes == Quotes::Curly && matches!(ch, '“' | '”')) {
             use std::fmt::Write as _;
-            let _ = write!(quoted, "\\u{:04X}", ch as u32);
+            let _ = write!(out, "\\u{:04X}", ch as u32);
         } else {
             match ch {
-                '"' => quoted.push_str("\\\""),
-                '\\' => quoted.push_str("\\\\"),
-                _ => quoted.push(ch),
+                '"' if quotes == Quotes::Ascii => out.push_str("\\\""),
+                '\\' => {
+                    let mut count = 1;
+                    while chars.as_str().starts_with('\\') {
+                        chars.next();
+                        count += 1;
+                    }
+                    let rest = chars.as_str();
+                    let unicode_escape = rest.strip_prefix('u').is_some_and(|tail| {
+                        tail.as_bytes()
+                            .get(..4)
+                            .is_some_and(|digits| digits.iter().all(u8::is_ascii_hexdigit))
+                    });
+                    let ambiguous = rest.chars().next().map_or(quotes != Quotes::None, |next| {
+                        (quotes == Quotes::Ascii && next == '"')
+                            || (quotes == Quotes::Curly && matches!(next, '“' | '”'))
+                            || is_hidden_char(next)
+                    }) || unicode_escape;
+                    // Treat a whole run alike: a literal escape and an escaped character must differ.
+                    out.extend(std::iter::repeat_n(
+                        '\\',
+                        count * if ambiguous { 2 } else { 1 },
+                    ));
+                }
+                _ => out.push(ch),
             }
         }
     }
-    quoted.push('"');
-    quoted
 }
 
 /// A complete, visibly escaped name for a dialog sentence that puts it between quotation marks, without
@@ -111,7 +170,27 @@ pub fn dialog_label(text: &str) -> String {
 
 #[cfg(test)]
 mod kg1_tests {
-    use super::{dialog_label, dialog_quote};
+    use super::{dialog_command, dialog_label, dialog_quote};
+
+    #[test]
+    fn command_reads_as_typed_and_still_exposes_hidden_characters() {
+        let typed = r#"cd "/home/me/git test" && git branch -m a b 2>&1; echo "exit=$?""#;
+        assert_eq!(dialog_command(typed), typed);
+        assert_eq!(dialog_command(r"C:\Users\x"), r"C:\Users\x");
+        // A line break cannot start a line of its own (no fake sentence after the command).
+        assert_eq!(dialog_command("echo a\nrm -rf b"), r"echo a\u000Arm -rf b");
+        assert_eq!(dialog_command("a\tb\u{202E}c"), "a\\u0009b\\u202Ec");
+        // A typed escape and the hidden character it names stay apart, as in `dialog_quote`.
+        assert_eq!(dialog_command(r"\u202E"), r"\\u202E");
+        assert_eq!(dialog_command("\\\u{202E}"), r"\\\u202E");
+        let mut seen = std::collections::BTreeSet::new();
+        for count in 0..5 {
+            for suffix in ["u202E", "\u{202E}", "\n", "\"", "x", ""] {
+                let input = format!("{}{suffix}", "\\".repeat(count));
+                assert!(seen.insert(dialog_command(&input)), "ambiguous: {input:?}");
+            }
+        }
+    }
 
     #[test]
     fn quote_preserves_identity_and_exposes_hidden_characters() {
@@ -119,6 +198,49 @@ mod kg1_tests {
             dialog_quote("a  \"b\n\u{202E}c"),
             "\"a  \\\"b\\u000A\\u202Ec\""
         );
+    }
+
+    #[test]
+    fn quote_keeps_windows_and_unc_path_separators_readable() {
+        for path in [
+            r"C:\Users\Rebeka\Documents\Tests VibeWork",
+            r"C:\new\test\users\u202-project",
+            r"\\server\share\Tests VibeWork",
+            r"\\?\C:\Users\Rebeka\Documents",
+            r"\\?\UNC\server\share\Documents",
+        ] {
+            assert_eq!(dialog_quote(path), format!("\"{path}\""));
+        }
+    }
+
+    #[test]
+    fn quote_distinguishes_literal_escapes_and_adjacent_backslashes() {
+        assert_eq!(dialog_quote(r"\u202E"), r#""\\u202E""#);
+        assert_eq!(dialog_quote(r"\\u202E"), r#""\\\\u202E""#);
+        assert_eq!(dialog_quote("\\\u{202E}"), r#""\\\u202E""#);
+        assert_eq!(dialog_quote("\\\""), r#""\\\"""#);
+        assert_eq!(dialog_quote("C:\\"), r#""C:\\""#);
+
+        let mut seen = std::collections::BTreeSet::new();
+        for count in 0..5 {
+            for suffix in ["u202E", "u202e", "\u{202E}", "\n", "\"", "server", ""] {
+                let input = format!("{}{suffix}", "\\".repeat(count));
+                assert!(seen.insert(dialog_quote(&input)), "ambiguous: {input:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn quote_exposes_every_hidden_character() {
+        for ch in (0..=0xFFFF)
+            .filter_map(char::from_u32)
+            .filter(|&ch| super::is_hidden_char(ch))
+        {
+            assert_eq!(
+                dialog_quote(&ch.to_string()),
+                format!("\"\\u{:04X}\"", ch as u32)
+            );
+        }
     }
 
     #[test]

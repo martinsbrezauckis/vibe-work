@@ -1,13 +1,5 @@
-/**
- * Documents waiting in a session's composer: one chip per document not yet read, with its
- * kind, page count and the quota sentence ("Reading it uses 3 pages of your Mistral OCR quota"), and the
- * buttons "Read text" (Mistral OCR, through the core), "Attach as picture" (images Vibe can see) and
- * Remove. A failed read shows Mistral's reason and offers "Try again". Read documents leave this row
- * and become context chips (`ChipsRow`).
- * Depends on: AppContext, the documents store, Icon. Called by: Composer.
- * Invariants: render only; nothing is sent to OCR before "Read text" is pressed; texts come from the
- * core (plain text nodes).
- */
+/** Automatic attachment reading and retry controls. Uses the documents store; render only. */
+import { Button } from "../../components/Controls";
 import type { ReactElement } from "react";
 
 import { Icon } from "../../components/Icon";
@@ -40,37 +32,39 @@ function DocChip({ doc, sessionId }: { doc: DocumentView; sessionId: string }): 
           {doc.kindLabel} · {pagesText(doc.pages)}
         </span>
       </div>
-      <p className="docchip-note" role={failed && !keyBlocked ? "alert" : undefined}>
-        {failed && !keyBlocked
+      <p className="docchip-note" role={failed ? "alert" : undefined}>
+        {failed
           ? (doc.error ?? "Reading failed.")
           : busy
             ? "Reading with Mistral OCR…"
             : quotaText(doc)}
       </p>
       <div className="docchip-acts">
-        <button
-          data-testid="composer.document-chips-extract"
-          type="button"
-          className="mini"
-          disabled={busy || keyBlocked}
-          title={`${failed ? "Try again to read text" : "Read text"} from ${doc.name} with Mistral OCR`}
-          aria-label={`${failed ? "Try again to read text" : "Read text"} from ${doc.name} with Mistral OCR`}
-          onClick={() => void actions.extract(sessionId, doc.id).catch(() => undefined)}
-        >
-          {failed ? "Try again" : "Read text"}
-        </button>
+        {failed ? (
+          <Button
+            data-testid="composer.document-chips-extract"
+            type="button"
+            appearance="compact"
+            disabled={busy || keyBlocked}
+            title={`Try again to read text from ${doc.name}`}
+            aria-label={`Try again to read text from ${doc.name}`}
+            onClick={() => void actions.extract(sessionId, doc.id).catch(() => undefined)}
+          >
+            Try again
+          </Button>
+        ) : null}
         {doc.canAttachAsPicture ? (
-          <button
+          <Button
             data-testid="composer.document-chips-as-picture"
             type="button"
-            className="mini"
+            appearance="compact"
             disabled={busy}
             title={`Attach ${doc.name} as a picture instead of reading text`}
             aria-label={`Attach ${doc.name} as a picture instead of reading text`}
-            onClick={() => void actions.asPicture(sessionId, doc.id).catch(() => undefined)}
+            onClick={() => void actions.asPicture(sessionId, doc.id)}
           >
             Attach as picture
-          </button>
+          </Button>
         ) : null}
         <button
           data-testid="composer.document-chips-remove"
@@ -94,7 +88,7 @@ export function DocumentChips({ sessionId }: { sessionId: string }): ReactElemen
   const chips = useDocumentsState((s) => s.chips[sessionId] ?? NONE);
   if (documents === null || chips.length === 0) return null;
   return (
-    <div className="doc-row" aria-label="Attached files with optional text reading">
+    <div className="doc-row" aria-label="Reading attached files">
       <KeyNotice message="Reading document text uses your Mistral key for OCR, which is kept in the vault." />
       {chips.map((doc) => (
         <DocChip key={doc.id} doc={doc} sessionId={sessionId} />

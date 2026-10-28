@@ -54,7 +54,7 @@ impl PreviewService {
             {
                 return;
             }
-            let (Some(mount), Some(url)) = (&entry.mount, &entry.url) else {
+            let (Some(mount), Some(url)) = (entry.ready_mount(), &entry.url) else {
                 return;
             };
             (mount.clone(), loads, url.to_string())

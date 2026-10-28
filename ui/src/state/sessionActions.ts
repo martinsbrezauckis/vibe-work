@@ -19,6 +19,7 @@
 import type { Command, JsonValue, ProcessesResult } from "../protocol/core";
 import { CoreCallError, toCallError } from "../protocol/client/types";
 import type { CoreController } from "./coreStore";
+import { reportMissingChat } from "./sessionOpenError";
 import { createStore } from "./createStore";
 import type { Shell } from "./shellStore";
 import type { Toasts } from "./toastStore";
@@ -29,12 +30,10 @@ export function createSessionActions(deps: {
   shell: Shell;
   toasts: Toasts;
   /**
-   * Right after a delete, before `ended`: the question about processes the session left running (they
+   * Right after a delete: the question about processes the session left running (they
    * stop before its copy may be removed). Its answer goes back to the `ui/sessions` route.
    */
   afterDelete?: ((id: string) => Promise<ProcessesResult | null>) | undefined;
-  /** After an archive or delete (the Keep / Remove choice for the session's copy). */
-  ended?: ((id: string, after: "archive" | "delete") => Promise<void>) | undefined;
 }) {
   const { core, shell, toasts } = deps;
   const seenInFlight = new Set<string>();
@@ -42,9 +41,10 @@ export function createSessionActions(deps: {
   // Ids whose last mark-as-seen failed: not retried by the watcher (no error loop), only by opening.
   const seenFailed = new Set<string>();
 
-  const fail = (thrown: unknown): void => {
+  const fail = (thrown: unknown, sessionId?: string): void => {
     const error = toCallError(thrown).error;
-    if (error.code === "confirmationDeclined") return;
+    if (error.code === "confirmationDeclined" || error.code === "accessModeUnverified") return;
+    if (sessionId !== undefined && reportMissingChat(thrown, toasts, sessionId)) return;
     toasts.push({ kind: "error", bellKind: "failure", text: error.message });
   };
   const call = (method: string, params: Record<string, JsonValue>, token?: string) => {
@@ -90,6 +90,25 @@ export function createSessionActions(deps: {
   };
 
   const actions = {
+    /** Children are removed only with their parent, including when called through a UI route. */
+    deleteRefusal(id: string): string | null {
+      const entry = entryOf(id);
+      const parentId = entry?.session["parentSessionId"];
+      const parent = typeof parentId === "string" ? entryOf(parentId) : undefined;
+      const children = parent?.state?.["childSessions"];
+      const owned =
+        entry?.ownedByParent ??
+        (parent !== undefined &&
+          Array.isArray(children) &&
+          children.some(
+            (child) =>
+              typeof child === "object" &&
+              child !== null &&
+              !Array.isArray(child) &&
+              child["id"] === id,
+          ));
+      return owned ? "Subagent chats are removed when you delete their parent chat." : null;
+    },
     markSeen,
     retrying,
     trustGuidance,
@@ -146,7 +165,8 @@ export function createSessionActions(deps: {
         try {
           await core.run({ type: "refreshSession", sessionId: id });
         } catch (thrown) {
-          fail(thrown);
+          fail(thrown, id);
+          return;
         }
       }
       await markSeen(id);
@@ -184,7 +204,6 @@ export function createSessionActions(deps: {
             : { archivedAt: null },
         );
         if (archived && shell.store.get().selected === id) shell.actions.selectSession(null);
-        if (archived) void deps.ended?.(id, "archive");
       } catch (thrown) {
         fail(thrown);
       }
@@ -192,10 +211,11 @@ export function createSessionActions(deps: {
 
     /**
      * Delete: native confirmation first, then the call with its single-use token. Then the question about
-     * processes the session left running, awaited so a Debug API request that deleted gets its answer; the copy's
-     * Keep / Remove choice comes after it.
+     * processes the session left running, awaited so a Debug API request that deleted gets its answer.
      */
     async remove(id: string): Promise<boolean> {
+      const reason = actions.deleteRefusal(id);
+      if (reason !== null) return false;
       const params = { sessionId: id };
       try {
         const asked = await core.run({
@@ -212,7 +232,6 @@ export function createSessionActions(deps: {
       core.forget(id);
       if (shell.store.get().selected === id) shell.actions.selectSession(null);
       await deps.afterDelete?.(id);
-      void deps.ended?.(id, "delete");
       return true;
     },
 
@@ -316,17 +335,13 @@ export function createSessionActions(deps: {
         return null;
       }
     },
-    async startIn(cwd: string, origin?: "debug-api"): Promise<string | null> {
+    async startIn(cwd: string): Promise<string | null> {
       try {
-        const result = await core.run(
-          { type: "startSession", agentConfig: { cwd } },
-          origin === undefined ? undefined : { origin },
-        );
+        const result = await core.run({ type: "startSession", agentConfig: { cwd } });
         if (result.type !== "session") return null;
         const started = result.snapshot.sessionId;
         // Every session has its own channel on the multiplexed server, so an earlier
-        // empty session stays usable: nothing is dropped here any more (the old single-connection
-        // workaround is gone).
+        // empty session stays usable: nothing is dropped here.
         shell.actions.selectSession(started);
         return started;
       } catch (thrown) {
@@ -388,7 +403,20 @@ export function createSessionActions(deps: {
           selected === null
             ? { type: "viewSession" }
             : { type: "viewSession", sessionId: selected };
-        core.run(command).catch(fail);
+        core
+          .run(command)
+          .then((result) => {
+            if (
+              result.type === "session" &&
+              result.snapshot.sessionId !== selected &&
+              shell.store.get().selected === selected
+            ) {
+              shell.actions.selectSession(result.snapshot.sessionId);
+            }
+          })
+          .catch((thrown: unknown) => {
+            fail(thrown, selected ?? undefined);
+          });
       };
       send();
       return shell.store.subscribe(send);

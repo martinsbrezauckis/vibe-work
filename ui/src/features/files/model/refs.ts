@@ -83,10 +83,7 @@ function splitLine(text: string): { path: string; line: number | null } {
  * The path a token names, or `null`. `relaxed`: the token came from inline code or a link target, where any path
  * shape with a folder part counts (spaces inside allowed by the caller).
  */
-export function pathOf(
-  token: string,
-  relaxed = false,
-): { path: string; line: number | null } | null {
+function pathOf(token: string, relaxed = false): { path: string; line: number | null } | null {
   let text = token.trim();
   if (text === "" || text.length > MAX_LENGTH) return null;
   if (/^file:\/\//i.test(text)) {

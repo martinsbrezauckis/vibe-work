@@ -32,9 +32,21 @@ fn assemble(body: &str, request: &Value) -> String {
 /// The observe script for the page environment `page`.
 #[must_use]
 pub fn observe(page: &str, max_refs: usize, max_text: usize, text_offset: usize) -> String {
+    observe_focused(page, max_refs, max_text, text_offset, None)
+}
+
+/// Observes matching controls before the ref cap, using only their redacted display fields.
+#[must_use]
+pub fn observe_focused(
+    page: &str,
+    max_refs: usize,
+    max_text: usize,
+    text_offset: usize,
+    find: Option<&str>,
+) -> String {
     assemble(
         OBSERVE,
-        &json!({"page": page, "maxRefs": max_refs, "maxText": max_text, "textOffset": text_offset}),
+        &json!({"page": page, "maxRefs": max_refs, "maxText": max_text, "textOffset": text_offset, "find": find}),
     )
 }
 
@@ -112,7 +124,7 @@ pub fn media(page: &str, max_items: usize) -> String {
 pub fn page_text(page: &str, request: &Value) -> String {
     let mut request = request.clone();
     request["page"] = json!(page);
-    assemble(PAGE, &request)
+    assemble(PAGE, &request).replace("__VW_SINGLE_HTML__", include_str!("js/single_html.js"))
 }
 
 /// The full-page screenshot helper script: `op` = metrics, scroll (to `y`), eager, pin, unpin.
@@ -143,4 +155,11 @@ pub fn secret_choice(page: &str, mode: &str, op: &str) -> String {
 #[must_use]
 pub fn fill(request: &Value) -> String {
     assemble(FILL, request)
+}
+
+/// Visible labels and destinations for Linux PDF link annotations.
+#[must_use]
+pub fn pdf_links(page: &str) -> String {
+    let request = json!({"page": page});
+    assemble(include_str!("js/pdf_links.js"), &request)
 }

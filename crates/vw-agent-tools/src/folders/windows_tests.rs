@@ -310,7 +310,7 @@ fn layout_resolution_error_names_the_bad_path() -> std::io::Result<()> {
     assert!(
         refusal
             .as_deref()
-            .is_some_and(|text| text.contains("could not be resolved")),
+            .is_some_and(|text| text.contains("could not resolve")),
         "{refusal:?}"
     );
     Ok(())
@@ -360,4 +360,88 @@ fn unc_prefix_and_root_are_kept_as_separate_components() {
         normalize_prefix(Path::new(r"\\SeRvEr\ShArE\folder")),
         Path::new(r"\\?\UNC\server\share\folder")
     );
+}
+
+/// `C:\a\b` in Git Bash's spelling, `/c/a/b`.
+fn msys(path: &Path) -> std::io::Result<String> {
+    let text = path.to_string_lossy().replace('\\', "/");
+    let (drive, rest) = text
+        .split_once(':')
+        .ok_or_else(|| std::io::Error::other("not a drive path"))?;
+    Ok(format!("/{}{rest}", drive.to_ascii_lowercase()))
+}
+
+// The agent often writes Git Bash drive paths in its commands; they name the same
+// folders as their Windows spelling, also inside quoted code.
+#[test]
+fn git_bash_drive_paths_in_commands_meet_the_folder_guard() -> std::io::Result<()> {
+    let temp = TempTree::new()?;
+    let home = temp.root.join("data").join("vibe-home");
+    let cwd = temp.root.join("project");
+    std::fs::create_dir_all(&home)?;
+    std::fs::create_dir_all(&cwd)?;
+    let layout = Layout::new(&home, &cwd)?;
+    let allow = |_: &Path, _: bool| -> Result<(), String> { Ok(()) };
+    let inside = msys(&home.join("x.txt"))?;
+    for command in [
+        format!("echo x > {inside}"),
+        format!("touch '{inside}'"),
+        format!("python -c \"open('{inside}', 'w').write('x')\""),
+        format!("echo x > {}", inside.replacen("/c/", "/C/", 1)),
+        // A spelling the raw-text scan cannot match: only the redirect check sees it.
+        format!("echo x > {}", inside.to_lowercase()),
+    ] {
+        let refusal = check_command(&layout, &command, None, &allow);
+        assert!(
+            refusal
+                .as_deref()
+                .is_some_and(|r| r.starts_with("Not run: Vibe Work's own")),
+            "{command}: {refusal:?}"
+        );
+    }
+    let outside = msys(&cwd.join("ok.txt"))?;
+    assert_eq!(
+        check_command(&layout, &format!("echo x > {outside}"), None, &allow),
+        None
+    );
+    Ok(())
+}
+
+// After `cd /c/...` the shell is in that Windows folder, so later relative paths are checked from it: a sibling
+// copy reached as `../` stays behind its permit.
+#[test]
+fn relative_paths_after_a_git_bash_cd_are_checked_from_the_folder_it_names() -> std::io::Result<()>
+{
+    let (_temp, layout, own, _other) = copies()?;
+    let permits = |_: &Path, is_own: bool| {
+        if is_own {
+            Ok(())
+        } else {
+            Err("other copy busy".to_owned())
+        }
+    };
+    let own_msys = msys(&own)?;
+    for command in [
+        format!("cd {own_msys} && cat ../../repo-b/other/notes.md"),
+        format!("cd {own_msys} && echo x > ../../repo-b/other/notes.md"),
+        format!("pushd {own_msys} && cat ../../repo-b/other/notes.md"),
+    ] {
+        let refusal = check_command(&layout, &command, None, &permits);
+        assert!(
+            refusal
+                .as_deref()
+                .is_some_and(|text| text.contains("other copy busy")),
+            "{command}: {refusal:?}"
+        );
+    }
+    assert_eq!(
+        check_command(
+            &layout,
+            &format!("cd {own_msys} && cat notes.md"),
+            None,
+            &permits
+        ),
+        None
+    );
+    Ok(())
 }

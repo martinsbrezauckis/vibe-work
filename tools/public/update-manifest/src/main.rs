@@ -3,9 +3,11 @@
 //! ```text
 //! make-latest-json write  --version X.Y.Z --app-config <tauri.conf.json> --channel <channel json>
 //!                         --pubkey <public key file> --notes-file <file> [--pub-date YYYY-MM-DDTHH:MM:SSZ]
-//!                         --artifacts <dir> --out <latest.json>
+//!                         [--macos-minimum <LSMinimumSystemVersion>] [--windows-minimum <build>]
+//!                         [--linux-glibc <glibc version>] --artifacts <dir> --out <latest.json>
 //! make-latest-json check  --version X.Y.Z --app-config <tauri.conf.json> --pubkey <public key file>
-//!                         --artifacts <dir> <latest.json>
+//!                         [--macos-minimum <v>] [--windows-minimum <v>] [--linux-glibc <v>] --artifacts <dir>
+//!                         <latest.json>
 //! make-latest-json verify --version X.Y.Z --pubkey <public key file> <file>      (checks <file>.sig)
 //! ```
 //! Exit codes: 0 done, 1 refused (the reason on stderr), 2 usage.
@@ -16,11 +18,13 @@ use std::collections::BTreeMap;
 use std::path::Path;
 use std::process::ExitCode;
 
-use make_latest_json::{Refused, WriteRequest};
+use make_latest_json::{Minimums, Refused, WriteRequest};
 
 const USAGE: &str = "usage: make-latest-json write --version X.Y.Z --app-config <file> --channel <file> \
---pubkey <file> --notes-file <file> [--pub-date <time>] --artifacts <dir> --out <file>\n       \
-make-latest-json check --version X.Y.Z --app-config <file> --pubkey <file> --artifacts <dir> <latest.json>\n       \
+--pubkey <file> --notes-file <file> [--pub-date <time>] [--macos-minimum <version>] [--windows-minimum <build>] \
+[--linux-glibc <version>] --artifacts <dir> --out <file>\n       \
+make-latest-json check --version X.Y.Z --app-config <file> --pubkey <file> [--macos-minimum <version>] \
+[--windows-minimum <build>] [--linux-glibc <version>] --artifacts <dir> <latest.json>\n       \
 make-latest-json verify --version X.Y.Z --pubkey <file> <file>";
 
 /// Parsed `--flag value` pairs plus the positional arguments; `None` on a flag without a value or given twice.
@@ -48,6 +52,11 @@ fn run(
     positional: &[String],
 ) -> Option<Result<String, Refused>> {
     let flag = |name: &str| flags.get(name).map(String::as_str);
+    let minimums = Minimums {
+        macos: flag("macos-minimum"),
+        windows: flag("windows-minimum"),
+        linux_glibc: flag("linux-glibc"),
+    };
     let known: &[&str] = match command {
         "write" => &[
             "version",
@@ -56,10 +65,21 @@ fn run(
             "pubkey",
             "notes-file",
             "pub-date",
+            "macos-minimum",
+            "windows-minimum",
+            "linux-glibc",
             "artifacts",
             "out",
         ],
-        "check" => &["version", "app-config", "pubkey", "artifacts"],
+        "check" => &[
+            "version",
+            "app-config",
+            "pubkey",
+            "macos-minimum",
+            "windows-minimum",
+            "linux-glibc",
+            "artifacts",
+        ],
         "verify" => &["version", "pubkey"],
         _ => return None,
     };
@@ -78,6 +98,7 @@ fn run(
                 pubkey: Path::new(flag("pubkey")?),
                 notes: Path::new(flag("notes-file")?),
                 pub_date: flag("pub-date"),
+                minimums,
                 artifacts: Path::new(flag("artifacts")?),
                 out: Path::new(flag("out")?),
             };
@@ -90,6 +111,7 @@ fn run(
                 Path::new(flag("app-config")?),
                 Path::new(flag("pubkey")?),
                 Path::new(flag("artifacts")?),
+                minimums,
                 Path::new(manifest),
             )
             .map(|()| format!("{manifest}: ok"))

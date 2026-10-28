@@ -1,7 +1,8 @@
 /**
  * Settings, "Models and agent" additions (//, Vibe 2.26.1): what new
  * sessions start with (access mode), what the agent may use (background
- * processes, subagents), when a silent answer counts as stalled, and the default model's sampling and output cap.
+ * processes, subagents) and when a silent answer counts as stalled. The model's sampling and output cap are not
+ * offered; Vibe Work keeps its own Large 4 output limit.
  * Every value is read from Vibe (`config/fields/read`) and written with Vibe's own methods
  * through a session (`state/vibeSettings.ts`); Full access as the default asks the native confirmation.
  * Depends on: state/vibeSettings, vibeSettingRows (rows and the read/write hook), composer access modes.
@@ -13,26 +14,18 @@
  */
 import type { ReactElement } from "react";
 
-import {
-  type ConfigOp,
-  modelPath,
-  writeConfig,
-  writeSubagentsForNewChats,
-} from "../../state/vibeSettings";
+import { type ConfigOp, writeConfig, writeSubagentsForNewChats } from "../../state/vibeSettings";
 import { ACCESS_MODES } from "../composer/model/access";
 import { TEXT } from "../../vocabulary";
 import { SelectRow, SwitchRow, useVibeSettings } from "./vibeSettingRows";
 
 const TIMEOUTS = [0, 60, 120, 300, 600];
-const TOP_P = [0.8, 0.9, 0.95, 1];
-const CAPS = [4096, 8192, 16384, 32768, 65536];
 
 /** Models and agent: new-session defaults and what the agent may use. */
 export function AgentDefaultsSettings(): ReactElement | null {
   const { core, running, via, view, error, busy, apply, applyToNewChats, newChatsNote } =
     useVibeSettings();
   if (core === null || !running) return null;
-  const model = view?.models.find((m) => m.alias === view.activeModel) ?? null;
   const set = (ops: ConfigOp[], reason: string, confirm = false) => {
     apply((sid) => writeConfig(core, sid, ops, reason, confirm));
   };
@@ -45,7 +38,7 @@ export function AgentDefaultsSettings(): ReactElement | null {
         </p>
       )}
       {via !== null && view === null && error === null && (
-        <p className="key-line">Reading the settings...</p>
+        <p className="key-line">Reading the settings…</p>
       )}
       {view !== null && (
         <>
@@ -119,48 +112,6 @@ export function AgentDefaultsSettings(): ReactElement | null {
               );
             }}
           />
-          {model !== null && (
-            <>
-              <SelectRow
-                id="model-top-p"
-                label={`Sampling (top p) for ${model.label}`}
-                detail="Lower keeps answers more focused. The provider's default suits most work."
-                value={model.topP === null ? "" : String(model.topP)}
-                options={[
-                  { value: "", label: "Provider default" },
-                  ...TOP_P.map((p) => ({ value: String(p), label: String(p) })),
-                ]}
-                disabled={busy}
-                setBy={null}
-                onChange={(v) => {
-                  const path = modelPath(model.alias, "top_p");
-                  set(
-                    v === "" ? [{ op: "remove", path }] : [{ op: "set", path, value: Number(v) }],
-                    "model sampling",
-                  );
-                }}
-              />
-              <SelectRow
-                id="model-max-output"
-                label={`Longest answer for ${model.label}`}
-                detail="A cap on the tokens of one answer. An answer cut off at it stops there."
-                value={model.maxOutputTokens === null ? "" : String(model.maxOutputTokens)}
-                options={[
-                  { value: "", label: "Provider default" },
-                  ...CAPS.map((c) => ({ value: String(c), label: `${String(c / 1024)}k tokens` })),
-                ]}
-                disabled={busy}
-                setBy={null}
-                onChange={(v) => {
-                  const path = modelPath(model.alias, "max_output_tokens");
-                  set(
-                    v === "" ? [{ op: "remove", path }] : [{ op: "set", path, value: Number(v) }],
-                    "model output cap",
-                  );
-                }}
-              />
-            </>
-          )}
         </>
       )}
       {error !== null && (

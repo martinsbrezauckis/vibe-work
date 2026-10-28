@@ -13,8 +13,9 @@
 //!
 //! Depends on: `layout`, `managed`, `repo`, `items`, `remember`, `shellx_profile`, `chain`, vault-core. Called by:
 //! vw-keys. Invariants: every method is blocking; the master key lives only in the session
-//! (`Arc<MasterKey>`, zeroed when the last clone drops); after `lock` no automatic remembered unlock happens.
-//! An explicit user request may use the saved device key and clears the manual lock after success.
+//! (`Arc<MasterKey>`, zeroed when the last clone drops). [`Vault::lock`] (the user's Lock) deletes the kept device
+//! key, so no remembered unlock happens until the next passphrase unlock; [`Vault::close`] (a quit that keeps the
+//! last state) drops the session and keeps it.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
@@ -33,6 +34,9 @@ use crate::remember::{DeviceSecretStore, account_for, new_device_secret, remembe
 use crate::repo::LocalRepo;
 use crate::secret::SecretString;
 use crate::shellx_profile::{RecoveryState, ShellxMode, ShellxProfile};
+
+#[path = "kept_key.rs"]
+mod kept_key;
 
 /// Which app layout a vault uses.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -246,6 +250,12 @@ impl Vault {
         &self.config.location
     }
 
+    /// The computer's credential store this client keeps device secrets in.
+    #[must_use]
+    pub fn device_store(&self) -> Arc<dyn DeviceSecretStore> {
+        Arc::clone(&self.config.device_store)
+    }
+
     fn session(&self) -> std::sync::MutexGuard<'_, Option<Session>> {
         self.session.lock().unwrap_or_else(PoisonError::into_inner)
     }
@@ -334,6 +344,9 @@ impl Vault {
                 return Err(VaultError::AlreadyExists);
             }
             let private = &managed.private_dir;
+            let Some(_creating) = crate::managed::Creating::begin(private) else {
+                return Err(VaultError::AlreadyExists);
+            };
             self.create_at(private, VaultKind::VibeWork, passphrase, remember)?;
             if let Err(error) = managed.save(&self.config.location, VaultKind::VibeWork) {
                 self.lock();
@@ -653,10 +666,21 @@ impl Vault {
         Ok(true)
     }
 
-    /// Locks: drops the session (the master key is zeroed when the last user drops it) and stops
-    /// remembered unlocks until the next passphrase unlock.
+    /// Locks: drops the session (the master key is zeroed when the last user drops it) and deletes
+    /// the kept device key, so the vault stays locked, also after a restart, until the next
+    /// passphrase unlock. When the credential store cannot delete its entry, the profile no
+    /// longer holds the keyfile that entry opens, and [`Vault::remember_note`] says why.
     pub fn lock(&self) {
         self.manual_lock.store(true, Ordering::SeqCst);
+        *self.session() = None;
+        if let Err(error) = self.forget_kept_key() {
+            self.note(Some(error.to_string()));
+        }
+    }
+
+    /// Drops the session and keeps the kept device key: the next start opens the vault with it
+    /// (a quit that keeps the last state).
+    pub fn close(&self) {
         *self.session() = None;
     }
 

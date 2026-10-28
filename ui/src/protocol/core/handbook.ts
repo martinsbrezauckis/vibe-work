@@ -88,7 +88,7 @@ modifiedMs: number,
  */
 steps: Array<Step>, };
 
-export type HandbookState = "none" | "handbook" | "lite" | "noManifest" | "preFormat";
+export type HandbookState = "none" | "handbook" | "lite" | "noManifest";
 
 export type Input = { 
 /**

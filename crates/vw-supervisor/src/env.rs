@@ -282,7 +282,8 @@ pub fn build_env(plan: &EnvPlan<'_>) -> Result<Vec<(OsString, OsString)>, EnvErr
         "BASH_ENV",
         crate::shell_env::path(plan.vibe_home).into_os_string(),
     );
-    // The shell tool uses SHELL on Unix; a user's login shell may not read BASH_ENV.
+    // Vibe 2's shell tool used SHELL on Unix; a user's login shell may not read BASH_ENV. Vibe 3.0.2 picks the bash
+    // tool's configured shell, else zsh before bash (`_sandbox_helper.py` `resolve_posix_shell`).
     #[cfg(unix)]
     set("SHELL", OsString::from("/bin/bash"));
     if let Some(home) = plan.home {

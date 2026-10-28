@@ -11,6 +11,7 @@
  * so it can never become a command; a deleted session's draft and chips are dropped.
  */
 import type { ContextItem } from "../features/composer/model/message";
+import { selectedModel } from "../features/composer/model/models";
 import type { ComposerActions } from "./composerImpl";
 import { runningTurnId } from "../features/composer/model/session";
 import { type SentContent, createComposerStore, takeContent } from "./composerStore";
@@ -23,10 +24,20 @@ import type { Shell } from "./shellStore";
 import type { Toasts } from "./toastStore";
 import type { ComposerInitialization } from "./composerDefaults";
 
+/**
+ * What was open on the New chat screen (terminals, browser, files) follows the session its first message starts
+ * (`state/newChatDraft.ts`): told before the start, and after it with the started id (`null`: nothing moves).
+ */
+export interface NewChatHandOver {
+  expectStart(): void;
+  finishStart(started: string | null): Promise<void>;
+}
+
 /** The asynchronous actions the facade forwards to the loaded implementation. */
 const DEFERRED = [
   "stop",
   "retry",
+  "retryPluginRefresh",
   "replaceQueued",
   "removeQueued",
   "loadRuntime",
@@ -56,8 +67,17 @@ export interface NewChatStarter {
   /** Why Send cannot start now (for example a copy without a branch name), or `null`. */
   refuse(): string | null;
   /** Starts the session; resolves to its id, or `null` when it did not start (the failure was shown). */
-  start(origin: "ui" | "debug-api"): Promise<string | null>;
+  start(): Promise<string | null>;
 }
+
+/**
+ * Runs before a message of `sessionId` goes out: `null` when there is nothing to do (the send starts at once), else
+ * the work, answering the note to show after the send (or null).
+ */
+export type BeforeSend = (
+  sessionId: string,
+  origin: "ui" | "debug-api",
+) => Promise<string | null> | null;
 
 /** What a send from the new-chat view resolved to: the usual outcome, plus the session it started. */
 export type NewChatOutcome = SendOutcome & { started?: string };
@@ -87,15 +107,26 @@ export function createComposer(deps: {
       setContentTaken: (): void => undefined,
       setContentSettled: (): void => undefined,
       setNewChatStarter: (): void => undefined,
+      setNewChatHandOver: (): void => undefined,
       setVoiceTurns: (): void => undefined,
+      setBeforeSend: (): void => undefined,
     } as const;
   }
 
   core.listen((event) => {
-    if (event.type === "alert" && event.kind === "pluginReloadFailed" && event.sessionId !== null)
-      composer.pluginReloadRefused(event.sessionId);
+    // Messages queued behind a stopped or failed turn: never sent (the core took them out of Vibe's queue), back in
+    // the composer for the user to send, change or drop. No toast, no dialog.
+    if (event.type === "queueReturned") {
+      if (composer.takeBackQueued(event.sessionId, event.items))
+        requestComposerFocus(event.sessionId);
+      return;
+    }
+    if (event.type === "alert" && event.kind === "pluginReloadFailed" && event.sessionId !== null) {
+      composer.pluginReloadRefused(event.sessionId, event.message);
+    }
   });
   const chains = new Map<string, Promise<unknown>>();
+  let menuRequest = 0;
   const initialization: ComposerInitialization = {
     ready: new Set(),
     pending: new Map(),
@@ -108,8 +139,38 @@ export function createComposer(deps: {
     ((sessionId: string, context: readonly ContextItem[], sent: boolean) => void) | null = null;
   // The new-chat view's starter while it shows the copy section; `null`: start in the folder itself.
   let newChatStarter: NewChatStarter | null = null;
+  let newChatHandOver: NewChatHandOver | null = null;
   // Whether a session is in voice chat (its turns then go out as voice turns); set by the voice controller.
   let voiceTurns: ((sessionId: string) => boolean) | null = null;
+  // Runs before a message goes out (the files controller saves edited open files); answers a note or null.
+  let beforeSend: BeforeSend | null = null;
+  /**
+   * Runs the before-send step, then `send`; its note shows after a successful send. Never blocks the send. With
+   * nothing to save the send starts at once (no extra wait); a save in between is tracked, so a Debug API request
+   * that sent the message stays served (and its origin kept) until the message went out.
+   */
+  const afterSaving = (
+    sessionId: string,
+    origin: "ui" | "debug-api",
+    send: () => Promise<SendOutcome>,
+  ): Promise<SendOutcome> => {
+    let pending: Promise<string | null> | null = null;
+    try {
+      pending = beforeSend?.(sessionId, origin) ?? null;
+    } catch {
+      // Saving first is a convenience; the message goes either way.
+    }
+    if (pending === null) return send();
+    const saving = pending;
+    return core.trackAction(
+      (async () => {
+        const note = await saving.catch(() => null);
+        const outcome = await send();
+        if (note !== null && outcome.ok) composer.note(sessionId, note);
+        return outcome;
+      })(),
+    );
+  };
   const asVoice = (sessionId: string, content: SentContent): SentContent =>
     voiceTurns?.(sessionId) === true ? { ...content, voice: true } : content;
   const loading: Partial<Record<"ui" | "debug-api" | "window", Promise<ComposerActions>>> = {};
@@ -138,6 +199,8 @@ export function createComposer(deps: {
      * at the key press, the session starts in the chip's folder (or its copy), the held access mode and model are
      * applied, and only then is the content sent as the first turn. Nothing typed is ever lost: a start that fails
      * puts the content back here; picks that fail (Full access declined) leave it unsent in the new session's box.
+     * Like any send, the first turn saves the edited open files first (the before-send step): the files the New chat
+     * screen had open are the session's by then (the hand-over), so they are on disk before the turn starts.
      */
     const sendNewChat = async (given?: SentContent): Promise<NewChatOutcome> => {
       const keyBlocked = deps.keyGuard?.() ?? null;
@@ -163,6 +226,7 @@ export function createComposer(deps: {
       const taken = given ?? takeContent(composer, NEW_CHAT);
       if (taken === null) return { ok: false, kind: "empty", message: "Nothing to send." };
       const content = asVoice(NEW_CHAT, taken);
+      contentTaken?.(NEW_CHAT, content.context);
       const held = composer.store.get().newChat;
       // Whose action the start is: the Debug API's when it called, wrote any of the content, held a pick, or chose
       // the folder. Applied after the client's request has ended, the core runs it as the window, so the user
@@ -176,16 +240,23 @@ export function createComposer(deps: {
           : "ui";
       composer.note(NEW_CHAT, null);
       composer.setSending(NEW_CHAT, true);
+      // Only a started session takes what was open (once); a failed start moves nothing.
+      let started: string | null = null;
+      let handed = false;
+      let sent = false;
+      const handOver = async (): Promise<void> => {
+        if (handed) return;
+        handed = true;
+        await newChatHandOver?.finishStart(started);
+      };
       try {
         const impl = await load(bound);
         await impl.loadConfig();
-        const started =
+        newChatHandOver?.expectStart();
+        started =
           newChatStarter === null
-            ? ((await deps.sessions?.startIn(
-                folder,
-                bound === "debug-api" ? "debug-api" : undefined,
-              )) ?? null)
-            : await newChatStarter.start(bound);
+            ? ((await deps.sessions?.startIn(folder)) ?? null)
+            : await newChatStarter.start();
         if (started === null) {
           const back = composer.restore(
             NEW_CHAT,
@@ -205,9 +276,12 @@ export function createComposer(deps: {
         }
         // The new session is selected now (the start selects it): its composer takes the keyboard.
         requestComposerFocus(started);
-        let picked = await impl.prepareSession(started, true, held);
+        await impl.prepareSession(started, true, held);
+        let picked = true;
+        // What was open on the New chat screen is the session's before its first message goes out.
+        await handOver();
         composer.resetNewChat();
-        if (picked && held.mode !== null) {
+        if (held.mode !== null) {
           // Keep the native access choice's consent across session creation, without promoting API input.
           const access = held.trustedAccessPick && bound === "ui" ? await load("window") : impl;
           picked = await access.setAccess(started, held.mode);
@@ -222,12 +296,20 @@ export function createComposer(deps: {
             content.by,
           );
           const message =
-            "Not sent yet: the access mode or model you chose was not set. Your message is in the box; send it when ready.";
+            "Not sent yet: the access mode you chose was not set. Your message is in the box; send it when ready.";
           composer.note(started, message);
           return { ok: false, kind: "picks", message, started };
         }
-        return { ...(await impl.sendContent(started, "send", content)), started };
+        // The open files moved to the session with the hand-over above: save them, then send the first turn.
+        const sessionId = started;
+        const outcome = await afterSaving(sessionId, bound, () =>
+          impl.sendContent(sessionId, "send", content),
+        );
+        sent = outcome.ok;
+        return { ...outcome, started };
       } finally {
+        await handOver();
+        contentSettled?.(started ?? NEW_CHAT, content.context, sent);
         composer.setSending(NEW_CHAT, false);
       }
     };
@@ -241,6 +323,16 @@ export function createComposer(deps: {
     };
     return {
       ...deferred,
+      async openMenu(sessionId: string, kind: "model" | "access" | null): Promise<void> {
+        const request = ++menuRequest;
+        composer.setMenu(kind === null ? null : { sessionId, kind });
+        if (kind === null) return;
+        // Attached chats receive Vibe's runtime updates. The new-chat menu reads the lobby.
+        if (kind === "model" && sessionId === NEW_CHAT) {
+          const loaded = await deferred.loadConfig();
+          if (!loaded && request === menuRequest) composer.setMenu(null);
+        }
+      },
       setAccess(sessionId: string, agentName: string, trustedClick = false): Promise<boolean> {
         if (sessionId === NEW_CHAT)
           return holdPick({
@@ -261,6 +353,9 @@ export function createComposer(deps: {
         if (sessionId === NEW_CHAT) {
           return holdPick({
             ...(modelAlias === undefined ? {} : { alias: modelAlias }),
+            ...(modelAlias === undefined
+              ? {}
+              : selectedModel(composer.store.get().config ?? undefined, modelAlias)),
             ...(reasoningEffort === undefined ? {} : { effort: reasoningEffort }),
           });
         }
@@ -316,7 +411,11 @@ export function createComposer(deps: {
         contentTaken?.(sessionId, content.context);
         const bound = origin === "debug-api" || content.by === "debug-api" ? "debug-api" : "ui";
         return load(bound)
-          .then((impl) => impl.sendContent(sessionId, mode, asVoice(sessionId, content)))
+          .then((impl) =>
+            afterSaving(sessionId, bound, () =>
+              impl.sendContent(sessionId, mode, asVoice(sessionId, content)),
+            ),
+          )
           .then(
             (outcome) => {
               contentSettled?.(sessionId, content.context, outcome.ok);
@@ -353,7 +452,11 @@ export function createComposer(deps: {
         // Reserve before lazy loading, so a second click cannot send the same request meanwhile.
         composer.setSending(sessionId, true);
         return load(origin === "ui" && trustedClick ? "window" : origin)
-          .then((impl) => impl.sendContent(sessionId, "send", asVoice(sessionId, content)))
+          .then((impl) =>
+            afterSaving(sessionId, origin, () =>
+              impl.sendContent(sessionId, "send", asVoice(sessionId, content)),
+            ),
+          )
           .finally(() => {
             composer.setSending(sessionId, false);
           });
@@ -381,7 +484,9 @@ export function createComposer(deps: {
           voice: true,
         };
         if (sessionId === NEW_CHAT) return sendNewChat(content);
-        return load(origin).then((impl) => impl.sendContent(sessionId, "queue", content));
+        return load(origin).then((impl) =>
+          afterSaving(sessionId, origin, () => impl.sendContent(sessionId, "queue", content)),
+        );
       },
       /** Loads the implementation now (the composer view calls it when it mounts). */
       preload: (): void => {
@@ -394,9 +499,12 @@ export function createComposer(deps: {
        */
       insertContext(sessionId: string, item: Omit<ContextItem, "id" | "by">): ContextItem {
         return composer.addContext(sessionId, {
-          label: item.label.trim().slice(0, 80) || "Context",
+          label:
+            (item.ref === undefined ? item.label.trim().slice(0, 80) : item.label.trim()) ||
+            "Context",
           source: item.source.trim().slice(0, 40) || "context",
           text: item.text,
+          ...(item.ref === undefined ? {} : { ref: item.ref }),
           ...(origin === "debug-api" ? { by: "debug-api" as const } : {}),
         });
       },
@@ -444,6 +552,14 @@ export function createComposer(deps: {
   const setNewChatStarter = (starter: NewChatStarter | null): void => {
     newChatStarter = starter;
   };
+  /** Installs (or, with `null`, removes) the step that runs before a message goes out. */
+  const setBeforeSend = (hook: BeforeSend | null): void => {
+    beforeSend = hook;
+  };
+  /** Installs what moves the New chat screen's open things to the session its first message starts. */
+  const setNewChatHandOver = (handOver: NewChatHandOver | null): void => {
+    newChatHandOver = handOver;
+  };
   /** Installs the voice chat's test of whether a session's turns are voice turns. */
   const setVoiceTurns = (test: (sessionId: string) => boolean): void => {
     voiceTurns = test;
@@ -457,7 +573,9 @@ export function createComposer(deps: {
     setContentTaken,
     setContentSettled,
     setNewChatStarter,
+    setNewChatHandOver,
     setVoiceTurns,
+    setBeforeSend,
   } as const;
 }
 

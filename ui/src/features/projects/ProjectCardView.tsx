@@ -10,6 +10,8 @@
  * Invariants: renders only; the card selects on click and through its name button (keyboard); inner buttons do not
  * also select the card; all page text is plain text.
  */
+import { Card } from "../../components/Card";
+import { Badge, Button } from "../../components/Controls";
 import type { MouseEvent, ReactElement } from "react";
 
 import { Icon } from "../../components/Icon";
@@ -20,7 +22,7 @@ import { type CardSession, type Health, type PlanLine, ago, displayName, planLin
 import { useProjectActions } from "./useProjectActions";
 
 /** A plan's line, bar and current step. */
-export function PlanBar({ line }: { line: PlanLine }): ReactElement {
+function PlanBar({ line }: { line: PlanLine }): ReactElement {
   return (
     <div className="pj-plan">
       <div className="pj-pl">
@@ -57,11 +59,12 @@ export function SessionChip({
   const note =
     session.state === "waiting" ? " · needs you" : session.state === "idle" ? " · idle" : "";
   return (
-    <button
+    <Badge
       data-item-id={session.id}
       data-testid="projects.project-card-view-stop-propagation"
       type="button"
-      className="pj-chip"
+      presentation="project-session"
+      as="button"
       data-state={session.state}
       title="Open this session"
       onClick={(e: MouseEvent) => {
@@ -72,7 +75,7 @@ export function SessionChip({
       <span className="d" aria-hidden="true" />
       {session.title}
       {note}
-    </button>
+    </Badge>
   );
 }
 
@@ -112,13 +115,12 @@ export function ProjectCardView({
       : [handbook, description].filter((t) => t !== null).join(" · ");
   const last = Math.max(card.changedMs, ...sessions.map((s) => s.bumpedAt));
   return (
-    <article
+    <Card
       data-item-id={projectId}
       data-testid="projects.project-card-view-pj-card"
-      className="pj-card"
       data-project={card.project}
       data-project-id={projectId}
-      data-selected={selected}
+      selected={selected}
       onClick={select}
       onContextMenu={management.onContextMenu}
     >
@@ -137,8 +139,7 @@ export function ProjectCardView({
               }}
             >
               {name}
-              {card.state === "lite" && <span className="pj-tag">Markdown</span>}
-              {card.state === "preFormat" && <span className="pj-tag">Earlier format</span>}
+              {card.state === "lite" && <Badge presentation="project-label">Markdown</Badge>}
             </button>
           )}
           {management.button}
@@ -149,10 +150,11 @@ export function ProjectCardView({
         <div className="pj-nohb">
           <Icon name="book-open" size={16} />
           <span className="pj-nohb-text">No handbook yet</span>
-          <button
+          <Button
             data-testid="projects.project-card-view-stop-propagation-3"
             type="button"
-            className="pj-btn small"
+            appearance="project"
+            shape="outlined"
             disabled={requestBusy}
             title={requestBusy ? HANDBOOK_BUSY_TOOLTIP : undefined}
             onClick={(e) => {
@@ -161,7 +163,7 @@ export function ProjectCardView({
             }}
           >
             Ask Vibe to create the handbook
-          </button>
+          </Button>
         </div>
       ) : card.plans.length === 0 ? (
         <div className="pj-plan">
@@ -189,7 +191,7 @@ export function ProjectCardView({
         )}
       </div>
       {management.menu}
-    </article>
+    </Card>
   );
 }
 
@@ -213,13 +215,12 @@ export function NoFolderCard({
 }): ReactElement {
   const management = useProjectActions(projectId, title);
   return (
-    <article
+    <Card
       data-item-id={projectId}
       data-testid="projects.project-card-view-pj-card-2"
-      className="pj-card"
       data-project=""
       data-project-id={projectId}
-      data-selected={selected}
+      selected={selected}
       onClick={select}
       onContextMenu={management.onContextMenu}
     >
@@ -246,17 +247,18 @@ export function NoFolderCard({
       <div className="pj-nohb">
         <Icon name="folder" size={16} />
         <span className="pj-nohb-text">No main folder: no handbook to show</span>
-        <button
+        <Button
           data-testid="projects.project-card-view-stop-propagation-5"
           type="button"
-          className="pj-btn small"
+          appearance="project"
+          shape="outlined"
           onClick={(e) => {
             e.stopPropagation();
             chooseFolder();
           }}
         >
-          Choose main folder...
-        </button>
+          Choose main folder…
+        </Button>
       </div>
       {sessions.length > 0 && (
         <div className="pj-sess">
@@ -267,6 +269,6 @@ export function NoFolderCard({
         </div>
       )}
       {management.menu}
-    </article>
+    </Card>
   );
 }

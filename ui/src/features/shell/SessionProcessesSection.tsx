@@ -61,7 +61,7 @@ function Row({
         <Button
           data-testid="shell.session-processes-section-stop"
           variant="danger"
-          small
+          shape="outlined"
           disabled={stopping || !running}
           aria-label={`Stop ${title}`}
           onClick={() => {

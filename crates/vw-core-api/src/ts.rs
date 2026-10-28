@@ -10,10 +10,16 @@
 use ts_rs::{Config, TS};
 
 mod git;
+mod network;
+mod new_chat;
 use git::git_decls;
+use network::network_decls;
 
+mod pages;
 mod preview;
-use preview::{browser_decls, preview_decls};
+mod skills;
+use pages::{handbook_decls, pages_decls, projects_decls};
+use preview::{browser_decls, preview_decls, proposal_decls};
 
 use crate::{
     AlertKind, AnomalyCountsView, AnomalyRecordView, AnomalyReport, CallbackInfo, ChannelView,
@@ -49,20 +55,6 @@ fn connectors_decls(cfg: &Config) -> Vec<String> {
         ToolView::decl(cfg),
         crate::NewServerSecret::decl(cfg),
         crate::ServerKeyView::decl(cfg),
-    ]
-}
-
-/// Settings > Network types, in their own module.
-fn network_decls(cfg: &Config) -> Vec<String> {
-    vec![
-        crate::NetworkRequest::decl(cfg),
-        crate::NetworkChanges::decl(cfg),
-        crate::NetworkResult::decl(cfg),
-        crate::NetworkView::decl(cfg),
-        crate::NetworkFieldView::decl(cfg),
-        crate::NetworkProblem::decl(cfg),
-        crate::NetworkTestKind::decl(cfg),
-        crate::NetworkTestView::decl(cfg),
     ]
 }
 
@@ -153,60 +145,6 @@ fn worktrees_decls(cfg: &Config) -> Vec<String> {
     ]
 }
 
-/// Project handbook types, in their own module for the same size reason (`Rect` comes from `preview.ts`).
-fn pages_decls(cfg: &Config) -> Vec<String> {
-    vec![
-        crate::PagesRequest::decl(cfg),
-        crate::PagesResult::decl(cfg),
-        crate::ProjectHub::decl(cfg),
-        vw_pages::Hub::decl(cfg),
-        vw_pages::HubGroup::decl(cfg),
-        vw_pages::HubPage::decl(cfg),
-        vw_pages::IndexHealth::decl(cfg),
-        vw_pages::Validation::decl(cfg),
-        vw_pages::Finding::decl(cfg),
-        vw_pages::Severity::decl(cfg),
-        vw_pages::PageFacts::decl(cfg),
-        vw_pages::Relation::decl(cfg),
-        vw_pages::LegacyHead::decl(cfg),
-        vw_pages::Step::decl(cfg),
-        vw_pages::Section::decl(cfg),
-        vw_pages::Comment::decl(cfg),
-        vw_pages::PagesSettings::decl(cfg),
-        vw_pages::PickedSection::decl(cfg),
-        vw_pages::Picked::decl(cfg),
-        vw_pages::ViewerView::decl(cfg),
-    ]
-}
-
-/// Handbook types in their own module so `pages.ts` stays under the size limit (`pages.ts` imports them): the
-/// Projects overview's heads and Format 1.2's page inputs, answers and visual check.
-fn handbook_decls(cfg: &Config) -> Vec<String> {
-    vec![
-        vw_pages::ProjectCard::decl(cfg),
-        vw_pages::Manifest::decl(cfg),
-        vw_pages::PlanSummary::decl(cfg),
-        vw_pages::HandbookState::decl(cfg),
-        vw_pages::Input::decl(cfg),
-        vw_pages::InputOption::decl(cfg),
-        vw_pages::Answer::decl(cfg),
-        vw_pages::AnswerValue::decl(cfg),
-        vw_pages::InputAnswer::decl(cfg),
-        vw_pages::PageAnswers::decl(cfg),
-        vw_pages::VisualIssue::decl(cfg),
-        vw_pages::VisualReport::decl(cfg),
-    ]
-}
-
-/// The user's project groups, in their own module for the same size reason.
-fn projects_decls(cfg: &Config) -> Vec<String> {
-    vec![
-        crate::ProjectsRequest::decl(cfg),
-        crate::ProjectsResult::decl(cfg),
-        crate::ProjectView::decl(cfg),
-    ]
-}
-
 /// The outer git loop, in its own module for the same size reason.
 /// The submodules that also import `SecretInput` from `keys.ts`: `secrets.ts` and `connectors.ts`
 /// (a key server's new secret).
@@ -239,7 +177,6 @@ fn secrets_decls(cfg: &Config) -> Vec<String> {
         crate::ProjectSecretView::decl(cfg),
         crate::EntryPermissionView::decl(cfg),
         crate::secrets_view::ProjectPermissionView::decl(cfg),
-        crate::GrantView::decl(cfg),
         crate::ServerGrantView::decl(cfg),
         crate::LoginView::decl(cfg),
         crate::FillGrantView::decl(cfg),
@@ -263,6 +200,11 @@ fn secrets_decls(cfg: &Config) -> Vec<String> {
 /// Project git browser types, separate from the existing Git action contract.
 fn git_browser_decls(cfg: &Config) -> Vec<String> {
     vec![
+        crate::ExplorerRequest::decl(cfg),
+        crate::ExplorerResult::decl(cfg),
+        crate::ExplorerEntry::decl(cfg),
+        crate::ExplorerVersion::decl(cfg),
+        crate::ExplorerHit::decl(cfg),
         crate::GitBrowserRequest::decl(cfg),
         crate::GitBrowserResult::decl(cfg),
         crate::GitBrowserSnapshot::decl(cfg),
@@ -322,6 +264,8 @@ fn changes_decls(cfg: &Config) -> Vec<String> {
 fn keys_decls(cfg: &Config) -> Vec<String> {
     vec![
         KeyRequest::decl(cfg),
+        crate::MistralKeyView::decl(cfg),
+        crate::MistralKeyTestView::decl(cfg),
         SecretInput::decl(cfg),
         KeyStatusView::decl(cfg),
         KeyMetadataView::decl(cfg),
@@ -433,10 +377,14 @@ fn status_decls(cfg: &Config) -> Vec<String> {
 /// The event stream's type (`CoreEvent`), in its own module so `index.ts` stays under the size limit (it
 /// was at 793 of 800 lines).
 fn events_decls(cfg: &Config) -> Vec<String> {
-    vec![CoreEvent::decl(cfg), SubagentCard::decl(cfg)]
-        .into_iter()
-        .map(|decl| trim_decl_lines(&decl))
-        .collect()
+    vec![
+        CoreEvent::decl(cfg),
+        SubagentCard::decl(cfg),
+        crate::GuardKind::decl(cfg),
+    ]
+    .into_iter()
+    .map(|decl| trim_decl_lines(&decl))
+    .collect()
 }
 
 fn core_decls(cfg: &Config) -> Vec<String> {
@@ -455,6 +403,8 @@ fn core_decls(cfg: &Config) -> Vec<String> {
         CoreError::decl(cfg),
         ErrorCode::decl(cfg),
         Origin::decl(cfg),
+        // Shared by skills.ts and market.ts (one-click install offers).
+        crate::ToolsInstallOffer::decl(cfg),
         AlertKind::decl(cfg),
         CallbackInfo::decl(cfg),
     ]
@@ -568,6 +518,10 @@ fn files_decls(cfg: &Config) -> Vec<String> {
         crate::FileChoice::decl(cfg),
         crate::FileContent::decl(cfg),
         crate::FileKind::decl(cfg),
+        crate::PanelView::decl(cfg),
+        crate::PanelEditor::decl(cfg),
+        crate::PanelSelection::decl(cfg),
+        crate::PanelFiles::decl(cfg),
     ]
 }
 
@@ -666,6 +620,7 @@ pub fn typescript_modules(header: &str) -> Vec<(String, String)> {
     let secrets = secrets_decls(&cfg);
     // Plain modules: only `index` imports from them (their declarations are used nowhere else).
     let plain = [
+        (proposal_decls(&cfg), "proposals"),
         (terminal_decls(&cfg), "terminal"),
         (keys_decls(&cfg), "keys"),
         (instructions_decls(&cfg), "instructions"),
@@ -673,12 +628,48 @@ pub fn typescript_modules(header: &str) -> Vec<(String, String)> {
         (speech_decls(&cfg), "speech"),
         (connectors_decls(&cfg), "connectors"),
         (market_decls(&cfg), "market"),
+        (skills::decls(&cfg), "skills"),
         (network_decls(&cfg), "network"),
         (projects_decls(&cfg), "projects"),
         (vibe_decls(&cfg), "vibe"),
         (git.clone(), "git"),
         (git_browser_decls(&cfg), "git_browser"),
         (work_decls(&cfg), "work"),
+        (crate::github_reads_view::declarations(&cfg), "github_reads"),
+        (
+            vec![
+                vw_ask::Requester::decl(&cfg),
+                crate::Ask::decl(&cfg),
+                crate::AskRecord::decl(&cfg),
+                crate::Outcome::decl(&cfg),
+                crate::Choice::decl(&cfg),
+                crate::AnsweredBy::decl(&cfg),
+                crate::Scope::decl(&cfg),
+                crate::Surface::decl(&cfg),
+                crate::AskGrantsRequest::decl(&cfg),
+                vw_ask::SessionGrant::decl(&cfg),
+                vw_ask::GrantPermission::decl(&cfg),
+                vw_ask::CoversPart::decl(&cfg),
+                vw_ask::GrantOffer::decl(&cfg),
+                crate::VibeRulesRequest::decl(&cfg),
+                crate::RuleRef::decl(&cfg),
+                crate::VibeRule::decl(&cfg),
+            ]
+            .into_iter()
+            .chain(crate::chrome_control::declarations(&cfg))
+            .map(|decl| trim_decl_lines(&decl))
+            .collect(),
+            "ask",
+        ),
+        (
+            vec![
+                crate::KeepAwakeStatus::decl(&cfg),
+                crate::KeepAwakeView::decl(&cfg),
+                crate::KeepAwakeRequest::decl(&cfg),
+            ],
+            "keep_awake",
+        ),
+        (new_chat::decls(&cfg), "new_chat"),
         (
             vec![
                 crate::SecretScanSettings::decl(&cfg),
@@ -778,7 +769,12 @@ pub fn typescript_modules(header: &str) -> Vec<(String, String)> {
         ),
         (
             "git_browser.ts".to_owned(),
-            submodule_with(header, &git_browser_decls(&cfg), &core, &git, "git"),
+            add_import(
+                &submodule_with(header, &git_browser_decls(&cfg), &core, &git, "git"),
+                &git_browser_decls(&cfg),
+                &changes,
+                "changes",
+            ),
         ),
     ];
     modules.extend(keys_importing_modules(header, &secrets, &core, &cfg));

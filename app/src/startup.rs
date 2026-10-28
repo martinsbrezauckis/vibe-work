@@ -19,8 +19,12 @@
 //!
 //! Test switches of development builds (ignored in user builds):
 //! - `VW_DEV_SERVER_ARGS`: extra arguments for the dev server, split on whitespace (no quoting), so
-//!   the real app can run the scripted fake Vibe (`--script --status-events --rich-turn`).
-//! - `VW_DEV_KEYS_STORE=os`: "remember this computer" uses the real OS credential store (Windows
+//!   the real app can run pinned Vibe with its provider directed to a local scripted model.
+//! - `VW_DEV_SERVER_LAUNCHER`: a launcher argv placed before the dev server, split the same way (a test's recording
+//!   tap: `vibe_wire_tap --channels <file> --`). It is the supervisor's launcher, not the program, so the core
+//!   recognizes the server below it as ours (`Supervisor::launcher_programs`); with the tap as the program, a
+//!   subagent's lease owner (the server, a child of the tap) looked like another window and its card was refused.
+//! - `VW_DEV_KEYS_STORE=os`: the unlocked vault's kept key goes to the real OS credential store (Windows
 //!   Credential Manager, ...) instead of memory. The entry's account is derived from the dev run's
 //!   own profile folder, so it can never be the real profile's entry.
 //! - `VW_DEV_KEYS_API_BASE=<url>`: the key test call and the model proxy go to this base (a fake
@@ -28,6 +32,9 @@
 //! - `VW_DEV_SLOW_NAMES=<suffix>`: host names ending in `<suffix>` take 2 s to resolve and answer a
 //!   reserved address (refused), in the browser's name checks and its network guard, so a real-app test can show
 //!   that slow lookups never freeze the window.
+//! - `VW_DEV_CHECK_PUBLIC_NAMES=<suffix>`: the browser's name CHECKS (navigation hook, request barrier)
+//!   answer a public address (`93.184.215.14`) for host names ending in `<suffix>`, while the engine and the network
+//!   guard resolve them for real: a deterministic DNS rebinding (the check sees public, the connection private).
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -73,12 +80,18 @@ fn data_dir_from(resolved: Result<PathBuf, String>) -> Result<PathBuf, String> {
     if let Some(root) = crate::live_profile::root()? {
         return vw_host::product::private_data_dir(Ok(root.join("data")), None);
     }
-    let dev_override = if DEV_BUILD {
+    vw_host::product::private_data_dir(resolved, dev_data_override())
+}
+
+/// A development run's own data folder (`VW_APP_DATA_DIR`, debug builds only). The run's local data and its main
+/// window's web storage live next to it, so a test run never writes into an installed Vibe Work's per-user folders
+/// (Windows `%LOCALAPPDATA%\app.vibework.desktop`: its `WebView2` profile, which an installed app may hold open).
+pub(crate) fn dev_data_override() -> Option<PathBuf> {
+    if DEV_BUILD {
         std::env::var_os("VW_APP_DATA_DIR").map(PathBuf::from)
     } else {
         None
-    };
-    vw_host::product::private_data_dir(resolved, dev_override)
+    }
 }
 
 /// The folder the Vibe install goes into: Tauri's local app data folder, user-only like the data
@@ -88,6 +101,10 @@ fn data_dir_from(resolved: Result<PathBuf, String>) -> Result<PathBuf, String> {
 fn local_data_dir(app: &AppHandle, data: &std::path::Path) -> PathBuf {
     if let Ok(Some(root)) = crate::live_profile::root() {
         return vw_host::product::private_data_dir(Ok(root.join("local-data")), None)
+            .unwrap_or_else(|_| data.to_path_buf());
+    }
+    if let Some(dev) = dev_data_override() {
+        return vw_host::product::private_data_dir(Ok(dev.join("local-data")), None)
             .unwrap_or_else(|_| data.to_path_buf());
     }
     match vw_host::product::private_data_dir(
@@ -133,10 +150,11 @@ fn launch() -> Result<vw_supervisor::SupervisorConfig, String> {
     config.extra_args.extend(dev_server_args(
         std::env::var("VW_DEV_SERVER_ARGS").ok().as_deref(),
     ));
+    config.launcher = dev_server_args(std::env::var("VW_DEV_SERVER_LAUNCHER").ok().as_deref());
     Ok(config)
 }
 
-/// `VW_DEV_SERVER_ARGS` split on whitespace (empty or unset: none).
+/// `VW_DEV_SERVER_ARGS` / `VW_DEV_SERVER_LAUNCHER` split on whitespace (empty or unset: none).
 fn dev_server_args(value: Option<&str>) -> Vec<std::ffi::OsString> {
     value
         .unwrap_or_default()
@@ -255,14 +273,14 @@ pub(crate) fn cli_home(app: &AppHandle) -> Option<PathBuf> {
     )
 }
 
-/// The OS credential store for remembered-device secrets; memory (nothing remembered across starts,
-/// logged) when the platform has none, e.g. Linux without a Secret Service.
+/// The OS credential store for the vault's kept key; memory (nothing kept across starts, so the
+/// vault starts locked; logged) when the platform has none, e.g. Linux without a Secret Service.
 fn os_device_store() -> Arc<dyn vw_vault::remember::DeviceSecretStore> {
     match vw_vault::remember::OsDeviceStore::new() {
         Ok(store) => Arc::new(store),
         Err(error) => {
-            tracing::warn!(%error, "no OS credential store: this computer cannot be remembered");
-            Arc::new(vw_vault::remember::MemoryDeviceStore::default())
+            tracing::warn!(%error, "no OS credential store: the vault cannot stay unlocked across a restart");
+            Arc::new(vw_vault::remember::MemoryDeviceStore::temporary())
         }
     }
 }
@@ -335,6 +353,9 @@ fn product_launch(
 /// own origin for Tauri's ACL).
 fn preview_setup(app: &AppHandle, data: &std::path::Path) -> vw_core_api::PreviewSetup {
     let mut config = vw_preview::PreviewConfig::new(data.join("preview"));
+    // Leave room for cold creation, service-worker clearing (6 s), content rules (10 s) and the bounded canaries
+    // (6 s). A late first canary must not lose to the outer engine-call timeout.
+    config.engine_timeout = std::time::Duration::from_secs(25);
     #[cfg(feature = "e2e-script")]
     {
         config.test_browser_origin = std::env::var("VW_E2E_CONSENT_ORIGIN")
@@ -367,7 +388,7 @@ fn preview_setup(app: &AppHandle, data: &std::path::Path) -> vw_core_api::Previe
             .dev_origin
             .clone_from(&app.config().build.dev_url);
     }
-    // The agent browser's network guard (Linux), an extra layer: without it public pages still open.
+    // Previews require a running listener and proven canary on every platform; a bind error leaves them refused.
     let slow = DEV_BUILD
         .then(|| std::env::var("VW_DEV_SLOW_NAMES").ok())
         .flatten()
@@ -379,14 +400,26 @@ fn preview_setup(app: &AppHandle, data: &std::path::Path) -> vw_core_api::Previe
         }
         None => Arc::new(vw_netguard::SystemResolver),
     };
+    if let Some(suffix) = DEV_BUILD
+        .then(|| std::env::var("VW_DEV_CHECK_PUBLIC_NAMES").ok())
+        .flatten()
+        .filter(|s| !s.is_empty())
+    {
+        let inner = config
+            .name_resolver
+            .take()
+            .unwrap_or_else(vw_preview::system_resolver);
+        config.name_resolver = Some(slow_names::check_public(suffix, inner));
+    }
     let guard = vw_netguard::NetGuard::bind(resolver)
         .inspect_err(|error| tracing::warn!(%error, "the browser's network guard did not start"))
         .ok();
-    let mut engine = vw_webview::TauriEngine::new(app.clone(), "main");
+    // Mark the previews as requiring the guard even when bind failed: the engine then gives a plain refusal.
+    let mut engine = vw_webview::TauriEngine::new(app.clone(), "main").require_network_guard();
     let host = app.state::<vw_host::HostHandle>().inner().clone();
-    engine = engine.with_context_sink(Arc::new(move |session_id| {
+    engine = engine.with_context_sink(Arc::new(move |session_id, choice| {
         if let Some(host) = host.try_get() {
-            host.browser_context_menu(session_id);
+            host.browser_context_menu(session_id, choice == vw_webview::PageMenuChoice::PointVibe);
         }
     }));
     if let Some(guard) = &guard {
@@ -434,6 +467,10 @@ pub fn host_config(app: &AppHandle, confirmer: SharedConfirmer) -> HostConfig {
         vw_vault::location::forbid_canonical_profile();
     }
     let mut core = CoreConfig::default();
+    let reading_app = app.clone();
+    core.read_aloud_available = Some(Arc::new(move || {
+        crate::main_window(&reading_app).is_some_and(|window| window.is_visible().unwrap_or(false))
+    }));
     if let Some(index) = crate::startup_market::index() {
         core.market = vw_core_api::MarketConfig {
             index: Some(index),
@@ -459,6 +496,23 @@ pub fn host_config(app: &AppHandle, confirmer: SharedConfirmer) -> HostConfig {
     if DEV_BUILD && let Ok(model) = std::env::var("VW_DEV_IMAGE_MODEL") {
         tracing::info!(%model, "development image model override");
         core.work.image_model = model;
+    }
+    // Development runs: a Chrome Control package for Set up (debug builds only; user builds ship it in the bundle).
+    // The store page is not opened from a dev run: its address goes to `<data>/chrome-store.log`.
+    if let Some(package) = dev_chrome_package(DEV_BUILD, std::env::var_os("VW_DEV_CHROME_PACKAGE"))
+    {
+        tracing::info!(package = %package.display(), "development Chrome Control package");
+        core.chrome_control.package = Some(package);
+        let log = data.join("chrome-store.log");
+        core.chrome_control.launcher = Some(Arc::new(move |url: &str| {
+            use std::io::Write as _;
+            std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&log)
+                .and_then(|mut file| writeln!(file, "{url}"))
+                .map_err(|e| e.to_string())
+        }));
     }
     // The temporary sessions' record (deleted at quit, or at the next start after a crash).
     core.sessions_dir = Some(data.join("sessions"));
@@ -499,9 +553,33 @@ pub fn host_config(app: &AppHandle, confirmer: SharedConfirmer) -> HostConfig {
     }
 }
 
+/// Development runs only (`VW_DEV_CHROME_PACKAGE=<folder>`): the Chrome Control package Set up copies from.
+/// User builds take it from the bundle's resources (`vw_host::product`); a dev run has no bundle, so without this
+/// Set up says the build does not include the helper. Release builds and an empty value give none.
+fn dev_chrome_package(dev_build: bool, value: Option<std::ffi::OsString>) -> Option<PathBuf> {
+    value
+        .filter(|v| dev_build && !v.is_empty())
+        .map(PathBuf::from)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::dev_server_args;
+    use super::{dev_chrome_package, dev_server_args};
+
+    #[test]
+    fn a_dev_chrome_package_only_in_development_builds_and_only_when_named() {
+        assert_eq!(
+            dev_chrome_package(true, Some("/pkg/chrome-control".into())),
+            Some(std::path::PathBuf::from("/pkg/chrome-control"))
+        );
+        assert_eq!(
+            dev_chrome_package(false, Some("/pkg".into())),
+            None,
+            "never in a release build"
+        );
+        assert_eq!(dev_chrome_package(true, Some("".into())), None);
+        assert_eq!(dev_chrome_package(true, None), None);
+    }
 
     #[test]
     fn dev_server_args_split_on_whitespace() {
@@ -540,6 +618,21 @@ mod slow_names {
                 Ok(vec![ANSWER])
             } else {
                 system(host)
+            }
+        })
+    }
+
+    /// `VW_DEV_CHECK_PUBLIC_NAMES`: the name checks see a public address for names ending in `suffix`; every other
+    /// name goes to `inner` (the guard keeps the system resolver: the check and the connection disagree).
+    pub(super) fn check_public(
+        suffix: String,
+        inner: vw_preview::NameResolver,
+    ) -> vw_preview::NameResolver {
+        Arc::new(move |host| {
+            if slow(host, &suffix) {
+                Ok(vec![IpAddr::V4(Ipv4Addr::new(93, 184, 215, 14))])
+            } else {
+                inner(host)
             }
         })
     }

@@ -16,13 +16,20 @@ type Limit = "auto" | "1" | "2" | "3" | "4";
 const OPTIONS: readonly Limit[] = ["auto", "1", "2", "3", "4"];
 
 /** The live browser tab limit and memory estimate. */
-export function BrowserPoolSettings(): ReactElement | null {
+export function BrowserPoolSettings({
+  onError,
+}: {
+  onError: (error: string | null) => void;
+}): ReactElement | null {
   const { core } = useApp();
   const [pool, setPool] = useState<Pool | null>(null);
   const [busy, setBusy] = useState(false);
   const [readError, setReadError] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const error = saveError ?? readError;
+  useEffect(() => {
+    onError(error);
+  }, [error, onError]);
 
   useEffect(() => {
     if (core === null || busy) return;
@@ -86,8 +93,8 @@ export function BrowserPoolSettings(): ReactElement | null {
         <span>
           Live browser tabs
           <span className="d">
-            How many page tabs can keep a native browser engine open at once. Background tabs pause
-            when the limit is reached. Auto adjusts to this computer&apos;s memory.
+            How many browser tabs can stay live at once. Background tabs pause when the limit is
+            reached. Auto adjusts to this computer&apos;s memory.
           </span>
           {pool === null && error === null && (
             <span className="d" role="status">
@@ -96,15 +103,11 @@ export function BrowserPoolSettings(): ReactElement | null {
           )}
           {pool !== null && (
             <span className="d" role="status">
-              Effective cap: {pool.effectiveCap}. Detected memory:{" "}
+              Up to {pool.effectiveCap} live {pool.effectiveCap === 1 ? "tab" : "tabs"} at once.
+              Memory:{" "}
               {pool.detectedRamGb === null ? "unavailable" : `${String(pool.detectedRamGb)} GB`};
               free memory:{" "}
               {pool.freeRamMb === null ? "unavailable" : `${String(pool.freeRamMb)} MB`}.
-            </span>
-          )}
-          {error !== null && (
-            <span className="key-problem" role="alert">
-              {error}
             </span>
           )}
         </span>

@@ -5,7 +5,7 @@ mod common;
 
 use std::sync::Arc;
 
-use common::core::script_core_with;
+use common::core::no_vibe_core_with as script_core_with;
 use common::fake_mistral;
 use common::vault::key_service_config;
 use serde_json::{Value, json};
@@ -28,7 +28,7 @@ fn keys(op: Value) -> Command {
 async fn key_and_vault_management_is_the_users_the_debug_api_only_reads() {
     let pass = format!("test-passphrase-{}", vw_vault::login::new_id());
     let fake = fake_mistral::start().await;
-    let dir = common::fake::scratch("keys-origin");
+    let dir = common::processes::scratch("keys-origin");
     std::fs::create_dir_all(dir.join("vibe-home")).unwrap();
     std::fs::write(
         dir.join("vibe-home/.env"),
@@ -48,7 +48,7 @@ async fn key_and_vault_management_is_the_users_the_debug_api_only_reads() {
     // the app window sets up the vault and the key without any dialog.
     run(
         Origin::Ui,
-        json!({"op": "createVault", "passphrase": pass.as_str(), "rememberDevice": false}),
+        json!({"op": "createVault", "passphrase": pass.as_str()}),
     )
     .await
     .unwrap();
@@ -116,11 +116,10 @@ async fn key_and_vault_management_is_the_users_the_debug_api_only_reads() {
     };
     let before = status(rig.core.clone()).await;
     for op in [
-        json!({"op": "createVault", "passphrase": pass.as_str(), "rememberDevice": true}),
+        json!({"op": "createVault", "passphrase": pass.as_str()}),
         json!({"op": "unlockVault", "passphrase": pass.as_str()}),
-        json!({"op": "unlockVault", "passphrase": pass.as_str(), "rememberDevice": true}),
+        json!({"op": "unlockVault", "passphrase": pass.as_str()}),
         json!({"op": "lockVault"}),
-        json!({"op": "removeKey"}),
         json!({"op": "useExistingKey", "itemId": "vibe-work-mistral-key"}),
         json!({"op": "importVibeKey", "source": "dotEnv"}),
         json!({"op": "removeVibeKeyOriginal", "source": "dotEnv"}),
@@ -147,14 +146,10 @@ async fn key_and_vault_management_is_the_users_the_debug_api_only_reads() {
     assert_eq!(status(rig.core.clone()).await.0, "locked");
     run(
         Origin::Ui,
-        json!({"op": "unlockVault", "passphrase": pass.as_str(), "rememberDevice": false}),
+        json!({"op": "unlockVault", "passphrase": pass.as_str()}),
     )
     .await
     .unwrap();
-    run(Origin::Ui, json!({"op": "removeKey"})).await.unwrap();
-    let (vault, key, _) = status(rig.core.clone()).await;
-    assert_eq!(vault, "unlocked");
-    assert_ne!(key, "ready", "the key was removed");
     assert!(
         rig.confirmer.shown().is_empty(),
         "{:?}",

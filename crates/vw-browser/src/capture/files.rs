@@ -2,7 +2,7 @@
 //! `capture/` holds a `.gitignore` of `*`, so the agent's `git add -A` cannot commit captures by accident;
 //! the user still sees the files next to the project.
 //!
-//! Depends on: std. Called by: `capture`, tests.
+//! Depends on: std, cap-std (directory handles). Called by: `capture`, tests.
 //! Invariants (page content is hostile input: titles and URLs choose nothing but the slug):
 //! - The slug is ASCII `a-z0-9-` only, at most [`SLUG_MAX`] characters, never empty (`page` then), so no separator,
 //!   dot, drive letter, reserved device name or Unicode trick reaches a path.
@@ -11,14 +11,20 @@
 //!   checked again after creation.
 //! - Every new file uses `create_new` (`O_CREAT|O_EXCL`), so a planted link is not followed. After updates only the
 //!   verified Before manifest via a create-new temporary file and rename over that entry, never through its link.
+//! - Files are written, read and renamed through directory handles (`cap_std::fs::Dir`) of `capture/` and of the
+//!   capture folder, opened right after their checks: a folder moved away and replaced by a
+//!   link afterwards keeps receiving the writes (the handle follows the folder, not the name), and no path resolved
+//!   through a handle may leave it (cap-std refuses `..` and links that point outside).
 //!   Files use names from [`file_name`] (ours, or `NN-<ascii stem>.<ext>` for media) and bounded writes.
 //! - Text files (Markdown, text, HTML, JSON, SVG) are written with every registered stored secret withheld
 //!   (`vw_secrets::scrub`, the same forms the agent tools' answers hide): the agent reads these files with Vibe's own
 //!   tools, past Vibe Work's answer scrub, and a page can copy a filled vault password into its text.
 
-use std::io::Write as _;
+use std::io::{Read as _, Write as _};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
+
+use cap_std::fs::{Dir, OpenOptions};
 
 /// Longest slug.
 pub const SLUG_MAX: usize = 48;
@@ -112,12 +118,60 @@ pub struct Written {
 /// A capture folder being written.
 #[derive(Debug)]
 pub struct Folder {
-    /// Absolute path.
+    /// Absolute path (for answers and messages; files go through `dir`).
     pub path: PathBuf,
     /// Path relative to the session folder (`capture/example-com-20261010-142233`).
     pub relative: String,
+    /// The capture folder, opened after its checks.
+    dir: Dir,
+    /// `capture/`, opened after its checks (the staging folder of [`Folder::write_atomic`] lives there).
+    base: Dir,
     written: Vec<Written>,
     total: u64,
+}
+
+/// Opens `leaf` inside `parent` as a directory handle: it must be a plain folder there (not a link), and the handle
+/// cannot resolve outside `parent` (cap-std).
+fn open_leaf(parent: &Dir, leaf: &str, shown: &Path) -> Result<Dir, String> {
+    let meta = parent
+        .symlink_metadata(leaf)
+        .map_err(|e| format!("{}: {e}", shown.display()))?;
+    if meta.file_type().is_symlink() || !meta.is_dir() {
+        return Err(format!(
+            "{} is not a plain folder; nothing was captured",
+            shown.display()
+        ));
+    }
+    parent
+        .open_dir(leaf)
+        .map_err(|e| format!("opening {}: {e}", shown.display()))
+}
+
+/// The session folder (canonical) and handles of it and of its checked `capture/` (created when `create`).
+fn open_base(session: &Path, create: bool) -> Result<(PathBuf, Dir), String> {
+    let session = session
+        .canonicalize()
+        .map_err(|e| format!("the session folder is not available: {e}"))?;
+    let base = session.join("capture");
+    real_dir(&base, &base, create)?;
+    let root = Dir::open_ambient_dir(&session, cap_std::ambient_authority())
+        .map_err(|e| format!("the session folder is not available: {e}"))?;
+    let handle = open_leaf(&root, "capture", &base)?;
+    Ok((base, handle))
+}
+
+/// `name` (ours: `/`-separated slug-safe parts) as a path relative to a folder handle; `None` for anything else.
+fn relative_name(name: &str) -> Option<&Path> {
+    let bad = name
+        .split('/')
+        .any(|p| p.is_empty() || p == "." || p == ".." || p.contains('\\') || p.contains(':'));
+    (!bad).then(|| Path::new(name))
+}
+
+fn new_file(dir: &Dir, name: &Path) -> std::io::Result<cap_std::fs::File> {
+    let mut options = OpenOptions::new();
+    options.write(true).create_new(true);
+    dir.open_with(name, &options)
 }
 
 /// `dir` must be a real folder (created when missing) that resolves to `expected` itself.
@@ -157,12 +211,8 @@ pub const GITIGNORE: &str = "# Vibe Work: captures stay out of commits (this fol
 /// `capture/.gitignore` holding `*`, written once and never over an existing entry (a user's own file stays; a
 /// planted link is not followed: `create_new`). Not the user's `.gitignore` and not `.git/info/exclude` (shared by
 /// every copy of the repository). Best effort: a capture is not refused when it cannot be written.
-fn keep_out_of_git(base: &Path) {
-    let file = std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(base.join(".gitignore"));
-    if let Ok(mut file) = file {
+fn keep_out_of_git(base: &Dir) {
+    if let Ok(mut file) = new_file(base, Path::new(".gitignore")) {
         let _ = file.write_all(GITIGNORE.as_bytes());
     }
 }
@@ -226,12 +276,8 @@ impl Folder {
     /// # Errors
     /// A plain reason: the session folder is missing, `capture` is a link or not a folder, nothing could be created.
     pub fn create(session: &Path, slug: &str, stamp: &str) -> Result<Self, String> {
-        let session = session
-            .canonicalize()
-            .map_err(|e| format!("the session folder is not available: {e}"))?;
-        let base = session.join("capture");
-        real_dir(&base, &base, true)?;
-        keep_out_of_git(&base);
+        let (base, handle) = open_base(session, true)?;
+        keep_out_of_git(&handle);
         let name = format!("{}-{stamp}", self::slug(slug));
         for n in 1..1000u32 {
             let leaf = if n == 1 {
@@ -240,12 +286,14 @@ impl Folder {
                 format!("{name}-{n}")
             };
             let path = base.join(&leaf);
-            match std::fs::create_dir(&path) {
+            match handle.create_dir(&leaf) {
                 Ok(()) => {
-                    real_dir(&path, &path, false)?;
+                    let dir = open_leaf(&handle, &leaf, &path)?;
                     return Ok(Self {
                         path,
                         relative: format!("capture/{leaf}"),
+                        dir,
+                        base: handle,
                         written: Vec::new(),
                         total: 0,
                     });
@@ -263,20 +311,18 @@ impl Folder {
     /// # Errors
     /// A plain reason.
     pub fn reopen(session: &Path, relative: &str) -> Result<Self, String> {
-        let session = session
-            .canonicalize()
-            .map_err(|e| format!("the session folder is not available: {e}"))?;
-        let base = session.join("capture");
-        real_dir(&base, &base, false)?;
         let leaf = relative
             .strip_prefix("capture/")
             .filter(|l| created_leaf(l))
             .ok_or("not a capture folder")?;
+        let (base, handle) = open_base(session, false)?;
         let path = base.join(leaf);
-        real_dir(&path, &path, false)?;
+        let dir = open_leaf(&handle, leaf, &path)?;
         Ok(Self {
             path,
             relative: relative.to_owned(),
+            dir,
+            base: handle,
             written: Vec::new(),
             total: 0,
         })
@@ -287,12 +333,26 @@ impl Folder {
     /// # Errors
     /// A plain reason.
     pub fn read(&self, name: &str, cap: u64) -> Result<Vec<u8>, String> {
-        let path = self.path.join(name);
-        let meta = std::fs::symlink_metadata(&path).map_err(|e| format!("{name}: {e}"))?;
+        let relative = relative_name(name).ok_or_else(|| format!("{name} is not a file name"))?;
+        let meta = self
+            .dir
+            .symlink_metadata(relative)
+            .map_err(|e| format!("{name}: {e}"))?;
         if !meta.is_file() || meta.len() > cap {
             return Err(format!("{name} is not a capture file"));
         }
-        std::fs::read(&path).map_err(|e| format!("{name}: {e}"))
+        let file = self
+            .dir
+            .open(relative)
+            .map_err(|e| format!("{name}: {e}"))?;
+        let mut bytes = Vec::new();
+        file.take(cap + 1)
+            .read_to_end(&mut bytes)
+            .map_err(|e| format!("{name}: {e}"))?;
+        if bytes.len() as u64 > cap {
+            return Err(format!("{name} is not a capture file"));
+        }
+        Ok(bytes)
     }
 
     /// A subfolder (`media`), created new inside the capture folder.
@@ -300,8 +360,15 @@ impl Folder {
     /// # Errors
     /// A plain reason.
     pub fn subfolder(&self, name: &str) -> Result<PathBuf, String> {
-        let path = self.path.join(slug(name));
-        real_dir(&path, &path, true)?;
+        let leaf = slug(name);
+        let path = self.path.join(&leaf);
+        match self.dir.create_dir(&leaf) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(e) => return Err(format!("creating {}: {e}", path.display())),
+        }
+        // A plain folder of this capture folder (a planted link there is refused).
+        open_leaf(&self.dir, &leaf, &path)?;
         Ok(path)
     }
 
@@ -329,21 +396,12 @@ impl Folder {
                 "{name} would pass the capture's total cap of {TOTAL_MAX} bytes"
             ));
         }
-        if name
-            .split('/')
-            .any(|p| p.is_empty() || p == "." || p == ".." || p.contains('\\'))
-        {
-            return Err(format!("{name} is not a file name"));
-        }
-        let path = self.path.join(name);
-        let mut file = std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&path)
-            .map_err(|e| format!("creating {name}: {e}"))?;
+        let relative = relative_name(name).ok_or_else(|| format!("{name} is not a file name"))?;
+        let mut file =
+            new_file(&self.dir, relative).map_err(|e| format!("creating {name}: {e}"))?;
         if let Err(e) = file.write_all(bytes).and_then(|()| file.sync_all()) {
             drop(file);
-            let _ = std::fs::remove_file(&path);
+            let _ = self.dir.remove_file(relative);
             return Err(format!("writing {name}: {e}"));
         }
         self.total += len;
@@ -351,6 +409,55 @@ impl Folder {
             name: name.to_owned(),
             bytes: len,
         };
+        self.written.push(written.clone());
+        Ok(written)
+    }
+
+    /// Publishes a complete file in one filesystem operation. Staging is outside this capture folder,
+    /// so process death during the write never exposes a partly written result.
+    ///
+    /// # Errors
+    /// The ordinary capture path, secret, size or exclusive-create checks fail.
+    pub fn write_atomic(&mut self, name: &str, bytes: &[u8], cap: u64) -> Result<Written, String> {
+        /// Removes the staging folder on every path.
+        struct Pending<'a>(&'a Dir, String);
+        impl Drop for Pending<'_> {
+            fn drop(&mut self) {
+                let _ = self.0.remove_dir_all(&self.1);
+            }
+        }
+        let relative = relative_name(name).ok_or_else(|| format!("{name} is not a file name"))?;
+        let leaf = self
+            .path
+            .file_name()
+            .ok_or("capture has no name")?
+            .to_string_lossy();
+        let staging = format!(".pending-{leaf}");
+        self.base
+            .create_dir(&staging)
+            .map_err(|e| format!("staging the capture: {e}"))?;
+        let pending = Pending(&self.base, staging.clone());
+        let staged_path = self.path.with_file_name(&staging);
+        let staged_dir = open_leaf(&self.base, &staging, &staged_path)?;
+        let mut staged = Self {
+            path: staged_path,
+            relative: self.relative.clone(),
+            dir: staged_dir,
+            base: self
+                .base
+                .try_clone()
+                .map_err(|e| format!("staging the capture: {e}"))?,
+            written: Vec::new(),
+            total: self.total,
+        };
+        let written = staged.write(name, bytes, cap)?;
+        staged
+            .dir
+            .hard_link(relative, &self.dir, relative)
+            .map_err(|e| format!("saving {name}: {e}"))?;
+        drop(staged);
+        drop(pending);
+        self.total += written.bytes;
         self.written.push(written.clone());
         Ok(written)
     }
@@ -367,13 +474,14 @@ impl Folder {
         cap: u64,
     ) -> Result<(), String> {
         let name = "capture.json";
-        let path = self.path.join(name);
-        let current =
-            std::fs::symlink_metadata(&path).map_err(|e| format!("checking {name}: {e}"))?;
+        let temp = "capture.json.tmp";
+        let current = self
+            .dir
+            .symlink_metadata(name)
+            .map_err(|e| format!("checking {name}: {e}"))?;
         if !current.is_file() || current.len() > cap || self.read(name, cap)? != expected {
             return Err("capture.json is no longer the Before record".to_owned());
         }
-        let temp = self.path.join("capture.json.tmp");
         let scrubbed = vw_secrets::scrub(bytes);
         let bytes = scrubbed
             .as_ref()
@@ -382,27 +490,26 @@ impl Folder {
         if len > cap || self.total + len > TOTAL_MAX {
             return Err("capture.json would exceed its capture cap".to_owned());
         }
-        let mut file = std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&temp)
-            .map_err(|e| format!("creating capture.json.tmp: {e}"))?;
+        let mut file =
+            new_file(&self.dir, Path::new(temp)).map_err(|e| format!("creating {temp}: {e}"))?;
         let result = file.write_all(bytes).and_then(|()| file.sync_all());
         drop(file);
         if let Err(e) = result {
-            let _ = std::fs::remove_file(&temp);
-            return Err(format!("writing capture.json.tmp: {e}"));
+            let _ = self.dir.remove_file(temp);
+            return Err(format!("writing {temp}: {e}"));
         }
         // Recheck immediately before rename: refuse a static replacement, including a link or arbitrary file.
-        let checked = std::fs::symlink_metadata(&path)
+        let checked = self
+            .dir
+            .symlink_metadata(name)
             .is_ok_and(|meta| meta.is_file() && meta.len() <= cap)
             && self.read(name, cap).is_ok_and(|old| old == expected);
         if !checked {
-            let _ = std::fs::remove_file(&temp);
+            let _ = self.dir.remove_file(temp);
             return Err("capture.json changed before the After record was saved".to_owned());
         }
-        if let Err(e) = std::fs::rename(&temp, &path) {
-            let _ = std::fs::remove_file(&temp);
+        if let Err(e) = self.dir.rename(temp, &self.dir, name) {
+            let _ = self.dir.remove_file(temp);
             return Err(format!("replacing capture.json: {e}"));
         }
         self.total += len;

@@ -28,9 +28,16 @@ import {
   retryPrompt,
   turnContent,
 } from "../features/composer/model/message";
-import { runningTurnId } from "../features/composer/model/session";
-import { type ComposerStore, type SentContent, contentKey, takeContent } from "./composerStore";
+import { runningTurnId, waitingForInput } from "../features/composer/model/session";
+import {
+  type ComposerStore,
+  type SentContent,
+  contentKey,
+  takeContent,
+  isPluginReloadFailure,
+} from "./composerStore";
 import type { CoreController } from "./coreStore";
+import { cardIdOf, hostOf } from "../features/ask/waiting";
 
 /** How a message leaves: a new turn, into the running turn, or after it. */
 export type SendMode = "send" | "steer" | "queue";
@@ -64,7 +71,7 @@ export function createSendActions(deps: {
    * caller reads the runtime (access mode, model) for the composer chips without opening a channel just for that.
    */
   afterTurn: (sessionId: string) => void;
-  /** New sessions must resolve their effective defaults before any submission path starts a turn. */
+  /** Apply new-session model preferences before submitting; a failed pick leaves the chat sendable. */
   beforeTurn: (sessionId: string) => Promise<boolean>;
 }) {
   const { core, composer, runCommand, chains, afterTurn } = deps;
@@ -118,13 +125,23 @@ export function createSendActions(deps: {
     text: string,
     by: SentContent["by"],
   ): Promise<SendOutcome> => {
+    const pluginsHeld = composer.store.get().pluginReloadFailed[sessionId] === true;
     try {
       await confirmed("session/shellCommand", { sessionId, command });
       composer.note(sessionId, null);
       return { ok: true, kind: "shell" };
     } catch (thrown) {
-      composer.restore(sessionId, text, [], [], false, by);
-      return fail(sessionId, "shell", toCallError(thrown));
+      const error = toCallError(thrown);
+      composer.restore(
+        sessionId,
+        text,
+        [],
+        [],
+        false,
+        by,
+        pluginsHeld || isPluginReloadFailure(error.error.message),
+      );
+      return fail(sessionId, "shell", error);
     }
   };
 
@@ -161,7 +178,8 @@ export function createSendActions(deps: {
     wanted: SendMode,
     content: SentContent,
   ): Promise<SendOutcome> => {
-    const { text, context, images } = content;
+    const { text, images } = content;
+    let context = content.context;
     if (composer.store.get().compacting[sessionId] === true) {
       if (content.restoreOnFailure !== false)
         composer.restore(sessionId, text, context, images, content.literal, content.by);
@@ -197,13 +215,14 @@ export function createSendActions(deps: {
         composer.restore(sessionId, text, [], [], false, content.by);
       return outcome;
     }
-    if (entry(sessionId)?.localOnly === true && !(await deps.beforeTurn(sessionId))) {
+    if (entry(sessionId)?.localOnly === true) await deps.beforeTurn(sessionId);
+    try {
+      context = await composer.prepareContext(sessionId, context);
+      content = { ...content, context };
+    } catch (error) {
       if (content.restoreOnFailure !== false)
         composer.restore(sessionId, text, context, images, content.literal, content.by);
-      const message =
-        "Not sent yet: the chat's model and thinking could not be loaded. Your message is in the box.";
-      composer.note(sessionId, message);
-      return { ok: false, kind: "picks", message };
+      return fail(sessionId, "documents", toCallError(error));
     }
     const turnId = running(sessionId);
     // Separate button requests must not become a steer if the session started working meanwhile.
@@ -213,7 +232,9 @@ export function createSendActions(deps: {
     const asked: SendMode = turnId === null ? "send" : wanted === "send" ? "steer" : wanted;
     // A voice turn is a queued turn even when the session is idle: only `session/turn/enqueue` carries
     // a context entry, and Vibe starts an idle session's item at once. A steer carries no context.
-    const mode: SendMode = voice && asked === "send" ? "queue" : asked;
+    const waiting = waitingForInput(entry(sessionId)?.state ?? null, turnId);
+    const mode: SendMode =
+      turnId !== null && waiting ? "steer" : voice && asked === "send" ? "queue" : asked;
     const key = contentKey(text, context, images);
     const kept = s.resend[sessionId];
     const keys =
@@ -263,7 +284,19 @@ export function createSendActions(deps: {
       const error = toCallError(thrown);
       composer.setResend(sessionId, MAYBE_DELIVERED.has(error.error.code) ? keys : null);
       if (content.restoreOnFailure === false) return fail(sessionId, mode, error);
-      if (!composer.restore(sessionId, text, context, images, content.literal, content.by)) {
+      if (
+        !composer.restore(
+          sessionId,
+          text,
+          context,
+          images,
+          content.literal,
+          content.by,
+          s.pluginReloadFailed[sessionId] === true ||
+            composer.store.get().pluginReloadFailed[sessionId] === true ||
+            isPluginReloadFailure(error.error.message),
+        )
+      ) {
         if (deps.keyGuard?.() != null || error.error.code === "keyService")
           return fail(sessionId, mode, error);
         composer.note(sessionId, `Not sent (${error.error.message}). Your new text was kept.`);
@@ -285,13 +318,14 @@ export function createSendActions(deps: {
   return {
     send,
     sendContent,
-    /** Stops the running turn (`turn/interrupt`); a no-op when nothing runs. */
+    /** Stops the chat and its owned work, including cards waiting after its own turn ended. */
     async stop(sessionId: string): Promise<boolean> {
       if (composer.store.get().compacting[sessionId] === true) {
         try {
           await core.run({ type: "stopSession", sessionId });
           composer.setCompacting(sessionId, false);
-          composer.note(sessionId, "Context compaction stopped. Send another message to continue.");
+          // A compaction in flight still finishes after the Stop; a message sent now waits for it and is not lost.
+          composer.note(sessionId, "Still compacting. Your next message is sent after that.");
           return true;
         } catch (thrown) {
           fail(sessionId, "stop", toCallError(thrown));
@@ -299,9 +333,14 @@ export function createSendActions(deps: {
         }
       }
       const turnId = running(sessionId);
-      if (turnId === null) return false;
+      const state = core.store.get();
+      const waiting = Object.values(state.asks).some(
+        (ask) => cardIdOf(ask) !== null && hostOf(state, ask) === sessionId,
+      );
+      if (turnId === null && !waiting) return false;
       try {
-        await core.run({ type: "interruptTurn", sessionId, expectedTurnId: turnId });
+        if (turnId === null) await core.run({ type: "stopSession", sessionId });
+        else await core.run({ type: "interruptTurn", sessionId, expectedTurnId: turnId });
         return true;
       } catch (thrown) {
         fail(sessionId, "stop", toCallError(thrown));

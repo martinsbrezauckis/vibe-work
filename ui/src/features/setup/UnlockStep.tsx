@@ -2,15 +2,16 @@
  * Unlocks the selected vault with one password. During first run `choice` is the user's explicit
  * choice; later the persisted core selection supplies the kind and cannot be switched here.
  * Depends on: AppContext, useKeys, fields. Called by: SetupScreen, VaultStartStep.
- * Invariants: the password is cleared on submit; remembered unlock is only offered for vaults
- * that support it (ShellX and Vibe Work), never the Vault app.
+ * Invariants: the password is cleared on submit; no "remember" choice: the core keeps the unlocked vault's key
+ * in the computer's credential store unless the Settings switch locks the vault at quit.
  */
+import { Button } from "../../components/Controls";
 import { useState } from "react";
 
 import type { VaultChoice } from "../../protocol/core";
 import { vaultName } from "../../state/keyText";
 import { useApp } from "../shell/AppContext";
-import { Problem, RememberChoice, SecretField } from "./fields";
+import { Problem, SecretField } from "./fields";
 import { useKeyUi } from "./useKeys";
 
 /** The unlock form. `choice` is supplied only for an unselected first-run vault. */
@@ -20,9 +21,7 @@ export function UnlockStep({ choice }: { choice?: VaultChoice }) {
   const busy = useKeyUi((s) => s.busy);
   const problem = useKeyUi((s) => s.problem);
   const [password, setPassword] = useState("");
-  const [remember, setRemember] = useState(true);
   const kind = choice ?? status?.vaultKind ?? null;
-  const canRemember = kind === "shellx" || kind === "vibeWork";
 
   return (
     <form
@@ -32,7 +31,7 @@ export function UnlockStep({ choice }: { choice?: VaultChoice }) {
         if (keys === null || password === "") return;
         const pass = password;
         setPassword("");
-        void keys.unlock(pass, choice, canRemember ? remember : undefined);
+        void keys.unlock(pass, choice);
       }}
     >
       <p>Type the password to open your {vaultName(kind)} and continue.</p>
@@ -44,31 +43,24 @@ export function UnlockStep({ choice }: { choice?: VaultChoice }) {
         autoFocus
         invalid={problem?.reason === "wrongPassphrase"}
       />
-      {canRemember && (
-        <RememberChoice
-          testId="setup.unlock-step-rememberchoice"
-          checked={remember}
-          onChange={setRemember}
-        />
-      )}
       <Problem text={problem?.text ?? null} />
       <div className="key-actions">
-        <button
+        <Button
           data-testid="setup.unlock-step-btn-primary"
           type="submit"
-          className="btn-primary"
+          appearance="dialog"
           disabled={busy || password === ""}
         >
-          {busy ? "Unlocking..." : "Unlock"}
-        </button>
-        <button
+          {busy ? "Unlocking…" : "Unlock"}
+        </Button>
+        <Button
           data-testid="setup.unlock-step-dismiss"
           type="button"
-          className="tb-btn"
+
           onClick={() => keys?.dismiss()}
         >
           Not now
-        </button>
+        </Button>
       </div>
     </form>
   );

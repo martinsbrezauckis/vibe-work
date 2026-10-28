@@ -1,14 +1,17 @@
 /**
- * One marketplace card: generic icon, name, publisher, one line, status in words, and the main action
- * (Install / Update / Add). A click on the card opens its details.
- * Depends on: CategoryIcon, model, hooks. Called by: MarketplacePage.
+ * One marketplace card: generic icon, name, publisher and version, one line, status in words, and the main action
+ * (Install… / Update / Add). A click on the card opens its details; Install… opens them with the install offer
+ *, whose Install button in the detail installs exactly what it shows.
+ * Depends on: CategoryIcon, InstallOffer (focus), model, hooks. Called by: MarketplacePage.
  * Invariants: no vendor logos; the status words come from `model` (catalog facts and Vibe's state).
  */
-import type { ReactElement } from "react";
+import { Badge, Button } from "../../components/Controls";
+import { type ReactElement, useRef } from "react";
 
 import type { MarketEntryView } from "../../protocol/core";
 import { CategoryIcon, type GlyphName } from "../connectors/CategoryIcon";
-import { useMarket, useMarketActions, useServers } from "./hooks";
+import { useOfferFocus } from "../connectors/InstallOffer";
+import { useMarket, useMarketActions, useMarketOffers, useServers } from "./hooks";
 import { addedServer, statusOf } from "./model";
 
 /** Marketplace category -> one of the generic glyphs. */
@@ -42,7 +45,13 @@ export function mainAction(
   return e.installed.updateAvailable ? "update" : null;
 }
 
-const LABEL = { install: "Install", update: "Update", add: "Add", addKey: "Add with key" } as const;
+// Install… shows the offer first; Update keeps the native dialog (no offer step in the design for it).
+const LABEL = {
+  install: "Install…",
+  update: "Update",
+  add: "Add",
+  addKey: "Add with key",
+} as const;
 
 /** A card. */
 export function MarketCard({
@@ -58,6 +67,12 @@ export function MarketCard({
   const status = statusOf(e, installing, servers);
   const action = mainAction(e, servers);
   const busy = installing !== null;
+  const focus = useMarketOffers((o) => o.focus);
+  const opener = useRef<HTMLButtonElement>(null);
+  useOfferFocus(focus, e.entry.id, "opener", opener);
+  // The installed version, else the catalog's (servers have none).
+  const version = e.installed?.version ?? e.entry.plugin?.version ?? e.entry.pack?.version;
+  const via = version === undefined ? e.entry.publisher : `${e.entry.publisher} · ${version}`;
   return (
     <div
       data-item-id={e.entry.id}
@@ -81,26 +96,28 @@ export function MarketCard({
         </span>
       </button>
       <div className="ctile-foot">
-        <span className={`cstat mstat-${status.tone}`} data-status={status.text}>
+        <Badge presentation="market-status" state={status.tone} data-status={status.text}>
           {status.text}
-        </span>
-        <span className="ctile-via" title={e.entry.publisher}>
-          {e.entry.publisher}
+        </Badge>
+        <span className="ctile-via" title={via}>
+          {via}
         </span>
         {action === null ? null : (
-          <button
+          <Button
             data-testid="marketplace.market-card-add-server"
+            ref={opener}
             type="button"
-            className="tb-btn primary"
+            variant="primary"
             disabled={busy && action !== "add" && action !== "addKey"}
             onClick={() => {
               if (action === "add") void actions?.addServer(e.entry.id);
               else if (action === "addKey") void actions?.addKeyServer(e.entry.id);
+              else if (action === "install") void actions?.offerInstall(e.entry.id);
               else void actions?.install(e.entry.id);
             }}
           >
             {LABEL[action]}
-          </button>
+          </Button>
         )}
       </div>
     </div>

@@ -9,6 +9,7 @@
  * party): only `https:` ones open, in the system browser through the core's `openLink` (checked again in
  * Rust), with their host shown; anything else says "link not opened (not https)".
  */
+import { Button } from "../../components/Controls";
 import { type ReactElement, useEffect, useState } from "react";
 
 import { useStore } from "../../state/createStore";
@@ -53,28 +54,28 @@ export function PrCard({ git, sessionId }: { git: Git; sessionId: string }): Rea
     return (
       <div className="pr-card pr-none" data-git="pr-card">
         <span>{view?.note ?? "No pull request known for this branch."}</span>
-        <button
+        <Button
           data-testid="git.pr-card-card"
           type="button"
-          className="mini"
+          appearance="compact"
           disabled={busy}
           data-action="pr-refresh"
           onClick={() => void git.card(sessionId, true)}
         >
           Check for a pull request
-        </button>
+        </Button>
         {view?.openUrl != null && (
-          <button
+          <Button
             data-testid="git.pr-card-open"
             type="button"
-            className="key-link"
+            appearance="key-link"
             title={host(view.openUrl)}
             onClick={() => {
               open(view.openUrl);
             }}
           >
             Open on GitHub
-          </button>
+          </Button>
         )}
       </div>
     );
@@ -84,17 +85,18 @@ export function PrCard({ git, sessionId }: { git: Git; sessionId: string }): Rea
     <div className={`pr-card pr-${card.state}`} data-git="pr-card" data-pr-number={card.number}>
       <div className="pr-head">
         <span className={`pr-state ${card.state}`}>{stateText(card)}</span>
-        <button
+        <Button
           data-testid="git.pr-card-open-2"
           type="button"
-          className="key-link pr-title"
+          appearance="key-link"
+          placement="pr-title"
           title={host(card.url)}
           onClick={() => {
             open(card.url);
           }}
         >
           #{card.number} {card.title}
-        </button>
+        </Button>
       </div>
       <ul className="pr-lines">
         <li
@@ -122,17 +124,17 @@ export function PrCard({ git, sessionId }: { git: Git; sessionId: string }): Rea
               {item.url === null ? (
                 item.name
               ) : (
-                <button
+                <Button
                   data-testid="git.pr-card-open-3"
                   type="button"
-                  className="key-link"
+                  appearance="key-link"
                   title={host(item.url)}
                   onClick={() => {
                     open(item.url);
                   }}
                 >
                   {item.name}
-                </button>
+                </Button>
               )}{" "}
               ({item.outcome}
               {item.url === null ? "" : `, ${host(item.url)}`})
@@ -147,39 +149,39 @@ export function PrCard({ git, sessionId }: { git: Git; sessionId: string }): Rea
       )}
       <div className="pr-actions">
         {card.checks.failed > 0 && (
-          <button
+          <Button
             data-testid="git.pr-card-prepare"
             type="button"
-            className="mini"
+            appearance="compact"
             disabled={busy}
             data-action="pr-send-checks"
             onClick={() => void git.prepare(sessionId, "checks")}
           >
             Send failing checks to Vibe
-          </button>
+          </Button>
         )}
         {card.state === "open" && (
-          <button
+          <Button
             data-testid="git.pr-card-prepare-2"
             type="button"
-            className="mini"
+            appearance="compact"
             disabled={busy}
             data-action="pr-send-review"
             onClick={() => void git.prepare(sessionId, "review")}
           >
             Send review comments to Vibe
-          </button>
+          </Button>
         )}
-        <button
+        <Button
           data-testid="git.pr-card-card-2"
           type="button"
-          className="mini"
+          appearance="compact"
           disabled={busy}
           data-action="pr-refresh"
           onClick={() => void git.card(sessionId, true)}
         >
           Refresh
-        </button>
+        </Button>
         {view !== undefined && <span className="pr-when">{view.note ?? fetchedText(view)}</span>}
       </div>
     </div>

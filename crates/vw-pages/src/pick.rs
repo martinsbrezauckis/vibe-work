@@ -7,7 +7,7 @@
 //! elements), tests.
 //! Invariants:
 //! - The answer is untrusted page data: parsed as JSON only, every field length-capped again here (path 512,
-//!   ids 8 × 100, text and quote 2,000, url 512); a malformed answer is "nothing picked", never an error the page
+//!   ids 8 × 100, text and quote 2,000, url 512, title 200); a malformed answer is "nothing picked", never an error the page
 //!   can use.
 //! - With a non-empty selection the pick answers at once; otherwise the next click (capture phase, default action
 //!   prevented) answers, Escape cancels. The overlay is removed when it answers.
@@ -37,6 +37,10 @@ pub struct Picked {
     pub quote: Option<String>,
     /// The page URL.
     pub url: String,
+    /// The page's title (at most 200 characters), for the chip's words.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
+    pub title: Option<String>,
 }
 
 /// The state of a pick.
@@ -66,7 +70,7 @@ fn quoted(name: &str) -> String {
 
 /// The page-side helpers both the click pick and the named-target pick use: `clip`, the readable DOM `path`, the
 /// element `role` and `describe(el, quote)`, which builds the answer object the host parses.
-const DESCRIBE_JS: &str = r##"  const clip = (v, n) => String(v || "").replace(/\s+/g, " ").trim().slice(0, n);
+pub(crate) const DESCRIBE_JS: &str = r##"  const clip = (v, n) => String(v || "").replace(/\s+/g, " ").trim().slice(0, n);
   const esc = (v) => (window.CSS && CSS.escape) ? CSS.escape(String(v)) : String(v).replace(/[^a-zA-Z0-9_-]/g, "\\$&");
   const role = (el) => {
     const r = el.getAttribute && el.getAttribute("role"); if (r) return clip(r, 40);
@@ -97,7 +101,7 @@ const DESCRIBE_JS: &str = r##"  const clip = (v, n) => String(v || "").replace(/
     }
     return { state: "picked", path: path(el), ids, tag: el.localName, role: role(el),
       text: clip(el.innerText || el.textContent, 2000), quote: quote ? clip(quote, 2000) : null,
-      url: String(location.href).slice(0, 512) };
+      url: String(location.href).slice(0, 512), title: clip(document.title, 200) };
   };"##;
 
 /// The script that starts a pick (its value is the first answer).
@@ -189,10 +193,17 @@ pub enum TargetMiss {
 /// (`describe` is the same function), so [`parse_target`] returns the same [`Picked`] a person would have caused.
 #[must_use]
 pub fn target_script(at: &PickAt) -> String {
+    target_script_with_quote(at, None)
+}
+
+/// A named target with an optional exact selection; a selection absent from the element is refused.
+#[must_use]
+pub fn target_script_with_quote(at: &PickAt, quote: Option<&str>) -> String {
     let at = match at {
         PickAt::Selector(selector) => serde_json::json!({ "selector": selector }),
         PickAt::Point { x, y } => serde_json::json!({ "x": x, "y": y }),
     };
+    let quote = serde_json::json!(quote);
     format!(
         r#"(() => {{
   const AT = {at};
@@ -202,9 +213,37 @@ pub fn target_script(at: &PickAt) -> String {
     el = AT.selector !== undefined ? document.querySelector(AT.selector) : document.elementFromPoint(AT.x, AT.y);
   }} catch (e) {{ return JSON.stringify({{ state: "invalid" }}); }}
   if (!el || el.nodeType !== 1) return JSON.stringify({{ state: "notfound" }});
-  return JSON.stringify(describe(el, ""));
+  const quote = {quote};
+  if (quote !== null && !String(el.innerText || el.textContent || "").includes(quote)) return JSON.stringify({{ state: "notfound" }});
+  return JSON.stringify(describe(el, quote || ""));
 }})()"#
     )
+}
+
+/// Reads the same named target for Copy, preserving line breaks up to the menu's copy bound.
+#[must_use]
+pub fn copy_target_script(at: &PickAt, quote: Option<&str>) -> String {
+    target_script_with_quote(at, quote).replace(
+        "return JSON.stringify(describe(el, quote || \"\"));",
+        "return JSON.stringify({ state: 'copied', text: String(quote ?? el.innerText ?? el.textContent ?? '').slice(0, 100000) });",
+    )
+}
+
+/// Parses a named Copy result, refusing missing targets and bounding untrusted page text again.
+#[must_use]
+pub fn parse_named_copy(raw: &str) -> Option<String> {
+    if raw.len() > 800_000 {
+        return None;
+    }
+    let outer: serde_json::Value = serde_json::from_str(raw).ok()?;
+    let value = match outer {
+        serde_json::Value::String(inner) => serde_json::from_str(&inner).ok()?,
+        other => other,
+    };
+    if value.get("state")?.as_str()? != "copied" {
+        return None;
+    }
+    Some(value.get("text")?.as_str()?.chars().take(100_000).collect())
 }
 
 /// Parses the answer of [`target_script`].
@@ -283,8 +322,39 @@ pub fn parse(result: &str) -> PickAnswer {
                 text: text(value.get("text"), 2000),
                 quote: Some(quote).filter(|q| !q.is_empty()),
                 url: text(value.get("url"), 512),
+                title: Some(text(value.get("title"), 200)).filter(|t| !t.is_empty()),
             })
         }
         _ => PickAnswer::Cancelled,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{PickAnswer, parse};
+
+    #[test]
+    fn a_pick_carries_the_page_title_bounded_and_none_when_empty() {
+        let answer = |title: &str| {
+            serde_json::Value::String(
+                serde_json::json!({"state": "picked", "path": "main > p", "ids": [], "tag": "p",
+                    "role": "p", "text": "Hello", "quote": "Hello", "url": "http://127.0.0.1:5173/",
+                    "title": title})
+                .to_string(),
+            )
+            .to_string()
+        };
+        let PickAnswer::Picked(picked) = parse(&answer("Shop")) else {
+            panic!("not picked")
+        };
+        assert_eq!(picked.title.as_deref(), Some("Shop"));
+        let PickAnswer::Picked(long) = parse(&answer(&"t".repeat(500))) else {
+            panic!("not picked")
+        };
+        assert_eq!(long.title.map(|t| t.chars().count()), Some(200));
+        let PickAnswer::Picked(none) = parse(&answer("")) else {
+            panic!("not picked")
+        };
+        assert_eq!(none.title, None);
     }
 }

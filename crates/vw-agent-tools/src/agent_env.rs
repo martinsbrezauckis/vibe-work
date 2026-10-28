@@ -11,14 +11,9 @@ pub const PUSH_REFUSED_KEY: &str = "url.push-is-the-users-step-in-vibe-work:.pus
 /// Remove inherited git credential channels, pin Git's credential prompting off and turn every push address into one
 /// git cannot reach. Call this after all other environment additions, immediately before a child is started.
 ///
-/// The git guard refuses every GitHub CLI (`gh`) command. The environment adds another layer:
-/// `GH_CONFIG_DIR` is the null device, so gh finds no config and no stored login and
-/// cannot store one (it fails to start: "open /dev/null/config.yml: not a directory"). Whatever starts gh with this
-/// environment, a `gh pr create` / `gh api -X POST` never runs with the user's GitHub account. An empty config
-/// A shared empty config folder retained what one agent process wrote, so one `gh auth login` (for example the
-/// user's own, in an integrated
-/// terminal) would have signed every later agent command in. Reads with the user's login need a broker that holds the
-/// token outside the agent's reach.
+/// GitHub reads use an app-owned broker through a credential-free PATH shim. Direct gh invocations
+/// remain signed out: `GH_CONFIG_DIR` is the null device, so they cannot load or persist a login.
+/// Neither the broker endpoint nor its shim needs a token in this environment.
 ///
 /// The push rule adds a second layer under the push guard hook, for a
 /// `git push` that reaches git anyway (a remote that needs no credentials, such as a local folder, would otherwise
@@ -146,6 +141,15 @@ mod tests {
     fn git_does_not_call_a_synthetic_credential_helper() {
         let root = std::env::temp_dir().join(format!("vw-agent-env-{}", std::process::id()));
         std::fs::create_dir_all(&root).unwrap();
+        // The env-cleared child must not discover the checkout (or its scratch boundary) above this fixture.
+        assert!(
+            Command::new("git")
+                .args(["init", "-q"])
+                .arg(&root)
+                .status()
+                .unwrap()
+                .success()
+        );
         let store = root.join("synthetic-credentials");
         std::fs::write(&store, "https://synthetic:synthetic@example.invalid\n").unwrap();
         let store_path = store.to_string_lossy().replace('\\', "/");
@@ -210,7 +214,7 @@ mod tests {
     /// Nothing gh writes with the agent's environment survives into the next
     /// agent process, and the user's own gh config is never read: a `gh config set` in one process (the same path a
     /// `gh auth login` takes) is not seen by a second one, and a synthetic user config with `git_protocol: ssh` is not
-    /// used. Falsifier: the shared empty config folder of 6d04be593 kept the value (the second process read "ssh").
+    /// used. Falsifier: a config folder shared by both processes keeps the value (the second process reads "ssh").
     /// Offline. Skips (and says so) without gh.
     #[test]
     fn gh_keeps_nothing_between_agent_processes_and_ignores_the_users_config() {

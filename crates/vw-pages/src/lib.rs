@@ -39,12 +39,14 @@ mod markdown;
 mod opening;
 mod page;
 mod page_inputs;
+mod page_menu;
 mod page_scan;
 mod paths;
 mod pick;
 mod picking;
 mod profile;
 mod projects;
+mod readiness;
 mod server;
 mod service;
 mod settings;
@@ -74,15 +76,21 @@ pub use markdown::{
     split_front_matter,
 };
 pub use page::{
-    Input, InputOption, LegacyHead, PageDetail, PageFacts, PageScan, Reference, Relation,
-    STEP_STATES, Section, Step, normalize_step, parse_html, scan_html,
+    Input, InputOption, PageDetail, PageFacts, PageScan, Reference, Relation, STEP_STATES, Section,
+    Step, normalize_step, parse_html, scan_html,
+};
+pub use page_menu::{
+    MAX_COPY, PageMenuAt, copy_script as menu_copy_script, page_script as page_menu_script,
+    parse_click as parse_menu_click, parse_copy as parse_menu_copy, selection_script,
+    target_script as menu_target_script,
 };
 pub use paths::{
     DEFAULT_FOLDER, INDEX, PagePath, PathError, asset_allowed, clean_relative, is_page_name,
 };
 pub use pick::{
     PickAnswer, PickAt, Picked, TargetMiss, accessor_name as pick_accessor, cancel_script,
-    parse as parse_pick, parse_target, poll_script, start_script, target_script,
+    copy_target_script, parse as parse_pick, parse_named_copy, parse_target, poll_script,
+    start_script, target_script, target_script_with_quote,
 };
 pub use picking::{run_pick, section_of};
 pub use profile::{

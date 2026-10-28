@@ -6,30 +6,25 @@ description: Use for thorough research on a question, a market, a technology or 
 Plan, search widely, read sources, cross-check, then write a cited report. Work in this order.
 
 1. **Plan.** Restate the question in one sentence and split it into 3-6 sub-questions. Tell the user the plan in two or three lines and start (ask one question with `ask_user_question` only when the question is truly ambiguous, such as an unknown time range or region). Keep a `todo` list with one item per sub-question.
-2. **Search** in code, returning a digest. Every step re-sends the whole conversation and the user pays for each token: a raw result list is ~4,000 characters per hit and a page up to 70,000, so search and read inside `run_typescript` and return only what you need. The web search connector's functions are `tools.connector_web_search.web_search({ query, limit })` (an object of hits: `url`, `title`, `description`, `snippets`, `date`) and `tools.connector_web_search.open_url({ url })` (`content` = the page text); no need to look them up. For each sub-question run 1-3 different queries (vary the words; add the year for anything that changes), several in one call:
+2. **Search** in code, returning a digest. Every step re-sends the whole conversation and the user pays for each token: a raw result list is ~4,000 characters per hit and a page up to 70,000, so search and read inside `run_typescript` and return only what you need. The web search connector's functions are `tools.connector_web_search.web_search({ query, limit })` (an object of hits: `url`, `title`, `description`, `snippets`, `date`) and `tools.connector_web_search.open_url({ url })` (`content` = the page text); no need to look them up. For each sub-question run 1-3 different queries (vary the words; add the year for anything that changes), one query per call:
    ```ts
    async function main() {
-     const queries = ["solid-state battery energy density", "solid-state battery production start 2026"];
+     const query = "solid-state battery production start 2026";
      const clean = (t: unknown) => String(t ?? "").replace(/<[^>]+>/g, "").slice(0, 300);
-     const runs = await Promise.allSettled(queries.map(query => tools.connector_web_search.web_search({ query, limit: 6 })));
-     return runs.flatMap((r, i) => r.status === "fulfilled"
-       ? Object.values(r.value as Record<string, any>).map(h => ({ q: i, title: h.title, url: h.url, date: h.date, text: clean(h.description) }))
-       : [{ q: i, error: String(r.reason).slice(0, 200) }]);
+     const hits = await tools.connector_web_search.web_search({ query, limit: 6 });
+     return Object.values(hits as Record<string, any>).map(h => ({ title: h.title, url: h.url, date: h.date, text: clean(h.description) }));
    }
    ```
    If the user has libraries switched on for this chat, also ask them (`vw:libraries`).
-3. **Read** the 5-12 most useful results, in code too, returning only the passages that answer your sub-questions (open each page once; never open the same URL twice):
+3. **Read** the 5-12 most useful results, one page per call, returning only the passages that answer your sub-questions (open each page once; never open the same URL twice):
    ```ts
    async function main() {
-     const urls = ["https://example.org/battery-report"];
+     const url = "https://example.org/battery-report";
      const wanted = /energy density|Wh\/kg|production|20\d\d/i;
-     const pages = await Promise.allSettled(urls.map(url => tools.connector_web_search.open_url({ url })));
-     return pages.map((p, i) => {
-       if (p.status !== "fulfilled") return { url: urls[i], error: String(p.reason).slice(0, 200) };
-       const text = String((p.value as any)?.content ?? "");
-       const parts = text.split(/\n\s*\n/).filter(x => wanted.test(x)).join("\n\n");
-       return { url: urls[i], chars: text.length, passages: parts.slice(0, 4000) };
-     });
+     const page = await tools.connector_web_search.open_url({ url });
+     const text = String((page as any)?.content ?? "");
+     const passages = text.split(/\n\s*\n/).filter(x => wanted.test(x)).join("\n\n");
+     return { url, chars: text.length, passages: passages.slice(0, 4000) };
    }
    ```
    If passages miss the facts you need, try other words; return a whole page (at most 12,000 characters) only for a key primary source. If `open_url` fails, navigate to its URL with `browser_act`, then `browser_read` (`vw:browser`), or search an enabled library (`vw:libraries`). Read the page. If a page does not show you its content, tell the user plainly that it does not render for you; they can open it in the Browser tab. Find another primary source if neither works; state the gap instead of citing unread text. Prefer primary sources: maker docs, papers, filings, official statistics, then reputable press. Note each source's title, publisher, date and URL.

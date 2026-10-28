@@ -4,8 +4,8 @@ import type { BrowserStatus, GitStatusView } from "../../protocol/core";
 import { commitBlocked, prBlocked, pushBlocked } from "../git/model";
 
 export type BrowserAction =
-  "commit" | "push" | "pr" | "bring" | "new-chat" | "new-task" | "open-chat";
-export type BrowserFile = { path: string; status: string };
+  "commit" | "push" | "pr" | "bring" | "new-chat" | "new-task" | "open-chat" | "review";
+type BrowserFile = { path: string; status: string };
 
 /** File labels use everyday words; the wire status stays available to Debug clients. */
 export function fileWords(status: string): string {
@@ -94,7 +94,10 @@ export function actionStep(target: BrowserTarget, action: BrowserAction): Browse
   const status = target.status;
   let label: string;
   let reason = admitted(target);
-  if (action === "open-chat") {
+  if (action === "review") {
+    label = "Open the Changes tab";
+    reason = target.sessionId ? null : "Open a session in this folder to review its changes.";
+  } else if (action === "open-chat") {
     label = "Open its chat";
     reason = target.sessionId ? null : "This copy has no session.";
   } else if (action === "new-chat" || action === "new-task") {

@@ -44,7 +44,8 @@ use crate::error::{ChangesError, clip};
 /// could run: fsmonitor, pager, external diff, ssh, credential helpers and askpass, any transport (we never
 /// fetch or push: `protocol.allow=never`); what keeps our temporary index ours (`splitIndex` would write
 /// `sharedindex.*` into `.git`); no housekeeping in the user's repository (`gc.auto`, `maintenance.auto`);
-/// stable output for the parser. The hooks folder is added per call (`hooks::current`).
+/// stable output for the parser; paths past 260 characters on Windows (`core.longpaths`, below). The hooks folder
+/// is added per call (`hooks::current`).
 pub(crate) const HARDENING: &[(&str, &str)] = &[
     ("core.fsmonitor", "false"),
     ("core.untrackedCache", "false"),
@@ -66,6 +67,12 @@ pub(crate) const HARDENING: &[(&str, &str)] = &[
     ("diff.relative", "false"),
     ("submodule.recurse", "false"),
     ("commit.gpgSign", "false"),
+    // Git for Windows stops at 260 characters unless this is on, so a deep app data folder (the baseline's copy of
+    // the project's ignore rules lives in `<data>/sessions/<id>/ignore/...`, one level per project folder) or a deep
+    // project could not be read. Given per call, so nothing is written to any config. Only Git for Windows reads the
+    // key; git on Linux and macOS never parses it (it accepts even a value that is not a boolean), so it is set on
+    // every platform.
+    ("core.longpaths", "true"),
 ];
 
 /// Keys of [`HARDENING`] the `Publish` profile leaves to the user's own system and global config (the
@@ -203,6 +210,8 @@ pub struct Call<'a> {
     cap: usize,
     profile: Profile,
     repo_hooks: bool,
+    cancel: Option<&'a AtomicBool>,
+    prefix: bool,
 }
 
 impl<'a> Call<'a> {
@@ -218,6 +227,8 @@ impl<'a> Call<'a> {
             cap: OUTPUT_CAP,
             profile: Profile::Review,
             repo_hooks: false,
+            cancel: None,
+            prefix: false,
         }
     }
 
@@ -267,6 +278,20 @@ impl<'a> Call<'a> {
     #[must_use]
     pub fn timeout(mut self, timeout: Duration) -> Self {
         self.timeout = timeout;
+        self
+    }
+
+    /// Stops a read when the caller replaces its search. No process outlives cancellation.
+    #[must_use]
+    pub fn cancel_when(mut self, token: &'a AtomicBool) -> Self {
+        self.cancel = Some(token);
+        self
+    }
+
+    /// Returns the bounded stdout prefix when a search fills its result budget.
+    #[must_use]
+    pub fn take_prefix(mut self) -> Self {
+        self.prefix = true;
         self
     }
 
@@ -349,9 +374,28 @@ impl<'a> Call<'a> {
             {
                 break status;
             }
-            if overflow.load(Ordering::Relaxed) || Instant::now() >= deadline {
+            if overflow.load(Ordering::Relaxed)
+                || Instant::now() >= deadline
+                || self.cancel.is_some_and(|c| c.load(Ordering::Relaxed))
+            {
                 let _ = child.kill();
                 let _ = child.wait();
+                if overflow.load(Ordering::Relaxed) && self.prefix {
+                    if let Some(writer) = writer {
+                        let _ = writer.join();
+                    }
+                    let stdout = stdout
+                        .map(|h| h.join().unwrap_or_default())
+                        .unwrap_or_default();
+                    if let Some(stderr) = stderr {
+                        let _ = stderr.join();
+                    }
+                    return Ok(Output {
+                        code: Some(0),
+                        stdout,
+                        stderr: String::new(),
+                    });
+                }
                 if overflow.load(Ordering::Relaxed) {
                     return Err(ChangesError::TooMuchOutput {
                         command: name,
@@ -375,7 +419,7 @@ impl<'a> Call<'a> {
         let stderr = stderr
             .map(|h| h.join().unwrap_or_default())
             .unwrap_or_default();
-        if overflow.load(Ordering::Relaxed) {
+        if overflow.load(Ordering::Relaxed) && !self.prefix {
             return Err(ChangesError::TooMuchOutput {
                 command: name,
                 limit: self.cap,

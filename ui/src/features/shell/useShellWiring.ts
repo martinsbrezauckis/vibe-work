@@ -1,14 +1,16 @@
 /**
  * Effects that connect the shell to the outside: the theme attribute on <html>, the single
- * keyboard listener, palette commands and shortcuts from `shellActions`, the `ui/*` routes (shell,
+ * keyboard listener, palette commands and shortcuts from `shellActions`, the prompt announcements, the `ui/*` routes (shell,
  * sessions, transcript, composer) and the loop that serves them. One hook so `Shell` stays a layout component.
  * Depends on: AppContext, actions, shellUiControl, state/uiControl, hooks. Called by: Shell.
  * Invariants: every registration is undone on unmount (React StrictMode mounts effects twice);
  * the UI-control loop only polls while the Debug API is on, or always in browser dev mode where
  * the Debug API is the transport itself.
  */
+import { editorLayoutOf } from "../../state/editorLayout";
 import { useEffect } from "react";
 import { attachSecretScanActivity } from "../../state/secretScanActivity";
+import { registerClipboard } from "../../state/clipboard";
 
 import { runUiControl } from "../../state/uiControl";
 import { useApp } from "./AppContext";
@@ -16,18 +18,24 @@ import { shellActions } from "./actions";
 import { useSessionWiring } from "../sessions/useSessionWiring";
 import { useShellState } from "./hooks";
 import { registerShellRoutes } from "./shellUiControl";
+import { startAskAnnouncements } from "../ask/askAnnouncements";
+import { startChatPrompts } from "../ask/waiting";
 import { registerInputRoutes } from "./inputRoutes";
 import { registerWalkthroughRoutes } from "./walkthroughRoutes";
 import { registerInspectRoutes } from "./inspectRoutes";
+import { registerControlRead } from "./controlRead";
 import { registerTranscriptRoutes } from "../transcript/transcriptRoutes";
 import { registerComposerRoutes } from "../composer/composerRoutes";
 import { registerDocumentRoutes } from "../composer/documentRoutes";
+import { useHandOverWiring } from "../files/handOver";
+import { registerPointShortcut } from "../files/point";
 import { registerVoiceKeys } from "../voice/hooks";
 import { registerVoiceRoutes } from "../voice/voiceRoutes";
 import { registerSetupRoutes } from "../setup/setupRoutes";
 import { registerSettingsRoutes } from "../settings/settingsRoutes";
 import { registerConnectorRoutes } from "../connectors/connectorRoutes";
 import { registerMarketRoutes } from "../marketplace/marketRoutes";
+import { registerSkillsRoutes } from "../skills/skillsRoutes";
 import { registerLibrariesRoutes } from "../libraries/librariesRoutes";
 import { registerWorktreeRoutes } from "../worktrees/worktreeRoutes";
 import { registerUpdatesRoutes } from "../updates/updatesRoutes";
@@ -38,6 +46,11 @@ import { keyReadiness, vaultReadiness } from "../../state/keyReadiness";
 /** Installs the shell's wiring for the lifetime of the component. */
 export function useShellWiring(): void {
   const app = useApp();
+  useEffect(
+    () =>
+      app.core === null ? undefined : registerClipboard(app.core, () => app.uiControl.serving()),
+    [app],
+  );
   useEffect(() => app.secretScan?.start(), [app]);
   const theme = useShellState((s) => s.theme);
   useEffect(() => (app.core === null ? undefined : attachSecretScanActivity(app.core)), [app.core]);
@@ -75,6 +88,17 @@ export function useShellWiring(): void {
         app.toasts.close();
         return;
       }
+      if (
+        event.key === "Escape" &&
+        !event.defaultPrevented &&
+        !document.querySelector('[role="dialog"], [role="menu"]') &&
+        app.shell.store.get().overlay === null &&
+        editorLayoutOf(app.shell.store.get()).slot !== "chat"
+      ) {
+        app.shell.actions.unfoldChat();
+        event.preventDefault();
+        return;
+      }
       if (app.shortcuts.handle(event)) event.preventDefault();
     };
     window.addEventListener("keydown", onKey, true);
@@ -109,8 +133,12 @@ export function useShellWiring(): void {
     };
   }, [app]);
 
+  useEffect(() => startAskAnnouncements(app), [app]);
+  useEffect(() => startChatPrompts(app), [app]);
   useEffect(() => registerShellRoutes(app), [app]);
+  useEffect(() => registerPointShortcut(app), [app]);
   useEffect(() => registerInspectRoutes(app), [app]);
+  useEffect(() => registerControlRead(app), [app]);
   useEffect(() => registerInputRoutes(app), [app]);
   useEffect(() => registerWalkthroughRoutes(app), [app]);
   useEffect(() => registerTranscriptRoutes(app), [app]);
@@ -122,6 +150,7 @@ export function useShellWiring(): void {
   useEffect(() => registerSettingsRoutes(app), [app]);
   useEffect(() => registerConnectorRoutes(app), [app]);
   useEffect(() => registerMarketRoutes(app), [app]);
+  useEffect(() => registerSkillsRoutes(app), [app]);
   useEffect(() => registerLibrariesRoutes(app), [app]);
   useEffect(() => registerWorktreeRoutes(app), [app]);
   useEffect(() => app.worktrees?.watch(), [app]);
@@ -154,6 +183,8 @@ export function useShellWiring(): void {
     };
   }, [app]);
   useSessionWiring();
+  // Files, folders and text other programs hand over ("Send to Vibe Work") become chips in the open box.
+  useHandOverWiring();
 
   // The Mistral key controller: reads the vault status once the window is up.
   useEffect(() => {

@@ -1,9 +1,10 @@
 /**
  * CodeMirror file editor mounted in a shadow root for VW's strict style CSP.
  * Depends on CodeMirror and local language/theme setup; called by FileEditor.
+ * `marks` lines (changed on disk while the file was open) carry a line class that moves with later typing.
  */
 import { useEffect, useLayoutEffect, useRef } from "react";
-import { Compartment, EditorState } from "@codemirror/state";
+import { Compartment, EditorState, StateEffect, StateField, type Text } from "@codemirror/state";
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
 import {
   bracketMatching,
@@ -14,12 +15,15 @@ import {
 } from "@codemirror/language";
 import {
   closeSearchPanel,
+  gotoLine,
   openSearchPanel,
   search,
   searchKeymap,
   searchPanelOpen,
 } from "@codemirror/search";
 import {
+  Decoration,
+  type DecorationSet,
   EditorView,
   drawSelection,
   highlightActiveLine,
@@ -28,14 +32,24 @@ import {
 } from "@codemirror/view";
 import { languageFor } from "./languages";
 import { editorHighlight, editorTheme } from "./theme";
+import type { CodeSelection } from "../files/model/context";
+import { editorActions } from "./actions";
 
-export interface EditorHandle {
+export interface EditorHandle extends ReturnType<typeof editorActions> {
+  /** Reads the main selection without changing the buffer, caret or focus. */
+  selection(): CodeSelection | null;
   focus(): void;
   find(): void;
   goToLine(line: number): void;
   getLine(): number;
   getScroll(): number;
   setText(text: string): void;
+  /** The text of line `line` (1-based), for pointing at the caret's line (right-click menu). */
+  lineText(line: number): string;
+  /** Replaces the selection (Cut, Paste in the right-click menu); false in a read-only editor. */
+  replaceSelection(text: string): boolean;
+  /** Opens the editor's Go to line field. */
+  goToLinePrompt(): void;
 }
 
 export interface CodeEditorProps {
@@ -49,7 +63,30 @@ export interface CodeEditorProps {
   onSave?: () => void;
   onCancel?: () => void;
   onReady?: (api: EditorHandle | null) => void;
+  /** Lines to mark as changed on disk (1-based; empty: none). */
+  marks?: readonly number[];
 }
+
+const setMarks = StateEffect.define<readonly number[]>();
+
+function markSet(doc: Text, lines: readonly number[]): DecorationSet {
+  const mark = Decoration.line({ class: "cm-vibe-line" });
+  return Decoration.set(
+    lines.filter((n) => n >= 1 && n <= doc.lines).map((n) => mark.range(doc.line(n).from)),
+  );
+}
+
+/** The marked lines, mapped through every later change so they stay on the same text. */
+const marksField = StateField.define<DecorationSet>({
+  create: () => Decoration.none,
+  update(value, transaction) {
+    let next = value.map(transaction.changes);
+    for (const effect of transaction.effects)
+      if (effect.is(setMarks)) next = markSet(transaction.state.doc, effect.value);
+    return next;
+  },
+  provide: (field) => EditorView.decorations.from(field),
+});
 
 function linePosition(view: EditorView): { line: number; column: number } {
   const pos = view.state.selection.main.head;
@@ -109,6 +146,7 @@ export function CodeEditor(props: CodeEditorProps) {
       state: EditorState.create({
         doc: props.value,
         extensions: [
+          EditorState.allowMultipleSelections.of(true),
           lineNumbers(),
           foldGutter(),
           bracketMatching(),
@@ -117,6 +155,7 @@ export function CodeEditor(props: CodeEditorProps) {
           highlightActiveLine(),
           history(),
           search(),
+          marksField,
           syntaxHighlighting(editorHighlight),
           keymap.of([
             {
@@ -160,6 +199,16 @@ export function CodeEditor(props: CodeEditorProps) {
     });
     view.current = editor;
     const api: EditorHandle = {
+      ...editorActions(editor),
+      selection: () => {
+        const { from, to, empty } = editor.state.selection.main;
+        if (empty) return null;
+        return {
+          start: editor.state.doc.lineAt(from).number,
+          end: editor.state.doc.lineAt(Math.max(from, to - 1)).number,
+          text: editor.state.sliceDoc(from, to),
+        };
+      },
       focus: () => {
         editor.focus();
       },
@@ -182,10 +231,33 @@ export function CodeEditor(props: CodeEditorProps) {
         if (editor.state.readOnly || editor.state.doc.toString() === text) return;
         editor.dispatch({ changes: { from: 0, to: editor.state.doc.length, insert: text } });
       },
+      lineText: (line) =>
+        editor.state.doc.line(Math.max(1, Math.min(line, editor.state.doc.lines))).text,
+      replaceSelection: (text) => {
+        if (editor.state.readOnly) return false;
+        editor.dispatch(editor.state.replaceSelection(text));
+        editor.focus();
+        return true;
+      },
+      goToLinePrompt: () => {
+        gotoLine(editor);
+      },
     };
     callbacks.current.onReady?.(api);
-    if (props.line !== null) api.goToLine(props.line);
-    else editor.focus();
+    if (props.line !== null) {
+      const anchor = atLine(editor, props.line);
+      editor.dispatch({
+        selection: { anchor },
+        effects: EditorView.scrollIntoView(anchor, { y: "center" }),
+      });
+    }
+    // A lazy editor must not take focus back after the user moved into the message field.
+    const active = document.activeElement;
+    if (!(
+      active instanceof HTMLElement &&
+      (active.matches("input, textarea") || active.isContentEditable)
+    ))
+      editor.focus();
     return () => {
       callbacks.current.onReady?.(null);
       editor.destroy();
@@ -226,6 +298,16 @@ export function CodeEditor(props: CodeEditorProps) {
       suppressChange.current = false;
     }
   }, [props.value]);
+
+  // After the text sync above, so the marks are placed on the new text.
+  const marks = (props.marks ?? []).join(",");
+  useEffect(() => {
+    const editor = view.current;
+    if (editor)
+      editor.dispatch({
+        effects: setMarks.of(marks === "" ? [] : marks.split(",").map(Number)),
+      });
+  }, [marks]);
 
   useEffect(() => {
     const editor = view.current;

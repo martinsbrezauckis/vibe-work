@@ -25,6 +25,7 @@ pub mod manager;
 pub mod pin;
 mod run;
 mod seen;
+mod startup;
 pub mod steps;
 pub mod support;
 pub mod update;

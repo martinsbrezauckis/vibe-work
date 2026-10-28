@@ -194,7 +194,12 @@ impl TerminalManager {
         blocking(&task_id, move || {
             // A lease may scan the OS tables, so it is asked here, off the async runtime.
             let port = ports.port_for(&request.session_id);
-            let env = terminal_env(&config.parent_env.vars(), port);
+            let mut env = terminal_env(&config.parent_env.vars(), port);
+            for (key, value) in &config.extra_env {
+                env.retain(|(k, _)| !k.eq_ignore_ascii_case(key));
+                env.push((key.clone(), value.clone()));
+            }
+            vw_supervisor::isolate_credentials(&mut env);
             let shell = config.shell.clone().unwrap_or_else(|| default_shell(&env));
             let launch = Launch {
                 id,

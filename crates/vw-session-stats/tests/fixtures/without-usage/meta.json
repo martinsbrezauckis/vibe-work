@@ -1,7 +1,0 @@
-{
-  "_fixture": "Session without usage/config; synthetic retained exchange for unknown-field tests.",
-  "session_id":"without-usage",
-  "start_time":"2026-10-14T09:00:00+00:00",
-  "end_time":null,
-  "total_messages":2
-}

@@ -5,8 +5,215 @@
  * scripts/public/check.sh fails when this file and the Rust types disagree.
  */
 
-import type { GitStatusView } from "./git";
-export type GitBrowserRequest = { "op": "read",
+import type { GitStatusView, CommitIdentity } from "./git";
+import type { ChangesView, InitPlan } from "./changes";
+export type ExplorerRequest = { "op": "folder",
+/**
+ * Root-relative path.
+ */
+path: string,
+/**
+ * Include ignored entries when requested.
+ */
+showIgnored: boolean,
+/**
+ * Continuation offset.
+ */
+offset: number, } | { "op": "status", } | { "op": "index", } | { "op": "search",
+/**
+ * Literal search words.
+ */
+query: string,
+/**
+ * Only inside this root-relative folder (Search in this folder), so the hit cap counts there.
+ */
+path?: string, } | { "op": "cancel", } | { "op": "history",
+/**
+ * Opaque continuation from the previous page.
+ */
+cursor: string | null,
+/**
+ * Literal search words.
+ */
+query: string,
+/**
+ * Only the commits that changed this root-relative file (History of this file).
+ */
+path?: string, } | { "op": "readAt",
+/**
+ * Commit object id.
+ */
+id: string,
+/**
+ * Root-relative path.
+ */
+path: string, } | { "op": "version",
+/**
+ * Commit object id.
+ */
+id: string, } | { "op": "revert",
+/**
+ * HEAD observed before review.
+ */
+head: string,
+/**
+ * Fingerprint the review showed.
+ */
+fingerprint: string,
+/**
+ * New files the confirmation said would be deleted.
+ */
+deletePaths: Array<string>, } | { "op": "review", } | { "op": "planHistory", } | { "op": "enableHistory",
+/**
+ * The user accepted the initialization plan.
+ */
+confirmed: boolean,
+/**
+ * Author details for the first commit.
+ */
+identity: CommitIdentity, };
+
+export type ExplorerResult = { "kind": "folder",
+/**
+ * Immediate children.
+ */
+entries: Array<ExplorerEntry>,
+/**
+ * Ignored names omitted by default.
+ */
+ignored: Array<string>,
+/**
+ * Offset for the next bounded directory page.
+ */
+next: number | null,
+/**
+ * Current repository status, absent for a plain folder.
+ */
+status: BrowserStatus | null, } | { "kind": "status",
+/**
+ * Current status, absent outside a repository.
+ */
+status: BrowserStatus | null,
+/**
+ * Explanation when repository metadata exists but Git cannot read it.
+ */
+note: string | null,
+/**
+ * Number of commits reachable from this branch.
+ */
+commits: number | null,
+/**
+ * Newest commit, when present.
+ */
+latest: ExplorerVersion | null, } | { "kind": "index",
+/**
+ * Root-relative file names.
+ */
+paths: Array<string>,
+/**
+ * More results exist beyond the reading limit.
+ */
+truncated: boolean, } | { "kind": "search",
+/**
+ * Source-line matches.
+ */
+hits: Array<ExplorerHit>,
+/**
+ * More results exist beyond the reading limit.
+ */
+truncated: boolean, } | { "kind": "history",
+/**
+ * Newest-first commits.
+ */
+versions: Array<ExplorerVersion>,
+/**
+ * Opaque continuation from the previous page.
+ */
+cursor: string | null, } | { "kind": "version",
+/**
+ * Paths changed in the commit.
+ */
+files: Array<string>,
+/**
+ * More results exist beyond the reading limit.
+ */
+truncated: boolean, } | { "kind": "text",
+/**
+ * The text (LF line endings), absent when it cannot be compared.
+ */
+text: string | null,
+/**
+ * Why not, in the user's words.
+ */
+note: string | null, } | { "kind": "review",
+/**
+ * Changes since HEAD.
+ */
+view: ChangesView,
+/**
+ * HEAD observed before review.
+ */
+head: string, } | { "kind": "initPlan",
+/**
+ * Files and consequence of enabling version history.
+ */
+plan: InitPlan, } | { "kind": "done", };
+
+export type ExplorerEntry = {
+/**
+ * Root-relative path.
+ */
+path: string,
+/**
+ * Directory or regular file.
+ */
+directory: boolean, };
+
+export type ExplorerVersion = {
+/**
+ * Object id used only for subsequent reads.
+ */
+id: string,
+/**
+ * Subject.
+ */
+subject: string,
+/**
+ * Author name, or you when local identity matches.
+ */
+who: string,
+/**
+ * Unix seconds.
+ */
+time: number,
+/**
+ * Whether the local upstream contains this commit; None if no upstream is known.
+ */
+published: boolean | null, };
+
+export type ExplorerHit = {
+/**
+ * Relative path.
+ */
+path: string,
+/**
+ * One-based source line.
+ */
+line: number,
+/**
+ * Bounded source text.
+ */
+text: string, };
+
+export type GitBrowserRequest = { "op": "explore",
+/**
+ * Exact picked, project or recorded session folder.
+ */
+folder: string,
+/**
+ * Bounded operation.
+ */
+request: ExplorerRequest, } | { "op": "read",
 /**
  * Saved project id, never an arbitrary filesystem path.
  */
@@ -20,7 +227,11 @@ projectId: string, } | { "op": "unwatch",
  */
 projectId: string, };
 
-export type GitBrowserResult = { "kind": "snapshot",
+export type GitBrowserResult = { "kind": "explorer",
+/**
+ * Operation result.
+ */
+result: ExplorerResult, } | { "kind": "snapshot",
 /**
  * View.
  */

@@ -6,12 +6,14 @@
  * Depends on: hooks, the connector views, model/view, the transcript's LinkDialog. Called by: Content.
  * Invariants: components render, the connectors controller decides; no vendor logos.
  */
+import { Button } from "../../components/Controls";
 import type { ReactElement } from "react";
 
 import { Selector } from "../../components/Selector";
 import { LinkDialog } from "../transcript/LinkDialog";
 import { KeyNotice, useKeyReadiness } from "../shell/KeyNotice";
 import { AddServerDialog } from "./AddServerDialog";
+import { RemoveServerDialog } from "./RemoveServerDialog";
 import { ConnectorDetail } from "./ConnectorDetail";
 import { ConnectorTile } from "./ConnectorTile";
 import { ToolsTabs } from "./ToolsTabs";
@@ -68,15 +70,15 @@ function Toolbar(): ReactElement {
         onChange={(value) => actions?.setFilter(value)}
         compact
       />
-      <button
+      <Button
         data-testid="connectors.connectors-page-refresh"
         type="button"
-        className="tb-btn"
+
         disabled={keyBlocked}
         onClick={() => void actions?.refresh()}
       >
         Refresh
-      </button>
+      </Button>
     </div>
   );
 }
@@ -103,6 +105,11 @@ export function ConnectorsPage(): ReactElement {
         <Toolbar />
         <KeyNotice message="Mistral's hosted connectors use your Mistral key to load and manage your connected accounts." />
         <CatalogNote />
+        {view?.privateConnectorsHidden === true && (
+          <p className="cnote" role="status">
+            This key can use shared connectors only.
+          </p>
+        )}
         <SignInBanner />
         {note === null ? null : (
           <p className="cnote" role="status">
@@ -133,6 +140,7 @@ export function ConnectorsPage(): ReactElement {
       </div>
       <ConnectorDetail />
       <AddServerDialog open={addOpen} />
+      <RemoveServerDialog />
       <LinkDialog />
     </div>
   );

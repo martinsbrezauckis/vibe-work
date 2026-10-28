@@ -10,13 +10,13 @@
 .set-cat-body .vault-actions-menu,
 .set-cat-body .vault-actions-editor {
   position: absolute;
-  z-index: 5;
+  z-index: var(--z-sticky);
   right: 0;
   top: 100%;
   width: min(290px, calc(100vw - 32px));
   padding: 8px;
   border: 1px solid var(--line-2);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: var(--raised);
   box-shadow: var(--shadow);
   white-space: normal;
@@ -84,7 +84,7 @@
   align-items: center;
   gap: 4px;
   border: 0;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   padding: 2px 4px;
   background: transparent;
   color: inherit;

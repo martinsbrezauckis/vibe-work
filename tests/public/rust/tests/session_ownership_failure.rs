@@ -6,48 +6,38 @@ mod common;
 
 use std::path::{Path, PathBuf};
 
-use common::core::{ScriptRig, script_core_with};
-use common::fake::scratch;
+use common::core::{ScriptRig, stored_core_with};
+use common::processes::scratch;
 use serde_json::{Value, json};
 use vw_core_api::{Command, CommandResult, CoreError, ErrorCode, Origin};
 
 /// A core whose session bookkeeping lives in `<dir>/sessions`, with one stored session (`keep`) and a log of
-/// where each request arrived. Returns the rig, the sessions folder and the channel log.
+/// where each request arrived. Returns the rig, the ownership folder and the channel log.
 async fn rig(name: &str) -> (ScriptRig, PathBuf, PathBuf) {
     let dir = scratch(&format!("{name}-ownership"));
-    let seed = dir.join("seed.json");
-    let items = json!([
-        {"id": "keep", "title": "Kept", "status": {"type": "idle"}, "createdAt": 3, "updatedAt": 8,
-         "cwd": "/work/calc", "history": []},
-    ]);
-    std::fs::write(&seed, serde_json::to_vec(&items).unwrap()).unwrap();
-    let seed = seed.to_string_lossy().into_owned();
-    let channels = dir.join("channels.log");
-    let channels_text = channels.to_string_lossy().into_owned();
+    let items = json!([{"id":"keep","title":"Kept","status":{"type":"idle"},"cwd":"/work/calc"}]);
     let sessions = dir.join("sessions");
     std::fs::create_dir_all(&sessions).unwrap();
     let sessions_for = sessions.clone();
-    let rig = script_core_with(
+    let rig = stored_core_with(
         name,
-        &[
-            "--seed",
-            seed.as_str(),
-            "--log-channels",
-            channels_text.as_str(),
-        ],
+        None,
+        items.as_array().unwrap(),
+        common::real_vibe::text_script(),
         move |c| c.sessions_dir = Some(sessions_for),
     )
     .await;
-    (rig, sessions, channels)
+    let channels = rig.dir.join("channels.log");
+    let leases = rig.vibe_home().join("vibe-work-leases");
+    (rig, leases, channels)
 }
 
 /// Replaces the session-ownership folder with a plain file, so no new ownership can be recorded.
-fn block_ownership(sessions: &Path) {
-    let leases = sessions.join("leases");
+fn block_ownership(leases: &Path) {
     if leases.is_dir() {
-        std::fs::remove_dir_all(&leases).unwrap();
+        std::fs::rename(leases, leases.with_file_name("held-leases")).unwrap();
     }
-    std::fs::write(&leases, b"plain file").unwrap();
+    std::fs::write(leases, b"plain file").unwrap();
 }
 
 async fn execute(rig: &ScriptRig, command: Value) -> Result<CommandResult, CoreError> {
@@ -94,6 +84,22 @@ fn deletes(channels: &Path) -> Vec<String> {
         .collect()
 }
 
+/// IDs returned by the actual server, before the core can reject its local ownership write.
+fn opened_ids(rig: &ScriptRig) -> Vec<String> {
+    std::fs::read_to_string(rig.dir.join("responses.jsonl"))
+        .unwrap()
+        .lines()
+        .filter_map(|line| {
+            let frame: Value = serde_json::from_str(line).unwrap();
+            let message = frame.get("message").unwrap_or(&frame);
+            message
+                .pointer("/result/state/session/id")
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+        })
+        .collect()
+}
+
 /// The core's own failure for an ownership folder it cannot use.
 fn assert_local_ownership_error(error: &CoreError) {
     assert_eq!(error.code, ErrorCode::Internal, "{error:?}");
@@ -109,8 +115,8 @@ fn assert_local_ownership_error(error: &CoreError) {
 
 #[tokio::test]
 async fn an_ordinary_start_is_undone_when_ownership_cannot_be_recorded() {
-    let (r, sessions, channels) = rig("start").await;
-    block_ownership(&sessions);
+    let (r, leases, channels) = rig("start").await;
+    block_ownership(&leases);
     let before = listed(&r).await;
 
     let error = execute(&r, json!({"type": "startSession"}))
@@ -121,7 +127,7 @@ async fn an_ordinary_start_is_undone_when_ownership_cannot_be_recorded() {
     let deleted = deletes(&channels);
     assert_eq!(deleted.len(), 1, "{:?}", r.received());
     assert!(
-        deleted[0].starts_with("fake-session-"),
+        opened_ids(&r).contains(&deleted[0]) && !before.contains(&deleted[0]),
         "the delete names the new session: {deleted:?}"
     );
     assert_eq!(
@@ -133,15 +139,22 @@ async fn an_ordinary_start_is_undone_when_ownership_cannot_be_recorded() {
 }
 
 #[tokio::test]
+// Windows cannot rename the ownership folder while the source's lock file inside is open, and the core resets the
+// folder's permissions when it opens a lock, so the test cannot block new ownership there; the undo path is the
+// same code on every system.
+#[cfg_attr(
+    windows,
+    ignore = "the ownership folder cannot be blocked while a lock inside is open"
+)]
 async fn an_attaching_fork_is_undone_when_ownership_cannot_be_recorded() {
-    let (r, sessions, channels) = rig("fork").await;
+    let (r, leases, channels) = rig("fork").await;
     let source = session_id(
         &execute(&r, json!({"type": "startSession"}))
             .await
             .expect("the source starts while ownership can be recorded"),
     );
     // The source keeps the ownership it already holds; the fork cannot get its own.
-    block_ownership(&sessions);
+    block_ownership(&leases);
     let before = listed(&r).await;
     assert!(before.contains(&source), "{before:?}");
 
@@ -156,7 +169,9 @@ async fn an_attaching_fork_is_undone_when_ownership_cannot_be_recorded() {
     let deleted = deletes(&channels);
     assert_eq!(deleted.len(), 1, "{:?}", r.received());
     assert!(
-        deleted[0].starts_with("fake-fork-"),
+        opened_ids(&r).contains(&deleted[0])
+            && !before.contains(&deleted[0])
+            && deleted[0] != source,
         "the delete names the new fork, never its source: {deleted:?}"
     );
     assert_eq!(
@@ -169,14 +184,17 @@ async fn an_attaching_fork_is_undone_when_ownership_cannot_be_recorded() {
 
 #[tokio::test]
 async fn an_existing_session_is_kept_when_its_resume_cannot_record_ownership() {
-    let (r, sessions, channels) = rig("resume").await;
-    block_ownership(&sessions);
+    let (r, leases, channels) = rig("resume").await;
+    block_ownership(&leases);
     let before = listed(&r).await;
-    assert!(before.iter().any(|id| id == "keep"), "{before:?}");
+    assert!(before.iter().any(|id| id == &r.id("keep")), "{before:?}");
 
-    let error = execute(&r, json!({"type": "resumeSession", "sessionId": "keep"}))
-        .await
-        .expect_err("a session this app cannot own must not reopen");
+    let error = execute(
+        &r,
+        json!({"type": "resumeSession", "sessionId": r.id("keep")}),
+    )
+    .await
+    .expect_err("a session this app cannot own must not reopen");
     assert_local_ownership_error(&error);
 
     assert!(

@@ -4,7 +4,7 @@
 .lib-costs {
   margin: 8px 0 0;
   padding-left: 18px;
-  font-size: 12.5px;
+  font-size: var(--text-12-5);
   line-height: 1.5;
 }
 .lib-ask {
@@ -12,12 +12,12 @@
   padding: 14px 16px;
   background: var(--panel);
   border: 1px solid var(--line-2);
-  border-radius: 10px;
+  border-radius: var(--radius-lg);
 }
 .lib-ask h3,
 .lib-detail-head h3 {
   margin: 0 0 8px;
-  font-size: 14px;
+  font-size: var(--text-14);
 }
 .lib-ask-row,
 .lib-new,
@@ -34,16 +34,16 @@
   background: var(--bg);
   color: var(--text);
   border: 1px solid var(--line-2);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   padding: 7px 10px;
-  font-size: 13px;
+  font-size: var(--text-13);
 }
 .lib-answer {
   margin-top: 12px;
 }
 .lib-answer-text {
   white-space: pre-wrap;
-  font-size: 13.5px;
+  font-size: var(--text-13-5);
   line-height: 1.55;
   margin: 0 0 10px;
 }
@@ -60,7 +60,7 @@
   padding: 0;
   color: var(--blue);
   font: inherit;
-  font-size: 13px;
+  font-size: var(--text-13);
   cursor: pointer;
   text-align: left;
 }
@@ -97,7 +97,7 @@
   background: none;
   color: var(--text);
   border: 1px solid transparent;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   padding: 8px 10px;
   cursor: pointer;
 }
@@ -110,24 +110,24 @@
 }
 .lib-item-name,
 .lib-doc-name {
-  font-size: 13.5px;
+  font-size: var(--text-13-5);
   overflow-wrap: anywhere;
 }
 .lib-scope {
   display: inline-flex;
   gap: 6px;
   align-items: center;
-  font-size: 12.5px;
+  font-size: var(--text-12-5);
   color: var(--text-2);
 }
 .lib-scope select {
   background-color: var(--bg);
   color: var(--text);
   border: 1px solid var(--line-2);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   padding: 5px 24px 5px 8px;
   font: inherit;
-  font-size: 12.5px;
+  font-size: var(--text-12-5);
 }
 /* "Make library" is a real button next to the field (it read as plain text). */
 .lib-new .tb-btn {
@@ -185,10 +185,10 @@
   overflow: auto;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  font: 12.5px/1.55 var(--mono);
+  font: var(--text-12-5)/var(--leading-copy) var(--font-mono);
   background: var(--bg);
   border: 1px solid var(--line-2);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   padding: 10px 12px;
 }
 @media (max-width: 900px) {

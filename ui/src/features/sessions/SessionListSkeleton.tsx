@@ -1,8 +1,17 @@
 /** Tree-shaped loading rows and the delayed note; uses shared motion styles and the core's readiness. Called by SessionList. */
 import { useEffect, useState } from "react";
+import { useVibeUi } from "../setup/VibeInstallStep";
+import { installStatus } from "../../state/vibeInstall";
 
 /** Mounted only while the list is loading, so each load gets its own six-second delay. */
 export function SessionListSkeleton({ ready }: { ready: boolean }) {
+  const setupText = useVibeUi(
+    (s) =>
+      installStatus(s.view) ??
+      (s.availability === "ready" && s.view?.phase.state !== "installed"
+        ? "Vibe is not installed yet"
+        : null),
+  );
   const [slow, setSlow] = useState(false);
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -36,7 +45,8 @@ export function SessionListSkeleton({ ready }: { ready: boolean }) {
       </div>
       {slow && (
         <p className="col-note">
-          {ready ? "Still loading sessions from Vibe." : "Still loading. Vibe is starting."}
+          {setupText ??
+            (ready ? "Still loading sessions from Vibe." : "Still loading. Vibe is starting.")}
         </p>
       )}
     </>

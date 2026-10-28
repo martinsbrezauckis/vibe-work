@@ -1,6 +1,5 @@
-//! A core over the multiplexed scripted fake (`fake_vibe_server --multiplex --script`) with seeded
-//! stored sessions `old-1`..`old-4` and the fake's per-request channel log (the fixture). Used by
-//! `vw_core_channels.rs` and `vw_core_restore.rs`.
+//! Real pinned Vibe with durable fixture sessions and passive per-channel request logs.
+//! Used by channel, restart and setting tests; model tool requests exercise real approval callbacks.
 
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
@@ -11,8 +10,8 @@ use vw_core_api::{
     SessionChange,
 };
 
-use super::core::{ScriptRig, script_core_with};
-use super::fake::scratch;
+use super::core::{ScriptRig, stored_core_with_server};
+use super::processes::scratch;
 
 pub struct Rig {
     pub rig: ScriptRig,
@@ -20,23 +19,25 @@ pub struct Rig {
 }
 
 /// The seeded stored sessions `old-1`..`old-4` (no recorded profile).
+/// Four stored chats in Ask. Since Vibe 3.0.1 every turn records the session's agent, and a reopened chat runs in
+/// that record; the seeds pin Ask so their turns keep asking (the seed default would be `accept-edits`).
 pub fn default_seed() -> Vec<Value> {
     (1..=4)
         .map(|n| {
             json!({"id": format!("old-{n}"), "title": format!("Old {n}"), "status": {"type": "idle"},
-                   "createdAt": n, "updatedAt": 100 - n, "cwd": "/work/alpha"})
+                   "createdAt": n, "updatedAt": 100 - n, "cwd": "/work/alpha", "agent": {"name": "ask"}})
         })
         .collect()
 }
 
-/// A core over the multiplexed fake with seeded stored sessions `old-1`..`old-4` and status events.
+/// A core over real Vibe with seeded stored sessions `old-1`..`old-4` and status events.
 pub async fn rig(name: &str, extra: &[&str], tweak: impl FnOnce(&mut CoreConfig)) -> Rig {
     let side = scratch(&format!("{name}-side"));
     rig_in(name, &side, &default_seed(), extra, tweak).await
 }
 
-/// [`rig`] with the side files (seed, channel log, `--persist` file) in `side`, which is kept as is
-/// (two cores in a row can share one persisted fake world), and the given seed.
+/// [`rig`] with the real Vibe home in `side`, which is kept as is
+/// (two cores in a row can share one stored real sessions), and the given seed.
 pub async fn rig_in(
     name: &str,
     side: &std::path::Path,
@@ -44,29 +45,89 @@ pub async fn rig_in(
     extra: &[&str],
     tweak: impl FnOnce(&mut CoreConfig),
 ) -> Rig {
-    let seed = side.join("seed.json");
-    std::fs::write(&seed, serde_json::to_vec(items).unwrap()).unwrap();
-    let channels = side.join("channels.log");
-    let (seed, log) = (
-        seed.to_string_lossy().into_owned(),
-        channels.to_string_lossy().into_owned(),
+    rig_in_fault(name, side, items, extra, tweak, Value::Null).await
+}
+
+pub async fn rig_in_fault(
+    name: &str,
+    side: &std::path::Path,
+    items: &[Value],
+    extra: &[&str],
+    tweak: impl FnOnce(&mut CoreConfig),
+    mut fault: Value,
+) -> Rig {
+    assert!(
+        extra.is_empty(),
+        "{name}: obsolete server options: {extra:?}"
     );
-    let mut args = vec![
-        "--status-events",
-        "--seed",
-        seed.as_str(),
-        "--log-channels",
-        log.as_str(),
-    ];
-    args.extend_from_slice(extra);
-    Rig {
-        rig: script_core_with(name, &args, tweak).await,
-        channels,
-    }
+    let rig = stored_core_with_server(
+        name,
+        Some(&side.join("vibe-home")),
+        items,
+        {
+            let mut script = super::shared_real_vibe::approval_script();
+            script.markers = true;
+            script
+        },
+        |config| {
+            tweak(config);
+            // Fixture aliases in local app input become the IDs captured from real Vibe, before Core loads them.
+            if let Some(dir) = &config.sessions_dir {
+                let file = dir.join("access.json");
+                if file.is_file() {
+                    let captures: Value = serde_json::from_slice(
+                        &std::fs::read(side.join("vibe-home/fixture-session-ids.json")).unwrap(),
+                    )
+                    .unwrap();
+                    let input: serde_json::Map<String, Value> =
+                        serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
+                    let actual: serde_json::Map<String, Value> = input
+                        .into_iter()
+                        .map(|(alias, value)| {
+                            (
+                                captures["ids"][&alias]
+                                    .as_str()
+                                    .unwrap_or(&alias)
+                                    .to_owned(),
+                                value,
+                            )
+                        })
+                        .collect();
+                    std::fs::write(file, serde_json::to_vec(&actual).unwrap()).unwrap();
+                }
+            }
+        },
+        move |server| {
+            if !fault.is_null() {
+                if let Some(rules) = fault["onRequest"].as_array_mut() {
+                    let captures: Value = serde_json::from_slice(
+                        &std::fs::read(server.vibe_home.join("fixture-session-ids.json")).unwrap(),
+                    )
+                    .unwrap();
+                    for rule in rules {
+                        if let Some(alias) = rule["sessionAlias"].as_str() {
+                            let id = captures["ids"][alias].clone();
+                            rule["sessionId"] = id;
+                        }
+                    }
+                }
+
+                let dir = server.cwd.clone();
+                super::process_fault::install(server, &dir, fault);
+            }
+        },
+    )
+    .await;
+    let channels = rig.dir.join("channels.log");
+    Rig { rig, channels }
 }
 
 impl Rig {
-    /// `(channel, method, session)` of every request the fake received, `initialize` included.
+    pub fn id(&self, alias: &str) -> String {
+        self.rig.id(alias)
+    }
+
+    /// `(channel, method, session)` of every request real Vibe received, `initialize` included.
     pub fn log(&self) -> Vec<(u64, String, String)> {
         std::fs::read_to_string(&self.channels)
             .unwrap_or_default()
@@ -109,7 +170,9 @@ impl Rig {
 
     pub async fn start(&self) -> String {
         match self
-            .run(Command::StartSession { agent_config: None })
+            .run(Command::StartSession {
+                agent_config: Some(json!({"agent":"ask"})),
+            })
             .await
             .unwrap()
         {
@@ -119,9 +182,10 @@ impl Rig {
     }
 
     pub async fn begin_turn(&self, sid: &str) {
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         self.run(Command::StartTurn {
             session_id: sid.to_owned(),
-            message: vec![json!({"type": "text", "text": "go"})],
+            message: vec![json!({"type": "text", "text": format!("go {sid}-{}", NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed))})],
             client_user_message_id: None,
         })
         .await
@@ -187,11 +251,24 @@ pub async fn opened(sub: &mut CoreSubscription, sid: &str) -> String {
 }
 
 pub fn went_idle(e: &CoreEvent) -> bool {
-    matches!(e, CoreEvent::Change { change: SessionChange::SessionPatched { patch, .. } }
-        if patch.iter().any(|op| op["path"] == "/status" && op["value"]["type"] == "idle"))
+    match e {
+        CoreEvent::Change {
+            change: SessionChange::SessionPatched { patch, .. },
+        } => patch.iter().any(|op| {
+            (op["path"] == "/status" && op["value"]["type"] == "idle")
+                || (op["path"] == "/status/type" && op["value"] == "idle")
+        }),
+        CoreEvent::Snapshot { snapshot } => {
+            snapshot.state["session"]["status"]["type"] == "idle"
+                && snapshot.state["turns"]
+                    .as_array()
+                    .is_some_and(|turns| turns.last().is_some_and(|t| t["status"] == "completed"))
+        }
+        _ => false,
+    }
 }
 
-/// Polls `cond` every 20 ms for up to six times `limit` (the fixture: see `fake::eventually`).
+/// Polls `cond` every 20 ms for up to six times `limit` (the fixture: see `processes::eventually`).
 pub async fn eventually(limit: Duration, cond: impl Fn() -> bool) -> bool {
     let limit = limit * 6;
     let end = Instant::now() + limit;
@@ -221,8 +298,25 @@ pub async fn active_agent(r: &Rig, sid: &str) -> String {
 /// Starts a turn on `sid` and reports whether it asked for an approval (`true`, then answered) or
 /// finished without asking (`false`).
 pub async fn asks(r: &Rig, sid: &str) -> bool {
+    let previous = match r
+        .run(Command::RefreshSession {
+            session_id: sid.to_owned(),
+        })
+        .await
+    {
+        Ok(CommandResult::Session { snapshot, .. }) => {
+            snapshot.state["turns"].as_array().map_or(0, Vec::len)
+        }
+        _ => 0,
+    };
     let mut sub = r.rig.core.subscribe(Some(sid.to_owned()));
-    r.begin_turn(sid).await;
+    r.run(Command::StartTurn {
+        session_id: sid.to_owned(),
+        message: vec![json!({"type":"text","text":"vw-bash: python -c 'print(12345)'"})],
+        client_user_message_id: None,
+    })
+    .await
+    .unwrap();
     let end = Instant::now() + Duration::from_secs(60);
     while Instant::now() < end {
         match tokio::time::timeout(Duration::from_millis(200), sub.next()).await {
@@ -235,7 +329,22 @@ pub async fn asks(r: &Rig, sid: &str) -> bool {
                 until(&mut sub, went_idle).await;
                 return true;
             }
-            Ok(Some(event)) if went_idle(&event) => return false,
+            Ok(Some(event)) if went_idle(&event) => {
+                if let Ok(CommandResult::Session { snapshot, .. }) = r
+                    .run(Command::ReadSession {
+                        session_id: sid.to_owned(),
+                    })
+                    .await
+                    && snapshot.state["turns"].as_array().is_some_and(|turns| {
+                        turns.len() > previous
+                            && turns
+                                .last()
+                                .is_some_and(|turn| turn["status"] == "completed")
+                    })
+                {
+                    return false;
+                }
+            }
             _ => {}
         }
     }

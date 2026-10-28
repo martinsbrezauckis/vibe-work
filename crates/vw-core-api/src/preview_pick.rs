@@ -8,7 +8,8 @@
 //! Invariants:
 //! - What comes back is untrusted page data (length-capped by `vw_pages::parse_pick`); the UI turns it into a
 //!   context chip, never a command.
-//! - A pick waits at most [`PICK_LIMIT`] and is cancelled (overlay removed) when it ends without an answer.
+//! - A pick waits at most [`PICK_LIMIT`] and is cancelled (overlay removed) when it ends without an answer. A web
+//!   page's pick (`tabId`) reads the selection only: a web page never gets the click overlay.
 //! - The accessor name is derived from the session id (a collision guard, not a secret), so `cancelPick` needs no
 //!   stored state.
 //! - A Debug API caller completes a pick without a person: every pick (this preview pick, the Browser panel's
@@ -82,7 +83,10 @@ pub(crate) async fn pick_at(
 ) -> Result<vw_pages::Picked, CoreError> {
     let at = preview_at(Some(target))?;
     let reply = service
-        .evaluate(session_id, vw_pages::target_script(&at))
+        .evaluate(
+            session_id,
+            vw_pages::target_script_with_quote(&at, target.quote.as_deref()),
+        )
         .await
         .map_err(|e| crate::previews::core_error(&e))?;
     vw_pages::parse_target(&reply).map_err(|miss| {
@@ -92,6 +96,83 @@ pub(crate) async fn pick_at(
             TargetMiss::Unreadable => "the page did not answer the pick",
         })
     })
+}
+
+/// A `pick` request: a web page's selection (`tab_id`), the element `target` names, or a person's pick.
+pub(crate) async fn run(
+    service: &PreviewService,
+    session_id: &str,
+    target: Option<PickTarget>,
+    tab_id: Option<String>,
+) -> Result<vw_pages::Picked, CoreError> {
+    match (target, tab_id) {
+        (target, Some(tab)) => pick_in_tab(service, session_id, &tab, target.as_ref()).await,
+        (Some(target), None) => pick_at(service, session_id, &target).await,
+        (None, None) => pick(service, session_id).await,
+    }
+}
+
+/// A web page `tab` of `session_id`'s Browser tab, after its own menu's Point Vibe at this: the page's selection
+/// now (never an overlay or a wait), or with `target` the element it names (the Debug API's way).
+pub(crate) async fn pick_in_tab(
+    service: &PreviewService,
+    session_id: &str,
+    tab: &str,
+    target: Option<&PickTarget>,
+) -> Result<vw_pages::Picked, CoreError> {
+    if service.owner_session_id(tab).as_deref() != Some(session_id)
+        || !service.web_tabs(session_id).iter().any(|key| key == tab)
+    {
+        return Err(invalid(
+            "tabId is not a web page of this session's Browser tab",
+        ));
+    }
+    let id = service
+        .page_mount(tab)
+        .ok_or_else(|| invalid("the web page is not open"))?;
+    let script = match target {
+        Some(target) => {
+            vw_pages::target_script_with_quote(&preview_at(Some(target))?, target.quote.as_deref())
+        }
+        None => vw_pages::selection_script(),
+    };
+    let reply = service
+        .evaluate_on_mount(&id, script)
+        .await
+        .map_err(|e| crate::previews::core_error(&e))?;
+    match vw_pages::parse_pick(&reply) {
+        PickAnswer::Picked(picked) => Ok(picked),
+        _ if target.is_some() => Err(invalid("no element matches the target")),
+        _ => Err(invalid("Select text on the page first.")),
+    }
+}
+
+/// The Copy action's named read, limited to a web tab owned by this session.
+pub(crate) async fn copy_text(
+    service: &PreviewService,
+    session_id: &str,
+    tab: &str,
+    target: &PickTarget,
+) -> Result<String, CoreError> {
+    let at = preview_at(Some(target))?;
+    if service.owner_session_id(tab).as_deref() != Some(session_id)
+        || !service.web_tabs(session_id).iter().any(|key| key == tab)
+    {
+        return Err(invalid(
+            "tabId is not a web page of this session's Browser tab",
+        ));
+    }
+    let id = service
+        .page_mount(tab)
+        .ok_or_else(|| invalid("the web page is not open"))?;
+    let reply = service
+        .evaluate_on_mount(
+            &id,
+            vw_pages::copy_target_script(&at, target.quote.as_deref()),
+        )
+        .await
+        .map_err(|e| crate::previews::core_error(&e))?;
+    vw_pages::parse_named_copy(&reply).ok_or_else(|| invalid("no text matches the target"))
 }
 
 /// Cancels a pick in `session_id`'s preview (removes the overlay); errors are ignored.
@@ -117,6 +198,13 @@ fn point(target: &PickTarget) -> Result<Option<(f64, f64)>, CoreError> {
 }
 
 fn selector(target: &PickTarget) -> Result<Option<&str>, CoreError> {
+    if target
+        .quote
+        .as_ref()
+        .is_some_and(|q| q.is_empty() || q.chars().count() > 100_000)
+    {
+        return Err(invalid("target.quote must contain 1 to 100000 characters"));
+    }
     match target.selector.as_deref() {
         None => Ok(None),
         Some(s) if !s.trim().is_empty() && s.len() <= SELECTOR_MAX => Ok(Some(s)),
@@ -159,6 +247,9 @@ pub(crate) fn annotate_target(
         "an annotation from the Debug API names its target: target.ref, target.selector, or target.x and target.y"
     };
     let target = target.ok_or_else(|| invalid(names))?;
+    if target.quote.is_some() {
+        return Err(invalid("target.quote is for preview picks and Copy"));
+    }
     if boxed {
         let rect = target.rect.ok_or_else(|| invalid(names))?;
         let sane = [rect.x, rect.y, rect.width, rect.height]
@@ -241,6 +332,9 @@ fn check_named(command: &Command) -> Result<(), CoreError> {
         Command::Preview {
             request: PreviewRequest::Pick { target, .. },
         } => preview_at(target.as_ref()).map(drop),
+        Command::Preview {
+            request: PreviewRequest::CopyText { target, .. },
+        } => preview_at(Some(target)).map(drop),
         Command::Browser {
             request: BrowserRequest::Annotate { mode, target, .. },
         } => annotate_target(mode.as_deref(), target.as_ref()).map(drop),

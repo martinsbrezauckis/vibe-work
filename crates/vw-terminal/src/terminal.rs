@@ -1,5 +1,5 @@
 //! One terminal: its shell process (one per generation; a restart starts a new one with the same id
-//! and scrollback), the three threads that serve it, and its stop/restart logic.
+//! and scrollback), the threads that serve it, and its stop/restart logic.
 //!
 //! Depends on: `pty` (spawn), `contain` (tree kill), `flow` (output), `config`, `seams`, `types`.
 //! Called by: `manager`.
@@ -10,6 +10,8 @@
 //! - waiter: waits for the shell **concurrently** with the reader (ShellX `6ec6e648`: waiting for
 //!   reader EOF first left zombies and blocked `ConPTY` readers), then kills what is left of its tree,
 //!   closes the PTY (`ConPTY` releases the reader only then), lets the reader drain, and reports.
+//!
+//! One output flush worker per terminal (in `flow`) also survives shell restarts.
 //!
 //! Invariants:
 //! - The waiter holds only weak references, so dropping the terminal drops the process, and the
@@ -40,7 +42,7 @@ use crate::seams::{OwnProcess, TerminalEvents};
 use crate::shell::ShellCommand;
 use crate::types::{ExitInfo, TerminalEvent, TerminalId, TerminalInfo, TerminalState};
 
-/// Bytes per PTY read (and so the largest output chunk a viewer receives).
+/// Bytes per PTY read; the output side batches smaller reads for its attached viewer.
 const READ_CHUNK: usize = 64 * 1024;
 /// How long the waiter lets the reader drain after the shell exited.
 const READER_DRAIN: Duration = Duration::from_secs(2);
@@ -192,11 +194,14 @@ impl Terminal {
             started_at_ms: SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX)),
-            output: Arc::new(Output::new(
-                config.scrollback_bytes,
-                config.high_water,
-                config.ack_timeout,
-            )),
+            output: Arc::new(
+                Output::new(
+                    config.scrollback_bytes,
+                    config.high_water,
+                    config.ack_timeout,
+                )
+                .map_err(|error| format!("cannot start the terminal output worker: {error}"))?,
+            ),
             process: Mutex::new(None),
             size: Mutex::new((launch.cols, launch.rows)),
             generation: AtomicU32::new(0),

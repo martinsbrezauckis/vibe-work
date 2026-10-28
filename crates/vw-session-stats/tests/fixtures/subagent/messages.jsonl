@@ -1,4 +1,0 @@
-{"role":"user","content":"Explore","injected":false,"message_id":"parent-user"}
-{"role":"assistant","content":"","injected":false,"message_id":"parent-call","tool_calls":[{"id":"task-1","index":0,"type":"function","function":{"name":"task","arguments":"{\"agent\":\"explore\",\"task\":\"Explore\"}"}}]}
-{"role":"tool","content":"response: Done\nturns_used: 2\ncompleted: True","injected":false,"name":"task","tool_call_id":"task-1","tool_result":{"duration":3.0,"cancelled":false,"output":{"response":"Done","turns_used":2,"completed":true}}}
-{"role":"assistant","content":"Done","injected":false,"message_id":"parent-done"}

@@ -2,7 +2,7 @@
 //! reach it; the allowlist (`vw_supervisor::INHERITED`) stays for `vibe-app-server`, MCP servers and
 //! helpers, which run the agent's commands.
 //!
-//! Depends on: vw-supervisor (`is_hijack_var`, `API_KEY_VAR`). Called by: `manager` (each open and
+//! Depends on: vw-supervisor (`is_hijack_var`, `API_KEY_VAR`), vw-platform (`child_env`). Called by: `manager` (each open and
 //! restart).
 //! Removed from the parent environment:
 //! - loader and runtime hijack variables (`is_hijack_var`: `LD_*`, `DYLD_*`, `BASH_ENV`, `ENV`,
@@ -13,6 +13,9 @@
 //!   and key handles), so nothing of the app's internals leaks into a user's shell;
 //! - an inherited `PORT` (the app's own `PORT` would point at the wrong thing); `PORT` is set only
 //!   from the session's lease.
+//!
+//! - what Vibe Work set for its own run only (`vw_platform::child_env`: the accessibility switch it may turn off
+//!   on Linux); a `NO_AT_BRIDGE` the user set themselves stays.
 //!
 //! Other ordinary variables pass through unchanged (`DISPLAY`, `JAVA_HOME`, `EDITOR`,...),
 //! and the user's rc files still run (login shell on Unix, the PowerShell profile on Windows).
@@ -39,11 +42,11 @@ pub fn terminal_env(
     parent: &[(OsString, OsString)],
     port: Option<u16>,
 ) -> Vec<(OsString, OsString)> {
-    let mut env: Vec<(OsString, OsString)> = parent
-        .iter()
-        .filter(|(name, _)| passes(name))
-        .cloned()
-        .collect();
+    let mut env: Vec<(OsString, OsString)> =
+        vw_platform::child_env::without_own_run_settings(parent.to_vec())
+            .into_iter()
+            .filter(|(name, _)| passes(name))
+            .collect();
     let mut set = |name: &str, value: OsString| {
         env.retain(|(existing, _)| !same_name(existing, OsStr::new(name)));
         env.push((OsString::from(name), value));

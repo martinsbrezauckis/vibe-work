@@ -49,6 +49,14 @@ pub struct OcrOutput {
 /// Why OCR failed. Texts are shown to the user as they are.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum OcrError {
+    /// A TIFF frame could not be prepared or read; never return a partial document.
+    #[error("TIFF page {page}: {reason}")]
+    ImagePage {
+        /// One-based page number.
+        page: usize,
+        /// Bounded decoder or OCR failure.
+        reason: String,
+    },
     /// HTTP 401.
     #[error("Mistral did not accept the API key (401). Check it in Settings.")]
     Unauthorized,
@@ -155,6 +163,50 @@ fn network(error: &reqwest::Error) -> OcrError {
 /// # Errors
 /// [`OcrError`] (see its variants).
 pub async fn ocr(
+    client: &reqwest::Client,
+    api_base: &str,
+    key: &str,
+    input: &OcrInput<'_>,
+    timeout: Duration,
+) -> Result<OcrOutput, OcrError> {
+    if input.mime != "image/tiff" {
+        return ocr_one(client, api_base, key, input, timeout).await;
+    }
+    let deadline = std::time::Instant::now() + timeout;
+    let bytes = input.bytes.to_vec();
+    let frames = tokio::task::spawn_blocking(move || crate::ocr_tiff::frames(&bytes, deadline))
+        .await
+        .map_err(|_| crate::ocr_tiff::page_error(1, "the TIFF decoder stopped"))??;
+    let mut output = OcrOutput {
+        model: String::new(),
+        pages: Vec::new(),
+        pages_processed: Some(0),
+    };
+    for (index, bytes) in frames.iter().enumerate() {
+        let remaining = deadline
+            .checked_duration_since(std::time::Instant::now())
+            .ok_or_else(|| {
+                crate::ocr_tiff::page_error(index + 1, "reading the document timed out")
+            })?;
+        let frame = OcrInput {
+            bytes,
+            mime: "image/png",
+            image: true,
+        };
+        let read = ocr_one(client, api_base, key, &frame, remaining)
+            .await
+            .map_err(|e| crate::ocr_tiff::page_error(index + 1, e))?;
+        output.model = read.model;
+        output.pages.extend(read.pages);
+        output.pages_processed = output
+            .pages_processed
+            .zip(read.pages_processed)
+            .and_then(|(total, count)| total.checked_add(count));
+    }
+    Ok(output)
+}
+
+async fn ocr_one(
     client: &reqwest::Client,
     api_base: &str,
     key: &str,

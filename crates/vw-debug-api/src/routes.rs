@@ -41,6 +41,7 @@ pub(crate) fn router() -> Router<ApiState> {
     #[cfg(feature = "vault-e2e")]
     let routes = routes.merge(crate::vault_e2e::router());
     routes
+        .merge(crate::ask_routes::router())
         .route("/health", get(health))
         .route("/sessions", get(list_sessions))
         .route("/sessions/{id}", get(read_session))
@@ -104,6 +105,7 @@ async fn health(State(state): State<ApiState>) -> Response {
         "uptimeMs": status.uptime_ms,
         "enabledReason": state.reason.as_str(),
         "debugApi": status.debug_api,
+        "keepAwake": state.core.keep_awake_view(),
         "rateLimits": status.rate_limits,
     }))
 }

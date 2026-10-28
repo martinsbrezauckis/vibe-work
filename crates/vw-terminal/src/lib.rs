@@ -38,6 +38,8 @@ mod contain;
 mod env;
 mod error;
 mod flow;
+#[cfg(test)]
+mod flow_tests;
 mod manager;
 mod pty;
 mod ring;
@@ -46,6 +48,8 @@ mod shell;
 mod terminal;
 mod text;
 mod types;
+mod viewer;
+mod viewer_stats;
 
 pub use config::{ParentEnv, TerminalConfig};
 pub use env::terminal_env;

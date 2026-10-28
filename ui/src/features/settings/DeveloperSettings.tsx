@@ -5,7 +5,7 @@
  * click; in browser dev mode the switch is disabled with the reason; the token never crosses the bridge, only the
  * path of the file that holds it.
  */
-import { Button } from "../../components/Controls";
+import { Button, Switch } from "../../components/Controls";
 import { PathLine } from "../../components/PathLine";
 import { type ReactElement, useEffect, useState } from "react";
 
@@ -76,11 +76,8 @@ export function DeveloperSettings(): ReactElement {
             {!canSwitch && " The switch works in the app window."}
           </span>
         </span>
-        <button
+        <Switch
           data-testid="settings.developer-settings-switch"
-          type="button"
-          className="switch"
-          role="switch"
           aria-label="Debug API"
           aria-checked={debugOn}
           disabled={!canSwitch}
@@ -102,7 +99,7 @@ export function DeveloperSettings(): ReactElement {
           <Button
             data-testid="settings.developer-settings-tb-btn"
             type="button"
-            small
+            shape="outlined"
             onClick={regenerate}
           >
             Regenerate token

@@ -21,9 +21,13 @@
 //! - Full access (`auto-approve`) the user confirmed for a session is put back on reopen without a new
 //!   dialog (`restore.rs`, trusted token for that exact switch). A custom profile name is never selected
 //!   by the core: it selects [`FALLBACK_PROFILE`] (`ask`, the stricter mode) instead and the user is told.
+//! - Whether the default profile for new sessions runs every tool without asking is kept in memory only, as
+//!   last written through this core (`dispatch`: the full-access alert for raising the default); unknown
+//!   after a restart, which counts as not Full access.
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError, Weak};
 
 use serde_json::Value;
@@ -56,6 +60,30 @@ pub(crate) struct Access {
     agents: Mutex<HashMap<String, String>>,
     restores: Mutex<HashMap<String, Weak<tokio::sync::Mutex<()>>>>,
     file: Option<PathBuf>,
+    /// Whether the default profile for new sessions, as this core last wrote it, runs every tool without
+    /// asking (memory only: unknown after a restart, which counts as not Full access).
+    default_full: AtomicBool,
+}
+
+/// The profile a `config/write` sets as the default for new sessions (`/default_agent`), if it touches the
+/// default at all: the written name, or an empty name when it removes the setting.
+pub(crate) fn default_written(method: &str, params: &Value) -> Option<String> {
+    if method != "config/write" {
+        return None;
+    }
+    let ops = params.get("ops").and_then(Value::as_array)?;
+    let op = ops
+        .iter()
+        .rev()
+        .find(|op| op.get("path").and_then(Value::as_str) == Some("/default_agent"))?;
+    let set = op.get("op").and_then(Value::as_str) == Some("set");
+    Some(
+        op.get("value")
+            .and_then(Value::as_str)
+            .filter(|_| set)
+            .unwrap_or_default()
+            .to_owned(),
+    )
 }
 
 impl Access {
@@ -90,6 +118,7 @@ impl Access {
             agents: Mutex::new(agents),
             restores: Mutex::new(HashMap::new()),
             file,
+            default_full: AtomicBool::new(false),
         }
     }
 
@@ -164,6 +193,17 @@ impl Access {
         }
     }
 
+    /// Whether the default profile for new sessions, as last written through this core, runs every tool
+    /// without asking. `false` when unknown.
+    pub(crate) fn default_is_full(&self) -> bool {
+        self.default_full.load(Ordering::SeqCst)
+    }
+
+    /// Records an accepted write of the default profile: whether it runs every tool without asking.
+    pub(crate) fn set_default_full(&self, full: bool) {
+        self.default_full.store(full, Ordering::SeqCst);
+    }
+
     /// The profile `session_id` ran with, if known.
     pub(crate) fn remembered(&self, session_id: &str) -> Option<String> {
         self.agents
@@ -176,8 +216,25 @@ impl Access {
 
 #[cfg(test)]
 mod tests {
-    use super::Access;
+    use super::{Access, default_written};
     use serde_json::json;
+
+    #[test]
+    fn a_default_write_names_its_profile() {
+        let set = |value: &str| json!({"sessionId": "s", "ops": [{"op": "set", "path": "/default_agent", "value": value}]});
+        assert_eq!(
+            default_written("config/write", &set("auto-approve")).as_deref(),
+            Some("auto-approve")
+        );
+        let removed = json!({"sessionId": "s", "ops": [{"op": "unset", "path": "/default_agent"}]});
+        assert_eq!(
+            default_written("config/write", &removed).as_deref(),
+            Some("")
+        );
+        let other = json!({"sessionId": "s", "ops": [{"op": "set", "path": "/active_model", "value": "x"}]});
+        assert_eq!(default_written("config/write", &other), None);
+        assert_eq!(default_written("session/agent/update", &set("ask")), None);
+    }
 
     #[test]
     fn the_profile_vibe_last_reported_wins() {

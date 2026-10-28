@@ -1,6 +1,7 @@
 /**
  * One pick-one selector for Settings and composer pickers: compact trigger, caret and a
- * viewport-bound menu. Depends on React, ReactDOM and Icon; callers own values and side effects.
+ * viewport-bound menu. A containing popover owns its menu so both share the top layer.
+ * Depends on React, ReactDOM and Icon; callers own values and side effects.
  * Keyboard arrows/Home/End move, Enter/Space pick, Escape closes and restores trigger focus.
  */
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
@@ -40,6 +41,7 @@ export function Selector<T extends string>({
   ariaDescription,
   testId,
   itemId,
+  hint,
 }: {
   label: string;
   value: T;
@@ -61,11 +63,14 @@ export function Selector<T extends string>({
   ariaDescription?: string;
   testId: string;
   itemId?: string;
+  /** Passive guidance beside the choices, such as where their default is set. */
+  hint?: string;
 }) {
   const id = useId();
   const trigger = useRef<HTMLButtonElement>(null);
   const menu = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
+  const [menuHost, setMenuHost] = useState<Element | null>(null);
   const previousOpen = useRef(false);
   const [activeValue, setActiveValue] = useState<T | null>(null);
   const [position, setPosition] = useState({
@@ -120,7 +125,7 @@ export function Selector<T extends string>({
       const inset = 8;
       const footerTop = document.querySelector(".statusbar")?.getBoundingClientRect().top ?? 0;
       const bottom = footerTop > 0 ? Math.min(window.innerHeight, footerTop) : window.innerHeight;
-      const height = Math.min(menu.current?.scrollHeight ?? 280, 280, bottom - 2 * inset);
+      const height = Math.min(menu.current?.scrollHeight || 280, 280, bottom - 2 * inset);
       const width = Math.min(
         Math.max(bounds.width, menu.current?.offsetWidth ?? 0),
         window.innerWidth - 2 * inset,
@@ -128,9 +133,10 @@ export function Selector<T extends string>({
       const below = bottom - bounds.bottom - inset;
       const above = bounds.top - inset;
       const up = below < height && above > below;
-      const maxHeight = Math.max(40, Math.min(280, up ? above - 4 : below - 4));
+      const maxHeight = Math.max(40, Math.min(280, bottom - 2 * inset, up ? above - 4 : below - 4));
+      const preferredTop = up ? bounds.top - Math.min(height, maxHeight) - 4 : bounds.bottom + 4;
       setPosition({
-        top: up ? Math.max(inset, bounds.top - Math.min(height, maxHeight) - 4) : bounds.bottom + 4,
+        top: Math.max(inset, Math.min(preferredTop, bottom - Math.min(height, maxHeight) - inset)),
         left: Math.max(inset, Math.min(bounds.left, window.innerWidth - width - inset)),
         minWidth: Math.min(bounds.width, window.innerWidth - 2 * inset),
         width,
@@ -172,6 +178,7 @@ export function Selector<T extends string>({
   }, [open, index, optionKeys]);
   const show = () => {
     if (disabled) return;
+    setMenuHost(trigger.current?.closest("[popover]") ?? document.body);
     onOpen?.();
     setActiveValue(
       (selected?.disabled ? undefined : selected?.value) ??
@@ -307,8 +314,9 @@ export function Selector<T extends string>({
                 {option.value === value && <Icon name="check" size={14} />}
               </button>
             ))}
+            {hint && <p className="ui-selector-empty">{hint}</p>}
           </div>,
-          document.body,
+          menuHost ?? document.body,
         )}
     </span>
   );

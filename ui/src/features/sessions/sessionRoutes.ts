@@ -77,7 +77,7 @@ const groupJson = (p: ProjectGroup): unknown => ({
 });
 
 /** The list as the UI shows it, as plain JSON. */
-export function listJson(app: App): unknown {
+function listJson(app: App): unknown {
   const state = app.core?.store.get();
   const all = Object.values(state?.sessions ?? {}).map((entry) =>
     summarize(entry, state?.stuck ?? {}),
@@ -214,6 +214,8 @@ export function registerSessionRoutes(app: App): () => void {
         case "delete": {
           // what the deleted session left running (no question is asked for a Debug API delete).
           const sessionId = id();
+          const reason = act.deleteRefusal(sessionId);
+          if (reason !== null) return { deleted: false, reason, list: listJson(app) };
           const deleted = await act.remove(sessionId);
           const leftRunning = (app.leftRunning?.store.get().items ?? []).filter(
             (item) => item.sessionId === sessionId,
@@ -263,7 +265,13 @@ export function registerSessionRoutes(app: App): () => void {
         throw new UiControlError("invalidParams", "action must be read, level or focus");
       }
       const s = notifier.store.get();
-      return { level: s.level, focusOverride: s.focusOverride, error: s.error, log: s.log };
+      return {
+        level: s.level,
+        focusOverride: s.focusOverride,
+        error: s.error,
+        log: s.log,
+        bell: app.toasts.history.get(),
+      };
     }),
   ];
   return () => {

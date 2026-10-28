@@ -4,6 +4,7 @@
  * Depends on: react, the Clipboard API. Called by: code blocks, message rows, the link dialog.
  * Invariants: the label says what happened for 1.2 s ("Copied" / "Copy failed"), then returns.
  */
+import { writeClipboard } from "../state/clipboard";
 import { type ReactElement, useEffect, useRef, useState } from "react";
 
 /** Copies `text` when clicked. `label` names what is copied (for the accessible name). */
@@ -33,7 +34,7 @@ export function CopyButton({
   };
   const copy = async () => {
     try {
-      await navigator.clipboard.writeText(text);
+      await writeClipboard(text);
       show("copied");
     } catch {
       show("failed");

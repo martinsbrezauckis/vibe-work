@@ -7,21 +7,13 @@
 
 export type InstructionsRequest = { "op": "read",
 /**
- * Personal or project.
+ * Personal instructions.
+ */
+scope: InstructionsScope, } | { "op": "readCli", } | { "op": "write",
+/**
+ * Personal instructions.
  */
 scope: InstructionsScope,
-/**
- * The session whose folder holds the project document (required for `project`).
- */
-sessionId?: string, } | { "op": "readCli", } | { "op": "write",
-/**
- * Personal or project.
- */
-scope: InstructionsScope,
-/**
- * The session whose folder holds the project document (required for `project`).
- */
-sessionId?: string,
 /**
  * The complete new text.
  */
@@ -32,13 +24,9 @@ text: string,
  */
 expected?: string, } | { "op": "apply",
 /**
- * `personal`: every open session. `project`: the open sessions in the session's folder.
+ * Every open session.
  */
-scope: InstructionsScope,
-/**
- * The session whose folder is meant (required for `project`).
- */
-sessionId?: string, };
+scope: InstructionsScope, };
 
 export type InstructionsResult = { "type": "doc",
 /**
@@ -64,10 +52,6 @@ reopened: number,
 waiting: number, };
 
 export type InstructionsDoc = {
-/**
- * Personal or project.
- */
-scope: InstructionsScope,
 /**
  * The file's full path (shown to the user; the user owns these folders).
  */
@@ -99,7 +83,7 @@ note: string | null,
  */
 cliAvailable: boolean | null, };
 
-export type InstructionsScope = "personal" | "project";
+export type InstructionsScope = "personal";
 
 export type ProjectInstructionFile = {
 /**

@@ -129,9 +129,11 @@ impl Core {
                 .await
                 .map_err(|e| CoreError::from_gate("session/backgroundProcess/output", &e))?;
             let encoded = reply.result.get("outputBase64").and_then(Value::as_str);
+            // Vibe runs a background process in a terminal; on Windows ConPTY opens with control sequences
+            // (`ESC[1t ESC[c ESC[?1004h ESC[?9001h`). The panel shows plain text, so they are removed here.
             let text = encoded
                 .and_then(|b| base64::engine::general_purpose::STANDARD.decode(b).ok())
-                .map(|bytes| String::from_utf8_lossy(&bytes).into_owned());
+                .map(|bytes| vw_terminal::strip_ansi(&String::from_utf8_lossy(&bytes)));
             return Ok(ProcessesResult::Output {
                 id: id.to_owned(),
                 available: text.is_some(),

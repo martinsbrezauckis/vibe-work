@@ -1,11 +1,10 @@
 /**
  * Worktree per session: the UI side of the core's `worktrees` command. Starting a session in its
- * own copy (and sending its first message), the end-of-session choice after archive or delete ("Keep the
- * worktree" / "Remove it", with the inspection shown first), and the startup list of copies whose session
- * was deleted, including copies the user kept. The UI counts accumulated copies on startup and after core worktree
+ * own copy, explicit inspection/removal and the list of copies left by older Vibe versions.
+ * The UI counts accumulated copies on startup and after core worktree
  * changes.
  * Depends on: coreStore (`CoreController`), shellStore, toastStore, createStore, protocol types.
- * Called by: createApp (wiring), sessionActions (`ended` after archive/delete), the worktree views.
+ * Called by: createApp (wiring), the worktree views.
  * Invariants:
  * - A start or read for a folder a Debug API client chose carries the Debug API origin.
  * - A removal names the inspection it was shown (its fingerprint); the core compares it and the native dialog
@@ -29,14 +28,12 @@ import type { Toasts } from "./toastStore";
 import { classify } from "../features/composer/model/message";
 import { createWorktreeNotifications } from "./worktreeNotifications";
 
-/** The open end-of-session choice. */
+/** The open explicit-removal inspection. */
 export interface EndChoice {
   sessionId: string;
-  /** Why it is asked. */
-  after: "archive" | "delete" | "startup";
   /** The inspection (null while it loads). */
   inspection: WorktreeInspection | null;
-  /** A removal or keep is running. */
+  /** A removal is running. */
   busy: boolean;
 }
 
@@ -96,6 +93,7 @@ export function createWorktrees(deps: {
   });
   const notices = createWorktreeNotifications(deps.persist ?? true);
   let counting = Promise.resolve();
+  /** Sessions whose archive the user started with "Throw away this copy". */
 
   const fail = (thrown: unknown): void => {
     const error = toCallError(thrown).error;
@@ -103,12 +101,9 @@ export function createWorktrees(deps: {
     toasts.push({ kind: "error", bellKind: "failure", text: error.message });
   };
 
-  /** One request; `origin` lowers it to the Debug API origin (a folder a Debug API client chose). */
-  async function run(request: WorktreesRequest, origin?: "debug-api"): Promise<WorktreesResult> {
-    const result: CommandResult = await core.run(
-      { type: "worktrees", request },
-      origin === undefined ? undefined : { origin },
-    );
+  /** One request (the window's command). */
+  async function run(request: WorktreesRequest): Promise<WorktreesResult> {
+    const result: CommandResult = await core.run({ type: "worktrees", request });
     if (result.type !== "worktrees") throw new Error(`unexpected answer ${result.type}`);
     return result.result;
   }
@@ -162,39 +157,46 @@ export function createWorktrees(deps: {
           event.type === "worktreesChanged" ||
           event.type === "lagged" ||
           (event.type === "server" && event.status.state === "running")
-        )
+        ) {
           void countCopies();
+          const end = store.get().end;
+          if (end !== null && !end.busy) void inspect(end);
+        }
       });
     },
 
-    /** Chooses an existing copy for the next chat, without creating another copy. */
-    newChatHere(
+    /**
+     * Chooses an existing copy for the next chat, without creating another copy. A folder a Debug API client names
+     * is its choice, like Choose folder (folders are given as paths): before the folder is shown, the host runs this
+     * exact `pickFolder` as the Debug API's under the request's grant (`ui_grants.rs`), so the copy form's reads
+     * that follow may trust it. Without a grant (from the window alone) it is refused and the folder counts as a
+     * session folder only.
+     */
+    async newChatHere(
       path: string,
       copy: boolean | null = null,
       origin: "ui" | "debug-api" = "ui",
-    ): void {
+    ): Promise<void> {
+      if (origin === "debug-api")
+        await core.run({ type: "pickFolder", path }).catch(() => undefined);
       shell.actions.setNewFolder(path, origin === "debug-api" ? "debug-api" : "session");
       store.set((s) => ({ ...s, newChatRequest: s.newChatRequest + 1, newChatCopy: copy }));
     },
 
     /**
      * Starts a session in its own copy, opens it and sends the first message (if any). Returns the new
-     * session's id, `null` on failure (a toast says why). `origin: "debug-api"` when a Debug API client
-     * chose the folder: the core then asks the native dialog. The first message was typed by
-     * the user in the form, so it goes out with the window's origin.
+     * session's id, `null` on failure (a toast says why). The window's command: a folder that was not picked
+     * gets the core's native dialog.
      */
-    async start(spec: CopyStart, origin?: "debug-api"): Promise<string | null> {
+    async start(spec: CopyStart): Promise<string | null> {
       try {
         const agentConfig: JsonValue = { cwd: spec.cwd };
-        const result = await run(
-          {
-            op: "start",
-            agentConfig,
-            base: spec.base,
-            branch: spec.branch,
-          },
-          origin,
-        );
+        const result = await run({
+          op: "start",
+          agentConfig,
+          base: spec.base,
+          branch: spec.branch,
+        });
         if (result.kind !== "started") return null;
         const id = result.snapshot.sessionId;
         if (result.include.found) {
@@ -208,7 +210,7 @@ export function createWorktrees(deps: {
           if (intent.kind === "command") {
             if (deps.runCommand === undefined)
               throw new Error("Run this app command from the chat composer.");
-            await deps.runCommand(id, intent.name, intent.args, origin);
+            await deps.runCommand(id, intent.name, intent.args);
           } else {
             await core.run({ type: "startTurn", sessionId: id, message: [{ type: "text", text }] });
           }
@@ -220,55 +222,16 @@ export function createWorktrees(deps: {
       }
     },
 
-    /**
-     * After a session was archived or deleted: when it works in a copy, open the Keep / Remove choice
-     * with the inspection. Sessions without a copy (or with a decision already made) ask nothing.
-     */
-    async ended(sessionId: string, after: "archive" | "delete"): Promise<void> {
-      let result: WorktreesResult;
-      try {
-        result = await run({ op: "info", sessionId });
-      } catch {
-        // No answer about a copy (worktrees off, Vibe busy): nothing to ask now; a deleted session's copy
-        // shows up in the startup list.
-        return;
-      }
-      if (result.kind !== "info" || result.info === null) return;
-      if (result.info.state !== "ready" || result.info.decision !== null) return;
-      await actions.loadOrphans();
-      const choice: EndChoice = { sessionId, after, inspection: null, busy: false };
+    /** Opens the inspection before any archive or removal of the selected chat's copy. */
+    async throwAway(sessionId: string): Promise<void> {
+      const choice: EndChoice = { sessionId, inspection: null, busy: false };
       store.set((s) => ({ ...s, end: choice }));
       await inspect(choice);
     },
 
-    /** Opens the existing inspection and Keep / Remove choice for any listed copy. */
+    /** Opens the same inspection for a listed copy. */
     async review(orphan: OrphanWorktree): Promise<void> {
-      const choice: EndChoice = {
-        sessionId: orphan.sessionId,
-        after: "startup",
-        inspection: null,
-        busy: false,
-      };
-      store.set((s) => ({ ...s, end: choice }));
-      await inspect(choice);
-    },
-
-    /** "Keep the worktree": remembered, never asked again. */
-    async keep(): Promise<void> {
-      const end = store.get().end;
-      if (end === null) return;
-      store.set((s) => ({ ...s, end: s.end === null ? null : { ...s.end, busy: true } }));
-      try {
-        await run({ op: "keep", sessionId: end.sessionId });
-        store.set((s) => ({
-          ...s,
-          end: null,
-        }));
-        await actions.loadOrphans();
-      } catch (thrown) {
-        store.set((s) => ({ ...s, end: s.end === null ? null : { ...s.end, busy: false } }));
-        fail(thrown);
-      }
+      await actions.throwAway(orphan.sessionId);
     },
 
     /** "Remove it": names the inspection the user saw (its fingerprint); the native dialog names the files. */
@@ -283,6 +246,7 @@ export function createWorktrees(deps: {
           sessionId: end.sessionId,
           fingerprint: inspection.fingerprint,
         });
+        if (shell.store.get().selected === end.sessionId) shell.actions.selectSession(null);
         store.set((s) => ({
           ...s,
           end: null,
@@ -297,7 +261,7 @@ export function createWorktrees(deps: {
       }
     },
 
-    /** Closes the dialog without deciding (asked again at the next start if the session is deleted). */
+    /** Cancels the explicit removal without changing the copy or its session. */
     dismiss(): void {
       store.set((s) => ({ ...s, end: null }));
     },

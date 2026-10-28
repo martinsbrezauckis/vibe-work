@@ -1,7 +1,7 @@
 /**
- * "Is this the first time this thing is on screen?" for arrival motion (feel item 7): the transcript is
+ * "Is this the first time this thing is on screen?" for arrival motion: the transcript is
  * virtualised, so a card re-mounts whenever it scrolls back into view; only its first mount may animate.
- * Depends on: react. Called by: ApprovalCard, QuestionCard.
+ * Depends on: react. Called by: AskCard.
  * Invariants: keyed by a stable id (the callback id); remembered for the window's life (a reload replays once).
  */
 import { useState } from "react";

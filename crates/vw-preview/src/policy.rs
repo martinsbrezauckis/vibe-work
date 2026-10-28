@@ -48,7 +48,7 @@ pub enum PortOwner {
 pub enum Destination {
     /// `about:blank`.
     Blank,
-    /// This computer, on `port` (owner rules apply).
+    /// This computer, on `port` (session ownership checks apply).
     Loopback {
         /// The port.
         port: u16,
@@ -97,10 +97,10 @@ pub enum UrlRefusal {
     #[error("'{0}' is not a URL")]
     NotAUrl(String),
     /// A scheme other than `http`/`https`.
-    #[error("only http:// and https:// web addresses open in the browser (got {0}:)")]
+    #[error("This address uses {0}:. Open an http:// or https:// web address instead")]
     Scheme(String),
     /// `https` on this computer.
-    #[error("servers on this computer open with http:// only (got https)")]
+    #[error("This server opens with http://. Change the address and try again")]
     LoopbackHttps,
     /// User info in the URL.
     #[error("URLs with a user name or password are not opened")]
@@ -119,8 +119,7 @@ pub enum UrlRefusal {
     /// A navigation inside a mount to the other page class (from a web page to a local server or back, top level
     /// or in a frame): only a fresh load from the address bar or the agent's navigate opens it.
     #[error(
-        "pages from the web and this session's local servers do not share a page: open {0} from the address bar \
-         (or with browser_act navigate)"
+        "pages from the web and this session's local servers do not share a page: open {0} from the address bar"
     )]
     OtherClass(String),
     /// The app's own development origin.
@@ -137,12 +136,12 @@ pub enum UrlRefusal {
     /// Only inferred to be this session's.
     #[error(
         "port {0} runs in this session's folder but was not started by Vibe Work and is not leased to this \
-         session; start the server with process_start (or on a leased port) to open it"
+         session; start the server in this session's Terminal to open it"
     )]
     NotProven(u16),
     /// Nothing of this session is on the port.
     #[error(
-        "port {0} is not one of this session's servers or leased ports (processes_list shows them)"
+        "port {0} is not one of this session's servers. Start the server in this session's Terminal, then open its address"
     )]
     Unattributed(u16),
 }
@@ -354,4 +353,9 @@ pub fn loopback_url(port: u16, path: Option<&str>) -> Result<String, UrlRefusal>
 /// At most 80 characters of untrusted text for a refusal.
 fn short(text: &str) -> String {
     text.chars().take(80).collect()
+}
+
+/// These documents belong to the page itself and need no refusal receipt or notification.
+pub(crate) fn embedded_document(url: &Url) -> bool {
+    url.scheme() == "data" || (url.scheme() == "about" && matches!(url.path(), "srcdoc" | "blank"))
 }

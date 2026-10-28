@@ -1,38 +1,24 @@
-//! Session deletion approval through the core and scripted fake Vibe.
+//! Session deletion approval through the core and real stored Vibe sessions.
 //! PREDICT: a user decline sends nothing, approval sends exactly once, and reuse is refused.
 
 mod common;
 
-use common::core::{ScriptRig, script_core};
-use common::fake::scratch;
+use common::core::{ScriptRig, stored_core_with};
 use serde_json::{Value, json};
 use vw_core_api::{Command, CommandResult, CoreError, ErrorCode, Origin};
 use vw_gate::Confirmation;
 
-fn seed(dir: &std::path::Path) -> String {
+async fn rig(name: &str) -> ScriptRig {
     let items: Vec<Value> = (1..=5)
         .map(|n| {
-            json!({"id": format!("old-{n}"), "title": format!("Old session {n}"), "status": {"type": "idle"},
-                   "createdAt": n, "updatedAt": 1000 - n, "cwd": "/work/alpha", "isUnseen": n == 2,
-                   "archivedAt": if n == 5 { json!(7) } else { Value::Null }})
+            json!({
+                "id":format!("old-{n}"),"title":format!("Old session {n}"),"status":{"type":"idle"},
+                "updatedAt":1000-n,"cwd":"/work/alpha","isUnseen":n==2,
+                "archivedAt":if n==5 {json!(7)} else {Value::Null}
+            })
         })
         .collect();
-    let path = dir.join("seed.json");
-    std::fs::write(&path, serde_json::to_vec(&items).unwrap()).unwrap();
-    path.to_string_lossy().into_owned()
-}
-
-async fn rig(name: &str) -> ScriptRig {
-    rig_with(name, &[]).await
-}
-
-async fn rig_with(name: &str, extra: &[&str]) -> ScriptRig {
-    let dir = scratch(&format!("{name}-seed"));
-    let seed = seed(&dir);
-    // The fake runs multiplexed (the supervisor's default): one channel per session, like Vibe.
-    let mut args = vec!["--status-events", "--seed", &seed];
-    args.extend_from_slice(extra);
-    script_core(name, &args).await
+    stored_core_with(name, None, &items, common::real_vibe::text_script(), |_| {}).await
 }
 
 async fn list(
@@ -71,7 +57,7 @@ fn ids(rows: &[Value]) -> Vec<String> {
 async fn delete_needs_the_native_dialog_and_names_the_session() {
     let rig = rig("idx-delete").await;
     list(&rig, None, None, None).await; // the core learns titles and folders from the listing
-    let params = json!({"sessionId": "old-2"});
+    let params = json!({"sessionId": rig.id("old-2")});
     let call = |token: Option<String>| Command::Call {
         method: "session/delete".to_owned(),
         params: params.clone(),
@@ -119,7 +105,7 @@ async fn delete_needs_the_native_dialog_and_names_the_session() {
     let again: Result<_, CoreError> = rig.core.execute(Origin::Ui, call(Some(token))).await;
     assert!(again.is_err(), "the token is single use");
     let (rows, _, _) = list(&rig, None, None, None).await;
-    assert!(!ids(&rows).contains(&"old-2".to_owned()));
+    assert!(!ids(&rows).contains(&rig.id("old-2")));
 
     // The Debug API: no token, no dialog (a confirmer scripted to decline is not consulted).
     let shown_before = rig.confirmer.shown().len();
@@ -129,7 +115,7 @@ async fn delete_needs_the_native_dialog_and_names_the_session() {
             Origin::DebugApi,
             Command::Call {
                 method: "session/delete".to_owned(),
-                params: json!({"sessionId": "old-3"}),
+                params: json!({"sessionId": rig.id("old-3")}),
                 confirmation_token: None,
             },
         )

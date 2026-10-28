@@ -18,7 +18,7 @@ workspace = true
 # outside the exported tree; private e2e builds only, a release build with it fails to compile (lib.rs). Off by default.
 vault-e2e = []
 e2e-script = ["vw-browser/e2e-script", "vw-preview/e2e-script"]
-ts = ["dep:ts-rs", "vw-vibe-install/ts", "vw-changes/ts", "vw-preview/ts", "vw-browser/ts", "vw-pages/ts", "vw-worktrees/ts", "vw-projects/ts", "vw-git/ts", "vw-market/ts"]
+ts = ["vw-ask/ts","dep:ts-rs", "vw-vibe-install/ts", "vw-changes/ts", "vw-preview/ts", "vw-browser/ts", "vw-pages/ts", "vw-worktrees/ts", "vw-projects/ts", "vw-git/ts", "vw-market/ts"]
 
 [[bin]]
 name = "gen-core-ts"
@@ -26,6 +26,9 @@ path = "src/bin/gen_core_ts.rs"
 required-features = ["ts"]
 
 [dependencies]
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+vw-ask = { path = "../vw-ask" }
+vw-proposals = { path = "../vw-proposals" }
 vw-logscan = { path = "../vw-logscan" }
 # Guessable Vault values must never reach the session-log comparison engine.
 zxcvbn = "3"
@@ -43,6 +46,7 @@ vw-mistral = { path = "../vw-mistral" }
 vw-documents = { path = "../vw-documents" }
 # The Tools marketplace: catalog, installer, store.
 vw-market = { path = "../vw-market" }
+vw-skills = { path = "../vw-skills" }
 # `documents/takePicture` answers image bytes as base64.
 base64 = "0.23"
 # Random dictation stream ids; already in the lock file through vw-documents.
@@ -77,7 +81,8 @@ vw-pages = { path = "../vw-pages" }
 # The user's project groups: store, filing rules, reconcile.
 vw-projects = { path = "../vw-projects" }
 cap-std = "4.0.3"
-pulldown-cmark = { version = "0.13.4", default-features = false }
+cap-fs-ext = "4.0.3"
+pulldown-cmark = { version = "0.13.5", default-features = false }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["float_roundtrip"] }  # exact float parsing for durationMs and similar values
 thiserror = "2"
@@ -96,6 +101,11 @@ tracing = "0.1"
 ts-rs = { version = "12.0.1", optional = true, features = ["serde-json-impl", "no-serde-warnings"] }
 # A secret_run consent binds to the content of the program and the files its arguments name.
 blake3 = "1.8"
+# Release helper identity is pinned to the final signed executable bytes.
+sha2 = "0.10"
+# A timed-out `gh auth` call stops every process gh started, as the supervisor and vibe-install contain their
+# children: process group on Unix, kill-on-close Job Object on Windows (same version and features as those crates).
+process-wrap = { version = "10.0.1", default-features = false, features = ["tokio1", "kill-on-drop", "process-group", "job-object", "creation-flags"] }
 
 [target.'cfg(unix)'.dependencies]
 rustix = { version = "1.1.5", default-features = false, features = ["std", "fs"] }
@@ -103,3 +113,6 @@ rustix = { version = "1.1.5", default-features = false, features = ["std", "fs"]
 [target.'cfg(windows)'.dependencies]
 # Rust-only BLAKE3 on Windows (same output), as vw-vault: no C/asm build in the msvc cross lint.
 blake3 = { version = "1.8", features = ["pure"] }
+
+[dev-dependencies]
+tokio = { version = "1.53", features = ["test-util"] }

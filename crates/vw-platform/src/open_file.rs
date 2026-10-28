@@ -152,7 +152,9 @@ pub fn file_open_class(path: &Path) -> Result<(PathBuf, OpenClass), OpenFileErro
 }
 
 fn spawn_detached(program: &str, args: Vec<std::ffi::OsString>) -> Result<(), OpenFileError> {
-    let mut child = Command::new(program)
+    let mut command = Command::new(program);
+    crate::child_env::remove_own_run_settings(&mut command);
+    let mut child = command
         .args(args)
         .spawn()
         .map_err(|error| OpenFileError::Spawn(error.to_string()))?;

@@ -3,13 +3,7 @@
 //!
 //! When it happens:
 //! - `session/history/clear` (`/clear`) and `session/rewind` with `inplace: false` ANSWER a state with a new id
-//!   (`sessions::observe` calls [`handed_off`] after loading it; the channel already moved in `channels`). Vibe
-//!   sends no hand-off notification for them: the store never emits `handedOff`, and the old session stays a
-//!   stored session of its own.
-//! - A compaction or context clear inside a turn is announced by `session/compacted` / `session/contextCleared`
-//!   (`_turns.py` `_handoff_session_if_needed`); the store turns it into `Change::HandedOff` and the pump calls
-//!   [`handed_off`], which also moves the channel (no request result moved it). A manual `session/compact` on
-//!   the unified harness keeps the id (measured), so it hands nothing off.
+//!   (`sessions::observe` calls [`handed_off`] after loading it; the channel already moved in `channels`). The old session stays a stored session of its own.
 //! - A fork is not a hand-off: the source keeps its own conversation and resources.
 //!
 //! What follows: the channel, the agent's tool credential (Vibe starts the new session's MCP server from the old
@@ -19,7 +13,8 @@
 //! project filing. The old session's Project and File viewers close (their next use opens them for the new id).
 //!
 //! Depends on: `channels`, `agent_tools`, `access`, vw-procmon, `previews`, vw-terminal, `changes`, `worktrees`,
-//! `projects_filing`, `pages`, `files`. Called by: `sessions::observe` (request results), `pump` (notifications).
+//! `projects_filing`, `pages`, `files`. Called by: `sessions::observe` (request results);
+//! `new_chat` uses [`move_running`] when the first message on the New chat screen started a session.
 //! Invariants:
 //! - Idempotent: a second call for the same pair finds nothing left under `old` and moves nothing.
 //! - Nothing is stopped or restarted: the same shells, processes and ports, owned by `new`.
@@ -46,10 +41,36 @@ pub(crate) async fn handed_off(shared: &Arc<Shared>, old: &str, new: &str) {
     shared.supervisor.untrack_session(old);
     shared.supervisor.track_session(new);
     shared.access.hand_off(old, new);
+    crate::model_choices::handed_off(&shared.model_choices, old, new);
+    shared.plugin_refresh.hand_off(old, new);
     shared.entry_projects.hand_off(old, new);
     if let Some(tools) = &shared.agent_tools {
         tools.session_handed_off(old, new);
     }
+    move_running(shared, old, new).await;
+    let (hub, from, to) = (shared.clone(), old.to_owned(), new.to_owned());
+    if tokio::task::spawn_blocking(move || hub.changes.hand_off(&from, &to))
+        .await
+        .is_ok()
+    {
+        shared.changes.request_refresh(new);
+        shared.emit(CoreEvent::LineCommentsChanged {
+            session_id: new.to_owned(),
+        });
+    }
+    if let Ok(records) = shared.worktrees.records()
+        && let Err(error) = records.hand_off(old, new)
+    {
+        tracing::warn!(%error, "worktrees: the copy's record did not follow the hand-off");
+    }
+    crate::projects_filing::handed_off(shared, old, new).await;
+    crate::pages::session_ended(shared, old).await;
+    crate::files::session_ended(shared, old).await;
+}
+
+/// Moves what runs for `old` to `new`: the process monitor's records and port lease, the terminals and the
+/// preview with its web tabs. Shared by a Vibe hand-off and the New chat screen's first message (`new_chat`).
+pub(crate) async fn move_running(shared: &Arc<Shared>, old: &str, new: &str) {
     let (monitor, from, to) = (shared.procmon.clone(), old.to_owned(), new.to_owned());
     match tokio::task::spawn_blocking(move || monitor.session_handed_off(&from, &to)).await {
         Ok(Ok(report)) => tracing::debug!(?report, "process monitor followed the hand-off"),
@@ -70,24 +91,6 @@ pub(crate) async fn handed_off(shared: &Arc<Shared>, old: &str, new: &str) {
         });
     }
     preview_handed_off(shared, old, new).await;
-    let (hub, from, to) = (shared.clone(), old.to_owned(), new.to_owned());
-    if tokio::task::spawn_blocking(move || hub.changes.hand_off(&from, &to))
-        .await
-        .is_ok()
-    {
-        shared.changes.request_refresh(new);
-        shared.emit(CoreEvent::LineCommentsChanged {
-            session_id: new.to_owned(),
-        });
-    }
-    if let Ok(records) = shared.worktrees.records()
-        && let Err(error) = records.hand_off(old, new)
-    {
-        tracing::warn!(%error, "worktrees: the copy's record did not follow the hand-off");
-    }
-    crate::projects_filing::handed_off(shared, old, new).await;
-    crate::pages::session_ended(shared, old).await;
-    crate::files::session_ended(shared, old).await;
 }
 
 /// Revalidates retained Browser pages against the new session owner without eagerly mounting them.

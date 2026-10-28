@@ -16,7 +16,7 @@
 //! answer; no client can send an "always".
 //!
 //! Depends on: vw-browser (`fill_check`, `fill_write`), vw-keys (logins), vw-vault (`login::fits`), vw-gate (dialog),
-//! `fill_grants`, `secret_grants` (the use log). Called by: `agent_tools/browser_tools` (the agent), `browser` (the
+//! `fill_grants`, `secret_uses` (the use log). Called by: `agent_tools/browser_tools` (the agent), `browser` (the
 //! `browser` command's `act` for the window and the Debug API).
 //! Invariants: the password is never in an answer, an error, a log line, the action log or the use log; a refused
 //! check never reaches the vault (`KeyService::login_counts` proves it in the tests).
@@ -95,14 +95,7 @@ fn pick<'a>(logins: &'a [Login], wanted: &str, target: &FillTarget) -> Result<&'
         .collect();
     match (named.len(), fitting.as_slice()) {
         (_, [one]) => Ok(one),
-        (0, _) => Err(refused(
-            "login",
-            &format!(
-                "no login named '{}' in the user's vault (secret_list shows the logins): ask the user to add it in \
-                 Settings > Project secrets",
-                wanted.chars().take(60).collect::<String>()
-            ),
-        )),
+        (0, _) => Err(missing_login(wanted)),
         (_, []) => Err(refused(
             "login",
             &format!(
@@ -115,6 +108,16 @@ fn pick<'a>(logins: &'a [Login], wanted: &str, target: &FillTarget) -> Result<&'
             "more than one login with that name fits this site: use the login's id from secret_list",
         )),
     }
+}
+
+fn missing_login(wanted: &str) -> String {
+    refused(
+        "login",
+        &format!(
+            "no login named '{}' in the user's vault (secret_list shows the logins): ask the user to add it in Settings > Project secrets",
+            wanted.chars().take(60).collect::<String>()
+        ),
+    )
 }
 
 /// The dialog: the session, the site, the login's name and user name, the field; never the password. `local` (a page
@@ -136,7 +139,7 @@ fn consent(
         summary: format!(
             "The agent of the session {} wants to sign in on {} with your saved login {}{}: Vibe Work puts the \
              password into the field {} on that page. The agent never sees the password.{}",
-            vw_gate::dialog_quote(title),
+            vw_gate::dialog_chat_quote(title),
             vw_gate::dialog_quote(&target.origin),
             vw_gate::dialog_quote(&login.name),
             if login.username.is_empty() {
@@ -178,7 +181,24 @@ pub(crate) async fn fill(
     by: Actor,
     requester: Requester,
 ) -> Result<Value, String> {
-    crate::agent_access::check(shared)?;
+    prepare(shared, driver, session_id, args, by, requester)
+        .await?
+        .await
+}
+
+#[allow(
+    clippy::too_many_lines,
+    reason = "ordered validation, consent, then deferred write"
+)]
+pub(crate) async fn prepare(
+    shared: &Arc<Shared>,
+    driver: &Browser,
+    session_id: &str,
+    args: &Value,
+    by: Actor,
+    requester: Requester,
+) -> Result<crate::ask::tool_calls::receipts::Execution, String> {
+    crate::agent_access::check_for(shared, "vibe-work/fillLogin", session_id)?;
     let owner = crate::previews::hub(shared)
         .map_err(|error| error.message)?
         .service
@@ -201,25 +221,16 @@ pub(crate) async fn fill(
             "Vibe Work has no vault connected, so no login can be filled".to_owned(),
         )
     })?;
-    let logins = keys.logins().await.map_err(|e| {
-        fail(
-            "vault",
-            if vw_keys::is_locked(&e) {
-                "the user's vault is locked: ask the user to unlock it in Vibe Work (Settings > Account), then try \
-                 again"
-                    .to_owned()
-            } else {
-                format!("the vault could not be read ({e})")
-            },
-        )
-    })?;
-    let login = pick(&logins, &wanted.login, &target).inspect_err(|text| {
-        driver.fill_refused(session_id, by, &wanted.reference, text);
-    })?;
     let folders =
         crate::agent_tools::session::folders(shared, &owner).map_err(|e| fail("project", e))?;
     let project = crate::agent_tools::permission_project_of(shared, &owner, &folders)
         .map_err(|e| fail("project", e))?;
+    let logins = crate::agent_tools::visible_logins(shared, &project)
+        .await
+        .map_err(|e| fail("vault", e))?;
+    let login = pick(&logins, &wanted.login, &target).inspect_err(|text| {
+        driver.fill_refused(session_id, by, &wanted.reference, text);
+    })?;
     let policy = project.policy(keys, &login.id).await.map_err(|_| {
         fail(
             "permission",
@@ -227,75 +238,92 @@ pub(crate) async fn fill(
         )
     })?;
     if policy.permission == vw_keys::EntryPermission::Never {
-        return Err(fail(
-            "permission",
-            format!(
-                "this entry is set to {} in this project",
-                vw_vocabulary::label("vaultPermissions", "never")
-            ),
-        ));
+        return Err(missing_login(&wanted.login));
     }
-    if target.role == LoginRole::Username {
-        if login.username.is_empty() {
-            return Err(fail("login", "this login has no user name".to_owned()));
+    if target.role == LoginRole::Username && login.username.is_empty() {
+        return Err(fail("login", "this login has no user name".to_owned()));
+    }
+    if target.role != LoginRole::Username && !login.has_password {
+        return Err(fail("login", "this login has no password".to_owned()));
+    }
+    // (3) + (4) the grant, or the user's answer.
+    let decision = if target.role == LoginRole::Username {
+        "username"
+    } else {
+        decide(
+            shared,
+            &owner,
+            &target,
+            login,
+            requester,
+            policy.permission == vw_keys::EntryPermission::Allowed,
+        )
+        .await
+        .map_err(|(decision, reason)| {
+            log(shared, &owner, &target, login, decision);
+            fail("grant", reason)
+        })?
+    };
+    let login = login.clone();
+    let shared = Arc::downgrade(shared);
+    let session_id = session_id.to_owned();
+    Ok(Box::pin(async move {
+        let shared = shared.upgrade().ok_or("Vibe Work closed.")?;
+        let driver = crate::browser::browser(&shared).map_err(|e| e.message)?;
+        let keys = shared.config.keys.as_ref().ok_or("Vault closed.")?;
+        let session_id = session_id.as_str();
+        let login = &login;
+        let fail = |check: &'static str, text: String| {
+            note(
+                driver,
+                session_id,
+                by,
+                &wanted.reference,
+                &FillRefusal { check, text },
+            )
+        };
+        if target.role == LoginRole::Username {
+            if project.policy(keys, &login.id).await.ok().as_ref() != Some(&policy) {
+                return Err(fail(
+                    "permission",
+                    "the entry permission changed meanwhile".to_owned(),
+                ));
+            }
+            driver
+                .fill_write(session_id, &target, &login.username, by)
+                .await
+                .map_err(|e| refused(e.check, &e.text))?;
+            return Ok(answer(&target, login));
         }
+        crate::agent_access::check(&shared)?;
+        // (5) the password, only now.
+        let password = keys
+            .login_password(login.id.clone())
+            .await
+            .map_err(|e| fail("vault", format!("the password could not be read ({e})")))?;
+        crate::agent_access::check(&shared)?;
         if project.policy(keys, &login.id).await.ok().as_ref() != Some(&policy) {
             return Err(fail(
                 "permission",
                 "the entry permission changed meanwhile".to_owned(),
             ));
         }
-        driver
-            .fill_write(session_id, &target, &login.username, by)
-            .await
-            .map_err(|e| refused(e.check, &e.text))?;
-        return Ok(answer(&target, login));
-    }
-    if !login.has_password {
-        return Err(fail("login", "this login has no password".to_owned()));
-    }
-    // (3) + (4) the grant, or the user's answer.
-    let decision = decide(
-        shared,
-        &owner,
-        &target,
-        login,
-        requester,
-        policy.permission == vw_keys::EntryPermission::Allowed,
-    )
-    .await
-    .map_err(|(decision, reason)| {
-        log(shared, &owner, &target, login, decision);
-        fail("grant", reason)
-    })?;
-    crate::agent_access::check(shared)?;
-    // (5) the password, only now.
-    let password = keys
-        .login_password(login.id.clone())
-        .await
-        .map_err(|e| fail("vault", format!("the password could not be read ({e})")))?;
-    crate::agent_access::check(shared)?;
-    if project.policy(keys, &login.id).await.ok().as_ref() != Some(&policy) {
-        return Err(fail(
-            "permission",
-            "the entry permission changed meanwhile".to_owned(),
-        ));
-    }
-    // (6) the write (the page repeats every check).
-    let written = driver
-        .fill_write(session_id, &target, password.expose(), by)
-        .await;
-    drop(password);
-    log(
-        shared,
-        &owner,
-        &target,
-        login,
-        if written.is_ok() { decision } else { "refused" },
-    );
-    written.map_err(|e| refused(e.check, &e.text))?;
-    tracing::info!(decision, "a vault login was filled into a page");
-    Ok(answer(&target, login))
+        // (6) the write (the page repeats every check).
+        let written = driver
+            .fill_write(session_id, &target, password.expose(), by)
+            .await;
+        drop(password);
+        log(
+            &shared,
+            &owner,
+            &target,
+            login,
+            if written.is_ok() { decision } else { "refused" },
+        );
+        written.map_err(|e| refused(e.check, &e.text))?;
+        tracing::info!(decision, "a vault login was filled into a page");
+        Ok(answer(&target, login))
+    }))
 }
 
 /// The user's decision for a password fill: an active "always" grant (read again right before the password, so a revoke
@@ -328,29 +356,30 @@ async fn decide(
                 "the user revoked this permission meanwhile: the next fill asks them".to_owned(),
             ));
         }
-        shared.secret_grants.fill_uses.used(&id);
+        shared.secret_uses.fill_uses.used(&id);
         return Ok("grant");
     }
-    let title = shared
-        .names
-        .title_of(&shared.store, session_id)
-        .unwrap_or_else(|| session_id.to_owned());
-    let asked = fill_grants::now_ms();
-    match shared
-        .confirmer
-        .confirm(&consent(&title, target, login, requester, local.as_deref()))
-        .await
-    {
-        Confirmation::Declined => Err((
-            "declined",
-            "the user did not allow it. Continue without signing in, or ask the user".to_owned(),
-        )),
+    let title = shared.names.confirmation_title(&shared.store, session_id);
+    let mut asked = fill_grants::now_ms();
+    let mut request = consent(&title, target, login, requester, local.as_deref());
+    request.params["sessionId"] = Value::String(session_id.into());
+    let answer = if requester == Requester::Agent {
+        let (answer, opened) = crate::ask::guards::answer(shared, request, "this saved login")
+            .await
+            .map_err(|reason| ("refused", reason))?;
+        asked = i64::try_from(opened).unwrap_or(i64::MAX);
+        answer
+    } else {
+        shared.confirmer.confirm(&request).await
+    };
+    match answer {
+        answer @ Confirmation::Declined => Err(("declined", answer.agent_text("this saved login"))),
         Confirmation::ApprovedAlways if local.is_none() && requester != Requester::DebugApi => {
             let id =
                 fill_grants::grant_always(shared, &login.id, &login.name, &target.origin, asked)
                     .await
                     .map_err(|reason| ("refused", reason))?;
-            shared.secret_grants.fill_uses.used(&id);
+            shared.secret_uses.fill_uses.used(&id);
             Ok("allowedAlways")
         }
         Confirmation::Approved | Confirmation::ApprovedAlways => {
@@ -427,11 +456,8 @@ fn note(driver: &Browser, session_id: &str, by: Actor, reference: &str, e: &Fill
 
 /// One line in the use log Settings shows (no value).
 fn log(shared: &Shared, session_id: &str, target: &FillTarget, login: &Login, decision: &str) {
-    let session = shared
-        .names
-        .title_of(&shared.store, session_id)
-        .unwrap_or_else(|| session_id.to_owned());
-    shared.secret_grants.log(SecretUseView {
+    let session = shared.names.display_title(&shared.store, session_id);
+    shared.secret_uses.log(SecretUseView {
         at_ms: fill_grants::now_ms(),
         session,
         project: String::new(),

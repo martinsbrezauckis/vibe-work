@@ -8,7 +8,7 @@
 //!   `/models`, `/tools/...`, proxy and TLS settings) is not listed, so it is refused.
 //! - One bad op refuses the whole call; nothing is partly applied.
 //! - `config/model/write` accepts only a model alias Vibe reported in `runtime/read` and one of
-//!   the five reasoning levels.
+//!   the five reasoning levels, with `sessionOnly: true`; chat picks never write the user default.
 //! - Making `auto-approve` the default profile is an escalation (needs a native confirmation).
 //! - The two privacy switches (`/enable_telemetry`, `/experiments/enable`) take a
 //!   boolean. Turning one OFF is free (less data leaves the machine). Turning one ON, and removing
@@ -81,6 +81,7 @@ const CONFIG_WRITE_FIELDS: &[Field] = &[
 
 const MODEL_WRITE_FIELDS: &[Field] = &[
     req("sessionId", Kind::Text(128)),
+    req("sessionOnly", Kind::Bool),
     opt("modelAlias", Kind::Text(128)),
     opt("reasoningEffort", Kind::OneOf(REASONING_LEVELS)),
 ];
@@ -214,6 +215,9 @@ pub(crate) fn model_write(
     aliases: &HashSet<String>,
 ) -> Result<(), GateError> {
     let object = check(method, params, MODEL_WRITE_FIELDS)?;
+    if object.get("sessionOnly") != Some(&Value::Bool(true)) {
+        return Err(policy(method, "model picks require sessionOnly: true"));
+    }
     let alias = object.get("modelAlias").filter(|v| !v.is_null());
     let effort = object.get("reasoningEffort").filter(|v| !v.is_null());
     if alias.is_none() && effort.is_none() {
@@ -284,5 +288,43 @@ fn check_model_field(
         }
         (Some("set"), None) => Err(invalid(method, "`set` needs a value")),
         _ => Err(invalid(method, "`op` must be `set` or `remove`")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn model_picks_require_session_scope_and_keep_the_closed_shape() {
+        let aliases = HashSet::from(["large-4".to_owned()]);
+        let method = "config/model/write";
+        for choice in [
+            json!({"modelAlias":"large-4"}),
+            json!({"reasoningEffort":"high"}),
+        ] {
+            let mut params = choice;
+            params["sessionId"] = json!("chat-a");
+            assert!(
+                model_write(method, &params, &aliases).is_err(),
+                "missing scope"
+            );
+            for scope in [json!(false), json!(null), json!("true"), json!(1)] {
+                params["sessionOnly"] = scope;
+                assert!(model_write(method, &params, &aliases).is_err());
+            }
+            params["sessionOnly"] = json!(true);
+            assert!(model_write(method, &params, &aliases).is_ok());
+            params["targetLayer"] = json!("user");
+            assert!(model_write(method, &params, &aliases).is_err());
+        }
+        for params in [
+            json!({"sessionId":"a","sessionOnly":true}),
+            json!({"sessionId":"a","sessionOnly":true,"modelAlias":"unknown"}),
+            json!({"sessionId":"a","sessionOnly":true,"reasoningEffort":"extreme"}),
+        ] {
+            assert!(model_write(method, &params, &aliases).is_err());
+        }
     }
 }

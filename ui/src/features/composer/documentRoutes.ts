@@ -59,7 +59,7 @@ function readDocs(app: App, sessionId: string): unknown {
 }
 
 /** Runs one `ui/documents` request. */
-export async function handleDocuments(app: App, body: unknown): Promise<unknown> {
+async function handleDocuments(app: App, body: unknown): Promise<unknown> {
   const input = asObject(body);
   const documents = app.documents;
   if (documents === null) throw new UiControlError("serverUnavailable", "the app has no core");

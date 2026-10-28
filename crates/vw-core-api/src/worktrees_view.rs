@@ -10,7 +10,7 @@
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use vw_worktrees::{BranchInfo, Decision, Head, IncludeReport, LostFile};
+use vw_worktrees::{BranchInfo, Head, IncludeReport, LostFile};
 
 use crate::view::SessionSnapshot;
 
@@ -68,12 +68,6 @@ pub enum WorktreesRequest {
         /// `fingerprint` of the inspection the user saw.
         fingerprint: String,
     },
-    /// "Keep the worktree": the copy stays and is not asked about again. From the Debug API it asks the
-    /// native dialog.
-    Keep {
-        /// Session id.
-        session_id: String,
-    },
     /// Copies Vibe Work made whose session was deleted and that nobody decided about (startup list).
     Orphans {},
 }
@@ -90,7 +84,6 @@ impl WorktreesRequest {
             Self::Info { .. } => "info",
             Self::Inspect { .. } => "inspect",
             Self::Remove { .. } => "remove",
-            Self::Keep { .. } => "keep",
             Self::Orphans {} => "orphans",
         }
     }
@@ -148,8 +141,6 @@ pub enum WorktreesResult {
         /// What happened.
         outcome: RemoveOutcome,
     },
-    /// `keep`.
-    Kept {},
     /// `orphans`.
     Orphans {
         /// Undecided leftovers and kept copies, oldest first.
@@ -219,8 +210,6 @@ pub struct WorktreeInfo {
     pub state: WorktreeState,
     /// Vibe Work made it (a record exists).
     pub made_here: bool,
-    /// The user's decision at the end of the session, if any.
-    pub decision: Option<Decision>,
 }
 
 /// What happens to the branch when the copy is removed.
@@ -302,8 +291,6 @@ pub struct RemoveOutcome {
 pub struct OrphanWorktree {
     /// The original session's id.
     pub session_id: String,
-    /// The original session's owner chose to keep this copy.
-    pub kept: bool,
     /// The copy's folder (window only).
     pub path: Option<String>,
     /// Its branch.

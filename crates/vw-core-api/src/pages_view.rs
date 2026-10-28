@@ -110,6 +110,34 @@ pub enum PagesRequest {
     },
     /// Cancels a running pick.
     CancelPick {},
+    /// The section the last right click on the shown page was on, the selection as its quote when the click was
+    /// on selected text (the page menu's Point Vibe at this and Comment…). Only a person's right click is
+    /// recorded by the page; without one the answer is "nothing picked".
+    MenuSection {
+        /// The session.
+        session_id: String,
+        /// A named section instead of the last trusted click (the Debug API's way).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[cfg_attr(feature = "ts", ts(optional))]
+        section: Option<String>,
+        /// Exact selected text within that section.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[cfg_attr(feature = "ts", ts(optional))]
+        quote: Option<String>,
+    },
+    /// The text the last right click on the shown page had selected (the page menu's Copy); empty without one.
+    MenuCopy {
+        /// The session.
+        session_id: String,
+        /// A named section instead of the last trusted click.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[cfg_attr(feature = "ts", ts(optional))]
+        section: Option<String>,
+        /// Exact selected text within that section.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[cfg_attr(feature = "ts", ts(optional))]
+        quote: Option<String>,
+    },
     /// Adds a comment on a section of a page.
     AddComment {
         /// The session.
@@ -198,7 +226,8 @@ pub enum PagesRequest {
         /// The page.
         path: String,
     },
-    /// The app's theme, which the viewer passes to every page (`light` or `dark`; Format 1.2 §6.4).
+    /// The app's theme, which the viewer passes to every page (`light` or `dark`; Format 1.2 §6.4); the Browser's
+    /// page menu also falls back to it.
     Theme {
         /// `light` or `dark`.
         theme: String,
@@ -302,7 +331,7 @@ pub enum PagesResult {
         /// The session's viewer after the request.
         viewer: Option<ViewerView>,
     },
-    /// `pickSection`.
+    /// `pickSection`, `menuSection`.
     Picked {
         /// The section, checked against the page file.
         picked: PickedSection,
@@ -365,6 +394,11 @@ pub enum PagesResult {
     Visual {
         /// The report.
         report: VisualReport,
+    },
+    /// `menuCopy`.
+    Copied {
+        /// The selected text, line breaks kept (at most 100,000 characters; empty without a selection).
+        text: String,
     },
     /// `layout`, `cancelPick`, `deleteComment`, `theme`.
     Done {},

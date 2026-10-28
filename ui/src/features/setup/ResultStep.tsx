@@ -2,7 +2,7 @@
  * The last setup step: the test call's outcome in plain words. "Key works. N models available" or
  * what 401 / 403 / a network failure means and what to do; for a refused key the user can paste
  * another one right here. Also offers to remove Vibe's own copy after an import (never silently) and
- * shows why "remember on this computer" did not work, if it did not.
+ * shows why the credential store could not keep the vault's key, if it could not.
  * Depends on: AppContext, useKeys, KeyStep, fields. Called by: SetupScreen.
  */
 import { Button } from "../../components/Controls";
@@ -32,11 +32,11 @@ export function ResultStep() {
       data-testid="setup-result"
       data-phase={test.phase}
     >
-      {test.phase === "running" && <p>Testing the key...</p>}
+      {test.phase === "running" && <p>Testing the key…</p>}
       {test.phase === "idle" && <p>The key is saved. Test it to make sure Mistral accepts it.</p>}
       {test.phase === "ok" && (
         <p className="key-success" role="status">
-          Key works. {test.models} {test.models === 1 ? "model is" : "models are"} available.
+          Key works.
         </p>
       )}
       {test.phase === "failed" && (
@@ -46,8 +46,8 @@ export function ResultStep() {
       )}
       {status?.rememberNote != null && (
         <p className="key-field-hint">
-          This computer could not remember the password ({status.rememberNote}). You will type it
-          again next time.
+          This computer&apos;s credential store could not keep the vault&apos;s key (
+          {status.rememberNote}). You will type the password at the next start.
         </p>
       )}
       {removable !== null && (
@@ -60,7 +60,7 @@ export function ResultStep() {
           <Button
             data-testid="setup.result-step-remove-vibe-copy"
             type="button"
-            small
+            shape="outlined"
             variant="danger"
             disabled={busy}
             onClick={() => {
@@ -75,22 +75,22 @@ export function ResultStep() {
       {replacing && test.phase !== "ok" && <KeyStep offers={false} label="Paste another key" />}
       <div className="key-actions">
         {test.phase === "ok" && (
-          <button
+          <Button
             type="button"
-            className="btn-primary"
+            appearance="dialog"
             data-testid="setup.continue"
             onClick={() => {
               keys?.finish();
             }}
           >
             Continue
-          </button>
+          </Button>
         )}
         {(test.phase === "failed" || test.phase === "idle") && (
           <>
-            <button
+            <Button
               type="button"
-              className="btn-primary"
+              appearance="dialog"
               data-testid="setup.retry"
               disabled={busy}
               onClick={() => {
@@ -98,29 +98,29 @@ export function ResultStep() {
               }}
             >
               Try again
-            </button>
+            </Button>
             {!replacing && (
-              <button
+              <Button
                 data-testid="setup.result-step-set-replacing"
                 type="button"
-                className="tb-btn"
+
                 onClick={() => {
                   setReplacing(true);
                 }}
               >
                 Use a different key
-              </button>
+              </Button>
             )}
-            <button
+            <Button
               data-testid="setup.result-step-finish"
               type="button"
-              className="tb-btn"
+
               onClick={() => {
                 keys?.finish();
               }}
             >
               Continue anyway
-            </button>
+            </Button>
           </>
         )}
       </div>

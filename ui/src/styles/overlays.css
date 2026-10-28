@@ -9,7 +9,7 @@
   position: fixed;
   inset: 0;
   background: var(--scrim);
-  z-index: 40;
+  z-index: var(--z-scrim);
 }
 .palette {
   position: fixed;
@@ -18,9 +18,9 @@
   transform: translateX(-50%);
   width: min(620px, 92vw);
   background: var(--raised);
-  border-radius: 14px;
+  border-radius: var(--radius-14);
   box-shadow: var(--shadow);
-  z-index: 50;
+  z-index: var(--z-dialog);
   overflow: hidden;
 }
 .palette input {
@@ -48,7 +48,7 @@
   align-items: center;
   gap: 10px;
   padding: 9px 12px;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   cursor: pointer;
   color: var(--text-2);
 }
@@ -83,9 +83,9 @@
   max-height: 86vh;
   overflow: auto;
   background: var(--raised);
-  border-radius: 16px;
+  border-radius: var(--radius-dialog);
   box-shadow: var(--shadow);
-  z-index: 50;
+  z-index: var(--z-dialog);
   /* a dialog opened from the status bar (Processes) inherited its small monospace, no-wrap text, so the
      whole dialog was in the data font and its lines ran past the edge. Every dialog starts from the body text. */
   font-family: var(--font-ui);
@@ -136,32 +136,8 @@
   font-size: var(--text-12);
   display: block;
 }
-.switch {
-  width: 34px;
-  height: 20px;
-  border-radius: 999px;
-  background: var(--line-3);
-  border: 0;
-  position: relative;
-  cursor: pointer;
-  flex: none;
-}
-.switch::after {
-  content: "";
-  position: absolute;
-  left: 3px;
-  top: 3px;
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  background: var(--on-accent);
-  transition: left 0.15s;
-}
-.switch[aria-checked="true"] {
-  background: var(--orange);
-}
-.switch[aria-checked="true"]::after {
-  left: 17px;
+.check input[type="checkbox"] {
+  accent-color: var(--orange);
 }
 .legal {
   font-size: var(--text-12);
@@ -171,7 +147,7 @@
 /* Toasts use a clear corner, or one navigable notice in the existing status bar. */
 .toasts {
   position: fixed;
-  z-index: 60;
+  z-index: var(--z-menu);
   display: grid;
   gap: 8px;
   max-width: min(420px, calc(100vw - var(--toast-left-inset, 18px) - 18px));
@@ -220,7 +196,7 @@
   padding: 2px 5px;
   font-size: var(--text-11);
   line-height: 18px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   box-shadow: none;
   animation: none;
 }
@@ -242,6 +218,11 @@
   left: 0;
   top: 0;
 }
+.toasts[data-docked] .toast-text {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
 .toasts[data-docked] .toast-content {
   display: flex;
   align-items: center;
@@ -251,18 +232,16 @@
   margin-top: 4px;
 }
 .toasts[data-docked] [data-toast-more] {
+  flex: none;
+  white-space: nowrap;
   margin-top: 0;
   min-height: 20px;
   padding: 0 4px;
   font-size: var(--text-11);
 }
-@media (max-width: 640px) {
-  .toasts[data-docked] .toast-text {
-    display: none;
-  }
-}
 .toasts[data-docked] .ibtn {
   flex: none;
+  padding: 0;
   width: 20px;
   height: 20px;
 }
@@ -270,8 +249,8 @@
   position: fixed;
   inset: auto;
   margin: 0;
-  z-index: 65;
-  width: min(460px, calc(100vw - 16px));
+  z-index: var(--z-selector);
+  width: min(680px, calc(100vw - 16px));
   max-height: calc(100dvh - 80px);
   overflow: hidden;
   display: flex;
@@ -279,7 +258,7 @@
   box-sizing: border-box;
   padding: var(--space-card-inline);
   border: 1px solid var(--line-2);
-  border-radius: 12px;
+  border-radius: var(--radius-xl);
   background: var(--panel);
   color: var(--text);
   box-shadow: var(--shadow);
@@ -287,6 +266,7 @@
 }
 .toast-dialog-head {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: var(--space-control-gap);
@@ -313,7 +293,7 @@
   gap: 10px;
   background: var(--raised);
   box-shadow: var(--shadow);
-  border-radius: 10px;
+  border-radius: var(--radius-lg);
   padding: 10px 14px;
   font-size: var(--text-13);
   color: var(--text);
@@ -336,11 +316,11 @@
   position: fixed;
   left: 12px;
   bottom: 38px;
-  z-index: 60;
+  z-index: var(--z-menu);
   max-width: min(60ch, calc(100vw - 24px));
   padding: 8px 12px;
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: var(--raised);
   color: var(--text);
   box-shadow: var(--shadow);
@@ -350,4 +330,57 @@
   overflow: hidden;
   text-overflow: ellipsis;
   pointer-events: none;
+}
+
+/* Security disclosures keep summaries and redacted step text readable at narrow widths. */
+.security-filter {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+.security-entry {
+  width: 100%;
+  min-width: 0;
+  flex: 1;
+}
+.security-entry > .ui-disclosure {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  text-align: left;
+}
+.security-entry-summary {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+}
+.security-entry-title,
+.security-what {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.security-counts {
+  white-space: normal;
+}
+.security-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 12px;
+}
+.security-line {
+  display: grid;
+  grid-template-columns: auto auto minmax(20px, 1fr) auto;
+  gap: 8px;
+  align-items: baseline;
+}
+.security-more {
+  display: flex;
+  gap: 8px;
+  align-items: center;
 }

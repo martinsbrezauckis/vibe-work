@@ -19,11 +19,11 @@ import type { Shell } from "./shellStore";
 import type { Toasts } from "./toastStore";
 
 /** How often shown output is read while the dialog is open. */
-export const OUTPUT_POLL_MS = 1000;
+const OUTPUT_POLL_MS = 1000;
 /** How often the list is read while the dialog is open. */
-export const LIST_POLL_MS = 2500;
+const LIST_POLL_MS = 2500;
 /** How often the list is read while the dialog is closed (the button's count). */
-export const IDLE_POLL_MS = 15_000;
+const IDLE_POLL_MS = 15_000;
 
 /** The UI state. */
 export interface SessionProcessesState {

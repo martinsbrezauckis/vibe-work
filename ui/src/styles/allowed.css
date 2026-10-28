@@ -1,0 +1,104 @@
+/*
+ * Settings › Allowed without asking and the Safety rows that link to the one place a level is set.
+ * Layout only: the page reuses the Settings type, the shared .check row, key-field, RowDisclosure, Badge,
+ * LinkButton and the destructive dialog. Rows wrap (never the vault list's one-line secrets-row): a long command
+ * breaks anywhere and Revoke stays on the right. Imported by settings-page.css.
+ */
+.allow-page {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
+}
+.allow-find {
+  min-width: 0;
+  margin: 14px 0 6px;
+}
+.allow-count {
+  margin-top: 6px;
+  margin-bottom: 10px;
+}
+.allow-groups {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(0, 1fr);
+}
+.allow-group,
+.allow-sub,
+.allow-body {
+  min-width: 0;
+}
+.allow-group {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+  padding: 4px 14px;
+}
+.allow-sub {
+  border-top: 1px solid var(--line);
+  padding: 2px 0 2px 14px;
+}
+.allow-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  min-height: 40px;
+}
+.allow-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  font-size: var(--text-13-5);
+  font-weight: var(--weight-semibold);
+}
+.allow-sub > .allow-head .allow-title {
+  font-size: var(--text-13);
+  font-weight: var(--weight-medium);
+}
+.allow-title > .ui-disclosure {
+  color: var(--text);
+}
+.allow-body {
+  padding-bottom: 10px;
+}
+.allow-body > .ui-help {
+  margin: 0 0 6px;
+}
+.allow-group .check {
+  font-size: var(--text-13);
+}
+.allow-group .check > .allow-what {
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+.allow-group .check + .check {
+  border-top: 1px solid var(--line);
+}
+.allow-more {
+  margin-top: 6px;
+}
+.allow-locked {
+  padding-bottom: 10px;
+}
+.allow-locked > .key-line {
+  margin: 0 0 6px;
+}
+.allow-group > .key-problem {
+  margin: 0 0 10px;
+}
+.allow-status {
+  margin: 0 0 8px;
+}
+.allow-status:empty {
+  margin: 0;
+}
+.allow-page > .empty-state.small {
+  margin-top: 12px;
+}
+/* Narrow panels (about 480 px): a row whose right cell is a link puts the link under its text. */
+@media (max-width: 480px) {
+  .allow-levels .check:has(> .ext-link) {
+    grid-template-columns: minmax(0, 1fr);
+    justify-items: start;
+  }
+}

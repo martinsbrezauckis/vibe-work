@@ -28,7 +28,6 @@ from ir import (
     Schema,
     TypeRef,
     UnionDef,
-    UntaggedDef,
 )
 
 HEADER = """\

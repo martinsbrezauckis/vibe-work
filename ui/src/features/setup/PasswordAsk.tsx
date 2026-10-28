@@ -1,7 +1,7 @@
 /**
  * A small inline "type your password" form for the Settings actions that need the vault password
- * (unlock, forget or remember this computer).
- * Depends on: fields, useKeys. Called by: KeySettings.
+ * (for example removing a saved Mistral key).
+ * Depends on: fields, useKeys. Called by: settings/MistralKeys.
  * Invariants: the password is cleared the moment it is submitted; the failure text (for example a
  * wrong password) comes from the key controller's `problem`.
  */
@@ -46,7 +46,7 @@ export function PasswordAsk(props: {
         <Button
           data-testid="setup.password-ask-btn-primary"
           type="submit"
-          small
+          shape="outlined"
           variant="primary"
           disabled={busy || password === ""}
         >
@@ -56,7 +56,7 @@ export function PasswordAsk(props: {
           <Button
             data-testid="setup.password-ask-tb-btn"
             type="button"
-            small
+            shape="outlined"
             onClick={props.onCancel}
           >
             Cancel

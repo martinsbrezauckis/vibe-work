@@ -29,7 +29,7 @@ export interface GroupsData {
 }
 
 /** Where the "Move to project…" menu opens and for which sessions. */
-export interface MoverState {
+interface MoverState {
   sessionIds: readonly string[];
   at: { x: number; y: number };
 }
@@ -206,8 +206,8 @@ export function createProjectGroups(deps: { core: CoreController; shell: Shell; 
       if (step === -1 && at > 0) await controller.place(id, list[at - 1]?.id ?? null);
       if (step === 1 && at < list.length - 1) await controller.place(id, list[at + 2]?.id ?? null);
     },
-    async setFolder(id: string, folder: string | null): Promise<void> {
-      await change({ op: "setFolder", projectId: id, folder });
+    async setFolder(id: string, folder: string | null): Promise<boolean> {
+      return (await change({ op: "setFolder", projectId: id, folder })) !== null;
     },
     /** "Choose main folder…": the native picker, then the folder. */
     async chooseFolder(id: string): Promise<void> {

@@ -7,7 +7,8 @@
  *   (including elements that already had those) on close. The one exception is the dialog's own scrim
  *   (a sibling with class `scrim`, the dimmed backdrop): it is `aria-hidden` but stays clickable, so "a click
  *   outside closes" works. An inert scrim is not hit-tested at all (HTML: inert nodes act as
- *   `pointer-events: none`), which silently broke every scrim's `onClick`.
+ *   `pointer-events: none`), which silently broke every scrim's `onClick`. The app's announcement regions
+ *   (`data-announcer-root`) are left alone: they hold no controls and must stay audible.
  * - Tab and Shift+Tab wrap inside the dialog; focus returns to the element that had it before.
  * - Escape closes (capture phase), after an owned selector menu has handled its own dismissal.
  */
@@ -55,6 +56,8 @@ function inertOutside(dialog: HTMLElement): () => void {
     for (const child of Array.from(parent.children)) {
       if (child === kept || !(child instanceof HTMLElement)) continue;
       if (selectorOwner(child, dialog)) continue;
+      // The app's announcement regions keep speaking while a dialog is open (a prompt can arrive meanwhile).
+      if (child.hasAttribute("data-announcer-root")) continue;
       changed.push({
         element: child,
         inert: child.inert,

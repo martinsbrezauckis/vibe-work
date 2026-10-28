@@ -47,6 +47,7 @@ pub async fn flow_from_manifest(
         version: json["version"].as_str().unwrap().to_owned(),
         notes: json["notes"].as_str().map(str::to_owned),
         signature: entry["signature"].as_str().unwrap().to_owned(),
+        os_too_old: None,
     })));
     *script.package.lock().unwrap() = bytes;
     let dir = unique_dir("manifest-flow");

@@ -1,11 +1,11 @@
 //! A session held by another process: show a session open elsewhere as read-only.
 //!
-//! How it is found: `session/read` answers `leaseHolder: {processId}` (2.26.1) from the lobby, without taking the
+//! How it is found: `session/read` answers `leaseHolder: {processId}` from the lobby, without taking the
 //! session (the holder's pid while the Vibe CLI or another app-server has it open, `null` right
 //! after it exits, and a `session/resume` meanwhile answers `conflict` / `session_busy`). Vibe Work polls instead
 //! of subscribing to Vibe's push (`session/lease/subscribe`), so one code path serves every platform and Python
 //! build: the core asks for the sessions a window shows that no channel of ours holds, every
-//! [`POLL`]; a change becomes the `sessionHolder` event, so the window locks and unlocks live.
+//! [`POLL`] (`CoreConfig::holder_poll`); a change becomes the `sessionHolder` event, so the window locks and unlocks live.
 //! The holder is "another process" only when its pid is not our own `vibe-app-server` (all our channels share it).
 //!
 //! Depends on: the gate (`session/read`), `channels` (viewed sessions, bound channels), the supervisor (our server's
@@ -118,10 +118,19 @@ async fn read_holder(
         .pointer("/leaseHolder/processId")
         .and_then(Value::as_u64)
         .and_then(|p| u32::try_from(p).ok());
-    let ours = shared.supervisor.server_pid();
-    Ok(pid
-        .filter(|p| Some(*p) != ours)
-        .map(|pid| (pid, "terminal")))
+    let Some(pid) = pid else { return Ok(None) };
+    let ours = if let Some(leader) = shared.supervisor.server_pid() {
+        let program = shared.supervisor.program();
+        let launchers = shared.supervisor.launcher_programs();
+        tokio::task::spawn_blocking(move || {
+            crate::own_server::is_server(pid, leader, &program, &launchers)
+        })
+        .await
+        .unwrap_or(false)
+    } else {
+        false
+    };
+    Ok((!ours).then_some((pid, "terminal")))
 }
 
 /// Checks one session and publishes a change. Errors leave the last known state.
@@ -179,12 +188,14 @@ pub(crate) fn start_poll(shared: &Arc<Shared>) {
 fn spawn_poll(shared: &Arc<Shared>) -> JoinHandle<()> {
     let weak = Arc::downgrade(shared);
     tokio::spawn(async move {
-        let mut interval = tokio::time::interval(POLL);
+        let every = weak
+            .upgrade()
+            .map_or(POLL, |shared| shared.config.holder_poll);
+        let mut interval = tokio::time::interval(every);
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {
             interval.tick().await;
             let Some(shared) = weak.upgrade() else { return };
-            shared.leases.heartbeat();
             for id in shared.channels.viewed_ids() {
                 if shared.channels.has_channel(&id) {
                     // We hold it: never another process's.

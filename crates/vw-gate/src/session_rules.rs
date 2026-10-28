@@ -13,6 +13,10 @@
 //!   caller's id is kept when it is usable, otherwise one we generate (rewind and fork
 //!   resolve their anchor by that id, and the ids Vibe mints itself are not resolvable on the
 //!   unified harness).
+//! - Fields a newer Vibe added that Vibe Work does not use yet are refused before anything else
+//!   ([`UNUSED_FIELDS`]): forwarding them as given would skip the rule that guards the same
+//!   choice elsewhere (`session/start.firstTurn` would start a turn without the `turn/start`
+//!   content and anchor rules, `session/start.model` without the `config/model/write` check).
 //! - Everything else in the params is forwarded exactly as given.
 
 use serde_json::{Map, Value, json};
@@ -56,6 +60,7 @@ pub(crate) fn adjust(
     params: &Value,
     picked: &PickedFolders,
 ) -> Result<Adjusted, GateError> {
+    unused_fields(method, params)?;
     content::check(method, params)?;
     if matches!(method, "turn/start" | "turn/steer") {
         return with_message_id(method, params);
@@ -82,6 +87,56 @@ pub(crate) fn adjust(
         user_entry_ids: Vec::new(),
         confirm: None,
     })
+}
+
+/// Request fields Vibe 3.0.1/3.0.2 added to forwarded methods that Vibe Work does not send, per
+/// method. They are refused when set (anything but absent, `null` or `false`, the defaults a
+/// generated struct may echo) so the gate keeps the 3.0.0 behaviour until a
+/// release designs their use:
+/// - `session/start`: the first-turn and start-choice fields (`server.py::_apply_start_choices`);
+///   Vibe Work sends the first message with `turn/start` and picks the model with
+///   `config/model/write`.
+/// - `skills/list`: the session-less form (`cwd`, `trustWorkspace` trusts `cwd` for the read);
+///   Vibe Work always lists the skills of an open session, and `sessionId` stays required.
+pub(crate) const UNUSED_FIELDS: &[(&str, &[&str])] = &[
+    (
+        "session/start",
+        &[
+            "title",
+            "model",
+            "reasoningEffort",
+            "sessionOnly",
+            "firstTurn",
+            "startedBySessionId",
+        ],
+    ),
+    ("skills/list", &["cwd", "trustWorkspace"]),
+];
+
+/// Refuses the [`UNUSED_FIELDS`] of `method`, and a `skills/list` without a session.
+fn unused_fields(method: &str, params: &Value) -> Result<(), GateError> {
+    let Some((_, fields)) = UNUSED_FIELDS.iter().find(|(m, _)| *m == method) else {
+        return Ok(());
+    };
+    if let Some(field) = fields.iter().find(|f| {
+        params
+            .get(**f)
+            .is_some_and(|v| !v.is_null() && *v != Value::Bool(false))
+    }) {
+        return Err(invalid(
+            method,
+            format!("`{field}` is not used by Vibe Work"),
+        ));
+    }
+    if method == "skills/list"
+        && params
+            .get("sessionId")
+            .and_then(Value::as_str)
+            .is_none_or(str::is_empty)
+    {
+        return Err(invalid(method, "`sessionId` is required"));
+    }
+    Ok(())
 }
 
 /// The caller's anchor id under `key` when usable, else a fresh one. Absent, `null` and `""`

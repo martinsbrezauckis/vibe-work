@@ -5,7 +5,27 @@
  * scripts/public/check.sh fails when this file and the Rust types disagree.
  */
 
-export type SpeechRequest = { "op": "start", 
+export type SpeechRequest = { "op": "readingReady", 
+/**
+ * The pending reading event's id.
+ */
+requestId: string, 
+/**
+ * False when speech could not be made; no bar or audio is added.
+ */
+available: boolean, 
+/**
+ * True with unavailable when the window already holds two requested readings.
+ */
+busy?: boolean, } | { "op": "readAloud", 
+/**
+ * The owner-selected session; session agents use the credential-scoped tool instead.
+ */
+sessionId: string, 
+/**
+ * A requested part, or None for the last finished reply.
+ */
+text: string | null, } | { "op": "start", 
 /**
  * The rate the webview captures at (16,000 preferred; 8,000 to 96,000 accepted).
  */
@@ -40,7 +60,15 @@ text: string,
  */
 voice: string | null, } | { "op": "voices", };
 
-export type SpeechResult = { "kind": "started", 
+export type SpeechResult = { "kind": "reading", 
+/**
+ * started, nobodyListening, keyMissing, voiceUnavailable or noReply (accepted/expired for a window receipt).
+ */
+status: string, 
+/**
+ * One plain sentence explaining the outcome.
+ */
+message: string, } | { "kind": "started", 
 /**
  * The new stream (random).
  */

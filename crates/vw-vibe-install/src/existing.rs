@@ -22,13 +22,25 @@ pub const PROBE_LIMIT: Duration = Duration::from_secs(25);
 /// Candidates probed at most.
 pub const MAX_PROBES: usize = 4;
 
-/// The warning shown before an install of another version can be chosen.
+/// The reason an install of another version cannot be chosen.
 #[must_use]
 pub fn version_warning(found: &str, pinned: &str) -> String {
-    format!(
-        "This Vibe is version {found}; Vibe Work is built and tested for {pinned}. With another version some \
-         features may not work as expected. Installing Vibe {pinned} for Vibe Work avoids this."
-    )
+    format!("This install is Vibe {found}; Vibe Work needs Vibe {pinned}.")
+}
+
+/// True when the canonical candidate `path` lies in Vibe Work's own install folder `own`, which is skipped (it is
+/// not the user's existing install).
+///
+/// `path` comes from `canonical_executable` (links resolved; on Windows long names and the on-disk case, without the
+/// verbatim prefix), while `own` is the folder as configured: through a symlinked folder, or on Windows in another
+/// spelling, the plain comparison misses. Then both are compared in their canonical forms (`canonicalize`); a side
+/// that cannot be canonicalized compares as written only.
+fn in_own_install(path: &Path, own: &Path) -> bool {
+    path.starts_with(own)
+        || matches!(
+            (path.canonicalize(), own.canonicalize()),
+            (Ok(path), Ok(own)) if path.starts_with(&own)
+        )
 }
 
 /// Every distinct existing server, with its version (or `None` when it did not answer).
@@ -42,7 +54,7 @@ pub async fn find(
     let mut seen: Vec<PathBuf> = Vec::new();
     for candidate in discovery.candidates() {
         if let Some(path) = canonical_executable(&candidate)
-            && !path.starts_with(exclude)
+            && !in_own_install(&path, exclude)
             && !seen.contains(&path)
         {
             seen.push(path);
@@ -79,7 +91,18 @@ pub async fn probe(
     home: &Path,
     parent_env: &[(OsString, OsString)],
 ) -> Option<String> {
-    tokio::time::timeout(PROBE_LIMIT, probe_inner(program, home, parent_env))
+    probe_with_args(program, &[], home, parent_env).await
+}
+
+/// The same bounded initialize probe through a development recording wrapper's arguments.
+/// The wrapper must transparently launch the real server; it never supplies a version itself.
+pub async fn probe_with_args(
+    program: &Path,
+    args: &[OsString],
+    home: &Path,
+    parent_env: &[(OsString, OsString)],
+) -> Option<String> {
+    tokio::time::timeout(PROBE_LIMIT, probe_inner(program, args, home, parent_env))
         .await
         .ok()
         .flatten()
@@ -87,6 +110,7 @@ pub async fn probe(
 
 async fn probe_inner(
     program: &Path,
+    args: &[OsString],
     home: &Path,
     parent_env: &[(OsString, OsString)],
 ) -> Option<String> {
@@ -103,6 +127,7 @@ async fn probe_inner(
     );
     let mut command = tokio::process::Command::new(program);
     command
+        .args(args)
         .env_clear()
         .envs(env)
         .current_dir(home)
@@ -146,4 +171,82 @@ async fn probe_inner(
         let _ = child.kill().await;
     }
     version
+}
+
+#[cfg(test)]
+mod tests {
+    use super::in_own_install;
+    use std::path::{Path, PathBuf};
+
+    fn scratch(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "vw-own-install-{name}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(dir.join("own").join("bin")).unwrap();
+        std::fs::create_dir_all(dir.join("other").join("bin")).unwrap();
+        std::fs::write(dir.join("own").join("bin").join("server"), b"x").unwrap();
+        std::fs::write(dir.join("other").join("bin").join("server"), b"x").unwrap();
+        dir
+    }
+
+    /// Candidates arrive canonical (links resolved); Vibe Work's own install folder may be configured through a
+    /// symlinked folder (a linked home, macOS `/var`). Its server is still its own; another folder's is not.
+    #[cfg(unix)]
+    #[test]
+    fn own_install_through_a_linked_folder_is_recognised() {
+        let base = scratch("linked");
+        let linked = base.join("linked-own");
+        std::os::unix::fs::symlink(base.join("own"), &linked).unwrap();
+        let own_server = base.join("own/bin/server").canonicalize().unwrap();
+        let other_server = base.join("other/bin/server").canonicalize().unwrap();
+        assert!(in_own_install(&own_server, &base.join("own")));
+        assert!(in_own_install(&own_server, &linked));
+        assert!(!in_own_install(&other_server, &linked));
+        assert!(!in_own_install(
+            &other_server,
+            Path::new("/nonexistent-own-install")
+        ));
+        std::fs::remove_dir_all(base).unwrap();
+    }
+
+    /// The candidate is canonical without the verbatim prefix (`C:\...`, long names, on-disk case); the own folder
+    /// may be written in another case, with `/` or verbatim. All name the same install.
+    #[cfg(windows)]
+    #[test]
+    fn own_install_matches_every_windows_spelling() {
+        let base = scratch("spellings");
+        let verbatim = base.join("own").canonicalize().unwrap();
+        let plain = PathBuf::from(verbatim.to_string_lossy().trim_start_matches(r"\\?\"));
+        let server = plain.join("bin").join("server");
+        let other = PathBuf::from(
+            base.join("other")
+                .canonicalize()
+                .unwrap()
+                .to_string_lossy()
+                .trim_start_matches(r"\\?\"),
+        )
+        .join("bin")
+        .join("server");
+        for own in [
+            base.join("own"),
+            verbatim.clone(),
+            plain.clone(),
+            PathBuf::from(plain.to_string_lossy().replace('\\', "/")),
+            PathBuf::from(plain.to_string_lossy().to_uppercase()),
+            PathBuf::from(plain.to_string_lossy().to_lowercase()),
+        ] {
+            assert!(in_own_install(&server, &own), "own {}", own.display());
+            assert!(!in_own_install(&other, &own), "own {}", own.display());
+        }
+        assert!(!in_own_install(
+            &server,
+            Path::new(r"C:\nonexistent-own-install")
+        ));
+        std::fs::remove_dir_all(base).unwrap();
+    }
 }

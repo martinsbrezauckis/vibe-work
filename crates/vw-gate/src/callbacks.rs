@@ -81,6 +81,8 @@ pub(crate) struct CallbackBook {
     entries: HashMap<String, Entry>,
     answered_order: VecDeque<String>,
     max_open: usize,
+    /// Claimed answers per session whose `callback/result` has not returned yet.
+    sending: HashMap<String, usize>,
 }
 
 fn invalid(detail: &str) -> CallbackFault {
@@ -107,6 +109,7 @@ impl CallbackBook {
             entries: HashMap::new(),
             answered_order: VecDeque::new(),
             max_open: max_open.max(1),
+            sending: HashMap::new(),
         }
     }
 
@@ -237,7 +240,24 @@ impl CallbackBook {
             .answered = true;
         self.answered_order.push_back(id.to_owned());
         self.forget_old_answered();
+        *self.sending.entry(session_id.to_owned()).or_default() += 1;
         Ok(())
+    }
+
+    /// The claimed answer's `callback/result` returned (delivered or failed).
+    pub(crate) fn sent(&mut self, session_id: &str) {
+        if let Some(count) = self.sending.get_mut(session_id) {
+            *count -= 1;
+            if *count == 0 {
+                self.sending.remove(session_id);
+            }
+        }
+    }
+
+    /// True while an answer of this session is on its way to the server: a No that ends the turn
+    /// makes the session idle before Vibe replies, and closing the channel then would lose the reply.
+    pub(crate) fn sending(&self, session_id: &str) -> bool {
+        self.sending.contains_key(session_id)
     }
 
     /// Forgets one callback (the server cancelled or expired it, or its turn ended).

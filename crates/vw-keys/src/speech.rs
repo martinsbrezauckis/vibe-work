@@ -36,7 +36,7 @@ impl KeyService {
     /// [`SpeechFailure`].
     pub async fn speak(&self, text: &str, voice: &str) -> Result<Speech, SpeechFailure> {
         let key = self.key_for_call().map_err(SpeechFailure::KeyNeeded)?;
-        let (client, base) = self.api();
+        let (ref client, base) = self.api();
         vw_mistral::tts::speak(
             client,
             base,
@@ -55,7 +55,7 @@ impl KeyService {
     /// [`SpeechFailure`].
     pub async fn voices(&self) -> Result<Vec<Voice>, SpeechFailure> {
         let key = self.key_for_call().map_err(SpeechFailure::KeyNeeded)?;
-        let (client, base) = self.api();
+        let (ref client, base) = self.api();
         vw_mistral::tts::voices(client, base, key.as_str())
             .await
             .map_err(SpeechFailure::Speech)
@@ -71,7 +71,7 @@ impl KeyService {
         language: Option<&str>,
     ) -> Result<Transcript, SpeechFailure> {
         let key = self.key_for_call().map_err(SpeechFailure::KeyNeeded)?;
-        let (client, base) = self.api();
+        let (ref client, base) = self.api();
         vw_mistral::stt_batch::transcribe(
             client,
             base,

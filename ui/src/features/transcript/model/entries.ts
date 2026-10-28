@@ -7,10 +7,12 @@
  * Depends on: protocol/core (`JsonValue`). Called by: the transcript model (`build.ts`, `callbacks.ts`,
  * `diff.ts`, `todos.ts`) and the row views.
  * Invariants: pure; never mutates its input; labels come from Vibe (`detail.display`, `state.display`),
- * never invented here.
+ * with shared plain labels for built-in tool identifiers.
  */
+import { toolText } from "./toolLabels";
 import { connectorToolLabel } from "../../connectors/model/meta";
 import type { JsonValue } from "../../../protocol/core";
+import type { CodeRef } from "../../files/model/context";
 
 /** A JSON object as the store holds it. */
 export type Obj = Readonly<Record<string, JsonValue | undefined>>;
@@ -100,7 +102,7 @@ export function statusOf(entry: Obj): string {
 const LIVE_STATUSES = new Set(["pending", "running", "blocked"]);
 
 /** True while an effect has not settled (`pending`, `running`, `blocked`, or the entry in progress). */
-export function effectLive(entry: Obj): boolean {
+function effectLive(entry: Obj): boolean {
   return LIVE_STATUSES.has(statusOf(entry)) || (statusOf(entry) === "" && inProgress(entry));
 }
 
@@ -174,7 +176,9 @@ export function effectView(entry: Obj): EffectView {
   // unified Vibe labels connector tool steps with the raw name (`connector_linear.list_issues`);
   // show "Linear: list issues" instead.
   const { verb } = label;
-  const target = connectorToolLabel(toolName) ?? label.target;
+  const target =
+    connectorToolLabel(toolName) ??
+    toolText(toolName, label.target, str(obj(detail["input"])?.["command"]));
   const success = settled === null ? null : settled["success"] === true;
   const errorObj = obj(state["error"]);
   const error =
@@ -186,9 +190,9 @@ export function effectView(entry: Obj): EffectView {
     toolName,
     status,
     live,
-    verb: verb === "" ? (str(entry["title"]) ?? "Step") : verb,
+    verb: toolText(toolName, verb === "" ? (str(entry["title"]) ?? "Step") : verb),
     target,
-    statusText: str(call["statusText"]) ?? "",
+    statusText: toolText(toolName, str(call["statusText"]) ?? ""),
     success,
     warnings: arr(settled?.["warnings"]).filter((w): w is string => typeof w === "string"),
     approvalNote: str(settled?.["approvalNote"]),
@@ -295,7 +299,7 @@ export function loopMessage(entry: Obj): string | null {
  * own chips carry their label in `userDisplayContent` as `{type: "vw.context", label}` items; those
  * win over the resource URIs (`vw://context/<n>`).
  */
-export function contextNames(entry: Obj): string[] {
+function contextNames(entry: Obj): string[] {
   const labels = arr(obj(entry["userDisplayContent"])?.["content"]).flatMap((item) => {
     const part = obj(item);
     const label = part?.["type"] === "vw.context" ? str(part["label"]) : null;
@@ -306,8 +310,34 @@ export function contextNames(entry: Obj): string[] {
     const b = obj(block);
     const resource = obj(b?.["resource"]);
     if (b?.["type"] !== "resource" || resource === null || resource["kind"] === "blob") return [];
+    if (resource["uri"] === "vw://app/context") return [];
     return [str(resource["title"]) ?? str(resource["name"]) ?? str(resource["uri"]) ?? "context"];
   });
+}
+
+/** Context labels with optional return locations; old resource messages keep their plain labels. */
+export function contextChips(entry: Obj): Array<{ label: string; ref?: CodeRef }> {
+  const chips = arr(obj(entry["userDisplayContent"])?.["content"]).flatMap((item) => {
+    const part = obj(item);
+    const label = part?.["type"] === "vw.context" ? str(part["label"]) : null;
+    if (label === null || label === "") return [];
+    const ref = obj(part?.["ref"]);
+    const path = str(ref?.["path"]);
+    const start = num(ref?.["start"]);
+    const end = num(ref?.["end"]);
+    const location =
+      path !== null &&
+      start !== null &&
+      end !== null &&
+      Number.isInteger(start) &&
+      Number.isInteger(end) &&
+      start >= 0 &&
+      end >= start
+        ? { path, start, end }
+        : undefined;
+    return [{ label, ...(location === undefined ? {} : { ref: location }) }];
+  });
+  return chips.length > 0 ? chips : contextNames(entry).map((label) => ({ label }));
 }
 
 /**

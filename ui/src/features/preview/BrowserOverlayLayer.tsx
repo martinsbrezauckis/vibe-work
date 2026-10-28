@@ -28,6 +28,8 @@ import type { Previews } from "./store";
 
 interface Frame {
   bounds: Rect;
+  /** The page's picture, shown in place of the parked page; null: a plain cover. */
+  snapshot: string | null;
   sessionId: string;
   tabId: string | undefined;
   pageUrl: string;
@@ -78,15 +80,31 @@ export function BrowserOverlayLayer({
     if (!open || pageUrl === null) return;
     const attempt = { current: true };
     const active = () => attempt.current;
-    const task = queue.current.then(async () => {
-      setState("preparing");
-      const result = await previews.browserOverlay(sessionId, "prepare", tabId);
-      if (!active()) return;
-      if (result.bounds === null) throw new Error("Browser overlay has no page bounds");
-      setFrame({ bounds: result.bounds, sessionId, tabId, pageUrl });
-      await previews.browserOverlay(sessionId, "show", tabId);
-      if (active()) setState("open");
-    });
+    const task = queue.current
+      .then(async () => {
+        setState("preparing");
+        const result = await previews.browserOverlay(sessionId, "prepare", tabId);
+        if (!active()) return;
+        if (result.bounds === null) {
+          // The page is no longer the one in view (a tab switch overtook the menu): nothing to park, the menus close.
+          closeBrowserOverlays();
+          return;
+        }
+        setFrame({
+          bounds: result.bounds,
+          snapshot: result.snapshot ?? null,
+          sessionId,
+          tabId,
+          pageUrl,
+        });
+        await previews.browserOverlay(sessionId, "show", tabId);
+        if (active()) setState("open");
+      })
+      .catch((error: unknown) => {
+        // The person switched tabs or closed the menu while this attempt waited: the core refuses parking a page
+        // that is no longer selected, which is expected and not an error to show over the page now in view.
+        if (active()) throw error;
+      });
     queue.current = task.catch(() => {
       // Keep backend refusal/error visible through the controller; never pretend the live view was hidden.
       if (attempt.current) closeBrowserOverlays();
@@ -121,13 +139,15 @@ export function BrowserOverlayLayer({
     frame.pageUrl !== pageUrl
   )
     return null;
-  const { bounds } = frame;
+  const { bounds, snapshot } = frame;
   return (
     <div
       className="browser-overlay-page"
       data-state={state}
       style={{ left: bounds.x, top: bounds.y, width: bounds.width, height: bounds.height }}
       aria-hidden="true"
-    />
+    >
+      {snapshot !== null && <img className="browser-overlay-shot" src={snapshot} alt="" />}
+    </div>
   );
 }

@@ -27,14 +27,14 @@ function asObject(value: JsonValue | undefined): Obj | null {
 }
 
 /** One setting: its value and who else sets it. */
-export interface Field<T> {
+interface Field<T> {
   value: T | null;
   /** The layer that decides it when that layer is not the user's file, else `null`. */
   setBy: string | null;
 }
 
 /** A configured model's tunables. */
-export interface ModelTuning {
+interface ModelTuning {
   alias: string;
   label: string;
   topP: number | null;
@@ -103,7 +103,7 @@ export function parseVibeSettings(result: JsonValue): VibeSettings | null {
     : asObject(models) !== null
       ? Object.values(asObject(models) ?? {})
       : [];
-  // The default model is the user's own value; a session's pick sits in the overrides layer on top (probe 2026-10-10).
+  // The default model is the user's own value; a session's pick sits in the overrides layer on top.
   const activeField = byName.get("active_model");
   const layers = activeField?.["layerValues"];
   const own = Array.isArray(layers)
@@ -221,9 +221,4 @@ export async function writeSubagentsForNewChats(
   } catch (thrown) {
     throw message(thrown);
   }
-}
-
-/** The JSON-pointer path of a model field (`/models/<alias>/<field>`; `~` and `/` escaped). */
-export function modelPath(alias: string, fieldName: "top_p" | "max_output_tokens"): string {
-  return `/models/${alias.replace(/~/g, "~0").replace(/\//g, "~1")}/${fieldName}`;
 }

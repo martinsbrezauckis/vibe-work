@@ -7,7 +7,7 @@ use std::sync::Arc;
 use serde_json::{Value, json};
 use vw_browser::delegation::DelegationAuthority;
 use vw_browser::{Actor, Outcome};
-use vw_gate::{ConfirmationRequest, Confirmer, Requester, dialog_value};
+use vw_gate::{ConfirmationRequest, Requester, dialog_value};
 use vw_preview::{PageTab, PageTabKind, PageTabOwner, PreviewService, PreviewState};
 
 use crate::browser::browser;
@@ -61,7 +61,72 @@ fn still_running(shared: &Shared, owner: &str, key: &str) -> Result<(), String> 
     Ok(())
 }
 
-async fn close(shared: &Arc<Shared>, owner: &str, key: &str) -> Result<Value, String> {
+pub(crate) async fn prepare_close(
+    shared: &Arc<Shared>,
+    owner: &str,
+    key: &str,
+) -> Result<crate::ask::tool_calls::receipts::Execution, String> {
+    let service = &hub(shared).map_err(|error| error.message)?.service;
+    let target = current_tab(service, owner, key).map_or_else(
+        |_| key.to_owned(),
+        |tab| {
+            format!(
+                "{} ({}) [{}]",
+                vw_gate::dialog_line(
+                    tab.preview
+                        .as_ref()
+                        .and_then(|v| v.title.as_deref())
+                        .unwrap_or("Untitled tab")
+                ),
+                site(&tab).unwrap_or_else(|| "unknown site".to_owned()),
+                key
+            )
+        },
+    );
+    let prepared = match key {
+        "" => Err("close_tab needs an explicit tab id".to_owned()),
+        "new" => Err("close_tab needs an existing web tab id".to_owned()),
+        _ => prepare_close_action(shared, owner, key).await,
+    };
+    let action = match prepared {
+        Ok(action) => action,
+        Err(error) => {
+            log_close(shared, owner, &target, &Err(error.clone()));
+            return Err(error);
+        }
+    };
+    let weak = Arc::downgrade(shared);
+    let owner = owner.to_owned();
+    Ok(Box::pin(async move {
+        let shared = weak.upgrade().ok_or("Browser closed.")?;
+        let driver = browser(&shared).map_err(|error| error.message)?;
+        let _flight = driver.sessions().begin(&owner, Actor::Agent);
+        let result = action.await;
+        log_close(&shared, &owner, &target, &result);
+        result
+    }))
+}
+
+fn log_close(shared: &Shared, owner: &str, target: &str, result: &Result<Value, String>) {
+    let (outcome, detail) = match result {
+        Ok(value) => (Outcome::Done, value["result"].as_str().unwrap_or("closed")),
+        Err(error) if error == vw_browser::STOPPED || error.contains("canceled") => {
+            (Outcome::Stopped, error.as_str())
+        }
+        Err(error) => (Outcome::Refused, error.as_str()),
+    };
+    if let Ok(driver) = browser(shared) {
+        driver
+            .sessions()
+            .end(owner, Actor::Agent, "close_tab", target, outcome, detail);
+    }
+}
+
+async fn prepare_close_action(
+    shared: &Arc<Shared>,
+    owner: &str,
+    key: &str,
+) -> Result<crate::ask::tool_calls::receipts::Execution, String> {
     let service = &hub(shared).map_err(|error| error.message)?.service;
     let driver = browser(shared).map_err(|error| error.message)?;
     let _owner_wait = driver.sessions().authorization_wait(owner, Actor::Agent);
@@ -100,59 +165,66 @@ async fn close(shared: &Arc<Shared>, owner: &str, key: &str) -> Result<Value, St
             biased;
             _ = owner_cancel.changed() => return Err("browser tab close was canceled".to_owned()),
             _ = page_cancel.changed() => return Err("browser tab close was canceled".to_owned()),
-            answer = shared.confirmer.confirm(&request) => answer.approved(),
+            answer = crate::ask::guards::answer(shared, request, "closing this tab") => answer?.0,
         };
-        if !approved {
-            still_running(shared, owner, key)?;
-            return Ok(
-                json!({"action":"close_tab", "ok":true, "tab":{"id":key,"site":site(&tab)},
-                "result":"the user kept this tab"}),
-            );
+        if !approved.approved() {
+            return Err(approved.agent_text("closing this tab"));
         }
         permitted_by_answer = true;
     }
-    if owner_cancel.has_changed().unwrap_or(true) || page_cancel.has_changed().unwrap_or(true) {
-        return Err("browser tab close was canceled".to_owned());
-    }
-    still_running(shared, owner, key)?;
-    let now = current_tab(service, owner, key)?;
-    let actual = service
-        .handoff_review_fingerprint(owner, key)
-        .map_err(|error| error.to_string())?;
-    if fingerprint != actual || now.owner_kind != tab.owner_kind {
-        return Err("browser tab changed while closing; ask again".to_owned());
-    }
-    if user_origin
-        && !permitted_by_answer
-        && !crate::browser_delegation::load(shared).close_user_tabs
-    {
-        return Err("permission to close user tabs changed; ask again".to_owned());
-    }
-    let admit = || {
-        let allowed = !owner_cancel.has_changed().unwrap_or(true)
-            && !page_cancel.has_changed().unwrap_or(true)
-            && still_running(shared, owner, key).is_ok()
-            && (!user_origin
-                || permitted_by_answer
-                || crate::browser_delegation::load(shared).close_user_tabs);
-        if allowed {
-            driver.sessions().cancel_actions(key);
-            driver.clear_secret_choice(key);
+    let weak = Arc::downgrade(shared);
+    let owner = owner.to_owned();
+    let key = key.to_owned();
+    Ok(Box::pin(async move {
+        let shared = weak.upgrade().ok_or("Browser closed.")?;
+        let shared = &shared;
+        let owner = owner.as_str();
+        let key = key.as_str();
+        let service = &hub(shared).map_err(|e| e.message)?.service;
+        let driver = browser(shared).map_err(|e| e.message)?;
+        if owner_cancel.has_changed().unwrap_or(true) || page_cancel.has_changed().unwrap_or(true) {
+            return Err("browser tab close was canceled".to_owned());
         }
-        allowed
-    };
-    let restore_error = service
-        .close_web_tab_and_restore_checked(owner, key, &fingerprint, &admit)
-        .await
-        .map_err(|error| error.to_string())?;
-    driver.sessions().session_ended(key);
-    Ok(close_receipt(
-        driver,
-        owner,
-        &tab,
-        permitted_by_answer,
-        restore_error.map(|error| error.to_string()),
-    ))
+        still_running(shared, owner, key)?;
+        let now = current_tab(service, owner, key)?;
+        let actual = service
+            .handoff_review_fingerprint(owner, key)
+            .map_err(|error| error.to_string())?;
+        if fingerprint != actual || now.owner_kind != tab.owner_kind {
+            return Err("browser tab changed while closing; ask again".to_owned());
+        }
+        if user_origin
+            && !permitted_by_answer
+            && !crate::browser_delegation::load(shared).close_user_tabs
+        {
+            return Err("permission to close user tabs changed; ask again".to_owned());
+        }
+        let admit = || {
+            let allowed = !owner_cancel.has_changed().unwrap_or(true)
+                && !page_cancel.has_changed().unwrap_or(true)
+                && still_running(shared, owner, key).is_ok()
+                && (!user_origin
+                    || permitted_by_answer
+                    || crate::browser_delegation::load(shared).close_user_tabs);
+            if allowed {
+                driver.sessions().cancel_actions(key);
+                driver.clear_secret_choice(key);
+            }
+            allowed
+        };
+        let restore_error = service
+            .close_web_tab_and_restore_checked(owner, key, &fingerprint, &admit)
+            .await
+            .map_err(|error| error.to_string())?;
+        driver.sessions().session_ended(key);
+        Ok(close_receipt(
+            driver,
+            owner,
+            &tab,
+            permitted_by_answer,
+            restore_error.map(|error| error.to_string()),
+        ))
+    }))
 }
 
 fn close_receipt(
@@ -223,47 +295,7 @@ pub(crate) async fn call(
             Ok(json!({"action":"list_tabs", "ok":true, "tabs":tabs,
                 "untrustedPageContent":{"tabs":content}}))
         }
-        Some("close_tab") => {
-            let key = tab.unwrap_or("");
-            let driver = browser(shared).map_err(|error| error.message)?;
-            let _flight = driver.sessions().begin(owner, Actor::Agent);
-            let target = current_tab(service, owner, key).map_or_else(
-                |_| key.to_owned(),
-                |tab| {
-                    format!(
-                        "{} ({}) [{}]",
-                        vw_gate::dialog_line(
-                            tab.preview
-                                .as_ref()
-                                .and_then(|v| v.title.as_deref())
-                                .unwrap_or("Untitled tab")
-                        ),
-                        site(&tab).unwrap_or_else(|| "unknown site".to_owned()),
-                        key
-                    )
-                },
-            );
-            let result = match key {
-                "" => Err("close_tab needs an explicit tab id".to_owned()),
-                "new" => Err("close_tab needs an existing web tab id".to_owned()),
-                _ => close(shared, owner, key).await,
-            };
-            let (outcome, detail) = match &result {
-                Ok(value) if value["result"] == "the user kept this tab" => {
-                    (Outcome::Refused, "the user kept this tab")
-                }
-                Ok(value) => (Outcome::Done, value["result"].as_str().unwrap_or("closed")),
-                Err(error) if error == vw_browser::STOPPED || error.contains("canceled") => {
-                    (Outcome::Stopped, error.as_str())
-                }
-                Err(error) => (Outcome::Refused, error.as_str()),
-            };
-            browser(shared)
-                .map_err(|error| error.message)?
-                .sessions()
-                .end(owner, Actor::Agent, "close_tab", &target, outcome, detail);
-            result
-        }
+        Some("close_tab") => prepare_close(shared, owner, tab.unwrap_or("")).await?.await,
         _ => Err("unknown browser tab action".to_owned()),
     }
 }

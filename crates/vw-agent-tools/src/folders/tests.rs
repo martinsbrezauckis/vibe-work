@@ -17,7 +17,7 @@ fn windows_leading_assignment_is_not_a_folder_path() -> std::io::Result<()> {
         assert_eq!(
             check_segments(
                 &layout,
-                crate::killparse_shell::windows_segments(command),
+                &crate::killparse_shell::windows_segments(command),
                 None,
                 &permits,
             ),
@@ -34,7 +34,7 @@ fn windows_leading_assignment_is_not_a_folder_path() -> std::io::Result<()> {
         assert_eq!(
             check_segments(
                 &windows_layout,
-                crate::killparse_shell::windows_segments(&format!("{assignment} echo ok")),
+                &crate::killparse_shell::windows_segments(&format!("{assignment} echo ok")),
                 None,
                 &permits,
             ),
@@ -44,7 +44,7 @@ fn windows_leading_assignment_is_not_a_folder_path() -> std::io::Result<()> {
     assert!(
         check_segments(
             &layout,
-            crate::killparse_shell::windows_segments("echo R=folder/guarded/file"),
+            &crate::killparse_shell::windows_segments("echo R=folder/guarded/file"),
             None,
             &permits,
         )
@@ -218,7 +218,7 @@ fn layout_and_path_resolution_errors_name_the_path() -> std::io::Result<()> {
     let refusal = layout.check(&bad, &root, Access::Write, &|_, _| Ok(()));
     assert!(
         refusal.as_deref().is_some_and(|text| {
-            text.contains("folders-invalid") && text.contains("could not be resolved")
+            text.contains("folders-invalid") && text.contains("could not resolve")
         }),
         "{refusal:?}"
     );
@@ -384,5 +384,195 @@ fn approval_file_aliases_are_refused_before_the_file_exists() -> std::io::Result
             "approval-file alias must be refused: {name}"
         );
     }
+    Ok(())
+}
+
+/// The Chrome Control permissions live beside the Vibe home; only the user changes them, in Settings. An agent's
+/// command or tool that names that folder is refused whatever it does there (reading included: nothing in it is the
+/// agent's), also when the shell only starts there.
+#[test]
+fn the_chrome_control_state_folder_is_refused_for_every_use() -> std::io::Result<()> {
+    let data = std::fs::canonicalize(std::env::temp_dir())?
+        .join(format!("vw-chrome-state-{}", std::process::id()))
+        .join("chrome-control-state");
+    std::fs::create_dir_all(data.join("vibe-home"))?;
+    std::fs::create_dir_all(data.join("project"))?;
+    let layout = Layout::new(&data.join("vibe-home"), &data.join("project"))?;
+    for access in [
+        Access::Read,
+        Access::Write,
+        Access::Unknown,
+        Access::Context,
+    ] {
+        for name in [
+            "chrome-control",
+            "chrome-control/permissions.json",
+            "Chrome-Control/permissions.json",
+            "chrome-control./permissions.json",
+        ] {
+            let refusal = layout.check(&data.join(name), &data, access, &|_, _| Ok(()));
+            assert!(
+                refusal
+                    .as_deref()
+                    .is_some_and(|r| r.contains("Settings › Browser › Your Chrome")),
+                "{name} with {access:?}: {refusal:?}"
+            );
+        }
+    }
+    // A neighbour with a longer name is not the folder.
+    assert_eq!(
+        layout.check(
+            &data.join("chrome-control-notes.txt"),
+            &data,
+            Access::Read,
+            &|_, _| Ok(())
+        ),
+        None
+    );
+    let command = format!(
+        "cat {}",
+        data.join("chrome-control/permissions.json").display()
+    );
+    assert!(check_command(&layout, &command, None, &|_, _| Ok(())).is_some());
+    Ok(())
+}
+
+/// A heredoc fixture: a Vibe home under `<root>/data`, a project folder, all permitted.
+fn heredoc_layout(name: &str) -> std::io::Result<(PathBuf, Layout)> {
+    let root = std::fs::canonicalize(std::env::temp_dir())?
+        .join(format!("vw-heredoc-{name}-{}", std::process::id()));
+    let vibe_home = root.join("data").join("vibe-home");
+    let cwd = root.join("project");
+    std::fs::create_dir_all(&vibe_home)?;
+    std::fs::create_dir_all(&cwd)?;
+    Ok((root, Layout::new(&vibe_home, &cwd)?))
+}
+
+const DIVIDES: &str =
+    "left = (w - side) // 2\ntop = (h - side) // 2\nratio = w / h\nprint(left, top, ratio)";
+
+/// An inline script's body is the program's input, not shell words, so Python's
+/// `// 2` and `w / h` are not the path `/` (an ancestor of Vibe Work's data folder).
+#[test]
+fn an_inline_script_that_divides_is_not_a_path() -> std::io::Result<()> {
+    let (root, layout) = heredoc_layout("heredoc-ok")?;
+    let permits = |_: &Path, _: bool| Ok(());
+    let script = DIVIDES;
+    for command in [
+        // One bash call, `cd` first, a quoted delimiter.
+        format!(
+            "cd {} && python3 - <<'EOF'\n{script}\nEOF",
+            layout.cwd.display()
+        ),
+        format!("python3 - <<'EOF'\n{script}\nEOF\necho done"),
+        format!("python3 <<-\"EOF\"\n\t{script}\n\tEOF"),
+    ] {
+        assert_eq!(
+            check_command(&layout, &command, None, &permits),
+            None,
+            "{command}"
+        );
+    }
+    std::fs::remove_dir_all(&root)?;
+    Ok(())
+}
+
+/// The protection stays: a body that a shell runs, a literal protected path or a quoted `/` in any
+/// body, a body handed on to a shell, and every command after the body are still checked and refused.
+#[test]
+fn heredoc_bodies_that_really_write_there_stay_refused() -> std::io::Result<()> {
+    let (root, layout) = heredoc_layout("heredoc-refused")?;
+    let permits = |_: &Path, _: bool| Ok(());
+    let script = DIVIDES;
+    let approvals = root.join("data").join("plugin-approvals.json");
+    for command in [
+        // A shell runs its body: `/` there is the root folder.
+        "bash <<'EOF'\nrm -rf /\nEOF".to_owned(),
+        "sh -s <<EOF\nrm -rf / // 2\nEOF".to_owned(),
+        // cat passes the body on to a shell.
+        "cat <<'EOF' | sh\nrm -rf /\nEOF".to_owned(),
+        // A here-document written into the protected file: the redirection target is a path as before.
+        format!("cat > {} <<'EOF'\n{{}}\nEOF", approvals.display()),
+        format!(
+            "python3 - > {} <<'EOF'\nprint(7 // 2)\nEOF",
+            approvals.display()
+        ),
+        format!("tee {} <<'EOF'\n{{}}\nEOF", approvals.display()),
+        // A quoted `/` in a script is the root folder, not an operator.
+        "python3 - <<'EOF'\nimport shutil\nshutil.rmtree('/')\nEOF".to_owned(),
+        // The body ends at its delimiter: what follows is a command again.
+        format!("python3 - <<'EOF'\n{script}\nEOF\nrm -rf /"),
+        "python3 - <<-EOF\n\tx = 1 // 2\n\tEOF\nrm -rf /".to_owned(),
+        // `<<<` is a here-string, not a here-document: the next line is a command.
+        "cat <<< 'a // b'\nrm -rf /".to_owned(),
+    ] {
+        assert!(
+            check_command(&layout, &command, None, &permits).is_some(),
+            "must stay refused: {command}"
+        );
+    }
+    std::fs::remove_dir_all(&root)?;
+    Ok(())
+}
+
+/// Bypass attempts through other interpreters, files run later and odd delimiters: each command must be refused.
+#[test]
+fn heredoc_bypasses_through_interpreters_files_and_delimiters_are_refused() -> std::io::Result<()> {
+    let (root, layout) = heredoc_layout("heredoc-bypass")?;
+    let permits = |_: &Path, _: bool| Ok(());
+    let bypasses = [
+        // Perl, Ruby and JavaScript have `/`-delimited quotes and regexes: a bare `/` there may be literal.
+        "perl <<'EOF'\nuse File::Path; rmtree(q / /. $ENV{HOME})\nEOF",
+        "ruby <<'EOF'\nrequire 'fileutils'; FileUtils.rm_rf(%r / /.source + Dir.home)\nEOF",
+        "node <<'EOF'\nrequire('fs').rmSync(/ /.source + require('os').homedir(), {recursive: true})\nEOF",
+        // Python: a `/` beside a string literal may join a path (`Path.home() / '.local'`).
+        "python3 - <<'EOF'\nimport pathlib, shutil\nshutil.rmtree(pathlib.Path.home() / '.local' / 'share')\nEOF",
+        // A cat/tee body written to a file that a later command runs.
+        "cat > run.sh <<'EOF'\nrm -rf /\nEOF\nsh run.sh",
+        "tee run.sh <<'EOF' >/dev/null\nrm -rf /\nEOF\nbash run.sh",
+        // The interpreter's output handed on to a shell, also through a line continuation.
+        "python3 - <<'EOF' | sh\nprint('rm -rf ' + chr(47))\nrm -rf /\nEOF",
+        "python3 - <<'EOF' \\\n| sh\nrm -rf /\nEOF",
+        // Delimiters bash reads differently (`$'..'`, `$".."`, expansions) and a body with no closing line.
+        "python3 - <<$'EOF'\nx = 1\nEOF\nrm -rf /\n$EOF",
+        "python3 - <<$\"EOF\"\nx = 1\nEOF\nrm -rf /\n$EOF",
+        "python3 - <<$D\nx = 1\n$D\nrm -rf /",
+        "python3 - <<'EOF'\nrm -rf /",
+    ]
+    .into_iter()
+    .filter(|command| check_command(&layout, command, None, &permits).is_none())
+    .collect::<Vec<_>>();
+    std::fs::remove_dir_all(&root)?;
+    assert!(bypasses.is_empty(), "must be refused: {bypasses:#?}");
+    Ok(())
+}
+
+/// Bypass attempts through command grouping, quoting and other invocation forms: each command must be refused (the
+/// exemption must not apply, so the `/` is checked as before).
+#[test]
+fn heredoc_bypasses_through_grouping_quoting_and_forms_are_refused() -> std::io::Result<()> {
+    let (root, layout) = heredoc_layout("heredoc-bypass2")?;
+    let permits = |_: &Path, _: bool| Ok(());
+    let bypasses = [
+        // A here-document belongs to the command being read at its `<<`, not to the next one kept.
+        "( bash ) <<'EOF'; python3 -\nrm -rf /\nEOF",
+        "{ bash; } <<'EOF'; python3 -\nrm -rf /\nEOF",
+        "bash <<'EOF' && python3 -\nrm -rf /\nEOF",
+        // Quoting the shell reads differently from Python (a multi-line string, a quote in a comment).
+        "python3 - <<'EOF'\nimport shutil\np = \'\'\'\n\'\n/\n\'\'\'\nshutil.rmtree(p.split()[-1])\nEOF",
+        "python3 - <<'EOF'\nimport shutil  # it's the root\nx = 1 / 2\nshutil.rmtree(chr(47))\nEOF",
+        "python3 - <<'EOF'\ns = \"\\\" / \\\"\"\nprint(1 / 2)\nEOF",
+        // Output to a file a later command runs, a process substitution, other forms than `python3 -`.
+        "python3 - > run.sh <<'EOF'\nprint(1 / 2)\nEOF\nsh run.sh",
+        "bash <(python3 - <<'EOF'\nprint(1 / 2)\nEOF\n)",
+        "python3 - x <<'EOF'\nprint(1 / 2)\nEOF",
+        "sudo python3 - <<'EOF'\nprint(1 / 2)\nEOF",
+        "python3 - <<EOF\nprint(1 / 2)\nEOF",
+    ]
+    .into_iter()
+    .filter(|command| check_command(&layout, command, None, &permits).is_none())
+    .collect::<Vec<_>>();
+    std::fs::remove_dir_all(&root)?;
+    assert!(bypasses.is_empty(), "must be refused: {bypasses:#?}");
     Ok(())
 }

@@ -115,6 +115,7 @@ export function VaultItemActions(props: {
   }, [mode, generating, props.inline]);
 
   const choose = (action: () => void) => {
+    if (props.busy) return;
     action();
     close();
   };
@@ -135,11 +136,11 @@ export function VaultItemActions(props: {
       }}
     >
       {props.inline !== true && (
-        <button
+        <Button
           data-testid="secrets.vault-item-actions-set-mode"
           ref={trigger}
           type="button"
-          className="tb-btn vault-actions-trigger"
+          placement="vault-actions"
           aria-label={`Actions for ${props.name}`}
           aria-expanded={mode !== "closed"}
           disabled={props.busy}
@@ -149,7 +150,7 @@ export function VaultItemActions(props: {
           }}
         >
           Actions
-        </button>
+        </Button>
       )}
       {mode === "menu" && (
         <div
@@ -165,7 +166,8 @@ export function VaultItemActions(props: {
             <>
               <Button
                 data-testid="secrets.vault-item-actions-set-name"
-                small
+                disabled={props.busy}
+                shape="outlined"
                 type="button"
 
                 onClick={() => {
@@ -177,7 +179,8 @@ export function VaultItemActions(props: {
               </Button>
               <Button
                 data-testid="secrets.vault-item-actions-set-mode-2"
-                small
+                disabled={props.busy}
+                shape="outlined"
                 type="button"
 
                 onClick={() => {
@@ -191,7 +194,8 @@ export function VaultItemActions(props: {
           {props.kind === "login" && copyUsername !== undefined && (
             <Button
               data-testid="secrets.vault-item-actions-choose"
-              small
+              disabled={props.busy}
+              shape="outlined"
               type="button"
 
               onClick={() => {
@@ -203,7 +207,8 @@ export function VaultItemActions(props: {
           )}
           <Button
             data-testid="secrets.vault-item-actions-choose-2"
-            small
+            disabled={props.busy}
+            shape="outlined"
             type="button"
 
             onClick={() => {
@@ -215,7 +220,7 @@ export function VaultItemActions(props: {
           {props.own && (
             <Button
               data-testid="secrets.vault-item-actions-set-value"
-              small
+              shape="outlined"
               disabled={props.busy}
               onClick={() => {
                 setValue("");
@@ -230,7 +235,8 @@ export function VaultItemActions(props: {
             <Button
               variant="danger"
               data-testid="secrets.vault-item-actions-set-mode-3"
-              small
+              disabled={props.busy}
+              shape="outlined"
               type="button"
 
               onClick={() => {
@@ -252,7 +258,7 @@ export function VaultItemActions(props: {
           <p>Project permissions: {props.projectPermissions?.join(", ") || "None"}</p>
           <Button
             data-testid="secrets.vault-item-actions-choose-3"
-            small
+            shape="outlined"
             type="button"
             variant="danger"
             disabled={props.busy}
@@ -264,7 +270,7 @@ export function VaultItemActions(props: {
           </Button>
           <Button
             data-testid="secrets.vault-item-actions-close"
-            small
+            shape="outlined"
             type="button"
             autoFocus
             onClick={() => {
@@ -280,6 +286,7 @@ export function VaultItemActions(props: {
           className="vault-actions-editor key-field-row is-rename"
           onSubmit={(event) => {
             event.preventDefault();
+            if (props.busy) return;
             if (name.trim() !== "" && name.trim() !== props.name)
               choose(() => {
                 props.onRename(name.trim());
@@ -299,16 +306,16 @@ export function VaultItemActions(props: {
           />
           <Button
             data-testid="secrets.vault-item-actions-button"
-            small
+            shape="outlined"
             type="submit"
             variant="primary"
-            disabled={name.trim() === "" || name.trim() === props.name}
+            disabled={props.busy || name.trim() === "" || name.trim() === props.name}
           >
             Save
           </Button>
           <Button
             data-testid="secrets.vault-item-actions-close-2"
-            small
+            shape="outlined"
             type="button"
 
             onClick={() => {
@@ -329,7 +336,7 @@ export function VaultItemActions(props: {
           style={{ top: editorPosition?.top, left: editorPosition?.left }}
           onSubmit={(event) => {
             event.preventDefault();
-            if (generating) return;
+            if (props.busy || generating) return;
             if (value === "" || (props.kind === "login" && value.length < 8)) return;
             const replacement = value;
             props.onReplace(replacement);
@@ -373,7 +380,7 @@ export function VaultItemActions(props: {
               >
                 <Button
                   data-testid="secrets.vault-item-actions-on-generate"
-                  small
+                  shape="outlined"
                   type="button"
                   variant="primary"
                   disabled={props.busy || !generator.valid}
@@ -387,7 +394,7 @@ export function VaultItemActions(props: {
                 </Button>
                 <Button
                   data-testid="secrets.vault-item-actions-close-3"
-                  small
+                  shape="outlined"
                   type="button"
 
                   onClick={() => {
@@ -403,16 +410,18 @@ export function VaultItemActions(props: {
             <>
               <Button
                 data-testid="secrets.vault-item-actions-button-2"
-                small
+                shape="outlined"
                 type="submit"
                 variant="primary"
-                disabled={value === "" || (props.kind === "login" && value.length < 8)}
+                disabled={
+                  props.busy || value === "" || (props.kind === "login" && value.length < 8)
+                }
               >
                 Save
               </Button>
               <Button
                 data-testid="secrets.vault-item-actions-close-4"
-                small
+                shape="outlined"
                 type="button"
 
                 onClick={() => {

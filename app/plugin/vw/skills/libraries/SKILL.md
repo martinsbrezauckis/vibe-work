@@ -5,6 +5,8 @@ description: Read this when the user asks about their own documents, files they 
 
 The user keeps documents in libraries; Vibe Work lets this chat search the ones switched on for all chats or for this project. Call the tools inside `run_typescript`:
 
+Run each example tool call in a separate program; carry returned values into the next call.
+
 ```ts
 const libs = await tools.mcp_vw.libraries_list({});        // names, file names, processing status
 const found = await tools.mcp_vw.library_search({ question: "What did the board decide about lenses in 2026?" });

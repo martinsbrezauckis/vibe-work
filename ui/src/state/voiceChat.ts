@@ -95,8 +95,6 @@ export const VOICE_CHAT_OFF: VoiceChatState = {
 
 /** How long after a send voice chat waits for the turn to show before it listens again. */
 const EXPECT_MS = 15_000;
-/** How long a handed-off owner may be missing from the model (its new snapshot on the way). */
-const HANDOFF_WAIT_MS = 5_000;
 /** How long the session must look idle before the microphone opens again. */
 const LISTEN_SETTLE_MS = 300;
 
@@ -483,9 +481,6 @@ export function createVoiceChat(deps: {
   let observed: object | undefined;
   /** A removal check is scheduled (`settle`). */
   let goneCheck = false;
-  /** When the owner was handed off to a new id (its snapshot may still be on the way), and whether to rebase. */
-  let handoff: number | null = null;
-  let rebase = false;
   const streamAnswer = (entry: ReturnType<typeof entryOf>, turnId: string, done = false): void => {
     if (mutedTurns.has(turnId)) return;
     const answers = turnAnswers(entry, turnId);
@@ -564,9 +559,6 @@ export function createVoiceChat(deps: {
     const entry = entryOf(s.owner);
     if (s.owner !== NEW_CHAT) {
       if (entry === undefined) {
-        // The model drops a session before the core's listeners hear why: a hand-off (compaction or a clear inside
-        // a turn) names the new id right after, so the check waits a moment; a removal turns voice chat off.
-        if (handoff !== null && now() - handoff < HANDOFF_WAIT_MS) return;
         if (!core.store.get().index.loading && !goneCheck) {
           goneCheck = true;
           queueMicrotask(() => {
@@ -578,18 +570,11 @@ export function createVoiceChat(deps: {
               owner !== NEW_CHAT &&
               entryOf(owner) === undefined
             ) {
-              if (handoff === null || now() - handoff >= HANDOFF_WAIT_MS) {
-                turnOff("The session closed, so voice chat stopped.");
-              }
+              turnOff("The session closed, so voice chat stopped.");
             } else settle();
           });
         }
         return;
-      }
-      if (rebase) {
-        // The continued session's earlier turns are history, not news: never spoken.
-        rebase = false;
-        for (const t of endedTurns(entry)) known.add(t.id);
       }
       if (sessionClosed(entry)) {
         turnOff("The session was archived, so voice chat stopped.");
@@ -620,7 +605,7 @@ export function createVoiceChat(deps: {
       return;
     }
     // `expecting` stays until a turn ends (`observe`): between a queued item leaving the queue and its turn starting
-    // the session looks idle for a moment (live run 2026-10-10: the microphone opened for 0.1 s in that gap).
+    // the session looks idle for a moment (otherwise the microphone can open briefly in that gap).
     if (sessionBusy(entry)) {
       patch({ phase: "thinking" });
       return;
@@ -674,22 +659,6 @@ export function createVoiceChat(deps: {
     if (store.get().on) settle();
   });
   core.listen((event: CoreEvent) => {
-    // A session hand-off: the conversation continues under a new id; voice chat follows it.
-    if (event.type === "change" && event.change.kind === "handedOff") {
-      const { oldSessionId, newSessionId } = event.change;
-      if (store.get().on && store.get().owner === oldSessionId) {
-        handoff = now();
-        rebase = true;
-        observed = undefined;
-        patch({ owner: newSessionId });
-        // If the new id never shows, the removal check runs once the wait is over.
-        setTimeout(() => {
-          settle();
-        }, HANDOFF_WAIT_MS + 10);
-        settle();
-      }
-      return;
-    }
     if (event.type !== "dictation" || event.streamId !== streamId) return;
     if (deps.canUseKey?.() === false) {
       turnOff();
@@ -746,6 +715,3 @@ export function createVoiceChat(deps: {
     },
   };
 }
-
-/** The voice chat controller. */
-export type VoiceChat = ReturnType<typeof createVoiceChat>;

@@ -3,18 +3,28 @@
  * restart, clear, copy, paste, close) and the active terminal's view. Switching sessions switches
  * terminals; a hidden session's terminals keep running in the core and buffer their output.
  * Depends on: store.ts, model.ts, TerminalView (lazy), features/shell (app context, shell state),
- * components/Icon, pages/point ("Point Vibe at this": the selection as a context chip). Called by: register.tsx (the panel tab body).
- * Invariants: renders only; every action is a store method; no terminal is opened for the
- * new-session view (there is no session folder yet).
+ * components/Icon, pages/point ("Point Vibe at this": the selection as a context chip), RowMenu (the right-click
+ * menu: Point Vibe at this, Copy, Paste). Called by: register.tsx (the panel tab body).
+ * Invariants: renders only; every action is a store method; on the New chat screen the terminals are its owner's
+ * (`panelOwner`: the chosen folder, else the home folder). A tab's tooltip names the folder it started in; a terminal
+ * that started before the chat in another folder than the session's says so.
  */
+import { writeClipboard } from "../../state/clipboard";
+import { Tabs, Tab } from "../../components/Tabs";
 import { Suspense, lazy, useEffect, useRef, useState } from "react";
 
 import { Icon } from "../../components/Icon";
 import { useStore } from "../../state/createStore";
+import { NO_NEW_CHAT } from "../../state/newChatDraft";
 import { detectMac } from "../../state/shortcuts";
-import { pointTerminal } from "../pages/point";
+import { createPortal } from "react-dom";
+import { type MenuAt, RowMenu, menuGroups, useRowMenu } from "../../components/RowMenu";
+import { terminalChip } from "../pages/model";
+import { insertChip, pointTerminal } from "../pages/point";
+import { readTerminalSelection } from "./selection";
 import { useApp } from "../shell/AppContext";
-import { useShellState } from "../shell/hooks";
+import { useCoreState, useShellState } from "../shell/hooks";
+import { panelOwner } from "../../state/shellState";
 import { activeOf } from "./model";
 import type { MountedTerminal } from "./session";
 import type { Terminals } from "./store";
@@ -50,10 +60,15 @@ function Tool({
   );
 }
 
+/** A terminal tab's tooltip: the folder it started in ("Home folder · ~/" for the home folder). */
+function folderTitle(cwd: string, home: string | null): string {
+  return home !== null && cwd === home ? "Home folder · ~/" : cwd;
+}
+
 /** The Terminal tab body. */
 export function TerminalPanel({ terminals }: { terminals: Terminals }) {
   const app = useApp();
-  const sessionId = useShellState((s) => s.selected);
+  const sessionId = useShellState(panelOwner);
   const [noticeText, setNoticeText] = useState<{ sessionId: string; text: string } | null>(null);
   const list = useStore(terminals.store, (s) =>
     sessionId === null ? undefined : s.bySession[sessionId],
@@ -64,8 +79,15 @@ export function TerminalPanel({ terminals }: { terminals: Terminals }) {
   const error = useStore(terminals.store, (s) =>
     sessionId === null ? undefined : s.error[sessionId],
   );
+  const home = useStore(app.newChat?.store ?? NO_NEW_CHAT, (s) => s.home);
+  const sessionCwd = useCoreState((s) =>
+    sessionId === null ? undefined : s.sessions[sessionId]?.session["cwd"],
+  );
   const mounted = useRef<MountedTerminal | null>(null);
   const tabsRef = useRef<HTMLDivElement>(null);
+  // Right click, the menu key or Shift F10 on the terminal: Point Vibe at this, Copy, Paste. The target is
+  // the selection when the menu opened.
+  const termMenu = useRowMenu<string>();
 
   useEffect(() => {
     if (sessionId !== null) void terminals.ensure(sessionId);
@@ -90,30 +112,30 @@ export function TerminalPanel({ terminals }: { terminals: Terminals }) {
   return (
     <div className="vw-term-panel" data-session-id={sessionId}>
       <div className="vw-term-bar">
-        <div
+        <Tabs
           data-testid="terminal.terminal-panel-vw-term-tabs"
-          className="vw-term-tabs"
-          role="tablist"
+          variant="strip"
+
           aria-label="Terminals"
           ref={tabsRef}
         >
           {tabs.map((t, index) => (
-            <button
+            <Tab
               data-testid="terminal.terminal-panel-select"
               data-item-id={t.terminalId}
               key={t.terminalId}
               type="button"
-              role="tab"
-              className="vw-term-tab"
+
               aria-selected={t.terminalId === active?.terminalId}
               data-terminal-id={t.terminalId}
               data-state={t.state.type}
+              title={folderTitle(t.cwd, home)}
               onClick={() => {
                 terminals.select(sessionId, t.terminalId);
               }}
             >
               {`${String(index + 1)} ${t.shell.split(/[\\/]/).pop() ?? "shell"}`}
-            </button>
+            </Tab>
           ))}
           <button
             data-testid="terminal.terminal-panel-open"
@@ -125,7 +147,7 @@ export function TerminalPanel({ terminals }: { terminals: Terminals }) {
           >
             <Icon name="plus" size={14} />
           </button>
-        </div>
+        </Tabs>
         {active !== null && (
           <div className="vw-term-tools">
             <Tool
@@ -188,6 +210,14 @@ export function TerminalPanel({ terminals }: { terminals: Terminals }) {
           {noticeText.text}
         </div>
       )}
+      {active !== null &&
+        typeof sessionCwd === "string" &&
+        sessionCwd !== "" &&
+        active.cwd !== sessionCwd && (
+          <div className="vw-term-exited" role="status">
+            {`This terminal started before the chat, in ${active.cwd}.`}
+          </div>
+        )}
       {exited !== null && active !== null && (
         <div className="vw-term-exited" role="status">
           {`The shell exited${exited.exitCode === null ? "" : ` with code ${String(exited.exitCode)}`}${exited.signal === null ? "" : ` (${exited.signal})`}.`}
@@ -201,17 +231,48 @@ export function TerminalPanel({ terminals }: { terminals: Terminals }) {
           </button>
         </div>
       )}
-      <div className="vw-term-body">
+      <div
+        data-testid="terminal.body"
+        className="vw-term-body"
+        onContextMenu={(event) => {
+          if (active !== null) termMenu.triggers(readTerminalSelection()).onContextMenu(event);
+        }}
+        onKeyDown={(event) => {
+          if (active !== null) termMenu.triggers(readTerminalSelection()).onKeyDown(event);
+        }}
+      >
+        {termMenu.at !== null && (
+          <TerminalMenu
+            at={termMenu.at}
+            onClose={termMenu.close}
+            // The selection the menu names (the shell may redraw and clear the live one meanwhile).
+            onPoint={(text) => {
+              const outcome = insertChip(app, sessionId, terminalChip(text));
+              notice(outcome.ok ? `Added to your message: ${outcome.chip.label}` : outcome.reason);
+            }}
+            onCopy={(text) => {
+              void writeClipboard(text).then(
+                () => {
+                  notice("Copied the selected text.");
+                },
+                () => {
+                  notice("The text could not be copied.");
+                },
+              );
+            }}
+            onPaste={() => void mounted.current?.paste()}
+          />
+        )}
         {active === null ? (
           <div className="empty">
-            {list === undefined ? "Loading terminals..." : "No terminal open."}
+            {list === undefined ? "Loading terminals…" : "No terminal open."}
           </div>
         ) : (
           <ViewBoundary key={active.terminalId}>
             <Suspense
               fallback={
                 <div className="empty" aria-busy="true">
-                  Loading the terminal...
+                  Loading the terminal…
                 </div>
               }
             >
@@ -231,5 +292,54 @@ export function TerminalPanel({ terminals }: { terminals: Terminals }) {
         )}
       </div>
     </div>
+  );
+}
+
+/** The terminal's right-click menu: Point Vibe at this and Copy for a selection, Paste always. */
+function TerminalMenu({
+  at,
+  onClose,
+  onPoint,
+  onCopy,
+  onPaste,
+}: {
+  at: MenuAt<string>;
+  onClose: () => void;
+  onPoint: (text: string) => void;
+  onCopy: (text: string) => void;
+  onPaste: () => void;
+}) {
+  const selected = at.target.trim() !== "";
+  return createPortal(
+    <RowMenu
+      testId="terminal.menu"
+      at={at}
+      label="Terminal actions"
+      heading={selected ? terminalChip(at.target).label : "Terminal"}
+      items={menuGroups(
+        [
+          selected && {
+            id: "point",
+            label: "Point Vibe at this",
+            run: () => {
+              onPoint(at.target);
+            },
+          },
+        ],
+        [
+          selected && {
+            id: "copy",
+            label: "Copy",
+            keys: MAC ? "Mod+C" : "Mod+Shift+C",
+            run: () => {
+              onCopy(at.target);
+            },
+          },
+          { id: "paste", label: "Paste", keys: MAC ? "Mod+V" : "Mod+Shift+V", run: onPaste },
+        ],
+      )}
+      onClose={onClose}
+    />,
+    document.body,
   );
 }

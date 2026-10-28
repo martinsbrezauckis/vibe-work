@@ -27,13 +27,7 @@ pub async fn clock_after(at: i64) {
 pub async fn after_revoke(service: &KeyService, id: &str) {
     let deadline = Instant::now() + Duration::from_secs(10);
     loop {
-        let state = if vw_vault::command_grant::is_grant_id(id) {
-            service
-                .command_grant(id.to_owned())
-                .await
-                .unwrap()
-                .map(|g| (!g.active(), g.revoked_ms))
-        } else if vw_vault::fill_grant::is_grant_id(id) {
+        let state = if vw_vault::fill_grant::is_grant_id(id) {
             service
                 .fill_grant(id.to_owned())
                 .await

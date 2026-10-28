@@ -41,7 +41,9 @@ pub fn scratch(name: &str) -> Scratch {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_nanos();
-    let dir = std::env::temp_dir()
+    // Under the shared real-Vibe test root: the Linux test sandbox binds only that root, so a session folder in
+    // the system temp folder would be invisible to Vibe there (the sandbox exposes only its fixture tree).
+    let dir = vw_public_tests::test_paths::root()
         .join("vw-procmon-tests")
         .join(format!("{name}-{}-{nanos}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
@@ -325,6 +327,8 @@ fn server_in_range(
     } else {
         "pass"
     };
+    // A taken port is EADDRINUSE, except on Windows, where HTTPServer's SO_REUSEADDR makes it WSAEACCES (errno 13:
+    // "An attempt was made to access a socket in a way forbidden by its access permissions").
     let code = format!(
         r"import errno,http.server,subprocess,sys
 for port in range(int(sys.argv[1]),int(sys.argv[2])+1):
@@ -332,7 +336,7 @@ for port in range(int(sys.argv[1]),int(sys.argv[2])+1):
         server=http.server.ThreadingHTTPServer(('127.0.0.1',port),http.server.SimpleHTTPRequestHandler)
         break
     except OSError as exc:
-        if exc.errno != errno.EADDRINUSE: raise
+        if exc.errno not in (errno.EADDRINUSE, errno.EACCES): raise
 else:
     raise RuntimeError('no port in range can bind')
 {signal}

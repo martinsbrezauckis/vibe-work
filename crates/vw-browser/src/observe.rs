@@ -320,6 +320,28 @@ pub fn found(
     out["promptGuard"] = guard_json(verdict);
     out["note"] = json!(UNTRUSTED_NOTE);
     fit(&mut out, budget);
+    // Diagnose what actually survived the byte budget. Text hits and hidden/disabled refs cannot be clicked;
+    // another identical find cannot recover a missing label or traverse an unreadable frame.
+    let returned = out["untrustedPageContent"]["refs"].as_array();
+    let usable = returned.is_some_and(|refs| {
+        refs.iter()
+            .any(|r| r["visible"] != false && r["disabled"] != true && r["role"] != "text")
+    });
+    if !usable {
+        let reason = if returned.is_some_and(|refs| !refs.is_empty()) {
+            "No matching visible, enabled control ref was returned."
+        } else if model.truncated {
+            "The DOM scan reached its limit; no matching control ref was returned."
+        } else if model.frames.iter().any(|f| f.visible && !f.same_origin) {
+            "No matching control ref was returned; a visible cross-origin frame cannot be read."
+        } else {
+            "No matching control ref was returned; text alone cannot be clicked."
+        };
+        out["nextStep"] = json!(format!(
+            "{reason} Read without find for visible labels, or use browser_capture to inspect the screen. Do not repeat this find unchanged."
+        ));
+        fit(&mut out, budget);
+    }
     out
 }
 

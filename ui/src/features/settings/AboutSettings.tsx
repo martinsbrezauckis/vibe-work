@@ -21,7 +21,7 @@ import { detectMac } from "../../state/shortcuts";
 /** The author line. */
 export const ABOUT_AUTHOR = "Made by Martins Brezauckis";
 /** The contact address, and the only link the contact line may open (`mailto:` to this one address). */
-export const CONTACT_EMAIL = "martins.brezauckis@gmail.com";
+const CONTACT_EMAIL = "martins.brezauckis@gmail.com";
 export const CONTACT_URL = `mailto:${CONTACT_EMAIL}`;
 /** Where the source code lives. */
 export const SOURCE_URL = "https://github.com/martinsbrezauckis/vibe-work";
@@ -119,7 +119,8 @@ export function AboutSettings(): ReactElement {
               Vibe shares <code>~/.vibe/logs/session</code> with the Vibe command line (or uses your{" "}
               <code>VIBE_HOME</code> folder). With &quot;Keep Vibe Work sessions separate from the
               CLI&quot; on, it uses <code>vibe-home/logs/session</code> inside Vibe Work&apos;s data
-              folder.
+              folder. Each choice shows a different chat list; chats in the other list are hidden,
+              not deleted, until you switch back.
             </span>
           </span>
         </div>

@@ -138,7 +138,7 @@ export function displayName(card: ProjectCard): string {
 }
 
 /** Last activity of a project: its handbook files or its newest session, ms since the epoch. */
-export function activity(
+function activity(
   item: OverviewItem,
   sessions: readonly SessionSummary[],
   members: GroupsData["members"] | null,
@@ -229,7 +229,6 @@ const plural = (n: number, word: string) => `${String(n)} ${word}${n === 1 ? "" 
 /** What the card says about its handbook (the validator's findings, when the hub has arrived). */
 export function healthOf(card: ProjectCard, hub: ProjectHub | null | undefined): Health {
   if (card.state === "none") return { tone: "none", text: null };
-  if (card.state === "preFormat") return { tone: "warn", text: "Earlier handbook format: migrate" };
   if (card.state === "lite") return { tone: "ok", text: "Markdown pages: hints only" };
   if (hub === undefined || hub === null || hub.hub === null) return { tone: "none", text: null };
   const v = hub.hub.validation;

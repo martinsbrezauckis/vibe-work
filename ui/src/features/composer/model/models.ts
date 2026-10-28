@@ -26,6 +26,10 @@ export interface ModelChoice {
   supportsImages: boolean;
   /** One full-window label, from Mistral's model card or the custom model's configured count. */
   contextLabel: string;
+  /** API model identity for the provider's thinking mapping, independent of a user alias. */
+  apiModel?: string;
+  /** Provider identity, so Mistral wire explanations do not describe a different backend. */
+  provider?: string;
 }
 
 /** The `ConfigView` inside a runtime snapshot (`{config}`), a `config/read` reply, or itself. */
@@ -50,15 +54,22 @@ function choiceOf(value: JsonValue): ModelChoice | null {
       : THINKING_LEVELS,
     supportsImages: m["supportsImages"] === true,
     contextLabel: contextWindowLabel(m),
+    ...(typeof m["provider"] === "string" ? { provider: m["provider"] } : {}),
+    ...(typeof m["name"] === "string" ? { apiModel: m["name"] } : {}),
   };
 }
 
 /** The configured models, in Vibe's order. */
 export function modelChoices(source: JsonValue | undefined): ModelChoice[] {
-  const models = configView(source)?.["models"];
+  const config = configView(source);
+  const models = config?.["models"];
   if (!Array.isArray(models)) return [];
+  const active = obj(config?.["activeModel"]);
   return models.flatMap((m) => {
-    const choice = choiceOf(m);
+    const row = obj(m);
+    const choice = choiceOf(
+      active !== null && row?.["alias"] === active["alias"] ? { ...row, ...active } : m,
+    );
     return choice === null ? [] : [choice];
   });
 }
@@ -67,6 +78,22 @@ export function modelChoices(source: JsonValue | undefined): ModelChoice[] {
 export interface CurrentPick {
   alias: string | null;
   effort: string | null;
+  modelName?: string;
+  modelDisplayName?: string;
+}
+
+/** Carry only the selected row's identity across startup; availability always comes from the core. */
+export function selectedModel(
+  source: JsonValue | undefined,
+  alias: string | undefined | null,
+): {
+  modelName?: string;
+  modelDisplayName?: string;
+} {
+  const model = modelChoices(source).find((model) => model.alias === alias);
+  return model?.apiModel === undefined
+    ? {}
+    : { modelName: model.apiModel, modelDisplayName: model.label };
 }
 
 /**
@@ -142,4 +169,26 @@ export function configuredModelPin(config: JsonValue | undefined): string | null
 export function modelLabel(choices: readonly ModelChoice[], alias: string | null): string {
   if (alias === null) return TEXT.model;
   return choices.find((c) => c.alias === alias)?.label ?? alias;
+}
+
+/** Explains when Off and Low are the same on the selected model. */
+export function thinkingRequest(model: ModelChoice | undefined, level: string): string {
+  if (!model?.apiModel) return "";
+  if (model.provider !== undefined && model.provider !== "mistral") {
+    return "";
+  }
+  const knownNone = [
+    "mistral-large-4",
+    "mistral-large-4-0",
+    "mistral-small-latest",
+    "mistral-small-2603",
+    "mistral-medium-latest",
+    "mistral-medium-3-5",
+  ].includes(model.apiModel);
+  if (level === "off" || level === "low") {
+    return knownNone && model.thinkingLevels.includes("low")
+      ? "Off and Low are the same on this model."
+      : "";
+  }
+  return "";
 }

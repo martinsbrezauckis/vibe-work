@@ -12,13 +12,13 @@
 import { TEXT } from "../../vocabulary";
 import { useMemo, useRef } from "react";
 import { EmptyState } from "../../components/EmptyState";
-import { IconButton } from "../../components/Controls";
+import { Badge, Button, IconButton } from "../../components/Controls";
 
 import { Icon } from "../../components/Icon";
 import { useModalFocus } from "../../hooks/useModalFocus";
 import { formatKeys } from "../../state/shortcuts";
 import { summarize } from "../../state/sessionSummary";
-import { Badge } from "../sessions/Badge";
+import { ActivityMark } from "../sessions/ActivityMark";
 import { buildList } from "../sessions/listModel";
 import { useListDrop } from "../sessions/listDrop";
 import { useListMotion } from "../sessions/listMotion";
@@ -33,11 +33,18 @@ import { useGroupActions, useGroups } from "../sessions/useGroups";
 import { useApp } from "./AppContext";
 import { useCoreState, useLayout, useShellState } from "./hooks";
 import { openNewChat } from "./newChat";
+import { badgeText, badgeTitle } from "../sessions/newChatText";
+import { NO_NEW_CHAT } from "../../state/newChatDraft";
+import { useStore } from "../../state/createStore";
 import { CopiesButton } from "../worktrees/CopiesButton";
 
 /** The list column. */
 export function SessionList() {
   const app = useApp();
+  // While the user is in a session and the New chat screen holds a terminal or a page, its button says so.
+  const draftOpen = useStore(app.newChat?.store ?? NO_NEW_CHAT, (s) => s.open);
+  const away = useShellState((s) => s.selected !== null);
+  const badge = away ? badgeText(draftOpen) : null;
   const { shell, core, sessions } = app;
   const filter = useShellState((s) => s.filter);
   const entries = useCoreState((s) => s.sessions);
@@ -113,18 +120,34 @@ export function SessionList() {
       {/* While Settings is open the session list stays mounted underneath (its scroll and folds kept), inert. */}
       <div className={`column-inner${settings ? " behind" : ""}`} inert={settings}>
         <div className="col-top">
-          <button
-            data-testid="shell.session-list-open-new-chat"
-            type="button"
-            className="btn-primary"
-            title={`${TEXT.newChat} (${formatKeys("Mod+N")})`}
-            onClick={() => {
-              openNewChat(app);
-            }}
-          >
-            <Icon name="message-square-plus" />
-            {TEXT.newChat}
-          </button>
+          <div className="session-list-header">
+            <IconButton
+              data-testid="shell.fold-sessions"
+              icon="panel-left"
+              label="Fold sessions"
+              onClick={() => {
+                if (layout.editorSplit) shell.actions.unfoldChat();
+                else shell.actions.toggleList(true);
+              }}
+            />
+            <Button
+              data-testid="shell.session-list-open-new-chat"
+              type="button"
+              appearance="dialog"
+              title={
+                badge === null
+                  ? `${TEXT.newChat} (${formatKeys("Mod+N")})`
+                  : badgeTitle(draftOpen, formatKeys("Mod+N"))
+              }
+              onClick={() => {
+                openNewChat(app);
+              }}
+            >
+              <Icon name="message-square-plus" />
+              {TEXT.newChat}
+              {badge !== null && <Badge>{badge}</Badge>}
+            </Button>
+          </div>
           <div className="filter-row">
             <label className="filter">
               <Icon name="search" />
@@ -141,7 +164,7 @@ export function SessionList() {
             <IconButton
               data-testid="shell.session-list-set-include-archived"
               icon="archive"
-              aria-label="Show archived sessions"
+              label="Show archived sessions"
               aria-pressed={index.includeArchived}
               title={index.includeArchived ? "Hide archived sessions" : "Show archived sessions"}
               onClick={() => void core?.setIncludeArchived(!index.includeArchived)}
@@ -169,7 +192,7 @@ export function SessionList() {
                     data-session-id={s.id}
                     onClick={() => void sessions?.open(s.id)}
                   >
-                    <Badge kind="input" />
+                    <ActivityMark kind="input" />
                     <span className="t">{s.title}</span>
                     <span className="p">{s.project}</span>
                   </button>
@@ -222,11 +245,11 @@ export function SessionList() {
               <div className="col-note error">
                 <p>Could not load your sessions.</p>
                 <p className="ui-help">{error}</p>
-                <button
+                <Button
                   data-testid="sessions.session-list-retry"
                   type="button"
-                  className="tb-btn"
-                  data-size="small"
+
+                  shape="outlined"
                   disabled={index.loading}
                   onClick={() => {
                     void core?.refresh();
@@ -234,7 +257,7 @@ export function SessionList() {
                   }}
                 >
                   Try again
-                </button>
+                </Button>
               </div>
             )}
             {model.hiddenArchived > 0 && !searching && (
@@ -248,7 +271,7 @@ export function SessionList() {
                 disabled={index.loading}
                 onClick={() => void core?.loadMore()}
               >
-                {index.loading ? "Loading..." : searching ? "Search older sessions" : "Load more"}
+                {index.loading ? "Loading…" : searching ? "Search older sessions" : "Load more"}
               </button>
             )}
           </div>

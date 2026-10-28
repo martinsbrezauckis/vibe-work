@@ -38,20 +38,20 @@ function Row({
       </span>
       <span className="pages-comment-text">{comment.text}</span>
       <span className="pages-comment-acts">
-        <button
+        <Button
           data-testid="pages.comment-panel-send"
           type="button"
-          className="pages-btn"
+          appearance="page"
           onClick={() => {
             send(comment);
           }}
         >
           Send to Vibe
-        </button>
+        </Button>
         <Button
           data-testid="pages.comment-panel-remove"
           type="button"
-          small
+          shape="outlined"
           variant="danger"
           onClick={() => {
             remove(comment);
@@ -112,39 +112,40 @@ export function CommentPanel({
             }}
           />
           <div className="pages-cbox-row">
-            <button
+            <Button
               data-testid="pages.comment-panel-save"
               type="button"
-              className="pages-btn go"
+              appearance="page"
+              variant="primary"
               disabled={text.trim() === ""}
               onClick={() => {
                 void saveText(true);
               }}
             >
               Send to Vibe
-            </button>
-            <button
+            </Button>
+            <Button
               data-testid="pages.comment-panel-save-2"
               type="button"
-              className="pages-btn"
+              appearance="page"
               disabled={text.trim() === ""}
               onClick={() => {
                 void saveText(false);
               }}
             >
               Save
-            </button>
-            <button
+            </Button>
+            <Button
               data-testid="pages.comment-panel-set-text-2"
               type="button"
-              className="pages-btn"
+              appearance="page"
               onClick={() => {
                 setText("");
                 cancel();
               }}
             >
               Cancel
-            </button>
+            </Button>
             <span className="pages-note">Saved in Vibe Work, not in the repo.</span>
           </div>
         </form>

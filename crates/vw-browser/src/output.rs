@@ -149,7 +149,8 @@ fn host_metadata(path: &[String]) -> bool {
     }
 }
 
-// Only the generated timestamp and host path are metadata; the slug can contain page-title words.
+// The range of a generated capture folder's slug (`collect` gives it only the context-free key rules; the timestamp
+// and host path are never filtered).
 fn capture_slug(text: &str, path: &[String]) -> Option<std::ops::Range<usize>> {
     let [field] = path else { return None };
     if !matches!(field.as_str(), "folder" | "path") {
@@ -195,11 +196,13 @@ fn collect(value: &Value, found: &mut Vec<String>, context: bool, path: &mut Vec
     }
     match value {
         Value::String(text) => {
+            // A generated capture folder's slug is host metadata: it was built from a title already filtered at
+            // naming (`capture/run.rs folder_name_source`), and joining its words with dashes makes one long run
+            // that the key-page rule would hide whenever the title holds a word like "token" (for "Acme Tokens"
+            // the agent would get `capture/[looks like a key: hidden]-…`). Only the context-free rules (known key
+            // prefixes, long mixed-case runs) still apply to the slug; page-derived strings keep every rule.
             let (text, context) = match capture_slug(text, path) {
-                Some(range) => {
-                    let slug = &text[range];
-                    (slug, key_context(slug))
-                }
+                Some(range) => (&text[range], false),
                 None => (text.as_str(), context),
             };
             found.extend(candidates(text, context).into_iter().map(str::to_owned));

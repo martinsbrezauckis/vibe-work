@@ -128,10 +128,10 @@ impl StuckSessions {
 }
 
 /// The refusal for a command of a stuck session.
-pub(crate) fn refusal(id: &str, method: &str) -> CoreError {
+pub(crate) fn refusal(_id: &str, method: &str) -> CoreError {
     CoreError::new(
         ErrorCode::SessionStuck,
-        format!("{STUCK_TEXT} (session {id}): try again or continue in a new session"),
+        format!("{STUCK_TEXT}. Try again or continue in a new session."),
     )
     .with_method(method)
 }

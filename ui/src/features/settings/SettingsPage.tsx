@@ -15,21 +15,24 @@ import { type ReactElement, useEffect, useRef } from "react";
 import { openHit } from "./openHit";
 
 import { Highlight } from "../../components/Highlight";
+import { formatKeys } from "../../state/shortcuts";
 import { Icon } from "../../components/Icon";
 import { NotificationSettings } from "../shell/NotificationSettings";
 import { useApp } from "../shell/AppContext";
 import { goHome } from "../shell/home";
-import { useShellState } from "../shell/hooks";
+import { useCoreState, useShellState } from "../shell/hooks";
+import { MistralKeys } from "./MistralKeys";
 import { KeySettings } from "../setup/KeySettings";
 import { ModelSettings } from "../setup/ModelSettings";
 import { UpdateSettings } from "../updates/UpdateSettings";
 import { AboutSettings } from "./AboutSettings";
-import { BrowserPoolSettings } from "./BrowserPoolSettings";
-import { BrowserDelegationSettings } from "./BrowserDelegationSettings";
+import { BrowserSettings } from "./BrowserSettings";
 import { AgentDefaultsSettings } from "./AgentDefaultsSettings";
 import { AccountSettings } from "./AccountSettings";
 import { AppearanceSettings } from "./AppearanceSettings";
 import { CliSharingSettings } from "./CliSharingSettings";
+import { KeepAwakeSettings } from "./KeepAwakeSettings";
+import { SendToSettings } from "./SendToSettings";
 import { CopiesSettings } from "./CopiesSettings";
 import { GitSettings } from "./GitSettings";
 import { DeveloperSettings } from "./DeveloperSettings";
@@ -41,11 +44,15 @@ import { PrivacySettings } from "./PrivacySettings";
 import { SignedInAccounts } from "./SignedInAccounts";
 import { SecretScanSettings } from "../secrets/SecretScanSettings";
 import { ProjectSecretsSettings } from "../secrets/ProjectSecretsSettings";
+import { AllowedLevels } from "./allowed/AllowedLevels";
+import { AllowedPage } from "./allowed/AllowedPage";
 import { SafetySettings } from "../secrets/SafetySettings";
 import { ImageSettings } from "./ImageSettings";
 import { SETTINGS_SEARCH_ID } from "./SettingsNav";
 import { VoiceSettings } from "./VoiceSettings";
+import { SaveBeforeSendSetting } from "./SaveBeforeSendSetting";
 import { useOfferedCategories } from "./availability";
+import { chromeAvailable } from "./chrome/chromeRows";
 import { searchSettings } from "./catalog";
 
 /** The sections each category shows, in order. */
@@ -56,6 +63,9 @@ function sections(category: string): ReactElement {
         <>
           <CliSharingSettings />
           <ErrorDetailSetting />
+          <SaveBeforeSendSetting />
+          <KeepAwakeSettings />
+          <SendToSettings />
           {/* The two Git cards stay together: author details, then session copies. */}
           <GitSettings />
           <CopiesSettings />
@@ -68,6 +78,7 @@ function sections(category: string): ReactElement {
         <>
           <AccountSettings part="account" />
           <KeySettings />
+          <MistralKeys />
           <MistralLinks category="account" />
         </>
       );
@@ -95,14 +106,17 @@ function sections(category: string): ReactElement {
         </>
       );
     case "browser":
+      return <BrowserSettings />;
+    case "safety":
       return (
         <>
-          <BrowserPoolSettings />
-          <BrowserDelegationSettings />
+          <AllowedLevels />
+          <SafetySettings />
         </>
       );
-    case "safety":
-      return <SafetySettings />;
+    case "allowed":
+      // Everything allowed without asking: its own category directly under Safety.
+      return <AllowedPage />;
     case "instructions":
       return (
         <>
@@ -215,7 +229,8 @@ export function SettingsPage(): ReactElement {
   const category = offered.find((c) => c.id === view.category) ??
     offered[0] ?? { id: "general", label: "General" };
   const searching = view.query.trim() !== "";
-  const results = searchSettings(view.query).filter((r) =>
+  const chrome = useCoreState((s) => s.chromeControl);
+  const results = searchSettings(view.query, chromeAvailable(chrome)).filter((r) =>
     offered.some((c) => c.id === r.category),
   );
   return (
@@ -265,7 +280,7 @@ export function SettingsPage(): ReactElement {
               ))}
             {results.length === 0 && (
               <p className="key-line">
-                No setting matches. Click “In: Settings” to search sessions and actions too.
+                No setting matches. Press {formatKeys("Mod+k")} to search everything.
               </p>
             )}
           </>

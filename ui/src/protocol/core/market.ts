@@ -5,6 +5,8 @@
  * scripts/public/check.sh fails when this file and the Rust types disagree.
  */
 
+import type { ToolsInstallOffer } from "./index";
+
 export type MarketRequest = { "op": "read", 
 /**
  * The session whose plugin and skill state is merged in.
@@ -53,6 +55,14 @@ cwd?: string, } | { "op": "install",
 /**
  * The catalog entry.
  */
+id: string, 
+/**
+ * The id of the `offerInstall` offer the window showed.
+ */
+offerId?: string, } | { "op": "offerInstall", 
+/**
+ * The catalog entry.
+ */
 id: string, } | { "op": "cancelInstall", } | { "op": "remove", 
 /**
  * The catalog entry.
@@ -71,7 +81,11 @@ notice?: string, } | { "kind": "installStarted",
 /**
  * The entry.
  */
-id: string, };
+id: string, } | { "kind": "offer", 
+/**
+ * The single-use offer.
+ */
+offer: ToolsInstallOffer, };
 
 export type MarketView = { 
 /**
@@ -124,6 +138,14 @@ name: string,
  * Vibe's description.
  */
 description: string, 
+/**
+ * The version its manifest gives; `null` when it gives none.
+ */
+version: string | null, 
+/**
+ * The author its manifest gives; `null` when it gives none.
+ */
+author: string | null, 
 /**
  * Its installed folder, including for restored chats with a separate pinned checkout.
  */

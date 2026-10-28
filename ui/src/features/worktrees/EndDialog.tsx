@@ -1,13 +1,6 @@
 /**
- * The end-of-session choice for a session's copy: after archive or delete (or from the startup
- * list), "Keep the copy" or "Remove it", with what removing discards shown first: every item with unsaved
- * work (changed, new, ignored but not build output, nested repositories; scrollable), the build output count,
- * commits no other branch holds (they stay on the kept branch), stashes made on it, and what happens to the
- * branch. A copy that cannot be removed here says why and offers Keep only. Every origin gets the full lists, including Debug API requests.
- * Depends on: state/worktrees (store, keep, remove, dismiss), model.ts, hooks/useModalFocus.
- * Called by: shell/Content.
- * Invariants: nothing is removed without a click on the remove button, whose label says how many items it
- * discards; the native dialog asks again with the names (the core). Names are text, never markup.
+ * Explicit copy removal: shows unsaved work, branch outcome and blockers before the native confirmation.
+ * Depends on state/worktrees, model and modal focus; mounted by shell/Content. Cancel changes nothing.
  */
 import { PathLine } from "../../components/PathLine";
 import { Button } from "../../components/Controls";
@@ -83,11 +76,12 @@ export function EndDialog(): ReactElement | null {
   const inspection = end.inspection;
   const files = inspection?.fileCount ?? 0;
   const canRemove = inspection !== null && inspection.blocked === null && !end.busy;
+  const verb = "Throw it away";
   const removeLabel =
     files === 0
-      ? "Remove it"
-      : `Remove it and discard ${String(files)} unsaved item${files === 1 ? "" : "s"}`;
-  const title = end.after === "startup" ? "Review this copy" : "Keep this session's copy?";
+      ? verb
+      : `${verb} and discard ${String(files)} unsaved item${files === 1 ? "" : "s"}`;
+  const title = "Throw away this copy?";
   return (
     <>
       <div className="scrim" />
@@ -108,20 +102,22 @@ export function EndDialog(): ReactElement | null {
           <Body worktrees={worktrees} />
         </section>
         <footer className="modal-actions">
-          <button
-            data-testid="worktrees.end-dialog-keep"
+          <Button
+            data-testid="worktrees.end-dialog-cancel"
             type="button"
-            className="tb-btn"
+
             data-dialog-initial-focus="true"
             disabled={end.busy}
-            onClick={() => void worktrees.keep()}
+            onClick={() => {
+              worktrees.dismiss();
+            }}
           >
-            Keep the copy
-          </button>
+            Cancel
+          </Button>
           <Button
             data-testid="worktrees.end-dialog-remove"
             type="button"
-            small
+            shape="outlined"
             variant="danger"
             data-action="remove"
             disabled={!canRemove}

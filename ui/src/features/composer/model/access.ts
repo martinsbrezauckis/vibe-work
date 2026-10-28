@@ -8,8 +8,7 @@
  *   dark launch); Vibe Work never forces it.
  * - Full access (`auto-approve`) needs consent: a trusted native menu pick decides; other paths need
  *   native confirmation. The gate always requires a token for the switch.
- * - "Plan first" is Vibe's builtin `plan` profile and is never called read-only (shell
- *   commands still run). "Plan on a page" is the app-owned `vw-plan` profile: the plan is
+ * - "Plan on a page" is the app-owned `vw-plan` profile: the plan is
  *   written as a Project Pages plan page; other file writes are refused; shell commands still run.
  */
 import type { JsonValue } from "../../../protocol/core";
@@ -17,7 +16,7 @@ import { term, TEXT, wording } from "../../../vocabulary";
 import { type Obj, obj } from "../../transcript/model/entries";
 
 /** The rule colour of a mode (classes `lvl-yolo|smart|warn|safe`; neutral has none). */
-export type AccessLevel = "yolo" | "smart" | "warn" | "neutral" | "safe";
+type AccessLevel = "yolo" | "smart" | "warn" | "neutral" | "safe";
 
 /** One access mode. */
 export interface AccessMode {
@@ -65,14 +64,6 @@ export const ACCESS_MODES: readonly AccessMode[] = [
     confirm: false,
   },
   {
-    id: "plan",
-    label: term("accessModes", "plan").name,
-    description: term("accessModes", "plan").description,
-    tooltip: term("accessModes", "plan").tooltip,
-    level: "safe",
-    confirm: false,
-  },
-  {
     id: "vw-plan",
     label: term("accessModes", "vw-plan").name,
     description: term("accessModes", "vw-plan").description,
@@ -83,7 +74,7 @@ export const ACCESS_MODES: readonly AccessMode[] = [
 ];
 
 /** Names of the agents a `RuntimeSnapshot` lists (`runtime.agents[].name`), or `null` without one. */
-export function runtimeAgents(runtime: JsonValue | undefined): string[] | null {
+function runtimeAgents(runtime: JsonValue | undefined): string[] | null {
   const agents = obj(runtime)?.["agents"];
   if (!Array.isArray(agents)) return null;
   return agents.flatMap((a) => {

@@ -3,6 +3,8 @@
  * shell button styles; consumed by shared Button, Badge, Selector and row disclosures.
  * Control state and size come from attributes, so feature pages need no visual overrides.
  */
+@import "./button-presentations.css";
+@import "./card.css";
 /* Native disabled state outranks contextual control styles, including form fields. */
 button:disabled,
 input:disabled,
@@ -11,28 +13,25 @@ select:disabled {
   opacity: 0.45 !important;
   cursor: default !important;
 }
-.tb-btn[data-size="small"] {
+/* Button shapes: "ghost" is the plain .tb-btn (borderless, the toolbar button); "outlined" is the Settings, dialog and
+   form button. */
+.tb-btn[data-shape="outlined"] {
   min-height: var(--control-height-small);
   padding: 0 10px;
   border: 1px solid var(--line-2);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   font-size: var(--text-12-5);
   font-weight: var(--weight-medium);
   white-space: nowrap;
 }
-.tb-btn.primary[data-size="small"] {
+.tb-btn.primary[data-shape="outlined"] {
   border-color: transparent;
-}
-.tb-btn[data-size="small"]:focus-visible {
-  box-shadow:
-    0 0 0 2px var(--bg),
-    0 0 0 4px var(--focus);
 }
 .ext-link {
   min-height: var(--control-height-small);
   padding: 0 8px;
   border: 0;
-  border-radius: 7px;
+  border-radius: var(--radius-7);
   background: transparent;
   color: var(--blue);
   cursor: pointer;
@@ -61,7 +60,7 @@ select:disabled {
   bottom: 3px;
   width: 5px;
   height: 5px;
-  border-radius: 50%;
+  border-radius: var(--radius-round);
   background: var(--red);
   box-shadow: 0 0 0 1px var(--raised);
 }
@@ -79,7 +78,7 @@ select:disabled {
   max-width: 100%;
   padding: 1px 7px;
   border: 1px solid var(--line-2);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   color: var(--text-3);
   font-size: var(--text-11);
   font-weight: var(--weight-medium);
@@ -104,7 +103,7 @@ select:disabled {
   min-height: var(--control-height-small);
   padding: 0 9px;
   border: 1px solid var(--line-2);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: var(--raised);
   color: var(--text);
   cursor: pointer;
@@ -132,7 +131,7 @@ select:disabled {
   flex: none;
   width: 7px;
   height: 7px;
-  border-radius: 50%;
+  border-radius: var(--radius-round);
   background: var(--text-3);
 }
 .ui-selector-dot[data-tone="allowed"] {
@@ -143,14 +142,14 @@ select:disabled {
 }
 .ui-selector-menu {
   position: fixed;
-  z-index: 65;
+  z-index: var(--z-selector);
   min-width: max-content;
   max-width: calc(100vw - 16px);
   max-height: calc(100dvh - 16px);
   overflow-y: auto;
   padding: 4px;
   border: 1px solid var(--line-2);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: var(--raised);
   box-shadow: var(--shadow);
 }
@@ -162,7 +161,7 @@ select:disabled {
   min-height: 30px;
   padding: 5px 8px;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text);
   cursor: pointer;
@@ -309,6 +308,74 @@ select:disabled {
   margin: 0;
 }
 
+.switch {
+  width: 34px;
+  height: 20px;
+  border-radius: var(--radius-pill);
+  background: var(--line-3);
+  border: 0;
+  position: relative;
+  cursor: pointer;
+  flex: none;
+}
+.switch::after {
+  content: "";
+  position: absolute;
+  left: 3px;
+  top: 3px;
+  width: 14px;
+  height: 14px;
+  border-radius: var(--radius-round);
+  background: var(--on-accent);
+  transition: left 0.15s;
+}
+.switch[aria-checked="true"] {
+  background: var(--orange);
+}
+.switch[aria-checked="true"]::after {
+  left: 17px;
+}
+
+.ui-badge[data-tone="ok"] {
+  color: var(--green);
+}
+.ui-badge[data-tone="warn"] {
+  color: var(--orange-3);
+}
+.ui-badge[data-tone="bad"] {
+  color: var(--red);
+}
+
+/* Shared detail roles retain established paragraph and inline-source typography. */
+.ui-help[data-detail="paragraph"] {
+  margin: 0 0 10px;
+  font-size: var(--text-12-5);
+  line-height: inherit;
+  color: var(--text-2);
+  overflow-wrap: anywhere;
+}
+.ui-help[data-detail="source"] {
+  font-size: inherit;
+  line-height: inherit;
+}
+
+/* Labelled icon actions own their layout outside any feature toolbar. */
+.ibtn[data-has-text="true"] {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  width: auto;
+  min-width: 32px;
+  padding-inline: 8px;
+  white-space: nowrap;
+}
+
+/* A destructive row link opens its confirmation before any removal. */
+.ext-link.danger {
+  color: var(--red);
+}
+
 /* Paths keep their punctuation in order and leave room for the copy action. */
 .path-line {
   display: flex;
@@ -327,19 +394,19 @@ select:disabled {
 /* Shared pointer and keyboard action menus. */
 .menu {
   position: fixed;
-  z-index: 60;
+  z-index: var(--z-menu);
   min-width: 190px;
   display: grid;
   padding: 4px;
   background: var(--raised);
-  border-radius: 10px;
+  border-radius: var(--radius-lg);
   box-shadow: var(--shadow);
 }
 .menu button {
   all: unset;
   box-sizing: border-box;
   padding: 7px 10px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   font-size: var(--text-13);
   cursor: pointer;
   color: var(--text-2);
@@ -355,7 +422,7 @@ select:disabled {
 .menu button.sep {
   margin-top: 4px;
   border-top: 1px solid var(--line);
-  border-radius: 0 0 6px 6px;
+  border-radius: 0 0 var(--radius-sm) var(--radius-sm);
   padding-top: 9px;
 }
 
@@ -371,6 +438,21 @@ select:disabled {
   flex: 1;
   min-width: 0;
   overflow-wrap: anywhere;
+  display: flex;
+  align-items: baseline;
+  gap: 24px;
+}
+.menu-label {
+  flex: 1;
+  min-width: 0;
+}
+/* The item's shortcut, at the right in the quiet text colour. */
+.menu-keys {
+  flex: none;
+  font: inherit;
+  font-size: var(--text-12);
+  color: var(--text-3);
+  white-space: nowrap;
 }
 .menu button:disabled {
   opacity: 0.45;
@@ -383,7 +465,38 @@ select:disabled {
   color: var(--text-2);
 }
 .menu-heading {
-  font-weight: 600;
+  max-width: 340px;
+  font-weight: var(--weight-semibold);
+  overflow-wrap: anywhere;
+}
+/* A list row's ⋯ button: the same menu as a right click on the row; shown on hover and focus. */
+.row-more {
+  all: unset;
+  box-sizing: border-box;
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  color: var(--text-3);
+  opacity: 0;
+}
+:hover > .row-more,
+:focus-within > .row-more,
+.row-more[aria-expanded="true"],
+.row-more:focus-visible {
+  opacity: 1;
+}
+.row-more:hover:where(:not(:disabled)) {
+  background: var(--active);
+  color: var(--text);
+}
+@media (hover: none) {
+  .row-more {
+    opacity: 1;
+  }
 }
 .menu-note {
   max-width: 340px;

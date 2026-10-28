@@ -115,21 +115,8 @@
 :focus-visible {
   transition: box-shadow var(--t-ui) var(--ease-out);
 }
-/* controls that draw their own box-shadow (the primary buttons' key edge, the mic's outline) hid the
-   keyboard focus ring, which is also a box-shadow: New chat, Install Vibe, Save and test the key and the mic showed
-   no focus at all. Their focused state keeps the ring (and the mic its outline). */
-.btn-primary:focus-visible,
-.tb-btn.primary:focus-visible,
-.pj-btn.primary:focus-visible {
-  box-shadow:
-    0 0 0 2px var(--bg),
-    0 0 0 4px var(--focus);
-}
 .ccorner .ibtn.mic:focus-visible {
-  box-shadow:
-    inset 0 0 0 1px var(--line-2),
-    0 0 0 2px var(--bg),
-    0 0 0 4px var(--focus);
+  --focus-ring-underlay: inset 0 0 0 1px var(--line-2);
 }
 
 /* Disclosure chevrons turn as a group opens. */
@@ -163,11 +150,10 @@
 }
 .ptab-pill {
   position: absolute;
-  z-index: -1;
-  top: 7px;
-  bottom: 7px;
+  z-index: var(--z-underlay);
+  top: 0;
   left: 0;
-  border-radius: 7px;
+  border-radius: var(--radius-7);
   background: var(--active);
   transition:
     transform var(--t-ui) var(--ease-out),
@@ -350,6 +336,14 @@
   display: block;
   margin-bottom: 18px;
 }
+@media (max-height: 700px) {
+  .welcome {
+    padding-top: 24px;
+  }
+  .welcome .brand-mark {
+    display: none;
+  }
+}
 
 /* 13. Empty states and skeletons. */
 .empty-state {
@@ -388,7 +382,7 @@
   position: relative;
   display: block;
   height: 10px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   background: var(--hover);
   overflow: hidden;
 }
@@ -436,7 +430,7 @@
   content: "";
   position: absolute;
   border: 1.5px solid currentColor;
-  border-radius: 2.5px;
+  border-radius: var(--radius-2-5);
   transition:
     opacity 150ms var(--ease-std),
     transform 200ms var(--ease-out);
@@ -464,7 +458,7 @@
   width: 6px;
   height: 10px;
   border-width: 0 1.75px 1.75px 0;
-  border-radius: 0 0 1px 0;
+  border-radius: 0 0 var(--radius-1) 0;
   transform: rotate(45deg);
 }
 .copy-btn.copied {
@@ -494,7 +488,7 @@
 mark {
   background: var(--mark);
   color: inherit;
-  border-radius: 3px;
+  border-radius: var(--radius-3);
   padding: 0 1px;
 }
 
@@ -514,7 +508,7 @@ mark {
 .content-page {
   position: absolute;
   inset: 0;
-  z-index: 3;
+  z-index: var(--z-overlay);
   display: grid;
   grid-template-rows: minmax(0, 1fr);
   grid-template-columns: minmax(0, 1fr);
@@ -547,8 +541,28 @@ mark {
   overflow: hidden;
   pointer-events: none;
 }
-.mini {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
+
+/* One keyboard ring, including controls whose resting shadows would cover it. */
+:focus-visible,
+.twist:focus-visible,
+.srow-more:focus-visible,
+.sec-btn:focus-visible,
+.link-btn:focus-visible,
+.tb-btn[data-shape="outlined"]:focus-visible,
+.pj-name:focus-visible,
+.pj-actions:focus-visible,
+.pj-x:focus-visible,
+.pj-chip:focus-visible,
+.pj-btn:focus-visible,
+.lc-add:focus-visible,
+.fref:focus-visible,
+.key-field-row input:focus-visible,
+.key-link:focus-visible,
+.vault-choice:focus-visible,
+.instr-text:focus-visible,
+.btn-primary:focus-visible,
+.tb-btn.primary:focus-visible,
+.pj-btn.primary:focus-visible,
+.ccorner .ibtn.mic:focus-visible {
+  box-shadow: var(--focus-ring-underlay, 0 0 transparent), var(--focus-ring);
 }

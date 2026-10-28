@@ -7,7 +7,8 @@
  * Invariants: links (Mistral's console) open only through the link dialog; plugin servers are shown, not
  * changed here (their plugin owns them).
  */
-import { Button } from "../../components/Controls";
+import { builtinServerText } from "../../state/builtinToolsText";
+import { Badge, Button } from "../../components/Controls";
 import type { ReactElement } from "react";
 
 import type { ServerView, ToolView } from "../../protocol/core";
@@ -56,7 +57,9 @@ function ConnectorPart({
       </header>
       <p>{tile.meta.line}</p>
       <p>
-        <span className={`cstat ${tile.status}`}>{tile.statusText}</span>
+        <Badge presentation="connector-status" state={tile.status}>
+          {tile.statusText}
+        </Badge>
         {tile.reason === null ? null : <span className="creason"> {tile.reason}</span>}
       </p>
       {tile.status === "setup" ? (
@@ -73,36 +76,36 @@ function ConnectorPart({
       </p>
       <div className="cactions">
         {tile.status === "signin" ? (
-          <button
+          <Button
             data-testid="connectors.connector-detail-sign-in"
             type="button"
-            className="btn-primary"
+            appearance="dialog"
             disabled={keyBlocked}
             onClick={() => void actions?.signIn(tile.alias)}
           >
             Sign in
-          </button>
+          </Button>
         ) : null}
-        <button
+        <Button
           data-testid="connectors.connector-detail-turn-off"
           type="button"
-          className="tb-btn"
+
           disabled={keyBlocked}
           onClick={() => void actions?.turnOff(tile.alias, tile.status !== "off", tile.meta.name)}
         >
           {tile.status === "off" ? "Turn on" : "Turn off"}
-        </button>
+        </Button>
         {manageUrl === null ? null : (
-          <button
+          <Button
             data-testid="connectors.connector-detail-ask-link"
             type="button"
-            className="tb-btn"
+
             onClick={() => {
               transcript.askLink(manageUrl);
             }}
           >
             Manage at Mistral
-          </button>
+          </Button>
         )}
       </div>
       {manageUrl === null ? (
@@ -144,15 +147,15 @@ function KeyLine({ server }: { server: ServerView }): ReactElement {
       ) : null}
       {key.grant === "none" ? (
         <div className="cactions">
-          <button
+          <Button
             data-testid="connectors.connector-detail-allow-server-key"
             type="button"
-            className="btn-primary"
+            appearance="dialog"
             disabled={vaultBlocked}
             onClick={() => void actions?.allowServerKey(server.name)}
           >
             Allow key
-          </button>
+          </Button>
         </div>
       ) : null}
     </>
@@ -162,6 +165,7 @@ function KeyLine({ server }: { server: ServerView }): ReactElement {
 function ServerPart({ server }: { server: ServerView }): ReactElement {
   const actions = useConnectorActions();
   const tone = serverTone(server);
+  const display = builtinServerText(server);
   return (
     <>
       <header className="cdetail-head">
@@ -169,14 +173,25 @@ function ServerPart({ server }: { server: ServerView }): ReactElement {
           <CategoryIcon name="server" size={20} />
         </span>
         <div>
-          <h2>{server.displayName}</h2>
+          <h2>{display?.name ?? server.displayName}</h2>
           <p className="cmuted mono">{server.address ?? "Runs on this computer"}</p>
         </div>
       </header>
       <p>
-        <span className={`cstat ${tone}`}>{serverStatusText(server)}</span>
+        <Badge presentation="connector-status" state={tone}>
+          {serverStatusText(server)}
+        </Badge>
         {server.error === null ? null : <span className="creason"> {server.error}</span>}
       </p>
+      {display ? (
+        <>
+          <p>{display.description}</p>
+          <p className="cmuted">
+            <code>{server.name}</code>
+            {server.plugin === null ? null : <> · {server.plugin}</>}
+          </p>
+        </>
+      ) : null}
       <h3>What it can do</h3>
       <Tools tools={server.tools} empty="Its tools show once a session has connected to it." />
       <h3>Sign-in</h3>
@@ -200,39 +215,39 @@ function ServerPart({ server }: { server: ServerView }): ReactElement {
       ) : (
         <div className="cactions">
           {server.signIn === "oauth" && tone !== "connected" ? (
-            <button
+            <Button
               data-testid="connectors.connector-detail-sign-in-server"
               type="button"
-              className="btn-primary"
+              appearance="dialog"
               onClick={() => void actions?.signInServer(server.name)}
             >
               Sign in
-            </button>
+            </Button>
           ) : null}
           {server.signIn === "oauth" && tone === "connected" ? (
-            <button
+            <Button
               data-testid="connectors.connector-detail-sign-out-server"
               type="button"
-              className="tb-btn"
+
               onClick={() => void actions?.signOutServer(server.name)}
             >
               Sign out
-            </button>
+            </Button>
           ) : null}
-          <button
+          <Button
             data-testid="connectors.connector-detail-set-server-off"
             type="button"
-            className="tb-btn"
+
             onClick={() => void actions?.setServerOff(server.name, !server.off)}
           >
             {server.off ? "Turn on" : "Turn off"}
-          </button>
+          </Button>
           <Button
             data-testid="connectors.connector-detail-remove-server"
             type="button"
-            small
+            shape="outlined"
             variant="danger"
-            onClick={() => void actions?.removeServer(server.name)}
+            onClick={() => actions?.askRemoveServer(server.name)}
           >
             Remove
           </Button>
@@ -255,14 +270,14 @@ export function ConnectorDetail(): ReactElement | null {
   if (connector === undefined && server === undefined) return null;
   return (
     <aside className="cdetail" aria-label="Details">
-      <button
+      <Button
         data-testid="connectors.connector-detail-select"
         type="button"
-        className="tb-btn cdetail-close"
+        placement="detail-close"
         onClick={() => actions?.select(null)}
       >
         Close
-      </button>
+      </Button>
       {connector !== undefined ? (
         <ConnectorPart tile={tileOf(connector)} manageUrl={view.manageUrl} />
       ) : server !== undefined ? (

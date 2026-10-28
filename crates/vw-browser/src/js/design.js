@@ -4,6 +4,7 @@
 // Heuristics adapted from ShellX Canvas (role words, type roles, scales,
 // contrast); Canvas read stylesheet text of its own targets, this reads the rendered page.
 // REQ: { page, maxElements }. Synchronous; the answer is untrusted page data (aggregated, every string clipped).
+/* global REQ, clip, collect, domPath, editable, roleOf, viewOf -- Supplied by the Rust script assembler and its shared prelude. */
 (() => {
   __VW_COMMON__
   const out = { url: String(location.href).slice(0, 2000), title: clip(document.title, 300) };
@@ -41,7 +42,7 @@
         // getImageData answers premultiplied-then-unpremultiplied values; alpha below 1 is kept as #rrggbbaa.
         result = `#${hex2(r)}${hex2(g)}${hex2(b)}${a < 255 ? hex2(a) : ""}`;
       }
-    } catch (_) {
+    } catch {
       result = null;
     }
     if (colourCache.size < 4000) colourCache.set(raw, result);
@@ -89,7 +90,7 @@
     try {
       walkRules(sheet.cssRules);
       sheetsRead += 1;
-    } catch (_) {
+    } catch {
       sheetsBlocked += 1;
     }
   }

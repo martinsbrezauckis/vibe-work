@@ -1,6 +1,6 @@
 //! The `worktrees` command: a session in its own copy of a git repository. This
 //! module holds the shared state, the dispatcher and the read-only ops (`count`, `options`, `suggestName`,
-//! `info`, `orphans`) plus `keep`; `start` is in `worktrees_start.rs`, `inspect` and `remove` in
+//! `info`, `orphans`); `start` is in `worktrees_start.rs`, `inspect` and `remove` in
 //! `worktrees_remove.rs`.
 //!
 //! Depends on: vw-worktrees (git side, records), `core::Core`, `changes_facts` (a session's folder),
@@ -40,9 +40,10 @@ const NOT_PICKED: &str = "To work in a new copy, choose this folder with Choose 
 const PENDING_FOR_MS: u64 = 120_000;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum SessionCopyState {
+pub(crate) enum SessionCopyState {
     Active,
     Archived,
+    OtherList,
     Deleted,
 }
 
@@ -243,7 +244,6 @@ impl Core {
                     .worktree_remove(origin, &session_id, &fingerprint)
                     .await?,
             }),
-            WorktreesRequest::Keep { session_id } => self.worktree_keep(&session_id),
             WorktreesRequest::Orphans {} => self.worktree_orphans().await,
         }
     }
@@ -393,14 +393,6 @@ impl Core {
         blocking(move || info_of(&records, &id, cwd.as_deref())).await
     }
 
-    fn worktree_keep(&self, session_id: &str) -> Result<WorktreesResult, CoreError> {
-        let records = self.shared.worktrees.records()?;
-        records
-            .update(session_id, |r| r.decision = Some(Decision::Kept))
-            .map_err(core_error)?;
-        Ok(WorktreesResult::Kept {})
-    }
-
     async fn worktree_count(&self) -> Result<WorktreesResult, CoreError> {
         let records = self.shared.worktrees.records()?;
         let vibe_root = self.shared.worktrees.vibe_root().to_path_buf();
@@ -426,9 +418,7 @@ impl Core {
             }
             let kept = record.decision == Some(Decision::Kept);
             let recovery = records.is_recovery(&record.session_id);
-            // A session archived before its first turn is recorded on its copy (Vibe never saved it, so
-            // its own archive state cannot be read back); such a copy is listed like a deleted session's.
-            let state = if record.session_deleted || record.session_archived {
+            let state = if record.session_deleted {
                 SessionCopyState::Deleted
             } else if kept || self.shared.store.view(&record.session_id).is_none() {
                 self.session_copy_state(&record.session_id).await.0
@@ -474,7 +464,6 @@ impl Core {
             }
             orphans.push(OrphanWorktree {
                 session_id: record.session_id,
-                kept,
                 path: Some(path.display().to_string()),
                 branch: record.branch,
                 base: record.base_name,
@@ -487,15 +476,10 @@ impl Core {
 
     /// Read the original session when the store cannot establish that a copy is still active.
     /// A failed read leaves it active, so an uncertain copy does not enter the inventory.
-    async fn session_copy_state(&self, session_id: &str) -> (SessionCopyState, Option<PathBuf>) {
-        // Vibe keeps no archive state for a session archived before its first turn; its copy record does.
-        let recorded_archive = self
-            .shared
-            .worktrees
-            .records()
-            .ok()
-            .and_then(|records| records.get(session_id))
-            .is_some_and(|record| record.session_archived);
+    pub(crate) async fn session_copy_state(
+        &self,
+        session_id: &str,
+    ) -> (SessionCopyState, Option<PathBuf>) {
         let read = self
             .shared
             .gate
@@ -508,11 +492,10 @@ impl Core {
                     .pointer("/state/session/cwd")
                     .and_then(Value::as_str)
                     .map(PathBuf::from);
-                let state = if recorded_archive
-                    || reply
-                        .result
-                        .pointer("/state/session/archivedAt")
-                        .is_some_and(|value| !value.is_null())
+                let state = if reply
+                    .result
+                    .pointer("/state/session/archivedAt")
+                    .is_some_and(|value| !value.is_null())
                 {
                     SessionCopyState::Archived
                 } else {
@@ -523,7 +506,25 @@ impl Core {
             Err(error) => {
                 let error = CoreError::from_gate("session/read", &error);
                 if error.server_code.as_deref() == Some("not_found") {
-                    (SessionCopyState::Deleted, None)
+                    // The CLI-sharing switch selects a store; absence there does not delete a chat
+                    // in the other list. Vibe's unified store exists when CURRENT is a file.
+                    let paths = &self.shared.instructions;
+                    let stored = std::iter::once(&paths.own_home)
+                        .chain(paths.cli_home.iter())
+                        .any(|home| {
+                            home.join("logs/session/unified")
+                                .join(session_id)
+                                .join("CURRENT")
+                                .is_file()
+                        });
+                    (
+                        if stored {
+                            SessionCopyState::OtherList
+                        } else {
+                            SessionCopyState::Deleted
+                        },
+                        None,
+                    )
                 } else {
                     (SessionCopyState::Active, None)
                 }
@@ -542,8 +543,8 @@ impl Core {
     ) -> Result<(), CoreError> {
         use vw_gate::{Confirmation, ConfirmationRequest, Confirmer};
         let summary = if let Some(id) = params.get("sessionId").and_then(Value::as_str) {
-            let title = self.shared.names.title_of(&self.shared.store, id);
-            with_session(&summary, id, title.as_deref())
+            let title = self.shared.names.confirmation_title(&self.shared.store, id);
+            with_session(&summary, &title)
         } else {
             summary
         };
@@ -556,11 +557,11 @@ impl Core {
         };
         match self.shared.confirmer.confirm(&request).await {
             Confirmation::Approved | Confirmation::ApprovedAlways => Ok(()),
-            Confirmation::Declined => Err(CoreError {
+            answer @ Confirmation::Declined => Err(CoreError {
                 method: Some(method.to_owned()),
                 ..CoreError::new(
                     ErrorCode::ConfirmationDeclined,
-                    "the change was not confirmed in the native dialog",
+                    answer.agent_text("this request"),
                 )
             }),
         }
@@ -583,18 +584,8 @@ fn count_copies(records: &Records, vibe_root: &Path) -> usize {
     paths.len()
 }
 
-fn with_session(summary: &str, id: &str, title: Option<&str>) -> String {
-    let session = title.map_or_else(
-        || format!("Session {}", vw_gate::dialog_quote(id)),
-        |title| {
-            format!(
-                "Session {} (ID {})",
-                vw_gate::dialog_quote(title),
-                vw_gate::dialog_quote(id)
-            )
-        },
-    );
-    format!("{session}\n\n{summary}")
+fn with_session(summary: &str, title: &str) -> String {
+    format!("Session {}\n\n{summary}", vw_gate::dialog_chat_quote(title))
 }
 
 /// A free `vibe/<slug>` for `text` in the repository: no branch and no worktree folder (git's list, and the
@@ -634,7 +625,6 @@ fn info_of(records: &Records, session_id: &str, cwd: Option<&Path>) -> Option<Wo
             path: path.map(|p| p.display().to_string()),
             state,
             made_here: true,
-            decision: record.decision,
         });
     }
     // A session sitting in a linked worktree Vibe Work did not make (a fork of a copy, a CLI session).
@@ -654,7 +644,6 @@ fn info_of(records: &Records, session_id: &str, cwd: Option<&Path>) -> Option<Wo
         path: Some(info.root.display().to_string()),
         state: WorktreeState::Ready,
         made_here: false,
-        decision: None,
     })
 }
 

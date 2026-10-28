@@ -113,7 +113,7 @@ export function NetworkSettings(): ReactElement | null {
           <div className="set-actions">
             <Button
               data-testid="settings.network-settings-read"
-              small
+              shape="outlined"
               disabled={n.busy !== null}
               onClick={n.read}
             >
@@ -122,7 +122,7 @@ export function NetworkSettings(): ReactElement | null {
           </div>
         </div>
       )}
-      {view === null && n.error === null && <p className="key-line">Reading the settings...</p>}
+      {view === null && n.error === null && <p className="key-line">Reading the settings…</p>}
       {view !== null && (
         <>
           {view.restartNeeded && n.note === null && (
@@ -217,16 +217,16 @@ export function NetworkSettings(): ReactElement | null {
                 <>
                   <Button
                     data-testid="settings.network-settings-choose-certificate"
-                    small
+                    shape="outlined"
                     disabled={locked}
                     onClick={n.chooseCertificate}
                   >
-                    Choose file...
+                    Choose file…
                   </Button>
                   {n.form.certificateFile !== "" && (
                     <Button
                       data-testid="settings.network-settings-clear-certificate"
-                      small
+                      shape="outlined"
                       disabled={locked}
                       onClick={() => {
                         n.edit("certificateFile", "");
@@ -264,7 +264,7 @@ export function NetworkSettings(): ReactElement | null {
           </div>
           {n.busy === "test" && (
             <p className="key-line" role="status">
-              Testing the connection to Mistral...
+              Testing the connection to Mistral…
             </p>
           )}
           {n.outcome !== null && (
@@ -282,7 +282,7 @@ export function NetworkSettings(): ReactElement | null {
           <div className="set-actions">
             <Button
               data-testid="settings.network-settings-test-connection"
-              small
+              shape="outlined"
               disabled={locked}
               onClick={n.testConnection}
             >
@@ -290,7 +290,7 @@ export function NetworkSettings(): ReactElement | null {
             </Button>
             <Button
               data-testid="settings.network-settings-save"
-              small
+              shape="outlined"
               variant="primary"
               disabled={locked || !n.dirty}
               onClick={n.save}

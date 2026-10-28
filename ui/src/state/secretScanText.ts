@@ -59,11 +59,17 @@ function matches(finding: SecretLeakFinding, names: SecretLeakName[], removed: b
 
 /** One retained entry per chat, including keys removed while a password still needs a decision. */
 export function findingText(finding: SecretLeakFinding): string {
-  if (finding.state === "chatOpen") return "Close this chat first, then Redact.";
+  // Only a chat Redact can change waits for its close; a Vibe 3 chat's finding names the secret like any other.
+  if (finding.state === "chatOpen" && finding.redactable)
+    return "Close this chat first, then Redact.";
   if (finding.state === "partial") {
+    // Vibe 3.0 seals each chat's log with digests: those files are never edited (a change would make the chat
+    // unloadable), and deleting the chat removes them. The notice only names the action.
+    if (finding.redactedFiles === 0 && finding.formatFiles > 0)
+      return `Your secret is in the chat “${finding.chatTitle}”. Delete the chat to remove it.`;
     const prefix = `Removed your secret from ${String(finding.redactedFiles)} of ${count(finding.files, "file")}.`;
     if (finding.formatFiles > 0)
-      return `${prefix} Some files could not be changed without damaging the chat.`;
+      return `${prefix} Delete the chat “${finding.chatTitle}” to remove the rest.`;
     if (finding.unreadableFiles > 0)
       return `${prefix} Some files could not be replaced. Try Redact again.`;
     return `${prefix} ${finding.changedFiles === 1 ? "The other file changed since the check; it will" : "The other files changed since the check; they will"} be checked again.`;

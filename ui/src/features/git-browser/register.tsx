@@ -1,4 +1,7 @@
-/** Registers the saved-project Git tree, live snapshot refresh, and the ui/git-browser route. Called by main. */
+/**
+ * Registers the Files tab (the saved-project Git tree under History, live snapshot refresh), the ui/git-browser
+ * route and the ui/explorer route (`../explorer/explorerRoute.ts`). Called by main.
+ */
 import { term } from "../../vocabulary";
 import { Selector, type SelectorOption } from "../../components/Selector";
 import { useEffect, type ReactElement } from "react";
@@ -8,8 +11,15 @@ import { createStore, useStore } from "../../state/createStore";
 import { UiControlError } from "../../state/uiControl";
 import type { App } from "../shell/AppContext";
 import { adapterAction, adapterFile } from "./routing";
+import { pointGitFile } from "./point";
 import { reposOf } from "./adapter";
 import { GitBrowser } from "./GitBrowser";
+import { FilesPanel } from "../explorer/FilesPanel";
+import { createExplorer, type Explorer } from "../explorer/store";
+import { createPlaceStore, type PlaceStore } from "../explorer/panelModel";
+import { registerExplorerRoute } from "../explorer/explorerRoute";
+import { bindFiles } from "../explorer/filesBridge";
+import { setFilesTabSource } from "../files/panelRead";
 import { actionStep, nextStep, stateWords, type BrowserAction, type BrowserTarget } from "./model";
 
 type View = {
@@ -57,8 +67,12 @@ function BrowserPanel({
   app,
   view,
   watch,
+  explorer,
+  places,
 }: {
   app: App;
+  explorer: Explorer;
+  places: PlaceStore;
   view: ReturnType<typeof createStore<View>>;
   watch: (id: string | null) => Promise<void>;
 }): ReactElement {
@@ -94,39 +108,53 @@ function BrowserPanel({
       />
     </div>
   );
-  if (selectedId === null)
-    return (
-      <section className="git-browser">
-        {chooser}
-        <div className="gb-message">Choose a saved project with a folder to browse Git.</div>
-      </section>
-    );
   const snapshot = state.projectId === currentProject(app) ? state.snapshot : null;
   const act = (task: Promise<void>) => {
     void task.catch((error: unknown) => {
       view.set((s) => ({ ...s, error: toCallError(error).error.message }));
     });
   };
+  const placeKey = selectedSessionId ?? selectedId ?? "new";
   return (
-    <div className="gb-panel">
-      {chooser}
-      <GitBrowser
-        repos={reposOf(snapshot)}
-        selectedSessionId={selectedSessionId}
-        loading={state.loading}
-        error={state.error}
-        onRetry={() => {
-          const id = currentProject(app);
-          if (id !== null) void watch(id);
-        }}
-        onAction={(target, action) => {
-          act(adapterAction(app, target, action, "ui"));
-        }}
-        onFile={(target, path) => {
-          act(adapterFile(app, target, path, "ui"));
-        }}
-      />
-    </div>
+    <FilesPanel
+      key={placeKey}
+      app={app}
+      explorer={explorer}
+      snapshot={snapshot}
+      places={places}
+      placeKey={placeKey}
+      legacy={
+        <details className="fx-places">
+          <summary data-testid="explorer.repositories">Repositories and session copies</summary>
+          {chooser}
+          <GitBrowser
+            inHistory
+            repos={reposOf(snapshot)}
+            note={snapshot?.truncated ? snapshot.note : null}
+            selectedSessionId={selectedSessionId}
+            loading={state.loading}
+            error={state.error}
+            onRetry={() => {
+              const id = currentProject(app);
+              if (id !== null) void watch(id);
+            }}
+            onAction={(target, action) => {
+              act(adapterAction(app, target, action, "ui"));
+            }}
+            onFile={(target, path) => {
+              act(adapterFile(app, target, path, "ui"));
+            }}
+            onPoint={(target, path) => {
+              act(
+                Promise.resolve().then(() => {
+                  pointGitFile(app, target, path);
+                }),
+              );
+            }}
+          />
+        </details>
+      }
+    />
   );
 }
 
@@ -134,6 +162,8 @@ function BrowserPanel({
 export function registerGitBrowser(app: App): () => void {
   if (app.core === null || app.projects === null) return () => undefined;
   const core = app.core;
+  const explorer = createExplorer(core);
+  const places = createPlaceStore();
   const view = createStore<View>({ projectId: null, snapshot: null, loading: false, error: null });
   let watched: string | null = null;
   let version = 0;
@@ -217,8 +247,48 @@ export function registerGitBrowser(app: App): () => void {
     }, delay);
   });
   const removeBody = app.panelTabs.register("git", () => (
-    <BrowserPanel app={app} view={view} watch={watch} />
+    <BrowserPanel app={app} view={view} watch={watch} explorer={explorer} places={places} />
   ));
+  // The same snapshot and panel key BrowserPanel renders with, for the ui/explorer route.
+  const removeExplorerRoute = registerExplorerRoute(app, explorer, places, () => {
+    const projectId = currentProject(app);
+    const state = view.get();
+    return {
+      snapshot: state.projectId === projectId ? state.snapshot : null,
+      key: app.shell.store.get().selected ?? projectId ?? "new",
+    };
+  });
+  const search = () => {
+    app.shell.actions.openTab("git");
+    setTimeout(
+      () => document.querySelector<HTMLInputElement>('[data-testid="explorer.search"]')?.focus(),
+      50,
+    );
+  };
+  const removeSearch = app.commands.register({
+    id: "files.search",
+    label: "Search files",
+    section: "Files",
+    keys: "Mod+Shift+F",
+    keywords: "folder text commits",
+    run: search,
+  });
+  const removeHistory = app.commands.register({
+    id: "files.history",
+    label: "Show history",
+    section: "Files",
+    keywords: "git commits versions",
+    run: () => {
+      app.shell.actions.openTab("git");
+      explorer.setView("history");
+    },
+  });
+  const removeKeys = app.shortcuts.register({
+    id: "files.search",
+    keys: "Mod+Shift+F",
+    description: "Search files, text and commits",
+    run: search,
+  });
   const removeRoute = app.uiControl.register("git-browser", async (body) => {
     const params = body === undefined || body === null ? {} : body;
     if (typeof params !== "object" || Array.isArray(params))
@@ -279,12 +349,36 @@ export function registerGitBrowser(app: App): () => void {
       repos: reposOf(snapshot).map((r) => ({ ...routeNode(r), copies: r.copies.map(routeNode) })),
     };
   });
+  // The file menus elsewhere (chat links, file tabs, Changes) reach this Files tab through the bridge.
+  const unbind = bindFiles(app, {
+    explorer,
+    showFolder: (folder) => {
+      if (explorer.store.get().folder === folder) return;
+      places.set({
+        key: app.shell.store.get().selected ?? currentProject(app) ?? "new",
+        place: folder,
+      });
+      explorer.choose(folder);
+    },
+  });
+  // What the agent's panel_read reports about the Files tab: the folder, the view and the search text.
+  setFilesTabSource(() => {
+    const s = explorer.store.get();
+    return { folder: s.folder, view: s.view, search: s.query };
+  });
   return () => {
+    unbind();
+    setFilesTabSource(null);
     version++;
     if (eventTimer !== null) clearTimeout(eventTimer);
     stopEvents();
     removeRoute();
+    removeExplorerRoute();
     removeBody();
+    explorer.stop();
+    removeSearch();
+    removeHistory();
+    removeKeys();
     if (watched !== null) void run(watched, "unwatch", true).catch(() => undefined);
   };
 }

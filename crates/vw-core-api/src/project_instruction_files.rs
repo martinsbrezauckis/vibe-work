@@ -3,7 +3,7 @@
 //! Called by the handler; no file operation uses a client-supplied absolute path.
 
 use crate::error::{CoreError, ErrorCode};
-use crate::instructions_view::{InstructionsDoc, InstructionsScope};
+use crate::instructions_view::InstructionsDoc;
 use crate::project_instructions::{invalid, io_error, refuse};
 use cap_std::fs::{Dir, OpenOptions};
 use std::fs;
@@ -221,7 +221,6 @@ pub(crate) fn read_doc(folder: &Path, name: &str) -> Result<InstructionsDoc, Cor
     check_name(name)?;
     let path = folder.join(name);
     let mut doc = InstructionsDoc {
-        scope: InstructionsScope::Project,
         path: path.to_string_lossy().into_owned(),
         folder: Some(folder.to_string_lossy().into_owned()),
         exists: false,

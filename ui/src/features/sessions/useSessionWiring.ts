@@ -12,7 +12,7 @@ import { useEffect, useRef } from "react";
 
 import { SEARCH_AUTOLOAD_PAGES } from "../../state/coreStore";
 import { documentFocused } from "../../state/notifyStore";
-import { publishContextSave } from "../preview/contextSaveEvents";
+import { publishContextPoint, publishContextSave } from "../preview/contextSaveEvents";
 import { SEARCH_DEBOUNCE_MS } from "../search/useCoreSearch";
 import { useApp } from "../shell/AppContext";
 import { useCoreState, useShellState } from "../shell/hooks";
@@ -39,12 +39,24 @@ export function useSessionWiring(): void {
       (id) => {
         toasts.forget(id);
       },
+      (id, spec) => {
+        toasts.update(id, spec);
+      },
     );
   }, [core, notifier, shell, toasts]);
 
   useEffect(() => sessions?.watchSeen(focused), [sessions]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => sessions?.watchViewed(), [sessions]);
+
+  useEffect(
+    () =>
+      core?.onSessionsGone((ids) => {
+        const selected = shell.store.get().selected;
+        if (selected !== null && ids.includes(selected)) shell.actions.selectSession(null);
+      }),
+    [core, shell],
+  );
 
   useEffect(() => {
     const onFocus = () => {
@@ -65,6 +77,7 @@ export function useSessionWiring(): void {
     void core.client
       .onHostEvent((event) => {
         if (event.type === "browserSaveContext") publishContextSave(event.sessionId);
+        else if (event.type === "browserPointContext") publishContextPoint(event.sessionId);
         else if (event.type === "openUpdates") shell.actions.openSettings("updates");
         else {
           void (async () => {

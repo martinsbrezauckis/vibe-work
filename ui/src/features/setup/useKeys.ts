@@ -13,6 +13,8 @@ const NONE: Store<KeyUi> = createStore<KeyUi>({
   status: null,
   candidates: [],
   vibeKeys: [],
+  mistralKeys: [],
+  switching: null,
   busy: false,
   problem: null,
   test: { phase: "idle" },

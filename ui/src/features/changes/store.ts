@@ -5,10 +5,11 @@
  * Depends on: state/coreStore (`run`, `listen`), state/createStore, model.ts, protocol types.
  * Called by: register.tsx, the views, the `ui/changes` route.
  * Invariants:
- * - A file is deleted only after a confirmation that names it: a revert that would delete asks first,
- *   and the core refuses (`confirmDeletes`) any request that does not name every deleted file.
+ * - Every revert (a file, a block, all) asks first; a file is deleted only after a confirmation that
+ *   names it, and the core refuses (`confirmDeletes`) any request that does not name every deleted file.
  * - `stale` ("file changed") reloads the view and says so; nothing is retried behind the user's back.
  * - A `changesUpdated` event reloads a session the store already shows.
+ * - Completed reads render during ongoing edits; later refreshes never hold an earlier caller open.
  */
 import { toCallError } from "../../protocol/client/types";
 import type {
@@ -28,11 +29,15 @@ import { pruneSessions } from "../../state/prune";
 import { bulkDeletes, deletedByRevert, shownInFull } from "./model";
 import { restoreRewindReply, type RewindDestination } from "../../state/composerRewind";
 import { validIdentity } from "../../state/gitIdentity";
+import { summarize } from "../../state/sessionSummary";
+import { reviewPath, type ReviewTarget } from "./reviewTarget";
+import { createReadQueue } from "./readQueue";
 
 /** A confirmation waiting in the tab. */
 export type Confirm =
   | { kind: "keepUnseen"; sessionId: string; file: FileChange }
   | { kind: "revertFile"; sessionId: string; file: FileChange; deletes: string[] }
+  | { kind: "revertHunk"; sessionId: string; file: FileChange; hunk: Hunk }
   | { kind: "revertAll"; sessionId: string; fingerprint: string; deletes: string[]; files: number }
   | { kind: "undoTurn"; sessionId: string; turnNumber: number; preview: UndoPreview }
   | {
@@ -49,6 +54,7 @@ export interface ChangesUi {
   busy: Readonly<Record<string, boolean>>;
   error: Readonly<Record<string, string | null>>;
   selected: Readonly<Record<string, string | null>>;
+  review: Readonly<Record<string, ReviewTarget | undefined>>;
   layout: "split" | "unified";
   confirm: Confirm | null;
   completion: Readonly<Record<string, "history" | "commit" | undefined>>;
@@ -59,6 +65,7 @@ const initial: ChangesUi = {
   busy: {},
   error: {},
   selected: {},
+  review: {},
   layout: "unified",
   confirm: null,
   completion: {},
@@ -72,7 +79,7 @@ function put<T>(map: Readonly<Record<string, T>>, key: string, value: T): Record
 export function createChanges(core: CoreController, rewind: RewindDestination) {
   const store = createStore<ChangesUi>(initial);
   const repositories: Record<string, string | undefined> = {};
-  const versions: Record<string, number> = {};
+  const queueRead = createReadQueue();
 
   const run = async (request: ChangesRequest): Promise<ChangesResult> => {
     if (
@@ -88,13 +95,24 @@ export function createChanges(core: CoreController, rewind: RewindDestination) {
     return result.result;
   };
   const setView = (view: ChangesView) => {
-    store.set((s) => ({
-      ...s,
-      views: put(s.views, view.sessionId, view),
-      completion:
-        view.files.length > 0 ? put(s.completion, view.sessionId, undefined) : s.completion,
-      error: put(s.error, view.sessionId, null),
-    }));
+    store.set((s) => {
+      const target = s.review[view.sessionId];
+      return {
+        ...s,
+        views: put(s.views, view.sessionId, view),
+        completion:
+          view.files.length > 0 ? put(s.completion, view.sessionId, undefined) : s.completion,
+        error: put(s.error, view.sessionId, null),
+        ...(target === undefined
+          ? {}
+          : {
+              selected: put(s.selected, view.sessionId, reviewPath(view, target.path)),
+              review: target.ready
+                ? s.review
+                : put(s.review, view.sessionId, { ...target, ready: true }),
+            }),
+      };
+    });
   };
   const setBusy = (sessionId: string, busy: boolean) => {
     store.set((s) => ({ ...s, busy: put(s.busy, sessionId, busy) }));
@@ -159,7 +177,9 @@ export function createChanges(core: CoreController, rewind: RewindDestination) {
 
   // a deleted session's entries go with it.
   core.onSessionsGone((ids) => {
-    store.set((s) => pruneSessions(s, ["views", "busy", "error", "selected", "completion"], ids));
+    store.set((s) =>
+      pruneSessions(s, ["views", "busy", "error", "selected", "review", "completion"], ids),
+    );
   });
   const stopListening = core.listen((event) => {
     if (event.type === "changesUpdated" && store.get().views[event.sessionId] !== undefined)
@@ -177,24 +197,24 @@ export function createChanges(core: CoreController, rewind: RewindDestination) {
         store.set((s) => ({ ...s, completion: put(s.completion, sessionId, "commit") }));
     },
     /** Reads (and refreshes) the session's changes. */
-    async load(sessionId: string): Promise<void> {
+    load(sessionId: string): Promise<void> {
       const repo = repositories[sessionId];
-      const version = (versions[sessionId] ?? 0) + 1;
-      versions[sessionId] = version;
-      try {
-        const result = await run(
-          repo === undefined || repo === "."
-            ? { op: "read", sessionId }
-            : { op: "readRepo", sessionId, repo },
-        );
-        if (versions[sessionId] === version && result.kind === "view") setView(result.view);
-      } catch (thrown) {
-        if (versions[sessionId] === version)
-          store.set((s) => ({
-            ...s,
-            error: put(s.error, sessionId, toCallError(thrown).error.message),
-          }));
-      }
+      return queueRead(JSON.stringify([sessionId, repo ?? "."]), async () => {
+        try {
+          const result = await run(
+            repo === undefined || repo === "."
+              ? { op: "read", sessionId }
+              : { op: "readRepo", sessionId, repo },
+          );
+          if (repositories[sessionId] === repo && result.kind === "view") setView(result.view);
+        } catch (thrown) {
+          if (repositories[sessionId] === repo)
+            store.set((s) => ({
+              ...s,
+              error: put(s.error, sessionId, toCallError(thrown).error.message),
+            }));
+        }
+      });
     },
     /** Follows the Git bar's confirmed repository; refreshes when its status is re-read. */
     selectRepository(sessionId: string, repo: string | undefined): void {
@@ -205,6 +225,7 @@ export function createChanges(core: CoreController, rewind: RewindDestination) {
           ...s,
           views: Object.fromEntries(Object.entries(s.views).filter(([id]) => id !== sessionId)),
           selected: put(s.selected, sessionId, null),
+          review: put(s.review, sessionId, undefined),
           completion: changedFolder ? put(s.completion, sessionId, undefined) : s.completion,
           confirm: s.confirm?.sessionId === sessionId ? null : s.confirm,
         }));
@@ -213,8 +234,19 @@ export function createChanges(core: CoreController, rewind: RewindDestination) {
     },
     keepHunk: (sessionId: string, file: FileChange, hunk: Hunk) =>
       act(sessionId, { op: "keep", sessionId, target: hunkTarget(file, hunk) }),
-    revertHunk: (sessionId: string, file: FileChange, hunk: Hunk) =>
-      act(sessionId, { op: "revert", sessionId, target: hunkTarget(file, hunk) }),
+    /** Reverts one block of a file, after a short confirmation (`confirmed` is the confirmation's own call). */
+    async revertHunk(
+      sessionId: string,
+      file: FileChange,
+      hunk: Hunk,
+      confirmed = false,
+    ): Promise<void> {
+      if (!confirmed) {
+        store.set((s) => ({ ...s, confirm: { kind: "revertHunk", sessionId, file, hunk } }));
+        return;
+      }
+      await act(sessionId, { op: "revert", sessionId, target: hunkTarget(file, hunk) });
+    },
     /** Keeps a file; one the user was not shown line by line (too large, binary) is kept only after a
      * confirmation that says so. */
     async keepFile(sessionId: string, file: FileChange, confirmed = false): Promise<void> {
@@ -224,10 +256,11 @@ export function createChanges(core: CoreController, rewind: RewindDestination) {
       }
       await act(sessionId, { op: "keep", sessionId, target: fileTarget(file) });
     },
-    /** Reverts a file; one the session created is deleted only after the confirmation names it. */
+    /** Reverts a file after a short confirmation; one the session created is deleted only after the
+     * confirmation names it. */
     async revertFile(sessionId: string, file: FileChange, confirmed = false): Promise<void> {
       const deletes = [deletedByRevert(file)].filter((p): p is string => p !== null);
-      if (deletes.length > 0 && !confirmed) {
+      if (!confirmed) {
         store.set((s) => ({ ...s, confirm: { kind: "revertFile", sessionId, file, deletes } }));
         return;
       }
@@ -317,6 +350,8 @@ export function createChanges(core: CoreController, rewind: RewindDestination) {
           return controller.keepFile(id, pending.file, true);
         case "revertFile":
           return controller.revertFile(id, pending.file, true);
+        case "revertHunk":
+          return controller.revertHunk(id, pending.file, pending.hunk, true);
         case "revertAll":
           return act(id, {
             op: "revert",
@@ -360,7 +395,22 @@ export function createChanges(core: CoreController, rewind: RewindDestination) {
       store.set((s) => ({ ...s, confirm: null }));
     },
     select(sessionId: string, path: string): void {
-      store.set((s) => ({ ...s, selected: put(s.selected, sessionId, path) }));
+      store.set((s) => ({
+        ...s,
+        selected: put(s.selected, sessionId, path),
+        review: put(s.review, sessionId, undefined),
+      }));
+    },
+    /** Subagent edits are reviewed in their parent's Changes, alongside the parent's own edits. */
+    owner(sessionId: string): string {
+      const session = core.store.get().sessions[sessionId];
+      return session === undefined ? sessionId : (summarize(session).parentId ?? sessionId);
+    },
+    /** Selects a transcript change after refreshing the session's review. */
+    async review(sessionId: string, path: string, line: number): Promise<void> {
+      if (repositories[sessionId] !== undefined) repositories[sessionId] = ".";
+      store.set((s) => ({ ...s, review: put(s.review, sessionId, { path, line, ready: false }) }));
+      await controller.load(sessionId);
     },
     setLayout(layout: ChangesUi["layout"]): void {
       store.set((s) => ({ ...s, layout }));

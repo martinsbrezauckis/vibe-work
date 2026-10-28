@@ -15,7 +15,7 @@
 //! marker text stays visible in the editor. The start-up [`write`] replaces a leading block of ours from an earlier
 //! version (first line `BEGIN` up to the first `END` line).
 //!
-//! Depends on: std only. Called by: `instructions` (personal read and write), `vw-host::agent_tools::prepare` (writes
+//! Depends on: std. Called by: `instructions` (personal read and write), `vw-host::agent_tools::prepare` (writes
 //! or removes the block at every start).
 //! Invariants: the block is the first thing in the file and appears at most once; text outside it is kept byte for
 //! byte; a link at the file's place is never written through.
@@ -30,18 +30,50 @@ pub const BEGIN: &str = "<!-- >>> vibe-work note (managed by Vibe Work: rewritte
 pub const END: &str = "<!-- <<< vibe-work note <<< -->";
 /// The note itself (`working_note.md`): the map, a few hundred tokens.
 pub const TEXT: &str = include_str!("working_note.md");
+const SCREEN_READER: &str = if cfg!(target_os = "macos") {
+    "On macOS, the system screen reader is VoiceOver (System Settings > Accessibility)."
+} else if cfg!(windows) {
+    "On Windows, the system screen reader is Narrator (Settings > Accessibility)."
+} else {
+    "On Linux, the desktop screen reader is Orca (Accessibility settings)."
+};
+/// The same explanation is delivered to the model and the window.
+pub const MCP_DISABLED: &str = "Vibe Work's tools are unavailable because enable_mcp = false in its managed config.toml. Enable MCP there and reopen the chat to use them.";
+
+/// Reads only the managed configuration's explicit MCP switch.
+#[must_use]
+pub fn mcp_disabled(vibe_home: &Path) -> bool {
+    fs::read_to_string(vibe_home.join("config.toml"))
+        .ok()
+        .and_then(|text| toml::from_str::<toml::Value>(&text).ok())
+        .and_then(|config| config.get("enable_mcp").and_then(toml::Value::as_bool))
+        == Some(false)
+}
+
+fn disabled_block() -> String {
+    format!(
+        "{BEGIN}\n{MCP_DISABLED}\n\n{}\n\n{SCREEN_READER}\n{END}\n",
+        TEXT.trim_end()
+    )
+}
+
+fn recognised(doc: &str) -> Option<String> {
+    [block(), disabled_block()]
+        .into_iter()
+        .find(|prefix| doc.starts_with(prefix))
+}
 
 /// The whole block: markers around [`TEXT`], ending in a newline.
 #[must_use]
 pub fn block() -> String {
-    format!("{BEGIN}\n{}\n{END}\n", TEXT.trim_end())
+    format!("{BEGIN}\n{}\n\n{SCREEN_READER}\n{END}\n", TEXT.trim_end())
 }
 
 /// True when `doc` starts with exactly the block this build ships (its first bytes are [`block`]). Only then is the
 /// block ours to hide or keep; anything else stays visible text.
 #[must_use]
 pub fn is_ours(doc: &str) -> bool {
-    doc.starts_with(&block())
+    recognised(doc).is_some()
 }
 
 /// `doc` without our block: the user's own text. Only the exact block this build ships, at the very start of the
@@ -51,10 +83,10 @@ pub fn is_ours(doc: &str) -> bool {
 /// model unseen).
 #[must_use]
 pub fn strip(doc: &str) -> String {
-    if !is_ours(doc) {
+    let Some(prefix) = recognised(doc) else {
         return doc.to_owned();
-    }
-    let rest = &doc[block().len()..];
+    };
+    let rest = &doc[prefix.len()..];
     rest.strip_prefix('\n').unwrap_or(rest).to_owned()
 }
 
@@ -77,7 +109,12 @@ pub fn compose(text: &str, note: bool) -> String {
 /// with it.
 #[must_use]
 pub fn keep(existing: &str, text: &str) -> String {
-    compose(text, is_ours(existing))
+    let composed = compose(text, is_ours(existing));
+    if existing.starts_with(&disabled_block()) {
+        composed.replacen(&block(), &disabled_block(), 1)
+    } else {
+        composed
+    }
 }
 
 /// True when `raw` (the file on disk) is what the user was shown as `expected` (the stale-write check of the
@@ -85,7 +122,7 @@ pub fn keep(existing: &str, text: &str) -> String {
 #[must_use]
 pub fn shows_as(raw: &str, expected: &str) -> bool {
     if is_ours(raw) {
-        compose(expected, true) == raw && strip(raw) == expected
+        keep(raw, expected) == raw && strip(raw) == expected
     } else {
         raw == expected
     }
@@ -140,7 +177,10 @@ pub fn write(vibe_home: &Path, note: bool) -> Result<bool, String> {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
         Err(e) => return Err(format!("{}: {e}", path.display())),
     };
-    let updated = compose(without_leading_block(&existing), note);
+    let mut updated = compose(without_leading_block(&existing), note);
+    if note && mcp_disabled(vibe_home) {
+        updated = updated.replacen(&block(), &disabled_block(), 1);
+    }
     if updated == existing {
         return Ok(false);
     }

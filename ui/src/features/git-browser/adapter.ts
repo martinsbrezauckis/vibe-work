@@ -2,7 +2,7 @@
 import type { GitBrowserNode, GitBrowserSnapshot } from "../../protocol/core";
 import type { BrowserRepo, BrowserTarget } from "./model";
 
-export function targetOf(node: GitBrowserNode): BrowserTarget {
+function targetOf(node: GitBrowserNode): BrowserTarget {
   return {
     id: node.id,
     kind: node.kind === "copy" ? "copy" : "repository",

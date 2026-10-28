@@ -1,0 +1,409 @@
+/* Open-file tabs, the two-editor layout and folded windows. Uses the app's controls and tokens. */
+.ptabs:has(.file-panel-tab) {
+  overflow: hidden;
+  container-type: inline-size;
+}
+/* Three tool tabs beside file tabs in a narrow strip: the tool tabs show their icon only (the name stays in the
+   tooltip and the accessible name), so file tabs and the panel's own buttons keep their room. */
+@container (max-width: 640px) {
+  .ptabs:has(
+      .ptab-group:not(.file-panel-tab)
+        ~ .ptab-group:not(.file-panel-tab)
+        ~ .ptab-group:not(.file-panel-tab)
+    )
+    .ptab-group:not(.file-panel-tab)
+    .ptab-label {
+    display: none;
+  }
+}
+/* A file tab shrinks to 92 px (the strip's fit counts the same width): short name, full path on hover. */
+.file-panel-tab {
+  flex: 1 1 140px;
+  min-width: 92px;
+  max-width: 180px;
+}
+.file-panel-tab .ptab {
+  min-width: 0;
+  flex: 1;
+  gap: 5px;
+  padding-left: 8px;
+}
+.file-panel-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.file-tab-dot {
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border-radius: var(--radius-pill);
+  background: var(--text);
+}
+.file-tab-dot[data-changed="true"] {
+  background: var(--orange);
+}
+.file-saved-label {
+  font-size: var(--text-11);
+  color: var(--text-3);
+}
+.open-file-menu-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.open-file-folder {
+  font-family: var(--font-mono);
+  font-size: var(--text-11);
+  color: var(--text-3);
+  overflow-wrap: anywhere;
+}
+.pbody:has(.editor-workspace) {
+  padding: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.editor-workspace {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+}
+.editor-workspace-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  border-bottom: 1px solid var(--line);
+  padding: 4px 8px;
+}
+.editor-picker {
+  margin-left: auto;
+}
+.editor-pair {
+  display: grid;
+  grid-template-columns: minmax(0, var(--editor-ratio, 50%)) 6px minmax(0, 1fr);
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+}
+.editor-pane {
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  border-top: 2px solid transparent;
+}
+.editor-pane[data-focused="true"] {
+  border-top-color: var(--orange);
+}
+.editor-divider {
+  background: var(--line);
+  cursor: col-resize;
+  touch-action: none;
+}
+.editor-divider:hover {
+  background: var(--focus);
+}
+.editor-workspace .file-tab {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  padding: 8px;
+}
+.editor-pane .file-tools {
+  gap: 2px;
+}
+.editor-pane .file-head {
+  flex: none;
+}
+.editor-pane .file-edit-hint {
+  display: none;
+}
+.editor-pane .file-edit-bar {
+  flex-wrap: wrap;
+}
+.editor-workspace .file-edit {
+  flex: 1;
+}
+.session-list-header {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.session-list-header > .btn-primary {
+  flex: 1;
+}
+.window-strip {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 10px 0;
+  gap: 10px;
+  background: var(--chrome);
+  border-right: 1px solid var(--line);
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+.sessions-strip {
+  grid-column: 2;
+  grid-row: 1;
+}
+.chat-strip {
+  grid-column: 3;
+  grid-row: 1;
+}
+.session-strip-items {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 32px;
+  overflow-y: auto;
+}
+.session-strip-items .ibtn {
+  position: relative;
+  width: 32px;
+  border: 1px solid var(--line-2);
+  font-size: var(--text-11);
+}
+.session-strip-items .ibtn svg {
+  display: none;
+}
+.session-strip-items .ibtn[aria-pressed="true"] {
+  border-color: var(--orange);
+  background: var(--active);
+}
+.chat-strip-title,
+.chat-strip-state {
+  writing-mode: vertical-rl;
+  color: var(--text-3);
+  font-size: var(--text-12);
+}
+.body.has-editors.has-panel {
+  transition: none;
+  grid-template-columns: 56px 48px var(--slot-w) minmax(0, 1fr);
+}
+.body.has-editors.slot-list {
+  grid-template-columns: 56px var(--slot-w) 48px minmax(0, 1fr);
+}
+.body.has-editors.slot-folded {
+  grid-template-columns: 56px 48px 48px minmax(0, 1fr);
+}
+.body.has-editors .column {
+  visibility: hidden;
+}
+.body.has-editors.slot-list .column {
+  visibility: visible;
+}
+.body.has-editors .content,
+.body.has-editors .column {
+  grid-row: 1;
+}
+.body.has-editors .panel {
+  grid-row: 1;
+}
+.body.chat-folded .content-base {
+  visibility: hidden;
+  pointer-events: none;
+}
+.body.chat-folded:not(.has-editors).has-panel {
+  grid-template-columns: 56px 284px 48px minmax(0, 1fr);
+}
+.body.chat-folded.no-col:not(.has-editors).has-panel {
+  grid-template-columns: 56px 0 48px minmax(0, 1fr);
+}
+.body.slot-list .content-base {
+  visibility: hidden;
+  pointer-events: none;
+}
+.saved-comparison {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+}
+.saved-compare-headers {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  border-bottom: 1px solid var(--line);
+}
+.saved-compare-headers > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  font-size: var(--text-12);
+  min-width: 0;
+}
+.saved-compare-host {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+@media (max-width: 899px) {
+  .body.has-editors.has-panel {
+    grid-template-columns: 0 0 0 minmax(0, 1fr);
+  }
+  .body.has-editors .panel {
+    position: relative;
+    inset: auto;
+    width: auto;
+    z-index: auto;
+    box-shadow: none;
+  }
+  .body.has-editors .content,
+  .body.has-editors .column,
+  .body.has-editors .window-strip,
+  .body.has-editors .rail {
+    visibility: hidden;
+  }
+}
+@media (max-width: 640px) {
+  .editor-pair {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) 6px minmax(0, 1fr);
+  }
+  .editor-divider {
+    cursor: row-resize;
+  }
+  .editor-pane .file-title,
+  .editor-pane .file-tools {
+    max-height: 70px;
+    overflow: auto;
+  }
+}
+.session-strip-items .ibtn[data-activity="run"]::after,
+.session-strip-items .ibtn[data-activity="input"]::after {
+  content: "";
+  position: absolute;
+  right: 2px;
+  top: 2px;
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-pill);
+  background: var(--green);
+}
+.session-strip-items .ibtn[data-activity="input"]::after {
+  background: var(--orange);
+}
+.editor-pair[data-fold-left="true"] {
+  grid-template-columns: 48px 6px minmax(0, 1fr);
+}
+.editor-pair[data-fold-right="true"] {
+  grid-template-columns: minmax(0, 1fr) 6px 48px;
+}
+.editor-pair[data-fold-left="true"][data-fold-right="true"] {
+  grid-template-columns: 48px minmax(0, 1fr) 48px;
+}
+.body.has-editors.slot-list .content,
+.body.chat-folded:not(.is-settings):not(.is-overview) .content {
+  visibility: hidden;
+  pointer-events: none;
+}
+.window-strip {
+  position: relative;
+  z-index: var(--z-content);
+}
+.saved-compare-headers {
+  grid-template-columns: minmax(0, var(--saved-left, 50%)) minmax(0, 1fr);
+}
+.saved-compare-headers > div {
+  justify-content: flex-start;
+  gap: 6px;
+}
+.saved-compare-headers > div > span {
+  flex: 1;
+  min-width: 0;
+}
+.saved-compare-engine {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+.saved-compare-engine .saved-compare-host {
+  position: absolute;
+  inset: 0;
+}
+.saved-compare-engine > .editor-divider {
+  position: absolute;
+  left: calc(var(--saved-left, 50%) - 3px);
+  top: 0;
+  bottom: 0;
+  width: 6px;
+}
+@media (max-width: 640px) {
+  .saved-compare-engine > .editor-divider {
+    left: 0;
+    right: 0;
+    top: calc(var(--saved-left, 50%) - 3px);
+    bottom: auto;
+    width: auto;
+    height: 6px;
+  }
+  .saved-compare-headers {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+@media (max-width: 640px) {
+  .saved-comparison {
+    position: relative;
+  }
+  .saved-compare-headers {
+    display: contents;
+  }
+  .saved-compare-headers > div {
+    position: absolute;
+    inset-inline: 0;
+    top: 0;
+    height: 44px;
+    background: var(--panel);
+    z-index: var(--z-sticky);
+  }
+  .saved-compare-headers > div:last-child {
+    top: calc(var(--saved-left, 50%) + 3px);
+  }
+}
+.body.list-folded:not(.has-editors) {
+  grid-template-columns: 56px 48px minmax(0, 1fr) 0;
+}
+.body.list-folded:not(.has-editors).has-panel {
+  grid-template-columns: 56px 48px minmax(380px, 1fr) var(--pw);
+}
+.body.list-folded.chat-folded:not(.has-editors).has-panel {
+  grid-template-columns: 56px 48px 48px minmax(0, 1fr);
+}
+.body > :is(.rail, .column, .content, .panel) {
+  grid-row: 1;
+}
+.body.list-folded .column {
+  visibility: hidden;
+}
+/* Fold controls keep the header's first hit area when its neighbor becomes a strip. */
+.shead:has(> .ibtn) {
+  padding-left: 8px;
+}
+.sessions-strip {
+  padding: 12px 4px 10px 12px;
+  align-items: stretch;
+}
+.editor-pane .file-head > .ibtn {
+  align-self: flex-start;
+}
+.editor-folded-strip {
+  padding-top: 8px;
+  border-top: 2px solid transparent;
+}
+.shead > .ibtn:first-child {
+  align-self: flex-start;
+}
+.chat-strip,
+.editor-folded-strip {
+  align-items: stretch;
+  padding-left: 8px;
+  padding-right: 7px;
+}

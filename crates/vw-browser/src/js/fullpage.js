@@ -4,6 +4,7 @@
 // transparent, or they would repeat in every slice; ShellX Browser's stitch repeats them), `unpin`, and
 // `eager` (images marked loading=lazy load now, so a one-render capture does not show empty boxes).
 // REQ: { page, op, y, capture? }. A capture token owns the scroll and styles until the host restores them.
+/* global ENV, REQ, clip, collect -- Supplied by the Rust script assembler and its shared prelude. */
 (() => {
   __VW_COMMON__
   const doc = document.documentElement;

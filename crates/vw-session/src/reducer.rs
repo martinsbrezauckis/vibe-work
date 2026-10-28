@@ -43,6 +43,28 @@ impl SessionEntry {
             );
             return out;
         };
+        // Vibe 3's deferred copy setup emits ephemeral cwd events, but reads still return
+        // watermark 0. Promotion on the first message starts durable numbering at 1 again,
+        // with bumpedAt. Do not let an old setup gap hold that new stream indefinitely.
+        // A session that never bumped reads `bumpedAt == createdAt` (Vibe 3.0.1+
+        // `PublicSession._default_bumped_at`; 3.0.0 sent null).
+        if event_id == 1
+            && n.method == "session/updated"
+            && self.state["session"]["harness"] == "unified"
+            && self.state["session"]["bumpedAt"] == self.state["session"]["createdAt"]
+            && self.state["turns"].as_array().is_some_and(Vec::is_empty)
+            && self.state["history"].as_array().is_some_and(Vec::is_empty)
+            && n.params["patch"].as_array().is_some_and(|patch| {
+                patch.len() == 1
+                    && patch[0]["op"] == "replace"
+                    && patch[0]["path"] == "/bumpedAt"
+                    && patch[0]["value"].is_number()
+            })
+        {
+            self.last_event_id = 0;
+            self.resync_pending = false;
+            self.log.clear();
+        }
         if event_id <= self.last_event_id {
             self.anomalies.record(
                 AnomalyKind::DuplicateEvent,
@@ -95,6 +117,7 @@ impl SessionEntry {
         out.actions.push(Action::NeedsResync {
             session_id: self.id().to_owned(),
             reason,
+            delayed: false,
         });
         self.remember(n);
     }
@@ -112,10 +135,12 @@ impl SessionEntry {
                     .get_mut("session")
                     .ok_or_else(|| missing("state.session"))?;
                 apply_patch(session, &patch).map_err(|e| Failure::Patch(e.to_string()))?;
-                Ok(vec![Change::SessionPatched {
+                let mut changes = vec![Change::SessionPatched {
                     session_id: sid,
                     patch,
-                }])
+                }];
+                changes.extend(self.fold_runtime_into_session());
+                Ok(changes)
             }
             "history/entryAdded" => self.on_entry_added(p, &sid),
             "history/entryUpdated" => self.on_entry_updated(p, &sid),
@@ -154,6 +179,7 @@ impl SessionEntry {
             ));
         }
         self.state = merged_with_prefix(&self.state, state);
+        let _ = self.fold_runtime_into_session();
         Ok(vec![Change::Replaced { session_id: sid }])
     }
 
@@ -189,15 +215,14 @@ impl SessionEntry {
         let entry_id = str_field(p, "entryId")?.to_owned();
         let patch = array_field(p, "patch")?;
         guard_identity(&patch)?;
-        let Some(slot) = self
+        let position = self
             .history_mut()?
-            .iter_mut()
-            .rev()
-            .find(|e| e.get("id").and_then(Value::as_str) == Some(&entry_id))
-        else {
-            // Entry outside the loaded window: Vibe's projection ignores it too.
-            return Ok(Vec::new());
+            .iter()
+            .rposition(|e| e.get("id").and_then(Value::as_str) == Some(&entry_id));
+        let Some(index) = position else {
+            return self.unknown_entry_update(p, entry_id);
         };
+        let slot = &mut self.history_mut()?[index];
         let frozen = slot.get("generationStatus").and_then(Value::as_str) == Some("completed");
         apply_patch(slot, &patch).map_err(|e| Failure::Patch(e.to_string()))?;
         let updated = slot.clone();
@@ -217,6 +242,25 @@ impl SessionEntry {
         Ok(changes)
     }
 
+    /// An update for an entry the view never saw added. Vibe can turn the add of a streamed final answer into an
+    /// update (upstream issue 1336); dropping it would lose the answer from the view, while the server's state has
+    /// it. When the entry's turn is loaded, reload once for that entry; an entry of a turn outside the loaded window
+    /// is ignored, as Vibe's own projection does, and so is a second update for an entry the reload still lacked.
+    fn unknown_entry_update(&mut self, p: &Value, entry_id: String) -> Handled {
+        let turn = p.get("turnId").and_then(Value::as_str);
+        let loaded_turn = turn.is_some_and(|turn| {
+            self.state["turns"]
+                .as_array()
+                .is_some_and(|turns| turns.iter().any(|t| t["id"] == turn))
+        });
+        if !loaded_turn || self.resynced_for_entry.as_deref() == Some(entry_id.as_str()) {
+            return Ok(Vec::new());
+        }
+        let reason = format!("update for entry {entry_id} that was never added");
+        self.resynced_for_entry = Some(entry_id);
+        Err(Failure::Patch(reason))
+    }
+
     fn on_stats(&mut self, p: &Value, sid: String) -> Handled {
         let stats = object_field(p, "stats")?;
         let num = |k: &str| stats.get(k).and_then(Value::as_u64);
@@ -227,7 +271,11 @@ impl SessionEntry {
         };
         // `AgentStatsSnapshot.token_usage`: total is sessionTotalLlmTokens, not input + output.
         let total = num("sessionTotalLlmTokens").unwrap_or(input + output);
-        let usage = json!({"inputTokens": input, "outputTokens": output, "totalTokens": total});
+        let mut usage = json!({"inputTokens": input, "outputTokens": output, "totalTokens": total});
+        // Vibe 3.0.1+ (`AgentStatsSnapshot.token_usage`): the prompt-cache part of the input, as a read carries it.
+        if let Some(cached) = num("sessionCachedTokens") {
+            usage["cachedInputTokens"] = json!(cached);
+        }
         let session = self
             .state
             .get_mut("session")
@@ -403,4 +451,197 @@ fn str_field<'a>(p: &'a Value, key: &str) -> Result<&'a str, Failure> {
     p.get(key)
         .and_then(Value::as_str)
         .ok_or_else(|| missing(key))
+}
+
+#[cfg(test)]
+mod promotion_tests {
+    use super::*;
+    use crate::{LoadKind, SessionStore};
+
+    fn patch(id: u64, path: &str, value: &Value) -> Notification {
+        Notification {
+            method: "session/updated".to_owned(),
+            params: json!({"sessionId":"copy", "eventId":id,
+                "patch":[{"op":"replace", "path":path, "value":value}]}),
+        }
+    }
+
+    /// A resync asked for after a short delay (not now); Debug text, so the test compiles against either shape.
+    fn delayed(action: &Action) -> bool {
+        format!("{action:?}").contains("delayed: true")
+    }
+
+    /// Review round 2: a resync read that lags twice at the same watermark drops the held event (the turn's final
+    /// idle status); the ONE delayed re-read it asks for then catches up, so the chat ends idle.
+    #[test]
+    fn a_read_lagging_twice_asks_for_one_delayed_read_that_catches_up() {
+        let store = SessionStore::new();
+        let state = |event: u64, status: &str| {
+            json!({"session":{"id":"s", "harness":"unified", "createdAt":1000, "bumpedAt":2000,
+                "status":{"type":status}}, "eventId":event, "turns":[{"id":"t", "status":"in_progress"}],
+                "history":[]})
+        };
+        let _ = store.load(state(5, "running"), LoadKind::New).unwrap();
+        let mut idle = patch(7, "/status", &json!({"type":"idle"}));
+        idle.params["sessionId"] = json!("s");
+        let _ = store.apply(idle);
+        let first = store.load(state(5, "running"), LoadKind::Read).unwrap();
+        assert!(
+            matches!(first.actions.as_slice(), [a] if !delayed(a)),
+            "{:?}",
+            first.actions
+        );
+        let second = store.load(state(5, "running"), LoadKind::Read).unwrap();
+        assert!(
+            matches!(second.actions.as_slice(), [a] if delayed(a)),
+            "a second lagging read asks for one delayed read: {:?}",
+            second.actions
+        );
+        assert_eq!(
+            store.view("s").unwrap().state["session"]["status"]["type"],
+            "running"
+        );
+        let caught_up = store.load(state(7, "idle"), LoadKind::Read).unwrap();
+        assert!(caught_up.actions.is_empty(), "{:?}", caught_up.actions);
+        let view = store.view("s").unwrap();
+        assert!(!view.resync_pending);
+        assert_eq!(view.state["session"]["status"]["type"], "idle");
+    }
+
+    #[test]
+    fn first_durable_turn_leaves_a_deferred_copy_setup_gap() {
+        let store = SessionStore::new();
+        let state = json!({"session":{"id":"copy", "harness":"unified", "createdAt":1000,
+            "bumpedAt":1000, "cwd":"/main", "status":{"type":"idle"}}, "eventId":0, "turns":[], "history":[]});
+        let _ = store.load(state.clone(), LoadKind::New).unwrap();
+        let _ = store.apply(patch(1, "/cwd", &json!("/copy")));
+        let _ = store.load(state, LoadKind::Read).unwrap();
+        assert!(matches!(
+            store
+                .apply(patch(2, "/cwd", &json!("/copy")))
+                .actions
+                .as_slice(),
+            [Action::NeedsResync { .. }]
+        ));
+        assert!(store.view("copy").unwrap().resync_pending);
+        let _ = store.apply(patch(1, "/bumpedAt", &json!(1234)));
+        let _ = store.apply(patch(2, "/status", &json!({"type":"running"})));
+        let running = store.view("copy").unwrap();
+        assert!(!running.resync_pending);
+        assert_eq!(running.last_event_id, 2);
+        assert_eq!(running.state["session"]["status"]["type"], "running");
+        let _ = store.apply(patch(3, "/status", &json!({"type":"idle"})));
+        // A late duplicate cannot rewind the stream after its first bump.
+        let _ = store.apply(patch(1, "/bumpedAt", &json!(1234)));
+        let ended = store.view("copy").unwrap();
+        assert_eq!(ended.last_event_id, 3);
+        assert_eq!(ended.state["session"]["status"]["type"], "idle");
+    }
+
+    /// A copy start as real Vibe 3.0.2 numbers it: the copy setup's ephemeral events 1 and 2, with the window's
+    /// copy wait reading the session in between (watermark 0). The gap event 2 is held and remembered; resync reads
+    /// answer watermark 0 again, so replaying event 2 stops asking for reads after the second one (the session is
+    /// never paused by the pump's resync budget: `ResyncPaused`).
+    #[test]
+    fn a_resync_read_behind_a_held_gap_event_does_not_ask_again() {
+        let store = SessionStore::new();
+        let state = json!({"session":{"id":"copy", "harness":"unified", "createdAt":1000,
+            "bumpedAt":1000, "cwd":"/main", "status":{"type":"idle"}}, "eventId":0, "turns":[], "history":[]});
+        let _ = store.load(state.clone(), LoadKind::New).unwrap();
+        let _ = store.apply(patch(1, "/cwd", &json!("/copy")));
+        let mut read = state;
+        read["session"]["cwd"] = json!("/copy");
+        let _ = store.load(read.clone(), LoadKind::Read).unwrap();
+        let held = store.apply(patch(2, "/cwd", &json!("/copy")));
+        assert!(matches!(
+            held.actions.as_slice(),
+            [Action::NeedsResync { .. }]
+        ));
+        // The first resync read cannot tell a lagging read from Vibe's setup numbering: it asks once more
+        // (`a_lagging_resync_read_still_asks_again_until_it_catches_up`). The second answers the same watermark
+        // for the same held event and settles the session; no later read asks again.
+        let first = store.load(read.clone(), LoadKind::Read).unwrap();
+        assert!(
+            matches!(first.actions.as_slice(), [Action::NeedsResync { .. }]),
+            "{:?}",
+            first.actions
+        );
+        // The second answers the same watermark for the same held event: the event is dropped and ONE delayed
+        // re-read is asked for (the safety net for a read that lags twice); that read and any later one settle.
+        let second = store.load(read.clone(), LoadKind::Read).unwrap();
+        assert!(
+            matches!(second.actions.as_slice(), [a] if delayed(a)),
+            "one delayed re-read: {:?}",
+            second.actions
+        );
+        for _ in 0..3 {
+            let reread = store.load(read.clone(), LoadKind::Read).unwrap();
+            assert!(
+                reread.actions.is_empty(),
+                "the read must settle the session: {:?}",
+                reread.actions
+            );
+        }
+        let settled = store.view("copy").unwrap();
+        assert!(!settled.resync_pending);
+        assert_eq!(settled.state["session"]["cwd"], "/copy");
+        // The first message's durable stream (numbered from 1 again) applies as before.
+        let _ = store.apply(patch(1, "/bumpedAt", &json!(1234)));
+        let _ = store.apply(patch(2, "/status", &json!({"type":"running"})));
+        let running = store.view("copy").unwrap();
+        assert!(!running.resync_pending);
+        assert_eq!(running.last_event_id, 2);
+        assert_eq!(running.state["session"]["status"]["type"], "running");
+    }
+
+    /// A resync read that lags behind the live stream (watermark 5 while event 7,
+    /// the turn's last, already arrived and 6 was lost) must still lead to another read, so the chat ends idle
+    /// once Vibe's read catches up, instead of staying "running" until some later event.
+    #[test]
+    fn a_lagging_resync_read_still_asks_again_until_it_catches_up() {
+        let store = SessionStore::new();
+        let state = |event: u64, status: &str| {
+            json!({"session":{"id":"s", "harness":"unified", "createdAt":1000, "bumpedAt":2000,
+                "status":{"type":status}}, "eventId":event, "turns":[{"id":"t", "status":"in_progress"}],
+                "history":[]})
+        };
+        let _ = store.load(state(5, "running"), LoadKind::New).unwrap();
+        let mut idle = patch(7, "/status", &json!({"type":"idle"}));
+        idle.params["sessionId"] = json!("s");
+        let held = store.apply(idle);
+        assert!(matches!(
+            held.actions.as_slice(),
+            [Action::NeedsResync { .. }]
+        ));
+        let lagging = store.load(state(5, "running"), LoadKind::Read).unwrap();
+        assert!(
+            matches!(lagging.actions.as_slice(), [Action::NeedsResync { .. }]),
+            "a read behind the held event must ask again: {:?}",
+            lagging.actions
+        );
+        let caught_up = store.load(state(7, "idle"), LoadKind::Read).unwrap();
+        assert!(caught_up.actions.is_empty(), "{:?}", caught_up.actions);
+        let view = store.view("s").unwrap();
+        assert!(!view.resync_pending);
+        assert_eq!(view.last_event_id, 7);
+        assert_eq!(view.state["session"]["status"]["type"], "idle");
+    }
+
+    #[test]
+    fn a_started_session_still_holds_gaps_and_ignores_old_bumps() {
+        let store = SessionStore::new();
+        let _ = store
+            .load(
+                json!({"session":{"id":"copy","harness":"unified","createdAt":1000,"bumpedAt":1000,
+            "status":{"type":"idle"}}, "eventId":2,
+            "turns":[{"id":"existing","status":"completed"}], "history":[]}),
+                LoadKind::New,
+            )
+            .unwrap();
+        let _ = store.apply(patch(4, "/status", &json!({"type":"running"})));
+        let _ = store.apply(patch(1, "/bumpedAt", &json!(1234)));
+        let view = store.view("copy").unwrap();
+        assert!(view.resync_pending);
+        assert_eq!(view.last_event_id, 2);
+    }
 }

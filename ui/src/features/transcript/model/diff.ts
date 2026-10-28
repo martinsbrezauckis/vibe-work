@@ -35,6 +35,12 @@ export interface FileDiff {
   newFile: boolean;
 }
 
+/** First changed file line for navigation, with a first-line fallback for an empty diff. */
+export function firstChangedLine(diff: FileDiff): number {
+  const line = diff.lines.find((line) => line.kind === "add" || line.kind === "del");
+  return Math.max(1, line?.newNo ?? line?.oldNo ?? 1);
+}
+
 /** Largest edit distance computed line by line before degrading (keeps a huge rewrite cheap). */
 const MAX_EDIT = 4000;
 
@@ -53,7 +59,10 @@ export function lineDiff(
   oldStart = 1,
   newStart = 1,
 ): { lines: DiffLine[]; oldNext: number; newNext: number } {
-  const withEol = (s: string) => (s === "" || s.endsWith("\n") ? s : `${s}\n`);
+  const withEol = (text: string) => {
+    const s = text.replace(/\r\n/g, "\n");
+    return s === "" || s.endsWith("\n") ? s : `${s}\n`;
+  };
   const changes = diffLines(withEol(oldText), withEol(newText), {
     maxEditLength: MAX_EDIT,
     timeout: 200,
@@ -83,17 +92,53 @@ function finish(path: string, lines: DiffLine[], newFile: boolean): FileDiff {
 }
 
 /** Each `{old, new}` pair as a hunk, separated by gap lines; the new side shifts by earlier hunks. */
-function hunks(pairs: readonly { start: number | null; old: string; new: string }[]): DiffLine[] {
+function hunks(
+  pairs: readonly { start: number | null; newStart?: number | null; old: string; new: string }[],
+): DiffLine[] {
   const lines: DiffLine[] = [];
   let shift = 0;
   pairs.forEach((pair, i) => {
     if (i > 0) lines.push({ kind: "gap", oldNo: null, newNo: null, text: "" });
     const start = pair.start ?? 1;
-    const block = lineDiff(pair.old, pair.new, start, start + shift);
+    const block = lineDiff(pair.old, pair.new, start, pair.newStart ?? start + shift);
     lines.push(...block.lines);
-    shift += block.newNext - block.oldNext;
+    shift = block.newNext - block.oldNext;
   });
   return lines;
+}
+
+/** Rebuild the after-text only when every reported hunk matches the exact pre-edit text. */
+function afterEdit(previous: string, occurrences: readonly Obj[]): string | null {
+  const offsets = [0];
+  for (let i = 0; i < previous.length; i += 1) if (previous[i] === "\n") offsets.push(i + 1);
+  const edits = occurrences
+    .map((o) => ({
+      line: num(o["startLine"]),
+      old: str(o["oldText"]),
+      next: str(o["newText"]),
+    }))
+    .sort((a, b) => (b.line ?? 0) - (a.line ?? 0));
+  let after = previous;
+  let boundary = previous.length;
+  for (const edit of edits) {
+    if (
+      edit.line === null ||
+      !Number.isInteger(edit.line) ||
+      edit.old === null ||
+      edit.next === null
+    )
+      return null;
+    const start = offsets[edit.line - 1];
+    if (
+      start === undefined ||
+      start + edit.old.length > boundary ||
+      previous.slice(start, start + edit.old.length) !== edit.old
+    )
+      return null;
+    after = after.slice(0, start) + edit.next + after.slice(start + edit.old.length);
+    boundary = start;
+  }
+  return after;
 }
 
 /**
@@ -109,8 +154,13 @@ export function editDiff(entry: Obj): FileDiff | null {
     .map(obj)
     .filter((o): o is Obj => o !== null);
   if (occurrences.length > 0) {
+    const previous = str(output?.["previousContent"]);
+    const after = previous === null ? null : afterEdit(previous, occurrences);
+    if (previous !== null && after !== null)
+      return finish(path, lineDiff(previous, after).lines, false);
     const pairs = occurrences.map((o) => ({
       start: num(o["startLine"]),
+      newStart: num(o["newStartLine"]),
       old: str(o["oldText"]) ?? "",
       new: str(o["newText"]) ?? "",
     }));

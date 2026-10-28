@@ -24,7 +24,7 @@ function sameItems(a: readonly StepItem[], b: readonly StepItem[]): boolean {
 }
 
 /** True when `next` would render exactly like `prev`. */
-export function sameRow(prev: Row, next: Row): boolean {
+function sameRow(prev: Row, next: Row): boolean {
   if (prev.kind !== next.kind || prev.key !== next.key) return false;
   switch (next.kind) {
     case "steps":

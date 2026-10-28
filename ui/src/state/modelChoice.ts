@@ -16,7 +16,7 @@ import { newChatPick } from "../features/composer/model/models";
 import { modelTerm } from "../vocabulary";
 
 /** One model Vibe's config lists. */
-export interface ModelOption {
+interface ModelOption {
   alias: string;
   label: string;
   /** Only levels actually reported for this model; absent means no explicit level is offered. */

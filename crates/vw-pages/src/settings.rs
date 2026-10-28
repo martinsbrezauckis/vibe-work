@@ -1,6 +1,5 @@
 //! Per-project handbook settings, kept in app data (never in the repository): a handbook folder the user chose
-//! (default: none, the folder is resolved by `handbook::resolve_folder`: `docs/handbook/`, else a pre-1.0
-//! `docs/pages/`) and whether prototype pages may run their script (default on: clickable mockups need it; Format 1.2
+//! (default: `docs/handbook/`) and whether prototype pages may run their script (default on: clickable mockups need it; Format 1.2
 //! §6.4: pages of every other kind never run script, whatever this says).
 //!
 //! Depends on: serde, vw-platform, `paths`, `comments` (project key). Called by: `service`, vw-core-api.
@@ -23,7 +22,7 @@ pub struct PagesSettings {
     /// Prototype pages (Format 1.2, kind `prototype`) may run their own script in the viewer, sandboxed and without
     /// network. Pages of every other kind never run script.
     pub scripts: bool,
-    /// The user chose `folder`; `false`: the folder is resolved (`docs/handbook`, else a pre-1.0 `docs/pages`), and
+    /// The user chose `folder`; `false`: the folder is resolved (`docs/handbook`), and
     /// a saved `folder` is ignored.
     #[serde(default)]
     pub custom: bool,
@@ -76,23 +75,20 @@ impl SettingsStore {
     }
 
     /// The settings of `project` with the folder in use: the chosen one, else the resolved one (see the module
-    /// header). The second value is true when the resolved folder is the pre-1.0 `docs/pages/`.
+    /// header).
     #[must_use]
-    pub fn get(&self, project: &Path) -> (PagesSettings, bool) {
+    pub fn get(&self, project: &Path) -> PagesSettings {
         let saved = self.saved(project);
         let chosen = saved
             .as_ref()
             .filter(|s| s.custom)
             .map(|s| s.folder.as_str());
-        let folder = crate::handbook::resolve_folder(project, chosen);
-        (
-            PagesSettings {
-                folder: folder.relative,
-                scripts: saved.as_ref().is_none_or(|s| s.scripts),
-                custom: chosen.is_some(),
-            },
-            folder.legacy,
-        )
+        let folder = crate::handbook::resolve_folder(chosen);
+        PagesSettings {
+            folder: folder.relative,
+            scripts: saved.as_ref().is_none_or(|s| s.scripts),
+            custom: chosen.is_some(),
+        }
     }
 
     /// Saves `settings` for `project` after checking the folder.

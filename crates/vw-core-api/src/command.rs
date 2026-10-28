@@ -33,45 +33,17 @@ use crate::safety_view::{SafetyRequest, SafetyResult};
 use crate::search_view::{SearchRequest, SearchResult};
 use crate::secrets_view::{SecretsRequest, SecretsResult};
 use crate::session_tools_view::{SessionToolsRequest, SessionToolsResult};
+use crate::skills_view::{SkillsRequest, SkillsResult};
 use crate::speech_view::{SpeechRequest, SpeechResult};
 use crate::terminal_view::{TerminalRequest, TerminalResult};
 use crate::view::{AnomalyReport, CallbackInfo, CoreStatus, SessionRowView, SessionSnapshot};
 use crate::work_view::{ImagesRequest, ImagesResult, LibrariesRequest, LibrariesResult};
 use crate::worktrees_view::{WorktreesRequest, WorktreesResult};
 
-/// Which client sent a command. Logged with every refusal so later intent rules can differ per
-/// client.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
-#[serde(rename_all = "kebab-case")]
-pub enum Origin {
-    /// The app's own webview (Tauri bridge).
-    Ui,
-    /// The loopback Debug API (an external agent or a test).
-    DebugApi,
-}
+pub use crate::command_origin::Origin;
+pub(crate) use crate::command_origin::requester;
 
-/// The dialog's requester for a command's origin, kept as a structured field.
-#[must_use]
-pub(crate) fn requester(origin: Origin) -> vw_gate::Requester {
-    match origin {
-        Origin::Ui => vw_gate::Requester::Window,
-        Origin::DebugApi => vw_gate::Requester::DebugApi,
-    }
-}
-
-impl Origin {
-    /// The wire name (`ui`, `debug-api`).
-    #[must_use]
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Ui => "ui",
-            Self::DebugApi => "debug-api",
-        }
-    }
-}
-
-/// One request to the core. Every variant that reaches Vibe is executed through the method gate.
+/// One request to the core. External Vibe calls use the gate; plugin refresh owns its internal reload/reopen.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(
@@ -81,6 +53,11 @@ impl Origin {
     deny_unknown_fields
 )]
 pub enum Command {
+    /// Writes ordinary owner text to the native clipboard; no clipboard contents are read back.
+    CopyText {
+        /// The text to copy (at most one million bytes).
+        text: String,
+    },
     /// `session/list` merged with sessions the server does not list yet.
     ListSessions {
         /// Page size (server default when absent).
@@ -98,6 +75,11 @@ pub enum Command {
     },
     /// The store's copy of one loaded session (no server call).
     ReadSession {
+        /// Session id.
+        session_id: String,
+    },
+    /// Re-pins this chat's plugins and reopens it with its host guards; working chats wait for turn end.
+    RefreshPlugins {
         /// Session id.
         session_id: String,
     },
@@ -198,6 +180,14 @@ pub enum Command {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[cfg_attr(feature = "ts", ts(optional))]
         model_alias: Option<String>,
+        /// Provider identity from the selected row, retained while its availability is checked.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[cfg_attr(feature = "ts", ts(optional))]
+        model_name: Option<String>,
+        /// Display name from the selected row, for a notice if it has disappeared.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[cfg_attr(feature = "ts", ts(optional))]
+        model_display_name: Option<String>,
         /// `off`, `low`, `medium`, `high` or `max`.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[cfg_attr(feature = "ts", ts(optional))]
@@ -231,6 +221,18 @@ pub enum Command {
     },
     /// Callbacks waiting for an answer.
     ListCallbacks {},
+    /// Decide a live review; available only to the window and Debug API.
+    DecideProtectedChange {
+        /// Owning live session.
+        session_id: String,
+        /// Captured proposal identity.
+        proposal_id: String,
+        /// Apply all captured files, or decline without writing.
+        approve: bool,
+        /// Optional plain-text decline feedback.
+        #[serde(default)]
+        note: Option<String>,
+    },
     /// Show the native dialog for one exact call and return its single-use token. The Debug API
     /// normally acts as the user, but Full access still asks in the native dialog.
     RequestConfirmation {
@@ -385,8 +387,12 @@ pub enum Command {
         /// What to do.
         request: ConnectorsRequest,
     },
-    /// The Tools marketplace: the curated catalog of skill packs, MCP servers and plugins with what is
-    /// installed; install (native dialog from the window; the Debug API acts as the user), remove.
+    /// Vibe skills in the selected work folder: list, enable, install, update, remove and detail.
+    Skills {
+        /// The skills operation.
+        request: SkillsRequest,
+    },
+    /// The reviewed Tools marketplace.
     Marketplace {
         /// What to do.
         request: MarketRequest,
@@ -423,6 +429,37 @@ pub enum Command {
     Secrets {
         /// What to do.
         request: SecretsRequest,
+    },
+    /// App-owned GitHub reader opt-in and account status.
+    GithubReads {
+        /// Read or set GitHub reads.
+        request: crate::GithubReadsRequest,
+    },
+    /// The "Allow for this session" answers Vibe Work keeps for Vibe's approvals: list, remove one, or remove many.
+    AskGrants {
+        /// List or remove.
+        request: crate::AskGrantsRequest,
+    },
+    /// Lasting rules old "Always allow" answers left in Vibe's config: list, or remove one (through Vibe's API).
+    VibeRules {
+        /// List or remove.
+        request: crate::VibeRulesRequest,
+    },
+    /// Chrome Control: the user's permissions, answers on its cards, set up and remove.
+    ChromeControl {
+        /// What to do.
+        request: crate::ChromeControlRequest,
+    },
+    /// Automatic idle-sleep preference and status.
+    KeepAwake {
+        /// Read or save the preference.
+        request: crate::KeepAwakeRequest,
+    },
+    /// The New chat screen's terminals and browser before the first message: its folder, the hand-over to the
+    /// session the first message started, Close all.
+    NewChat {
+        /// The operation.
+        request: crate::NewChatRequest,
     },
     /// App-owned session log scan settings and actions, without secret values.
     SecretScan {
@@ -463,68 +500,6 @@ pub enum Command {
     },
 }
 
-impl Command {
-    /// The variant name as on the wire (`startTurn`, ...), for logs.
-    #[must_use]
-    pub fn name(&self) -> &'static str {
-        match self {
-            Self::ListSessions { .. } => "listSessions",
-            Self::ReadSession { .. } => "readSession",
-            Self::RefreshSession { .. } => "refreshSession",
-            Self::StartSession { .. } => "startSession",
-            Self::ResumeSession { .. } => "resumeSession",
-            Self::ForkSession { .. } => "forkSession",
-            Self::RewindSession { .. } => "rewindSession",
-            Self::StartTurn { .. } => "startTurn",
-            Self::SteerTurn { .. } => "steerTurn",
-            Self::InterruptTurn { .. } => "interruptTurn",
-            Self::StopSession { .. } => "stopSession",
-            Self::PickModel { .. } => "pickModel",
-            Self::SetDefaultModel { .. } => "setDefaultModel",
-            Self::SetAccessMode { .. } => "setAccessMode",
-            Self::AnswerCallback { .. } => "answerCallback",
-            Self::ListCallbacks {} => "listCallbacks",
-            Self::RequestConfirmation { .. } => "requestConfirmation",
-            Self::Call { .. } => "call",
-            Self::ViewSession { .. } => "viewSession",
-            Self::RetryReopen { .. } => "retryReopen",
-            Self::CancelReopen { .. } => "cancelReopen",
-            Self::ContinueInNewSession { .. } => "continueInNewSession",
-            Self::ReadStatus {} => "readStatus",
-            Self::ReadAnomalies { .. } => "readAnomalies",
-            Self::Keys { .. } => "keys",
-            Self::Vibe { .. } => "vibe",
-            Self::Terminal { .. } => "terminal",
-            Self::Instructions { .. } => "instructions",
-            Self::ProjectInstructions { .. } => "projectInstructions",
-            Self::Documents { .. } => "documents",
-            Self::Speech { .. } => "speech",
-            Self::Libraries { .. } => "libraries",
-            Self::Images { .. } => "images",
-            Self::Changes { .. } => "changes",
-            Self::LineComments { .. } => "lineComments",
-            Self::Preview { .. } => "preview",
-            Self::Browser { .. } => "browser",
-            Self::Pages { .. } => "pages",
-            Self::Projects { .. } => "projects",
-            Self::Files { .. } => "files",
-            Self::Connectors { .. } => "connectors",
-            Self::Marketplace { .. } => "marketplace",
-            Self::Worktrees { .. } => "worktrees",
-            Self::GitBrowser { .. } => "gitBrowser",
-            Self::Git { .. } => "git",
-            Self::Processes { .. } => "processes",
-            Self::Secrets { .. } => "secrets",
-            Self::SecretScan { .. } => "secretScan",
-            Self::Safety { .. } => "safety",
-            Self::Network { .. } => "network",
-            Self::PickFolder { .. } => "pickFolder",
-            Self::SessionTools { .. } => "sessionTools",
-            Self::Search { .. } => "search",
-        }
-    }
-}
-
 /// What a successful command returns.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
@@ -534,6 +509,11 @@ impl Command {
     rename_all_fields = "camelCase"
 )]
 pub enum CommandResult {
+    /// The protected-folder decision and its readable record.
+    ProtectedChange {
+        /// Final review state.
+        proposal: crate::ProtectedChangeView,
+    },
     /// `listSessions`.
     Sessions {
         /// Local-only sessions first (newest first), then the server's page in order.
@@ -580,7 +560,7 @@ pub enum CommandResult {
         /// Counters and recent records.
         report: AnomalyReport,
     },
-    /// A one-way key or vault operation succeeded (nothing else is returned).
+    /// A one-way operation succeeded (nothing else is returned).
     Done {},
     /// Every `vibe` op: the install view after it ran.
     VibeInstall {
@@ -596,6 +576,11 @@ pub enum CommandResult {
     KeyCandidates {
         /// Mistral credentials already in the vault (metadata).
         candidates: Vec<KeyCandidateView>,
+    },
+    /// All saved Mistral keys; metadata only.
+    MistralKeys {
+        /// Account rows without credential values.
+        keys: Vec<crate::MistralKeyView>,
     },
     /// `keys` / `testKey`: the key works.
     KeyTest {
@@ -682,7 +667,12 @@ pub enum CommandResult {
         /// The connectors request's answer.
         result: ConnectorsResult,
     },
-    /// `marketplace`.
+    /// `skills`.
+    Skills {
+        /// The skills response.
+        result: SkillsResult,
+    },
+    /// The reviewed Tools marketplace.
     Marketplace {
         /// The marketplace request's answer.
         result: MarketResult,
@@ -711,6 +701,46 @@ pub enum CommandResult {
     Secrets {
         /// The secrets request's answer.
         result: SecretsResult,
+    },
+    /// GitHub reader preference and account status.
+    GithubReads {
+        /// Current GitHub reader state.
+        view: crate::GithubReadsView,
+    },
+    /// `askGrants`: every kept session grant, oldest first.
+    AskGrants {
+        /// The grants after the request.
+        grants: Vec<vw_ask::SessionGrant>,
+        /// What "Allow for this session" would keep on each open card that offers it (its covers line).
+        offers: Vec<vw_ask::GrantOffer>,
+        /// How many grants the request removed (0 for `list`).
+        removed: u32,
+    },
+    /// `chromeControl`: Settings › Browser › Your Chrome after the request.
+    ChromeControl {
+        /// The rows, the level and the setup status.
+        view: crate::ChromeControlView,
+        /// The set up offer the window shows before the click (`offerSetup` only).
+        offer: Option<crate::ToolsInstallOffer>,
+    },
+    /// `vibeRules`: the lasting rules after the request.
+    VibeRules {
+        /// Each rule: a tool-wide `always`, or one added allowlist pattern.
+        rules: Vec<crate::VibeRule>,
+        /// Vibe's default allowlists were read, so its shipped patterns are left out.
+        defaults_known: bool,
+        /// How many rules the request removed (0 for `list`).
+        removed: u32,
+    },
+    /// Automatic idle-sleep preference and status.
+    KeepAwake {
+        /// Core-owned view.
+        view: crate::KeepAwakeView,
+    },
+    /// The New chat screen's owner id and folder.
+    NewChat {
+        /// The current state.
+        view: crate::NewChatView,
     },
     /// Session log settings, status and retained findings.
     SecretScan {

@@ -10,5 +10,38 @@
 <dict>
   <key>NSMicrophoneUsageDescription</key>
   <string>Dictation sends your voice to Mistral's Voxtral to turn it into text while the mic button is on.</string>
+  <key>NSServices</key>
+  <array>
+    <dict>
+      <key>NSMenuItem</key>
+      <dict>
+        <key>default</key>
+        <string>Send to Vibe Work</string>
+      </dict>
+      <key>NSMessage</key>
+      <string>sendFiles</string>
+      <key>NSPortName</key>
+      <string>Vibe Work</string>
+      <key>NSSendFileTypes</key>
+      <array>
+        <string>public.item</string>
+      </array>
+    </dict>
+    <dict>
+      <key>NSMenuItem</key>
+      <dict>
+        <key>default</key>
+        <string>Ask Vibe Work</string>
+      </dict>
+      <key>NSMessage</key>
+      <string>askText</string>
+      <key>NSPortName</key>
+      <string>Vibe Work</string>
+      <key>NSSendTypes</key>
+      <array>
+        <string>public.utf8-plain-text</string>
+      </array>
+    </dict>
+  </array>
 </dict>
 </plist>

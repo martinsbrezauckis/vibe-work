@@ -1,6 +1,7 @@
 // Captures only a physical page selection or click for a user-initiated vault save.
 // The answer goes to the native browser core, never to the UI or an agent tool.
 // REQ: { page, mode: selection|element|contextSelection, op: start|poll|cancel }.
+/* global COPY_ATTRS, ENV, REQ, keyTokens -- Supplied by the Rust script assembler and its shared prelude. */
 (() => {
   __VW_COMMON__
   const NAME = "__vw_secret_choice";

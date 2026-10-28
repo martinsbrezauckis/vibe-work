@@ -9,8 +9,12 @@ import type {
   CliSharingView,
   CoreClient,
   DocumentsPicked,
+  ExecuteOptions,
+  HandOverView,
   HostEvent,
   OsNotification,
+  SendToRequest,
+  SendToView,
   TerminalChunkHandler,
   UpdateView,
   UiControlReply,
@@ -51,8 +55,20 @@ export const RUNNING_STATUS: CoreStatus = {
 
 export interface FakeClient extends CoreClient {
   commands: Command[];
-  /** The origin each command was sent with (same order as `commands`): "debug-api" when the UI lowered it. */
+  /**
+   * Who the host attributes each command to (same order as `commands`), as the real host does: `debug-api` while a
+   * `ui/*` request that may act is pending (queued, served or acknowledged and not finished; pure reads do not
+   * count, `crates/vw-host/src/ui_grants.rs` `drives`), else `ui`. The page cannot change it: every command is the
+   * window's, and the host only attributes (and, for the routes in its grant table, grants) by the request.
+   */
   origins: string[];
+  /** The options each command was sent with (same order as `commands`): only `{origin: "window"}` exists. */
+  options: (ExecuteOptions | undefined)[];
+  /**
+   * Whether the page is serving a Debug API action right now (renderShell sets it): the host's driving rule also
+   * covers a request a test hands to `uiControl.handle` directly, without this transport.
+   */
+  servingProbe?: () => boolean;
   /** Sets the answer for a command type (a result, or a CoreError to reject with). */
   answer(type: Command["type"], result: CommandResult | CoreError): void;
   /** Answers a command type from a function of the command (paging, per-method replies). */
@@ -67,6 +83,12 @@ export interface FakeClient extends CoreClient {
   replies: UiControlReply[];
   /** Delivers a host event (an OS notification was clicked). */
   emitHost(event: HostEvent): void;
+  /** "Send to Vibe Work": keeps a hand-over and tells the subscriber, as the app's inbox does. */
+  emitHandOver(view: HandOverView): void;
+  /** The "Right-click menus" switch: each request, and the view it answers (`sendToView`). */
+  sendToRequests: SendToRequest[];
+  sendToView: SendToView;
+  sendTo(request: SendToRequest): Promise<SendToView>;
   /** Notifications the UI asked the host to show. */
   notifications: OsNotification[];
   pickFolder: ReturnType<typeof vi.fn<() => Promise<string | null>>>;
@@ -105,7 +127,7 @@ export interface FakeClient extends CoreClient {
    */
   updateChannel: boolean;
   emitUpdate(view: UpdateView): void;
-  /** Every update call, with the origin the UI sent (`ui` unless it lowered it to `debug-api`). */
+  /** Every update call, with whom the host attributes it to (as `origins`). */
   updateCalls: { name: string; origin: string; arg?: unknown }[];
   /** Makes the next call of this name reject with this error code and message. */
   updateFailure: Map<string, { code: CoreError["code"]; message: string }>;
@@ -121,6 +143,18 @@ export function fakeClient(kind: CoreClient["kind"] = "fake"): FakeClient {
     | CoreError
     | ((command: Command) => CommandResult | CoreError);
   const answers = new Map<string, Answer>([
+    ["copyText", { type: "done" }],
+    // Model-only UI fixtures have no key service, matching the core's explicit refusal.
+    [
+      "keys",
+      {
+        code: "keyService",
+        serverCode: "notConfigured",
+        message: "No key service",
+        method: null,
+        summary: null,
+      },
+    ],
     ["readStatus", { type: "status", status: RUNNING_STATUS }],
     [
       "viewSession",
@@ -135,6 +169,30 @@ export function fakeClient(kind: CoreClient["kind"] = "fake"): FakeClient {
       "listSessions",
       { type: "sessions", rows: [], nextCursor: null, continueSessionId: null },
     ],
+    // The New chat screen's owner: a fresh id after each hand-over, the folder echoed back.
+    [
+      "newChat",
+      (() => {
+        let owner = 1;
+        let folder: string | undefined;
+        return (command: Command): CommandResult => {
+          if (command.type === "newChat") {
+            if (command.request.op === "adopt") owner += 1;
+            if (command.request.op === "setFolder")
+              folder = command.request.folder;
+          }
+          return {
+            type: "newChat",
+            view: {
+              ownerId: `new-chat-${String(owner)}`,
+              ...(folder === undefined ? { home: "/home/you" } : { folder }),
+            },
+          };
+        };
+      })(),
+    ],
+    // no session grants unless a test scripts them (the window reads them with the status).
+    ["askGrants", { type: "askGrants", grants: [], offers: [], removed: 0 }],
     // nothing is left running unless a test scripts it.
     [
       "processes",
@@ -164,6 +222,8 @@ export function fakeClient(kind: CoreClient["kind"] = "fake"): FakeClient {
   ]);
   let handler: ((event: CoreEvent) => void) | null = null;
   let hostHandler: ((event: HostEvent) => void) | null = null;
+  let handOverWaiting: (() => void) | null = null;
+  const handOvers: HandOverView[] = [];
   let updateHandler: ((view: UpdateView) => void) | null = null;
   const updateCall = (
     name: string,
@@ -191,10 +251,41 @@ export function fakeClient(kind: CoreClient["kind"] = "fake"): FakeClient {
   };
   const queue: UiControlRequest[] = [];
   const waiters: ((r: UiControlRequest | null) => void)[] = [];
+  // The host's driving rule (`ui_grants.rs` `drives`): pending requests, and whether each may act.
+  const PURE_ROUTES = [
+    "state",
+    "revision",
+    "settle",
+    "rect",
+    "layout",
+    "trace",
+    "setup",
+    "secrets",
+    "toasts",
+    "notifications",
+    "walkthrough",
+  ];
+  const pending = new Map<string, boolean>();
+  const drives = (request: UiControlRequest): boolean => {
+    const action =
+      typeof request.body === "object" && request.body !== null
+        ? (request.body as { action?: unknown }).action
+        : undefined;
+    return !(
+      PURE_ROUTES.includes(request.name) ||
+      action === "read" ||
+      action === "state"
+    );
+  };
+  const attributed = (): string =>
+    [...pending.values()].some(Boolean) || client.servingProbe?.() === true
+      ? "debug-api"
+      : "ui";
   const client: FakeClient = {
     kind,
     commands: [],
     origins: [],
+    options: [],
     replies: [],
     notifications: [],
     pickFolder: vi.fn<() => Promise<string | null>>(() =>
@@ -240,11 +331,46 @@ export function fakeClient(kind: CoreClient["kind"] = "fake"): FakeClient {
     emitHost(event) {
       hostHandler?.(event);
     },
+    handOver: {
+      subscribe(onWaiting) {
+        handOverWaiting = onWaiting;
+        if (handOvers.length > 0) onWaiting();
+        return Promise.resolve(() => {
+          handOverWaiting = null;
+        });
+      },
+      take: () => Promise.resolve(handOvers.splice(0)),
+    },
+    emitHandOver(view) {
+      handOvers.push(view);
+      handOverWaiting?.();
+    },
+    sendToRequests: [],
+    sendToView: {
+      system: "linux",
+      supported: true,
+      on: false,
+      underMoreOptions: false,
+      offer: false,
+    },
+    sendTo(request) {
+      client.sendToRequests.push(request);
+      if (request.op === "set")
+        client.sendToView = {
+          ...client.sendToView,
+          on: request.on,
+          offer: false,
+        };
+      if (request.op === "notNow")
+        client.sendToView = { ...client.sendToView, offer: false };
+      return Promise.resolve(client.sendToView);
+    },
     answer: (type, result) => void answers.set(type, result),
     answerWith: (type, reply) => void answers.set(type, reply),
     execute(command, options) {
       client.commands.push(command);
-      client.origins.push(options?.origin ?? "ui");
+      client.origins.push(attributed());
+      client.options.push(options);
       const scripted = answers.get(command.type);
       const answer =
         typeof scripted === "function" ? scripted(command) : scripted;
@@ -292,10 +418,13 @@ export function fakeClient(kind: CoreClient["kind"] = "fake"): FakeClient {
         }),
       reply(reply) {
         client.replies.push(reply);
+        // The final reply ends the request; an acknowledgement (`pending`) keeps it.
+        if (!(reply.ok && reply.pending === true)) pending.delete(reply.id);
         return Promise.resolve();
       },
     },
     request(request) {
+      pending.set(request.id, drives(request));
       const waiter = waiters.shift();
       if (waiter !== undefined) waiter(request);
       else queue.push(request);
@@ -326,12 +455,12 @@ export function fakeClient(kind: CoreClient["kind"] = "fake"): FakeClient {
         updateHandler = onView;
         return Promise.resolve(client.updateChannel);
       },
-      check: () => updateCall("check", "ui"),
-      download: (options) => updateCall("download", options?.origin ?? "ui"),
-      install: (options) => updateCall("install", options?.origin ?? "ui"),
+      check: () => updateCall("check", attributed()),
+      download: () => updateCall("download", attributed()),
+      install: () => updateCall("install", attributed()),
       setAutoDownload: (enabled) =>
-        updateCall("setAutoDownload", "ui", enabled),
-      openReleasePage: () => updateCall("openReleasePage", "ui"),
+        updateCall("setAutoDownload", attributed(), enabled),
+      openReleasePage: () => updateCall("openReleasePage", attributed()),
     },
     terminalStreams: new Map(),
     detached: [],
@@ -385,17 +514,6 @@ export function snapshot(
       localOnly: false,
       resyncPending: false,
       interruptedTurns: [],
-      anomalies: {
-        duplicateEvents: 0,
-        eventGaps: 0,
-        reannouncedEntries: 0,
-        completedEntryUpdates: 0,
-        patchFailures: 0,
-        recoveredPatchFailures: 0,
-        malformedPayloads: 0,
-        inconsistentEnvelopes: 0,
-        interruptedTurns: 0,
-      },
     },
   } as CoreEvent;
 }

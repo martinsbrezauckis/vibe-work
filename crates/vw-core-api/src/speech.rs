@@ -246,6 +246,25 @@ pub(crate) async fn execute(
     request: SpeechRequest,
 ) -> Result<CommandResult, CoreError> {
     match request {
+        SpeechRequest::ReadingReady {
+            request_id,
+            available,
+            busy,
+        } => {
+            let value =
+                crate::read_aloud::ready(shared, &request_id, available, busy.unwrap_or(false));
+            Ok(result(SpeechResult::Reading {
+                status: value["status"].as_str().unwrap_or_default().to_owned(),
+                message: value["message"].as_str().unwrap_or_default().to_owned(),
+            }))
+        }
+        SpeechRequest::ReadAloud { session_id, text } => {
+            let value = crate::read_aloud::start(shared, &session_id, text.as_deref(), false).await;
+            Ok(result(SpeechResult::Reading {
+                status: value["status"].as_str().unwrap_or_default().to_owned(),
+                message: value["message"].as_str().unwrap_or_default().to_owned(),
+            }))
+        }
         SpeechRequest::Start {
             sample_rate,
             language,

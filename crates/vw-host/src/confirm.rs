@@ -112,9 +112,9 @@ fn capture_save_text(params: &serde_json::Value) -> Option<String> {
     ))
 }
 
-/// The default button of a shortened request: pages through its full text.
+/// The forward button of a shortened request's overview: pages through its full text.
 pub const SHOW_FULL: &str = "Show the full request";
-/// The default button of a page of the full text that is not the last.
+/// The forward button of a page of the full text that is not the last.
 pub const NEXT_PART: &str = "Next part";
 /// The only button of a request too long to page through here.
 pub const CLOSE: &str = "Close";
@@ -164,6 +164,9 @@ fn lead(request: &ConfirmationRequest) -> String {
 /// How many pages the full caller text takes (`None` when the request is not a shortened one).
 #[must_use]
 pub fn full_pages(request: &ConfirmationRequest) -> Option<usize> {
+    if request.method == "vibe-work/secretRun" {
+        return None;
+    }
     long_text(request).map(|text| text.len().div_ceil(PAGE_CHARS).max(1))
 }
 
@@ -221,10 +224,10 @@ pub fn shortened_dialog_text(request: &ConfirmationRequest, step: ShortStep) -> 
     }
 }
 
-/// The buttons of `step`, first to last; the first is the default (Return) on every OS (`dialog_buttons`). Return
-/// never approves text the user has not been shown: the overview offers only [`SHOW_FULL`] (default) and Cancel (or
-/// only [`CLOSE`] when too long to page), a page that is not the last offers [`NEXT_PART`] and Cancel, and only the
-/// last page offers the plain approval (`Allow once` / `Continue`; never "always" on a shortened request).
+/// The buttons of `step`, first to last; the last declines and is the default (Return) on every OS
+/// ([`dialog_buttons`]), so Return never approves and never pages on. The overview offers only [`SHOW_FULL`] and
+/// Cancel (or only [`CLOSE`] when too long to page), a page that is not the last offers [`NEXT_PART`] and Cancel, and
+/// only the last page offers the plain approval (`Allow once` / `Continue`; never "always" on a shortened request).
 #[must_use]
 pub fn shortened_buttons(request: &ConfirmationRequest, step: ShortStep) -> Vec<String> {
     let pages = full_pages(request).unwrap_or(0);
@@ -289,21 +292,31 @@ pub const DONT_ALLOW: &str = "Don't allow";
 /// The approving button of a two-button confirmation.
 pub const CONTINUE: &str = "Continue";
 
-/// The labels of the dialog's buttons for `request`, first to last. The first one is the default (Return) on every
-/// OS: tauri-plugin-dialog 2.8.1 hands them to rfd 0.16 in this order, and Windows' task dialog (`nDefaultButton` 0:
-/// "the first button in the dialog will be the default"), macOS' `NSAlert` (the first added button has Return) and
-/// GTK (the first added button holds the focus) all default to the first.
+/// The labels of the dialog's buttons for `request`, first to last. The LAST one always declines: the app makes it
+/// the default (Return) on every OS, so a stray Enter (from the composer, say) never approves, and Escape or a closed
+/// window decline too ([`system_dialog_order`] for Windows and macOS, the GTK window sets its default response).
 /// - A request that offers "always": `Allow once` / the request's `always` label / `Don't allow`.
 /// - An MCP server's key ("always" is the recommended choice): the
 ///   `always` label / `Allow until Vibe Work closes` / `Don't allow`.
-/// - An agent asking to close a user tab: `Keep` / `Close` (Return keeps the tab).
+/// - An agent asking to close a user tab: `Close` / `Keep`.
 /// - Otherwise `Continue` / `Cancel`.
 ///
 /// The pressed label decides the answer ([`dialog_answer`]), so the order never changes what a label means.
 #[must_use]
 pub fn dialog_buttons(request: &ConfirmationRequest) -> Vec<String> {
+    if request.method == vw_core_api::NEW_CHAT_RESTORE_DIALOG_METHOD {
+        return vec!["Keep".to_owned(), "Pick again".to_owned()];
+    }
+    if request.method == vw_core_api::CHROME_RESTORE_DIALOG_METHOD {
+        return vec!["Keep".to_owned(), "Lower to Browse".to_owned()];
+    }
     if request.method == "vibe-work/browserCloseTab" {
-        return vec!["Keep".to_owned(), "Close".to_owned()];
+        return vec!["Close".to_owned(), "Keep".to_owned()];
+    }
+    if let Some(always) = &request.always
+        && request.method == "vibe-work/secretRun"
+    {
+        return vec![ALLOW_ONCE.to_owned(), always.clone(), "Deny".to_owned()];
     }
     match &request.always {
         Some(always) if request.method == vw_core_api::MCP_KEY_DIALOG_METHOD => vec![
@@ -320,10 +333,62 @@ pub fn dialog_buttons(request: &ConfirmationRequest) -> Vec<String> {
     }
 }
 
+/// `labels` (last = declining, [`dialog_buttons`]) in the order the Windows task dialog and macOS' `NSAlert` take them.
+/// Both make the FIRST button the default (Windows `nDefaultButton` 0: "the first button in the dialog"; macOS: the
+/// first added button has Return), so the declining label moves to the front and the others keep their order.
+#[must_use]
+pub fn system_dialog_order(labels: &[String]) -> Vec<String> {
+    match labels.split_last() {
+        Some((declining, others)) => std::iter::once(declining).chain(others).cloned().collect(),
+        None => Vec::new(),
+    }
+}
+
+/// The window's generic line, used as the heading when the question is too long for one.
+pub const DIALOG_TITLE: &str = "Vibe Work asks for your confirmation";
+/// Longest first paragraph used as a dialog's heading.
+const HEADING_MAX_CHARS: usize = 300;
+
+/// A dialog `text` ([`dialog_text`], [`shortened_dialog_text`]) split into a heading and the rest, for windows that show
+/// a bold first line (GTK: screen readers read it first, after the window title). The heading is the caller's first
+/// paragraph (the question); the "who asks" line, when there is one, moves to the top of the rest. A first paragraph
+/// longer than 300 characters leaves [`DIALOG_TITLE`] as the heading and the whole text below. Nothing is dropped.
+#[must_use]
+pub fn dialog_heading(text: &str) -> (String, String) {
+    let (lead, body) = [DEBUG_API_LINE, AGENT_LINE]
+        .iter()
+        .find_map(|line| {
+            text.strip_prefix(line)
+                .and_then(|rest| rest.strip_prefix("\n\n"))
+                .map(|rest| (Some(*line), rest))
+        })
+        .unwrap_or((None, text));
+    let (first, after) = body.split_once("\n\n").unwrap_or((body, ""));
+    if first.trim().is_empty() || first.chars().count() > HEADING_MAX_CHARS {
+        return (DIALOG_TITLE.to_owned(), text.to_owned());
+    }
+    let rest = match (lead, after.is_empty()) {
+        (Some(line), false) => format!("{line}\n\n{after}"),
+        (Some(line), true) => line.to_owned(),
+        (None, _) => after.to_owned(),
+    };
+    (first.to_owned(), rest)
+}
+
 /// The decision a pressed button stands for (`pressed`: its label; `None`: closed, failed or no dialog). Fails
 /// closed: anything that is not exactly an approving label of this request declines.
 #[must_use]
 pub fn dialog_answer(request: &ConfirmationRequest, pressed: Option<&str>) -> Confirmation {
+    if matches!(
+        request.method.as_str(),
+        vw_core_api::CHROME_RESTORE_DIALOG_METHOD | vw_core_api::NEW_CHAT_RESTORE_DIALOG_METHOD
+    ) {
+        return if pressed == Some("Keep") {
+            Confirmation::Approved
+        } else {
+            Confirmation::Declined
+        };
+    }
     if request.method == "vibe-work/browserCloseTab" {
         return if pressed == Some("Close") {
             Confirmation::Approved

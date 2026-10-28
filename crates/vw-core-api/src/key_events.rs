@@ -33,13 +33,23 @@ pub(crate) async fn forward(
                 .to_owned(),
             },
             vw_keys::KeyEvent::RateLimits(limits) => CoreEvent::RateLimits {
-                limits: limits.into(),
+                limits: limits.map(Into::into),
             },
             vw_keys::KeyEvent::RemoteFileCleanupFailed(message) => CoreEvent::Alert {
                 session_id: None,
                 kind: crate::event::AlertKind::RemoteFileCleanupFailed,
                 message,
             },
+            vw_keys::KeyEvent::NetworkSettingsChecked(false) => {
+                crate::network::rejection_notice(shared.config.keys.as_deref())
+            }
+            // Saved settings that waited for the vault are in use: later subscribers get no notice for them.
+            vw_keys::KeyEvent::NetworkSettingsChecked(true) => {
+                shared
+                    .network_notice
+                    .store(false, std::sync::atomic::Ordering::Relaxed);
+                CoreEvent::KeyStatusChanged {}
+            }
             vw_keys::KeyEvent::StatusChanged | vw_keys::KeyEvent::KeyChanged => {
                 let _ = shared
                     .secret_scan

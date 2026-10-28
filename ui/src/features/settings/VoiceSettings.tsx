@@ -9,6 +9,7 @@
  * Invariants: every line says what the choice does and what leaves the computer; a failure to list
  * voices or microphones is shown as text, never swallowed; changing a choice never starts anything.
  */
+import { Switch } from "../../components/Controls";
 import { useEffect, useState } from "react";
 
 import { Selector } from "../../components/Selector";
@@ -120,11 +121,8 @@ export function VoiceSettings() {
             like Mistral&apos;s Autosend.
           </span>
         </span>
-        <button
+        <Switch
           data-testid="settings.voice-settings-update-3"
-          type="button"
-          className="switch"
-          role="switch"
           aria-label="Send after dictation"
           aria-checked={autosend}
           onClick={() => {
@@ -141,11 +139,8 @@ export function VoiceSettings() {
             to Mistral and uses your quota. Never while you dictate.
           </span>
         </span>
-        <button
+        <Switch
           data-testid="settings.voice-settings-update-4"
-          type="button"
-          className="switch"
-          role="switch"
           aria-label="Read finished turns aloud"
           aria-checked={narration}
           onClick={() => {

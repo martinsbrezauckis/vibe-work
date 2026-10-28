@@ -1,4 +1,4 @@
-//! Synthetic sessions verify owned worktree cleanup and dirty-file reporting.
+//! Real Vibe with a scripted model verifies explicit removal and compatibility with legacy copy records.
 
 // Unix only, like these tests before they became public: on Windows git reports a worktree as `C:/...` while the
 // temporary folder resolves to `\\?\C:\...`, so the path comparisons and readiness waits do not match there.
@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use changes::TempRepo;
-use common::core::{ScriptRig, script_core_with};
+use common::core::{ScriptRig, real_core};
 use serde_json::{Value, json};
 use vw_core_api::{
     BranchPlan, ChangesResult, Command, CommandResult, CoreError, CoreEvent, ErrorCode, Origin,
@@ -24,10 +24,17 @@ use worktrees::{checkout, run};
 
 async fn rig(name: &str, data: &Path) -> ScriptRig {
     let data = data.to_path_buf();
-    script_core_with(name, &["--status-events", "--edit-files"], move |config| {
-        config.changes_dir = Some(data);
-    })
+    real_core(
+        name,
+        &[],
+        None,
+        common::real_vibe::edit_script(),
+        move |config| {
+            config.changes_dir = Some(data);
+        },
+    )
     .await
+    .0
 }
 
 async fn exec_as(
@@ -129,14 +136,44 @@ async fn turn_with_edits(rig: &ScriptRig, sid: &str, text: &str) {
     .await
     .unwrap();
     let waited = tokio::time::timeout(Duration::from_secs(60), async {
+        let mut changed = false;
+        let mut idle = false;
         while let Some(event) = events.next().await {
-            if matches!(event, CoreEvent::ChangesUpdated { .. }) {
+            changed |= matches!(event, CoreEvent::ChangesUpdated { .. });
+            idle |= common::channel_rig::went_idle(&event);
+            if changed && idle {
                 return;
             }
         }
+        panic!("session event stream ended before changes and idle");
     })
     .await;
-    assert!(waited.is_ok(), "no changesUpdated event within 10 s");
+    assert!(
+        waited.is_ok(),
+        "no changesUpdated and idle events within 60 s"
+    );
+}
+
+/// One plain turn (no edits), waiting until the session is idle again.
+async fn plain_turn(rig: &ScriptRig, sid: &str) {
+    let mut events = rig.core.subscribe(Some(sid.to_owned()));
+    exec_as(
+        rig,
+        Origin::Ui,
+        json!({"type": "startTurn", "sessionId": sid, "message": [{"type": "text", "text": "hello"}]}),
+    )
+    .await
+    .unwrap();
+    let waited = tokio::time::timeout(Duration::from_secs(60), async {
+        while let Some(event) = events.next().await {
+            if common::channel_rig::went_idle(&event) {
+                return;
+            }
+        }
+        panic!("session event stream ended before idle");
+    })
+    .await;
+    assert!(waited.is_ok(), "no idle event within 60 s");
 }
 
 async fn changed(rig: &ScriptRig, sid: &str) -> Vec<String> {
@@ -164,18 +201,16 @@ async fn inspect(rig: &ScriptRig, sid: &str) -> WorktreeInspection {
     }
 }
 
-async fn archive(rig: &ScriptRig, sid: &str) {
-    exec_as(rig, Origin::Ui, json!({"type": "call", "method": "session/archive", "params": {"sessionId": sid, "archived": true}}))
-        .await
-        .unwrap();
-}
-
 /// Every removal call the fake received: each must state the three parameters.
 fn assert_explicit_removal_parameters(rig: &ScriptRig) -> usize {
-    let log =
-        std::fs::read_to_string(rig.dir.join("vibe-home/worktree-remove.log")).unwrap_or_default();
-    for line in log.lines() {
-        let call: Value = serde_json::from_str(line).unwrap();
+    let log = std::fs::read_to_string(rig.dir.join("params.jsonl")).unwrap_or_default();
+    let calls: Vec<Value> = log
+        .lines()
+        .map(|line| serde_json::from_str::<Value>(line).unwrap())
+        .filter(|call| call["method"] == "workspace/git/worktrees/remove")
+        .map(|call| call["params"].clone())
+        .collect();
+    for call in &calls {
         let inspect = call["inspect"].as_bool();
         if inspect == Some(true) {
             continue;
@@ -187,7 +222,7 @@ fn assert_explicit_removal_parameters(rig: &ScriptRig) -> usize {
             "a removal did not carry explicit inspection and choice parameters: {call}"
         );
     }
-    log.lines().count()
+    calls.len()
 }
 
 fn branches(repo: &TempRepo) -> Vec<String> {
@@ -338,15 +373,6 @@ async fn removal_needs_the_exact_list_and_the_dialog() {
     let path = ready(&rig, &sid).await;
     turn_with_edits(&rig, &sid, "edit:new.txt").await;
 
-    let live = inspect(&rig, &sid).await;
-    assert!(
-        live.blocked
-            .as_deref()
-            .unwrap_or("")
-            .contains("Archive or delete"),
-        "{live:?}"
-    );
-    archive(&rig, &sid).await;
     let seen = inspect(&rig, &sid).await;
     assert!(seen.blocked.is_none(), "{seen:?}");
     let files: Vec<&str> = seen.files.iter().map(|f| f.path.as_str()).collect();
@@ -425,7 +451,7 @@ async fn removal_needs_the_exact_list_and_the_dialog() {
     assert_eq!(checkout(&repo.root), before, "the main checkout changed");
     assert!(
         assert_explicit_removal_parameters(&rig) >= 4,
-        "the fake saw the probes and the removal"
+        "real Vibe saw the probes and the removal"
     );
 }
 
@@ -435,6 +461,7 @@ async fn a_branch_with_commits_is_kept_and_a_clean_copy_goes() {
     let rig = rig("worktree-commits", &repo.data).await;
     let sid = start_copy(&rig, &repo.root, "main", "vibe/kept").await;
     let path = ready(&rig, &sid).await;
+    turn_with_edits(&rig, &sid, "edit:work.txt").await;
     std::fs::write(path.join("work.txt"), "committed\n").unwrap();
     run(&path, &["add", "work.txt"]);
     run(
@@ -449,7 +476,6 @@ async fn a_branch_with_commits_is_kept_and_a_clean_copy_goes() {
             "work",
         ],
     );
-    archive(&rig, &sid).await;
     let seen = inspect(&rig, &sid).await;
     assert_eq!(seen.unmerged_total, 1);
     assert!(seen.unmerged[0].ends_with(" work"), "{seen:?}");
@@ -482,200 +508,86 @@ async fn a_branch_with_commits_is_kept_and_a_clean_copy_goes() {
     assert_explicit_removal_parameters(&rig);
 }
 
+/// A 2.26.1 claim has no session_dirs; Vibe 3 must not reap a legacy kept or undecided copy.
 #[tokio::test]
-async fn debug_api_starts_and_keeps_directly_and_orphans_are_listed() {
-    // (the folder becomes picked), even with a confirmer scripted to decline (proof that none is consulted).
+async fn legacy_copies_stay_listed_and_removable_after_restart() {
     let repo = TempRepo::with_files(&[("a.txt", "a\n")]);
-    let rig = rig("worktree-debug", &repo.data).await;
-    let cwd = repo.root.to_str().unwrap();
-    rig.confirmer.then(Confirmation::Declined);
-    let WorktreesResult::Started { snapshot, .. } = wt(
-        &rig,
-        Origin::DebugApi,
-        json!({"op": "start", "agentConfig": {"cwd": cwd}, "base": "main", "branch": "vibe/api"}),
+    let original = rig("worktree-legacy", &repo.data).await;
+    let home = original.vibe_home();
+    let records = vw_worktrees::Records::open(&repo.data.join("worktrees/records")).unwrap();
+    let mut copies = Vec::new();
+    for (name, decision) in [
+        ("old-kept", Some(vw_worktrees::Decision::Kept)),
+        ("old-undecided", None),
+    ] {
+        let id = start_copy(&original, &repo.root, "main", &format!("vibe/{name}")).await;
+        let path = ready(&original, &id).await;
+        // A copy whose chat never ran is reaped by Vibe 3.0.2 when it shuts down (its session is not stored, so
+        // the cleanup it schedules on close finishes; 3.0.0 exited before it did). A legacy copy is emulated on
+        // a chat that ran, so Vibe still holds its session at shutdown.
+        plain_turn(&original, &id).await;
+        records
+            .update(&id, |r| {
+                r.session_deleted = true;
+                r.decision = decision;
+            })
+            .unwrap();
+        copies.push((id, path));
+    }
+    original.core.shutdown().await;
+    for (_, path) in &copies {
+        let claim = home
+            .join("worktrees/.claims")
+            .join(path.parent().unwrap().file_name().unwrap())
+            .join(path.file_name().unwrap())
+            .join("record.json");
+        let mut value: Value = serde_json::from_slice(&std::fs::read(&claim).unwrap()).unwrap();
+        value.as_object_mut().unwrap().remove("session_dirs");
+        value
+            .as_object_mut()
+            .unwrap()
+            .remove("moved_checkout_admin");
+        value["reap_requested"] = json!(false);
+        std::fs::write(claim, serde_json::to_vec(&value).unwrap()).unwrap();
+    }
+    let data = repo.data.clone();
+    let (reopened, _model) = real_core(
+        "worktree-legacy-restart",
+        &[],
+        Some(&home),
+        common::real_vibe::edit_script(),
+        move |config| config.changes_dir = Some(data),
     )
-    .await
-    .unwrap() else {
-        panic!()
-    };
-    assert!(
-        rig.confirmer.shown().is_empty(),
-        "{:?}",
-        rig.confirmer.shown()
-    );
-    assert!(
-        rig.core.is_picked_folder(&repo.root),
-        "the Debug API's folder counts as picked"
-    );
-    rig.confirmer.forget();
-    let sid = snapshot.session_id;
-    let copy_path = ready(&rig, &sid).await;
-    let WorktreesResult::Options { options } =
-        wt(&rig, Origin::Ui, json!({"op": "options", "cwd": copy_path}))
+    .await;
+    let WorktreesResult::Orphans { orphans } =
+        wt(&reopened, Origin::DebugApi, json!({"op":"orphans"}))
             .await
             .unwrap()
     else {
         panic!()
     };
-    assert!(!options.picked && !options.offered);
-    assert_eq!(options.existing_branch.as_deref(), Some("vibe/api"));
-    assert!(
-        wt(
-            &rig,
-            Origin::Ui,
-            json!({"op": "suggestName", "cwd": copy_path, "text": "another"})
+    assert_eq!(orphans.len(), 2, "{orphans:?}");
+    for (id, path) in copies {
+        assert!(path.join("a.txt").is_file());
+        assert!(
+            orphans
+                .iter()
+                .any(|o| o.session_id == id && o.path.as_deref() == path.to_str())
+        );
+        let seen = inspect(&reopened, &id).await;
+        assert!(seen.blocked.is_none(), "{seen:?}");
+        let WorktreesResult::Removed { outcome } = wt(
+            &reopened,
+            Origin::DebugApi,
+            json!({"op":"remove", "sessionId":id, "fingerprint":seen.fingerprint}),
         )
         .await
-        .is_err()
-    );
-    // Delete the session (native dialog approved by the fake confirmer).
-    let token = match exec_as(&rig, Origin::Ui, json!({"type": "requestConfirmation", "method": "session/delete", "params": {"sessionId": sid}})).await.unwrap() {
-        CommandResult::Confirmation { token } => token,
-        other => panic!("{other:?}"),
-    };
-    exec_as(&rig, Origin::Ui, json!({"type": "call", "method": "session/delete", "params": {"sessionId": sid}, "confirmationToken": token}))
-        .await
-        .unwrap();
-    let WorktreesResult::Orphans { orphans } = wt(&rig, Origin::Ui, json!({"op": "orphans"}))
-        .await
-        .unwrap()
-    else {
-        panic!()
-    };
-    assert_eq!(orphans.len(), 1, "{orphans:?}");
-    assert_eq!(orphans[0].branch, "vibe/api");
-    assert!(!orphans[0].kept);
-    let WorktreesResult::Orphans { orphans: api } =
-        wt(&rig, Origin::DebugApi, json!({"op": "orphans"}))
-            .await
-            .unwrap()
-    else {
-        panic!()
-    };
-    assert_eq!(api, orphans);
-    assert!(
-        api[0].path.is_some() && api[0].repo_root.is_some(),
-        "{api:?}"
-    );
-    let shown = rig.confirmer.shown().len();
-    wt(
-        &rig,
-        Origin::DebugApi,
-        json!({"op": "keep", "sessionId": sid}),
-    )
-    .await
-    .unwrap();
-    assert_eq!(rig.confirmer.shown().len(), shown, "keep asked no dialog");
-    let WorktreesResult::Orphans { orphans } = wt(&rig, Origin::Ui, json!({"op": "orphans"}))
-        .await
-        .unwrap()
-    else {
-        panic!()
-    };
-    assert_eq!(
-        orphans.len(),
-        1,
-        "kept copy should remain discoverable: {orphans:?}"
-    );
-    assert!(orphans[0].kept);
-    assert_eq!(orphans[0].session_id, sid);
-    wt(
-        &rig,
-        Origin::DebugApi,
-        json!({"op": "keep", "sessionId": sid}),
-    )
-    .await
-    .unwrap();
-    let WorktreesResult::Orphans { orphans: again } =
-        wt(&rig, Origin::Ui, json!({"op": "orphans"}))
-            .await
-            .unwrap()
-    else {
-        panic!()
-    };
-    assert_eq!(
-        again, orphans,
-        "repeat Keep must not lose the inventory entry"
-    );
-    let copy = orphans[0].path.as_ref().unwrap();
-    let reused = exec_as(
-        &rig,
-        Origin::Ui,
-        json!({"type": "startSession", "agentConfig": {"cwd": copy}}),
-    )
-    .await
-    .unwrap();
-    assert!(
-        matches!(reused, CommandResult::Session { .. }),
-        "{reused:?}"
-    );
-    let WorktreesResult::Orphans { orphans: in_use } =
-        wt(&rig, Origin::Ui, json!({"op": "orphans"}))
-            .await
-            .unwrap()
-    else {
-        panic!()
-    };
-    assert!(
-        in_use.is_empty(),
-        "a loaded chat reuses the copy: {in_use:?}"
-    );
-    assert_explicit_removal_parameters(&rig);
-}
-
-#[tokio::test]
-async fn kept_archived_copy_is_listed_but_an_active_copy_is_not() {
-    let repo = TempRepo::with_files(&[("a.txt", "a\n")]);
-    let rig = rig("kept-archived-copy", &repo.data).await;
-    let sid = start_copy(&rig, &repo.root, "main", "vibe/kept-archive").await;
-    let copy = ready(&rig, &sid).await;
-    wt(
-        &rig,
-        Origin::DebugApi,
-        json!({"op": "keep", "sessionId": sid}),
-    )
-    .await
-    .unwrap();
-    let WorktreesResult::Orphans { orphans: active } =
-        wt(&rig, Origin::Ui, json!({"op": "orphans"}))
-            .await
-            .unwrap()
-    else {
-        panic!()
-    };
-    assert!(active.is_empty(), "active copy appeared: {active:?}");
-
-    archive(&rig, &sid).await;
-    let WorktreesResult::Orphans { orphans: archived } =
-        wt(&rig, Origin::Ui, json!({"op": "orphans"}))
-            .await
-            .unwrap()
-    else {
-        panic!()
-    };
-    assert_eq!(archived.len(), 1, "{archived:?}");
-    assert!(archived[0].kept);
-    assert_eq!(archived[0].path.as_deref(), copy.to_str());
-
-    let reused = exec_as(
-        &rig,
-        Origin::Ui,
-        json!({"type": "startSession", "agentConfig": {"cwd": copy}}),
-    )
-    .await
-    .unwrap();
-    assert!(
-        matches!(reused, CommandResult::Session { .. }),
-        "{reused:?}"
-    );
-    let WorktreesResult::Orphans { orphans: in_use } =
-        wt(&rig, Origin::Ui, json!({"op": "orphans"}))
-            .await
-            .unwrap()
-    else {
-        panic!()
-    };
-    assert!(in_use.is_empty(), "active reuse appeared: {in_use:?}");
+        .unwrap() else {
+            panic!()
+        };
+        assert!(outcome.removed && !path.exists(), "{outcome:?}");
+    }
+    reopened.core.shutdown().await;
 }
 
 /// path is ever taken from a client or inferred from the session's folder); a copy whose branch now lives in a
@@ -713,7 +625,6 @@ async fn only_recorded_copies_inside_vibes_folder_are_acted_on() {
 
     let sid = start_copy(&rig, &repo.root, "main", "vibe/moved").await;
     let path = ready(&rig, &sid).await;
-    archive(&rig, &sid).await;
     // The branch's worktree moves outside Vibe's folder (plain git, as a user or agent could).
     run(
         &repo.root,

@@ -13,7 +13,7 @@
 import { type GatedVendor, gatedVendor } from "./meta";
 
 /** Longest address (the Rust rule has the same limit). */
-export const MAX_SERVER_URL = 2048;
+const MAX_SERVER_URL = 2048;
 
 /** The verdict on an address. */
 export type ServerUrlCheck =

@@ -29,6 +29,7 @@ compile_error!(
     "the vault-e2e feature is for debug test builds only; it must never be in a release build"
 );
 
+mod ask_routes;
 mod auth;
 mod config;
 /// Test builds only (feature `e2e-script`): `POST /e2e/script`, `GET /e2e/windows`.

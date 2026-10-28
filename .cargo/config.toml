@@ -4,9 +4,16 @@
 #
 # Debug info: full DWARF for every dependency made each debug target dir 15-30 GB (every test binary links
 # all of them). Dependencies get none; our own crates keep line tables, so panics and backtraces still
-# name file:line. Measured 2026-10-09.
+# name file:line.
 [profile.dev]
 debug = "line-tables-only"
 
 [profile.dev.package."*"]
 debug = false
+
+# The minimum macOS: every macOS build (app, sidecar, tests) targets 11.0, the release's LSMinimumSystemVersion (the
+# macOS bundle script checks both; Vibe's `macosx_11_0` wheels need 11). The macOS preview network guard (vw-webview
+# feature `macos-proxy`, Network.framework's proxy API) needs 14: it comes in 0.1.3 together with this value and the
+# bundle's minimum at 14.0. Ignored on Linux and Windows; a value already in the environment wins (no `force`).
+[env]
+MACOSX_DEPLOYMENT_TARGET = "11.0"

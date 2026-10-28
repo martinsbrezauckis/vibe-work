@@ -37,8 +37,8 @@ use crate::mcp_keys_config::{ConfigEditError, add_entry, forwarder_url};
 
 /// The dialog's method name (not a Vibe method; the dialog shows it with the params).
 pub const METHOD: &str = "vibe-work/mcpServerKey";
-/// The dialog's "always" answer: its first button and the default (the recommended
-/// choice; `vw_host::dialog_buttons`).
+/// The dialog's "always" answer: its first button (the recommended choice; the default is the declining
+/// "Don't allow", `vw_host::dialog_buttons`).
 pub(crate) const ALWAYS_LABEL: &str = "Always (until revoked)";
 
 /// Header names a key may not use: hop-by-hop, framing, and the ones MCP or the forwarder own.
@@ -73,7 +73,8 @@ pub(crate) struct McpKeysState {
     /// it, so the decision never compares two wall-clock readings (a clock stepped back could otherwise let a plain
     /// grant outlive a revoke; 10 parallel test runs once failed at the same moment this way).
     plain: Mutex<HashMap<String, i64>>,
-    uses: Mutex<HashMap<String, u32>>,
+    /// Binding id -> (requests forwarded with its key in this run, the last one in ms).
+    uses: Mutex<HashMap<String, (u32, i64)>>,
 }
 
 impl McpKeysState {
@@ -81,20 +82,20 @@ impl McpKeysState {
         self.plain.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// Times binding `id` was used in this run.
-    pub(crate) fn uses(&self, id: &str) -> u32 {
+    /// Times binding `id` was used in this run, and the last use (ms; `None` before the first).
+    pub(crate) fn uses(&self, id: &str) -> (u32, Option<i64>) {
         self.uses
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .get(id)
-            .copied()
-            .unwrap_or(0)
+            .map_or((0, None), |(n, last)| (*n, Some(*last)))
     }
 
     fn count(&self, id: &str) {
         let mut uses = self.uses.lock().unwrap_or_else(PoisonError::into_inner);
-        let n = uses.entry(id.to_owned()).or_insert(0);
-        *n = n.saturating_add(1);
+        let entry = uses.entry(id.to_owned()).or_insert((0, 0));
+        entry.0 = entry.0.saturating_add(1);
+        entry.1 = crate::fill_grants::now_ms();
     }
 
     /// The grant word of `b` for views: `always`, the plain scope's word, or `none`.
@@ -131,11 +132,11 @@ fn now_ms() -> i64 {
 }
 
 fn keys(shared: &Shared) -> Result<&Arc<KeyService>, CoreError> {
-    shared.config.keys.as_ref().ok_or_else(|| {
-        let mut error = CoreError::new(ErrorCode::KeyService, "no vault is connected");
-        error.server_code = Some("notConfigured".to_owned());
-        error
-    })
+    shared
+        .config
+        .keys
+        .as_ref()
+        .ok_or_else(crate::keys::no_vault)
 }
 
 fn invalid(message: impl Into<String>) -> CoreError {
@@ -251,9 +252,9 @@ async fn consent(
     match shared.confirmer.confirm(&request).await {
         Confirmation::Approved => Ok(false),
         Confirmation::ApprovedAlways => Ok(true),
-        Confirmation::Declined => Err(CoreError::new(
+        answer @ Confirmation::Declined => Err(CoreError::new(
             ErrorCode::ConfirmationDeclined,
-            "you did not allow the key for this server; nothing was added",
+            answer.agent_text("this use of a secret"),
         )),
     }
 }
@@ -359,7 +360,12 @@ pub(crate) async fn add(
         Chosen::Existing { id, name } => (id, name),
         Chosen::New(new) => {
             let stored = keys
-                .store_secret(new.name, new.value.into_secret(), None)
+                .store_secret_labelled(
+                    new.name,
+                    new.value.into_secret(),
+                    None,
+                    Some(vw_keys::SecretLabel::Mcp),
+                )
                 .await
                 .map_err(|e| crate::keys::key_error(&e))?;
             (stored.secret.id, stored.secret.name)
@@ -590,7 +596,9 @@ pub(crate) async fn grant_views(shared: &Shared) -> Vec<crate::secrets_view::Ser
                 .map_or_else(|| b.secret_name.clone(), |s| s.name.clone()),
             secret_id: b.secret_id.clone(),
             grant: shared.connectors.mcp_keys.grant_word(b).to_owned(),
-            uses: shared.connectors.mcp_keys.uses(&b.id),
+            uses: shared.connectors.mcp_keys.uses(&b.id).0,
+            created_ms: b.created_ms,
+            last_used_ms: shared.connectors.mcp_keys.uses(&b.id).1,
         })
         .collect()
 }

@@ -246,7 +246,7 @@ pub fn worktrees(root: &Path) -> Result<Vec<WorktreeEntry>, WorktreeError> {
         if let Some(path) = field.strip_prefix("worktree ") {
             list.extend(current.take());
             current = Some(WorktreeEntry {
-                path: PathBuf::from(path),
+                path: native_spelling(path, cfg!(windows)),
                 branch: None,
             });
         } else if let Some(full) = field.strip_prefix("branch ")
@@ -257,6 +257,17 @@ pub fn worktrees(root: &Path) -> Result<Vec<WorktreeEntry>, WorktreeError> {
     }
     list.extend(current);
     Ok(list)
+}
+
+/// A path as git prints it, in the platform's own spelling: git for Windows writes `C:/Dev/app`, which the window
+/// would otherwise show next to the `C:\Dev\app` everything else uses for the same folder. Only the separators
+/// change (case and the rest stay as git wrote them). `windows` is the platform flag, so this is tested everywhere.
+fn native_spelling(path: &str, windows: bool) -> PathBuf {
+    if windows {
+        PathBuf::from(path.replace('/', "\\"))
+    } else {
+        PathBuf::from(path)
+    }
 }
 
 /// Why git would run a program this repository names while a copy is made or checked (`None` when nothing
@@ -335,5 +346,24 @@ pub fn resolve_base(root: &Path, base: &str) -> Result<String, WorktreeError> {
         Err(WorktreeError::InvalidName(format!(
             "there is no local branch {base:?} to start from"
         )))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::native_spelling;
+    use std::path::PathBuf;
+
+    #[test]
+    fn git_paths_take_the_platform_spelling() {
+        let git = "C:/DEVELOPER/vibe-home/worktrees/repo-1/aurora";
+        assert_eq!(
+            native_spelling(git, true),
+            PathBuf::from(r"C:\DEVELOPER\vibe-home\worktrees\repo-1\aurora")
+        );
+        assert_eq!(
+            native_spelling("/home/me/app", false),
+            PathBuf::from("/home/me/app")
+        );
     }
 }

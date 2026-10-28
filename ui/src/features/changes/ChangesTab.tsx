@@ -7,7 +7,8 @@
  * Depends on: store.ts, GitReview, TurnUndo, ConfirmBox, shell hooks, git/BranchBar, git/GitDialogs. Called by:
  * register.tsx (the panel body).
  */
-import { type ReactElement, useEffect } from "react";
+import { Button } from "../../components/Controls";
+import { type ReactElement, useEffect, useRef } from "react";
 import { EmptyState } from "../../components/EmptyState";
 
 import { useStore } from "../../state/createStore";
@@ -23,6 +24,7 @@ import { LineCommentsPanel } from "./LineCommentsPanel";
 import { LostBanner } from "./LostBanner";
 import { completionText, historyOfferShown } from "./model";
 import type { Changes } from "./store";
+import { reviewPath, reviewHunk } from "./reviewTarget";
 import { TurnUndo } from "./TurnUndo";
 
 function Effects({
@@ -64,6 +66,7 @@ function EffectsWithGit({
 /** The tab. */
 export function ChangesTab({ changes }: { changes: Changes }): ReactElement {
   const { git } = useApp();
+  const root = useRef<HTMLDivElement>(null);
   const sessionId = useShellState((s) => s.selected);
   const view = useStore(changes.store, (s) =>
     sessionId === null ? undefined : s.views[sessionId],
@@ -74,6 +77,42 @@ export function ChangesTab({ changes }: { changes: Changes }): ReactElement {
   const error = useStore(changes.store, (s) =>
     sessionId === null ? null : (s.error[sessionId] ?? null),
   );
+  const target = useStore(changes.store, (s) =>
+    sessionId === null ? undefined : s.review[sessionId],
+  );
+  const selected = useStore(changes.store, (s) =>
+    sessionId === null ? null : s.selected[sessionId],
+  );
+  const targetPath =
+    target?.ready === true && view !== undefined ? reviewPath(view, target.path) : null;
+  const targetFile = view?.files.find((file) => file.path === targetPath);
+  const hunkId =
+    targetFile === undefined || target === undefined
+      ? null
+      : reviewHunk(targetFile, target.line)?.id;
+  useEffect(() => {
+    if (target?.ready !== true || targetPath === null || root.current === null) return;
+    const row = [
+      ...root.current.querySelectorAll<HTMLButtonElement>(".files button[data-path]"),
+    ].find((element) => element.dataset["path"] === targetPath);
+    if (row !== undefined) {
+      row.focus({ preventScroll: true });
+      row.scrollIntoView({ block: "nearest" });
+      const hunk = [...root.current.querySelectorAll<HTMLElement>("[data-hunk-id]")].find(
+        (element) => element.dataset["hunkId"] === hunkId,
+      );
+      hunk?.scrollIntoView({ block: "nearest" });
+    } else {
+      const diffs = [...root.current.querySelectorAll<HTMLElement>("[data-review-path]")].filter(
+        (element) => element.dataset["reviewPath"] === targetPath,
+      );
+      const diff = (
+        diffs.find((element) => Number(element.dataset["reviewLine"]) === target.line) ?? diffs[0]
+      )?.querySelector<HTMLElement>(".diff");
+      diff?.focus({ preventScroll: true });
+      diff?.scrollIntoView({ block: "nearest" });
+    }
+  }, [target, targetPath, hunkId, selected]);
   const completion = useStore(changes.store, (s) =>
     sessionId === null ? undefined : s.completion[sessionId],
   );
@@ -94,16 +133,16 @@ export function ChangesTab({ changes }: { changes: Changes }): ReactElement {
       ) : (
         <div className="empty" data-testid="changes-read-failed">
           The changes could not be read.{" "}
-          <button
+          <Button
             data-testid="changes.changes-tab-load"
             type="button"
-            className="key-link"
+            appearance="key-link"
             onClick={() => {
               void changes.load(sessionId);
             }}
           >
             Read again
-          </button>
+          </Button>
         </div>
       );
   else if (view.mode === "git" || view.mode === "uncommitted")
@@ -133,6 +172,7 @@ export function ChangesTab({ changes }: { changes: Changes }): ReactElement {
     );
   return (
     <div
+      ref={root}
       className="changes-tab"
       data-mode={view?.mode ?? (error === null || sessionId === null ? "loading" : "failed")}
     >
@@ -143,6 +183,14 @@ export function ChangesTab({ changes }: { changes: Changes }): ReactElement {
       )}
       {sessionId !== null && git !== null && <BranchBar git={git} sessionId={sessionId} />}
       {sessionId !== null && view?.mode === "git" && <LineCommentsPanel sessionId={sessionId} />}
+      {target?.ready === true &&
+        view !== undefined &&
+        view.mode !== "unavailable" &&
+        targetPath === null && (
+          <p className="server-note" role="status">
+            This change is not waiting for review any more: it was committed or undone.
+          </p>
+        )}
       {body}
       <ConfirmBox changes={changes} />
       {sessionId !== null && git !== null && <GitDialogs git={git} sessionId={sessionId} />}

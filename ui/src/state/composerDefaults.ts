@@ -2,13 +2,15 @@
  * Initializes composer chips from the session's effective runtime before interaction or a first turn.
  * Depends on core/composer stores and Vibe's config provenance; called by composerSession.
  * Reads are coalesced across origins. Project thinking wins over the app preference; explicit picks
- * and existing conversations are never initialized again. A failed read/write leaves a turn unsent.
+ * and existing conversations are never initialized again. A failed model read or pick leaves the chat sendable.
  */
 import type { JsonValue } from "../protocol/core";
+import { toCallError } from "../protocol/client/types";
 import {
   configuredModelPin,
   configuredReasoning,
   currentPick,
+  selectedModel,
   type CurrentPick,
 } from "../features/composer/model/models";
 import { obj } from "../features/transcript/model/entries";
@@ -22,15 +24,21 @@ export interface ComposerInitialization {
   choices: Map<string, CurrentPick>;
 }
 
-/** A resolved transport call can still report a rejected configuration mutation. */
-export function modelWriteAccepted(result: JsonValue | null): boolean {
+/** Refusals may be a resolved response; keep Vibe's explanation visible to the person choosing. */
+export function requireModelWriteAccepted(result: JsonValue | null): void {
   const response = obj(result);
   const failures = response?.["failures"];
-  return response?.["rejected"] !== true && (!Array.isArray(failures) || failures.length === 0);
+  if (Array.isArray(failures) && failures.length > 0)
+    throw new Error(
+      failures.filter((failure) => typeof failure === "string").join("\n") ||
+        "The model choice could not be applied.",
+    );
+  if (response?.["rejected"] === true)
+    throw new Error("The model choice was refused by this configuration.");
 }
 
 /** Whether the project explicitly sets thinking for this alias (including a value equal to its default). */
-export function projectThinking(fields: JsonValue, alias: string | null): boolean {
+function projectThinking(fields: JsonValue, alias: string | null): boolean {
   const rows = obj(fields)?.["fields"];
   if (!Array.isArray(rows) || alias === null) return false;
   for (const row of rows) {
@@ -57,6 +65,7 @@ export function prepareComposerSession(
   sessionId: string,
   fresh = false,
   given?: CurrentPick,
+  reportFailure?: (message: string) => void,
 ): Promise<boolean> {
   const held = given ?? {
     alias: null,
@@ -70,7 +79,15 @@ export function prepareComposerSession(
     return explicit && !same
       ? pending.then((ok) =>
           ok
-            ? prepareComposerSession(core, composer, initialization, sessionId, false, held)
+            ? prepareComposerSession(
+                core,
+                composer,
+                initialization,
+                sessionId,
+                false,
+                held,
+                reportFailure,
+              )
             : false,
         )
       : pending;
@@ -81,6 +98,7 @@ export function prepareComposerSession(
     return reply.type === "reply" ? reply.result : null;
   };
   const prepare = async (): Promise<boolean> => {
+    let picking = false;
     try {
       const entry = core.store.get().sessions[sessionId];
       let runtime = entry?.runtime ?? obj(await read("runtime/read"))?.["runtime"];
@@ -105,26 +123,35 @@ export function prepareComposerSession(
         (effort !== null && effort !== pick.effort)
       ) {
         const pin = held.alias ?? configuredModelPin(runtime);
+        picking = true;
         const reply = await core.run({
           type: "pickModel",
           sessionId,
           ...(pin === null ? {} : { modelAlias: pin }),
+          ...selectedModel(runtime, pin),
+          ...(held.modelName === undefined ? {} : { modelName: held.modelName }),
+          ...(held.modelDisplayName === undefined
+            ? {}
+            : { modelDisplayName: held.modelDisplayName }),
           ...(effort === null ? {} : { reasoningEffort: effort }),
         });
-        if (reply.type !== "reply" || !modelWriteAccepted(reply.result)) return false;
+        if (reply.type !== "reply") return false;
+        requireModelWriteAccepted(reply.result);
         runtime = obj(reply.result)?.["runtime"] ?? obj(await read("runtime/read"))?.["runtime"];
         const actual = currentPick(runtime, undefined);
         if (
           runtime === undefined ||
-          (held.alias !== null && actual.alias !== held.alias) ||
-          (effort !== null && actual.effort !== effort)
+          (obj(reply.result)?.["modelChoiceFallback"] !== true &&
+            ((held.alias !== null && actual.alias !== held.alias) ||
+              (effort !== null && actual.effort !== effort)))
         )
           return false;
       }
       core.setRuntime(sessionId, runtime);
       initialization.ready.add(sessionId);
       return true;
-    } catch {
+    } catch (thrown) {
+      if (picking) reportFailure?.(toCallError(thrown).error.message);
       return false;
     }
   };

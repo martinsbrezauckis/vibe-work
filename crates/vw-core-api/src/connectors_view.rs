@@ -197,6 +197,10 @@ pub struct ConnectorsView {
     pub catalog: CatalogLoad,
     /// Why the catalog could not be loaded (Vibe's message), when it could not.
     pub catalog_error: Option<String>,
+    /// The current key can use shared connectors only; private sign-ins are unavailable.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
+    pub private_connectors_hidden: Option<bool>,
     /// Mistral-hosted connectors, in Vibe's order.
     pub connectors: Vec<ConnectorView>,
     /// MCP servers: from Vibe Work's own config and, when a session's state was read, from that session
@@ -274,6 +278,10 @@ pub struct ServerView {
     pub error: Option<String>,
     /// The plugin that provides it (`null`: Vibe's config).
     pub plugin: Option<String>,
+    /// Origin: built-in for app-injected tools or a built-in plugin; otherwise the pinned plugin’s scope, when known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
+    pub source: Option<String>,
     /// True when it is in Vibe Work's own config (it can be signed out, turned off and removed here).
     pub configured: bool,
     /// The key Vibe Work adds for it (`null`: not a key server).

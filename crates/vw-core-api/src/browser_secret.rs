@@ -30,7 +30,7 @@ fn consent_request(
             "Save the {length}-character value you selected in the {} on {} for session {} to your vault as {}{}? The agent never sees the value; it can later ask to use it in a command.",
             vw_gate::dialog_quote(element),
             vw_gate::dialog_quote(page),
-            vw_gate::dialog_quote(title),
+            vw_gate::dialog_chat_quote(title),
             vw_gate::dialog_quote(name),
             if replaces {
                 " (replacing the value stored under that name)"
@@ -135,10 +135,7 @@ pub(crate) async fn save(
         .map_err(denied)?;
     let value = SecretString::new(captured.value.as_str());
     let length = value.expose().chars().count();
-    let title = shared
-        .names
-        .title_of(&shared.store, &owner)
-        .unwrap_or(owner);
+    let title = shared.names.confirmation_title(&shared.store, &owner);
     let request = consent_request(
         &title,
         &captured.origin,
@@ -147,10 +144,9 @@ pub(crate) async fn save(
         length,
         replaces,
     );
-    if !shared.confirmer.confirm(&request).await.approved() {
-        return Err(denied(
-            "Not stored: the user declined the vault save".to_owned(),
-        ));
+    let answer = shared.confirmer.confirm(&request).await;
+    if !answer.approved() {
+        return Err(denied(answer.agent_text("this vault save")));
     }
     let stored = keys
         .store_secret_labelled(name.to_owned(), value, Some(captured.origin), None)
@@ -201,6 +197,6 @@ mod tests {
             escaped.params["session"], title,
             "metadata is quoted only by its renderer"
         );
-        assert!(escaped.summary.contains(&vw_gate::dialog_quote(title)));
+        assert!(escaped.summary.contains(&vw_gate::dialog_chat_quote(title)));
     }
 }

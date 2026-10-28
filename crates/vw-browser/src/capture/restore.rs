@@ -53,12 +53,21 @@ impl CapturePage {
         Ok(answer)
     }
 
-    pub(super) async fn screenshot(&self) -> Result<Vec<u8>, String> {
+    /// The CSS viewport width the engine lays the page out at (ours, from the preview's placement; never the page's).
+    pub(super) fn css_viewport_width(&self) -> Option<f64> {
         self.browser
             .service()
-            .screenshot_png(&self.mount.session_id)
-            .await
-            .map_err(|e| e.to_string())
+            .css_viewport_width(&self.mount.session_id)
+    }
+
+    pub(super) async fn screenshot(&self, scaled: bool) -> Result<Vec<u8>, String> {
+        let service = self.browser.service();
+        let png = if scaled {
+            service.screenshot_slice_png(&self.mount.session_id).await
+        } else {
+            service.screenshot_png(&self.mount.session_id).await
+        };
+        png.map_err(|e| e.to_string())
     }
 }
 

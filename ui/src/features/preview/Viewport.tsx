@@ -6,6 +6,7 @@
  * Adapted from ShellX.
  * Depends on: store.ts (`layout`), components/NativeViewport. Called by: PreviewTab.
  */
+import { Button } from "../../components/Controls";
 import { type ReactElement, type ReactNode, useCallback, useSyncExternalStore } from "react";
 
 import { NativeViewport } from "../../components/NativeViewport";
@@ -28,6 +29,7 @@ export function Viewport({
   stopped = null,
   snapshot,
   onReload,
+  beforeChat = false,
   children,
 }: {
   previews: Previews;
@@ -39,6 +41,8 @@ export function Viewport({
   stopped?: string | null;
   snapshot?: string | null;
   onReload?: () => void;
+  /** The New chat screen's browser: no session yet, its servers are the ones started in its Terminal. */
+  beforeChat?: boolean;
   /** The server list and empty guidance are page content, never toolbar content. */
   children?: ReactNode;
 }): ReactElement {
@@ -77,14 +81,14 @@ export function Viewport({
           <p>Server stopped</p>
           <p className="preview-url">{stopped}</p>
           {onReload && (
-            <button
+            <Button
               data-testid="preview.viewport-preview-btn"
               type="button"
-              className="preview-btn"
+              appearance="preview"
               onClick={onReload}
             >
               Reload
-            </button>
+            </Button>
           )}
         </div>
       ) : waiting ? (
@@ -103,14 +107,14 @@ export function Viewport({
           <div className="browser-paused-message">
             <span>Browser paused</span>
             {onReload && (
-              <button
+              <Button
                 data-testid="preview.viewport-preview-btn-2"
                 type="button"
-                className="preview-btn"
+                appearance="preview"
                 onClick={onReload}
               >
                 Reload
-              </button>
+              </Button>
             )}
           </div>
         </div>
@@ -119,7 +123,9 @@ export function Viewport({
           <>
             {children}
             <div className="empty">
-              Type an address above, or open one of this session's servers, to see the page here.
+              {beforeChat
+                ? "Type an address above, or open a server you started in the Terminal, to see the page here."
+                : "Type an address above, or open one of this session's servers, to see the page here."}
             </div>
           </>
         )

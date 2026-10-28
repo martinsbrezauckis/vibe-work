@@ -41,7 +41,7 @@ impl KeyService {
     /// [`WorkFailure`].
     pub async fn libraries(&self) -> Result<LibraryList, WorkFailure> {
         let key = self.key_for_call().map_err(WorkFailure::KeyNeeded)?;
-        let (client, base) = self.api();
+        let (ref client, base) = self.api();
         Ok(libraries::list(client, base, key.as_str()).await?)
     }
 
@@ -55,7 +55,7 @@ impl KeyService {
         description: Option<&str>,
     ) -> Result<Library, WorkFailure> {
         let key = self.key_for_call().map_err(WorkFailure::KeyNeeded)?;
-        let (client, base) = self.api();
+        let (ref client, base) = self.api();
         Ok(libraries::create(client, base, key.as_str(), name, description).await?)
     }
 
@@ -65,7 +65,7 @@ impl KeyService {
     /// [`WorkFailure`].
     pub async fn library_delete(&self, id: &str) -> Result<(), WorkFailure> {
         let key = self.key_for_call().map_err(WorkFailure::KeyNeeded)?;
-        let (client, base) = self.api();
+        let (ref client, base) = self.api();
         Ok(libraries::delete(client, base, key.as_str(), id).await?)
     }
 
@@ -75,7 +75,7 @@ impl KeyService {
     /// [`WorkFailure`].
     pub async fn library_documents(&self, id: &str) -> Result<Vec<LibraryDocument>, WorkFailure> {
         let key = self.key_for_call().map_err(WorkFailure::KeyNeeded)?;
-        let (client, base) = self.api();
+        let (ref client, base) = self.api();
         Ok(libraries::documents(client, base, key.as_str(), id).await?)
     }
 
@@ -89,7 +89,7 @@ impl KeyService {
         file: (&str, &str, &[u8]),
     ) -> Result<LibraryDocument, WorkFailure> {
         let key = self.key_for_call().map_err(WorkFailure::KeyNeeded)?;
-        let (client, base) = self.api();
+        let (ref client, base) = self.api();
         Ok(libraries::upload(client, base, key.as_str(), library, file).await?)
     }
 
@@ -103,7 +103,7 @@ impl KeyService {
         document: &str,
     ) -> Result<(), WorkFailure> {
         let key = self.key_for_call().map_err(WorkFailure::KeyNeeded)?;
-        let (client, base) = self.api();
+        let (ref client, base) = self.api();
         Ok(libraries::delete_document(client, base, key.as_str(), library, document).await?)
     }
 
@@ -117,7 +117,7 @@ impl KeyService {
         document: &str,
     ) -> Result<(String, bool), WorkFailure> {
         let key = self.key_for_call().map_err(WorkFailure::KeyNeeded)?;
-        let (client, base) = self.api();
+        let (ref client, base) = self.api();
         Ok(libraries::document_text(client, base, key.as_str(), library, document).await?)
     }
 
@@ -132,7 +132,7 @@ impl KeyService {
         libraries: &[String],
     ) -> Result<Answer, WorkFailure> {
         let key = self.key_for_call().map_err(WorkFailure::KeyNeeded)?;
-        let (client, base) = self.api();
+        let (ref client, base) = self.api();
         Ok(libraries::search(client, base, key.as_str(), model, question, libraries).await?)
     }
 
@@ -142,7 +142,7 @@ impl KeyService {
     /// [`WorkFailure`].
     pub async fn image_make(&self, job: &ImageJob<'_>) -> Result<Made, WorkFailure> {
         let key = self.key_for_call().map_err(WorkFailure::KeyNeeded)?;
-        let (client, base) = self.api();
+        let (ref client, base) = self.api();
         Ok(vw_mistral::work::images::make_with_cleanup_notice(
             client,
             base,

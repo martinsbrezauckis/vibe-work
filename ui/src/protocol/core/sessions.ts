@@ -7,20 +7,11 @@
 
 import type { JsonValue } from "./index";
 
-import type { AnomalyCountsView } from "./status";
 export type SessionChange = { "kind": "removed", 
 /**
  * Session.
  */
-sessionId: string, } | { "kind": "handedOff", 
-/**
- * Id it had.
- */
-oldSessionId: string, 
-/**
- * Id it has now.
- */
-newSessionId: string, } | { "kind": "sessionPatched", 
+sessionId: string, } | { "kind": "sessionPatched", 
 /**
  * Session.
  */
@@ -150,11 +141,7 @@ resyncPending: boolean,
 /**
  * Turns this store marked interrupted after a resume.
  */
-interruptedTurns: Array<string>, 
-/**
- * Anomaly counters.
- */
-anomalies: AnomalyCountsView, };
+interruptedTurns: Array<string>, };
 
 export type SessionRowView = { 
 /**
@@ -165,6 +152,10 @@ session: JsonValue,
  * The resolved access mode for display before the session has a runtime.
  */
 accessMode?: string, 
+/**
+ * Ownership from the existing parent's childSessions (a fork's parent id alone is not ownership).
+ */
+ownedByParent?: boolean, 
 /**
  * The server's listing does not contain it yet.
  */
@@ -275,6 +266,14 @@ limit?: number, } | { "op": "files",
  * The words to find.
  */
 query: string, 
+/**
+ * Match only file names, without reading content; an empty query lists names.
+ */
+namesOnly?: boolean, 
+/**
+ * One exact known session folder or user-picked folder (also before a new chat starts).
+ */
+folder?: string, 
 /**
  * Only this session's folders; the folders of every listed session when absent.
  */

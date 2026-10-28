@@ -46,7 +46,7 @@ const REASONS: Readonly<Record<string, string>> = {
   selectionRequired: "Choose a vault before unlocking it.",
   io: "Vibe Work could not read or write the vault folder. Check that the folder is writable.",
   rememberFailed:
-    "The vault was opened, but this computer could not remember it. You will type the password again next time.",
+    "The vault was opened, but this computer's credential store could not keep its key. You will type the password at the next start.",
   noKey: "There is no Mistral key yet. Paste one to continue.",
   nothingToImport: "Vibe's saved key is gone. Paste a key instead.",
   notACandidate: "That saved key is no longer in the vault. Pick another or paste a key.",

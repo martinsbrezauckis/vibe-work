@@ -10,15 +10,22 @@ use std::time::Duration;
 use vw_preview::{EngineError, MountId};
 
 impl TauriEngine {
+    pub(super) async fn pdf(&self, id: MountId) -> Result<Vec<u8>, EngineError> {
+        let webview = self.webview(&id)?;
+        let _visibility = self.visibility.lock().await;
+        crate::pdf::print(&webview).await
+    }
+
     /// A screenshot of a mount; overlay-hidden pages refuse capture on every platform.
     pub(super) async fn shot(
         &self,
         id: MountId,
         full: Option<(u32, u32)>,
         limit: Duration,
+        sharp: bool,
     ) -> Result<Vec<u8>, EngineError> {
         let webview = self.webview(&id)?;
-        let _visibility = self.visibility.lock().await;
+        let visibility = self.visibility.clone().lock_owned().await;
         let shown = self
             .shown
             .lock()
@@ -31,6 +38,19 @@ impl TauriEngine {
                 "Browser page capture is off while chrome covers it".to_owned(),
             ));
         }
+        #[cfg(target_os = "linux")]
+        if sharp {
+            return crate::linux_capture::screenshot(&webview, limit, visibility).await;
+        }
+        // macOS: the same viewport rendered at one point per CSS pixel; nothing about the webview changes.
+        #[cfg(target_os = "macos")]
+        if sharp {
+            let _visibility = visibility;
+            return platform::screenshot_sharp(&webview, limit).await;
+        }
+        // The scaled Linux capture transfers this lock to its UI task so Stop cannot interrupt restoration.
+        let _visibility = visibility;
+        let _ = sharp;
         #[cfg(windows)]
         {
             if shown.visible {

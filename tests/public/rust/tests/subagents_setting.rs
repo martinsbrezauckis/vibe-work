@@ -1,4 +1,4 @@
-//! Subagent settings over a scripted fake Vibe server.
+//! Subagent settings over a pinned real Vibe and a scripted model.
 //! PREDICT: writes use a short-lived chat and leave the user chat usable.
 
 mod common;
@@ -6,7 +6,8 @@ mod common;
 use std::path::Path;
 
 use common::subagents_rig::{
-    listed, named, position, record, set_subagents, setup, temporary_ids, users_chat_in,
+    listed, named, position, record, set_subagents, setup, setup_fault, temporary_ids,
+    users_chat_in,
 };
 use serde_json::{Value, json};
 use vw_core_api::{Command, CommandResult, Origin, SessionToolsResult};
@@ -86,7 +87,10 @@ async fn the_short_lived_chat_opens_in_the_servers_own_folder() {
         .filter(|entry| entry["method"] == "session/start")
         .collect();
     assert_eq!(starts.len(), 2, "{starts:?}");
-    assert_eq!(starts[0]["agentConfig"]["cwd"], "/work/alpha");
+    assert_eq!(
+        starts[0]["agentConfig"]["cwd"],
+        r.rig.dir.join("work").join("alpha").to_str().unwrap()
+    );
     let helper_folder = starts[1]["agentConfig"]["cwd"].as_str().unwrap();
     assert_eq!(Path::new(helper_folder), r.rig.dir.as_path());
     assert_ne!(helper_folder, "/work/alpha");
@@ -96,11 +100,29 @@ async fn the_short_lived_chat_opens_in_the_servers_own_folder() {
 
 #[tokio::test]
 async fn a_refused_write_is_an_error_and_the_short_lived_chat_is_still_deleted() {
-    let s = setup("sub-t3", &["--subagents-reject"]).await;
+    let s = setup_fault(
+        "sub-t3",
+        &[],
+        json!({"onRequest":[{"method":"config/write","times":1,"fault":"config-directory"}]}),
+    )
+    .await;
     let r = &s.r;
     let before = listed(r).await;
     let error = set_subagents(r, true).await.unwrap_err();
-    assert_eq!(error.message, "Vibe did not accept the change.");
+    assert_eq!(error.server_code.as_deref(), Some("internal_error"));
+    assert_eq!(error.method.as_deref(), Some("config/write"));
+    assert_eq!(
+        error.message,
+        format!(
+            "config/write failed: Layer 'user-toml': cannot read config file at {} (internal_error)",
+            s.sessions_dir
+                .parent()
+                .unwrap()
+                .join("vibe-home")
+                .join("config.toml")
+                .display()
+        )
+    );
     let helper = named(r, "config/write").remove(0);
     assert_eq!(named(r, "session/delete"), [helper]);
     assert_eq!(listed(r).await, before);
@@ -111,7 +133,12 @@ async fn a_refused_write_is_an_error_and_the_short_lived_chat_is_still_deleted()
 
 #[tokio::test]
 async fn a_delete_that_fails_once_is_tried_once_more() {
-    let s = setup("sub-t4", &["--delete-faults", "1"]).await;
+    let s = setup_fault(
+        "sub-t4",
+        &[],
+        json!({"onRequest":[{"method":"session/delete","times":1,"fault":"storage-link"}]}),
+    )
+    .await;
     let r = &s.r;
     let before = listed(r).await;
     let result = set_subagents(r, false).await.unwrap();
@@ -136,7 +163,12 @@ async fn a_delete_that_fails_once_is_tried_once_more() {
 
 #[tokio::test]
 async fn a_chat_that_cannot_be_deleted_is_named_and_removed_when_the_app_quits() {
-    let s = setup("sub-t5", &["--delete-faults", "2"]).await;
+    let s = setup_fault(
+        "sub-t5",
+        &[],
+        json!({"onRequest":[{"method":"session/delete","times":2,"fault":"storage-link"}]}),
+    )
+    .await;
     let r = &s.r;
     let result = set_subagents(r, false).await.unwrap();
     let helper = named(r, "config/write").remove(0);

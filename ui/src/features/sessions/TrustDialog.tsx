@@ -7,6 +7,7 @@
  * Invariants: nothing is sent until the user presses "Trust this folder"; Escape and Cancel send
  * nothing; the files Vibe reports (`detectedFiles`) are listed as text, never rendered.
  */
+import { Button } from "../../components/Controls";
 import { useEffect, useRef, useState } from "react";
 
 import { useModalFocus } from "../../hooks/useModalFocus";
@@ -74,19 +75,19 @@ export function TrustDialog({ cwd, onClose }: { cwd: string; onClose: () => void
           )}
         </section>
         <footer className="modal-actions">
-          <button
+          <Button
             data-testid="sessions.trust-dialog-tb-btn"
             type="button"
-            className="tb-btn"
+
             data-dialog-initial-focus="true"
             onClick={onClose}
           >
             Cancel
-          </button>
-          <button
+          </Button>
+          <Button
             data-testid="sessions.trust-dialog-trust"
             type="button"
-            className="btn-primary"
+            appearance="dialog"
             disabled={trusted}
             onClick={() => {
               void sessions?.trust(cwd).then((ok) => {
@@ -95,7 +96,7 @@ export function TrustDialog({ cwd, onClose }: { cwd: string; onClose: () => void
             }}
           >
             Trust this folder
-          </button>
+          </Button>
         </footer>
       </div>
     </>

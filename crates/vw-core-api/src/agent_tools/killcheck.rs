@@ -24,7 +24,7 @@ use std::sync::Arc;
 use serde::Deserialize;
 use serde_json::{Value, json};
 use vw_agent_tools::killparse::{KillScan, KillTarget, NameMatch, scan};
-use vw_gate::{Confirmation, ConfirmationRequest, Confirmer};
+use vw_gate::ConfirmationRequest;
 use vw_procmon::{Attribution, Inputs, ProcessInfo, Snapshot};
 
 use super::session::session_name;
@@ -109,6 +109,32 @@ pub(crate) async fn guard(
     found: &KillScan,
     asked: Asked<'_>,
 ) -> Result<Result<(), String>, String> {
+    let report = |reason: String| {
+        if matches!(asked, Asked::Hook { .. }) || reason.starts_with("Not done:") {
+            reason
+        } else {
+            crate::guard_refusals::record(
+                shared,
+                session,
+                crate::GuardKind::Process,
+                crate::guard_refusals::step(shared, session, None),
+                &reason,
+            )
+        }
+    };
+    decide(shared, session, command, found, asked)
+        .await
+        .map_err(report)
+        .map(|verdict| verdict.map_err(report))
+}
+
+async fn decide(
+    shared: &Arc<Shared>,
+    session: &str,
+    command: &str,
+    found: &KillScan,
+    asked: Asked<'_>,
+) -> Result<Result<(), String>, String> {
     if !found.mentions {
         return Ok(Ok(()));
     }
@@ -126,25 +152,23 @@ pub(crate) async fn guard(
     } else if matches!(asked, Asked::Card(true)) {
         // The user approved Vibe's card for this exact call of our own tool moments ago.
         (Ok(()), "allowed by the user on Vibe's card")
-    } else if hold(shared, session, command, &reasons).await {
-        if let Asked::Hook {
-            call_id,
-            hook_session,
-        } = asked
-        {
-            // Vibe's card for this bash call (if its permissions ask) gets this yes from the core.
-            if let Some(ledger) = crate::one_ask::of(shared) {
-                ledger.guard_said_yes(&[hook_session, session], call_id, command);
-            }
-        }
-        (Ok(()), "allowed by the user")
     } else {
-        (
-            Err("The user did not allow this process-stop command. \
-                 Use processes_list and process_stop for this session's processes."
-                .to_owned()),
-            "refused by the user",
-        )
+        match hold(shared, session, command, &reasons, asked).await {
+            Ok(()) => {
+                if let Asked::Hook {
+                    call_id,
+                    hook_session,
+                } = asked
+                {
+                    // Vibe's card for this bash call (if its permissions ask) gets this yes from the core.
+                    if let Some(ledger) = crate::one_ask::of(shared) {
+                        ledger.guard_said_yes(&[hook_session, session], call_id, command);
+                    }
+                }
+                (Ok(()), "allowed by the user")
+            }
+            Err(reason) => (Err(reason), "refused"),
+        }
     };
     tracing::info!(
         session,
@@ -157,12 +181,15 @@ pub(crate) async fn guard(
 }
 
 /// Holds a command the classifier could not read for the user: a native dialog with the exact command.
-async fn hold(shared: &Shared, session: &str, command: &str, why: &[String]) -> bool {
-    let title = shared
-        .names
-        .title_of(&shared.store, session)
-        .unwrap_or_else(|| session.to_owned());
-    let request = ConfirmationRequest {
+async fn hold(
+    shared: &Arc<Shared>,
+    session: &str,
+    command: &str,
+    why: &[String],
+    asked: Asked<'_>,
+) -> Result<(), String> {
+    let title = shared.names.confirmation_title(&shared.store, session);
+    let mut request = ConfirmationRequest {
         method: HOLD_METHOD.to_owned(),
         requester: vw_gate::Requester::Agent,
         summary: hold_summary(&title, command, why),
@@ -173,18 +200,21 @@ async fn hold(shared: &Shared, session: &str, command: &str, why: &[String]) -> 
         }),
         always: None,
     };
-    shared.confirmer.confirm(&request).await == Confirmation::Approved
+    if let Asked::Hook { call_id, .. } = asked {
+        request.params["toolCallId"] = Value::String(call_id.into());
+    }
+    crate::ask::guards::wait(shared, request, "this process-stop command").await
 }
 
 fn hold_summary(title: &str, command: &str, why: &[String]) -> String {
     format!(
         "The agent of the session {} wants to run a command that may stop processes. It runs as you.\n\nWhy approval is needed: {}.\n\nCommand:\n{}",
-        vw_gate::dialog_quote(title),
+        vw_gate::dialog_chat_quote(title),
         why.iter()
             .map(|reason| vw_gate::dialog_line(reason))
             .collect::<Vec<_>>()
             .join("; "),
-        vw_gate::dialog_quote(command),
+        vw_gate::dialog_command(command),
     )
 }
 
@@ -342,6 +372,6 @@ mod kg1_tests {
         let text = hold_summary("Build session", &command, &["other session PID".to_owned()]);
         assert!(text.contains("Build session"));
         assert!(text.contains("other session PID"));
-        assert!(text.ends_with(&format!("Command:\n{}", vw_gate::dialog_quote(&command))));
+        assert!(text.ends_with(&format!("Command:\n{command}")));
     }
 }

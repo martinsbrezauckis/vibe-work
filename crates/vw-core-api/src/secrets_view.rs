@@ -2,11 +2,11 @@
 //! Settings > Project secrets lists metadata and grants, adds, renames, replaces, generates, removes and copies secrets
 //! and website logins. The user can pause agent vault access here. Mutations keep item ids where applicable; copies
 //! go only to the native clipboard. `serverGrants` adds MCP server grants, revoked with the same `revoke`.
-//! Logic lives in `secrets.rs` (commands) and `secret_grants.rs` (vault records for grants); the agent
+//! Logic lives in `secrets.rs` (commands) and `secret_uses.rs` (the in-memory use log); the agent
 //! side in `agent_tools/secret_run.rs`.
 //!
 //! Depends on: `keys` (`SecretInput`), serde. Called by: `command` (the `secrets` variant), `secrets`,
-//! `secret_grants`, the UI through the generated TypeScript.
+//! `secret_uses`, the UI through the generated TypeScript.
 //! Invariants: wire form `{"op": "<camelCase>", ...camelCase fields}`, unknown fields refused; no result carries a
 //! secret value (names, ids, variable names, programs and times only); secret and password inputs are redacted in
 //! `Debug` and when serialized. Vault access rules classify all seven actions as user-only.
@@ -183,10 +183,15 @@ pub enum SecretsRequest {
         /// Listed secret id.
         id: String,
     },
-    /// Revokes one "always" grant (a command grant, an MCP server's key, or a website fill grant).
+    /// Revokes one "always" grant (an MCP server's key or a website fill grant).
     Revoke {
         /// The grant's id.
         grant_id: String,
+    },
+    /// Revokes several grants in one request ("Revoke all" on the Allowed without asking page): MCP server key and website fill grants alike. Ids already gone are skipped; none left is `notFound`.
+    RevokeMany {
+        /// The grants' ids (at most 10 000).
+        grant_ids: Vec<String>,
     },
     /// stores a website login (Vault's plain `login` item) the agent may fill in after the user's consent.
     /// One-way: the answer has no password.
@@ -357,7 +362,7 @@ pub struct ProjectPermissionView {
     pub permission: EntryPermissionView,
 }
 
-/// Project permission on one Vault entry. Existing narrower command, site and server grants still apply to Ask.
+/// Project permission on one Vault entry. Login site and MCP server grants keep their own scope.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
@@ -426,6 +431,9 @@ pub struct FillGrantView {
     pub granted_ms: i64,
     /// Fills since Vibe Work started.
     pub uses: u32,
+    /// The last fill since Vibe Work started, ms; `None` before the first.
+    #[cfg_attr(feature = "ts", ts(type = "number | null"))]
+    pub last_used_ms: Option<i64>,
 }
 
 /// A secret an agent may name (metadata only).
@@ -481,35 +489,6 @@ impl From<vw_keys::ProjectSecret> for ProjectSecretView {
     }
 }
 
-/// An "always for this command" grant binds to the exact command: agents of sessions
-/// in `project` may run exactly `command` (the same program file, arguments, folder and named files) with the same
-/// secrets in the same variables, without asking again, until it is revoked.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
-#[serde(rename_all = "camelCase")]
-pub struct GrantView {
-    /// Grant id.
-    pub id: String,
-    /// The command as the dialog showed it (resolved program and arguments).
-    pub command: String,
-    /// `VARIABLE <- secret name` per secret.
-    pub bindings: Vec<String>,
-    /// The secrets' ids (removing a secret revokes its grants).
-    pub secret_ids: Vec<String>,
-    /// The project folder.
-    pub project: String,
-    /// The hash over everything the consent binds to (`agent_tools/secret_pin.rs`).
-    pub fingerprint: String,
-    /// When the user chose "always" for it (the latest time), ms.
-    #[cfg_attr(feature = "ts", ts(type = "number"))]
-    pub created_ms: i64,
-    /// Times it was used since Vibe Work started (counts are not stored).
-    pub uses: u32,
-    /// Last use since Vibe Work started, ms.
-    #[cfg_attr(feature = "ts", ts(type = "number | null"))]
-    pub last_used_ms: Option<i64>,
-}
-
 /// An MCP server that gets a vault secret as its key, with the user's grant. Revoking it (`revoke` with
 /// this `id`) stops Vibe Work's forwarder from adding the key until the user allows it again.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -532,6 +511,12 @@ pub struct ServerGrantView {
     pub grant: String,
     /// Requests forwarded with the key in this run.
     pub uses: u32,
+    /// When the binding was made (the key was given to the server), ms.
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
+    pub created_ms: i64,
+    /// The last request forwarded with the key in this run, ms; `None` before the first.
+    #[cfg_attr(feature = "ts", ts(type = "number | null"))]
+    pub last_used_ms: Option<i64>,
 }
 
 /// One request of an agent to use secrets, and what happened (the use log; metadata only).
@@ -572,8 +557,6 @@ pub enum SecretsResult {
         agent_access_locked: bool,
         /// The secrets an agent may name, by name.
         secrets: Vec<ProjectSecretView>,
-        /// The "always" grants in force, newest first (vault records; empty while the vault is locked).
-        grants: Vec<GrantView>,
         /// The uses since Vibe Work started, newest first (at most 200 are kept; never stored).
         uses: Vec<SecretUseView>,
         /// MCP servers that get a secret as their key (empty while the vault is locked).

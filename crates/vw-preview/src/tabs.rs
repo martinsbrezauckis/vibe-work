@@ -202,7 +202,7 @@ impl PreviewService {
             state
                 .entries
                 .get(page_key)
-                .and_then(|entry| entry.mount.clone())
+                .and_then(|entry| entry.ready_mount().cloned())
         };
         let Some(mount) = mount else { return };
         let id = self.mount_id(page_key, &mount);

@@ -8,6 +8,7 @@
  * touches the open chat, the row says the change is for new chats, and a short-lived chat the core could not
  * delete again is shown as a notification.
  */
+import { Switch, SettingsRow } from "../../components/Controls";
 import { type ReactElement, useCallback, useEffect, useState } from "react";
 
 import { Selector } from "../../components/Selector";
@@ -146,7 +147,7 @@ export function SelectRow(props: {
   onChange: (value: string) => void;
 }): ReactElement {
   return (
-    <div className="check" data-setting={props.id}>
+    <SettingsRow data-setting={props.id}>
       <span>
         {props.label}
         <span className="d">{props.detail}</span>
@@ -163,7 +164,7 @@ export function SelectRow(props: {
         disabled={props.disabled || props.setBy !== null}
         onChange={props.onChange}
       />
-    </div>
+    </SettingsRow>
   );
 }
 
@@ -180,7 +181,7 @@ export function SwitchRow(props: {
   note?: string | null;
 }): ReactElement {
   return (
-    <div className="check" data-setting={props.id}>
+    <SettingsRow data-setting={props.id}>
       <span>
         {props.label}
         <span className="d">{props.detail}</span>
@@ -191,11 +192,8 @@ export function SwitchRow(props: {
           </span>
         )}
       </span>
-      <button
+      <Switch
         data-testid={`settings.${props.id}`}
-        type="button"
-        className="switch"
-        role="switch"
         aria-label={props.label}
         aria-checked={props.on === true}
         disabled={props.disabled || props.on === null || props.setBy !== null}
@@ -203,6 +201,6 @@ export function SwitchRow(props: {
           if (props.on !== null) props.onFlip(!props.on);
         }}
       />
-    </div>
+    </SettingsRow>
   );
 }

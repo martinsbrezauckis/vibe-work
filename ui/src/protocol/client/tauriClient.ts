@@ -14,7 +14,9 @@ import {
   type CliSharingView,
   type CoreClient,
   type DocumentsPicked,
+  type HandOverView,
   type HostEvent,
+  type SendToView,
   type TerminalChunkHandler,
   type TerminalStream,
   type UpdateView,
@@ -40,13 +42,8 @@ export function insideTauri(): boolean {
 export function createTauriClient(): CoreClient {
   return {
     kind: "tauri",
-    execute: (command: Command, options) =>
-      call<CommandResult>(
-        "core_execute",
-        options?.origin === "debug-api"
-          ? { command, debugApiCapability: options.capability ?? "" }
-          : { command },
-      ),
+    // Every command is the window's: nothing here can claim the Debug API origin (`app/src/commands.rs`).
+    execute: (command: Command) => call<CommandResult>("core_execute", { command }),
     async subscribe(onEvent) {
       const channel = new Channel<CoreEvent>();
       channel.onmessage = onEvent;
@@ -82,6 +79,7 @@ export function createTauriClient(): CoreClient {
     async notifyOs(notification) {
       await call<null>("notify_session", { request: notification });
     },
+    showPrompt: (askId: string) => call<boolean>("show_prompt", { askId }),
     async onHostEvent(onEvent) {
       const channel = new Channel<HostEvent>();
       channel.onmessage = onEvent;
@@ -90,6 +88,20 @@ export function createTauriClient(): CoreClient {
         channel.onmessage = () => undefined;
       };
     },
+    handOver: {
+      async subscribe(onWaiting) {
+        const channel = new Channel<null>();
+        channel.onmessage = () => {
+          onWaiting();
+        };
+        await call<null>("hand_over_subscribe", { events: channel });
+        return () => {
+          channel.onmessage = () => undefined;
+        };
+      },
+      take: () => call<HandOverView[]>("hand_over_take", {}),
+    },
+    sendTo: (request) => call<SendToView>("send_to", { request }),
     cliSharing: (share) => call<CliSharingView>("cli_sharing", { share: share ?? null }),
     async setDebugApi(enabled) {
       await call<null>("debug_api_set", { enabled });
@@ -105,17 +117,11 @@ export function createTauriClient(): CoreClient {
       async check() {
         await call<null>("update_check", {});
       },
-      async download(options) {
-        await call<null>(
-          "update_download",
-          options?.origin === "debug-api" ? { debugApiCapability: options.capability ?? "" } : {},
-        );
+      async download() {
+        await call<null>("update_download", {});
       },
-      async install(options) {
-        await call<null>(
-          "update_install",
-          options?.origin === "debug-api" ? { debugApiCapability: options.capability ?? "" } : {},
-        );
+      async install() {
+        await call<null>("update_install", {});
       },
       async setAutoDownload(enabled) {
         await call<null>("update_set_auto_download", { enabled });

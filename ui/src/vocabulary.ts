@@ -59,12 +59,3 @@ export function vaultTerm(kind: string | null): Term {
     ? term("vaultKinds", kind)
     : { name: TEXT.vaultGeneric, description: "", tooltip: TEXT.vaultGeneric };
 }
-
-/** The model chip's action label, shared by its tooltip and accessible name. */
-export function modelThinkingTooltip(name: string, level: string | null): string {
-  return wording(TEXT.modelThinkingChoose, {
-    name,
-    thinking:
-      level === null ? "" : wording(TEXT.modelThinkingSuffix, { name: thinkingTerm(level).name }),
-  });
-}

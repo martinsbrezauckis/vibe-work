@@ -22,6 +22,7 @@ pub mod chat;
 mod client;
 pub mod network;
 mod ocr;
+mod ocr_tiff;
 pub mod realtime;
 pub mod stt_batch;
 mod test_call;
@@ -30,7 +31,7 @@ pub mod work;
 mod ws;
 
 pub use auth::bearer;
-pub use client::{ClientError, https_client, proxy_client, tls_builder};
+pub use client::{ClientError, ClientSlot, https_client, proxy_client, tls_builder};
 pub use ocr::{OCR_MODEL, OCR_TIMEOUT, OcrError, OcrInput, OcrOutput, ocr, request_body};
 pub use test_call::{DEFAULT_API_BASE, TestCallError, TestCallOk, list_models};
 pub use tts::{SpeechError, Voice};

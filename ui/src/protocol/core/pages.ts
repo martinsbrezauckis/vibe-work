@@ -7,487 +7,507 @@
 
 import type { Rect } from "./preview";
 import type { ProjectCard, Manifest, Input, AnswerValue, PageAnswers, VisualReport } from "./handbook";
-export type PagesRequest = { "op": "hub", 
+export type PagesRequest = { "op": "hub",
 /**
  * The session.
  */
-sessionId: string, } | { "op": "overview", } | { "op": "projectHub", 
+sessionId: string, } | { "op": "overview", } | { "op": "projectHub",
 /**
  * The project folder, as an `overview` card names it.
  */
-project: string, } | { "op": "page", 
+project: string, } | { "op": "page",
 /**
  * The session.
  */
-sessionId: string, 
+sessionId: string,
 /**
  * Path inside the pages folder.
  */
-path: string, } | { "op": "open", 
+path: string, } | { "op": "open",
 /**
  * The session.
  */
-sessionId: string, 
+sessionId: string,
 /**
  * Path inside the pages folder; absent: the hub.
  */
-path?: string, 
+path?: string,
 /**
  * A section or step id to scroll to (a click in the plan checklist).
  */
-anchor?: string, } | { "op": "plan", 
+anchor?: string, } | { "op": "plan",
 /**
  * The session.
  */
-sessionId: string, } | { "op": "back", 
+sessionId: string, } | { "op": "back",
 /**
  * The session.
  */
-sessionId: string, } | { "op": "forward", 
+sessionId: string, } | { "op": "forward",
 /**
  * The session.
  */
-sessionId: string, } | { "op": "reload", 
+sessionId: string, } | { "op": "reload",
 /**
  * The session.
  */
-sessionId: string, } | { "op": "layout", 
+sessionId: string, } | { "op": "layout",
 /**
  * The shown session (absent: hide).
  */
-sessionId?: string, 
+sessionId?: string,
 /**
  * The page area in the main window's CSS pixels (absent: hide).
  */
-rect?: Rect, } | { "op": "pickSection", 
+rect?: Rect, } | { "op": "pickSection",
 /**
  * The session.
  */
-sessionId: string, 
+sessionId: string,
 /**
  * The section (or step) id to pick without a click.
  */
-section?: string, } | { "op": "cancelPick", } | { "op": "addComment", 
+section?: string, } | { "op": "cancelPick", } | { "op": "menuSection",
 /**
  * The session.
  */
-sessionId: string, 
+sessionId: string,
+/**
+ * A named section instead of the last trusted click (the Debug API's way).
+ */
+section?: string,
+/**
+ * Exact selected text within that section.
+ */
+quote?: string, } | { "op": "menuCopy",
+/**
+ * The session.
+ */
+sessionId: string,
+/**
+ * A named section instead of the last trusted click.
+ */
+section?: string,
+/**
+ * Exact selected text within that section.
+ */
+quote?: string, } | { "op": "addComment",
+/**
+ * The session.
+ */
+sessionId: string,
 /**
  * The page.
  */
-path: string, 
+path: string,
 /**
  * The section id (must exist in the page file).
  */
-section: string, 
+section: string,
 /**
  * The comment.
  */
-text: string, 
+text: string,
 /**
  * The text the user selected.
  */
-quote?: string, } | { "op": "deleteComment", 
+quote?: string, } | { "op": "deleteComment",
 /**
  * The session.
  */
-sessionId: string, 
+sessionId: string,
 /**
  * The comment id.
  */
-id: string, } | { "op": "markSent", 
+id: string, } | { "op": "markSent",
 /**
  * The session.
  */
-sessionId: string, 
+sessionId: string,
 /**
  * Comment ids.
  */
-ids: Array<string>, } | { "op": "settings", 
+ids: Array<string>, } | { "op": "settings",
 /**
  * The session.
  */
-sessionId: string, } | { "op": "setSettings", 
+sessionId: string, } | { "op": "setSettings",
 /**
  * The session.
  */
-sessionId: string, 
+sessionId: string,
 /**
  * The new settings.
  */
-settings: PagesSettings, } | { "op": "clearExternal", 
+settings: PagesSettings, } | { "op": "clearExternal",
 /**
  * The session.
  */
-sessionId: string, } | { "op": "screenshot", 
+sessionId: string, } | { "op": "screenshot",
 /**
  * The session.
  */
-sessionId: string, } | { "op": "answers", 
+sessionId: string, } | { "op": "answers",
 /**
  * The session.
  */
-sessionId: string, 
+sessionId: string,
 /**
  * Path inside the handbook folder; absent: every page with inputs.
  */
-path?: string, } | { "op": "setAnswer", 
+path?: string, } | { "op": "setAnswer",
 /**
  * The session.
  */
-sessionId: string, 
+sessionId: string,
 /**
  * The page.
  */
-path: string, 
+path: string,
 /**
  * The input id.
  */
-input: string, 
+input: string,
 /**
  * The answer.
  */
-value: AnswerValue, } | { "op": "clearAnswer", 
+value: AnswerValue, } | { "op": "clearAnswer",
 /**
  * The session.
  */
-sessionId: string, 
+sessionId: string,
 /**
  * The page.
  */
-path: string, 
+path: string,
 /**
  * The input id.
  */
-input: string, } | { "op": "markAnswersSent", 
+input: string, } | { "op": "markAnswersSent",
 /**
  * The session.
  */
-sessionId: string, 
+sessionId: string,
 /**
  * The page.
  */
-path: string, } | { "op": "theme", 
+path: string, } | { "op": "theme",
 /**
  * `light` or `dark`.
  */
-theme: string, } | { "op": "currentPlan", 
+theme: string, } | { "op": "currentPlan",
 /**
  * The session.
  */
-sessionId: string, } | { "op": "exportPage", 
+sessionId: string, } | { "op": "exportPage",
 /**
  * The session.
  */
-sessionId: string, 
+sessionId: string,
 /**
  * The page.
  */
-path: string, 
+path: string,
 /**
  * An absolute file path to write.
  */
-destination?: string, } | { "op": "visualCheck", 
+destination?: string, } | { "op": "visualCheck",
 /**
  * The session.
  */
-sessionId: string, 
+sessionId: string,
 /**
  * The page.
  */
 path: string, };
 
-export type PagesResult = { "type": "hub", 
+export type PagesResult = { "type": "hub",
 /**
  * The project folder.
  */
-project: string, 
+project: string,
 /**
  * Its shown name.
  */
-name: string, 
+name: string,
 /**
  * The project's settings (handbook folder, scripts).
  */
-settings: PagesSettings, 
+settings: PagesSettings,
 /**
  * The hub (`None`: no handbook folder yet). Boxed: the result enum stays small.
  */
-hub: Hub | null, 
+hub: Hub | null,
 /**
  * Comments per page path.
  */
-commentCounts: { [key in string]: number }, 
+commentCounts: { [key in string]: number },
 /**
  * The session's viewer.
  */
-viewer: ViewerView | null, 
+viewer: ViewerView | null,
 /**
  * Current visual check reports by page (pages not checked since they changed are absent).
  */
-visual: { [key in string]: VisualReport }, } | { "type": "overview", 
+visual: { [key in string]: VisualReport }, } | { "type": "overview",
 /**
  * Every known project's card, by name.
  */
-projects: Array<ProjectCard>, 
+projects: Array<ProjectCard>,
 /**
  * How long the core took to read the heads, ms.
  */
-elapsedMs: number, } | { "type": "projectHub", 
+elapsedMs: number, } | { "type": "projectHub",
 /**
  * The project and its hub (boxed: the result enum stays small).
  */
-project: ProjectHub, } | { "type": "page", 
+project: ProjectHub, } | { "type": "page",
 /**
  * The page.
  */
-path: string, 
+path: string,
 /**
  * What the page file says (boxed: the result enum stays small).
  */
-facts: PageFacts, 
+facts: PageFacts,
 /**
  * Comments on sections that exist.
  */
-attached: Array<Comment>, 
+attached: Array<Comment>,
 /**
  * Comments whose section is gone.
  */
-detached: Array<Comment>, 
+detached: Array<Comment>,
 /**
  * The session's viewer.
  */
-viewer: ViewerView | null, } | { "type": "viewer", 
+viewer: ViewerView | null, } | { "type": "viewer",
 /**
  * The session's viewer after the request.
  */
-viewer: ViewerView | null, } | { "type": "picked", 
+viewer: ViewerView | null, } | { "type": "picked",
 /**
  * The section, checked against the page file.
  */
-picked: PickedSection, } | { "type": "comment", 
+picked: PickedSection, } | { "type": "comment",
 /**
  * The stored comment.
  */
-comment: Comment, } | { "type": "comments", 
+comment: Comment, } | { "type": "comments",
 /**
  * The comments marked.
  */
-comments: Array<Comment>, } | { "type": "settings", 
+comments: Array<Comment>, } | { "type": "settings",
 /**
  * The settings.
  */
-settings: PagesSettings, } | { "type": "screenshot", 
+settings: PagesSettings, } | { "type": "screenshot",
 /**
  * PNG, standard base64.
  */
-pngBase64: string, 
+pngBase64: string,
 /**
  * Width in pixels.
  */
-width: number, 
+width: number,
 /**
  * Height in pixels.
  */
-height: number, } | { "type": "answers", 
+height: number, } | { "type": "answers",
 /**
  * The handbook folder, relative to the project (`docs/handbook`).
  */
-folder: string, 
+folder: string,
 /**
  * The pages asked for, in hub order.
  */
-pages: Array<PageAnswers>, } | { "type": "currentPlan", 
+pages: Array<PageAnswers>, } | { "type": "currentPlan",
 /**
  * The plan page (`None`: the project has no plan page).
  */
-path: string | null, 
+path: string | null,
 /**
  * Its facts (boxed: the result enum stays small).
  */
-facts: PageFacts | null, } | { "type": "exported", 
+facts: PageFacts | null, } | { "type": "exported",
 /**
  * A file name to suggest.
  */
-name: string, 
+name: string,
 /**
  * Size of the file in bytes.
  */
-bytes: number, 
+bytes: number,
 /**
  * Files inlined.
  */
-inlined: number, 
+inlined: number,
 /**
  * References left out, plain words.
  */
-leftOut: Array<string>, 
+leftOut: Array<string>,
 /**
  * Where it was written (`destination`, or the native save dialog's choice).
  */
-savedTo: string | null, 
+savedTo: string | null,
 /**
  * The file's text (without `destination`).
  */
-html: string | null, } | { "type": "visual", 
+html: string | null, } | { "type": "visual",
 /**
  * The report.
  */
-report: VisualReport, } | { "type": "done", };
+report: VisualReport, } | { "type": "copied",
+/**
+ * The selected text, line breaks kept (at most 100,000 characters; empty without a selection).
+ */
+text: string, } | { "type": "done", };
 
-export type ProjectHub = { 
+export type ProjectHub = {
 /**
  * The project folder.
  */
-project: string, 
+project: string,
 /**
  * Its shown name (last folder name).
  */
-name: string, 
+name: string,
 /**
  * Its hub (`None`: no handbook folder yet).
  */
 hub: Hub | null, };
 
-export type Hub = { 
+export type Hub = {
 /**
  * The folder, relative to the project.
  */
-folder: string, 
-/**
- * The folder or some pages are from an earlier build: a migration is suggested (§11).
- */
-legacy: boolean, 
+folder: string,
 /**
  * The manifest head, when `index.html` is a manifest.
  */
-manifest: Manifest | null, 
+manifest: Manifest | null,
 /**
  * The index's state.
  */
-index: IndexHealth, 
+index: IndexHealth,
 /**
  * Non-empty groups in [`GROUPS`] order.
  */
-groups: Array<HubGroup>, 
+groups: Array<HubGroup>,
 /**
  * Pages read.
  */
-count: number, 
+count: number,
 /**
  * More files exist than were read.
  */
-truncated: boolean, 
+truncated: boolean,
 /**
  * The validator's findings for the whole folder.
  */
 validation: Validation, };
 
-export type HubGroup = { 
+export type HubGroup = {
 /**
  * One of [`GROUPS`]' ids.
  */
-id: string, 
+id: string,
 /**
  * Shown heading.
  */
-label: string, 
+label: string,
 /**
  * Pages, newest first.
  */
 pages: Array<HubPage>, };
 
-export type HubPage = { 
+export type HubPage = {
 /**
  * Path inside the handbook.
  */
-path: string, 
+path: string,
 /**
  * Title (the file name when the page has none).
  */
-title: string, 
+title: string,
 /**
- * The kind (`handbook.kind`, front matter `kind`, or a pre-1.0 page's kind mapped to 1.0), if known.
+ * The kind (`handbook.kind` or front matter `kind`), if known.
  */
-kind: string | null, 
+kind: string | null,
 /**
  * Head status as written.
  */
-status: string | null, 
+status: string | null,
 /**
- * `dcterms.modified` (a pre-1.0 page: `vw-date`).
+ * `dcterms.modified`.
  */
-modified: string | null, 
+modified: string | null,
 /**
  * `description`.
  */
-description: string | null, 
+description: string | null,
 /**
  * File modification time, ms since the Unix epoch.
  */
-modifiedMs: number, 
+modifiedMs: number,
 /**
  * Plan steps done or skipped.
  */
-stepsDone: number, 
+stepsDone: number,
 /**
  * Plan steps.
  */
-stepsTotal: number, 
+stepsTotal: number,
 /**
  * Inputs the page asks the user to answer (Format 1.2 §6.6).
  */
-inputs: number, 
+inputs: number,
 /**
  * A Markdown (lite) page.
  */
-lite: boolean, 
-/**
- * A pre-1.0 page (needs migration).
- */
-legacy: boolean, };
+lite: boolean, };
 
-export type IndexHealth = "current" | "missing" | "notManifest" | "stale" | "preFormat";
+export type IndexHealth = "current" | "missing" | "notManifest" | "stale";
 
-export type Validation = { 
+export type Validation = {
 /**
  * Every finding, sorted by page, severity, rule.
  */
-findings: Array<Finding>, 
+findings: Array<Finding>,
 /**
  * Errors.
  */
-errors: number, 
+errors: number,
 /**
  * Warnings.
  */
-warnings: number, 
+warnings: number,
 /**
  * Information.
  */
-infos: number, 
+infos: number,
 /**
  * Pages read.
  */
-pages: number, 
+pages: number,
 /**
  * More files exist than were read.
  */
 truncated: boolean, };
 
-export type Finding = { 
+export type Finding = {
 /**
  * The rule id (`HB-E03`).
  */
-rule: string, 
+rule: string,
 /**
  * Its severity.
  */
-severity: Severity, 
+severity: Severity,
 /**
  * The page (path inside the handbook) or file it is about.
  */
-page: string, 
+page: string,
 /**
  * What is wrong, plain words.
  */
@@ -495,260 +515,246 @@ message: string, };
 
 export type Severity = "error" | "warning" | "info";
 
-export type PageFacts = { 
+export type PageFacts = {
 /**
  * `<title>` (a Markdown page: front matter `title`, else its first heading).
  */
-title: string | null, 
+title: string | null,
 /**
  * The first `<h1>`'s text.
  */
-h1: string | null, 
+h1: string | null,
 /**
  * `handbook.format`.
  */
-format: string | null, 
+format: string | null,
 /**
  * `handbook.kind`, lowercased (Markdown: front matter `kind`).
  */
-kind: string | null, 
+kind: string | null,
 /**
  * `handbook.status` as written (status tokens are lowercase; the validator checks it).
  */
-status: string | null, 
+status: string | null,
 /**
  * `dcterms.created`.
  */
-created: string | null, 
+created: string | null,
 /**
  * `dcterms.modified` (Markdown: `updated`, or `date`).
  */
-modified: string | null, 
+modified: string | null,
 /**
  * `description` (Markdown: `summary`).
  */
-description: string | null, 
+description: string | null,
 /**
  * `handbook.project` (the manifest).
  */
-project: string | null, 
+project: string | null,
 /**
  * `author`, repeatable.
  */
-authors: Array<string>, 
+authors: Array<string>,
 /**
  * `handbook.outcome` (reports).
  */
-outcome: string | null, 
+outcome: string | null,
 /**
- * The pre-1.0 head, when the page has `vw-*` meta tags.
+ * `<meta name="vw-generated" content="hub">`: a page that must not run prototype scripts.
  */
-legacy: LegacyHead | null, 
-/**
- * `<meta name="vw-generated" content="hub">`: an index an earlier build of the app wrote (§11 step 4).
- */
-generated: boolean, 
+generated: boolean,
 /**
  * Links with a relation, in page order.
  */
-relations: Array<Relation>, 
+relations: Array<Relation>,
 /**
  * Plan steps in page order.
  */
-steps: Array<Step>, 
+steps: Array<Step>,
 /**
  * Inputs in page order (§6.6, Format 1.2; at most 500, each with at most 100 options).
  */
-inputs: Array<Input>, 
+inputs: Array<Input>,
 /**
  * Sections (elements with an id; steps by their step id) in page order.
  */
-sections: Array<Section>, 
+sections: Array<Section>,
 /**
  * Every `href`/`src` of the page (links, images, scripts, styles, frames).
  */
-links: Array<string>, 
+links: Array<string>,
 /**
  * A Markdown (lite) page.
  */
 lite: boolean, };
 
-export type Relation = { 
+export type Relation = {
 /**
  * The relation token.
  */
-rel: string, 
+rel: string,
 /**
  * The link as written.
  */
 href: string, };
 
-export type LegacyHead = { 
-/**
- * `vw-kind`, lowercased.
- */
-kind: string | null, 
-/**
- * `vw-status` as written.
- */
-status: string | null, 
-/**
- * `vw-date`.
- */
-date: string | null, };
-
-export type Step = { 
+export type Step = {
 /**
  * The step id (`data-step`; `s1`, `s2`, ... by position in a Markdown page).
  */
-id: string, 
+id: string,
 /**
  * `todo`, `doing`, `done`, `blocked` or `skipped` (an unknown or missing value reads as `todo`; the validator
  * reports it).
  */
-status: string, 
+status: string,
 /**
  * The step's text.
  */
 text: string, };
 
-export type Section = { 
+export type Section = {
 /**
  * The element id.
  */
-id: string, 
+id: string,
 /**
  * Its heading text (or the start of its own text).
  */
 label: string, };
 
-export type Comment = { 
+export type Comment = {
 /**
  * Random id.
  */
-id: string, 
+id: string,
 /**
  * The page (path inside the pages folder).
  */
-page: string, 
+page: string,
 /**
  * The section id it is on.
  */
-section: string, 
+section: string,
 /**
  * The section's label when the comment was written (shown for detached comments).
  */
-sectionLabel: string, 
+sectionLabel: string,
 /**
  * The text the user had selected, if any.
  */
-quote: string | null, 
+quote: string | null,
 /**
  * The comment.
  */
-text: string, 
+text: string,
 /**
  * Written at, ms since the Unix epoch.
  */
-createdMs: number, 
+createdMs: number,
 /**
  * Put into the composer to send at, ms (`None`: not sent yet).
  */
 sentMs: number | null, };
 
-export type PagesSettings = { 
+export type PagesSettings = {
 /**
  * The handbook folder, relative to the project folder. In answers: the folder in use (chosen or resolved).
  */
-folder: string, 
+folder: string,
 /**
  * Prototype pages (Format 1.2, kind `prototype`) may run their own script in the viewer, sandboxed and without
  * network. Pages of every other kind never run script.
  */
-scripts: boolean, 
+scripts: boolean,
 /**
- * The user chose `folder`; `false`: the folder is resolved (`docs/handbook`, else a pre-1.0 `docs/pages`), and
+ * The user chose `folder`; `false`: the folder is resolved (`docs/handbook`), and
  * a saved `folder` is ignored.
  */
 custom: boolean, };
 
-export type PickedSection = { 
+export type PickedSection = {
 /**
  * The page.
  */
-page: string, 
+page: string,
 /**
  * The section id (exists in the file).
  */
-section: string, 
+section: string,
 /**
  * Its label (from the file).
  */
-label: string, 
+label: string,
 /**
  * The selected text, if the pick came from a selection.
  */
-quote: string | null, 
+quote: string | null,
 /**
  * The picked element's own text (untrusted page text).
  */
 text: string, };
 
-export type Picked = { 
+export type Picked = {
 /**
  * A readable DOM path (`main > section#steps > li:nth-of-type(2)`).
  */
-path: string, 
+path: string,
 /**
  * `id` and `data-step` values of the element and its ancestors, nearest first (at most 8).
  */
-ids: Array<string>, 
+ids: Array<string>,
 /**
  * The element's tag.
  */
-tag: string, 
+tag: string,
 /**
  * Its role (`link`, `button`, `heading`, the tag otherwise).
  */
-role: string, 
+role: string,
 /**
  * Its text (at most 2,000 characters).
  */
-text: string, 
+text: string,
 /**
  * The selected text, when the pick came from a selection.
  */
-quote: string | null, 
+quote: string | null,
 /**
  * The page URL.
  */
-url: string, };
+url: string,
+/**
+ * The page's title (at most 200 characters), for the chip's words.
+ */
+title?: string, };
 
-export type ViewerView = { 
+export type ViewerView = {
 /**
  * The session.
  */
-sessionId: string, 
+sessionId: string,
 /**
  * The page shown (`None`: the hub at the server's root).
  */
-path: string | null, 
+path: string | null,
 /**
  * The page's title (untrusted page text, at most 200 characters).
  */
-title: string | null, 
+title: string | null,
 /**
  * A load is running.
  */
-loading: boolean, 
+loading: boolean,
 /**
  * The last link the page tried to open outside the page server (offered, never opened by itself).
  */
-external: string | null, 
+external: string | null,
 /**
  * The viewer webview shows this session now.
  */
-shown: boolean, 
+shown: boolean,
 /**
  * The page server's origin (`http://127.0.0.1:<port>`).
  */

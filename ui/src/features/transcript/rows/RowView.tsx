@@ -8,11 +8,16 @@ import { type ReactElement, memo } from "react";
 
 import type { Row } from "../model/build";
 import { detailOf, entryId } from "../model/entries";
-import { ApprovalCard } from "./ApprovalCard";
+import { protectedChangeOf } from "../model/protectedChange";
+import type { ChromeAskView } from "../../../protocol/core";
+import { ApprovalAsk } from "../../ask/ApprovalAsk";
+import { ChromeAsk } from "../../ask/ChromeAsk";
+import { ProtectedAsk } from "../../ask/ProtectedAsk";
+import { QuestionAsk } from "../../ask/QuestionAsk";
 import { AssistantRow, UserRow } from "./MessageRows";
-import { QuestionCard } from "./QuestionCard";
 import { DividerRow, NoticeRow, OtherRow, TurnEndRow } from "./SmallRows";
 import { StepsGroup } from "./StepsGroup";
+import { ModelChangeRow } from "./ModelChangeRow";
 
 function Body({ row, sessionId }: { row: Row; sessionId: string }): ReactElement {
   switch (row.kind) {
@@ -25,12 +30,36 @@ function Body({ row, sessionId }: { row: Row; sessionId: string }): ReactElement
     case "callback":
       // a subagent's card answers for the child session (`answerFor`), not the transcript's own.
       return detailOf(row.entry)["kind"] === "user_input" ? (
-        <QuestionCard entry={row.entry} sessionId={row.answerFor ?? sessionId} />
+        <QuestionAsk
+          entry={row.entry}
+          sessionId={row.answerFor ?? sessionId}
+          hostSessionId={sessionId}
+        />
       ) : detailOf(row.entry)["kind"] === "approval" ? (
-        <ApprovalCard entry={row.entry} sessionId={row.answerFor ?? sessionId} />
+        <ApprovalAsk
+          entry={row.entry}
+          sessionId={row.answerFor ?? sessionId}
+          hostSessionId={sessionId}
+        />
       ) : (
         <OtherRow entry={row.entry} />
       );
+    case "protectedChange": {
+      const proposal = protectedChangeOf(row.entry);
+      return proposal === null ? (
+        <OtherRow entry={row.entry} />
+      ) : (
+        <ProtectedAsk proposal={proposal} sessionId={sessionId} />
+      );
+    }
+    case "chromeAsk": {
+      const view = row.entry["chromeAsk"] as unknown as ChromeAskView | undefined;
+      return view === undefined ? (
+        <OtherRow entry={row.entry} />
+      ) : (
+        <ChromeAsk view={view} sessionId={sessionId} />
+      );
+    }
     case "notice":
       return <NoticeRow entry={row.entry} />;
     case "hook":
@@ -40,7 +69,11 @@ function Body({ row, sessionId }: { row: Row; sessionId: string }): ReactElement
         </div>
       );
     case "divider":
-      return <DividerRow entry={row.entry} />;
+      return row.entry["kind"] === "model_change" ? (
+        <ModelChangeRow entry={row.entry} sessionId={sessionId} />
+      ) : (
+        <DividerRow entry={row.entry} />
+      );
     case "turnEnd":
       return <TurnEndRow turn={row.turn} />;
     case "other":

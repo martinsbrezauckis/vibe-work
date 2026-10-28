@@ -33,6 +33,9 @@ pub(crate) struct Inner {
     /// Events for sessions not loaded yet (the notification can overtake the `session/start`
     /// response), replayed by `load`. Bounded per session and in session count.
     pub(crate) pending: BTreeMap<String, VecDeque<Notification>>,
+    /// The latest `runtime/updated` snapshot of a session not loaded yet (Vibe sends it right after a lifecycle
+    /// reply, which the load follows only after the core's own awaits), applied by `load`. Bounded with `pending`.
+    pending_runtime: BTreeMap<String, Value>,
     pending_order: VecDeque<String>,
     subs: Vec<Weak<SubShared>>,
     /// Subscribers that received something during the current call, to wake after unlock.
@@ -157,7 +160,6 @@ impl Inner {
 
     pub(crate) fn apply(&mut self, n: Notification) -> Applied {
         match n.method.as_str() {
-            "session/compacted" | "session/contextCleared" => self.handoff(&n),
             "runtime/updated" => self.runtime_updated(&n),
             _ if n.params.get("eventId").is_some() && n.params.get("sessionId").is_some() => {
                 self.session_event(n)
@@ -187,12 +189,13 @@ impl Inner {
         }
     }
 
-    /// `runtime/updated`: remember the snapshot and fold its active model into the session.
+    /// `runtime/updated`: remember the snapshot and fold its active model and agent into the session.
     ///
     /// The server fills `session.model` and `session.reasoningEffort` from the runtime on its
     /// own, without a `session/updated` event (a read after the first turn can show
     /// `model: "cli-fast"` while the start result and every event had `null`). Vibe's own client
-    /// does the same fold (`client_state.py apply_runtime`: `session.model = active_model.alias`).
+    /// does the same fold (`client_state.py apply_runtime`: `session.model = active_model.alias`,
+    /// `session.agent = active_agent`).
     fn runtime_updated(&mut self, n: &Notification) -> Applied {
         let (Some(sid), Some(runtime)) = (
             n.params.get("sessionId").and_then(Value::as_str),
@@ -205,6 +208,9 @@ impl Inner {
         if let Some(entry) = self.sessions.get_mut(&sid) {
             entry.runtime = Some(runtime.clone());
             changes.extend(entry.fold_runtime_into_session());
+        } else {
+            self.reserve_pending(&sid);
+            self.pending_runtime.insert(sid.clone(), runtime.clone());
         }
         changes.push(Change::RuntimeUpdated {
             session_id: sid,
@@ -234,14 +240,7 @@ impl Inner {
     /// Stores an event for a session that is not loaded, evicting the oldest session's buffer
     /// when too many sessions are waiting.
     fn buffer_pending(&mut self, sid: String, n: Notification) {
-        if !self.pending.contains_key(&sid) {
-            if self.pending_order.len() >= MAX_PENDING_SESSIONS
-                && let Some(old) = self.pending_order.pop_front()
-            {
-                self.pending.remove(&old);
-            }
-            self.pending_order.push_back(sid.clone());
-        }
+        self.reserve_pending(&sid);
         let queue = self.pending.entry(sid).or_default();
         if queue.len() == EVENT_LOG_CAP {
             queue.pop_front();
@@ -249,10 +248,30 @@ impl Inner {
         queue.push_back(n);
     }
 
+    /// Makes `sid` one of the sessions whose early events and runtime are kept, forgetting the oldest such session
+    /// when too many are waiting.
+    fn reserve_pending(&mut self, sid: &str) {
+        if self.pending_order.iter().any(|s| s == sid) {
+            return;
+        }
+        if self.pending_order.len() >= MAX_PENDING_SESSIONS
+            && let Some(old) = self.pending_order.pop_front()
+        {
+            self.pending.remove(&old);
+            self.pending_runtime.remove(&old);
+        }
+        self.pending_order.push_back(sid.to_owned());
+    }
+
     /// Takes (and forgets) the buffered events of a session that just became loaded.
     pub(crate) fn take_pending(&mut self, sid: &str) -> Vec<Notification> {
         self.pending_order.retain(|s| s != sid);
         self.pending.remove(sid).map(Vec::from).unwrap_or_default()
+    }
+
+    /// Takes (and forgets) the runtime snapshot that arrived before its session was loaded.
+    pub(crate) fn take_pending_runtime(&mut self, sid: &str) -> Option<Value> {
+        self.pending_runtime.remove(sid)
     }
 
     /// Publishes `changes` and returns them wrapped as [`Applied`] with no actions.

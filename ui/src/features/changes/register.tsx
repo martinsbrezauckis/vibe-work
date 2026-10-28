@@ -18,13 +18,12 @@ import { registerChangesRoute } from "./changesRoutes";
 import { LineCommentsProvider } from "./LineCommentsContext";
 import { createLineComments } from "./lineComments";
 import { hasChanges } from "./model";
-import { createChanges } from "./store";
 
 /** Registers the Changes tab and route on `app`; returns the function that removes them. */
 export function registerChangesTab(app: App): () => void {
   const core = app.core;
-  if (core === null) return () => undefined;
-  const changes = createChanges(core, app);
+  const changes = app.changes;
+  if (core === null || changes === null) return () => undefined;
   const comments = createLineComments(app, core, changes);
   const removeBody = app.panelTabs.register("changes", () => (
     <LineCommentsProvider value={comments}>

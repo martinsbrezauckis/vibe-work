@@ -286,7 +286,7 @@ export function Toolbar({
                   <IconButton
                     data-testid="preview.toolbar-crosshair"
                     icon="crosshair"
-                    label="Point Vibe at this"
+                    label="Point Vibe at this: add a part of the page to your next message"
                     disabled={busy || !open}
                     onClick={point}
                   />

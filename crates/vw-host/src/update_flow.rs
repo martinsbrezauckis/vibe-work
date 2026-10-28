@@ -4,7 +4,9 @@
 //!
 //! State machine:
 //! `idle -> checking -> available -> downloading -> ready -> installing -> restarting`, plus `failed`.
-//! Link-only installs stop at `available`. A verified package on disk starts the flow at `ready`.
+//! Link-only installs stop at `available`. A verified package on disk starts the flow at `ready`. An offer for a
+//! newer system than this computer has stops at `osTooOld` (`checking -> osTooOld`): nothing is downloaded from
+//! there, and the next check starts over.
 //!
 //! **Consent is a security property and is enforced here, not in the UI.** [`UpdateManager::install`] installs
 //! only when a consent for exactly the current `ready` version is recorded; [`UpdateManager::consent`] records it
@@ -55,8 +57,11 @@ pub enum UpdateError {
     /// Installing needs the user's agreement first; none is recorded.
     #[error("installing needs your agreement first")]
     ConsentRequired,
-    /// This installation updates through its package manager.
-    #[error("this installation updates through its package manager: open the release page")]
+    /// Vibe Work does not update this copy itself (.deb, .rpm, a plain binary): the user installs the new version
+    /// from the release page (our packages come from the release page, not from a package repository).
+    #[error(
+        "Vibe Work does not update this copy itself: download the new version from the release page"
+    )]
     LinkOnly,
     /// A step failed; the text says why in plain words.
     #[error("{0}")]
@@ -157,6 +162,7 @@ impl UpdateManager {
                     version: p.version.clone(),
                     notes: p.notes.clone(),
                     signature: p.signature.clone(),
+                    os_too_old: None,
                 }),
             ),
             None => (Phase::Idle, None),
@@ -337,7 +343,7 @@ impl UpdateManager {
             Err(error) => {
                 tracing::info!(%error, "update check failed");
                 if kept_ready {
-                    // Offline with a verified package on disk: the offer stays.
+                    // A failed announcement check leaves the verified package on disk available.
                     return Ok(());
                 }
                 self.fail(Stage::Check, error, None);
@@ -376,6 +382,26 @@ impl UpdateManager {
                 offer.version, self.0.cfg.current
             );
             self.fail(Stage::Check, error, Some(offer.version));
+            return;
+        }
+        if let Some(need) = offer.os_too_old.clone() {
+            // Before anything is downloaded: a package this system cannot open is never fetched (no notification;
+            // the notice says why).
+            tracing::info!(version = %offer.version, os = %need.os, minimum = %need.minimum, current = %need.current,
+                "update: this system is older than the new version needs; not downloaded");
+            self.0.store.clear();
+            self.with(|s| {
+                s.pending = None;
+                s.consent = None;
+                s.offer = Some(offer.clone());
+                s.phase = Phase::OsTooOld {
+                    version: offer.version.clone(),
+                    os: need.os,
+                    minimum: need.minimum,
+                    current: need.current,
+                };
+            });
+            self.save_status("osTooOld", Some(&offer.version), None);
             return;
         }
         let same_as_pending = self.with(|s| {

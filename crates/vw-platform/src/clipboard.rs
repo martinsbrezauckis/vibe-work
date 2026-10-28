@@ -60,6 +60,7 @@ pub trait ClipboardBackend: Send + 'static {
 enum Request {
     Copy(
         Zeroizing<String>,
+        bool,
         Arc<AtomicBool>,
         oneshot::Sender<Result<(), ClipboardError>>,
     ),
@@ -113,10 +114,26 @@ impl ClipboardService {
     /// # Errors
     /// Returns an error if the clipboard is unavailable or the worker has shut down.
     pub async fn copy(&self, value: Zeroizing<String>) -> Result<(), ClipboardError> {
+        self.copy_with_expiry(value, true).await
+    }
+
+    /// Copies ordinary owner text without the vault's expiry timer, including when no web gesture is present.
+    ///
+    /// # Errors
+    /// Returns an error if the clipboard is unavailable or the worker has shut down.
+    pub async fn write_text(&self, value: String) -> Result<(), ClipboardError> {
+        self.copy_with_expiry(Zeroizing::new(value), false).await
+    }
+
+    async fn copy_with_expiry(
+        &self,
+        value: Zeroizing<String>,
+        expires: bool,
+    ) -> Result<(), ClipboardError> {
         let (reply, response) = oneshot::channel();
         let cancelled = Arc::new(AtomicBool::new(false));
         self.sender
-            .send(Request::Copy(value, Arc::clone(&cancelled), reply))
+            .send(Request::Copy(value, expires, Arc::clone(&cancelled), reply))
             .map_err(|_| ClipboardError::Unavailable)?;
         match tokio::time::timeout(COPY_WAIT, response).await {
             Ok(Ok(result)) => result,
@@ -171,7 +188,7 @@ fn run_worker(
             receiver.recv().ok()
         };
         match request {
-            Some(Request::Copy(value, cancelled, reply)) => {
+            Some(Request::Copy(value, expires, cancelled, reply)) => {
                 if cancelled.load(Ordering::Acquire) || reply.is_closed() {
                     let _ = reply.send(Err(ClipboardError::TimedOut));
                     continue;
@@ -187,6 +204,9 @@ fn run_worker(
                 }
                 if reply.send(result).is_err() && wrote {
                     clear_if_current(backend.as_mut(), &mut current);
+                }
+                if wrote && !expires {
+                    current = None;
                 }
             }
             Some(Request::Shutdown) | None => {

@@ -6,6 +6,7 @@
  * Invariants: render only; the text is untrusted (OCR output of a user file) and is shown as a text
  * node in `<pre>`, never as Markdown or HTML.
  */
+import { Button } from "../../components/Controls";
 import { type ReactElement, useRef, useState } from "react";
 
 import { useModalFocus } from "../../hooks/useModalFocus";
@@ -15,7 +16,7 @@ import { useApp } from "../shell/AppContext";
 import { useComposerState, useDocumentsState } from "./hooks";
 
 /** Characters shown before "Show all". */
-export const PREVIEW_CHARS = 20_000;
+const PREVIEW_CHARS = 20_000;
 
 /** The preview dialog, while one is open. */
 export function DocPreview(): ReactElement | null {
@@ -62,17 +63,15 @@ export function DocPreview(): ReactElement | null {
             </p>
           )}
           {kept === null ? null : <p className="doc-kept">{kept}</p>}
-          <p className="d">
-            The saved file path is sent with your message. Short extracted text is included too.
-          </p>
+          <p className="d">The extracted text and saved file path are sent with your message.</p>
           <pre className="out plain doc-text" data-testid="doc-preview-text">
             {all || !long ? item.text : safeHead(item.text, PREVIEW_CHARS)}
           </pre>
           {long && !all ? (
-            <button
+            <Button
               data-testid="composer.doc-preview-set-all"
               type="button"
-              className="show-all-btn"
+              appearance="expander"
               title="Show all document text"
               aria-label="Show all document text"
               onClick={() => {
@@ -81,21 +80,21 @@ export function DocPreview(): ReactElement | null {
             >
               Show all ({Math.round((item.text.length - PREVIEW_CHARS) / 1000).toLocaleString("en")}{" "}
               KB more)
-            </button>
+            </Button>
           ) : null}
         </section>
         <footer className="modal-actions">
-          <button
+          <Button
             data-testid="composer.doc-preview-btn-primary"
             type="button"
-            className="btn-primary"
+            appearance="dialog"
             title="Close document preview (Escape)"
             aria-label="Close document preview (Escape)"
             data-dialog-initial-focus="true"
             onClick={close}
           >
             Close
-          </button>
+          </Button>
         </footer>
       </div>
     </>

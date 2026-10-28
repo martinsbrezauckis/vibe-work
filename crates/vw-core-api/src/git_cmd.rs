@@ -226,7 +226,13 @@ impl Core {
                 if let Some(on) = run_hooks {
                     settings.run_hooks = on;
                 }
-                crate::git_settings::save(&self.shared.git, &place.main_root, &settings)?;
+                // A disk-confirmed write: on the blocking pool, like the identity's.
+                let (shared, root, saved) = (
+                    self.shared.clone(),
+                    place.main_root.clone(),
+                    settings.clone(),
+                );
+                blocking(move || crate::git_settings::save(&shared.git, &root, &saved)).await??;
                 Ok(GitResult::Settings { settings })
             }
             other => self.git_publish(origin, other).await,
@@ -235,6 +241,27 @@ impl Core {
 
     /// The session's git place, or why there is none.
     pub(crate) fn git_place(&self, session_id: &str) -> Result<Place, CoreError> {
+        if let Some(folder) = self.workspace_folder(session_id)? {
+            let (root, git_dir) = state::locate(&folder)
+                .map_err(git_error)?
+                .filter(|(root, _)| *root == folder)
+                .ok_or_else(|| {
+                    CoreError::new(
+                        ErrorCode::NotFound,
+                        "This folder has no version history yet.",
+                    )
+                })?;
+            return Ok(Place {
+                main_root: root.clone(),
+                root,
+                git_dir,
+                location: GitLocation::Folder,
+                base: None,
+                own_branch: None,
+                title: String::new(),
+                running: false,
+            });
+        }
         let view = self
             .shared
             .store

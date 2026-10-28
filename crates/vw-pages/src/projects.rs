@@ -1,5 +1,5 @@
 //! `PagesService`'s project data (split out of `service`): per-project settings, the handbook folder (chosen, else
-//! `docs/handbook/`, else a pre-1.0 `docs/pages/`), its page server (started on first use), one page's facts and the
+//! `docs/handbook/` by default), its page server (started on first use), one page's facts and the
 //! current plan. No engine calls here.
 //!
 //! Depends on: `service` (the struct), `server`, `settings`, `hub`, `handbook`, `page`, `paths`. Called by:
@@ -20,16 +20,15 @@ impl PagesService {
     /// The settings of a project.
     #[must_use]
     pub fn settings(&self, project: &Path) -> PagesSettings {
-        self.settings.get(project).0
+        self.settings.get(project)
     }
 
-    /// The handbook folder of a project (relative) and whether it is the pre-1.0 one.
+    /// The handbook folder of a project (relative).
     #[must_use]
     pub fn folder(&self, project: &Path) -> crate::handbook::Folder {
-        let (settings, legacy) = self.settings.get(project);
+        let settings = self.settings.get(project);
         crate::handbook::Folder {
             relative: settings.folder,
-            legacy,
         }
     }
 
@@ -161,6 +160,6 @@ impl PagesService {
     #[must_use]
     pub fn card(&self, project: &Path) -> crate::handbook::overview::ProjectCard {
         let folder = self.folder(project);
-        crate::handbook::overview::card(project, &folder.relative, folder.legacy)
+        crate::handbook::overview::card(project, &folder.relative)
     }
 }

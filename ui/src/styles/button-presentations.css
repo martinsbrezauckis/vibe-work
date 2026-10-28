@@ -1,0 +1,176 @@
+/* Existing Button presentations, consolidated without changing geometry or states.
+ * Depends on tokens; imported by shared-controls for shared action components. */
+.btn-primary {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 34px;
+  border: 0;
+  border-radius: var(--radius-9);
+  background: var(--primary-bg);
+  color: var(--primary-fg);
+  font-weight: var(--weight-semibold);
+  cursor: pointer;
+  padding: 0 14px;
+}
+.btn-primary:hover:where(:not(:disabled)) {
+  filter: brightness(0.94);
+}
+.link-btn {
+  all: unset;
+  cursor: pointer;
+  color: var(--blue);
+  font-size: var(--text-12);
+  border-radius: var(--radius-xs);
+}
+.link-btn:hover:where(:not(:disabled)) {
+  text-decoration: underline;
+}
+.link-btn:focus-visible {
+  outline: none;
+}
+.mini[aria-checked="true"] {
+  color: var(--text);
+  border-color: var(--orange-2);
+}
+.key-link {
+  all: unset;
+  cursor: pointer;
+  color: var(--blue);
+  font-size: var(--text-12-5);
+  text-decoration: underline;
+  justify-self: start;
+}
+.key-link:focus-visible {
+  outline: none;
+}
+.preview-btn {
+  border: 1px solid var(--line-2);
+  background: var(--raised);
+  color: var(--text);
+  border-radius: var(--radius-7);
+  padding: 4px 10px;
+  font-size: var(--text-12);
+  cursor: pointer;
+}
+.preview-btn:hover:not(:disabled) {
+  background: var(--hover);
+}
+.pages-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid var(--line-2);
+  background: var(--raised);
+  color: var(--text);
+  border-radius: var(--radius-7);
+  padding: 4px 10px;
+  font-size: var(--text-12);
+  cursor: pointer;
+}
+.pages-btn:hover:not(:disabled) {
+  background: var(--hover);
+}
+.pages-btn[aria-pressed="true"] {
+  background: var(--active);
+}
+.pages-btn.go {
+  background: var(--primary-bg);
+  color: var(--primary-fg);
+  border-color: transparent;
+}
+.pj-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 12px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--line-2);
+  font-size: var(--text-13);
+  font-weight: var(--weight-medium);
+  color: var(--text);
+  background: var(--panel);
+  cursor: pointer;
+}
+.pj-btn:hover:not(:disabled) {
+  background: var(--hover);
+}
+.pj-btn.primary {
+  background: var(--primary-bg);
+  color: var(--primary-fg);
+  border-color: transparent;
+}
+.pj-btn.small {
+  height: 26px;
+  padding: 0 9px;
+  font-size: var(--text-12);
+}
+.cbtn {
+  border: 1px solid var(--line-2);
+  background: var(--raised);
+  border-radius: var(--radius-md);
+  padding: 6px 9px;
+  cursor: pointer;
+  font-size: var(--text-13);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+.cbtn:hover:not(:disabled) {
+  border-color: var(--line-3);
+}
+.cbtn.go {
+  background: var(--primary-bg);
+  color: var(--primary-fg);
+  border-color: transparent;
+  font-weight: var(--weight-semibold);
+}
+.mini {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid var(--line-2);
+  background: var(--panel);
+  color: var(--text-2);
+  border-radius: var(--radius-sm);
+  padding: 2px 8px;
+  font: var(--weight-medium) var(--text-11-5) var(--font-ui);
+  cursor: pointer;
+}
+.mini:hover:not(:disabled) {
+  color: var(--text);
+  border-color: var(--line-3);
+}
+
+.pj-nohb .pj-btn {
+  margin-left: auto;
+  flex: none;
+  max-width: 100%;
+  height: auto;
+  min-height: 26px;
+  padding-block: var(--space-control-gap);
+  white-space: normal;
+  text-wrap: balance;
+  line-height: 1.2;
+  text-align: center;
+}
+
+@container (max-width: 480px) {
+  .pj-nohb .pj-btn {
+    grid-column: 1 / -1;
+    margin-left: 0;
+    justify-self: start;
+  }
+}
+
+.show-all-btn {
+  border: 0;
+  background: none;
+  color: var(--blue);
+  font-size: var(--text-12);
+  padding: 6px 12px;
+  cursor: pointer;
+}

@@ -1,11 +1,13 @@
 /**
  * Toast notifications: a list in a store. Placement (never over an input) is decided by the view
  * (`features/shell/toastPlacement.ts`); this module only holds what is shown.
- * Depends on: createStore, notifications types. Called by: coreStore (pushes), the Toasts view
+ * Depends on: createStore, the announcer, notifications types. Called by: coreStore (pushes), the Toasts view
  * (reads, dismisses), tests.
- * Invariants: ids are unique; active toasts are bounded separately from the full-text history.
+ * Invariants: ids are unique; active toasts are bounded separately from the full-text history. A toast is said
+ * once by the app's announcer when it appears (errors assertively).
  * Dismissal/expiry never removes retained text. Only allowed bell kinds enter memory-only history.
  */
+import { announce } from "./announcer";
 import { createStore } from "./createStore";
 import { isBellKind, type ToastSpec } from "./notifications";
 
@@ -23,6 +25,11 @@ export interface Toast extends ToastSpec {
   read: boolean;
 }
 
+/** Says a toast once as it appears (errors assertively); the toast itself is not a live region. */
+function say(toast: ToastSpec): void {
+  announce(toast.text, { assertive: toast.kind === "error" });
+}
+
 /** Creates a toast list. */
 export function createToasts() {
   const store = createStore<readonly Toast[]>([]);
@@ -32,6 +39,9 @@ export function createToasts() {
     selectedId: null,
   });
   let next = 1;
+  const toastedChats = new Set<string>();
+  const seenRefusals = new Set<string>();
+  const filter = createStore<"all" | import("./notifications").BellKind>("all");
   const markRead = () => {
     history.set((list) => list.map((notice) => (notice.read ? notice : { ...notice, read: true })));
   };
@@ -55,12 +65,20 @@ export function createToasts() {
     if (active !== undefined && !history.get().some((notice) => notice.id === id)) {
       retain(active);
     }
+    const selected = history.get().find((notice) => notice.id === id);
+    if (
+      selected?.bellKind !== undefined &&
+      filter.get() !== "all" &&
+      filter.get() !== selected.bellKind
+    )
+      filter.set(selected.bellKind);
     markRead();
     panel.set({ open: true, selectedId: id ?? null });
   };
   return {
     store,
     history,
+    filter,
     panel,
     /** Retains full text without displaying an in-app toast (used for OS notifications). */
     record,
@@ -98,13 +116,56 @@ export function createToasts() {
     feedback(text: string): number {
       const notice = make({ kind: "info", text });
       store.set((list) => [...list, notice].slice(-MAX_TOASTS));
+      say(notice);
       return notice.id;
     },
     /** Adds a toast and returns its id. */
     push(spec: ToastSpec): number {
+      const refusal = spec.guardRefusal;
+      if (refusal !== undefined) {
+        const key = `${refusal.sessionId}:${refusal.refusalId}`;
+        if (seenRefusals.has(key)) return 0;
+        seenRefusals.add(key);
+        const previous = history
+          .get()
+          .find(
+            (notice) => notice.security !== undefined && notice.sessionId === refusal.sessionId,
+          );
+        const total = (previous?.security?.total ?? 0) + 1;
+        const security = {
+          total,
+          counts: {
+            ...previous?.security?.counts,
+            [refusal.guard]: (previous?.security?.counts[refusal.guard] ?? 0) + 1,
+          },
+          refusals: [...(previous?.security?.refusals ?? []), refusal].slice(-500),
+        };
+        const notice = {
+          ...make(spec),
+          ...(previous === undefined ? {} : { id: previous.id }),
+          createdAt: Math.max(refusal.at, previous?.createdAt ?? 0),
+          security,
+          text:
+            spec.preserveSecurityText === true
+              ? spec.text
+              : `Vibe Work stopped ${total === 1 ? "an action" : `${String(total)} actions`} in “${refusal.title}”`,
+        };
+        history.set((list) =>
+          [...list.filter((item) => item.id !== previous?.id), notice]
+            .sort((a, b) => a.createdAt - b.createdAt)
+            .slice(-MAX_NOTIFICATIONS),
+        );
+        if (!toastedChats.has(refusal.sessionId)) {
+          toastedChats.add(refusal.sessionId);
+          store.set((list) => [...list, { ...notice, text: spec.text }].slice(-MAX_TOASTS));
+          say(spec);
+        }
+        return notice.id;
+      }
       const notice = make(spec);
       retain(notice);
       store.set((list) => [...list, notice].slice(-MAX_TOASTS));
+      say(notice);
       return notice.id;
     },
     /** Removes one toast. */

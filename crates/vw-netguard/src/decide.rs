@@ -1,6 +1,8 @@
 //! The egress decision for one request target (`host`, `port`): where the proxy may connect, or why not. Names are
 //! resolved HERE, every answer is checked, and the proxy connects to exactly the addresses returned, so a DNS answer
-//! cannot change between the check and the connection (DNS rebinding).
+//! cannot change between the check and the connection (DNS rebinding). A PUBLIC target sent on through the user's
+//! own proxy (`upstream`) is always asked for the checked address too, so it cannot re-resolve the name into its
+//! own private network. The original Host header and TLS server name are retained.
 //!
 //! Depends on: `ip`, `resolve`. Called by: `serve`.
 //! Invariants:

@@ -108,9 +108,17 @@ fn link_external_session(snapshot: &mut GitBrowserSnapshot, member: &str, cwd: &
     }
 }
 
-#[allow(clippy::too_many_lines)]
 fn collect(root: &Path, project_id: String) -> (GitBrowserSnapshot, Vec<PathBuf>) {
-    let discovery = vw_git::browser::discover(root, vw_git::browser::Limits::default());
+    collect_with_limits(root, project_id, vw_git::browser::Limits::default())
+}
+
+#[allow(clippy::too_many_lines)]
+fn collect_with_limits(
+    root: &Path,
+    project_id: String,
+    limits: vw_git::browser::Limits,
+) -> (GitBrowserSnapshot, Vec<PathBuf>) {
+    let discovery = vw_git::browser::discover_complete(root, limits);
     let watch = watch_paths(root, &discovery);
     let parents: BTreeMap<_, _> = discovery
         .nodes
@@ -231,6 +239,12 @@ impl Core {
         request: GitBrowserRequest,
     ) -> Result<GitBrowserResult, CoreError> {
         let (project_id, watch, stop) = match request {
+            GitBrowserRequest::Explore { folder, request } => {
+                return self
+                    .explore(folder, request)
+                    .await
+                    .map(|result| GitBrowserResult::Explorer { result });
+            }
             GitBrowserRequest::Read { project_id } => (project_id, false, false),
             GitBrowserRequest::Watch { project_id } => (project_id, true, false),
             GitBrowserRequest::Unwatch { project_id } => (project_id, false, true),
@@ -412,7 +426,22 @@ mod tests {
 
     #[test]
     fn external_copy_keeps_branch_without_status_or_git_actions() {
-        let root = resolved_temp().join(format!("vw-browser-copy-{}", std::process::id()));
+        external_copy_snapshot(vw_git::browser::Limits::default(), "copy");
+    }
+
+    #[test]
+    fn discovery_deadline_keeps_copy_until_snapshot_is_ready() {
+        external_copy_snapshot(
+            vw_git::browser::Limits {
+                time: Duration::ZERO,
+                ..vw_git::browser::Limits::default()
+            },
+            "deadline",
+        );
+    }
+
+    fn external_copy_snapshot(limits: vw_git::browser::Limits, label: &str) {
+        let root = resolved_temp().join(format!("vw-browser-{label}-{}", std::process::id()));
         let project = root.join("project");
         let outside = root.join("copy");
         let record = project.join(".git/worktrees/copy");
@@ -425,7 +454,8 @@ mod tests {
         )
         .unwrap();
         std::fs::write(record.join("HEAD"), "ref: refs/heads/vibe/real\n").unwrap();
-        let (mut snapshot, watches) = collect(&project, "saved".into());
+        let (mut snapshot, watches) = collect_with_limits(&project, "saved".into(), limits);
+        assert!(!snapshot.truncated, "{snapshot:?}");
         let record = vw_worktrees::records::Record {
             session_id: "copy-session".into(),
             repo_root: project.clone(),
@@ -437,7 +467,6 @@ mod tests {
             created_at_ms: 0,
             decision: None,
             session_deleted: false,
-            session_archived: false,
         };
         link_recorded_copies(&mut snapshot, &[record], &["copy-session".into()]);
         let copy = snapshot.nodes.iter().find(|n| n.outside_project).unwrap();

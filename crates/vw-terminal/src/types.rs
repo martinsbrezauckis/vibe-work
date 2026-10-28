@@ -132,5 +132,6 @@ pub enum TerminalEvent {
 }
 
 /// Receives output bytes for an attached viewer. Returns `false` when the viewer is gone (the
-/// terminal then detaches it and keeps buffering). Called on the terminal's reader thread.
+/// terminal then detaches it and keeps buffering). Called under the output lock by attach, the
+/// reader, or the timed flush worker; must not block or re-enter the manager.
 pub type ViewerSink = Box<dyn FnMut(&[u8]) -> bool + Send>;

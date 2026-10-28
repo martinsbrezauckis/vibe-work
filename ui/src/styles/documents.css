@@ -19,9 +19,9 @@
   width: 320px;
   padding: 8px 10px;
   border: 1px solid var(--line-2);
-  border-radius: 10px;
+  border-radius: var(--radius-lg);
   background: var(--panel);
-  font-size: 12px;
+  font-size: var(--text-12);
   color: var(--text-2);
 }
 .docchip.failed {
@@ -36,7 +36,7 @@
 }
 .docchip-name {
   color: var(--text);
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -69,18 +69,18 @@
   display: inline-flex;
   padding: 1px 7px;
   border: 1px solid var(--line-2);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   color: var(--text-2);
-  font-size: 11px;
+  font-size: var(--text-11);
 }
 .doc-preview .d {
-  font-size: 12.5px;
+  font-size: var(--text-12-5);
   color: var(--text-3);
   margin: 0 0 8px;
 }
 .doc-kept {
   margin: 0 0 8px;
-  font-size: 12.5px;
+  font-size: var(--text-12-5);
   color: var(--orange-3);
 }
 .doc-text {
@@ -94,7 +94,7 @@
 .search-q {
   margin: 0 0 6px;
   padding: 8px 8px 0;
-  font-size: 12.5px;
+  font-size: var(--text-12-5);
   color: var(--text-2);
 }
 .sources {
@@ -116,7 +116,7 @@
   background: none;
   color: var(--text);
   padding: 5px 8px;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   cursor: pointer;
   font: inherit;
   min-width: 0;
@@ -126,14 +126,14 @@
   background: var(--hover);
 }
 .source-title {
-  font-size: 13px;
+  font-size: var(--text-13);
   max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .source-host {
-  font-size: 11px;
+  font-size: var(--text-11);
   color: var(--text-3);
   max-width: 100%;
   overflow: hidden;
@@ -153,9 +153,9 @@
   display: flex;
   flex-direction: column;
   background: var(--raised);
-  border-radius: 14px;
+  border-radius: var(--radius-14);
   box-shadow: var(--shadow);
-  z-index: 20;
+  z-index: var(--z-panel);
   overflow: hidden;
 }
 .sources-panel header {
@@ -167,14 +167,14 @@
 }
 .sources-panel h2 {
   margin: 0;
-  font-size: 14px;
+  font-size: var(--text-14);
 }
 .sources-panel .sources-close {
   margin-left: auto;
 }
 .sources-panel .d {
   margin: 10px 14px 6px;
-  font-size: 12px;
+  font-size: var(--text-12);
   color: var(--text-3);
 }
 .sources-panel .sources {

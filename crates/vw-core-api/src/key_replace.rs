@@ -1,4 +1,4 @@
-//! Dispatches key commands and confirms replacing an active model key before the store command writes it.
+//! Dispatches key commands and confirms replacement or selection before the model key changes.
 //! Depends on the key service and the core's native confirmer; called by the typed dispatcher.
 //! Only a fixed warning crosses the dialog boundary, never the typed or stored key.
 
@@ -24,11 +24,16 @@ pub(crate) async fn execute(
         error.server_code = Some("notConfigured".to_owned());
         return Err(error);
     };
-    confirm(shared, &request).await?;
+    if let KeyRequest::UseMistralKey { item_id } = &request {
+        confirm_switch(shared, keys, item_id).await?;
+        refuse_busy(shared)?;
+    } else {
+        confirm(shared, &request).await?;
+    }
     crate::keys::execute(keys, request).await
 }
 
-/// Ask the native dialog only when a store request would replace a key currently in use.
+/// Ask before replacing a key in use unless its latest test rejected authentication.
 async fn confirm(shared: &Shared, request: &KeyRequest) -> Result<(), CoreError> {
     if !matches!(request, KeyRequest::SetupStoreKey { .. }) {
         return Ok(());
@@ -45,10 +50,66 @@ async fn confirm(shared: &Shared, request: &KeyRequest) -> Result<(), CoreError>
     ) {
         return Ok(());
     }
+    if keys.key_was_rejected() {
+        return Ok(());
+    }
     let request = ConfirmationRequest {
         method: "vibe-work/replaceModelKey".to_owned(),
         requester: Requester::Window,
         summary: "Replace the Mistral key in use? This replaces the key used by sessions with the new key. Agents never see either value.".to_owned(),
+        params: json!({}),
+        always: None,
+    };
+    if shared.confirmer.confirm(&request).await != Confirmation::Approved {
+        return Err(CoreError::new(
+            ErrorCode::ConfirmationDeclined,
+            "The Mistral key was kept.",
+        ));
+    }
+    Ok(())
+}
+
+fn refuse_busy(shared: &Shared) -> Result<(), CoreError> {
+    if shared
+        .store
+        .statuses()
+        .iter()
+        .any(|(id, _)| crate::recovery::working(shared, id))
+    {
+        let mut error = CoreError::new(
+            ErrorCode::KeyService,
+            "Wait until the chats finish, then switch keys.",
+        );
+        error.server_code = Some("chatsWorking".to_owned());
+        return Err(error);
+    }
+    Ok(())
+}
+
+async fn confirm_switch(
+    shared: &Shared,
+    keys: &vw_keys::KeyService,
+    item_id: &str,
+) -> Result<(), CoreError> {
+    refuse_busy(shared)?;
+    let rows = keys
+        .mistral_keys()
+        .await
+        .map_err(|e| crate::keys::key_error(&e))?;
+    let row = rows
+        .iter()
+        .find(|k| k.item_id == item_id)
+        .ok_or_else(|| crate::keys::key_error(&vw_keys::KeyError::NotACandidate))?;
+    if row.in_use {
+        return Ok(());
+    }
+    let request = ConfirmationRequest {
+        method: "vibe-work/useModelKey".to_owned(),
+        requester: Requester::Window,
+        summary: format!(
+            "Use the key “{}” for Mistral? Chats continue with the new key.",
+            row.label
+        ),
         params: json!({}),
         always: None,
     };

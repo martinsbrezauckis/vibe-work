@@ -7,6 +7,7 @@
  * on asks the native confirmation (the gate requires it); off does not. A value that the environment
  * or an administrator sets is shown as such and cannot be changed here.
  */
+import { Switch } from "../../components/Controls";
 import { useEffect, useState } from "react";
 
 import { sessionForPick } from "../../state/modelChoice";
@@ -88,11 +89,8 @@ export function PrivacySettings() {
             </span>
           )}
         </span>
-        <button
+        <Switch
           data-testid="settings.privacy-settings-flip"
-          type="button"
-          className="switch"
-          role="switch"
           aria-label={label}
           aria-checked={current?.on === true}
           disabled={
@@ -115,7 +113,7 @@ export function PrivacySettings() {
         </p>
       )}
       {via !== null && view === null && error === null && (
-        <p className="key-line">Reading the switches...</p>
+        <p className="key-line">Reading the switches…</p>
       )}
       {view !== null && (
         <>

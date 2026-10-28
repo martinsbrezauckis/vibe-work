@@ -13,6 +13,10 @@
 //! because macOS `killpg` answers EPERM for a group whose members all exited but are not reaped yet (block
 //! Linux delivers to such a group and returns success).
 //!
+//! Also [`process_argv`] (macOS): a process's arguments exactly as `KERN_PROCARGS2` holds them, empty ones included.
+//! `sysinfo` skips every run of NUL bytes there, so for a process that rewrote its title (Python's setproctitle, as
+//! Vibe's server does) it returns the title and then environment strings as "arguments".
+//!
 //! Depends on: libc (macOS), windows 0.62 (Windows). Called by: vw-procmon (`os::other`, `stop`, `signal`).
 //! Invariant: vw-platform is the one crate allowed `unsafe` (with a documented SAFETY justification); every block
 //! states its SAFETY argument. Other platforms get the safe fallbacks (`None` / `Unsupported`).
@@ -62,6 +66,34 @@ pub enum TerminateError {
 #[must_use]
 pub fn process_facts(pid: u32) -> Option<ProcessFacts> {
     imp::process_facts(pid)
+}
+
+/// macOS: the arguments of `pid` exactly as the kernel holds them (`KERN_PROCARGS2`), empty ones included and never
+/// any environment string; `None` when the process cannot be read (gone, another user's). Other platforms: `None`.
+#[must_use]
+pub fn process_argv(pid: u32) -> Option<Vec<String>> {
+    imp::process_argv(pid)
+}
+
+/// Parses a `KERN_PROCARGS2` record: `argc` (native-endian `i32`), the executable path, NUL padding, then exactly
+/// `argc` NUL-terminated arguments (an empty argument is a lone NUL), then the environment, which is never read.
+/// `None` for a record too short to hold `argc` arguments.
+#[must_use]
+pub fn parse_procargs(record: &[u8]) -> Option<Vec<String>> {
+    let count = usize::try_from(i32::from_ne_bytes(record.get(..4)?.try_into().ok()?)).ok()?;
+    let rest = record.get(4..)?;
+    let path_end = rest.iter().position(|b| *b == 0)?;
+    let mut tail = &rest[path_end..];
+    while tail.first() == Some(&0) {
+        tail = &tail[1..];
+    }
+    let mut arguments = Vec::with_capacity(count.min(4096));
+    for _ in 0..count {
+        let end = tail.iter().position(|b| *b == 0)?;
+        arguments.push(String::from_utf8_lossy(&tail[..end]).into_owned());
+        tail = &tail[end + 1..];
+    }
+    Some(arguments)
 }
 
 /// macOS: `Some(true)` while the process group `pgid` has a member that is not a zombie, `Some(false)` when
@@ -135,6 +167,48 @@ mod imp {
         _wait: Duration,
     ) -> Result<bool, TerminateError> {
         Err(TerminateError::Unsupported)
+    }
+
+    pub(super) fn process_argv(pid: u32) -> Option<Vec<String>> {
+        let pid = libc::c_int::try_from(pid).ok()?;
+        let mut argmax: libc::c_int = 0;
+        let mut size = std::mem::size_of::<libc::c_int>();
+        let mut mib = [libc::CTL_KERN, libc::KERN_ARGMAX];
+        // SAFETY: `mib` names a two-level integer sysctl; `argmax` is a live c_int and `size` is its size, so the
+        // kernel writes at most `size` bytes into it. No new value is passed.
+        let read = unsafe {
+            libc::sysctl(
+                mib.as_mut_ptr(),
+                2,
+                (&raw mut argmax).cast::<libc::c_void>(),
+                &raw mut size,
+                std::ptr::null_mut(),
+                0,
+            )
+        };
+        if read != 0 {
+            return None;
+        }
+        let mut record = vec![0_u8; usize::try_from(argmax).ok()?];
+        let mut size = record.len();
+        let mut mib = [libc::CTL_KERN, libc::KERN_PROCARGS2, pid];
+        // SAFETY: `record` is a live, writable buffer of `size` bytes; the kernel writes at most `size` bytes and
+        // sets `size` to the bytes written. No new value is passed.
+        let read = unsafe {
+            libc::sysctl(
+                mib.as_mut_ptr(),
+                3,
+                record.as_mut_ptr().cast::<libc::c_void>(),
+                &raw mut size,
+                std::ptr::null_mut(),
+                0,
+            )
+        };
+        if read != 0 {
+            return None;
+        }
+        record.truncate(size);
+        super::parse_procargs(&record)
     }
 
     pub(super) fn group_has_live_member(pgid: u32) -> Option<bool> {
@@ -235,6 +309,10 @@ mod imp {
         None
     }
 
+    pub(super) fn process_argv(_pid: u32) -> Option<Vec<String>> {
+        None
+    }
+
     pub(super) fn process_facts(pid: u32) -> Option<ProcessFacts> {
         let handle = open(pid, PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_SYNCHRONIZE)?;
         // OpenProcess and GetProcessTimes also succeed for an exited process while a caller
@@ -298,11 +376,45 @@ mod imp {
         None
     }
 
+    pub(super) fn process_argv(_pid: u32) -> Option<Vec<String>> {
+        None
+    }
+
     pub(super) fn terminate_verified(
         _pid: u32,
         _start_token: u64,
         _wait: Duration,
     ) -> Result<bool, TerminateError> {
         Err(TerminateError::Unsupported)
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod argv_tests {
+    use super::parse_procargs;
+
+    fn record(argc: i32, body: &[u8]) -> Vec<u8> {
+        let mut bytes = argc.to_ne_bytes().to_vec();
+        bytes.extend_from_slice(body);
+        bytes
+    }
+
+    /// Exactly `argc` arguments, empty ones kept, nothing from the environment that follows.
+    #[test]
+    fn procargs_keep_empty_arguments_and_stop_before_the_environment() {
+        let normal = record(3, b"/bin/sh    /bin/sh -c  SECRET=x ");
+        assert_eq!(parse_procargs(&normal).unwrap(), ["/bin/sh", "-c", ""]);
+        // A retitled process: the title, then NUL padding over the old arguments, then the environment.
+        let titled = record(
+            4,
+            b"/usr/bin/python3  vibe-app-server        MISTRAL_API_KEY=k ",
+        );
+        assert_eq!(
+            parse_procargs(&titled).unwrap(),
+            ["vibe-app-server", "", "", ""]
+        );
+        assert_eq!(parse_procargs(&record(2, b"/bin/sh  only ")), None);
+        assert_eq!(parse_procargs(&[1, 0]), None);
     }
 }

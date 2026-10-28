@@ -13,11 +13,7 @@ offerId: string, } | { "op": "cancel", } | { "op": "checkExisting", } | { "op": 
 /**
  * Its path as the check listed it.
  */
-path: string, 
-/**
- * The user saw the version warning and accepts it (needed for another version).
- */
-acceptWarning: boolean, } | { "op": "prepareUpdate", } | { "op": "confirmUpdate", 
+path: string, } | { "op": "prepareUpdate", } | { "op": "confirmUpdate", 
 /**
  * The id from `prepareUpdate`'s offer.
  */
@@ -40,6 +36,11 @@ existing: Array<ExistingView>,
  * Whether `checkExisting` ran in this app run.
  */
 checkedExisting: boolean, 
+/**
+ * The older app-owned Vibe version this install replaces after an app update (setup then says Update, not
+ * Install); absent for a fresh install or the user's own install.
+ */
+replacing?: string, 
 /**
  * Vibe updates from the signed supported-Vibe manifest (boxed: the view travels in core events).
  */
@@ -159,7 +160,7 @@ docsUrl: string, };
 
 export type SourceView = { 
 /**
- * What it is ("uv 0.12.24 (Astral)", "mistral-vibe 2.26.0 (`PyPI`)", "Python 3.12 (through uv)").
+ * What it is ("uv 0.12.24 (Astral)", "mistral-vibe 2.26.0 (`PyPI`)", "Python 3.14.8 (through uv)").
  */
 name: string, 
 /**

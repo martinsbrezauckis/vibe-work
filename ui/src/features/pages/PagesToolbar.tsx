@@ -5,6 +5,7 @@
  * Depends on: components/Icon, protocol types. Called by: PagesTab.
  * Invariants: renders only; every button calls a prop; the path is plain text (never markup).
  */
+import { Button } from "../../components/Controls";
 import { term } from "../../vocabulary";
 import { formatKeys } from "../../state/shortcuts";
 import type { ReactElement } from "react";
@@ -73,17 +74,17 @@ export function PagesToolbar({
   const onPage = path !== null;
   return (
     <div className="pages-toolbar" role="toolbar" aria-label={term("workNames", "projectTab").name}>
-      <button
+      <Button
         data-testid="pages.pages-toolbar-pages-btn"
         type="button"
-        className="pages-btn"
+        appearance="page"
         aria-pressed={!onPage}
         title="The project handbook: every page, grouped by kind"
         onClick={actions.hub}
       >
         <Icon name="book-open" size={14} />
         Handbook
-      </button>
+      </Button>
       <Tool
         testId="pages.toolbar-back"
         icon="arrow-left"
@@ -119,47 +120,47 @@ export function PagesToolbar({
         {prototype ? "Prototype · sandboxed" : "Sandboxed"}
       </span>
       <span className="pages-actions">
-        <button
+        <Button
           data-testid="pages.pages-toolbar-pages-btn-2"
           type="button"
-          className="pages-btn"
+          appearance="page"
           title={`Open the current plan (${formatKeys("Mod+Shift+P")})`}
           disabled={busy}
           onClick={actions.plan}
         >
           Plan page
-        </button>
+        </Button>
         {picking ? (
-          <button
+          <Button
             data-testid="pages.pages-toolbar-pages-btn-3"
             type="button"
-            className="pages-btn"
+            appearance="page"
             onClick={actions.cancelPick}
           >
             Cancel pick
-          </button>
+          </Button>
         ) : (
           <>
-            <button
+            <Button
               data-testid="pages.pages-toolbar-pages-btn-4"
               type="button"
-              className="pages-btn"
+              appearance="page"
               title="Select text or click a section of the page, then write a comment for Vibe"
               disabled={!onPage || busy}
               onClick={actions.comment}
             >
               Comment
-            </button>
-            <button
+            </Button>
+            <Button
               data-testid="pages.pages-toolbar-pages-btn-5"
               type="button"
-              className="pages-btn"
+              appearance="page"
               title="Select text or click a section: it is added to your next message"
               disabled={!onPage || busy}
               onClick={actions.point}
             >
               Point Vibe at this
-            </button>
+            </Button>
             <Tool
               testId="pages.toolbar-share"
               icon="download"

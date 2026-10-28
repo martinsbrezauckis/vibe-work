@@ -1,37 +1,18 @@
-//! A type-erased `Confirmer`, so `Core` is one concrete type that both clients (Tauri bridge,
-//! Debug API) can hold without being generic over the dialog implementation.
+//! Native confirmation adapter for the gate and core features.
+//! Depends on the shared ask service, native presenter, session names and exact-call dialog text registry.
+//! Core construction installs it once; every native feature and gated confirmation uses the same adapter.
 //!
-//! Depends on: vw-gate (`Confirmer`, `Confirmation`, `ConfirmationRequest`), `dialog_texts` (sentences the
-//! core wrote for one exact call). Called by: `core` (wraps the app's confirmer), the gate (asks
-//! it).
-//! Invariants:
-//! - **Debug API requests:** a request whose `requester` is
-//!   [`Requester::DebugApi`] is answered `Approved` here, without a dialog, and logged (method only, never
-//!   params), except the vault dialogs below. The Debug API is the operator's console with the operator's access, so a
-//!   Full access escalation, a proxy or certificate change, a provider consent and the rest are answered here too.
-//!   This is the one choke point for every confirmation the core and the gate ask. Who may carry that requester is
-//!   decided by the transport: only the Debug API socket (bearer token) and the window while it serves a Debug API
-//!   UI-control request (`vw-host` `execute_for_ui_control`).
-//! - **Vault dialog exception:** a request whose method is one of the vault's dialogs
-//!   (`vault_scope::DIALOG_METHODS`: giving an MCP server a vault secret, storing a captured key, running a command
-//!   with a secret, filling a vault login's password into a page) always goes to the native dialog,
-//!   even when the Debug API asked. The Debug API may start the flow; the user's answer in the window
-//!   decides whether a value leaves the vault. The agent never answers a vault dialog.
-//! - **Core requests:** a request with [`Requester::Core`] (the core finishing a step the user chose earlier: deleting
-//!   a temporary session at quit or at the next start) is answered `Approved` the same way. Only core code builds
-//!   such a request; no client origin maps to it (`command::requester`).
-//! - Every other request: the wrapped confirmer is asked exactly once and its answer is returned unchanged
-//!   (except `ApprovedAlways` to a request that did not offer it, which becomes `Approved`); it
-//!   must fail closed (`Declined`) when no dialog can be shown (vw-gate rule). A Debug API request that offers
-//!   "always" is answered `Approved` (once): the client acting as the user asks again next time.
-//! - Provider permission grants wider than basic identity use `vibe-work/providerConsent`: the dialog is for the
-//!   user and the agent; a Debug API browser action answers it here like any other confirmation.
+//! Every request opens a value-free ask before presentation. The service records the first answer or cancellation; dropping the presentation ends its permission wait and makes late answers ineffective.
+//! The Debug API acts as the user outside the vault, and Core may complete an earlier user choice without
+//! another dialog. Vault policy always requires the person's native answer, regardless of requester.
+//! Dialogs retain their complete feature explanations and existing offered scopes. Records use policy labels,
+//! never request parameters or dialog bodies. An unoffered lasting answer is reduced to Allow once.
 
+use std::collections::BTreeSet;
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, PoisonError};
 
-use tracing::info;
 use vw_gate::{Confirmation, ConfirmationRequest, Confirmer, Requester};
 use vw_session::SessionStore;
 
@@ -45,6 +26,7 @@ type Asking = Pin<Box<dyn Future<Output = Confirmation> + Send>>;
 pub(crate) struct DynConfirmer(
     Arc<dyn Fn(ConfirmationRequest) -> Asking + Send + Sync>,
     Arc<DialogTexts>,
+    Arc<Mutex<BTreeSet<String>>>,
 );
 
 impl DynConfirmer {
@@ -55,100 +37,111 @@ impl DynConfirmer {
         confirmer: C,
         names: Arc<Names>,
         store: SessionStore,
+        asks: Arc<crate::ask::Service>,
     ) -> Self {
         let confirmer = Arc::new(confirmer);
         let texts = Arc::new(DialogTexts::default());
         let registry = texts.clone();
+        let deletes = Arc::new(Mutex::new(BTreeSet::new()));
+        let approved_deletes = deletes.clone();
         let ask = Arc::new(move |mut request: ConfirmationRequest| {
-            // a vault dialog (a key to an MCP server, a captured key stored, a command run with a
-            // secret, a vault login filled) is never answered for the Debug API: the user's own answer in the
-            // native dialog decides. Nothing else waits for a person when the Debug API asks.
-            if request.requester == Requester::DebugApi
-                && !crate::vault_scope::DIALOG_METHODS.contains(&request.method.as_str())
-            {
-                // The Debug API is the user (module docs): its own request is its consent.
-                info!(
-                    method = %request.method,
-                    "confirmation answered for the Debug API (acts as the user, no dialog)"
-                );
-                return Box::pin(std::future::ready(Confirmation::Approved)) as Asking;
-            }
-            if request.requester == Requester::Core {
-                // A step the user chose earlier (deleting a temporary session); only the core sets it.
-                info!(
-                    method = %request.method,
-                    "confirmation answered by the core (a step the user chose earlier, no dialog)"
-                );
+            let deletes = approved_deletes.clone();
+            let by = match request.requester {
+                Requester::DebugApi => vw_ask::AnsweredBy::DebugApi,
+                Requester::Core => vw_ask::AnsweredBy::Core,
+                Requester::Window | Requester::Agent => vw_ask::AnsweredBy::Person,
+            };
+            let session = request
+                .params
+                .get("sessionId")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_owned);
+            // `askId` names the guard's or secret run's own id; `open_own` never joins another ask with it.
+            let mut handle = asks.open_own(
+                &request.method,
+                session,
+                match request.requester {
+                    Requester::Agent => vw_ask::Requester::Agent,
+                    Requester::Window => vw_ask::Requester::Window,
+                    Requester::DebugApi => vw_ask::Requester::DebugApi,
+                    Requester::Core => vw_ask::Requester::Core,
+                },
+                vec![vw_ask::Choice::Once, vw_ask::Choice::No],
+                request
+                    .params
+                    .get("askId")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_owned),
+            );
+            handle.cancel_on_drop = true;
+            let automatic = matches!(request.requester, Requester::Core | Requester::DebugApi)
+                && !handle.ask.person_only;
+            if automatic {
+                handle.finish(crate::ask::allowed(by, vw_ask::Scope::Once));
+                if request.requester == Requester::DebugApi {
+                    record_delete(&deletes, &request);
+                }
                 return Box::pin(std::future::ready(Confirmation::Approved)) as Asking;
             }
             let confirmer = confirmer.clone();
-            if let Some(text) = texts.take(&request.method, &request.params) {
-                text.apply(&mut request.summary);
-            } else if request.method == "session/agent/update"
-                && vw_gate::full_access_escalation(&request.method, &request.params)
-            {
-                let title = request
-                    .params
-                    .get("sessionId")
-                    .and_then(serde_json::Value::as_str)
-                    .and_then(|id| {
-                        store
-                            .view(id)
-                            .and_then(|view| {
-                                let session = view.state.get("session")?;
-                                session
-                                    .get("title")
-                                    .and_then(serde_json::Value::as_str)
-                                    .filter(|title| !title.trim().is_empty())
-                                    .map(str::to_owned)
-                            })
-                            .or_else(|| names.title_of(&store, id))
-                    })
-                    .unwrap_or_else(|| "this chat".to_owned());
-                request.summary = format!(
-                    "Let the agent in {} run every tool without asking ({})?",
-                    vw_gate::dialog_quote(&title),
-                    vw_vocabulary::label("accessModes", "auto-approve")
-                );
-            } else if request.method == "workspace/git/worktrees/remove" {
-                // A removal the core did not prepare (a raw `call`): still a specific sentence.
-                request.summary = crate::worktrees_remove::describe_raw(&request.params);
-            } else if request.method == "session/delete" {
-                let title = request
-                    .params
-                    .get("sessionId")
-                    .and_then(serde_json::Value::as_str)
-                    .and_then(|id| names.title_of(&store, id));
-                if let Some(title) = title {
-                    // The title is the session's (agent- or user-written): sanitized and quoted.
-                    let id = request
-                        .params
-                        .get("sessionId")
-                        .and_then(serde_json::Value::as_str)
-                        .unwrap_or("");
-                    request.summary = format!(
-                        "Delete session {} (ID {}) and its history permanently (the Vibe CLI loses it too)?",
-                        vw_gate::dialog_quote(&title),
-                        vw_gate::dialog_quote(id),
-                    );
-                }
-            } else if let Some(text) =
-                crate::connector_consent::describe(&request.method, &request.params)
-            {
-                // The gate's generic sentence becomes one that names the server or connector.
-                // Who asked is the request's `requester` field (the dialog shows it first), not this text.
-                request.summary = text;
+            decorate(&mut request, &texts, &names, &store);
+            // The presenter lists a window of its own under the ask's id, so the window can bring it to the front
+            // (after `decorate`: the registered sentences are found by the request's own params).
+            if let Some(fields) = request.params.as_object_mut() {
+                fields.insert("askId".to_owned(), handle.ask.id.clone().into());
             }
             Box::pin(async move {
                 let offered = request.always.is_some();
-                match confirmer.confirm(&request).await {
-                    // "always" is an answer only to a request that offered it.
+                let confirmation = tokio::select! {
+                    biased;
+                    outcome = handle.closed() => return as_confirmation(&outcome),
+                    answer = confirmer.confirm(&request) => answer,
+                };
+                let confirmation = match confirmation {
                     Confirmation::ApprovedAlways if !offered => Confirmation::Approved,
                     answer => answer,
+                };
+                let outcome = match confirmation {
+                    Confirmation::Approved => {
+                        crate::ask::allowed(vw_ask::AnsweredBy::Person, vw_ask::Scope::Once)
+                    }
+                    Confirmation::ApprovedAlways => {
+                        crate::ask::allowed(vw_ask::AnsweredBy::Person, vw_ask::Scope::Level)
+                    }
+                    Confirmation::Declined => crate::ask::refused(vw_ask::AnsweredBy::Person, None),
+                };
+                handle.finish(outcome);
+                let answer = as_confirmation(&handle.closed().await);
+                if matches!(
+                    answer,
+                    Confirmation::Approved | Confirmation::ApprovedAlways
+                ) {
+                    record_delete(&deletes, &request);
                 }
+                answer
             }) as Asking
         });
-        Self(ask, registry)
+        Self(ask, registry, deletes)
+    }
+
+    /// A person (or the Debug API acting as the person) approved Delete of this exact id.
+    pub(crate) fn deletion_confirmed(&self, id: &str) -> bool {
+        self.2
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .contains(id)
+    }
+
+    pub(crate) fn deletion_finished(&self, id: &str) {
+        self.2
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(id);
+    }
+
+    /// Registers the native ask before its owned presentation is scheduled.
+    pub(crate) fn begin(&self, request: ConfirmationRequest) -> Asking {
+        (self.0)(request)
     }
 
     /// The registry of sentences for exact calls (shared with the core).
@@ -157,9 +150,79 @@ impl DynConfirmer {
     }
 }
 
+fn record_delete(deletes: &Mutex<BTreeSet<String>>, request: &ConfirmationRequest) {
+    if request.method == "session/delete"
+        && let Some(id) = request.params["sessionId"].as_str()
+    {
+        deletes
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(id.to_owned());
+    }
+}
+
 impl Confirmer for DynConfirmer {
     fn confirm(&self, request: &ConfirmationRequest) -> impl Future<Output = Confirmation> + Send {
         (self.0)(request.clone())
+    }
+}
+
+fn decorate(
+    request: &mut ConfirmationRequest,
+    texts: &DialogTexts,
+    names: &Names,
+    store: &SessionStore,
+) {
+    if let Some(text) = texts.take(&request.method, &request.params) {
+        text.apply(&mut request.summary);
+    } else if request.method == "session/agent/update"
+        && vw_gate::full_access_escalation(&request.method, &request.params)
+    {
+        let title = request
+            .params
+            .get("sessionId")
+            .and_then(serde_json::Value::as_str)
+            .map_or_else(
+                || "Untitled session".to_owned(),
+                |id| names.confirmation_title(store, id),
+            );
+        request.summary = format!(
+            "Let the agent in {} run every tool without asking ({})?",
+            vw_gate::dialog_chat_quote(&title),
+            vw_vocabulary::label("accessModes", "auto-approve")
+        );
+    } else if request.method == "workspace/git/worktrees/remove" {
+        // A removal the core did not prepare (a raw `call`): still a specific sentence.
+        request.summary = crate::worktrees_remove::describe_raw(&request.params);
+    } else if request.method == "session/delete" {
+        let title = request
+            .params
+            .get("sessionId")
+            .and_then(serde_json::Value::as_str)
+            .map_or_else(
+                || "Untitled session".to_owned(),
+                |id| names.confirmation_title(store, id),
+            );
+        request.summary = format!(
+            "Delete session {} and its history permanently (the Vibe CLI loses it too)?",
+            vw_gate::dialog_chat_quote(&title),
+        );
+    } else if let Some(text) = crate::connector_consent::describe(&request.method, &request.params)
+    {
+        // The gate's generic sentence becomes one that names the server or connector.
+        // Who asked is the request's `requester` field (the dialog shows it first), not this text.
+        request.summary = text;
+    }
+}
+
+fn as_confirmation(outcome: &vw_ask::Outcome) -> Confirmation {
+    match outcome {
+        vw_ask::Outcome::Allowed {
+            scope: vw_ask::Scope::Level,
+            ..
+        } => Confirmation::ApprovedAlways,
+        vw_ask::Outcome::Allowed { .. } => Confirmation::Approved,
+        _ => Confirmation::Declined,
     }
 }
 
@@ -201,6 +264,40 @@ mod tests {
         }
     }
 
+    #[test]
+    fn delete_and_full_access_questions_keep_windows_titles_readable() {
+        let title = r"C:\Users\Rebeka\Documents\Tests VibeWork";
+        let full_access = vw_vocabulary::label("accessModes", "auto-approve");
+        let names = Names::default();
+        names.note_listing(&[json!({"id": "s1", "title": title})]);
+        for (method, params, expected) in [
+            (
+                "session/delete",
+                json!({"sessionId": "s1"}),
+                format!(
+                    "Delete session \"{title}\" and its history permanently (the Vibe CLI loses it too)?"
+                ),
+            ),
+            (
+                "session/agent/update",
+                json!({"sessionId": "s1", "agentName": "auto-approve"}),
+                format!(
+                    "Let the agent in \"{title}\" run every tool without asking ({full_access})?"
+                ),
+            ),
+        ] {
+            let mut consent = request(Requester::Window, method, params.clone());
+            decorate(
+                &mut consent,
+                &DialogTexts::default(),
+                &names,
+                &SessionStore::new(),
+            );
+            assert_eq!(consent.summary, expected);
+            assert_eq!(consent.params, params);
+        }
+    }
+
     /// The product rule: through the Debug API only vault actions wait for a person. A vault dialog method goes to
     /// the native dialog (which here declines it); every other confirmation, a Full access escalation included, is
     /// answered by the core with no dialog; the window's own request for the same Full access still goes to the dialog.
@@ -211,6 +308,10 @@ mod tests {
             dialog.clone(),
             Arc::new(Names::default()),
             vw_session::SessionStore::new(),
+            crate::ask::Service::new(
+                Arc::new(crate::SystemAskClock::default()),
+                tokio::sync::broadcast::channel(100).0,
+            ),
         );
         for method in crate::vault_scope::DIALOG_METHODS {
             let answer = confirmer

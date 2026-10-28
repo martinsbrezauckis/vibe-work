@@ -1,17 +1,28 @@
-//! Approval callback ownership through the core and scripted fake Vibe.
+//! Approval callback ownership through the core and real Vibe with a scripted model.
 //! PREDICT: only the callback's session can answer it; user approval and denial each pass once,
 //! and the emitted answer keeps the origin that actually sent it.
 
 mod common;
 
-use common::core::{ScriptRig, script_core};
+use common::core::{ScriptRig, real_core};
 use serde_json::json;
 use vw_core_api::{Command, CommandResult, CoreEvent, ErrorCode, Origin};
 
 async fn session(rig: &ScriptRig) -> String {
+    let folder = rig.dir.join(format!(
+        "session-{}",
+        rig.core.status().loaded_sessions.len()
+    ));
+    std::fs::create_dir_all(&folder).unwrap();
+    rig.core.register_picked_folder(&folder).unwrap();
     match rig
         .core
-        .execute(Origin::Ui, Command::StartSession { agent_config: None })
+        .execute(
+            Origin::Ui,
+            Command::StartSession {
+                agent_config: Some(json!({"agent":"ask", "cwd":folder, "trustWorkspace":true})),
+            },
+        )
         .await
         .unwrap()
     {
@@ -70,7 +81,19 @@ fn answered_with_origin(rig: &mut vw_core_api::CoreSubscription, session_id: &st
 
 #[tokio::test]
 async fn approval_card_answers_keep_session_and_origin() {
-    let rig = script_core("approval-provenance", &["--script"]).await;
+    let (rig, _model) = real_core(
+        "approval-provenance",
+        &[],
+        None,
+        common::real_vibe::approval_script(),
+        |_| {},
+    )
+    .await;
+    assert_eq!(
+        rig.core.status().vibe_version.as_deref(),
+        Some(include_str!("../../../../tools/public/codegen/vibe.pin").trim()),
+        "public protocol tests must run the pinned real Vibe"
+    );
     let first = session(&rig).await;
     let second = session(&rig).await;
     let mut events = rig.core.subscribe(None);

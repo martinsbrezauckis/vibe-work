@@ -8,8 +8,8 @@
 //! Invariants:
 //! - The list's identifier is the mount's webview label (unique per mount); one list per webview at a time; only the
 //!   newest started compile of a webview installs (`RuleGenerations`).
-//! - Every wait for the main thread is bounded ([`RULES_WAIT`]); a failure is reported to the caller, which logs it
-//!   and keeps the mount (the navigation policy stays; the layer is then not reported).
+//! - Every wait for the main thread is bounded ([`RULES_WAIT`]); a failure is returned to the caller, which refuses
+//!   the mount before the first page can load.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -33,6 +33,13 @@ pub(crate) async fn apply(
     page: &RulePage,
     generations: &Arc<RuleGenerations>,
 ) -> Result<(), EngineError> {
+    if super::engine::mac_fault("rules")
+        || cfg!(debug_assertions) && std::env::var_os("VW_DEV_NO_CONTENT_RULES").is_some()
+    {
+        return Err(EngineError::Platform(
+            "injected content-rule installation failure".to_owned(),
+        ));
+    }
     let (identifier, json) = (label.to_owned(), content_rules_json(page));
     // a compile that finishes after a newer one started for this webview never installs.
     let generation = generations.begin(label);

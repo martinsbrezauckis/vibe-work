@@ -5,6 +5,8 @@ description: Read this before starting, reusing, stopping or restarting a server
 
 Vibe Work runs session processes through `mcp_vw` in `run_typescript`:
 
+Run each example tool call in a separate program; carry returned values into the next call.
+
 ```ts
 await tools.mcp_vw.processes_list({});
 await tools.mcp_vw.process_start({ command: "python3 -m http.server $PORT --bind 127.0.0.1" }); // bash

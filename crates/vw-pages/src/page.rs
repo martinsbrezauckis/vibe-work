@@ -1,8 +1,7 @@
 //! What the app reads from one handbook page FILE (Project Handbook Format 1.2, `docs/public/HANDBOOK_FORMAT.md`):
 //! the head (§5: `handbook.*`, `dcterms.*`, `description`, `author`), the visible header markers (`data-field`), plan
 //! steps (§6.3), inputs (§6.6), sections and every `id` (§6.2), headings, images, links with their `rel`, and what the validator
-//! needs to know about scripts, styles and resources (§6.4). Pages from earlier builds (`vw-kind`, `vw-status`,
-//! `vw-date`, the `vw-generated` hub) are read as migration input only (§11).
+//! needs to know about scripts, styles and resources (§6.4). The generated-page marker keeps prototype scripts disabled.
 //!
 //! This file holds the types; the HTML reader is `page_scan`.
 //!
@@ -84,19 +83,6 @@ pub struct Input {
     pub options: Vec<InputOption>,
 }
 
-/// The head of a page from an earlier build (§11), read only to show the page and to suggest a migration.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
-#[serde(rename_all = "camelCase")]
-pub struct LegacyHead {
-    /// `vw-kind`, lowercased.
-    pub kind: Option<String>,
-    /// `vw-status` as written.
-    pub status: Option<String>,
-    /// `vw-date`.
-    pub date: Option<String>,
-}
-
 /// The facts of one page (what the UI and the hub show).
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
@@ -124,9 +110,7 @@ pub struct PageFacts {
     pub authors: Vec<String>,
     /// `handbook.outcome` (reports).
     pub outcome: Option<String>,
-    /// The pre-1.0 head, when the page has `vw-*` meta tags.
-    pub legacy: Option<LegacyHead>,
-    /// `<meta name="vw-generated" content="hub">`: an index an earlier build of the app wrote (§11 step 4).
+    /// `<meta name="vw-generated" content="hub">`: a page that must not run prototype scripts.
     pub generated: bool,
     /// Links with a relation, in page order.
     pub relations: Vec<Relation>,
@@ -157,12 +141,6 @@ impl PageFacts {
             .iter()
             .find(|s| s.id == id)
             .map(|s| s.label.as_str())
-    }
-
-    /// True for a page of an earlier build that has no 1.0 head (§11): the validator only reports HB-W16.
-    #[must_use]
-    pub fn is_pre_format(&self) -> bool {
-        (self.legacy.is_some() || self.generated) && self.kind.is_none()
     }
 }
 

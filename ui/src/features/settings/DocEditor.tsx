@@ -1,10 +1,10 @@
 /**
- * One instruction editor: a text area for an `AGENTS.md`, the review step with the diff,
- * and the plain-words notes around it. Shared by personal and project settings.
+ * One instruction editor: an `AGENTS.md` file shown as the file (its name and path), its text and Save. Shared by
+ * personal and project settings.
  * Depends on: useInstructions, DiffPreview, state/instructions. Called by: InstructionsSettings, ProjectSettings.
- * Invariants: Save exists only in the review step, and writes exactly the text the diff shows; a file
- * the app may not edit (a link, a folder, not text) shows the reason and no editor; every failure is
- * shown as text; text a Debug API client wrote is labelled as such.
+ * Invariants: the person's Save writes the editor's text at once; text a Debug API client wrote is labelled and saved
+ * only from the review step, which shows the diff of exactly what Save writes; a file the app may not edit (a link,
+ * a folder, not text) shows the reason and no editor; every failure is shown as text.
  */
 import { Button } from "../../components/Controls";
 import { PathLine } from "../../components/PathLine";
@@ -17,8 +17,8 @@ import { useInstructionsController, useInstructionsState } from "./useInstructio
 interface Props {
   scope: "personal";
   title: string;
-  /** Plain words under the title. */
-  blurb: ReactNode;
+  /** Plain words under the title, if any. */
+  blurb?: ReactNode;
   /** Extra controls next to the editor's buttons (the CLI copy button). */
   extra?: ReactNode;
 }
@@ -66,7 +66,7 @@ export function DocEditorView({
 }: {
   scope: string;
   title: string;
-  blurb: ReactNode;
+  blurb?: ReactNode;
   extra?: ReactNode;
   view: DocView;
   actions: {
@@ -87,11 +87,12 @@ export function DocEditorView({
   return (
     <div className="instr" data-scope={scope}>
       <h4 id={`${id}-title`}>{title}</h4>
-      <p className="key-line">{blurb}</p>
+      {blurb !== undefined && <p className="key-line">{blurb}</p>}
       {doc !== null && (
         <div className="key-field-hint ui-help" data-testid={`${id}-path`}>
           <PathLine path={doc.path} />
-          {doc.exists ? null : <span>Not created yet.</span>}
+          {/* The personal file can hold only Vibe Work's managed note, which the editor does not show. */}
+          {doc.exists || scope === "personal" ? null : <span>Not created yet.</span>}
         </div>
       )}
       {doc?.note != null && <p className="key-field-hint ui-help">{doc.note}</p>}
@@ -120,23 +121,38 @@ export function DocEditorView({
       <div className="set-actions">
         {editable && !view.reviewing && (
           <>
-            <Button
-              data-testid="settings.doc-editor-review"
-              type="button"
-              small
-              disabled={!dirty || busy || view.stale}
-              onClick={() => {
-                actions.review();
-              }}
-            >
-              Review changes
-            </Button>
+            {view.draftBy === "debug-api" ? (
+              <Button
+                data-testid="settings.doc-editor-review"
+                type="button"
+                shape="outlined"
+                disabled={!dirty || busy || view.stale}
+                onClick={() => {
+                  actions.review();
+                }}
+              >
+                Review changes
+              </Button>
+            ) : (
+              <Button
+                data-testid="settings.doc-editor-save-now"
+                type="button"
+                shape="outlined"
+                variant="primary"
+                disabled={!dirty || busy || view.stale}
+                onClick={() => {
+                  void actions.save();
+                }}
+              >
+                {view.busy === "saving" ? "Saving…" : "Save"}
+              </Button>
+            )}
             {dirty && (
               <Button
                 variant="danger"
                 data-testid="settings.doc-editor-discard"
                 type="button"
-                small
+                shape="outlined"
                 disabled={busy}
                 onClick={() => {
                   actions.discard();
@@ -153,19 +169,19 @@ export function DocEditorView({
             <Button
               data-testid="settings.doc-editor-save"
               type="button"
-              small
+              shape="outlined"
               variant="primary"
               disabled={busy}
               onClick={() => {
                 void actions.save();
               }}
             >
-              {view.busy === "saving" ? "Saving..." : "Save"}
+              {view.busy === "saving" ? "Saving…" : "Save"}
             </Button>
             <Button
               data-testid="settings.doc-editor-back"
               type="button"
-              small
+              shape="outlined"
               disabled={busy}
               onClick={() => {
                 actions.back();
@@ -179,7 +195,7 @@ export function DocEditorView({
           <Button
             data-testid="settings.doc-editor-reload"
             type="button"
-            small
+            shape="outlined"
             onClick={() => {
               void actions.reload();
             }}

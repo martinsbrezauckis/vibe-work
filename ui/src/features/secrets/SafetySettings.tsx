@@ -7,7 +7,7 @@
  * Invariants: every change goes through the core (which writes the settings file the hook reads), so the next
  * command is checked with it; the screen shows the core's answer, never its own guess.
  */
-import { Button } from "../../components/Controls";
+import { Button, Switch } from "../../components/Controls";
 import { useEffect, useState } from "react";
 
 import type { SafetyResult } from "../../protocol/core";
@@ -71,11 +71,8 @@ export function SafetySettings() {
       {view?.rules.map((r) => (
         <div data-item-id={r.id} className="check" key={r.id} data-setting={`safety-${r.id}`}>
           <span>{r.label}</span>
-          <button
+          <Switch
             data-testid="secrets.safety-settings-change"
-            type="button"
-            className="switch"
-            role="switch"
             aria-label={r.label}
             aria-checked={r.on}
             disabled={busy}
@@ -98,7 +95,7 @@ export function SafetySettings() {
             variant="danger"
             data-testid="secrets.safety-settings-change-2"
             type="button"
-            small
+            shape="outlined"
             disabled={busy}
             onClick={() => {
               change({ op: "removeCustom", id: c.id });
@@ -138,7 +135,7 @@ export function SafetySettings() {
         <Button
           data-testid="secrets.safety-settings-tb-btn"
           type="submit"
-          small
+          shape="outlined"
           disabled={busy || text.trim() === ""}
         >
           Add rule

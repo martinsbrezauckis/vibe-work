@@ -1,4 +1,5 @@
 /** Reviews the exact user page before delegating it; its rectangle reserves native webview space. */
+import { Button } from "../../components/Controls";
 import { useLayoutEffect, useRef, type ReactElement } from "react";
 import { createPortal } from "react-dom";
 
@@ -74,25 +75,25 @@ export function TabHandoffDialog({
           {error && <p role="alert">{error}</p>}
         </section>
         <footer className="modal-actions">
-          <button
+          <Button
             data-testid="preview.tab-handoff-dialog-tb-btn"
             type="button"
-            className="tb-btn"
+
             disabled={busy}
             onClick={onClose}
           >
             Cancel
-          </button>
-          <button
+          </Button>
+          <Button
             data-testid="preview.tab-handoff-dialog-btn-primary"
             type="button"
-            className="btn-primary"
+            appearance="dialog"
             data-dialog-initial-focus
             disabled={busy}
             onClick={onConfirm}
           >
             {busy ? "Giving control…" : "Give control"}
-          </button>
+          </Button>
         </footer>
       </div>
     </>,

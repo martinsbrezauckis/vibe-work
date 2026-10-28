@@ -25,6 +25,20 @@ use vw_session::SessionStore;
 use crate::core::{Core, Shared};
 use crate::error::{CoreError, ErrorCode};
 
+/// The startup sweep of the process ledger: stops owned leftovers of an earlier run,
+/// re-attaches agent processes. Runs off the async runtime; a failure is logged, never fatal.
+pub(crate) async fn startup_sweep(procmon: &ProcMon) -> Option<SweepReport> {
+    let monitor = procmon.clone();
+    // Session existence is unknown before the first listing: nothing is called "deleted" on a guess.
+    tokio::task::spawn_blocking(move || monitor.sweep(&|_| None))
+        .await
+        .ok()
+        .and_then(|r| {
+            r.map_err(|e| tracing::warn!(error = %e, "startup sweep failed"))
+                .ok()
+        })
+}
+
 /// Session contexts (folders, Vibe background processes) of every loaded session, from the store.
 pub(crate) fn contexts(store: &SessionStore) -> Vec<SessionContext> {
     store

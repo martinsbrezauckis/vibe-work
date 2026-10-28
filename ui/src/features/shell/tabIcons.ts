@@ -6,12 +6,12 @@
 import type { IconName } from "../../components/Icon";
 import type { TabKind } from "../../state/shellState";
 
-/** Tab kind → icon: the handbook (open book), the plan checklist (a checked list), the browser (globe), changes (file with +/-), terminal, a file. */
+/** Tab kind → icon: the handbook (open book), the plan checklist (a checked list), the browser (globe), Files (a stack of files), changes (file with +/-), terminal, a file. */
 export const TAB_ICON: Readonly<Record<TabKind, IconName>> = {
   project: "book-open",
   plan: "list-todo",
   browser: "globe",
-  git: "git-branch",
+  git: "files",
   changes: "file-diff",
   terminal: "square-terminal",
   file: "file",

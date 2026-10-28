@@ -3,13 +3,14 @@
 // @font-face rules name, kept only when the page fetched them) and inline SVG logos (markup, no fetch). The host
 // fetches the URLs itself without cookies, under the navigation policy; nothing here sends a request.
 // REQ: { page, maxItems }. Synchronous; the answer is untrusted page data.
+/* global REQ, clip, collect, globalRect, viewOf -- Supplied by the Rust script assembler and its shared prelude. */
 (() => {
   __VW_COMMON__
   const abs = (value) => {
     try {
       const u = new URL(String(value || ""), location.href);
       return u.protocol === "http:" || u.protocol === "https:" ? u.href.slice(0, 2000) : null;
-    } catch (_) {
+    } catch {
       return null;
     }
   };
@@ -17,7 +18,7 @@
   const loaded = new Set();
   try {
     for (const entry of performance.getEntriesByType("resource").slice(0, 3000)) loaded.add(String(entry.name));
-  } catch (_) {
+  } catch {
     // No timing list: only completed images count as loaded.
   }
   const items = [];
@@ -37,7 +38,7 @@
     try {
       const u = new URL(a.getAttribute("href"), location.href);
       return u.origin === location.origin && (u.pathname === "/" || u.pathname === "");
-    } catch (_) {
+    } catch {
       return false;
     }
   };
@@ -62,7 +63,7 @@
           try {
             const url = new URL(ref, el.ownerDocument.URL);
             return url.hash && url.href.split("#")[0] === el.ownerDocument.URL.split("#")[0] ? `url(${url.hash})` : whole;
-          } catch (_) {
+          } catch {
             return whole;
           }
         });
@@ -104,10 +105,10 @@
       if (url) images.push({ kind: "image", url, alt: "video poster", area: 0, top: 0, loaded: loaded.has(url) });
     }
     if (images.length < 400 && tag !== "img") {
-      let bg = "";
+      let bg;
       try {
         bg = viewOf(el).getComputedStyle(el).backgroundImage;
-      } catch (_) {
+      } catch {
         bg = "";
       }
       if (bg && bg !== "none") {
@@ -129,7 +130,7 @@
       if (faces.length >= 60) break;
       faces.push({ family: clip(face.family, 80).replace(/^["']|["']$/g, ""), weight: clip(face.weight, 20), style: clip(face.style, 20), status: clip(face.status, 12) });
     }
-  } catch (_) {
+  } catch {
     // document.fonts unavailable: the rule scan below still lists the files.
   }
   const fontUrls = [];
@@ -143,10 +144,10 @@
         const re = /url\(["']?([^"')]+)["']?\)/g;
         let m;
         while ((m = re.exec(src))) {
-          let url = null;
+          let url;
           try {
             url = new URL(m[1], base).href;
-          } catch (_) {
+          } catch {
             url = null;
           }
           if (url && /^https?:/.test(url)) fontUrls.push({ family, weight, url: url.slice(0, 2000) });
@@ -158,7 +159,7 @@
   for (const sheet of Array.from(document.styleSheets || [])) {
     try {
       scan(sheet.cssRules, sheet.href || location.href);
-    } catch (_) {
+    } catch {
       // A cross-origin sheet: its font files are found through the timing list below.
     }
   }

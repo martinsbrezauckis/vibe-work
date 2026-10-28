@@ -209,11 +209,13 @@ impl CoreError {
     /// No session `id` is loaded.
     #[must_use]
     pub fn not_loaded(id: &str) -> Self {
-        // The id is the caller's own text; bound it so a hostile caller cannot inflate errors.
-        let shown: String = id.chars().take(128).collect();
+        tracing::debug!(session_id = id, "session is not loaded");
         Self::new(
             ErrorCode::NotFound,
-            format!("session {shown:?} is not loaded"),
+            format!(
+                "{} is not open. Open it from the session list and try again.",
+                vw_vocabulary::text("thisSession").unwrap_or_default()
+            ),
         )
     }
 
@@ -266,6 +268,14 @@ impl CoreError {
             }
         };
         let message = match error {
+            RpcError::Remote { error, .. } if method == "session/delete"
+                && error.code.as_str() == "conflict"
+                && error.message.starts_with("Session is already open:") => {
+                "This chat is still in use. Close it where it is open, then try again.".to_owned()
+            }
+            RpcError::Remote { error, .. } if error.code.as_str() == "conflict" && error.message.starts_with("A turn is already running") && matches!(method, "session/history/clear" | "session/rewind") => {
+                "A reply is still running. Answer the pending approval or press Stop, then try again.".to_owned()
+            }
             RpcError::Timeout { id: 0, after, .. } => {
                 format!("{method}: no ready server within {after:?}")
             }

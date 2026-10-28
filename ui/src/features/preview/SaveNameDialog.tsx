@@ -3,6 +3,7 @@
  * reserves its screen rectangle before the native viewport may appear, so the page cannot paint over the field.
  * Depends on: modal focus, native-layer reservations and the browser choice metadata. Called by: SaveVault.
  */
+import { Button } from "../../components/Controls";
 import { type ReactElement, type SubmitEvent, useLayoutEffect, useRef, useState } from "react";
 
 import { reserve } from "../../components/nativeLayer";
@@ -100,24 +101,24 @@ export function SaveNameDialog({
             <p className="preview-save-hint">The selected value goes straight to your vault.</p>
           </section>
           <footer className="modal-actions">
-            <button
+            <Button
               data-testid="preview.save-name-dialog-tb-btn"
               type="button"
-              className="tb-btn"
+
               disabled={busy}
               onClick={onClose}
             >
               Cancel
-            </button>
-            <button
+            </Button>
+            <Button
               data-testid="preview.save-name-dialog-btn-primary"
               type="submit"
-              className="btn-primary"
+              appearance="dialog"
               data-vault-save-confirm
               disabled={busy || name.trim() === ""}
             >
               {busy ? "Saving…" : "Save to vault"}
-            </button>
+            </Button>
           </footer>
         </form>
       </div>

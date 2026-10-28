@@ -7,7 +7,7 @@ use crate::{
 use crate::{
     core::Shared,
     secret_scan::{self, Job},
-    secret_scan_cache::{Cache, CachedFile, Stamp, chat, clean, fingerprint},
+    secret_scan_cache::{Cache, CachedFile, Stamp, chat, clean, fingerprint, withhold_parts},
 };
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -28,6 +28,8 @@ struct ChatHits {
     secrets: BTreeMap<String, SecretLeakName>,
     files: u32,
     places: u32,
+    /// One of its files is not sealed (a log from before Vibe 3.0), so Redact can work there.
+    redactable: bool,
 }
 
 struct Worker {
@@ -95,7 +97,7 @@ pub(crate) fn run(
                     continue;
                 }
                 worker.folder = Some(folder.clone());
-                if let Err(error) = worker.scan(&shared, runtime, &folder, full)
+                if let Err(error) = worker.scan(&shared, &folder, full)
                     && error.code != ErrorCode::KeyService
                 {
                     secret_scan::status(&shared, SecretScanStatus::Error);
@@ -103,7 +105,7 @@ pub(crate) fn run(
                 shared.secret_scan.running.store(false, Ordering::Release);
             }
             Job::Redact { finding_id, reply } => {
-                let _ = reply.send(worker.redact(&shared, runtime, &finding_id, false));
+                let _ = reply.send(worker.redact(&shared, runtime, &finding_id));
             }
             Job::Stop => break,
         }
@@ -138,6 +140,22 @@ fn inputs(shared: &Shared) -> Result<Vec<VaultScanSecret>, CoreError> {
     Ok(secrets)
 }
 
+/// True when the session log file `path` lies in the configured session log `folder`.
+///
+/// Both sides are compared in their canonical forms (`std::fs::canonicalize`), because one folder can be written
+/// several ways: the folder may be configured through a symlinked folder (or, on macOS, below the `/var` link),
+/// and on Windows `canonicalize` answers `\\?\C:\...` with long names and the on-disk case, while the folder is
+/// configured as `C:\...` (possibly with a short name or another case). The file is resolved too, so a file that
+/// is a link to a file elsewhere, or a `..` hop out of the folder, stays outside. A side that cannot be
+/// canonicalized (missing, no access) means outside: a redaction is refused rather than allowed on a guess.
+pub(crate) fn inside_log_folder(folder: &Path, path: &Path) -> bool {
+    let Ok(folder) = folder.canonicalize() else {
+        return false;
+    };
+    path.canonicalize()
+        .is_ok_and(|path| path.starts_with(&folder))
+}
+
 pub(crate) fn filter_inputs(mut secrets: Vec<VaultScanSecret>) -> (Vec<VaultScanSecret>, u32) {
     let total = secrets.len();
     secrets.retain(|secret| {
@@ -155,6 +173,10 @@ fn owned(secrets: &[VaultScanSecret]) -> Vec<vw_logscan::Secret> {
         .collect()
 }
 
+fn values(secrets: &[VaultScanSecret]) -> Vec<&str> {
+    secrets.iter().map(|secret| secret.value.expose()).collect()
+}
+
 fn finding_id(chat_id: &str) -> String {
     format!("secret-leak-{}", blake3::hash(chat_id.as_bytes()).to_hex())
 }
@@ -170,7 +192,6 @@ impl Worker {
     fn scan(
         &mut self,
         shared: &std::sync::Arc<Shared>,
-        runtime: &tokio::runtime::Handle,
         folder: &Path,
         full: bool,
     ) -> Result<(), CoreError> {
@@ -181,7 +202,6 @@ impl Worker {
             return Ok(());
         }
         let fingerprint = fingerprint(&secrets);
-        let auto = shared.secret_scan.view().settings.auto_redact;
         let mut seen = BTreeSet::new();
         let mut failed = 0;
         let mut errors = Vec::new();
@@ -204,13 +224,16 @@ impl Worker {
                 continue;
             }
             let path = entry.into_path();
+            if crate::secret_scan_cache::derived_index(folder, &path) {
+                continue;
+            }
             seen.insert(path.clone());
             let Ok(stamp) = Stamp::read(&path) else {
                 errors.push(path);
                 failed += 1;
                 continue;
             };
-            if !full && !self.cache.changed(&path, &stamp, &fingerprint, auto) {
+            if !full && !self.cache.changed(&path, &stamp, &fingerprint) {
                 continue;
             }
             let report = vw_logscan::scan_files(vec![path.clone()], owned(&secrets))
@@ -223,7 +246,7 @@ impl Worker {
             }
             let hits = hits(&report, &secrets);
             // Only Vibe metadata establishes chat ownership. Unattributed sidecars cannot acquire redaction authority.
-            if let Some((chat_id, title)) = chat(&path) {
+            if let Some((chat_id, title)) = chat(folder, &path) {
                 let authority = finding_id(&chat_id);
                 self.cache.files.insert(
                     path.clone(),
@@ -231,10 +254,9 @@ impl Worker {
                         stamp,
                         fingerprint: fingerprint.clone(),
                         chat_id,
-                        title,
+                        title: withhold_parts(&title, &values(&secrets)),
                         hits,
                         places: count(report.place_count()),
-                        retry_auto: false,
                     },
                 );
                 self.reports
@@ -251,7 +273,6 @@ impl Worker {
                         title: String::new(),
                         hits,
                         places: 0,
-                        retry_auto: false,
                     },
                 );
             } else {
@@ -264,32 +285,22 @@ impl Worker {
         for reports in self.reports.values_mut() {
             reports.retain(|path, _| seen.contains(path));
         }
+        self.drop_stale_findings();
         self.refresh(shared);
-        if auto {
-            self.redact_automatically(shared, runtime);
-        }
         Self::checked(shared, failed, errors);
         Ok(())
     }
 
-    fn redact_automatically(
-        &mut self,
-        shared: &std::sync::Arc<Shared>,
-        runtime: &tokio::runtime::Handle,
-    ) {
-        let ids: Vec<_> = self
-            .cache
-            .findings
-            .iter()
-            .filter(|finding| finding.state != SecretLeakState::Removed)
-            .map(|finding| finding.finding_id.clone())
-            .collect();
-        for id in ids {
-            if !yield_to_user(shared) {
-                return;
-            }
-            let _ = self.redact(shared, runtime, &id, true);
-        }
+    /// A chat whose files are gone (deleted, the remedy for a sealed Vibe 3.0 store) or no longer hold a value
+    /// loses its finding in this check, not one check later (the same rule as `restrict_inputs`).
+    fn drop_stale_findings(&mut self) {
+        let files = &self.cache.files;
+        self.cache.findings.retain(|finding| {
+            finding.state == SecretLeakState::Removed
+                || files
+                    .values()
+                    .any(|file| file.chat_id == finding.chat_id && !file.hits.is_empty())
+        });
     }
 
     fn checked(shared: &Shared, failed: u32, errors: Vec<PathBuf>) {
@@ -323,12 +334,16 @@ impl Worker {
     }
 
     fn refresh(&mut self, shared: &Shared) {
+        // A locked vault leaves nothing to compare: the cached titles were withheld when they were checked.
+        let secrets = inputs(shared)
+            .map(|s| filter_inputs(s).0)
+            .unwrap_or_default();
         let mut chats: BTreeMap<String, ChatHits> = BTreeMap::new();
-        for file in self
+        for (path, file) in self
             .cache
             .files
-            .values()
-            .filter(|file| !file.hits.is_empty())
+            .iter()
+            .filter(|(_, file)| !file.hits.is_empty())
         {
             let entry = chats
                 .entry(file.chat_id.clone())
@@ -337,9 +352,11 @@ impl Worker {
                     secrets: BTreeMap::new(),
                     files: 0,
                     places: 0,
+                    redactable: false,
                 });
             entry.files += 1;
             entry.places += file.places;
+            entry.redactable |= !self.sealed_file(path);
             for (id, hit) in &file.hits {
                 let old = entry
                     .secrets
@@ -363,11 +380,15 @@ impl Worker {
             let mut finding = SecretLeakFinding {
                 finding_id: finding_id.clone(),
                 chat_id: chat_id.clone(),
-                chat_title: clean(
-                    &shared
-                        .names
-                        .title_of(&shared.store, chat_id)
-                        .unwrap_or_else(|| chat.title.clone()),
+                // The live title only when there are values to withhold from it; else the cached, withheld one.
+                chat_title: withhold_parts(
+                    &clean(
+                        &(!secrets.is_empty())
+                            .then(|| shared.names.title_of(&shared.store, chat_id))
+                            .flatten()
+                            .unwrap_or_else(|| chat.title.clone()),
+                    ),
+                    &values(&secrets),
                 ),
                 secrets: chat.secrets.values().cloned().collect(),
                 places: chat.places,
@@ -377,6 +398,7 @@ impl Worker {
                 changed_files: 0,
                 format_files: 0,
                 unreadable_files: 0,
+                redactable: chat.redactable,
             };
             if let Some(old) = self
                 .cache
@@ -446,36 +468,5 @@ fn hits(report: &ScanReport, secrets: &[VaultScanSecret]) -> BTreeMap<String, Se
                 },
             ))
         })
-        .collect()
-}
-
-/// Overlapping key/password representations remain manual too: automatic output must not reveal a password.
-pub(crate) fn automatic_ids(
-    report: &ScanReport,
-    hits: &BTreeMap<String, SecretLeakName>,
-) -> BTreeSet<String> {
-    let passwords: Vec<_> = report
-        .secrets
-        .iter()
-        .filter(|secret| hits.get(&secret.id).is_some_and(|hit| hit.website_password))
-        .flat_map(|secret| &secret.locations)
-        .collect();
-    report
-        .secrets
-        .iter()
-        .filter(|secret| {
-            hits.get(&secret.id)
-                .is_some_and(|hit| !hit.website_password)
-        })
-        .filter(|secret| {
-            !secret.locations.iter().any(|location| {
-                passwords.iter().any(|password| {
-                    location.file == password.file
-                        && location.byte_offset < password.byte_offset + password.byte_length
-                        && password.byte_offset < location.byte_offset + location.byte_length
-                })
-            })
-        })
-        .map(|secret| secret.id.clone())
         .collect()
 }

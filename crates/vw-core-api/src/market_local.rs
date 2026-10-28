@@ -24,9 +24,7 @@ fn text<'a>(v: &'a Value, key: &str) -> &'a str {
 
 /// An app receipt identifies a catalog install even while its folder is off.
 pub(crate) fn receipt(folder: &Path) -> Option<vw_market::Receipt> {
-    let bytes = std::fs::read(folder.join(vw_market::RECEIPT)).ok()?;
-    let receipt: vw_market::Receipt = serde_json::from_slice(&bytes).ok()?;
-    (folder.file_name()?.to_str()? == receipt.entry_id).then_some(receipt)
+    vw_market::Receipt::read_from(folder)
 }
 
 /// Only direct, non-linked plugin folders in these two owned roots can be changed.
@@ -110,18 +108,20 @@ pub(crate) fn project(
         .filter_map(|row| {
             let name = text(row, "name");
             let path = text(row, "path");
-            if (receipt(Path::new(path))
-                .is_some_and(|r| catalog.is_some_and(|c| c.entry(&r.entry_id).is_some()))
-                && Path::new(path).parent().is_some_and(|root| {
-                    root == store.plugins_dir()
-                        || root == store.plugins_dir().with_file_name("plugins-off")
-                }))
-                || receipts.keys().any(|id| {
-                    catalog.is_some_and(|c| c.entry(id).is_some())
-                        && store
-                            .plugin_dir(id)
-                            .is_ok_and(|folder| folder == Path::new(path))
-                })
+            // Rejected folders must keep their unreadable card even with a marketplace receipt.
+            if row["readable"] != false
+                && ((receipt(Path::new(path))
+                    .is_some_and(|r| catalog.is_some_and(|c| c.entry(&r.entry_id).is_some()))
+                    && Path::new(path).parent().is_some_and(|root| {
+                        root == store.plugins_dir()
+                            || root == store.plugins_dir().with_file_name("plugins-off")
+                    }))
+                    || receipts.keys().any(|id| {
+                        catalog.is_some_and(|c| c.entry(id).is_some())
+                            && store
+                                .plugin_dir(id)
+                                .is_ok_and(|folder| folder == Path::new(path))
+                    }))
             {
                 return None;
             }
@@ -156,6 +156,8 @@ pub(crate) fn project(
             Some(LocalPluginView {
                 name: name.to_owned(),
                 description: text(row, "description").to_owned(),
+                version: row["version"].as_str().map(str::to_owned),
+                author: row["author"].as_str().map(str::to_owned),
                 path: path.to_owned(),
                 scope: text(row, "scope").to_owned(),
                 managed: managed(Path::new(path), home, cwd, off),

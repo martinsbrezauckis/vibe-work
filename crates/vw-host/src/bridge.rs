@@ -17,18 +17,23 @@
 //!   window returns empty when the new window polls, even if its transport has not disconnected.
 //! - The bridge carries only what the route and the UI put in it; it never reaches Vibe, so it
 //!   cannot be a path around the gate. A route that needs Vibe must go through `Core::execute`.
-//! - **Capability:** every request carries a fresh random `capability` (256 bits
-//!   from the OS RNG) that only the UI client taking the request sees. While the UI serves it, the commands it
-//!   runs for it pass that capability ([`crate::Host::execute_for_ui_control`]); [`UiBridge::capability_live`]
-//!   accepts it only while that exact request is pending: not finally answered, not past its deadline (compared in
-//!   constant time). A reply or a timeout removes the entry, so the capability is dead from then on. This is
-//!   what binds the Debug API origin (which acts as the user, without native dialogs) to a real Debug API
-//!   request instead of a flag any script in the window could set. Slow work acknowledges with `pending`; that
-//!   request keeps its capability for at most ten minutes, completes through a second reply, and is polled through
-//!   `ui/requests` without entering the window queue.
+//! - **No authority reaches the page.** A request handed to the UI carries only its id, route and body. The page's
+//!   JavaScript holds nothing that makes its commands the Debug API's: every window command runs as the window
+//!   (`Origin::Ui`, [`crate::Host::execute_window`]), whoever sent it, so a script injected into the page gains
+//!   nothing by hooking the poll, the replies or the outgoing calls.
+//! - **Grants, decided here.** The few owner-only effects a route promises (a folder given as a path, a push whose
+//!   native confirmation the Debug API answers, ...) are computed in Rust from the authenticated request's route and
+//!   body when it is parked ([`crate::ui_grants`]): each is a pattern over one exact window command, pinned to the
+//!   values the request names. While the request is pending, the first window command that matches a grant runs
+//!   as the Debug API, once ([`UiBridge::take_grant`]); a reply, a timeout or turning the Debug API off ends every
+//!   grant of that request. A page cannot widen, renew or create a grant: nothing it sends is read to build one.
+//! - **Driving.** While a request that may act is pending (any but a pure read, [`crate::ui_grants::drives`]) the
+//!   window is driven by the Debug API ([`UiBridge::driving`]): the core attributes window commands to the Debug API
+//!   and holds them to its vault rule. That only restricts; it never grants.
+//! - Slow work acknowledges with `pending`; that request (and its unused grants) lasts at most ten minutes,
+//!   completes through a second reply, and is polled through `ui/requests` without entering the window queue.
 
 use std::collections::{HashMap, VecDeque};
-use std::fmt::Write as _;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
@@ -39,9 +44,11 @@ use tokio::sync::{Notify, oneshot};
 use vw_core_api::{CoreError, ErrorCode};
 use vw_debug_api::{RegistryError, UiRoutes};
 
+use crate::ui_grants::{Grant, GrantFacts};
+
 /// Longest a client may be parked in one poll.
 const MAX_POLL: Duration = Duration::from_secs(30);
-/// Bounds capability leases and result retention for acknowledged work.
+/// Bounds acknowledged work (its grants included) and result retention.
 const JOB_LIMIT: Duration = Duration::from_secs(10 * 60);
 /// Most retained results; callers should collect them promptly.
 const MAX_JOBS: usize = 128;
@@ -55,8 +62,6 @@ pub struct UiRequest {
     pub name: String,
     /// The JSON body the caller posted.
     pub body: Value,
-    /// The request's capability (module docs): passed back with each command run for this request.
-    pub capability: String,
 }
 
 /// The UI's answer to one request.
@@ -97,6 +102,9 @@ pub struct UiReplyError {
     pub code: ErrorCode,
     /// Human-readable text.
     pub message: String,
+    /// Optional machine-readable refusal reason from the core, such as `vaultUserOnly`.
+    #[serde(default)]
+    pub server_code: Option<String>,
 }
 
 impl UiReply {
@@ -112,18 +120,26 @@ impl UiReply {
             let error = self.error.unwrap_or(UiReplyError {
                 code: ErrorCode::Internal,
                 message: "the UI reported a failure without details".to_owned(),
+                server_code: None,
             });
-            UiOutcome::Err(CoreError::new(error.code, error.message))
+            let mut core_error = CoreError::new(error.code, error.message);
+            core_error.server_code = error.server_code;
+            UiOutcome::Err(core_error)
         };
         (self.id, outcome)
     }
 }
 
-/// A request waiting for its reply: where the reply goes, its capability and when it times out.
+/// A request waiting for its reply: where the reply goes, when it times out and the window commands it lets run
+/// as the Debug API (module docs).
 struct Pending {
     reply: Option<oneshot::Sender<UiOutcome>>,
-    capability: String,
     deadline: Instant,
+    grants: Vec<Grant>,
+    /// May act (not a pure read): counts for [`UiBridge::driving`].
+    drives: bool,
+    /// Screenshot checks need geometry, never a slow-work acknowledgement.
+    final_only: bool,
 }
 
 struct Inner {
@@ -133,6 +149,8 @@ struct Inner {
     wake: Notify,
     counter: AtomicU64,
     timeout: Duration,
+    /// Host-side facts grants may pin (the core's catalog), set once the core runs.
+    facts: std::sync::OnceLock<Arc<dyn GrantFacts>>,
 }
 
 #[derive(Default)]
@@ -159,17 +177,27 @@ impl UiBridge {
                 wake: Notify::new(),
                 counter: AtomicU64::new(1),
                 timeout,
+                facts: std::sync::OnceLock::new(),
             }),
         }
     }
 
-    /// Parks a request for the UI and waits for its answer.
+    /// Gives grants the host's facts (the core's catalog); the first call wins.
+    pub fn set_facts(&self, facts: Arc<dyn GrantFacts>) {
+        let _ = self.inner.facts.set(facts);
+    }
+
+    /// Parks a request for the UI and waits for its answer. Its grants are built here, from `name` and `body`
+    /// only ([`crate::ui_grants`]).
     ///
     /// # Errors
     /// The UI's own error, or `timeout` when no UI client answered in time.
     pub async fn request(&self, name: &str, body: Value) -> Result<Value, CoreError> {
         let id = format!("ui-{}", self.inner.counter.fetch_add(1, Ordering::Relaxed));
-        let capability = new_capability()?;
+        // From the authenticated request alone, before the page sees it.
+        let grants =
+            crate::ui_grants::for_request(name, &body, self.inner.facts.get().map(AsRef::as_ref));
+        let drives = crate::ui_grants::drives(name, &body);
         let (tx, rx) = oneshot::channel();
         {
             let mut pending = self
@@ -177,13 +205,15 @@ impl UiBridge {
                 .pending
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner);
-            pending.retain(|_, entry| Instant::now() < entry.deadline);
+            Self::prune(&mut pending);
             pending.insert(
                 id.clone(),
                 Pending {
                     reply: Some(tx),
-                    capability: capability.clone(),
                     deadline: Instant::now() + self.inner.timeout,
+                    grants,
+                    drives,
+                    final_only: name == "secrets",
                 },
             );
         }
@@ -196,7 +226,6 @@ impl UiBridge {
                 id: id.clone(),
                 name: name.to_owned(),
                 body,
-                capability,
             });
         self.inner.wake.notify_waiters();
         match tokio::time::timeout(self.inner.timeout, rx).await {
@@ -288,6 +317,10 @@ impl UiBridge {
             if Instant::now() >= entry.deadline {
                 return false;
             }
+            if entry.final_only {
+                // Keep the original waiter and deadline: pixels must not leave before the final check.
+                return entry.reply.is_some();
+            }
             let Some(sender) = entry.reply.take() else {
                 return false;
             };
@@ -320,6 +353,7 @@ impl UiBridge {
         let Some(entry) = pending.remove(id) else {
             return false;
         };
+        // The request is over: its unused grants went with the entry.
         if let Some(sender) = entry.reply {
             return sender.send(outcome).is_ok();
         }
@@ -355,25 +389,66 @@ impl UiBridge {
         })
     }
 
-    /// True while `capability` belongs to a request that is pending: handed out or queued, not answered, not
-    /// past its deadline (module docs). Every pending entry is compared in constant time, and an empty or
-    /// made-up value matches none.
-    #[must_use]
-    pub fn capability_live(&self, capability: &str) -> bool {
+    /// Drops entries past their deadline (a timed-out request whose waiter is gone), ending their grants.
+    fn prune(pending: &mut HashMap<String, Pending>) {
         let now = Instant::now();
+        pending.retain(|_, entry| now < entry.deadline);
+    }
+
+    /// True while the Debug API drives the window: a request that may act (any but a pure read) is pending
+    /// (queued, being served, or acknowledged and not finished). The core attributes window commands to the Debug API
+    /// then and holds them to its vault rule (module docs); nothing is granted by it.
+    #[must_use]
+    pub fn driving(&self) -> bool {
         let mut pending = self
             .inner
             .pending
             .lock()
             .unwrap_or_else(PoisonError::into_inner);
-        pending.retain(|_, entry| now < entry.deadline);
-        // No early return: the time does not depend on which entry matched (hence `|` and `&`, not `||`, `&&`).
-        #[allow(clippy::needless_bitwise_bool)]
-        pending.values().fold(false, |live, entry| {
-            let same =
-                vw_debug_api::constant_time_eq(capability.as_bytes(), entry.capability.as_bytes());
-            live | (same & (now < entry.deadline))
-        })
+        Self::prune(&mut pending);
+        pending.values().any(|entry| entry.drives)
+    }
+
+    /// Uses the first unused grant of a pending request that `command` (a window command as JSON) matches, and
+    /// returns that request's id and the grant's name; `None` when no grant matches (the command runs as the window).
+    /// A grant is used once; a second identical command runs as the window.
+    #[must_use]
+    pub fn take_grant(&self, command: &Value) -> Option<(String, &'static str)> {
+        let mut pending = self
+            .inner
+            .pending
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        Self::prune(&mut pending);
+        // Oldest request first: ids are `ui-<counter>`, so sort by the counter for a stable choice.
+        let mut ids: Vec<&String> = pending.keys().collect();
+        ids.sort_by_key(|id| {
+            id.trim_start_matches("ui-")
+                .parse::<u64>()
+                .unwrap_or(u64::MAX)
+        });
+        let id = ids
+            .into_iter()
+            .find(|id| pending[*id].grants.iter().any(|g| g.matches(command)))?
+            .clone();
+        let entry = pending.get_mut(&id)?;
+        let grant = entry.grants.iter_mut().find(|g| g.matches(command))?;
+        grant.used = true;
+        Some((id, grant.name))
+    }
+
+    /// Ends every unused grant (the Debug API was turned off): pending requests may still be answered, but their
+    /// commands run as the window's from now on.
+    pub fn revoke_grants(&self) {
+        for entry in self
+            .inner
+            .pending
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .values_mut()
+        {
+            entry.grants.clear();
+        }
     }
 
     /// Registers `ui/<name>` so that calling it parks a request here.
@@ -450,19 +525,4 @@ impl UiBridge {
             },
         )
     }
-}
-
-/// A fresh capability: 32 bytes from the OS RNG as 64 hex characters.
-fn new_capability() -> Result<String, CoreError> {
-    let mut bytes = [0_u8; 32];
-    getrandom::fill(&mut bytes).map_err(|e| {
-        CoreError::new(
-            ErrorCode::Internal,
-            format!("no randomness for a UI-control capability: {e}"),
-        )
-    })?;
-    Ok(bytes.iter().fold(String::with_capacity(64), |mut hex, b| {
-        let _ = write!(hex, "{b:02x}");
-        hex
-    }))
 }

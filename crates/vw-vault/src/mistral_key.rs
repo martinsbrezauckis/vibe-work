@@ -1,7 +1,8 @@
-//! The one secret Vibe Work owns in the vault: the Mistral API key.
+//! Mistral API credentials kept in the vault for Vibe Work.
 //!
-//! Stored as a typed resource: kind `developerCredential`, id
-//! [`RESOURCE_ID`], label "Mistral API key (Vibe Work)", `publicFields.provider = "mistral"`,
+//! Stored as typed resources of kind `developerCredential`. First setup uses [`RESOURCE_ID`];
+//! additional named credentials get fresh identities. The initial label is "Mistral API key (Vibe Work)".
+//! Each has `publicFields.provider = "mistral"`,
 //! secret field `apiKey`, permission `userOnly` (hidden from every agent surface, incl. Vault's
 //! MCP list; can relax it with consent).
 //!
@@ -22,6 +23,18 @@ use crate::secret::SecretString;
 
 /// Id of the resource Vibe Work writes.
 pub const RESOURCE_ID: &str = "vibe-work-mistral-api-key";
+/// Prefix for additional credentials created by this app.
+pub const ID_PREFIX: &str = "vibe-work-mistral-";
+
+/// Whether the item identity belongs to the app’s model credentials.
+#[must_use]
+pub fn is_own(id: &str) -> bool {
+    id == RESOURCE_ID
+        || id.strip_prefix(ID_PREFIX).is_some_and(|suffix| {
+            suffix.len() == 32 && suffix.bytes().all(|b| b.is_ascii_hexdigit())
+        })
+}
+
 /// Its label.
 pub const RESOURCE_LABEL: &str = "Mistral API key (Vibe Work)";
 /// Secret field name.
@@ -116,16 +129,38 @@ pub fn key_in_item(item: &VaultItem) -> Option<SecretString> {
 /// Mistral credentials in `items`, excluding Vibe Work's own resource.
 #[must_use]
 pub fn find_existing(items: &[VaultItem]) -> Vec<Candidate> {
+    find_all(items)
+        .into_iter()
+        .filter(|item| item.item_id != RESOURCE_ID)
+        .collect()
+}
+
+/// A fresh identity for an additional Mistral credential.
+#[must_use]
+pub fn new_id() -> String {
+    format!(
+        "{ID_PREFIX}{}",
+        hex::encode(vault_core::random_bytes::<16>())
+    )
+}
+
+/// Every Mistral credential, including the original setup item; metadata only.
+#[must_use]
+pub fn find_all(items: &[VaultItem]) -> Vec<Candidate> {
     let compat_ids: Vec<String> = COMPAT_KEY_NAMES
         .iter()
         .map(|k| shellx_compat_item_id(k))
         .collect();
     items
         .iter()
-        .filter(|item| item.id != RESOURCE_ID)
         .filter_map(|item| {
             let source = match VaultResource::from_item(item) {
-                Some(resource) if is_mistral_resource(&resource) => "resource",
+                Some(resource)
+                    if resource.kind == ResourceKind::DeveloperCredential
+                        && is_mistral_resource(&resource) =>
+                {
+                    "resource"
+                }
                 None if compat_ids.contains(&item.id) => "compat",
                 Some(_) | None => return None,
             };

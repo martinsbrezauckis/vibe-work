@@ -82,6 +82,9 @@ pub enum PagesError {
     /// A pick ended without anything picked.
     #[error("nothing was picked (Escape, the page changed, or no click within the time limit)")]
     NothingPicked,
+    /// A named menu target or its requested selection is absent from the shown page.
+    #[error("the named section or selected text is not on the shown page")]
+    NamedTargetMissing,
     /// The picked element is not inside a section of the page file.
     #[error(
         "the picked part of the page is not inside a section with an id; pick a part of a section"
