@@ -72,7 +72,8 @@ fn main_permission(kind: &str) -> PermissionResponse {
 /// Keeps the main webview on the app's own origin: a refused navigation never happens. Plugin navigation hooks run
 /// for every webview (tauri `manager/webview.rs`), so the decision is per label: `main` gets the app-origin policy,
 /// a preview webview is decided by its own handler (the preview's URL policy), any other label is
-/// refused. Each main-document load resets child placements before new window commands may place them.
+/// refused. Each main-document load resets child placements before new window commands may place them, and the
+/// placements of commands the replaced document started place nothing after that reset.
 fn navigation_guard<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
     tauri::plugin::Builder::new("navigation-guard")
         .on_navigation(|webview, url| match webview.label() {

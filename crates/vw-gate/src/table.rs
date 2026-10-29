@@ -183,6 +183,12 @@ static TABLE: &[Row] = &[
     fwd!("session/subagents/interrupt", SessionSubagentsInterrupt),
     deny!("session/subagents/read", NoUserInterface),
     deny!("session/subagents/wait", NoUserInterface),
+    // New in Vibe 3.0.3 (session artifacts: pull and merge requests linked to the session's branch,
+    // experimental upstream); no Vibe Work screen uses them in 0.1.2. `artifacts/sync` asks the
+    // provider (`gh` / `glab`) for the current state.
+    deny!("artifacts/list", NoUserInterface),
+    deny!("artifacts/markViewed", NoUserInterface),
+    deny!("artifacts/sync", NoUserInterface),
     fwd!("account/read", AccountRead),
     p2!("agents/install", AgentsInstall),
     deny!("agents/list", NotOnUnified),

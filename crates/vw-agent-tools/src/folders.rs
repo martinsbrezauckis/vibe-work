@@ -662,7 +662,7 @@ pub fn check_command(
     if let Some(given) = given.filter(|g| g.is_absolute()) {
         roots.push(given.to_string_lossy().into_owned());
     }
-    for root in &mentions::with_bash_spellings(roots) {
+    for root in &mentions::with_windows_spellings(roots) {
         for mention in raw_mentions(&expanded, root) {
             let folder = mentions::native(folder_part(&mention));
             if let Some(refusal) =

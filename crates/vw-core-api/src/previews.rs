@@ -8,9 +8,8 @@
 //! Invariants:
 //! - Every URL is checked for the session with `UrlPolicy::check` and the monitor's ownership before it is
 //!   loaded; refusals name the owner.
-//! - Every origin runs every request directly, and the Debug API opens a session's port like the window does
-//!   (it acts as the user; the dialog and its "proven port only" rule for the Debug API are gone;
-//!   the agent's preview tools keep `strict`).
+//! - Every origin runs every request directly; the Debug API opens a session's port like the window does (it acts
+//!   as the user), and the agent's preview tools keep `strict`.
 //! - The change-forwarding task is owned by [`PreviewHub`] and aborted when the hub drops or the core shuts down.
 
 use std::path::PathBuf;
@@ -191,6 +190,9 @@ pub(crate) fn start_events(shared: &Arc<Shared>) {
                     .as_ref()
                     .and_then(|hub| hub.service.owner_session_id(&page))
             });
+            if session_id.as_deref() == Some(crate::browser_accounts::ACCOUNT_PAGE) {
+                continue;
+            }
             shared.emit(CoreEvent::PreviewChanged { session_id });
         }
     });
@@ -214,6 +216,9 @@ pub(crate) fn start_events(shared: &Arc<Shared>) {
                     .as_ref()
                     .and_then(|hub| hub.service.owner_session_id(&page))
             });
+            if owner.as_deref() == Some(crate::browser_accounts::ACCOUNT_PAGE) {
+                continue;
+            }
             shared.emit(CoreEvent::BrowserChanged { session_id: owner });
         }
     });

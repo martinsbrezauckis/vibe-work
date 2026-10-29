@@ -87,6 +87,10 @@ impl Core {
             None
         };
         let id = preview_owner.as_deref().unwrap_or(id);
+        // The Settings sign-in page is no Vibe session; only its own account commands reach it.
+        if id == crate::browser_accounts::ACCOUNT_PAGE {
+            return Err(crate::browser_accounts::user_only());
+        }
         // The New chat screen's owner and a folder's own key (`files-workspace:<folder>`: the Files tab and its Commit
         // dialog before any chat) are not Vibe sessions: there is no lease to hold and nothing to ask Vibe.
         // Vibe's `session/read` refuses these folder keys as invalid session ids.

@@ -108,7 +108,7 @@ Settings > Updates checks the announced macOS version, Windows build or glibc ve
 
 Updates are signed and installed when you click Install and restart. How to check a download's checksum and
 signature: [docs/public/RELEASE_VERIFICATION.md](docs/public/RELEASE_VERIFICATION.md). Vibe Work installs the Vibe versions it has been
-tested with (3.0.2 for this release); newer tested versions arrive through a signed list, without a new app release.
+tested with (3.0.3 for this release); newer tested versions arrive through a signed list, without a new app release.
 
 ## Send files or text to a chat
 
@@ -166,15 +166,15 @@ Requirements: Rust 1.99.0 (pinned by `rust-toolchain.toml`), Node 22 or later, p
 A development build starts Vibe from a `data/` folder in the repository (git-ignored):
 
 ```sh
-# The pinned Vibe (version in tools/public/codegen/vibe.pin), hash-locked like the app installs it, in data/vibe-3.0.2/venv.
-uv venv --python 3.14.8 data/vibe-3.0.2/venv
-uv pip install --python data/vibe-3.0.2/venv --require-hashes --only-binary :all: -r crates/vw-vibe-install/pin/vibe.requirements.txt
+# The pinned Vibe (version in tools/public/codegen/vibe.pin), hash-locked like the app installs it, in data/vibe-3.0.3/venv.
+uv venv --python 3.14.8 data/vibe-3.0.3/venv
+uv pip install --python data/vibe-3.0.3/venv --require-hashes --only-binary :all: -r crates/vw-vibe-install/pin/vibe.requirements.txt
 # The included minimal Vibe config is copied into each run folder; your own ~/.vibe stays untouched.
 mkdir -p data/vibe-home-template
 cp tools/public/dev/vibe-config.template.toml data/vibe-home-template/config.toml
 
 pnpm install --frozen-lockfile
-VW_DEV_SERVER_BIN="$PWD/data/vibe-3.0.2/venv/bin/vibe-app-server" VW_DEV_KEYS=1 pnpm tauri dev
+VW_DEV_SERVER_BIN="$PWD/data/vibe-3.0.3/venv/bin/vibe-app-server" VW_DEV_KEYS=1 pnpm tauri dev
 ```
 
 `VW_DEV_SERVER_BIN`, `VW_DEV_HOME_TEMPLATE` and `VW_DEV_RUN_DIR` (absolute paths) override the Vibe program, the

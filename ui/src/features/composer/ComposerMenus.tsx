@@ -14,7 +14,7 @@ import { Selector } from "../../components/Selector";
 
 import type { AccessMode } from "./model/access";
 import type { ModelChoice } from "./model/models";
-import { thinkingRequest, THINKING_LEVELS } from "./model/models";
+import { THINKING_LEVELS } from "./model/models";
 import { itemDescription, itemName, itemRuns, type MenuItem } from "./model/slash";
 import { modelTerm, TEXT, thinkingTerm, wording } from "../../vocabulary";
 
@@ -134,10 +134,6 @@ export function ModelMenu({
             value: level,
             label: thinkingTerm(level).name,
             tooltip: thinkingTerm(level).tooltip,
-            description: thinkingRequest(
-              models.find((model) => model.alias === alias),
-              level,
-            ),
           })),
         ]}
       />

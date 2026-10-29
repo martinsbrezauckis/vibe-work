@@ -9,6 +9,8 @@
 export type { JsonValue, Unrecognized } from "./support";
 export type * from "./account";
 export type * from "./agents";
+export type * from "./artifacts_1";
+export type * from "./artifacts_2";
 export type * from "./callback";
 export type * from "./client_tool";
 export type * from "./common_agents";

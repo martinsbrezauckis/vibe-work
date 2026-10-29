@@ -1,5 +1,6 @@
 //! Browser chrome handoff: park the selected native child while HTML menus cover its slot.
 //! Depends on the preview registry, layout lock and engine visibility seam; called by the core's Browser overlay op.
+//! A handoff request of a replaced main document changes nothing (`PlacementGate`).
 
 use super::{PreviewError, PreviewService};
 use crate::engine::MountId;
@@ -65,6 +66,9 @@ impl PreviewService {
         page: &str,
     ) -> Result<BrowserOverlayPrepared, PreviewError> {
         let _layout = self.layout_op.lock().await;
+        if self.stale_window_layout() {
+            return Err(PreviewError::NotInView);
+        }
         let _activity = self.session_lock(page).await;
         let (id, bounds) = self.overlay_target(owner, page)?;
         let loads = self
@@ -104,6 +108,9 @@ impl PreviewService {
     /// Returns an error if preparation is stale or the native child cannot be hidden.
     pub async fn show_browser_overlay(&self, owner: &str, page: &str) -> Result<(), PreviewError> {
         let _layout = self.layout_op.lock().await;
+        if self.stale_window_layout() {
+            return Ok(());
+        }
         let (id, bounds) = self.overlay_target(owner, page)?;
         let (current, prepared) = {
             let state = self.inner.lock();
@@ -148,7 +155,8 @@ impl PreviewService {
     /// Returns an error if the native child cannot be restored, placed or reparked.
     pub async fn close_browser_overlay(&self, owner: &str, page: &str) -> Result<(), PreviewError> {
         let _layout = self.layout_op.lock().await;
-        if self.inner.lock().owner_of(page) != owner {
+        // A replaced document's menu never ends a handoff of the document that replaced it.
+        if self.stale_window_layout() || self.inner.lock().owner_of(page) != owner {
             return Ok(());
         }
         let label = self.inner.lock().browser_overlays.get(page).cloned();

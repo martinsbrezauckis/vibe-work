@@ -1,10 +1,9 @@
 /**
  * The transcript of one session: the session's history as rows (`model/build.ts`) in a
- * virtualised list (`virtua` 0.53.3 `VList`), the pinned todo strip, "Jump to latest", the link
- * dialog and Quote in reply for a selection in an answer (`useQuoteMenu`). Prompts are announced by the
+ * virtualised list (`virtua` 0.53.3 `VList`), the pinned todo strip, "Jump to latest" and Quote in reply for a selection in an answer (`useQuoteMenu`). Prompts are announced by the
  * app's announcer (`features/ask/askAnnouncements.ts`), not here; a card that "Go to the waiting prompt" asks
  * for is scrolled into view.
- * Depends on: model (memo, todos), rows/RowView, useFollow, TodoStrip, LinkDialog, the ask card focus requests,
+ * Depends on: model (memo, todos), rows/RowView, useFollow, TodoStrip, the ask card focus requests,
  * the core and transcript stores. Called by: the shell's content area (keyed by session id, so switching sessions
  * starts fresh).
  * Invariants: the component reads the store only; a session the app knows only from the listing is
@@ -25,7 +24,6 @@ import { useCoreState } from "../shell/hooks";
 import { useTranscriptUi } from "./hooks";
 import { useStepTarget } from "./useStepTarget";
 import { FindBar } from "./FindBar";
-import { LinkDialog } from "./LinkDialog";
 import { SourcesPanel } from "./SourcesPanel";
 import type { Row } from "./model/build";
 import { createTranscriptBuilder } from "./model/memo";
@@ -164,7 +162,6 @@ export function Transcript({ sessionId }: { sessionId: string }): ReactElement {
         )}
         {/* Not while a page covers the work view: the page shows its own content. */}
         {!covered && <SourcesPanel />}
-        {!covered && <LinkDialog />}
       </div>
     </FileRefsProvider>
   );

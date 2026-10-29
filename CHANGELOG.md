@@ -2,9 +2,9 @@
 
 All notable changes to Vibe Work. Versions follow [Semantic Versioning](https://semver.org/); dates are UTC.
 
-## 0.1.2 (2026-10-28)
+## 0.1.2 (2026-10-29)
 
-Built for Vibe 3.0.2 on Python 3.14.8. This release adds files and history, editors side by side and clearer permissions.
+Built for Vibe 3.0.3 on Python 3.14.8. This release adds files and history, editors side by side and clearer permissions.
 
 - Files tab: browse your project's folders, search file names and text, and open a result at its line. History shows
   who saved each version, when, what changed and what has not been published. The Git tab's actions are here too.
@@ -12,8 +12,8 @@ Built for Vibe 3.0.2 on Python 3.14.8. This release adds files and history, edit
   Changes. Send your first message when you want Vibe to join you; what you opened stays open.
 - Editors: each file has its own tab; Open to the side puts two files beside each other. Compare with saved version
   shows the saved text beside your edits. Settings > Appearance > Open files in also offers One File tab.
-- Edit together: Vibe can read your open file and selection. Its changes appear with marked lines; edits on different
-  lines merge with yours, and changes to the same lines offer Keep yours, Take Vibe's or Compare side by side.
+- Edit together: Vibe can read this chat's open files and selection. Its changes appear with marked lines; edits on
+  different lines merge with yours, and changes to the same lines offer Keep yours, Take Vibe's or Compare side by side.
   Settings > General > Save open files before Vibe works is on by default.
 - File previews: HTML and Markdown open as a preview, with Edit and Preview to the side; pictures and PDFs open as
   previews. Choose how HTML and Markdown open in Settings > Appearance.
@@ -29,6 +29,7 @@ Built for Vibe 3.0.2 on Python 3.14.8. This release adds files and history, edit
 - Prompt windows for a chat's Git, vault and saved-login requests keep the rest of the app usable: you can work in
   other chats while one waits. The chat that asked waits until you answer.
 - After a restart, only turns that did not finish are marked Interrupted.
+- A new message, /clear, /rewind or Undo turn right after a reply ends no longer fails on a busy computer.
 - Windows: Stop also ends programs that Vibe's Git Bash commands started, including ones left in the background.
   A program started in the background inside one command now ends with that command, as on macOS and Linux;
   servers that should keep running are started through Vibe Work's process list.
@@ -64,8 +65,8 @@ Built for Vibe 3.0.2 on Python 3.14.8. This release adds files and history, edit
   loops until it is reopened. Deleting a loop updates that chat's loop label and leaves other chats' loops alone.
 - Provider errors offer a plain explanation and details with stored secrets removed.
 - Secret commands on Windows use the agent shell’s tool folders.
-- Thinking Off turns off the reasoning response on supported Mistral models. The picker explains what each level
-  sends, including when Off and Low are the same.
+- Thinking Off turns off the reasoning response on supported Mistral models. The picker offers the levels the
+  model takes; a level kept from earlier settings that the model does not take is sent as the nearest one it takes.
 - Vibe 3: clearer file-search results, exact edit previews, compaction progress and the selected model's context
   limit. Vibe can wait for permission answers and secret commands, then continue when they are ready.
 - Stop during compaction: the composer now says that Vibe finishes compacting in the background and that your next
@@ -95,8 +96,9 @@ Built for Vibe 3.0.2 on Python 3.14.8. This release adds files and history, edit
 - Chat deletion finishes removing saved files, and retries unfinished removal the next time Vibe Work starts.
 - Vibe checks HTTPS certificates with your system's certificate store, so it follows the trust decisions of your
   operating system and accepts company certificate authorities installed there.
-- Updating from 0.1.1 installs Python 3.14 and Vibe 3.0 on first start. Vibe 3 reads older sessions; Vibe 2.26.1
-  cannot read sessions saved by Vibe 3, including sessions shared with your own command-line installation.
+- Updating from 0.1.1 installs Python 3.14 and Vibe 3.0.3 on first start. Vibe 3.0.3 reads older sessions; Vibe 2.26.1
+  and earlier Vibe 3.0 releases cannot read sessions saved by Vibe 3.0.3, including sessions shared with your own
+  command-line installation.
 - Confirmation windows support the keyboard and desktop accessibility controls, with Cancel, Don't allow or Keep
   selected first.
 - Changes to Vibe's settings, skills and agent profiles can be proposed for your review: the card shows each file's
@@ -126,7 +128,10 @@ Built for Vibe 3.0.2 on Python 3.14.8. This release adds files and history, edit
   or No; the card names the file and page count when known, and says when its pages go to Mistral OCR.
   Allow once attaches and reads that document.
 - Windows: file tools accept Git Bash drive paths, and commands that name them (`/c/Users/...`) get the same folder
-  protections as native Windows paths.
+  protections as native Windows paths, also when written with forward slashes (`C:/Users/...`) or in another
+  letter case.
+- Plugins: Remove and Turn off also end a plugin's approval when Vibe Work's data folder is reached through a link
+  or spelled in another case.
 - Read aloud on request: ask Vibe to read its last reply aloud once, with Skip and Stop, using your Narration voice
   without switching on voice chat or automatic narration.
 - Power: Settings > General > Power > Keep this computer awake while Vibe is working is on by default. The screen
@@ -140,7 +145,8 @@ Built for Vibe 3.0.2 on Python 3.14.8. This release adds files and history, edit
   the kept key. If you had turned Remember on this computer off, this switch starts on.
 - Updates check the required macOS version, Windows build or Linux system library (glibc) before downloading. If
   your system is too old, Settings > Updates says what is needed. Copies installed from a .deb point to the download
-  page. Updates also clean up old installer files and keep the Settings buttons in view.
+  page. Updates also clean up old installer files and keep the Settings buttons in view. An update installs only
+  when its signature names the version that was offered.
 - Many smaller improvements: long pastes fold into a Pasted text chip you can open; chat and side-panel headers
   line up; handbook answers take one line until you choose Show answers; warnings stay in their corner; the Full
   access warning appears when you raise access; setup accepts a replacement for a rejected key with fewer steps;

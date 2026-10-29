@@ -1,5 +1,5 @@
 //! Bridges the gap between Vibe publishing an idle turn and releasing its active task.
-//! Uses the gate and session store; dispatch retries only a conflict naming that exact finished turn.
+//! Uses the gate and session store; any call is retried only on a conflict naming that exact finished turn.
 //! Authorized failed deletes are completed by `session_delete`, without resending a destructive request.
 //! Also the one place every forwarded call passes: it records a chat's work as started before sending it, and
 //! a checked app continuation's Stop test runs here, right before each attempt is sent (`stops.rs`).
@@ -26,7 +26,7 @@ pub(crate) async fn call(
     // Work is marked started before it is sent (any doubt = started); only a refusal from before the send undoes it
     // (`plugin_refresh::unstarted`). Dropping this future keeps the mark.
     let admission = shared.plugin_refresh.admission(method, params);
-    let deadline = Instant::now() + Duration::from_secs(1);
+    let deadline = Instant::now() + RELEASE_WAIT;
     let mut retry = false;
     loop {
         // No await between this test and the send it guards: a Stop after it waits for the chat's send lock.
@@ -44,8 +44,7 @@ pub(crate) async fn call(
         if let Ok(reply) = &result {
             crate::stops::sent(shared, stop, at_send, method, params, &reply.result);
         }
-        let closing = method == "turn/start"
-            && token.is_none()
+        let closing = token.is_none()
             && result.as_ref().err().is_some_and(|error| {
                 params["sessionId"]
                     .as_str()
@@ -63,6 +62,12 @@ pub(crate) async fn call(
     }
 }
 
+/// How long a call refused for a turn that already finished waits for that turn's release, which takes longer on a
+/// busy computer. Only that exact refusal waits, so a call that ran is never sent twice.
+const RELEASE_WAIT: Duration = Duration::from_secs(5);
+
+/// Vibe refused the call (any method: a refusal ran nothing) because the idle session's last turn, already
+/// finished, still holds its task.
 fn finished_conflict(state: &Value, error: &GateError) -> bool {
     let GateError::Transport(RpcError::Remote { error, .. }) = error else {
         return false;
@@ -70,13 +75,17 @@ fn finished_conflict(state: &Value, error: &GateError) -> bool {
     let Some(data) = error.data.as_option() else {
         return false;
     };
-    if error.code.as_str() != "conflict"
-        || data["harnessCode"] != "turn_conflict"
-        || state["session"]["status"]["type"] != "idle"
-    {
+    if error.code.as_str() != "conflict" || state["session"]["status"]["type"] != "idle" {
         return false;
     }
-    let Some(active) = data["details"]["active_turn_id"].as_str() else {
+    // The harness names the turn in `details` (turn/start); the session backend as `activeTurnId` (history clear,
+    // rewind and other calls that need an idle session).
+    let active = if data["harnessCode"] == "turn_conflict" {
+        data["details"]["active_turn_id"].as_str()
+    } else {
+        data["activeTurnId"].as_str()
+    };
+    let Some(active) = active else {
         return false;
     };
     state["turns"]
@@ -119,5 +128,39 @@ mod tests {
         state["session"]["status"]["type"] = json!("idle");
         state["turns"][0]["status"] = json!("in_progress");
         assert!(!finished_conflict(&state, &error("conflict", "finished")));
+    }
+
+    /// Calls such as `session/history/clear` are refused by the session backend, with the turn as `activeTurnId`
+    /// and no harness code (a clear right after a turn ended, on a busy computer).
+    #[test]
+    fn a_session_backend_refusal_for_the_finished_turn_can_be_retried() {
+        let error = |code: &str, data: Value| {
+            GateError::Transport(RpcError::Remote {
+                method: "session/history/clear".into(),
+                error: serde_json::from_value(
+                    json!({"code":code,"message":"A turn is already running: finished","data":data}),
+                )
+                .unwrap(),
+            })
+        };
+        let mut state = json!({"session":{"status":{"type":"idle"}},"turns":[{"id":"finished","status":"completed"}]});
+        assert!(finished_conflict(
+            &state,
+            &error("conflict", json!({"activeTurnId":"finished"}))
+        ));
+        assert!(!finished_conflict(
+            &state,
+            &error("conflict", json!({"activeTurnId":"another"}))
+        ));
+        assert!(!finished_conflict(
+            &state,
+            &error("internal_error", json!({"activeTurnId":"finished"}))
+        ));
+        assert!(!finished_conflict(&state, &error("conflict", json!({}))));
+        state["turns"][0]["status"] = json!("in_progress");
+        assert!(!finished_conflict(
+            &state,
+            &error("conflict", json!({"activeTurnId":"finished"}))
+        ));
     }
 }

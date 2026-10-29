@@ -225,7 +225,10 @@ pub fn read_listed_within(
                 let mut file = archive
                     .by_index(index)
                     .map_err(|e| refuse(format!("unreadable member: {e}")))?;
-                let path = file.name().to_owned();
+                let path = file
+                    .name()
+                    .map_err(|e| refuse(format!("unreadable member: {e}")))?
+                    .into_owned();
                 let is_link = file.unix_mode().is_some_and(|m| m & 0o170_000 == 0o120_000);
                 let kind_ok = file.is_file() && !is_link;
                 let size = file.size();

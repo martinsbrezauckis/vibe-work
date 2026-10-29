@@ -92,9 +92,7 @@ impl PagesService {
             viewer.loading = crate::service::navigates(state.mount.as_ref(), session, &viewer);
             state.viewers.insert(session.to_owned(), viewer);
         }
-        let shown = self.shared.lock().shown.clone();
-        if let Some((shown_session, rect)) = shown.filter(|(s, _)| s == session) {
-            self.show(&shown_session, rect).await?;
+        if self.show_current(Some(session)).await? {
             let _ =
                 tokio::time::timeout(self.config.load_wait, loads.wait_for(|n| *n > before)).await;
         }

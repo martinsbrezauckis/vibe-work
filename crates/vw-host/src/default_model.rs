@@ -19,9 +19,10 @@ const OUTPUT_PRICE: f64 = 2.09;
 // The completion limit the Mistral API enforces for mistral-large-4 (a larger `max_tokens` is
 // rejected with HTTP 400 "This model supports at most 262144 completion tokens",
 // while `GET /v1/models/mistral-large-4` reports `max_output_tokens: null`).
-// Vibe 3.0.1+ sends `max_tokens = context window - estimated input` when a model has no
+// Vibe 3.0.1 and 3.0.2 sent `max_tokens = context window - estimated input` when a model had no
 // `max_output_tokens`, which for the 1,000,000 window is about 987k, so every turn failed.
-// With the cap it sends min(262144, room left in the window): no tighter than the API itself.
+// Vibe 3.0.3 sends no `max_tokens` to Mistral unless a request sets its own; the value stays as
+// the model's real completion limit, which Vibe passes on as a model fact.
 const MAX_OUTPUT_TOKENS: i64 = 262_144;
 
 const FIRST_CONFIG: &str = "active_model = \"large-4\"\n\n\

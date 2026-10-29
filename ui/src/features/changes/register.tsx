@@ -45,11 +45,13 @@ export function registerChangesTab(app: App): () => void {
     const finished = (shownStatus === "running" || shownStatus === "blocked") && status === "idle";
     const started = shownStatus === "idle" && status === "running";
     shownStatus = status;
-    if (selected !== shown) {
-      shown = selected;
+    // A chosen stored session is read once it is open: until then the core has nothing to answer.
+    const open = entry?.state === null ? null : selected;
+    if (open !== shown) {
+      shown = open;
       shownBar = undefined;
-      if (selected !== null) void changes.load(selected);
-      if (selected !== null && git !== null) void git.load(selected);
+      if (open !== null) void changes.load(open);
+      if (open !== null && git !== null) void git.load(open);
     } else if ((started || finished) && selected !== null && git !== null) {
       // Turn boundaries can change the commit guard without changing any files.
       void git.load(selected);

@@ -289,13 +289,13 @@ active: string | null,
  */
 editors: Array<PanelEditor>, 
 /**
- * The Files tab, when it is open.
+ * The Files tab, when it is open and shows this session's folder.
  */
 files: PanelFiles | null, };
 
 export type PanelEditor = { 
 /**
- * The path the tab's tooltip shows (relative to the session folder when inside it).
+ * The file's full path (the shown path while the session's folder is unknown).
  */
 path: string, 
 /**

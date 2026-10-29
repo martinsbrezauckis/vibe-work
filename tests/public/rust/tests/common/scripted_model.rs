@@ -1,10 +1,10 @@
 //! The scripted model: a stand-in on 127.0.0.1 where Mistral's API would be, so the REAL Vibe runs real
 //! turns that stay deterministic, free and key-free. Vibe itself is never replaced: only the model's answers are.
 //!
-//! Wire, as the pinned Vibe 3.0.2 speaks it (the versioned Python 3.14 environment):
+//! Wire, as the pinned Vibe 3.0.3 speaks it (the versioned Python 3.14 environment):
 //! - Vibe's `mistral` backend streams every agent turn with `chat.stream_async` (`vibe/core/llm/backend/mistral.py:570`)
 //!   and makes side calls (titles, summaries) with `chat.complete_async` (`mistral.py:488`);
-//! - the SDK (mistralai 2.6.0) posts both to `<server>/v1/chat/completions` (`mistralai/client/chat.py:236` and `:624`,
+//! - the SDK (mistralai 3.5.0) posts both to `<server>/v1/chat/completions` (`mistralai/client/chat.py:236` and `:624`,
 //!   the streamed one as server-sent events `data: <CompletionChunk>` ended by `data: [DONE]`);
 //! - `<server>` is the provider's `api_base` without its `/v<N>` suffix (`vibe/utils/http.py:223`), so the provider
 //!   gets `api_base = <base>/v1`; usage comes from each chunk's `usage` (`mistral.py:604`).

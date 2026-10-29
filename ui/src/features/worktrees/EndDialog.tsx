@@ -1,6 +1,7 @@
 /**
  * Explicit copy removal: shows unsaved work, branch outcome and blockers before the native confirmation.
- * Depends on state/worktrees, model and modal focus; mounted by shell/Content. Cancel changes nothing.
+ * Depends on state/worktrees, model and modal focus; mounted by shell/Shell, outside the chat column, because the
+ * Changes tab asks it from the side panel, which a maximized panel leaves as the only visible area. Cancel changes nothing.
  */
 import { PathLine } from "../../components/PathLine";
 import { Button } from "../../components/Controls";

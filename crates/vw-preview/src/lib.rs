@@ -34,6 +34,7 @@ mod names;
 mod native_click;
 mod navigation;
 mod page_init;
+mod placement_gate;
 mod policy;
 mod preview_error;
 mod service;
@@ -66,6 +67,7 @@ pub use names::{
 };
 pub use native_click::{NativeClickGuard, NativeClickPoint};
 pub use page_init::{MENU_TOKENS, page_accessor, page_init_script, page_init_script_themed};
+pub use placement_gate::{PlacementGate, for_window_generation};
 
 /// The all-frames document-start script that removes WebRTC (`js/no_peer_connections.js`). The engine adds it
 /// for mounts with [`MountSpec::no_peer_connections`].

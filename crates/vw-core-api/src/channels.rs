@@ -471,9 +471,10 @@ impl Channels {
         locked(&self.inner).imported.insert(from.into(), to.into());
     }
 
-    /// Attached requests follow an imported conversation; stored-history operations keep their own id.
+    /// Attached requests follow an imported conversation; stored-history operations keep their own id. A runtime
+    /// read is answered only for the attached session, so it follows too (it does not reopen a session itself).
     pub(crate) fn canonical_params(&self, method: &str, params: &mut Value) {
-        if crate::routing::needs_channel(method, params).is_none() {
+        if method != "runtime/read" && crate::routing::needs_channel(method, params).is_none() {
             return;
         }
         if let Some(id) = params["sessionId"].as_str() {
@@ -765,5 +766,13 @@ mod tests {
             channels.canonical_params(method, &mut params);
             assert_eq!(params["sessionId"], "imported-id", "{method}");
         }
+        // A composer's runtime read for the chosen row follows the conversation to its new id too: under the old
+        // id it would go to the lobby, which refuses it. Stored-history reads keep their own id.
+        let mut params = serde_json::json!({"sessionId": "cli-id"});
+        channels.canonical_params("runtime/read", &mut params);
+        assert_eq!(params["sessionId"], "imported-id", "runtime/read");
+        let mut params = serde_json::json!({"sessionId": "cli-id"});
+        channels.canonical_params("session/read", &mut params);
+        assert_eq!(params["sessionId"], "cli-id", "session/read");
     }
 }

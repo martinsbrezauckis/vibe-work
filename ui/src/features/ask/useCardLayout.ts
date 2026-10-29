@@ -34,6 +34,17 @@ export function focusCard(card: HTMLDivElement | null): void {
   card.scrollIntoView({ block: "nearest" });
 }
 
+/**
+ * "Go to the waiting prompt": focuses and reveals the card, then ends a scroll still running in the transcript.
+ * A keyboard scroll (Home, PageUp) animates, and an instant reveal does not stop that animation, so the list would
+ * carry the card away afterwards. A smooth scroll to the revealed position replaces it without moving the list.
+ */
+export function jumpToCard(card: HTMLDivElement | null): void {
+  focusCard(card);
+  const list = card?.closest<HTMLElement>(".tx-list");
+  list?.scrollTo({ top: list.scrollTop, behavior: "smooth" });
+}
+
 /** Reveals the focused answer inside each scroll frame. */
 export function revealCardControl(target: HTMLElement): void {
   if (!target.matches("input,textarea,select,button")) return;

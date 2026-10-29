@@ -42,15 +42,11 @@ fn command(script: &str) -> Command {
 struct Scratch(PathBuf);
 
 impl Scratch {
-    /// Below the resolved temporary folder on Unix: Vibe reports resolved plugin paths, and the macOS temporary
-    /// folder lies below the `/var` link. Windows keeps the folder as given (resolving adds the `\\?\` prefix).
+    /// Below the resolved temporary folder, in its plain spelling (no `\\?\` prefix): Vibe reports resolved plugin
+    /// paths. The macOS temporary folder lies below the `/var` link; a Windows `%TEMP%` can be an 8.3 alias
+    /// (`C:\Users\RUNNER~1\...`), which Vibe reports in its long form.
     fn new(label: &str) -> Self {
-        let base = std::env::temp_dir();
-        let base = if cfg!(unix) {
-            base.canonicalize().unwrap()
-        } else {
-            base
-        };
+        let base = vw_platform::canonical_plain(&std::env::temp_dir()).unwrap();
         let path = base.join(format!(
             "vw-{label}-test-{}-{}",
             std::process::id(),

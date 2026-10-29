@@ -12,7 +12,8 @@ use crate::core::Shared;
 use crate::error::{CoreError, ErrorCode};
 use crate::previews::hub;
 
-/// A reserved browser entry that is never a loaded agent session.
+/// A reserved browser entry (the Settings sign-in page) that is never a loaded agent session: it is never named to
+/// Vibe, and its changes are not announced as a session's.
 pub(crate) const ACCOUNT_PAGE: &str = "\0signed-in-accounts";
 
 fn failure(error: impl std::fmt::Display) -> CoreError {
@@ -22,6 +23,11 @@ fn failure(error: impl std::fmt::Display) -> CoreError {
 /// Reports a wiring error if an account command escaped its dedicated handler.
 pub(crate) fn unhandled() -> CoreError {
     CoreError::new(ErrorCode::Internal, "account request was not handled")
+}
+
+/// The refusal of any request that names the reserved page as a session.
+pub(crate) fn user_only() -> CoreError {
+    failure("this sign-in page is for the user only")
 }
 
 /// Refuses tooling access to the reserved page where the user signs in by hand.
@@ -51,7 +57,7 @@ pub(crate) fn admit(request: &BrowserRequest) -> Result<(), CoreError> {
         _ => None,
     };
     if session == Some(ACCOUNT_PAGE) {
-        return Err(failure("this sign-in page is for the user only"));
+        return Err(user_only());
     }
     Ok(())
 }

@@ -314,8 +314,8 @@ pub fn unpack_uv(archive: &Path, kind: &str, dir: &Path) -> Result<PathBuf, Fetc
             let mut zip = zip::ZipArchive::new(file).map_err(|e| bad(&e.to_string()))?;
             for index in 0..zip.len() {
                 let mut entry = zip.by_index(index).map_err(|e| bad(&e.to_string()))?;
-                let name = entry
-                    .name()
+                let name = entry.name().map_err(|e| bad(&e.to_string()))?;
+                let name = name
                     .rsplit(['/', '\\'])
                     .next()
                     .unwrap_or_default()

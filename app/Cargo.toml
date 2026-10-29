@@ -73,9 +73,9 @@ tauri = { version = "2.12.1", features = ["test"] }
 make-latest-json = { path = "../tools/public/update-manifest" }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-tauri-plugin-updater = { version = "=2.13.2", default-features = false, features = ["rustls-tls", "system-proxy"] }
+tauri-plugin-updater = { version = "=2.14.1", default-features = false, features = ["rustls-tls", "system-proxy"] }
 # Confirmation windows need a handle so cancellation can close the GTK dialog.
 gtk = "0.18"
 
 [target.'cfg(not(target_os = "linux"))'.dependencies]
-tauri-plugin-updater = { version = "=2.13.2", default-features = false, features = ["native-tls", "system-proxy", "zip"] }
+tauri-plugin-updater = { version = "=2.14.1", default-features = false, features = ["native-tls", "system-proxy", "zip"] }

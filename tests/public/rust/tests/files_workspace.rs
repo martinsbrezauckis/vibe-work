@@ -175,8 +175,27 @@ async fn a_picked_folder_opens_in_the_dialog_spelling_and_nothing_beside_it_does
     ];
     if cfg!(windows) {
         let text = dialog.to_string_lossy().into_owned();
-        refused.push(std::path::PathBuf::from(text.to_uppercase()));
-        refused.push(std::path::PathBuf::from(text.to_lowercase()));
+        // Other-case spellings change the names below the drive: a drive letter names the same drive in either case,
+        // while a folder can be case-sensitive. A path already in lower case (the CI runner's `D:\a\...`) has no
+        // lower-case spelling that differs there, so only spellings that differ are refused.
+        let (drive, rest) = text.split_at(2);
+        for other in [rest.to_uppercase(), rest.to_lowercase()] {
+            if other != rest {
+                refused.push(std::path::PathBuf::from(format!("{drive}{other}")));
+            }
+        }
+        // The drive letter in the other case names the same folder: it lists like the dialog's spelling.
+        let letter = text.chars().next().unwrap_or_default();
+        let other = if letter.is_ascii_uppercase() {
+            letter.to_ascii_lowercase()
+        } else {
+            letter.to_ascii_uppercase()
+        };
+        let flipped = format!("{other}{}", &text[1..]);
+        assert!(
+            run(&rig, explore(&flipped)).await.is_ok(),
+            "{flipped}: the drive letter in the other case names the same folder"
+        );
         let drive = if text.starts_with(['Z', 'z']) {
             'Y'
         } else {

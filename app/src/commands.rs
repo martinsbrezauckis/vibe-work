@@ -29,7 +29,7 @@ pub async fn core_execute(
     host: State<'_, HostHandle>,
     command: Command,
 ) -> Result<CommandResult, CoreError> {
-    host.get_for_window().await.execute_window(command).await
+    host.execute_window(command).await
 }
 
 /// Starts (or restarts) the event stream into `events`: first a snapshot of every loaded session,

@@ -299,6 +299,7 @@ pub use connectors_view::{
     NewServerSecret, ServerKeyView, ServerView, ToolView,
 };
 pub use core::{Core, CoreConfig, CoreStartError};
+pub use core_viewers::for_window_generation;
 pub use dictation::SpeechConfig;
 pub use documents::DocumentsConfig;
 pub use documents_view::{

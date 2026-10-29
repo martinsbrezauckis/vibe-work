@@ -222,6 +222,22 @@ fn thinking_levels_match_the_vibe_wire_values_in_both_directions() {
 }
 
 #[test]
+fn a_later_vibes_thinking_level_never_fails_a_model_answer() {
+    let model: ModelConfigView = serde_json::from_value(json!({"name":"m", "alias":"a", "thinking":"xhigh",
+        "thinkingLevels":["off","xhigh","future-level"], "supportsImages":false, "displayName":"fixture-model"}))
+    .unwrap();
+    assert_eq!(model.thinking, ThinkingLevel::Xhigh);
+    assert_eq!(
+        model.thinking_levels,
+        vec![
+            ThinkingLevel::Off,
+            ThinkingLevel::Xhigh,
+            ThinkingLevel::Unrecognized
+        ]
+    );
+}
+
+#[test]
 fn missing_required_fields_and_wrong_known_types_are_rejected() {
     // Vibe 3.0.2: every `skills/list` field is optional (a session-less list), so only a wrong type fails.
     assert!(serde_json::from_value::<SkillsListParams>(json!({"sessionId": 1})).is_err());

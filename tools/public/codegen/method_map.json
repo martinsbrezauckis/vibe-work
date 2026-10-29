@@ -1,5 +1,5 @@
 {
-  "_comment": "Method -> Pydantic model name table for Vibe app-server 3.0.2. Vibe has no central registry (the server dispatches with match statements), so this table is our own data, derived from the dispatch code and live-validated by the protocol bench. generate.py fails on drift: every name in protocol.SERVER_METHODS must be a key of `requests`, every key must be a real method, and every model name must exist. A null model means Vibe declares none for that side.",
+  "_comment": "Method -> Pydantic model name table for Vibe app-server 3.0.3. Vibe has no central registry (the server dispatches with match statements), so this table is our own data, derived from the dispatch code and live-validated by the protocol bench. generate.py fails on drift: every name in protocol.SERVER_METHODS must be a key of `requests`, every key must be a real method, and every model name must exist. A null model means Vibe declares none for that side.",
   "requests": {
     "initialize": {
       "params": "InitializeParams",
@@ -20,6 +20,18 @@
     "agents/uninstall": {
       "params": "AgentInstallParams",
       "result": "AgentsListResponse"
+    },
+    "artifacts/list": {
+      "params": "ArtifactsListParams",
+      "result": "ArtifactsListResponse"
+    },
+    "artifacts/markViewed": {
+      "params": "ArtifactsMarkViewedParams",
+      "result": "EmptyResponse"
+    },
+    "artifacts/sync": {
+      "params": "ArtifactsSyncParams",
+      "result": "EmptyResponse"
     },
     "callback/result": {
       "params": "CallbackResultParams",
@@ -647,7 +659,9 @@
     "connector_catalog/authUrl": "ConnectorAuthUrlParams",
     "connector_catalog/authFailed": "ConnectorAuthFailedParams",
     "vibeCode/teleport/event": "TeleportEventParams",
-    "imports/updated": "ImportJobUpdatedParams"
+    "imports/updated": "ImportJobUpdatedParams",
+    "artifacts/created": "ArtifactCreatedParams",
+    "artifacts/updated": "ArtifactUpdatedParams"
   },
   "serverRequests": {
     "callback/call": {

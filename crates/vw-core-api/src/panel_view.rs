@@ -22,7 +22,7 @@ pub struct PanelView {
     pub active: Option<String>,
     /// The open editors.
     pub editors: Vec<PanelEditor>,
-    /// The Files tab, when it is open.
+    /// The Files tab, when it is open and shows this session's folder.
     pub files: Option<PanelFiles>,
 }
 
@@ -31,7 +31,7 @@ pub struct PanelView {
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct PanelEditor {
-    /// The path the tab's tooltip shows (relative to the session folder when inside it).
+    /// The file's full path (the shown path while the session's folder is unknown).
     pub path: String,
     /// The editor has focus (it receives the next opened file).
     pub focused: bool,

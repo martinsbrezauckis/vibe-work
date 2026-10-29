@@ -70,7 +70,7 @@ const PRIVACY_ON: &str = "Turn on data sharing with Mistral: usage telemetry and
 const MAX_OPS: usize = 16;
 
 /// Reasoning levels Vibe accepts (`ModelConfigView.thinkingLevels`).
-const REASONING_LEVELS: &[&str] = &["off", "low", "medium", "high", "max"];
+const REASONING_LEVELS: &[&str] = &["off", "low", "medium", "high", "xhigh", "max"];
 
 const CONFIG_WRITE_FIELDS: &[Field] = &[
     req("sessionId", Kind::Text(128)),

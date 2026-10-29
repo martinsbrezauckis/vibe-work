@@ -12,13 +12,15 @@ pub(super) enum PanelSelection {
 }
 
 impl PreviewService {
-    /// Hides every live child and forgets placements and chrome handoffs from the old main document.
+    /// Hides every live child and forgets placements and chrome handoffs from the documents before main-document
+    /// load `generation`; their window layouts that arrive later place nothing.
     /// Pages, tab selection, addresses and agent ownership remain alive.
     ///
     /// # Errors
     /// The first engine failure, after attempting to hide every child.
-    pub async fn reset_ui_placement(&self) -> Result<(), PreviewError> {
+    pub async fn reset_ui_placement(&self, generation: u64) -> Result<(), PreviewError> {
         let _layout = self.layout_op.lock().await;
+        self.placement_gate.advance(generation);
         self.select_browser_panel(None).await;
         let (pages, overlays) = {
             let mut state = self.inner.lock();
@@ -58,6 +60,16 @@ impl PreviewService {
             }
         }
         failure.map_or(Ok(()), Err)
+    }
+
+    /// A window layout of a main document a reset replaced: it places nothing. The caller holds `layout_op`, so
+    /// one admitted here finishes before the reset hides it.
+    pub(super) fn stale_window_layout(&self) -> bool {
+        let stale = !self.placement_gate.admits();
+        if stale {
+            tracing::debug!("layout ignored: its main document was replaced");
+        }
+        stale
     }
 
     /// The CSS viewport width this service lays `session_id`'s mounted page out at: its placement's width divided by

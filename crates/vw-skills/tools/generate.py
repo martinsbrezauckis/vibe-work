@@ -19,8 +19,11 @@ from pydantic import TypeAdapter
 
 CRATE = Path(__file__).resolve().parents[1]
 REPO = CRATE.parents[1]
-TAG = "3.0.2"
+TAG = "3.0.3"
 MODULES = ("protocol", "models", "config")
+# Value sets Vibe grows between versions (3.0.3 added `xhigh`): an unknown value decodes instead of failing the
+# whole answer. Only answers carry them; Vibe Work never sends `Unrecognized`.
+OPEN_ENUMS = {"ThinkingLevel"}
 METHODS = {
     "list": ("SkillsListParams", "SkillsListResponse"),
     "installed": ("SkillsInstalledParams", "SkillsInstalledResponse"),
@@ -97,6 +100,9 @@ def render(name, schema, classes):
         lines = [f"/// Vibe's `{name}` wire values.", "#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]", f"pub enum {ty} {{"]
         for value in schema.get("enum", [schema.get("const")]):
             lines += [f"    /// Wire value `{value}`.", f"    #[serde(rename = {json.dumps(value)})]", f"    {variant(value)},"]
+        if name in OPEN_ENUMS:
+            lines += ["    /// A value this Vibe version does not define (a later Vibe adds levels); decoding never fails on it.",
+                      "    #[serde(other)]", "    Unrecognized,"]
         return "\n".join(lines + ["}", ""])
     cls = classes[name]
     lines = [f"/// Vibe's `{name}` model; unknown extra fields are ignored.", "#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]", f"pub struct {ty} {{"]

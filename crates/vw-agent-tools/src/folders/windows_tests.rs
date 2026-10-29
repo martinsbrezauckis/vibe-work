@@ -382,13 +382,16 @@ fn git_bash_drive_paths_in_commands_meet_the_folder_guard() -> std::io::Result<(
     std::fs::create_dir_all(&cwd)?;
     let layout = Layout::new(&home, &cwd)?;
     let allow = |_: &Path, _: bool| -> Result<(), String> { Ok(()) };
-    let inside = msys(&home.join("x.txt"))?;
+    // The home as the product names it: resolved, which is also how the app gives it (`VIBE_HOME`). `%TEMP%` can be
+    // an 8.3 alias (`C:\Users\RUNNER~1\...`): a third spelling that neither the app nor Vibe hands out, and that
+    // the raw-text scan does not know.
+    let inside = msys(&vw_platform::canonical_plain(&home)?.join("x.txt"))?;
     for command in [
         format!("echo x > {inside}"),
         format!("touch '{inside}'"),
         format!("python -c \"open('{inside}', 'w').write('x')\""),
         format!("echo x > {}", inside.replacen("/c/", "/C/", 1)),
-        // A spelling the raw-text scan cannot match: only the redirect check sees it.
+        // Another case: the raw-text scan and the redirect check both see it.
         format!("echo x > {}", inside.to_lowercase()),
     ] {
         let refusal = check_command(&layout, &command, None, &allow);
@@ -404,6 +407,69 @@ fn git_bash_drive_paths_in_commands_meet_the_folder_guard() -> std::io::Result<(
         check_command(&layout, &format!("echo x > {outside}"), None, &allow),
         None
     );
+    Ok(())
+}
+
+// Windows names one folder in many spellings: Python code on Windows usually writes `C:/...`, a path can come in
+// another case, and separators can be mixed. Each still names the Vibe home inside quoted code.
+#[test]
+fn windows_spellings_of_the_home_in_quoted_code_meet_the_folder_guard() -> std::io::Result<()> {
+    let temp = TempTree::new()?;
+    let home = temp.root.join("data").join("vibe-home");
+    let cwd = temp.root.join("project");
+    std::fs::create_dir_all(&home)?;
+    std::fs::create_dir_all(&cwd)?;
+    let layout = Layout::new(&home, &cwd)?;
+    let allow = |_: &Path, _: bool| -> Result<(), String> { Ok(()) };
+    let native = vw_platform::canonical_plain(&home)?
+        .join("x.txt")
+        .to_string_lossy()
+        .into_owned();
+    let forward = native.replace('\\', "/");
+    let (drive, rest) = native
+        .split_once('\\')
+        .ok_or_else(|| std::io::Error::other("not a drive path"))?;
+    let mixed = format!(r"{drive}\{}", rest.replace('\\', "/"));
+    let mixed_other_way = format!("{drive}/{rest}");
+    let bash = msys(Path::new(&native))?;
+    let mut missed = Vec::new();
+    for path in [
+        forward.clone(),
+        forward.to_lowercase(),
+        forward.to_uppercase(),
+        native.clone(),
+        native.to_lowercase(),
+        mixed,
+        mixed_other_way,
+        bash.to_lowercase(),
+        bash.to_uppercase(),
+    ] {
+        for command in [
+            format!("python -c \"open(r'{path}', 'w').write('x')\""),
+            format!("python -c 'open(r\"{path}\", \"w\").write(\"x\")'"),
+        ] {
+            let refusal = check_command(&layout, &command, None, &allow);
+            if !refusal
+                .as_deref()
+                .is_some_and(|r| r.starts_with("Not run: Vibe Work's own"))
+            {
+                missed.push(format!("{command}: {refusal:?}"));
+            }
+        }
+    }
+    assert!(missed.is_empty(), "not refused:\n{}", missed.join("\n"));
+    let project = vw_platform::canonical_plain(&cwd)?
+        .join("ok.txt")
+        .to_string_lossy()
+        .replace('\\', "/");
+    for path in [project.clone(), project.to_lowercase()] {
+        let command = format!("python -c \"open('{path}', 'w').write('x')\"");
+        assert_eq!(
+            check_command(&layout, &command, None, &allow),
+            None,
+            "{command}"
+        );
+    }
     Ok(())
 }
 

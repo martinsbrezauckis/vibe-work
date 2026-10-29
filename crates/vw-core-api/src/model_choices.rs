@@ -217,7 +217,7 @@ fn load(file: &std::path::Path) -> std::io::Result<BTreeMap<String, Choice>> {
             || choice.alias.len() > 128
             || !matches!(
                 choice.effort.as_str(),
-                "off" | "low" | "medium" | "high" | "max"
+                "off" | "low" | "medium" | "high" | "xhigh" | "max"
             )
     }) {
         return Err(std::io::Error::other("invalid saved chat model choice"));

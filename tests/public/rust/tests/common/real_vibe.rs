@@ -124,6 +124,13 @@ pub fn supervisor_config(run: &Path, model: &ScriptedModel) -> SupervisorConfig 
             "keyring.backends.null.Keyring".into(),
         ));
     }
+    // On macOS Vibe keeps its secrets in the login keychain through the system `security` tool, whatever keyring
+    // backend is configured; its own test switch keeps every test away from the real keychain (`test_keyring`).
+    if cfg!(target_os = "macos") {
+        config
+            .extra_env
+            .push(("VIBE_TEST_DISABLE_KEYRING".to_owned(), "1".into()));
+    }
     // Match the existing public fixture's budget; no startup or request timeout is extended.
     config.handshake_timeout = std::time::Duration::from_secs(60);
     config.shutdown_grace = std::time::Duration::from_secs(1);

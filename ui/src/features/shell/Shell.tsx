@@ -1,6 +1,6 @@
 /**
  * The window frame: title bar, icon rail, list column, content, on-demand side panel, status bar,
- * the Settings page layer, the overlays (command palette, toasts) and the announcement regions. Layout is computed by `computeLayout`
+ * the Settings page layer, the overlays (command palette, toasts, the window-level dialogs) and the announcement regions. Layout is computed by `computeLayout`
  * (`computeLayout`) and applied as classes and one CSS variable (`--pw`).
  * Depends on: every shell component, hooks. Called by: main.tsx (inside `AppProvider`).
  * Invariants: components read the stores only; no layout arithmetic here beyond applying the
@@ -28,6 +28,8 @@ import { Toasts } from "./Toasts";
 import { WalkthroughCaption } from "./WalkthroughCaption";
 import { useProjects } from "../projects/hooks";
 import { DeleteProjectDialog } from "../sessions/DeleteProjectDialog";
+import { LinkDialog } from "../transcript/LinkDialog";
+import { EndDialog } from "../worktrees/EndDialog";
 import { UpdateNotice } from "../updates/UpdateNotice";
 import { VibeUpdateDialog } from "../updates/VibeUpdate";
 import { useLayout, useShellState } from "./hooks";
@@ -94,6 +96,8 @@ export function Shell() {
       <Announcer />
       <CommandPalette />
       <DeleteProjectDialog />
+      <LinkDialog />
+      <EndDialog />
       <VibeUpdateDialog />
     </PathHome.Provider>
   );

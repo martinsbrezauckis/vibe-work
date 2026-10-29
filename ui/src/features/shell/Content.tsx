@@ -5,7 +5,7 @@
  * Projects overview or the Tools page replace the view while open. Tools
  * stays available over key/vault and Vibe setup; a server's vault needs belong in its own detail.
  * When Vibe is not running the reason is shown in plain words. The worktree feature adds the header's copy chip, the startup
- * list of copies from deleted sessions and the end-of-session dialog.
+ * list of copies from deleted sessions (their end-of-session dialog is the window's, mounted by Shell).
  * Both chat views show KeyNotice whenever the Mistral key cannot be used, even after setup is skipped.
  * Depends on: AppContext, hooks, components/Icon, state/shellState, the transcript, composer, worktree, projects
  * and connectors features.
@@ -37,7 +37,6 @@ import { MarketplacePage } from "../marketplace/MarketplacePage";
 import { useMarket } from "../marketplace/hooks";
 import { LibrariesPage } from "../libraries/LibrariesPage";
 import { useLibraries } from "../libraries/hooks";
-import { EndDialog } from "../worktrees/EndDialog";
 import { OrphanList } from "../worktrees/OrphanList";
 import { IncludeNote } from "../worktrees/IncludeNote";
 import { WorktreeChip } from "../worktrees/WorktreeChip";
@@ -273,7 +272,6 @@ export function Content() {
         </div>
       </CoveredByPage.Provider>
       {page !== null && <div className="content-page">{page}</div>}
-      <EndDialog />
     </main>
   );
 }

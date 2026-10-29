@@ -16,12 +16,12 @@ workspace = true
 ts = ["dep:ts-rs"]
 
 [dependencies]
-# All already in the lock file: sha2 0.10.9 (vw-changes, vw-pages), flate2 1.1 and zip 8.6.0
+# All already in the lock file: sha2 0.10.9 (vw-changes, vw-pages), flate2 1.1 and zip 9.1.3
 # (vw-documents), tar 0.4.46 (through the Tauri bundler stack), base64 0.23 (vw-pages), reqwest 0.13.5 (vw-mistral).
 sha2 = "0.10.9"
 flate2 = "1.1"
 tar = { version = "0.4.46", default-features = false }
-zip = { version = "8.6.0", default-features = false, features = ["deflate"] }
+zip = { version = "9.1.3", default-features = false, features = ["deflate"] }
 base64 = "0.23"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

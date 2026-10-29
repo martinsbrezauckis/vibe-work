@@ -43,6 +43,13 @@ init_harness_files_manager("user", "project", additional_dirs=workspace)
 files = HarnessFilesManager(sources=("user", "project")).for_session(cwd, workspace_roots=workspace)
 
 
+# The unused-settings check (`check_layer_keys`) finds custom tools by importing the tool folders' files and asks
+# each tool whether it is available, which reads the OS keyring for web search's key and probes for system libraries
+# with subprocesses and temporary files. Its only result is a warning about unused settings, which this listing does
+# not show, so it is skipped here; the server still runs it.
+VibeConfigSchema.check_layer_keys = lambda self, *args, **kwargs: None
+
+
 async def inspection_config():
     # Same layer precedence as the pinned default builder, without its persistent
     # migrations or SSL initialization. The resolver only reads configured MCP names.

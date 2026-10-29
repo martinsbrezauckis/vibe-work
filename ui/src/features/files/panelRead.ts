@@ -5,14 +5,16 @@
  * Vibe is reading them.
  * Depends on: state/files (workspace), shellState (tab labels), liveEditors. Called by: register.tsx (the event),
  * git-browser/register (the Files tab's part), FileEditor (the reading line), tests.
- * Invariants: reads only; only the event's own session; no terminal output, browser page or form field is ever
- * part of the answer (those tabs are named only); unsaved text is sent only when it differs from the file on disk.
+ * Invariants: reads only; only the event's own session, with editor paths in full and the Files tab only while
+ * it shows that session's folder; no terminal output, browser page or form field is ever part of the answer
+ * (those tabs are named only); unsaved text is sent only when it differs from the file on disk.
  */
 import type { PanelEditor, PanelFiles, PanelView } from "../../protocol/core";
 import { createStore } from "../../state/createStore";
 import { TAB_META } from "../../state/shellState";
 import type { App } from "../shell/AppContext";
 import { liveEditor } from "./liveEditors";
+import { absoluteFilePath } from "./model/context";
 
 /** How long the reading line stays after a read. */
 const SHOWN_MS = 4000;
@@ -36,6 +38,11 @@ export function panelView(app: App, sessionId: string): PanelView {
   const files = app.files;
   const view = files?.workspace.of(sessionId);
   const docs = view?.documents ?? {};
+  // Editor paths are relative to the session's own folder: the answer names them in full, so none can be read
+  // against another folder.
+  const cwd = app.core?.store.get().sessions[sessionId]?.session["cwd"];
+  const fullPath = (display: string) =>
+    typeof cwd === "string" ? absoluteFilePath(display, cwd) : display;
   const name = (file: string) => {
     const doc = docs[file];
     const short = doc?.shown.display.split(/[\\/]/).pop() ?? file;
@@ -69,7 +76,7 @@ export function panelView(app: App, sessionId: string): PanelView {
     const unsaved = saved === null && draft !== undefined && draft.text !== draft.base.text;
     return [
       {
-        path: doc.shown.display,
+        path: fullPath(doc.shown.display),
         focused: view?.active === file && (split === null || split[split.focus] === file),
         side:
           split === null

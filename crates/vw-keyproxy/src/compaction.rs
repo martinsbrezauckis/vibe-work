@@ -41,7 +41,7 @@ pub(crate) fn prepare(bytes: &[u8]) -> (Option<Vec<u8>>, ChatShape) {
     let Ok(mut request) = serde_json::from_slice::<Value>(bytes) else {
         return (None, ChatShape::default());
     };
-    let explicit_off = crate::reasoning::explicit_off(&mut request);
+    let reasoning_fitted = crate::reasoning::fit(&mut request);
     let compaction_prompt = request
         .get("messages")
         .and_then(Value::as_array)
@@ -51,8 +51,11 @@ pub(crate) fn prepare(bytes: &[u8]) -> (Option<Vec<u8>>, ChatShape) {
             if last.get("role")?.as_str()? != "user" {
                 return None;
             }
-            let builtin = content.contains("You are performing a CONTEXT CHECKPOINT COMPACTION.")
-                && content.contains("<summary>");
+            // Vibe 3.0.3 retries a summary that was cut off with this fixed last message
+            // (`compaction.cut_off_retry` in the harness's default prompts).
+            let builtin = (content.contains("You are performing a CONTEXT CHECKPOINT COMPACTION.")
+                && content.contains("<summary>"))
+                || content == "You were cut off. Don't think, don't be long, just answer.";
             let historical_image = messages[..messages.len() - 1].iter().any(|message| {
                 message
                     .get("content")
@@ -126,7 +129,7 @@ pub(crate) fn prepare(bytes: &[u8]) -> (Option<Vec<u8>>, ChatShape) {
             }
         }
     }
-    if shape.omitted == 0 && !explicit_off {
+    if shape.omitted == 0 && !reasoning_fitted {
         return (None, shape);
     }
     (serde_json::to_vec(&request).ok(), shape)
@@ -180,6 +183,23 @@ mod tests {
                 assert_eq!(shape.omitted, 0);
             }
         }
+    }
+
+    #[test]
+    fn an_image_free_cut_off_summary_retry_is_compaction() {
+        let bytes = serde_json::to_vec(&json!({
+            "stream": false,
+            "metadata": {"call_type": "secondary_call"},
+            "messages": [
+                {"role": "user", "content": "Earlier request"},
+                {"role": "assistant", "content": "<summary>partial"},
+                {"role": "user", "content": "You were cut off. Don't think, don't be long, just answer."}
+            ]
+        }))
+        .unwrap();
+        let (rewritten, shape) = prepare(&bytes);
+        assert!(shape.compaction);
+        assert!(rewritten.is_none());
     }
 
     #[test]

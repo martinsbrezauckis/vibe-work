@@ -13,15 +13,15 @@ workspace = true
 
 [dependencies]
 # Pinned document-parser versions.
-# calamine 0.36.1 (MIT): XLSX read locally (exact values, no OCR quota). `dates`: date cells as ISO text.
-calamine = { version = "0.36.1", default-features = false, features = ["dates"] }
-# zip 8.6.0 (MIT): DOCX/PPTX/XLSX are ZIP files; the same features calamine asks for, so one build.
-zip = { version = "8.6.0", default-features = false, features = ["deflate"] }
+# calamine 0.37.0 (MIT): XLSX read locally (exact values, no OCR quota). `dates`: date cells as ISO text.
+calamine = { version = "0.37.0", default-features = false, features = ["dates"] }
+# zip 9.1.3 (MIT): DOCX/PPTX/XLSX are ZIP files; the same features calamine asks for, so one build.
+zip = { version = "9.1.3", default-features = false, features = ["deflate"] }
 # flate2 (already in the lock file through zip): inflates PDF object streams for the page count.
 flate2 = "1.1"
 getrandom = "0.3"
 serde = { version = "1", features = ["derive"] }
 thiserror = "2"
 
-# MIT; reuse calamine's small XML parser for bounded Word/PowerPoint parts.
+# MIT; the small XML parser for bounded Word/PowerPoint parts (calamine brings its own, newer copy).
 quick-xml = "0.41.0"

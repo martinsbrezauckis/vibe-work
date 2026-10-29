@@ -7,6 +7,8 @@
 //! - The state lock is never held across an engine call or a file scan.
 //! - Every engine call is bounded (`engine_timeout`; a pick by `pick_timeout`, then cancelled).
 //! - The viewer only ever loads URLs of a page server this service started (`viewer::allowed`).
+//! - Viewer placements (layout, show, the reload reset) run one at a time under `layout_op`; a window layout of a
+//!   replaced main document places nothing (`vw_preview::PlacementGate`).
 //! - A pick's section is the first of the page's reported ids that exists in the page FILE; labels come from the
 //!   file. A page script can make a pick cite another real section, never an invented one.
 
@@ -53,6 +55,10 @@ pub struct PagesService {
     pub(crate) theme: Arc<std::sync::Mutex<String>>,
     /// Built hubs by handbook folder, with the folder fingerprint they were built from (`files::fingerprint`).
     pub(crate) hubs: Arc<std::sync::Mutex<HashMap<PathBuf, (u64, crate::hub::Hub)>>>,
+    /// Orders viewer placements (show, hide, reset).
+    pub(crate) layout_op: Arc<AsyncMutex<()>>,
+    /// Refuses placements of a replaced main document; checked and advanced under `layout_op`.
+    pub(crate) placement_gate: Arc<vw_preview::PlacementGate>,
 }
 
 pub(crate) async fn bounded<T>(
@@ -91,6 +97,8 @@ impl PagesService {
             hubs: Arc::new(std::sync::Mutex::new(HashMap::new())),
             checker: None,
             theme: Arc::new(std::sync::Mutex::new("dark".to_owned())),
+            layout_op: Arc::new(AsyncMutex::new(())),
+            placement_gate: Arc::default(),
         }
     }
 
@@ -131,6 +139,11 @@ impl PagesService {
     /// # Errors
     /// [`PagesError::Other`] for a bad rectangle; engine failures.
     pub async fn layout(&self, shown: Option<(String, Rect)>) -> Result<(), PagesError> {
+        let _layout = self.layout_op.lock().await;
+        if !self.placement_gate.admits() {
+            tracing::debug!("viewer layout ignored: its main document was replaced");
+            return Ok(());
+        }
         if let Some((_, rect)) = &shown {
             rect.checked().map_err(PagesError::Other)?;
         }
@@ -141,6 +154,32 @@ impl PagesService {
             }
             _ => self.hide().await,
         }
+    }
+
+    /// Hides the viewer for main-document load `generation`, keeping every session's page; window layouts of the
+    /// documents before it that arrive later place nothing.
+    ///
+    /// # Errors
+    /// Engine failures while hiding.
+    pub async fn reset_ui_placement(&self, generation: u64) -> Result<(), PagesError> {
+        let _layout = self.layout_op.lock().await;
+        self.placement_gate.advance(generation);
+        self.shared.lock().shown = None;
+        self.hide().await
+    }
+
+    /// Shows the page of the session the window shows now (only `session`'s, when given), read under the layout
+    /// lock so an open or a theme change never restores an area a reset or a later layout took away. Returns
+    /// whether it showed one.
+    pub(crate) async fn show_current(&self, session: Option<&str>) -> Result<bool, PagesError> {
+        let _layout = self.layout_op.lock().await;
+        let shown = self.shared.lock().shown.clone();
+        let Some((current, rect)) = shown.filter(|(s, _)| session.is_none_or(|only| only == s))
+        else {
+            return Ok(false);
+        };
+        self.show(&current, rect).await?;
+        Ok(true)
     }
 
     async fn hide(&self) -> Result<(), PagesError> {
@@ -158,8 +197,9 @@ impl PagesService {
         Ok(())
     }
 
-    /// Places the viewer over `rect` showing `session`'s page (mounting or re-targeting it).
-    pub(crate) async fn show(&self, session: &str, rect: Rect) -> Result<(), PagesError> {
+    /// Places the viewer over `rect` showing `session`'s page (mounting or re-targeting it). The caller holds
+    /// `layout_op`.
+    async fn show(&self, session: &str, rect: Rect) -> Result<(), PagesError> {
         let placement = vw_preview::place(rect, DeviceWidth::Fit).map_err(PagesError::Other)?;
         let (mount, viewer) = {
             let state = self.shared.lock();

@@ -17,7 +17,7 @@ Sources (all official, all fetched at generation time and written into the data 
 Consistency checks (generation fails otherwise): the export names exactly the packages and versions that the
 published wheel's `Requires-Dist` pins; a wheel exists for every target we ship.
 
-Usage: python3 -I generate_pin.py --vibe 3.0.2 --commit <sha> --uv 0.12.24 --python 3.14.8 --out <crate>/pin [--work <scratch>]
+Usage: python3 -I generate_pin.py --vibe 3.0.3 --commit <sha> --uv 0.12.24 --python 3.14.8 --out <crate>/pin [--work <scratch>]
 Needs: git, uv, network. Writes `vibe-install.json` and `vibe.requirements.txt` into --out.
 Called by: maintainers when bumping Vibe (with tools/public/codegen/vibe.pin, regenerated types, bench, gate).
 """

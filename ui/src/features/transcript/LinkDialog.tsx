@@ -4,7 +4,9 @@
  * own words play no part) and the host it goes to. "Open in browser" hands it to the core
  * (`open_link`), which opens the system browser; the main window never navigates. A link that cannot
  * be opened (not http/https, a hidden user name, malformed) says why and offers Copy only.
- * Depends on: model/links, useModalFocus, CopyButton, the transcript store. Called by: Transcript.
+ * Depends on: model/links, useModalFocus, CopyButton, the transcript store. Called by: Shell.
+ * Mounted once, outside the chat column: links are also asked from the side panel (Terminal, Project pages) and the
+ * pages over the work view, and a maximized panel folds the chat column away.
  * Invariants: modal (inert background, Escape closes, focus returns); nothing opens without a click on
  * "Open in browser".
  */

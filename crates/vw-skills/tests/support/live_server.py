@@ -14,7 +14,7 @@ def deny_network(event, args):
         raise PermissionError("Internet sockets disabled for the skills live test")
 
 
-assert importlib.metadata.version("mistral-vibe") == "3.0.2"
+assert importlib.metadata.version("mistral-vibe") == "3.0.3"
 sys.addaudithook(deny_network)
 # Import only after the audit hook is active.
 importlib.import_module("vibe.app_server.stdio").main()

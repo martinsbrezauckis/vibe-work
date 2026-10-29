@@ -70,7 +70,7 @@ vibe_pin=$(cat tools/public/codegen/vibe.pin)
 "${VIBE_PYTHON:-data/vibe-$vibe_pin/venv/bin/python}" crates/vw-skills/tools/generate.py --check
 ```
 
-The generator checks that the interpreter has **mistral-vibe 3.0.2** installed. Fixture requests/results are model-written examples, not captured user
+The generator checks that the interpreter has **mistral-vibe 3.0.3** installed. Fixture requests/results are model-written examples, not captured user
 sessions. The schema fixtures preserve upstream JSON Schema for contract tests;
 JSON fixtures use valid JSON without comment headers.
 

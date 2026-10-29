@@ -52,10 +52,10 @@ impl Core {
             model: &self.shared.config.commit_model,
             system: &system,
             user: &user,
-            max_tokens: 400,
+            // Large 4 always thinks now and refuses `none`; the cap leaves room for its default thinking.
+            max_tokens: 2000,
             timeout: Duration::from_secs(40),
-            // A commit message needs no thinking; Large 4 thinks by default and would spend the cap on it.
-            reasoning_effort: Some("none"),
+            reasoning_effort: None,
         };
         match keys.chat(request).await {
             Ok(Some(answer)) => match message::clean_answer(&answer) {

@@ -114,9 +114,7 @@ impl Core {
                 "The plugin folder changed while the request was open. Nothing was changed.",
             ));
         }
-        let user_plugin = folder
-            .parent()
-            .is_some_and(|p| p == home.join(if off { "plugins-off" } else { "plugins" }));
+        let user_plugin = home_plugin(folder, home, off);
         if user_plugin {
             // Revoke before changing bytes. A failed move or delete leaves the plugin off on the next sweep.
             self.shared.plugin_approvals.set(folder, None)?;
@@ -151,7 +149,7 @@ impl Core {
         }
         self.reload_sessions().await;
         if op == "removePlugin"
-            && folder.starts_with(home)
+            && user_plugin
             && let Some(receipt) = receipt
         {
             notice = self
@@ -184,6 +182,20 @@ impl Core {
         }
         Ok(())
     }
+}
+
+/// `folder` lies directly in the home's `plugins` folder (`plugins-off` when `off`). Compared resolved as well:
+/// Vibe reports plugin folders in their resolved spelling, while the home keeps the one the platform gave, which can
+/// differ (a profile moved behind a link, another case on Windows).
+fn home_plugin(folder: &Path, home: &Path, off: bool) -> bool {
+    let root = home.join(if off { "plugins-off" } else { "plugins" });
+    folder.parent().is_some_and(|parent| {
+        parent == root
+            || matches!(
+                (parent.canonicalize(), root.canonicalize()),
+                (Ok(parent), Ok(root)) if parent == root
+            )
+    })
 }
 
 pub(crate) fn move_plugin(folder: &Path, off: bool) -> Result<(), CoreError> {
@@ -283,7 +295,7 @@ fn rename_settled(
 mod tests {
     use super::plugin_change_summary;
 
-    use super::{move_plugin, rename_settled};
+    use super::{home_plugin, move_plugin, rename_settled};
     use std::io::{Error, ErrorKind};
     use std::path::{Path, PathBuf};
     use std::time::Duration;
@@ -373,6 +385,65 @@ mod tests {
                 .unwrap_err()
                 .starts_with("The plugin could not be moved: ")
         );
+    }
+
+    /// Vibe reports plugin folders in their resolved spelling; the app names its home as the platform gave it, which
+    /// can reach the same folder through a link (a profile moved behind a junction or symlink) or, on Windows, in
+    /// another case. A plugin of the home is still one, so Remove and Turn off end its approval.
+    #[test]
+    fn a_plugin_of_the_home_is_recognised_in_every_spelling_of_the_home() {
+        let base = vw_platform::canonical_plain(&std::env::temp_dir())
+            .unwrap()
+            .join(format!("vw-home-spelling-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let real = base.join("real");
+        std::fs::create_dir_all(real.join("vibe-home/plugins/maker")).unwrap();
+        std::fs::create_dir_all(real.join("vibe-home/plugins-off/quiet")).unwrap();
+        std::fs::create_dir_all(base.join("project/.vibe/plugins/local")).unwrap();
+        let link = base.join("link");
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        #[cfg(windows)]
+        assert!(
+            std::process::Command::new("cmd")
+                .args(["/C", "mklink", "/J"])
+                .arg(&link)
+                .arg(&real)
+                .output()
+                .unwrap()
+                .status
+                .success()
+        );
+        // The spelling Vibe reports.
+        let resolved = real.join("vibe-home");
+        let mut homes = vec![resolved.clone(), link.join("vibe-home")];
+        if cfg!(windows) {
+            homes.push(PathBuf::from(resolved.to_string_lossy().to_uppercase()));
+        }
+        let mut wrong = Vec::new();
+        for home in &homes {
+            let cases = [
+                (resolved.join("plugins/maker"), false, true),
+                (resolved.join("plugins-off/quiet"), true, true),
+                (resolved.join("plugins/maker"), true, false),
+                (base.join("project/.vibe/plugins/local"), false, false),
+            ];
+            for (folder, off, expected) in cases {
+                if home_plugin(&folder, home, off) != expected {
+                    wrong.push(format!(
+                        "{} off={off} home={}",
+                        folder.display(),
+                        home.display()
+                    ));
+                }
+            }
+        }
+        #[cfg(unix)]
+        std::fs::remove_file(&link).unwrap();
+        #[cfg(windows)]
+        std::fs::remove_dir(&link).unwrap();
+        std::fs::remove_dir_all(&base).unwrap();
+        assert!(wrong.is_empty(), "misjudged:\n{}", wrong.join("\n"));
     }
 
     fn plugin_home(tag: &str) -> PathBuf {

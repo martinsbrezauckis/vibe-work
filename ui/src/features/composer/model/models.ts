@@ -170,25 +170,3 @@ export function modelLabel(choices: readonly ModelChoice[], alias: string | null
   if (alias === null) return TEXT.model;
   return choices.find((c) => c.alias === alias)?.label ?? alias;
 }
-
-/** Explains when Off and Low are the same on the selected model. */
-export function thinkingRequest(model: ModelChoice | undefined, level: string): string {
-  if (!model?.apiModel) return "";
-  if (model.provider !== undefined && model.provider !== "mistral") {
-    return "";
-  }
-  const knownNone = [
-    "mistral-large-4",
-    "mistral-large-4-0",
-    "mistral-small-latest",
-    "mistral-small-2603",
-    "mistral-medium-latest",
-    "mistral-medium-3-5",
-  ].includes(model.apiModel);
-  if (level === "off" || level === "low") {
-    return knownNone && model.thinkingLevels.includes("low")
-      ? "Off and Low are the same on this model."
-      : "";
-  }
-  return "";
-}

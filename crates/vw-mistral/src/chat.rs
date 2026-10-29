@@ -38,9 +38,8 @@ pub struct ChatRequest<'a> {
     pub max_tokens: u32,
     /// The time limit.
     pub timeout: Duration,
-    /// `reasoning_effort` (`"none"` turns thinking off on models that think by default, such as Mistral Large 4:
-    /// without it a short answer can spend its whole token cap on thinking; probe, Vibe 2.26.1
-    /// `vibe/core/llm/backend/mistral.py:255-280` sends the same value for "off"). `None`: the server default.
+    /// `reasoning_effort`, or `None` for the server default. The levels a model takes differ by model and change
+    /// on the live API (Large 4 refuses `"none"` and always thinks); a request without the field is taken by all.
     pub reasoning_effort: Option<&'a str>,
 }
 

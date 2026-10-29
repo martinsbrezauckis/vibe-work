@@ -1,4 +1,4 @@
-"""Vibe Work's 3.0.2 child Stop and configuration-switch guards, loaded by the server launcher.
+"""Vibe Work's 3.0.3 child Stop and configuration-switch guards, loaded by the server launcher.
 
 A Stop of an owned child session goes through Vibe's subagent controller and its
 durable interrupt operation. Access-mode switches wait for configuration reads
@@ -81,7 +81,7 @@ def install_config_switch_guard(adapter):
 
 
 def install():
-    if importlib.metadata.version("mistral-vibe") != "3.0.2":
+    if importlib.metadata.version("mistral-vibe") != "3.0.3":
         return
     from vibe.app_server import _unified_harness_backend_adapter as adapter
     from mistralai_vibe_local_harness.vibe._subagents._models import IdleChild, RunningChild, TurnFailedChild

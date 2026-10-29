@@ -49,12 +49,7 @@ impl PagesService {
             )
             .await;
         }
-        let shown = self.shared.lock().shown.clone();
-        if let Some((session, rect)) = shown
-            && self.shared.lock().viewers.contains_key(&session)
-        {
-            self.show(&session, rect).await?;
-        }
+        self.show_current(None).await?;
         Ok(())
     }
 }

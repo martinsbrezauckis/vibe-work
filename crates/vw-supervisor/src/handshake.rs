@@ -33,6 +33,9 @@ pub fn default_initialize_params() -> InitializeParams {
             // Vibe Work does not offer `session/spawn`, so the agent gets no `vibe.start_session` tool.
             session_spawn: None,
             disabled_notifications: None,
+            // Vibe Work does not lend its sign-in tokens to Vibe, so Vibe never sends
+            // `platformCredentials/resolve` and keeps its own sign-in.
+            platform_credentials: Maybe::Absent,
         }),
     }
 }

@@ -1,16 +1,15 @@
 /**
  * The Connectors page: Mistral-hosted connectors grouped by
  * category with search and filters, each with its state in plain words; the sign-in in progress; "Your
- * MCP servers" with "Add MCP server"; the details panel; the link dialog for sign-in pages and Mistral's
- * console. Shown in the content area from the rail's Tools button.
- * Depends on: hooks, the connector views, model/view, the transcript's LinkDialog. Called by: Content.
+ * MCP servers" with "Add MCP server"; the details panel. Sign-in pages and Mistral's console open through the
+ * window's link dialog. Shown in the content area from the rail's Tools button.
+ * Depends on: hooks, the connector views, model/view. Called by: Content.
  * Invariants: components render, the connectors controller decides; no vendor logos.
  */
 import { Button } from "../../components/Controls";
 import type { ReactElement } from "react";
 
 import { Selector } from "../../components/Selector";
-import { LinkDialog } from "../transcript/LinkDialog";
 import { KeyNotice, useKeyReadiness } from "../shell/KeyNotice";
 import { AddServerDialog } from "./AddServerDialog";
 import { RemoveServerDialog } from "./RemoveServerDialog";
@@ -141,7 +140,6 @@ export function ConnectorsPage(): ReactElement {
       <ConnectorDetail />
       <AddServerDialog open={addOpen} />
       <RemoveServerDialog />
-      <LinkDialog />
     </div>
   );
 }

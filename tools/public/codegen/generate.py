@@ -2,7 +2,7 @@
 """Generate the Rust and TypeScript protocol types from the installed Mistral Vibe package.
 
 Role: single entry point of the generator. Run it with the interpreter that has Vibe
-installed (data/vibe-3.0.2/venv/bin/python, or the one named by $VIBE_PYTHON).
+installed (data/vibe-3.0.3/venv/bin/python, or the one named by $VIBE_PYTHON).
   --write   regenerate crates/vw-protocol/src/generated and ui/src/protocol/generated
   --check   regenerate into a scratch directory and fail on any difference (CI drift gate)
 Fails loudly when: the installed Vibe version differs from vibe.pin; method_map.json is out of

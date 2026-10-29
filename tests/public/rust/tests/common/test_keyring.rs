@@ -70,10 +70,25 @@ fn configure(config: &mut SupervisorConfig, settings: &str) {
     config
         .extra_env
         .push(("XDG_CONFIG_HOME".into(), xdg.clone().into_os_string()));
+    keyring_off_on_macos(&mut config.extra_env);
     if cfg!(windows) {
         // Keyring uses LOCALAPPDATA on Windows, even when HOME and XDG_CONFIG_HOME are disposable.
         config
             .extra_env
             .push(("LOCALAPPDATA".into(), xdg.into_os_string()));
+    }
+}
+
+/// On macOS Vibe reads and writes its secrets through the system `security` tool, in the user's login keychain,
+/// whatever keyring backend is configured above. Vibe's own test switch turns its keyring off there, so a test
+/// never reaches the real keychain: a token Vibe would store is refused instead. Other systems keep the
+/// disposable backend above.
+pub fn keyring_off_on_macos(env: &mut Vec<(String, std::ffi::OsString)>) {
+    if cfg!(target_os = "macos")
+        && !env
+            .iter()
+            .any(|(name, _)| name == "VIBE_TEST_DISABLE_KEYRING")
+    {
+        env.push(("VIBE_TEST_DISABLE_KEYRING".into(), "1".into()));
     }
 }

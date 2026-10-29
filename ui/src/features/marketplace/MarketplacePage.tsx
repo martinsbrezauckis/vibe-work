@@ -1,14 +1,13 @@
 /**
  * The Marketplace tab of the Tools page: plugins, skill packs and MCP servers from the reviewed catalog,
  * with search, filters, the install in progress and the details panel.
- * Depends on: hooks, model, MarketCard, MarketDetail, ToolsTabs, the transcript's LinkDialog. Called by: Content.
+ * Depends on: hooks, model, MarketCard, MarketDetail, ToolsTabs. Called by: Content.
  * Invariants: components render, the marketplace controller decides; no vendor logos.
  */
 import { Button } from "../../components/Controls";
 import type { ReactElement } from "react";
 
 import { Selector } from "../../components/Selector";
-import { LinkDialog } from "../transcript/LinkDialog";
 import { ToolsTabs } from "../connectors/ToolsTabs";
 import { LocalPlugins } from "./LocalPlugins";
 import { MarketCard } from "./MarketCard";
@@ -131,7 +130,6 @@ export function MarketplacePage(): ReactElement {
         ) : null}
       </div>
       <MarketDetail />
-      <LinkDialog />
     </div>
   );
 }

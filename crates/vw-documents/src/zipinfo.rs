@@ -56,7 +56,13 @@ pub fn entry_names(bytes: &[u8]) -> Result<Vec<String>, String> {
     if archive.len() > MAX_ENTRIES {
         return Err("too many entries".to_owned());
     }
-    Ok(archive.file_names().map(str::to_owned).collect())
+    archive
+        .file_names()
+        .map(|name| {
+            name.map(std::borrow::Cow::into_owned)
+                .map_err(|e| e.to_string())
+        })
+        .collect()
 }
 
 /// The text of the entry `name` (UTF-8, at most [`MAX_ENTRY_BYTES`]), or `None` when it is missing,

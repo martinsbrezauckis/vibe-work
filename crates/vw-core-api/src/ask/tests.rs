@@ -228,10 +228,11 @@ async fn a_yes_after_machine_sleep_is_accepted() {
         vec![Choice::Once, Choice::No],
         None,
     );
-    // Two hours of sleep: the wall clock moves, the monotonic timer does not.
+    // Two hours of sleep: the wall clock moves, the monotonic timer does not. The ask opened when the clock was
+    // created or a few milliseconds later, so the clock now reads at least the moved wall clock, two hours on.
     WALL.fetch_add(2 * 60 * 60 * 1000, Ordering::SeqCst);
     assert!(
-        clock.now_ms() >= handle.ask.opened_at + 7_200_000,
+        clock.now_ms() >= wall() && wall() >= handle.ask.opened_at + 7_200_000 - 60_000,
         "the ask clock must follow the wall clock across a sleep"
     );
     assert!(

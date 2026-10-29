@@ -353,7 +353,7 @@ Cargo normal dependency graphs
 - bytes@1.12.1 — MIT; crates.io; linux,macos,windows
 - cairo-rs@0.18.5 — MIT; crates.io; linux
 - cairo-sys-rs@0.18.2 — MIT; crates.io; linux
-- calamine@0.36.1 — MIT; crates.io; linux,macos,windows
+- calamine@0.37.0 — MIT; crates.io; linux,macos,windows
 - camino@1.2.6 — MIT OR Apache-2.0; crates.io; linux,macos,windows
 - cap-fs-ext@4.0.3 — Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT; crates.io; linux,macos,windows
 - cap-primitives@4.0.3 — Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT; crates.io; linux,macos,windows
@@ -597,6 +597,7 @@ Cargo normal dependency graphs
 - memoffset@0.9.1 — MIT; crates.io; linux
 - mime@0.3.17 — MIT OR Apache-2.0; crates.io; linux,macos,windows
 - minisign-verify@0.2.5 — MIT; crates.io; linux,macos,windows
+- minisign-verify@0.3.0 — MIT; crates.io; linux,macos,windows
 - miniz_oxide@0.8.9 — MIT OR Zlib OR Apache-2.0; crates.io; linux,macos,windows
 - miniz_oxide@0.9.1 — MIT OR Zlib OR Apache-2.0; crates.io; linux,macos,windows
 - mio@1.2.4 — MIT; crates.io; linux,macos,windows
@@ -785,7 +786,7 @@ Cargo normal dependency graphs
 - tauri-macros@2.7.1 — Apache-2.0 OR MIT; crates.io; linux,macos,windows
 - tauri-plugin-dialog@2.8.1 — Apache-2.0 OR MIT; crates.io; linux,macos,windows
 - tauri-plugin-fs@2.6.0 — Apache-2.0 OR MIT; crates.io; linux,macos,windows
-- tauri-plugin-updater@2.13.2 — Apache-2.0 OR MIT; crates.io; linux,macos,windows
+- tauri-plugin-updater@2.14.1 — Apache-2.0 OR MIT; crates.io; linux,macos,windows
 - tauri-runtime@2.12.1 — Apache-2.0 OR MIT; crates.io; linux,macos,windows
 - tauri-runtime-wry@2.12.1 — Apache-2.0 OR MIT; vendored; linux,macos,windows
 - tauri-utils@2.10.1 — Apache-2.0 OR MIT; crates.io; linux,macos,windows
@@ -835,7 +836,7 @@ Cargo normal dependency graphs
 - tungstenite@0.30.0 — MIT OR Apache-2.0; crates.io; linux,macos,windows
 - twox-hash@2.1.5 — MIT; crates.io; linux,macos,windows
 - type1-encoding-parser@0.1.1 — MIT; crates.io; linux
-- typed-path@0.12.3 — MIT OR Apache-2.0; crates.io; linux,macos,windows
+- typed-path@0.13.0 — MIT OR Apache-2.0; crates.io; linux,macos,windows
 - typeid@1.0.3 — MIT OR Apache-2.0; crates.io; linux,macos,windows
 - typenum@1.20.1 — MIT OR Apache-2.0; crates.io; linux,macos,windows
 - unicase@2.10.0 — MIT OR Apache-2.0; crates.io; linux,macos,windows
@@ -933,8 +934,7 @@ Cargo normal dependency graphs
 - zerotrie@0.2.5 — Unicode-3.0; crates.io; linux,macos,windows
 - zerovec@0.11.8 — Unicode-3.0; crates.io; linux,macos,windows
 - zerovec-derive@0.11.6 — Unicode-3.0; crates.io; linux,macos,windows
-- zip@4.6.1 — MIT; crates.io; windows
-- zip@8.6.0 — MIT; crates.io; linux,macos,windows
+- zip@9.1.3 — MIT; crates.io; linux,macos,windows
 - zlib-rs@0.6.8 — Zlib; crates.io; linux,macos,windows
 - zmij@1.0.23 — MIT; crates.io; linux,macos,windows
 - zopfli@0.8.3 — Apache-2.0; crates.io; linux,macos,windows

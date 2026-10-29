@@ -152,6 +152,8 @@ pub struct PreviewService {
         >,
     >,
     pub(crate) layout_op: Arc<tokio::sync::Mutex<()>>,
+    /// Refuses placements of a replaced main document; checked and advanced under `layout_op`.
+    pub(crate) placement_gate: Arc<crate::PlacementGate>,
     pub(crate) visibility: Arc<std::sync::Mutex<Option<VisibilityReport>>>,
     pub(crate) visibility_changes: Arc<tokio::sync::watch::Sender<u64>>,
     pub(crate) native_window_visible: Arc<std::sync::Mutex<Option<bool>>>,
@@ -201,6 +203,7 @@ impl PreviewService {
             pool_op: Arc::new(tokio::sync::Mutex::new(())),
             activity: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
             layout_op: Arc::new(tokio::sync::Mutex::new(())),
+            placement_gate: Arc::default(),
             visibility: Arc::new(std::sync::Mutex::new(None)),
             visibility_changes: Arc::new(tokio::sync::watch::Sender::new(0)),
             native_window_visible: Arc::new(std::sync::Mutex::new(None)),
@@ -483,6 +486,9 @@ impl PreviewService {
         rect: Option<Rect>,
     ) -> Result<(), PreviewError> {
         let _layout = self.layout_op.lock().await;
+        if self.stale_window_layout() {
+            return Ok(());
+        }
         tracing::debug!(
             page = page.as_deref().unwrap_or("-"),
             ?rect,
@@ -534,6 +540,9 @@ impl PreviewService {
         selected: service_layout::PanelSelection,
     ) -> Result<(), PreviewError> {
         let _layout = self.layout_op.lock().await;
+        if self.stale_window_layout() {
+            return Ok(());
+        }
         self.layout_selected_locked(shown, selected).await
     }
 

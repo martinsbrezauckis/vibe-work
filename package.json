@@ -12,5 +12,11 @@
   },
   "devDependencies": {
     "@tauri-apps/cli": "2.12.1"
+  },
+  "pnpm": {
+    "overrides": {
+      "undici": "8.12.2",
+      "zod": "4.6.6"
+    }
   }
 }

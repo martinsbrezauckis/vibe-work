@@ -31,29 +31,57 @@ pub(super) fn raw_mentions(text: &str, root: &str) -> Vec<String> {
 }
 
 fn collect(word: &str, root: &str, out: &mut Vec<String>) {
-    for (at, _) in word.match_indices(root) {
-        out.push(word[at..].to_owned());
+    if cfg!(windows) {
+        // Windows reads `C:\a`, `c:/A` and `C:\a/b` as one folder: every start where the root follows that way.
+        for (at, _) in word.char_indices() {
+            if starts_with_windows_path(&word[at..], root) {
+                out.push(word[at..].to_owned());
+            }
+        }
+    } else {
+        for (at, _) in word.match_indices(root) {
+            out.push(word[at..].to_owned());
+        }
     }
 }
 
-/// `roots` plus, on Windows, each drive root's Git Bash spelling (`C:\a` as `/c/a` and `/C/a`): the agent's commands
-/// run in Git Bash and often name paths that way.
-pub(super) fn with_bash_spellings(mut roots: Vec<String>) -> Vec<String> {
+/// `text` starts with `root` as Windows compares path text: letters in either case, `/` and `\` alike.
+fn starts_with_windows_path(text: &str, root: &str) -> bool {
+    let mut text = text.chars();
+    root.chars().all(|r| {
+        text.next().is_some_and(|t| {
+            t == r
+                || matches!((t, r), ('/' | '\\', '/' | '\\'))
+                || t.to_uppercase().eq(r.to_uppercase())
+        })
+    })
+}
+
+/// `roots` plus, on Windows, each drive root without the verbatim prefix (`\\?\C:\a` as `C:\a`) and in its Git
+/// Bash spelling (`/c/a`): the agent's commands run in Git Bash and name paths either way. The scan matches these
+/// regardless of case and separator, so `c:/a`, `C:\a/b` and `/C/a` are covered too.
+pub(super) fn with_windows_spellings(mut roots: Vec<String>) -> Vec<String> {
     if cfg!(windows) {
         let extra: Vec<String> = roots
             .iter()
             .filter_map(|root| {
-                let plain = root.strip_prefix(r"\\?\").unwrap_or(root);
+                let plain = root
+                    .strip_prefix(r"\\?\")
+                    .unwrap_or(root)
+                    .replace('/', "\\");
                 let (drive, rest) = plain.split_once(":\\")?;
-                let rest = rest.replace('\\', "/");
-                (drive.len() == 1).then(|| {
-                    [drive.to_ascii_lowercase(), drive.to_ascii_uppercase()]
-                        .map(|d| format!("/{d}/{rest}"))
-                })
+                let bash = format!(
+                    "/{}/{}",
+                    drive.to_ascii_lowercase(),
+                    rest.replace('\\', "/")
+                );
+                (drive.len() == 1).then(|| [plain.clone(), bash])
             })
             .flatten()
             .collect();
         roots.extend(extra);
+        let mut seen = std::collections::HashSet::new();
+        roots.retain(|root| seen.insert(root.to_lowercase()));
     }
     roots
 }

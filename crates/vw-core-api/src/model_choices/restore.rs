@@ -5,14 +5,24 @@ use crate::core::Shared;
 use crate::error::CoreError;
 use serde_json::{Value, json};
 
+/// The chat's model is in Vibe's model list, and so is its thinking level when Vibe lists the model's levels
+/// (Vibe 3.0.3 reports only the levels it offers, e.g. Off and High for Large 4, and sends a level as picked).
+/// A choice that is not offered takes the same Settings fallback as a model that left the list.
 pub(super) fn offered(runtime: &Value, choice: &Choice) -> bool {
     runtime
         .pointer("/config/models")
         .and_then(Value::as_array)
         .is_some_and(|models| {
             models.iter().any(|model| {
-                actual(&json!({"runtime":{"config":{"activeModel":model}}}))
-                    .is_some_and(|current| choice.same_model(&current))
+                let level_offered = choice.effort.is_empty()
+                    || model["thinkingLevels"].as_array().is_none_or(|levels| {
+                        levels
+                            .iter()
+                            .any(|level| level.as_str() == Some(&choice.effort))
+                    });
+                level_offered
+                    && actual(&json!({"runtime":{"config":{"activeModel":model}}}))
+                        .is_some_and(|current| choice.same_model(&current))
             })
         })
 }
@@ -301,5 +311,18 @@ mod tests {
             ),
             "Your Settings default model is unavailable right now. This chat now uses Current display with high thinking."
         );
+    }
+
+    #[test]
+    fn a_thinking_level_the_model_no_longer_offers_takes_the_settings_fallback() {
+        let runtime = json!({"config":{"models":[
+            {"thinking":"off","thinkingLevels":["off","high"],"alias":"large-4","name":"large-4"},
+            {"thinking":"off","alias":"old","name":"old"}
+        ]}});
+        assert!(offered(&runtime, &model("large-4", "Large 4", "high")));
+        assert!(!offered(&runtime, &model("large-4", "Large 4", "medium")));
+        assert!(differs(&runtime, &model("large-4", "Large 4", "low")));
+        // A model whose levels Vibe does not list keeps any level, as before.
+        assert!(offered(&runtime, &model("old", "Old", "medium")));
     }
 }

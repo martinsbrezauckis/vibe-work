@@ -16,7 +16,7 @@ import { reposOf } from "./adapter";
 import { GitBrowser } from "./GitBrowser";
 import { FilesPanel } from "../explorer/FilesPanel";
 import { createExplorer, type Explorer } from "../explorer/store";
-import { createPlaceStore, type PlaceStore } from "../explorer/panelModel";
+import { createPlaceStore, panelContext, type PlaceStore } from "../explorer/panelModel";
 import { registerExplorerRoute } from "../explorer/explorerRoute";
 import { bindFiles } from "../explorer/filesBridge";
 import { setFilesTabSource } from "../files/panelRead";
@@ -361,9 +361,16 @@ export function registerGitBrowser(app: App): () => void {
       explorer.choose(folder);
     },
   });
-  // What the agent's panel_read reports about the Files tab: the folder, the view and the search text.
-  setFilesTabSource(() => {
+  // What the agent's panel_read reports about the Files tab: the folder, the view and the search text. The one
+  // explorer follows the selected session only while the Files tab is on screen, so it may still hold another
+  // session's folder: then nothing is reported. The source is asked only for the selected session, the one
+  // panelContext computes.
+  setFilesTabSource((sessionId) => {
     const s = explorer.store.get();
+    const projectId = currentProject(app);
+    const state = view.get();
+    const snapshot = state.projectId === projectId ? state.snapshot : null;
+    if (s.folder !== panelContext(app, snapshot, places.get(), sessionId).folder) return null;
     return { folder: s.folder, view: s.view, search: s.query };
   });
   return () => {

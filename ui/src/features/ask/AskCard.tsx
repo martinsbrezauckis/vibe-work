@@ -13,7 +13,7 @@ import type { CoversPart } from "../../protocol/core";
 import { TEXT, wording } from "../../vocabulary";
 import { registerCardFocus } from "./cardFocus";
 import { type AskButton, type AskChoice } from "./model";
-import { focusCard, revealCardControl, useCardLayout } from "./useCardLayout";
+import { focusCard, jumpToCard, revealCardControl, useCardLayout } from "./useCardLayout";
 
 /** What one card shows; the adapter fills it from Vibe's callback, a protected change or the ask metadata. */
 export interface AskCardProps {
@@ -103,7 +103,7 @@ export function AskCard(props: AskCardProps): ReactElement {
   useEffect(
     () =>
       registerCardFocus(props.id, () => {
-        focusCard(frame.current);
+        jumpToCard(frame.current);
       }),
     [props.id],
   );

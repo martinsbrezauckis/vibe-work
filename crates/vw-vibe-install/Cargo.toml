@@ -36,10 +36,10 @@ thiserror = "2"
 tokio = { version = "1.53", features = ["rt", "sync", "time", "process", "io-util", "fs", "macros"] }
 tracing = "0.1"
 # Archives of Astral's uv release: .tar.gz (Linux, macOS) and .zip (Windows). All three are already in
-# Cargo.lock (zip 8.6.0 + flate2 1.1.10 with zlib-rs through calamine, tar 0.4.46); same features, no new crates.
+# Cargo.lock (zip 9.1.3 + flate2 1.1.10 with zlib-rs through calamine, tar 0.4.46); same features, no new crates.
 flate2 = { version = "1.1.10", default-features = false, features = ["zlib-rs"] }
 tar = { version = "0.4.46", default-features = false }
-zip = { version = "8.6.0", default-features = false, features = ["deflate"] }
+zip = { version = "9.1.3", default-features = false, features = ["deflate"] }
 # Whole-tree containment of the uv steps (cancel and timeout kill uv and every child it started), as the
 # supervisor does for the server: process group on Unix, kill-on-close Job Object on Windows.
 process-wrap = { version = "10.0.1", default-features = false, features = ["tokio1", "kill-on-drop", "process-group", "job-object", "creation-flags"] }

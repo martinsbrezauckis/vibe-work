@@ -31,8 +31,8 @@ From a fresh checkout:
 
 ```sh
 pnpm install --frozen-lockfile
-uv venv --python 3.14.8 data/vibe-3.0.2/venv
-uv pip install --python data/vibe-3.0.2/venv --require-hashes --only-binary :all: -r crates/vw-vibe-install/pin/vibe.requirements.txt
+uv venv --python 3.14.8 data/vibe-3.0.3/venv
+uv pip install --python data/vibe-3.0.3/venv --require-hashes --only-binary :all: -r crates/vw-vibe-install/pin/vibe.requirements.txt
 cargo test -p vw-public-tests --no-fail-fast
 pnpm --filter vibe-work-ui test
 scripts/public/check.sh
