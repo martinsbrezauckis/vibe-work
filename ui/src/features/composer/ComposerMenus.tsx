@@ -17,6 +17,7 @@ import type { ModelChoice } from "./model/models";
 import { THINKING_LEVELS } from "./model/models";
 import { itemDescription, itemName, itemRuns, type MenuItem } from "./model/slash";
 import { modelTerm, TEXT, thinkingTerm, wording } from "../../vocabulary";
+import { effectiveLevel } from "../../state/thinkingLevels";
 
 /** The access mode picker passes the native option event's trust to the composer action. */
 export function AccessMenu({
@@ -69,7 +70,7 @@ export function AccessMenu({
 export function ModelMenu({
   models,
   alias,
-  effort,
+  effort: picked,
   onModel,
   onEffort,
   onOpen,
@@ -85,7 +86,10 @@ export function ModelMenu({
   onClose?: () => void;
   modelLabel?: string;
 }): ReactElement {
-  const levels = models.find((m) => m.alias === alias)?.thinkingLevels ?? THINKING_LEVELS;
+  const choice = models.find((m) => m.alias === alias);
+  const levels = choice?.thinkingLevels ?? THINKING_LEVELS;
+  // A model that always thinks shows its set level as High, its only choice.
+  const effort = effectiveLevel(choice?.alwaysThinks === true, picked);
   const label =
     modelLabel ?? models.find((model) => model.alias === alias)?.label ?? TEXT.modelFallback;
   return (

@@ -4,7 +4,7 @@ Thank you for helping. Bug reports, ideas and pull requests are welcome.
 
 ## Reporting a bug
 
-Open an issue with what you did, what you expected, what happened, and your system and Vibe Work version (Settings ›
+Open an issue with what you did, what you expected, what happened, and your system and Vibe Work version (Settings >
 About). A screenshot helps. For security problems, follow `SECURITY.md` instead of opening an issue.
 
 ## Asking for a feature

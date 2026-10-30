@@ -110,7 +110,11 @@ pub(crate) async fn guard(
     asked: Asked<'_>,
 ) -> Result<Result<(), String>, String> {
     let report = |reason: String| {
-        if matches!(asked, Asked::Hook { .. }) || reason.starts_with("Not done:") {
+        // The user's own answer (a No, or a prompt closed unanswered) is not a guard refusal.
+        if matches!(asked, Asked::Hook { .. })
+            || reason.starts_with("Not done:")
+            || reason == vw_ask::DECLINED
+        {
             reason
         } else {
             crate::guard_refusals::record(
@@ -373,5 +377,11 @@ mod kg1_tests {
         assert!(text.contains("Build session"));
         assert!(text.contains("other session PID"));
         assert!(text.ends_with(&format!("Command:\n{command}")));
+    }
+
+    /// The hook recognizes the user's No by this exact text, so it adds nothing to it.
+    #[test]
+    fn the_hook_knows_the_declined_result() {
+        assert_eq!(vw_agent_tools::hook::DECLINED, vw_ask::DECLINED);
     }
 }

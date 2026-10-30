@@ -100,7 +100,7 @@ pub(crate) const DESCRIBE_JS: &str = r##"  const clip = (v, n) => String(v || ""
       const st = n.getAttribute("data-step"); if (st && ids.length < 8) ids.push(clip(st, 100));
     }
     return { state: "picked", path: path(el), ids, tag: el.localName, role: role(el),
-      text: clip(el.innerText || el.textContent, 2000), quote: quote ? clip(quote, 2000) : null,
+      text: clip(el.innerText, 2000), quote: quote ? clip(quote, 2000) : null,
       url: String(location.href).slice(0, 512), title: clip(document.title, 200) };
   };"##;
 

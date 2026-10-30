@@ -299,7 +299,9 @@ async fn the_secret_broker_end_to_end() {
     )
     .await;
     assert!(
-        swapped_secret.unwrap_err().contains("the user said No"),
+        swapped_secret
+            .unwrap_err()
+            .contains("the user declined this"),
         "a dialog was asked"
     );
     assert_eq!(dialogs("vibe-work/secretRun"), 3, "another secret asks");
@@ -361,7 +363,7 @@ async fn the_secret_broker_end_to_end() {
         )
         .await
         .unwrap_err()
-        .contains("the user said No")
+        .contains("the user declined this")
     );
     assert_eq!(dialogs("vibe-work/secretRun"), 4);
 

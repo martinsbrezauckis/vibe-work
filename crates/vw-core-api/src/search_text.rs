@@ -36,6 +36,11 @@ impl Query {
         let phrase = words.join(" ");
         Some(Self { words, phrase })
     }
+
+    /// The query's words joined without spaces (lowercase), as the name-only fuzzy ranking matches them.
+    pub(crate) fn compact(&self) -> String {
+        self.words.concat()
+    }
 }
 
 /// A lowercase copy of `text` and, for each of its bytes, the byte offset in `text` of the char it came from.

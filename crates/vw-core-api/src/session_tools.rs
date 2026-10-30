@@ -1,6 +1,6 @@
 //! The `sessionTools` command: routes each op to its module.
 //!
-//! Depends on: `session_export`, `temporary`, `subagents_setting`, `session_tools_view`. Called by: `dispatch`.
+//! Depends on: `session_export`, `session_excerpt`, `temporary`, `subagents_setting`, `session_tools_view`. Called by: `dispatch`.
 
 use crate::command::Origin;
 use crate::core::Core;
@@ -67,6 +67,9 @@ impl Core {
             SessionToolsRequest::SetSubagents { enabled } => {
                 self.set_subagents(origin, enabled).await
             }
+            SessionToolsRequest::Excerpt { session_id } => Ok(SessionToolsResult::Excerpt {
+                excerpt: self.session_excerpt(&session_id).await?,
+            }),
         }
     }
 }

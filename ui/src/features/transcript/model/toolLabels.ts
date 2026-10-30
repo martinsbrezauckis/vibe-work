@@ -84,6 +84,15 @@ export function builtinTool(tool: string): ToolWords | null {
   }
 }
 
+/**
+ * What an approval is about when Vibe sent neither a summary nor a title: a built-in's plain name, else the tool's
+ * own identity without Vibe's `mcp_` route prefix.
+ */
+export function toolFallback(tool: string): string {
+  if (tool === "") return "request";
+  return builtinTool(tool)?.name ?? tool.replace(/^mcp_/, "");
+}
+
 /** Replace only a built-in's label or display prefix; filenames and exact commands remain unchanged. */
 export function toolText(tool: string, text: string, literal: string | null = null): string {
   if (literal !== null && text === literal) return text;

@@ -98,6 +98,10 @@ pub(crate) fn describe(method: &str, params: &Value) -> Option<String> {
             "Start the sign-in for the MCP server {}. Vibe asks the server for its sign-in page; you finish it in your browser.",
             quoted(params, "name")
         ),
+        "connector_catalog/connect" => format!(
+            "Connect the Mistral connector {}. It needs no sign-in; Mistral keeps the connection on your account.",
+            quoted(params, "alias")
+        ),
         "connector_catalog/auth/request" => format!(
             "Start the sign-in for the Mistral connector {}. Mistral gives the vendor's sign-in page; you finish it in your browser and the account link is kept by Mistral.",
             quoted(params, "alias")

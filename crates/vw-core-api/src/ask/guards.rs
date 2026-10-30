@@ -89,23 +89,11 @@ fn pending(
                 NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
             );
             request.params["askId"] = serde_json::Value::String(id.clone());
-            let session = request.params["sessionId"].as_str().map(str::to_owned);
             let presentation = shared.confirmer.begin(request);
             let (send, result) = watch::channel(None);
-            let id_for_answer = id.clone();
-            let owner = shared.clone();
-            let target = session.clone();
+            // A No is handed to the waiting caller, which returns the declined result; the turn goes on.
             let task = tokio::spawn(async move {
                 let answer = presentation.await;
-                if answer == Confirmation::Declined
-                    && let Some(session) = target
-                    && owner.asks.outcome(&id_for_answer).is_some_and(|r| {
-                        !r.ask.person_only && matches!(r.outcome, vw_ask::Outcome::Refused { .. })
-                    })
-                    && let Err(error) = super::stop_after_no(&owner, &session).await
-                {
-                    tracing::warn!(%error, "could not stop the declined prompt's turn");
-                }
                 send.send_replace(Some(answer));
             });
             calls.insert(

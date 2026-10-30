@@ -30,14 +30,15 @@ pub enum NewChatRequest {
         #[cfg_attr(feature = "ts", ts(optional))]
         folder: Option<String>,
     },
-    /// The first message started `sessionId`: its terminals, browser and port lease move to that session
-    /// (nothing stops), and the New chat screen gets a fresh owner id.
+    /// The first message started `sessionId`: its terminals, browser (with the App preview's site data, so its
+    /// sign-ins stay) and port lease move to that session (nothing stops), and the New chat screen gets a fresh owner
+    /// id.
     Adopt {
         /// The session the first message started.
         session_id: String,
     },
     /// Closes everything open before the chat: the terminals stop, the browser pages close and their local
-    /// site data is cleared. The folder stays.
+    /// site data is cleared, and the New chat screen gets a fresh owner id. The folder stays.
     CloseAll {},
 }
 

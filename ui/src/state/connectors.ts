@@ -25,6 +25,7 @@ import type { Shell } from "./shellStore";
 import type { Toasts } from "./toastStore";
 import type { Transcript } from "./transcriptStore";
 import { type SignIn, type Timers, createSignIns } from "./connectorSignIn";
+import { TEXT, wording } from "../vocabulary";
 
 /** Everything the page shows. */
 export interface ConnectorsState {
@@ -121,7 +122,7 @@ export function createConnectors(deps: {
     _origin: "ui" | "debug-api",
     req: ConnectorsRequest,
   ): Promise<ConnectorsResult> => {
-    if (!canUseKey() && ["refresh", "signIn", "setConnectorOff"].includes(req.op))
+    if (!canUseKey() && ["refresh", "signIn", "connect", "setConnectorOff"].includes(req.op))
       throw new Error("Mistral key required for hosted connectors");
     const result = await core.run({ type: "connectors", request: req });
     if (result.type !== "connectors") throw new Error("unexpected answer to a connectors request");
@@ -135,7 +136,8 @@ export function createConnectors(deps: {
   };
   const fail = (thrown: unknown, req?: ConnectorsRequest): string => {
     const error = toCallError(thrown).error;
-    const hosted = req !== undefined && ["refresh", "signIn", "setConnectorOff"].includes(req.op);
+    const hosted =
+      req !== undefined && ["refresh", "signIn", "connect", "setConnectorOff"].includes(req.op);
     if (error.code === "keyService" || (hosted && !canUseKey())) {
       patch({ note: null });
       return error.message;
@@ -225,6 +227,16 @@ export function createConnectors(deps: {
         canUseKey()
           ? signIns.connector(origin, alias, contextSession(core, shell))
           : Promise.resolve(),
+      /**
+       * Connects a Mistral connector that needs no sign-in through the context session (no page, no dialog from
+       * the window); the board reads the session's state again, so the next message can use it.
+       */
+      connect: (alias: string, name: string) => {
+        const sessionId = contextSession(core, shell);
+        return canUseKey() && sessionId !== null
+          ? run({ op: "connect", sessionId, alias }, wording(TEXT.connectorConnectedNote, { name }))
+          : Promise.resolve(false);
+      },
       /** Shows the sign-in page's link dialog again. */
       openPage: () => {
         signIns.openPage();

@@ -14,6 +14,7 @@ import { type ReactElement, useCallback, useEffect, useState } from "react";
 import { Selector } from "../../components/Selector";
 import { sessionForPick } from "../../state/modelChoice";
 import { type SubagentsSaved, type VibeSettings, readVibeSettings } from "../../state/vibeSettings";
+import { TEXT } from "../../vocabulary";
 import { useApp } from "../shell/AppContext";
 import { useCoreState, useShellState } from "../shell/hooks";
 
@@ -21,6 +22,7 @@ const SETTERS: Record<string, string> = {
   environment: "Vibe Work for this run",
   admin: "your administrator",
   overrides: "a setting of this session",
+  "project-toml": TEXT.setByProjectSettings,
 };
 
 /** Shown under a setting that was saved for new chats only. */
@@ -129,7 +131,8 @@ export function useVibeSettings() {
   };
 }
 
-function lockLine(setBy: string | null): ReactElement | null {
+/** The line under a row that another layer sets, naming that layer; `null` when the user's file decides. */
+export function lockLine(setBy: string | null): ReactElement | null {
   return setBy === null ? null : (
     <span className="d">Set by {SETTERS[setBy] ?? setBy}; it cannot be changed here.</span>
   );

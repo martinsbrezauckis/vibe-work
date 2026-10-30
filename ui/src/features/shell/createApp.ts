@@ -10,7 +10,9 @@
 import { createNewChatDraft } from "../../state/newChatDraft";
 import { createChanges } from "../changes/store";
 import { createSecretScan } from "../../state/secretScan";
+import { createConfigNotices } from "../../state/configNotices";
 import { createVibeInstall } from "../../state/vibeInstall";
+import { createDefaultModel } from "../../state/defaultModel";
 import type { CoreClient } from "../../protocol/client/types";
 import { createCommands } from "../../state/commands";
 import { createComposer } from "../../state/composer";
@@ -206,9 +208,14 @@ export function createApp(options: CreateAppOptions): App {
   return {
     core,
     secretScan: core === null ? null : createSecretScan(core, toasts),
+    configNotices:
+      core === null
+        ? null
+        : createConfigNotices({ core, toasts, persist: options.persist ?? true }),
     sessions,
     keys,
     vibe: core === null ? null : createVibeInstall(core),
+    defaultModel: core === null ? null : createDefaultModel({ core }),
     updates:
       options.client === null
         ? null

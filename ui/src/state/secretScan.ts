@@ -32,6 +32,13 @@ export function createSecretScan(core: CoreController, toasts: Toasts) {
       if (old) toasts.update(old.id, { kind: "info", bellKind: "security", ...spec });
       else toasts.record({ kind: "info", bellKind: "security", ...spec });
     }
+    // A finding the core no longer reports (its chat was deleted) leaves the bell; if it returns, it is new again.
+    const current = new Set(view.findings.map((finding) => finding.findingId));
+    for (const notice of toasts.history.get()) {
+      const id = notice.secretLeak?.findingId;
+      if (id !== undefined && !current.has(id)) toasts.forget(notice.id);
+    }
+    for (const id of [...seen.keys()]) if (!current.has(id)) seen.delete(id);
   };
   const run = async (request: SecretScanRequest): Promise<void> => {
     const key = request.op === "redact" ? request.findingId : "settings";

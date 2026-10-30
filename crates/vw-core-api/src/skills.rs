@@ -4,9 +4,8 @@ use crate::command::Origin;
 use crate::core::Core;
 use crate::error::{CoreError, ErrorCode};
 use crate::keys::mistral_key_available;
-use crate::skills_view::{
-    SkillDetail, SkillIssue, SkillRow, SkillsAction, SkillsRequest, SkillsResult, SkillsView,
-};
+use crate::skills_rows::{board, lock_reason, representative, row_view};
+use crate::skills_view::{SkillDetail, SkillsAction, SkillsRequest, SkillsResult};
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -77,27 +76,6 @@ fn refuse(text: impl Into<String>) -> CoreError {
 }
 fn canonical(path: &Path) -> PathBuf {
     path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
-}
-fn representative(row: &vw_skills::SkillView) -> Option<&vw_skills::SkillSummary> {
-    row.active
-        .as_ref()
-        .or_else(|| (row.installations.len() == 1).then(|| &row.installations[0]))
-}
-fn lock_reason(row: &vw_skills::SkillView) -> Option<String> {
-    row.installations
-        .iter()
-        .chain(row.active.iter())
-        .find(|s| s.locked)
-        .map(|s| {
-            if s.source == vw_skills::SkillSource::Plugin {
-                format!(
-                    "Set by plugin {}",
-                    s.name.split(':').next().unwrap_or(&s.name)
-                )
-            } else {
-                "Set in Vibe's settings file".to_owned()
-            }
-        })
 }
 /// The version an install offer names for `skill_id` of `row`: the catalog's latest, else the row's (one place, so
 /// the offer and the check at the click read it the same way).
@@ -188,57 +166,6 @@ fn offered_update_landed(
     Err(error)
 }
 
-fn row_view(row: &vw_skills::SkillView) -> SkillRow {
-    let current = representative(row);
-    let installed = !row.installations.is_empty() || row.active.is_some();
-    let lock_reason = lock_reason(row);
-    let scope = current.map(|s| {
-        match s.scope {
-            vw_skills::SkillScope::Builtin => "builtin",
-            vw_skills::SkillScope::Global => "global",
-            vw_skills::SkillScope::Project => "project",
-        }
-        .to_owned()
-    });
-    let skill_id = current
-        .and_then(|s| s.registry.as_ref().map(|r| r.skill_id.clone()))
-        .or_else(|| {
-            (!installed && row.catalog.len() == 1).then(|| row.catalog[0].skill_id.clone())
-        });
-    SkillRow {
-        name: row.name.clone(),
-        description: row.description.clone().unwrap_or_default(),
-        source: if current.is_some_and(|s| s.scope == vw_skills::SkillScope::Builtin) {
-            Some("builtin".to_owned())
-        } else {
-            row.source.map(|s| {
-                match s {
-                    vw_skills::SkillsSource::Builtin => "builtin",
-                    vw_skills::SkillsSource::User => "user",
-                    vw_skills::SkillsSource::Project => "project",
-                    vw_skills::SkillsSource::Plugin => "plugin",
-                    vw_skills::SkillsSource::Catalog => "catalog",
-                }
-                .to_owned()
-            })
-        },
-        installed,
-        enabled: row.enabled,
-        locked: lock_reason.is_some() || (installed && current.is_none()),
-        lock_reason,
-        scope,
-        skill_id,
-        installed_version: row.installed_version,
-        latest_version: row.latest_version,
-        update_available: row.catalog_update.is_some()
-            && row.catalog_update == row.latest_version
-            && row
-                .latest_version
-                .zip(row.installed_version)
-                .is_some_and(|(latest, installed)| latest > installed)
-            && current.is_some_and(|s| s.registry.is_some()),
-    }
-}
 fn mutation_target<'a>(
     view: &'a vw_skills::SkillsView,
     action: &SkillsAction,
@@ -269,22 +196,6 @@ fn mutation_target<'a>(
         }
     }
     Ok(target)
-}
-fn board(view: vw_skills::SkillsView, busy: bool, authenticated: bool) -> SkillsView {
-    SkillsView {
-        skills: view.skills.iter().map(row_view).collect(),
-        issues: view
-            .issues
-            .into_iter()
-            .map(|i| SkillIssue {
-                file: i.file,
-                message: i.message,
-            })
-            .collect(),
-        catalog_loaded: view.catalog_loaded,
-        authenticated,
-        busy,
-    }
 }
 impl Core {
     pub(crate) async fn lock_skills_work(
@@ -565,9 +476,14 @@ impl Core {
             offered_update_landed(&view, target_name.as_deref(), version)?;
         }
         let authenticated = mistral_key_available(self.shared.config.keys.as_deref());
-        Ok(SkillsResult::View {
-            view: board(view, self.skills_busy(folder), authenticated),
-        })
+        let busy = self.skills_busy(folder);
+        let places =
+            crate::skill_times::SkillPlaces::new(&self.shared.instructions.own_home, folder);
+        // The rows' file times read the disk: off the async workers.
+        let view = tokio::task::spawn_blocking(move || board(view, busy, authenticated, &places))
+            .await
+            .map_err(|e| CoreError::new(ErrorCode::Internal, format!("skills list failed: {e}")))?;
+        Ok(SkillsResult::View { view })
     }
 
     async fn skills_detail<T: SkillsTransport>(

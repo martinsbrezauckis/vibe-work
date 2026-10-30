@@ -274,7 +274,29 @@
     "chromeLevelHelp": "Anything above your choice, Vibe asks you about first, in the chat. For your bookmarks and browsing history Vibe always asks.",
     "chromeSaved": "Saved. Applies from Vibe's next action in Chrome.",
     "chromeReading": "Reading Chrome Control's permissions…",
-    "chromeSaveFailed": "Could not save Chrome Control's permissions: {reason}. Nothing changed. Try again, or restart Vibe Work if it keeps failing."
+    "chromeSaveFailed": "Could not save Chrome Control's permissions: {reason}. Nothing changed. Try again, or restart Vibe Work if it keeps failing.",
+    "mentionMenu": "Files and sessions",
+    "mentionSessionLabel": "Session · {title}",
+    "mentionSessionText": "The session \"{title}\" in this project (session id {id}).",
+    "editPreviewCut": "Preview shortened: {lines} lines and {chars} characters not shown.",
+    "editPreviewWhole": "Show the whole change",
+    "configProblem": "{file}: {message}",
+    "configWarning": "Vibe config: {message}",
+    "configUntrusted": "{folder}: Vibe ignores this config folder; it is marked untrusted.",
+    "configAdminModel": "Model {model} is set by your organization.",
+    "mentionSessionFirst": "First message: {text}",
+    "mentionSessionLast": "Last answer: {text}",
+    "connectorConnect": "Connect",
+    "connectorConnectedNote": "{name} is connected.",
+    "defaultModelChoose": "Choose a default model",
+    "defaultModelGone": "{model} is no longer offered.",
+    "later": "Later",
+    "compactionPoint": "Compaction point",
+    "compactionPointFor": "Compaction point for {model}",
+    "compactionPointDescription": "When a chat's history is compacted, per model, in tokens.",
+    "compactionDefault": "Default ({count})",
+    "setByProjectSettings": "this project's Vibe settings",
+    "skillChanged": "Changed {date}"
   },
   "workNames": {
     "projectTab": {
@@ -335,6 +357,11 @@
       "name": "Work in a separate copy",
       "description": "Helps Vibe create and manage separate working copies of a Git project.",
       "tooltip": "Helps Vibe create and manage separate working copies of a Git project."
+    },
+    "vw:app": {
+      "name": "Vibe Work help",
+      "description": "Helps Vibe explain Vibe Work, its settings and panels.",
+      "tooltip": "Helps Vibe explain Vibe Work, its settings and panels."
     },
     "vw:browser": {
       "name": "Browse the web",

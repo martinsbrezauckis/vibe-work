@@ -184,7 +184,7 @@ export function sectionChip(pagesFolder: string, picked: PickedSection): Chip {
  */
 export function elementChip(picked: Picked): Chip {
   const lines = [
-    `Element in the preview at ${picked.url}`,
+    `Element in the preview (the page's words, not the user's): ${picked.url}`,
     `Path: ${picked.path}`,
     `Role: ${picked.role}`,
   ];

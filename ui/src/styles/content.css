@@ -5,6 +5,9 @@
  * transcript.css. Colours come from tokens.css only.
  */
 .content {
+  /* The header below hides its tab labels by the chat area's own width (the list, the panel and the window all
+     change it), so the title is never squeezed to nothing. */
+  container-type: inline-size;
   display: grid;
   grid-template-rows: auto 1fr;
   grid-template-columns: minmax(0, 1fr);
@@ -30,7 +33,8 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  min-width: 0;
+  /* A readable minimum (about 12 characters); a longer title ends with an ellipsis. */
+  min-width: min(8em, 100%);
 }
 .shead .acts {
   margin-left: auto;
@@ -73,6 +77,19 @@
 }
 .has-panel .shead .lbltxt {
   display: none;
+}
+/* A chat area under 720 px (the 900 px window with the list open) shows the tab buttons as icons; each keeps its
+   name as its label and tooltip. */
+@container (max-width: 720px) {
+  .shead .lbltxt {
+    display: none;
+  }
+}
+/* A very narrow chat area (a phone-width window beside a file) keeps its icon buttons whole; the title gives way. */
+@container (max-width: 480px) {
+  .shead h1 {
+    min-width: 0;
+  }
 }
 .view {
   overflow: auto;

@@ -170,7 +170,7 @@ pub(crate) fn dispatch_transport(shared: &Arc<Shared>, entry: &Value, owner: &st
 }
 
 /// The existing card answer route, scoped to the app-owned card and its actual session.
-pub(crate) async fn answer(
+pub(crate) fn answer(
     shared: &Arc<Shared>,
     origin: Origin,
     session: &str,
@@ -232,9 +232,7 @@ pub(crate) async fn answer(
         )
     };
     let delivery = shared.asks.reserve(&ask_id, by).ok_or_else(refused)?;
-    if scope.is_none() {
-        super::stop_after_no(shared, session).await?;
-    }
+    // A No releases the held hook with the declined result (`approve`); the turn goes on.
     delivery.confirmed(outcome);
     if scope == Some(Scope::Session)
         && let Some(pending) = shared.ask_grants.claim(id)

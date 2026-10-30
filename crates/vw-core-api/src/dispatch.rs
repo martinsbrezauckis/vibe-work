@@ -377,6 +377,11 @@ impl Core {
                     user_entry_ids: Vec::new(),
                 })
             }
+            Command::CheckDefaultModel {} => Ok(CommandResult::Reply {
+                result: crate::model_check::check(&self.shared).await?,
+                client_user_message_id: None,
+                user_entry_ids: Vec::new(),
+            }),
             Command::Terminal { request } => self.terminal(request).await,
             Command::Instructions { request } => self.instructions(origin, request).await,
             Command::ProjectInstructions { request } => {
@@ -651,6 +656,8 @@ impl Core {
             selected,
         }))
         .await?;
+        // Before the store, the name cache or any client sees it: chat titles hold no vault value (`title_guard`).
+        crate::title_guard::withhold_in(&self.shared, &mut reply.result);
         if let Some(opening) = entry_project {
             opening.finish(&self.shared, &reply.result);
         }

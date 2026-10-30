@@ -1,6 +1,6 @@
 /**
  * The details panel of the selected connector or server: what it is, its state with Vibe's
- * own reason, the tools Vibe reports, who keeps the sign-in, and its actions (sign in, turn off or on,
+ * own reason, the tools Vibe reports, who keeps the sign-in, and its actions (sign in or connect, turn off or on,
  * manage at Mistral; for servers also sign out and remove).
  * Depends on: AppContext (link dialog), hooks, CategoryIcon, model/meta, model/view. Called by:
  * ConnectorsPage.
@@ -18,6 +18,7 @@ import { CategoryIcon } from "./CategoryIcon";
 import { useConnectorActions, useConnectors } from "./hooks";
 import { CATEGORIES } from "./model/meta";
 import { type Tile, serverStatusText, serverTone, tileOf } from "./model/view";
+import { TEXT } from "../../vocabulary";
 
 function Tools({ tools, empty }: { tools: readonly ToolView[]; empty: string }): ReactElement {
   if (tools.length === 0) return <p className="cmuted">{empty}</p>;
@@ -84,6 +85,17 @@ function ConnectorPart({
             onClick={() => void actions?.signIn(tile.alias)}
           >
             Sign in
+          </Button>
+        ) : null}
+        {tile.status === "connect" ? (
+          <Button
+            data-testid="connectors.connector-detail-connect"
+            type="button"
+            appearance="dialog"
+            disabled={keyBlocked}
+            onClick={() => void actions?.connect(tile.alias, tile.meta.name)}
+          >
+            {TEXT.connectorConnect}
           </Button>
         ) : null}
         <Button

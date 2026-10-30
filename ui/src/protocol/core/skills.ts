@@ -183,7 +183,12 @@ latestVersion: number | null,
 /**
  * Only the catalog's `check_updates` signal enables an update button.
  */
-updateAvailable: boolean, };
+updateAvailable: boolean,
+/**
+ * When the skill file of the active or sole installed copy last changed, in milliseconds since the epoch;
+ * absent for built-in, plugin and catalog-only rows and when the file cannot be found.
+ */
+modifiedAt: number | null, };
 
 export type SkillDetail = {
 /**

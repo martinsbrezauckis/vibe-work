@@ -18,6 +18,11 @@ mod handoff;
 pub(crate) use handoff::{forked, handed_off};
 mod restore;
 pub(crate) use restore::restore;
+
+/// The alias of a Settings default Vibe no longer offers (its own validation warning), else `None`.
+pub(crate) fn unavailable_default_alias(config: &Value) -> Option<String> {
+    restore::unavailable_default(config).map(|choice| choice.alias)
+}
 mod live;
 pub(crate) use live::{admission, before, pick, publish, selected};
 

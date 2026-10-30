@@ -163,6 +163,7 @@ pub(crate) fn snapshot(shared: &Shared, id: &str) -> Result<SessionSnapshot, Cor
         .map(|view| {
             let mut snapshot = SessionSnapshot::from(view);
             super::agent_tools::shell_commands::project(shared, &mut snapshot.state);
+            crate::edit_preview::project(shared, &mut snapshot.state);
             shared.protected_changes.overlay(id, &mut snapshot.state);
             shared.chrome_control.overlay(id, &mut snapshot.state);
             crate::ask::tool_calls::overlay(shared, id, &mut snapshot.state);
@@ -187,6 +188,7 @@ pub(crate) fn detail(result: &Value) -> Value {
 pub(crate) fn project_result(shared: &Shared, method: &str, params: &Value, result: &mut Value) {
     crate::provider_errors::value(result);
     super::agent_tools::shell_commands::project(shared, result);
+    crate::edit_preview::project(shared, result);
     let Some(state) = result.get_mut("state").filter(|s| s.is_object()) else {
         return;
     };

@@ -69,8 +69,8 @@ impl PreviewService {
         true
     }
 
-    /// A session ended (archive or delete): its preview closes; on delete its website data is wiped and the
-    /// entry forgotten. Returns paths whose mount could not be closed or data could not be removed yet (the caller
+    /// A session ended (archive or delete): its preview closes; on delete its website data is wiped (never data a
+    /// session adopted from this owner, `adopt_storage`) and the entry forgotten. Returns paths whose mount could not be closed or data could not be removed yet (the caller
     /// records them for a later retry).
     pub async fn session_ended(&self, session_id: &str, deleted: bool) -> Vec<PathBuf> {
         let web_keys = self.web_tabs(session_id);
@@ -123,10 +123,16 @@ impl PreviewService {
             state.tabs.remove(session_id);
         }
         let storage = self.storage(session_id);
+        // A New chat screen owner whose data a session adopted: that data is the session's now, wiped only when
+        // the session is deleted.
+        if self.store_adopted_by_other(session_id, storage.key) {
+            return leftovers;
+        }
         match self.bounded("wipe", self.engine.wipe(&storage)).await {
             Ok(left) => leftovers.extend(left),
             Err(_) => leftovers.push(storage.dir),
         }
+        self.forget_adoption(session_id);
         leftovers
     }
 
@@ -134,8 +140,9 @@ impl PreviewService {
     /// compaction with a new id). The preview follows: its URL, title, width and console
     /// become `new`'s (and the window's shown preview, when it was `old`'s), so the Browser tab of the session the
     /// window shows keeps it. Its webview is closed: a session's website data lives in a folder named after the
-    /// session id ([`crate::ids::StorageKey`]), so the next show or use mounts it again with `new`'s storage
-    /// (the old session's data stays in its folder until that session is deleted). When `new` already has a
+    /// session id ([`crate::ids::StorageKey`]; after [`Self::adopt_storage`], after the New chat screen owner's id),
+    /// so the next show or use mounts it again with `new`'s storage (the old session's data stays in its folder
+    /// until that session is deleted). When `new` already has a
     /// preview of its own, `old`'s is dropped instead. Port rights and download paths are withdrawn before the
     /// core revalidates them for `new`. A failed native close leaves the old entry in place for retry.
     pub async fn session_handed_off(&self, old: &str, new: &str) {

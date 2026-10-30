@@ -4,9 +4,9 @@
  * text as the user types until the user edits it by hand (then it stays), and the git-ignored files note. What
  * `.worktreeinclude` copies stays visible. The first message is the composer's own text (the composer supplies it).
  * Depends on: useCopyForm (state), IncludeList. Called by: sessions/NewChatPanel.
- * Invariants: renders only for a git folder, or with the reason alone when the core did not
- * read the folder because it was not chosen with the folder picker; a repository that is not offered a copy shows
- * the reason and a switch that cannot be turned on; names and messages are plain text inputs.
+ * Invariants: renders only for a git folder, so nothing when the core did not read the folder because it was not
+ * chosen with the folder picker; a repository that is not offered a copy shows the reason and a switch that cannot
+ * be turned on; names and messages are plain text inputs.
  */
 import type { ReactElement } from "react";
 
@@ -16,15 +16,7 @@ import type { CopyForm } from "./useCopyForm";
 
 /** The section. */
 export function CopySection({ form }: { form: CopyForm }): ReactElement | null {
-  if (form.notPicked && form.existingBranch === null && form.reason !== null) {
-    return (
-      <fieldset className="copy-section" data-worktree="section">
-        <p className="copy-reason" role="note">
-          For a new copy, choose a folder with Change folder…
-        </p>
-      </fieldset>
-    );
-  }
+  // A folder the core did not read (not chosen with the folder picker) has no known repository: no section.
   if (!form.available) return null;
   return (
     <fieldset className="copy-section" data-worktree="section">

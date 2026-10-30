@@ -185,7 +185,8 @@ ok: boolean,
  */
 file: string | null, 
 /**
- * How to name it: relative to the session's folder, else the full path (a picked folder).
+ * How to name it: relative to the session's own working folder when the file lies in it, else the full path
+ * (elsewhere in its project, or a picked folder).
  */
 display: string | null, 
 /**
@@ -211,7 +212,7 @@ export type FileChoice = {
  */
 file: string, 
 /**
- * Path relative to the session folder.
+ * As in [`FileRefView::display`].
  */
 display: string, 
 /**

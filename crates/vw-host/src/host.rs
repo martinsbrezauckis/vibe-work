@@ -1,8 +1,7 @@
 //! `Host`: starts and owns the core and the Debug API for the running app.
 //!
-//! Depends on: vw-core-api (`Core`), vw-debug-api (`DebugApi`), vw-supervisor, `bridge`,
-//! `forward`, `settings`. Called by: `app` (Tauri commands call [`Host::execute`],
-//! [`Host::subscribe`], [`Host::set_debug_api`] and the bridge accessors), the private test host.
+//! Depends on: vw-core-api (`Core`), vw-debug-api (`DebugApi`), vw-supervisor, `bridge`, `forward`, `settings`.
+//! Called by: `app` ([`Host::execute`], [`Host::subscribe`], [`Host::set_debug_api`], bridge), the test host.
 //! Invariants:
 //! - [`Host::start`] always returns a `Host`. When Vibe cannot be started the host records why in
 //!   [`Startup`] and every command fails with `serverUnavailable` carrying that reason, so the
@@ -221,6 +220,10 @@ const SHELL_ROUTES: &[(&str, &str)] = &[
     (
         "search",
         "Search like Ctrl K and Ctrl F do. Body: {action: palette|results|run|find|next|previous|findClose|fileFind|fileNext|filePrevious|fileFindClose|findState, query?, id?, sessionId?}: palette {query} opens the global search with the words typed; results (default) returns the rows the palette shows now (id, kind: session|message|file|setting|action, title, path, opens); run {id} opens one like Enter (a message opens its conversation at the match with the find bar, a file opens the File tab at the line); find {query?, sessionId?} is Ctrl F in a conversation (the find bar; sessionId defaults to the open session), next/previous step through its matches, findClose closes it; fileFind/fileNext/filePrevious/fileFindClose do the same in the File tab; findState returns both bars (session, query, current match) and their match counts.",
+    ),
+    (
+        "models",
+        "The card that asks for a new default model when Vibe no longer offers the Settings one. Body: {action: read|check|pick|later, alias?}: read (default) returns {open, gone {alias, label} or null, models [{alias, label}] (the models Vibe offers), saving, error}; check runs the launch check again (checkDefaultModel); pick {alias} saves that model as the default for new chats like its button and closes the card; later closes it without a change (it asks again at the next launch).",
     ),
     (
         "updates",

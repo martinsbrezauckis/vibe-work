@@ -6,6 +6,7 @@
  * Invariants: ids are unique; active toasts are bounded separately from the full-text history. A toast is said
  * once by the app's announcer when it appears (errors assertively).
  * Dismissal/expiry never removes retained text. Only allowed bell kinds enter memory-only history.
+ * Removing a retained entry (Dismiss, Clear all) is told to `onDismissed` listeners; closing a toast is not.
  */
 import { announce } from "./announcer";
 import { createStore } from "./createStore";
@@ -42,6 +43,11 @@ export function createToasts() {
   const toastedChats = new Set<string>();
   const seenRefusals = new Set<string>();
   const filter = createStore<"all" | import("./notifications").BellKind>("all");
+  // Told the ids of retained entries the person dismissed from the bell (Dismiss, Clear all).
+  const dismissedListeners = new Set<(ids: readonly number[]) => void>();
+  const tellDismissed = (ids: readonly number[]): void => {
+    if (ids.length > 0) for (const listener of dismissedListeners) listener(ids);
+  };
   const markRead = () => {
     history.set((list) => list.map((notice) => (notice.read ? notice : { ...notice, read: true })));
   };
@@ -102,15 +108,26 @@ export function createToasts() {
     },
     /** Removes a retained entry and its active toast when dismissed from the panel. */
     forget(id: number): void {
+      const retained = history.get().some((toast) => toast.id === id);
       store.set((list) => list.filter((toast) => toast.id !== id));
       history.set((list) => list.filter((toast) => toast.id !== id));
       panel.set((state) => (state.selectedId === id ? { ...state, selectedId: null } : state));
+      if (retained) tellDismissed([id]);
     },
     /** Dismisses all retained and active entries, leaving the panel open at its empty state. */
     clear(): void {
+      const ids = history.get().map((toast) => toast.id);
       store.set([]);
       history.set([]);
       panel.set((state) => ({ ...state, selectedId: null }));
+      tellDismissed(ids);
+    },
+    /** Calls `listener` with the ids of retained entries the person dismissed; returns the unsubscribe. */
+    onDismissed(listener: (ids: readonly number[]) => void): () => void {
+      dismissedListeners.add(listener);
+      return () => {
+        dismissedListeners.delete(listener);
+      };
     },
     /** Brief confirmation for a completed user action; never retained in Notifications. */
     feedback(text: string): number {

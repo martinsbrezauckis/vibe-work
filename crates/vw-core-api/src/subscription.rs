@@ -120,6 +120,7 @@ impl CoreSubscription {
         match &mut event {
             CoreEvent::Snapshot { snapshot } => {
                 crate::agent_tools::shell_commands::project(&shared, &mut snapshot.state);
+                crate::edit_preview::project(&shared, &mut snapshot.state);
                 shared
                     .protected_changes
                     .overlay(&snapshot.session_id, &mut snapshot.state);

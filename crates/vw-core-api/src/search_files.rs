@@ -11,6 +11,10 @@
 //! Budgets: [`MAX_FILES`] files read, [`MAX_BYTES`] read in all, [`DEADLINE`]; past one of them the answer says
 //! `truncated`. Hits: names first, then lines in folder and file order, [`COUNT_CAP`] counted.
 //!
+//! Name-only search (the composer's @ menu) reads no content: it ranks every listed name by `search_fuzzy` (best
+//! first, then shorter paths, then path order) and checks only the best ones on disk; an empty query lists names in
+//! folder and file order.
+//!
 //! Depends on: `search_text`, vw-changes (`git`). Called by: `search` (`search files`), `files_lookup` (names only).
 //! Invariants: only paths under a searched folder are read (git's names are joined to the folder and checked to stay
 //! inside it lexically, with no `..` and no absolute part); nothing is written.
@@ -18,6 +22,7 @@
 use std::path::{Component, Path, PathBuf};
 use std::time::{Duration, Instant};
 
+use crate::search_fuzzy;
 use crate::search_text::{Query, find, snippet};
 use crate::search_view::FileHit;
 
@@ -142,6 +147,62 @@ fn plain_relative(rel: &str) -> bool {
         .all(|c| matches!(c, Component::Normal(_) | Component::CurDir))
 }
 
+/// A listed name that can be shown: a regular file, not a link, not under a linked folder.
+fn listable(folder: &Path, rel: &str) -> bool {
+    let path = folder.join(rel);
+    std::fs::symlink_metadata(&path).is_ok_and(|meta| meta.is_file())
+        && !vw_changes::has_symlinked_parent(folder, &path)
+}
+
+/// Name-only search: no content is read (`scanned` stays 0). Every listed name is ranked by [`search_fuzzy::score`]
+/// of the query (its words joined); only the best names are checked on disk, until `limit` are found.
+fn names(folders: &[Folder], query: Option<&Query>, limit: usize) -> Found {
+    let started = Instant::now();
+    let wanted = query.map(Query::compact).unwrap_or_default();
+    let mut found = Found::default();
+    let mut ranked: Vec<(i64, usize, String)> = Vec::new();
+    'folders: for (index, folder) in folders.iter().enumerate() {
+        for rel in candidates(&folder.path) {
+            if ranked.len() >= MAX_FILES as usize || started.elapsed() >= DEADLINE {
+                found.truncated = true;
+                break 'folders;
+            }
+            // Hidden files and folders are skipped in the listing too, like the walk and the Files view's default scope.
+            if !plain_relative(&rel) || rel.split('/').any(|part| part.starts_with('.')) {
+                continue;
+            }
+            if let Some(score) = search_fuzzy::score(search_fuzzy::target(&rel, &wanted), &wanted) {
+                ranked.push((score, index, rel));
+            }
+        }
+    }
+    found.total = u32::try_from(ranked.len())
+        .unwrap_or(u32::MAX)
+        .min(COUNT_CAP);
+    if !wanted.is_empty() {
+        // A stable sort: equal scores keep folder and file order after the shorter path.
+        ranked.sort_by(|a, b| b.0.cmp(&a.0).then(a.2.len().cmp(&b.2.len())));
+    }
+    for (_, index, rel) in ranked {
+        if found.hits.len() >= limit || started.elapsed() >= DEADLINE {
+            break;
+        }
+        let Some(folder) = folders.get(index) else {
+            continue;
+        };
+        if listable(&folder.path, &rel) {
+            found.hits.push(FileHit {
+                folder: folder.path.display().to_string(),
+                path: rel.clone(),
+                line: None,
+                text: rel,
+                session_id: folder.session_id.clone(),
+            });
+        }
+    }
+    found
+}
+
 /// Searches `folders` for `query`; at most `limit` hits are returned.
 pub(crate) fn search(
     folders: &[Folder],
@@ -149,18 +210,17 @@ pub(crate) fn search(
     limit: usize,
     names_only: bool,
 ) -> Found {
+    if names_only {
+        return names(folders, query, limit);
+    }
     let started = Instant::now();
     let mut found = Found::default();
     let mut bytes: u64 = 0;
     let mut names: Vec<FileHit> = Vec::new();
     let mut lines: Vec<FileHit> = Vec::new();
-    let mut inspected = 0;
     'folders: for folder in folders {
         for rel in candidates(&folder.path) {
-            if (if names_only { inspected } else { found.scanned }) >= MAX_FILES
-                || bytes >= MAX_BYTES
-                || started.elapsed() >= DEADLINE
-            {
+            if found.scanned >= MAX_FILES || bytes >= MAX_BYTES || started.elapsed() >= DEADLINE {
                 found.truncated = true;
                 break 'folders;
             }
@@ -169,7 +229,6 @@ pub(crate) fn search(
             if !plain_relative(&rel) || rel.split('/').any(|part| part.starts_with('.')) {
                 continue;
             }
-            inspected += 1;
             let hit = |line: Option<u32>, text: String| FileHit {
                 folder: folder.path.display().to_string(),
                 path: rel.clone(),
@@ -177,7 +236,7 @@ pub(crate) fn search(
                 text,
                 session_id: folder.session_id.clone(),
             };
-            if !names_only && query.is_some_and(|query| find(&rel, query).is_some()) {
+            if query.is_some_and(|query| find(&rel, query).is_some()) {
                 found.total = found.total.saturating_add(1).min(COUNT_CAP);
                 names.push(hit(None, rel.clone()));
             }
@@ -186,22 +245,12 @@ pub(crate) fn search(
             let Ok(meta) = std::fs::symlink_metadata(&path) else {
                 continue;
             };
-            if !meta.is_file() || (!names_only && meta.len() > MAX_FILE) {
+            if !meta.is_file() || meta.len() > MAX_FILE {
                 continue;
             }
             // Nor a file under a linked folder: git lists names from its index, and a tracked folder replaced by a
             // link would lead outside, including through a symlinked parent.
             if vw_changes::has_symlinked_parent(&folder.path, &path) {
-                continue;
-            }
-            if names_only {
-                let name = path.file_name().unwrap_or_default().to_string_lossy();
-                if query.is_none_or(|query| find(&name, query).is_some()) {
-                    found.total = found.total.saturating_add(1).min(COUNT_CAP);
-                    if names.len() < limit {
-                        names.push(hit(None, rel.clone()));
-                    }
-                }
                 continue;
             }
             let Some(query) = query else {

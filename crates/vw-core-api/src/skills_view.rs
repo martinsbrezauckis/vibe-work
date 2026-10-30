@@ -164,6 +164,10 @@ pub struct SkillRow {
     pub latest_version: Option<i64>,
     /// Only the catalog's `check_updates` signal enables an update button.
     pub update_available: bool,
+    /// When the skill file of the active or sole installed copy last changed, in milliseconds since the epoch;
+    /// absent for built-in, plugin and catalog-only rows and when the file cannot be found.
+    #[cfg_attr(feature = "ts", ts(type = "number | null"))]
+    pub modified_at: Option<i64>,
 }
 
 /// Expanded row content; local descriptions and prompts come from installed/list.

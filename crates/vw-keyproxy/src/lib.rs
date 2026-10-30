@@ -34,7 +34,9 @@
 //!   owner is told once per waiting request; it is never forwarded with the placeholder.
 
 mod compaction;
+mod connector_bodies;
 pub mod connectors;
+pub mod credentials;
 mod key;
 mod limits;
 mod mcp;

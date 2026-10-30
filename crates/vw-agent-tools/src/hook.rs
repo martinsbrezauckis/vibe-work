@@ -79,6 +79,18 @@ pub const MAX_PAYLOAD: usize = 1024 * 1024;
 const ADVICE: &str = "Use the Vibe Work process tools instead: processes_list shows this session's processes, \
 process_stop stops one of them.";
 
+/// The result of a call the user said No to: the same text as `vw_ask::DECLINED`, which the core returns.
+pub const DECLINED: &str = "Not run: the user declined this. Do not do it another way. Tell the user why it is needed and wait for their reply before you go on with it.";
+
+/// The kill guard's refusal. A guard refusal names the process tools; the user's own No is returned as it is,
+/// so nothing points the agent at another way to stop the same process.
+fn kill_refusal(reason: &str) -> String {
+    if reason == DECLINED {
+        return deny(reason);
+    }
+    deny(&format!("{reason} {ADVICE}"))
+}
+
 fn deny(reason: &str) -> String {
     json!({"decision": "deny", "reason": reason}).to_string()
 }
@@ -519,13 +531,12 @@ fn decide_kill(payload: &str, endpoint_file: &Path) -> Option<String> {
         });
     match answer {
         Ok(value) if value.get("decision").and_then(Value::as_str) == Some("allow") => None,
-        Ok(value) => Some(deny(&format!(
-            "{} {ADVICE}",
+        Ok(value) => Some(kill_refusal(
             value
                 .get("reason")
                 .and_then(Value::as_str)
-                .unwrap_or("Vibe Work blocked this kill command.")
-        ))),
+                .unwrap_or("Vibe Work blocked this kill command."),
+        )),
         Err(problem) => Some(deny(&format!(
             "Vibe Work could not check which processes this kill command targets ({problem}). {ADVICE}"
         ))),
@@ -572,4 +583,16 @@ fn report_refusal(guard: Guard, payload: &str, endpoint_file: &Path, answer: Str
         Err(error) => eprintln!("guard refusal could not be published: {error}"),
     }
     decision.to_string()
+}
+
+#[cfg(test)]
+mod kill_refusal_tests {
+    use super::*;
+
+    #[test]
+    fn a_user_no_is_returned_as_it_is_and_a_guard_refusal_gets_the_process_tools() {
+        assert_eq!(kill_refusal(DECLINED), deny(DECLINED));
+        let refused = "Not run: pid 7 belongs to another app.";
+        assert_eq!(kill_refusal(refused), deny(&format!("{refused} {ADVICE}")));
+    }
 }

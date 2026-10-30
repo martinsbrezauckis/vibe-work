@@ -173,7 +173,7 @@ impl PreviewService {
         let storage = if class == crate::policy::PageClass::Web || fixture_web {
             self.shared_web_storage()
         } else {
-            session_storage
+            self.own_store(session_storage)
         };
         let spec = MountSpec {
             id: MountId {

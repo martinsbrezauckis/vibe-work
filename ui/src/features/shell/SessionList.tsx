@@ -17,7 +17,6 @@ import { Badge, Button, IconButton } from "../../components/Controls";
 import { Icon } from "../../components/Icon";
 import { useModalFocus } from "../../hooks/useModalFocus";
 import { formatKeys } from "../../state/shortcuts";
-import { summarize } from "../../state/sessionSummary";
 import { ActivityMark } from "../sessions/ActivityMark";
 import { buildList } from "../sessions/listModel";
 import { useListDrop } from "../sessions/listDrop";
@@ -31,7 +30,7 @@ import { SettingsNav } from "../settings/SettingsNav";
 import { UnfiledSection } from "../sessions/UnfiledSection";
 import { useGroupActions, useGroups } from "../sessions/useGroups";
 import { useApp } from "./AppContext";
-import { useCoreState, useLayout, useShellState } from "./hooks";
+import { useCoreState, useLayout, useSessionSummaries, useShellState } from "./hooks";
 import { openNewChat } from "./newChat";
 import { badgeText, badgeTitle } from "../sessions/newChatText";
 import { NO_NEW_CHAT } from "../../state/newChatDraft";
@@ -47,10 +46,8 @@ export function SessionList() {
   const badge = away ? badgeText(draftOpen) : null;
   const { shell, core, sessions } = app;
   const filter = useShellState((s) => s.filter);
-  const entries = useCoreState((s) => s.sessions);
   const index = useCoreState((s) => s.index);
   const ready = useCoreState((s) => s.server.phase === "running");
-  const stuck = useCoreState((s) => s.stuck);
   const layout = useLayout();
   const groups = useGroupActions();
   const data = useGroups((g) => g.data);
@@ -58,10 +55,7 @@ export function SessionList() {
   const creating = useGroups((g) => g.creating);
   // one drop controller for the whole list (sessions into projects, projects reordered).
   const drop = useListDrop(groups, () => groups?.store.get().data?.projects.map((p) => p.id) ?? []);
-  const summaries = useMemo(
-    () => Object.values(entries).map((entry) => summarize(entry, stuck)),
-    [entries, stuck],
-  );
+  const summaries = useSessionSummaries();
   const full = useMemo(
     () => buildList(summaries, { query: "", showArchived: index.includeArchived }, data),
     [summaries, index.includeArchived, data],

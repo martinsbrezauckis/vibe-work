@@ -23,6 +23,7 @@ mod discovery;
 mod env;
 mod handshake;
 mod launch;
+mod live_ids;
 mod python;
 mod shell_env;
 mod supervisor;

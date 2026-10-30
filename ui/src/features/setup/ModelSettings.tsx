@@ -10,6 +10,7 @@ import { useEffect, useState } from "react";
 import { Selector } from "../../components/Selector";
 import { useStore } from "../../state/createStore";
 import { offeredReasoning } from "../../state/defaultReasoning";
+import { effectiveLevel } from "../../state/thinkingLevels";
 import { modelTerm, TEXT, thinkingTerm, wording } from "../../vocabulary";
 
 import { readModels, writeDefaultModel, type ModelList } from "../../state/modelChoice";
@@ -61,7 +62,8 @@ export function ModelSettings() {
   const model = list?.models.find((m) => m.alias === list.current);
   const savedLabel = list?.models.find((m) => m.alias === saved)?.label ?? saved;
   const levels = model?.thinkingLevels ?? [];
-  const level = offeredReasoning(savedLevel, levels);
+  // A model that always thinks (Large 4) shows a saved level as High, its only one.
+  const level = offeredReasoning(effectiveLevel(model?.alwaysThinks === true, savedLevel), levels);
 
   return (
     <section aria-labelledby="model-settings-title" data-setting="default-model">

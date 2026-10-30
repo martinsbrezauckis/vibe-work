@@ -2,7 +2,9 @@
  * One skill's disclosure and actions. Install… and Update to vN… open the row's detail with the install offer
  * (`InstallOffer`): its button installs exactly what it shows. Shared controls own their appearance; the
  * skills store and its offer flow own changes and focus.
- * Depends on: Controls, InstallOffer, the skills hooks. Called by: SkillsPage.
+ * An installed row shows when its skill file last changed (the core's `modifiedAt`; none for built-in, plugin and
+ * catalog rows).
+ * Depends on: Controls, InstallOffer, the skills hooks, vocabulary. Called by: SkillsPage.
  */
 import { builtinSkillText } from "../../state/builtinToolsText";
 import { useRef } from "react";
@@ -12,7 +14,7 @@ import { PathText } from "../../components/PathText";
 import { Icon } from "../../components/Icon";
 import type { SkillRow as Row } from "../../protocol/core";
 import { useApp } from "../shell/AppContext";
-import { term } from "../../vocabulary";
+import { term, TEXT, wording } from "../../vocabulary";
 import { SKILLS_BUSY } from "../../state/skills";
 import { InstallOffer, useOfferFocus } from "../connectors/InstallOffer";
 import { useSkillOffers, useSkills } from "./hooks";
@@ -23,6 +25,23 @@ const SOURCES: Readonly<Record<string, string>> = {
   plugin: "Plugin",
   catalog: "Catalog",
 };
+
+/** When the skill file last changed: the date, with the full date and time as the title. */
+function Changed({ ms }: { ms: number }) {
+  const at = new Date(ms);
+  return (
+    <time
+      className="cmuted"
+      data-testid="skills.modified"
+      dateTime={at.toISOString()}
+      title={at.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}
+    >
+      {wording(TEXT.skillChanged, {
+        date: at.toLocaleDateString(undefined, { dateStyle: "medium" }),
+      })}
+    </time>
+  );
+}
 
 /** A name opens the full description, versions and source below its row. */
 export function SkillRow({ row }: { row: Row }) {
@@ -63,6 +82,7 @@ export function SkillRow({ row }: { row: Row }) {
           {row.lockReason === null ? null : <p className="cmuted">{row.lockReason}</p>}
         </div>
         <div className="skills-actions">
+          {typeof row.modifiedAt === "number" ? <Changed ms={row.modifiedAt} /> : null}
           <span className="cmuted">v{row.installedVersion ?? row.latestVersion ?? "—"}</span>
           {row.installed ? (
             <>

@@ -4,6 +4,8 @@
 //! Invariants:
 //! - A session key is the first 16 bytes of SHA-256(`"vibe-work-preview\0" + session id`): stable across runs,
 //!   never the bare session id (which is a path segment chosen by Vibe). The browser key uses a separate domain.
+//!   A session that adopted the New chat screen's website data uses the key of that screen owner's id instead
+//!   (`service_adopt`).
 //! - Every preview webview label starts with [`LABEL_PREFIX`]; the navigation guard of the app refuses any other
 //!   non-`main` label.
 

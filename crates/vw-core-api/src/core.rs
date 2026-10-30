@@ -49,6 +49,8 @@ pub(crate) struct Shared {
     /// Install offers the window showed before a one-click install.
     pub(crate) install_offers: crate::install_offers::Offers,
     pub(crate) guard_refusals: crate::guard_refusals::Refusals,
+    /// Edit and write previews of open approval cards (`edit_preview.rs`).
+    pub(crate) edit_previews: crate::edit_preview::Previews,
     pub(crate) protected_changes: crate::protected_changes::Hub,
     pub(crate) github_reads: Arc<crate::github_reads::Reader>,
     pub(crate) keep_awake: crate::keep_awake::AwakeState,
@@ -164,6 +166,10 @@ pub(crate) struct Shared {
     key_events: Mutex<Option<JoinHandle<()>>>,
     /// Re-emits the Vibe install's view changes.
     vibe_events: Mutex<Option<JoinHandle<()>>>,
+    /// Re-reads the vault values chat titles are compared with when the vault opens or changes (`title_guard`).
+    title_events: Mutex<Option<JoinHandle<()>>>,
+    /// Withholds vault-value parts in every chat title and preview from Vibe (`title_guard`).
+    pub(crate) titles: crate::title_guard::TitleGuard,
 }
 
 impl Shared {
@@ -190,7 +196,12 @@ impl Drop for Shared {
         {
             tick.abort();
         }
-        for slot in [&self.pump, &self.key_events, &self.vibe_events] {
+        for slot in [
+            &self.pump,
+            &self.key_events,
+            &self.vibe_events,
+            &self.title_events,
+        ] {
             if let Some(task) = slot.lock().unwrap_or_else(PoisonError::into_inner).take() {
                 task.abort();
             }
@@ -443,6 +454,7 @@ impl Core {
             install_offers: crate::install_offers::Offers::default(),
             guard_asks: crate::ask::guards::Calls::default(),
             guard_refusals: crate::guard_refusals::Refusals::default(),
+            edit_previews: crate::edit_preview::Previews::default(),
             protected_changes: crate::protected_changes::Hub::of(&config),
             github_reads,
             keep_awake: crate::keep_awake::from_config(&config),
@@ -515,8 +527,20 @@ impl Core {
             pump: Mutex::new(None),
             key_events: Mutex::new(None),
             vibe_events: Mutex::new(None),
+            title_events: Mutex::new(None),
+            titles: crate::title_guard::TitleGuard::default(),
         });
         let _ = slot.set(Arc::downgrade(&shared));
+        // Before any notification is applied: an open vault's values withhold titles from the first listing on.
+        crate::title_guard::refresh(&shared).await;
+        let watcher = tokio::spawn(crate::title_guard::watch(
+            Arc::downgrade(&shared),
+            shared.events.subscribe(),
+        ));
+        *shared
+            .title_events
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Some(watcher);
         let task = tokio::spawn(pump::run(
             Arc::downgrade(&shared),
             first,
@@ -670,6 +694,14 @@ impl Core {
                 .map(Into::into),
         }
     }
+    /// The last resort when [`Core::shutdown`] could not finish at quit: SIGKILL to the Vibe server's process group
+    /// and its crash watchdog, synchronously ([`vw_supervisor::Supervisor::kill_now`]). Returns whether a server was
+    /// running.
+    #[must_use]
+    pub fn stop_server_now(&self) -> bool {
+        self.shared.supervisor.kill_now()
+    }
+
     /// Stops the pump and owned processes, returns leases, then shuts the server down cleanly.
     /// Agent processes stay in the ledger; stdin closes before the grace period and kill.
     pub async fn shutdown(&self) {
@@ -712,6 +744,7 @@ impl Core {
             &self.shared.pump,
             &self.shared.key_events,
             &self.shared.vibe_events,
+            &self.shared.title_events,
         ] {
             let task = slot.lock().unwrap_or_else(PoisonError::into_inner).take();
             if let Some(task) = task {

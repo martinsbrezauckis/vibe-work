@@ -13,7 +13,9 @@
 //! (resolve, and the re-check before every read or open), tests.
 //! Invariants:
 //! - [`resolve_in`] / [`recheck_in`] call [`ScopeFs`] only for a candidate whose lexical form is inside an allowed
-//!   folder, plus one canonicalization of the session's own folder (the core's record, not client text).
+//!   folder, plus one canonicalization of the session's own folder (the core's record, not client text) per
+//!   candidate. A relative path has at most two candidates: joined to the folder the agent works in
+//!   ([`Scope::cwd`]) first, then to the session folder; the first allowed file wins and both use the same check.
 //! - Containment is compared on `path_key` forms (Windows: one spelling, no case), never on raw text.
 //! - Every refusal is the same `None`: no reason, no difference between "missing" and "not allowed".
 //! - Windows: UNC and device forms (`\\server\share`, `\\?\`, `\\.\`) are refused before any access.
@@ -61,6 +63,10 @@ impl ScopeFs for RealFs {
 pub struct Scope {
     /// The session's folder as the core recorded it (relative paths are joined to it).
     pub session: PathBuf,
+    /// The folder the agent works in when it is not `session` (a chat started in a subfolder of its project's main
+    /// folder): a relative path is joined to it first, then to `session`. It grants nothing: the joined path must
+    /// still lie in `session` or a picked folder.
+    pub cwd: Option<PathBuf>,
     /// Folders the user picked (canonical).
     pub picked: Vec<PathBuf>,
     /// The user's home folder, for `~/` paths (`None`: `~` is never expanded).
@@ -252,7 +258,21 @@ fn check(scope: &Scope, path: &Path, fs: &dyn ScopeFs) -> Option<Hit> {
 
 /// Resolves `text` for `scope` through `fs`: the allowed file, or `None` (the same answer for every refusal).
 pub fn resolve_in(scope: &Scope, text: &str, fs: &dyn ScopeFs) -> Option<Hit> {
-    check(scope, &candidate(scope, text)?, fs)
+    let from_session = candidate(scope, text)?;
+    // A relative path names a file from the folder the agent works in first (`Scope::cwd`), then from the session
+    // folder; both candidates pass the same check, so the working folder widens nothing.
+    if let Some(cwd) = &scope.cwd {
+        let working = Scope {
+            session: cwd.clone(),
+            ..scope.clone()
+        };
+        if let Some(from_cwd) = candidate(&working, text).filter(|path| *path != from_session)
+            && let Some(hit) = check(scope, &from_cwd, fs)
+        {
+            return Some(hit);
+        }
+    }
+    check(scope, &from_session, fs)
 }
 
 /// [`resolve_in`] on the real filesystem.

@@ -119,17 +119,6 @@ pub(super) fn close_tabs_covers() -> Vec<CoversPart> {
     vec![CoversPart::words("closing your tabs in this session")]
 }
 
-/// The agent's sentence after the user's No on the card (without the refusal code).
-pub(super) fn said_no(summary: &str, note: Option<&str>) -> String {
-    vw_ask::agent_text(
-        &vw_ask::Outcome::Refused {
-            by: vw_ask::AnsweredBy::Person,
-            note: note.map(str::to_owned),
-        },
-        &format!("“{summary}” in their Chrome"),
-    )
-}
-
 /// The native confirmation's text for raising the level `from` → `to`.
 pub(super) fn raise_summary(from: ChromeSettings, to: ChromeSettings) -> String {
     let title = match to.level {
@@ -212,16 +201,5 @@ mod tests {
         assert!(text.contains(&format!("• {}", name("send"))));
         assert!(text.contains("A vault login is used only if you allowed it"));
         assert!(text.ends_with(&format!("You can change this in {PLACE}.")));
-    }
-}
-
-#[cfg(test)]
-mod refusal_tests {
-    #[test]
-    fn chrome_no_uses_the_same_rule_and_preserves_the_note() {
-        assert_eq!(
-            super::said_no("Send", Some("save the draft")),
-            "Not done: the user said No to “Send” in their Chrome. The user's note: save the draft"
-        );
     }
 }

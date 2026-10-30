@@ -435,6 +435,8 @@ pub(crate) struct State {
     /// Ports any session's server listens on now (from the core's re-check): a Local page may reach
     /// them (as the egress guard allows), so the URL rules include them.
     pub(crate) server_ports: Vec<u16>,
+    /// Storage keys a page was mounted with in this run (that owner has website data of its own).
+    pub(crate) used_keys: std::collections::HashSet<crate::ids::StorageKey>,
 }
 
 /// Ordered pages of one session; the app page is implicit and pinned first.

@@ -6,7 +6,9 @@
 //!   `approve` and kept as a session grant here, so Vibe keeps no rule of its own;
 //! - Vibe's "Always allow" (`approve_permanently`) is never offered and refused if a client sends it, because Vibe
 //!   would write it into Vibe Work's `config.toml` for every project and later session;
-//! - the gate refuses both decisions on the wire, so nothing else can send them either.
+//! - the gate refuses both decisions on the wire, so nothing else can send them either;
+//! - a person's No on Vibe's own card ends the turn (`cancel_turn`) and the subagents it started; Vibe Work's own
+//!   prompts answer only their call (`vw_ask::text::DECLINED`) and the agent goes on.
 use crate::core::Shared;
 use serde_json::{Value, json};
 use std::sync::Arc;
@@ -193,7 +195,7 @@ pub(crate) async fn answer(
 ) -> Result<crate::CommandResult, crate::CoreError> {
     use crate::{CommandResult, CoreError, CoreEvent, ErrorCode};
     if super::tool_calls::local(&callback_id) {
-        return super::tool_calls::answer(shared, origin, &session_id, &callback_id, &output).await;
+        return super::tool_calls::answer(shared, origin, &session_id, &callback_id, &output);
     }
     let ask_id = format!("callback:{callback_id}");
     ensure_unanswered(shared, &callback_id)?;

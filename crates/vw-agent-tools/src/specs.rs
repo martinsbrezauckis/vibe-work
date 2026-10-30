@@ -31,7 +31,7 @@ pub fn tool_list(chrome_package: bool) -> Value {
                 }
             }
         },
-        {"name": tools::PROTECTED_CHANGE_STATUS, "description": "The outcome of a propose_protected_change whose answer was Waiting: waits up to 25 seconds for the user's decision in a new program, then answers the result (applied, declined, stopped) or Waiting again.", "inputSchema": {"type":"object", "required":["proposalId"], "additionalProperties":false, "properties":{"proposalId":{"type":"string"}}}},
+        {"name": tools::PROTECTED_CHANGE_STATUS, "description": "The outcome of a propose_protected_change whose answer was Waiting: waits up to 25 seconds for the user's decision in a new program, then answers the outcome (applied, or not run when the user said No) or Waiting again.", "inputSchema": {"type":"object", "required":["proposalId"], "additionalProperties":false, "properties":{"proposalId":{"type":"string"}}}},
         {
             "name": tools::READ_ALOUD,
             "description": "Vibe Work: read a reply aloud once when the user asks to hear it (for example: \

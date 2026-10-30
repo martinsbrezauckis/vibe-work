@@ -99,7 +99,11 @@ pub(crate) async fn guard(
     decide(shared, session, cwd, command, asked)
         .await
         .map_err(|reason| {
-            if matches!(asked, Asked::Hook { .. }) || reason.starts_with("Not done:") {
+            // The user's own answer (a No, or a prompt closed unanswered) is not a guard refusal.
+            if matches!(asked, Asked::Hook { .. })
+                || reason.starts_with("Not done:")
+                || reason == vw_ask::DECLINED
+            {
                 reason
             } else {
                 crate::guard_refusals::record(

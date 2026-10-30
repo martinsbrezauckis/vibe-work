@@ -6,9 +6,18 @@ fn every_outcome_has_one_plain_agent_sentence() {
         by: AnsweredBy::Person,
         note: Some("  a plain *note*  ".into()),
     };
+    // A No answers the declined call with one fixed sentence, whatever was asked and whatever note came with it.
+    let declined = "Not run: the user declined this. Do not do it another way. Tell the user why it is needed and wait for their reply before you go on with it.";
+    assert_eq!(agent_text(&refused, "this command"), declined);
     assert_eq!(
-        agent_text(&refused, "this command"),
-        "Not done: the user said No to this command. The user's note: a plain *note*"
+        agent_text(
+            &Outcome::Refused {
+                by: AnsweredBy::DebugApi,
+                note: None
+            },
+            "anything"
+        ),
+        declined
     );
     assert_eq!(
         agent_text(

@@ -34,7 +34,7 @@ import { decideClose } from "./closeDecision";
 import { applyChoice, choicesOf, noticeText } from "./model/diskNotice";
 import { openFileRows } from "./openFiles";
 import { liveCodeActions } from "./liveEditors";
-import { SEARCH_COMMANDS } from "../editor/actions";
+import { SEARCH_COMMANDS } from "../editor/searchCommands";
 
 const SIDES = ["left", "right"] as const;
 

@@ -27,6 +27,7 @@ fn readonly(command: &Command, wire: &Value) -> bool {
                 "read"
                     | "list"
                     | "holder"
+                    | "excerpt"
                     | "export"
                     | "inspect"
                     | "status"

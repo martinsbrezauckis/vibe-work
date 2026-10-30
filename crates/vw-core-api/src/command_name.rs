@@ -21,6 +21,7 @@ impl Command {
             Self::StopSession { .. } => "stopSession",
             Self::PickModel { .. } => "pickModel",
             Self::SetDefaultModel { .. } => "setDefaultModel",
+            Self::CheckDefaultModel {} => "checkDefaultModel",
             Self::SetAccessMode { .. } => "setAccessMode",
             Self::AnswerCallback { .. } => "answerCallback",
             Self::ListCallbacks {} => "listCallbacks",

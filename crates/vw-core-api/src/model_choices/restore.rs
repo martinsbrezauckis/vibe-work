@@ -1,4 +1,5 @@
-//! Restores chat choices, falling back to Settings with one alert when a model is unavailable.
+//! Restores chat choices, falling back to Settings with one alert when a model is unavailable (every model alike: no
+//! chat is moved to another entry without that alert).
 //! Called by reopen and model selection; failures leave the chat open and sendable.
 use super::{Choice, actual, apply};
 use crate::core::Shared;
@@ -6,7 +7,7 @@ use crate::error::CoreError;
 use serde_json::{Value, json};
 
 /// The chat's model is in Vibe's model list, and so is its thinking level when Vibe lists the model's levels
-/// (Vibe 3.0.3 reports only the levels it offers, e.g. Off and High for Large 4, and sends a level as picked).
+/// (Vibe 3.0.3 reports only the levels it offers, e.g. Off and High for Medium 3.5, and sends a level as picked).
 /// A choice that is not offered takes the same Settings fallback as a model that left the list.
 pub(super) fn offered(runtime: &Value, choice: &Choice) -> bool {
     runtime
@@ -235,10 +236,21 @@ pub(crate) async fn restore(
                 saved
             })
     });
-    if let Some(choice) = recorded.filter(|choice| differs(&last, choice)) {
+    if let Some(choice) =
+        recorded.filter(|choice| differs(&last, choice) && !unset_off(&last, choice))
+    {
         return fallback(shared, id, &choice, last).await;
     }
     last
+}
+
+/// A recorded Off that the chat's own model does not offer is no choice to restore: a chat whose level was left unset
+/// records no level (read as Off, `model_choices::recorded`), and Vibe then runs the model's own default, as it does
+/// for an Off it pinned for an unset level in older sessions. Large 4 offers no Off, so its chats reopen as they ran.
+fn unset_off(runtime: &Value, choice: &Choice) -> bool {
+    choice.effort == "off"
+        && !offered(runtime, choice)
+        && actual(&json!({"runtime":runtime})).is_some_and(|current| choice.same_model(&current))
 }
 
 pub(super) fn differs(runtime: &Value, choice: &Choice) -> bool {
@@ -324,5 +336,31 @@ mod tests {
         assert!(differs(&runtime, &model("large-4", "Large 4", "low")));
         // A model whose levels Vibe does not list keeps any level, as before.
         assert!(offered(&runtime, &model("old", "Old", "medium")));
+    }
+
+    #[test]
+    fn an_off_the_running_model_does_not_offer_is_no_choice_to_restore() {
+        let runtime = |alias: &str| {
+            json!({"config":{
+                "activeModel":{"thinking":"low","alias":alias,"name":alias},
+                "models":[
+                    {"thinking":"low","thinkingLevels":["low","medium","high"],"alias":"large-4","name":"large-4"},
+                    {"thinking":"off","thinkingLevels":["off","high"],"alias":"flash","name":"flash"}
+                ]
+            }})
+        };
+        let unset = model("large-4", "", "off");
+        assert!(differs(&runtime("large-4"), &unset));
+        assert!(
+            unset_off(&runtime("large-4"), &unset),
+            "the chat runs as it ran"
+        );
+        // Another model running, an offered Off, or another level: the usual restore rules.
+        assert!(!unset_off(&runtime("flash"), &unset));
+        assert!(!unset_off(&runtime("flash"), &model("flash", "", "off")));
+        assert!(!unset_off(
+            &runtime("large-4"),
+            &model("large-4", "", "max")
+        ));
     }
 }

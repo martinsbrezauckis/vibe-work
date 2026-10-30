@@ -1,6 +1,6 @@
 /**
  * One connector tile: generic category icon, the name, one line, the status in words and,
- * for a connector that needs it, the Sign in button. A click on the tile opens its details.
+ * for a connector that needs it, the Sign in or (no sign-in needed) the Connect button. A click on the tile opens its details.
  * Depends on: CategoryIcon, model/view, hooks. Called by: ConnectorsPage.
  * Invariant: no vendor logo; the status words are Vibe's states in plain language (`model/view`).
  */
@@ -12,6 +12,7 @@ import { CategoryIcon } from "./CategoryIcon";
 import { useKeyReadiness } from "../shell/KeyNotice";
 import { useConnectorActions } from "./hooks";
 import type { Tile } from "./model/view";
+import { TEXT } from "../../vocabulary";
 
 /** A tile. */
 export function ConnectorTile({ tile, selected }: { tile: Tile; selected: boolean }): ReactElement {
@@ -61,6 +62,19 @@ export function ConnectorTile({ tile, selected }: { tile: Tile; selected: boolea
             }}
           >
             Sign in
+          </Button>
+        ) : null}
+        {tile.status === "connect" ? (
+          <Button
+            data-testid="connectors.connector-tile-connect"
+            type="button"
+            variant="primary"
+            disabled={keyBlocked}
+            onClick={() => {
+              void actions?.connect(tile.alias, tile.meta.name);
+            }}
+          >
+            {TEXT.connectorConnect}
           </Button>
         ) : null}
       </div>

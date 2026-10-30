@@ -169,7 +169,8 @@ pub struct FileRefView {
     pub ok: bool,
     /// The handle for the other requests.
     pub file: Option<String>,
-    /// How to name it: relative to the session's folder, else the full path (a picked folder).
+    /// How to name it: relative to the session's own working folder when the file lies in it, else the full path
+    /// (elsewhere in its project, or a picked folder).
     pub display: Option<String>,
     /// The kind the name suggests (`read` decides from the bytes).
     pub kind: Option<FileKind>,
@@ -186,14 +187,14 @@ pub struct FileRefView {
     pub total: Option<usize>,
 }
 
-/// One allowed file in a reference chooser, relative to the session folder.
+/// One allowed file in a reference chooser.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct FileChoice {
     /// Session-bound handle, rechecked before every use.
     pub file: String,
-    /// Path relative to the session folder.
+    /// As in [`FileRefView::display`].
     pub display: String,
     /// Kind suggested by the file name.
     pub kind: FileKind,

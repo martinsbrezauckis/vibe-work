@@ -50,6 +50,15 @@ pub enum ConnectorsRequest {
         /// The connector.
         alias: String,
     },
+    /// Connects a Mistral-hosted connector that needs no sign-in (`connector_catalog/connect`): Vibe makes the
+    /// person's own default connection on their Mistral account, with no secret in it, and refreshes the session's
+    /// connectors, so the next message can use it. The session is reopened when it has no channel.
+    Connect {
+        /// The session to ask through.
+        session_id: String,
+        /// The connector.
+        alias: String,
+    },
     /// Turns a Mistral-hosted connector off (or on again) in Vibe's config, for every session.
     SetConnectorOff {
         /// The connector.

@@ -181,7 +181,11 @@ sessionId: string, } | { "op": "setSubagents",
 /**
  * The new value.
  */
-enabled: boolean, };
+enabled: boolean, } | { "op": "excerpt", 
+/**
+ * The session.
+ */
+sessionId: string, };
 
 export type SessionToolsResult = { "kind": "exported", 
 /**
@@ -209,7 +213,11 @@ enabled: boolean | null,
  * The short-lived chat when it could not be deleted, even after one retry. It stays in the list as a
  * temporary chat and is deleted when Vibe Work quits; `null` when it is gone.
  */
-leftoverSessionId: string | null, };
+leftoverSessionId: string | null, } | { "kind": "excerpt", 
+/**
+ * The excerpt.
+ */
+excerpt: SessionExcerptView, };
 
 export type SessionExportView = { 
 /**
@@ -248,6 +256,20 @@ savedTo: string | null,
  * The Markdown itself, when no destination was given.
  */
 markdown: string | null, };
+
+export type SessionExcerptView = { 
+/**
+ * The session's title (or its first-message preview, or the untitled-session label).
+ */
+title: string, 
+/**
+ * The first message the person sent, when there is one.
+ */
+firstUser: string | null, 
+/**
+ * The last answer, when there is one.
+ */
+lastAnswer: string | null, };
 
 export type SearchRequest = { "op": "messages", 
 /**

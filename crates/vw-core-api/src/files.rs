@@ -154,12 +154,14 @@ fn gone() -> CoreError {
     )
 }
 
-/// How a hit is named: relative to the session folder, else its full path (a picked folder) in its everyday
-/// spelling (Windows: `C:\x`, never the canonical `\\?\C:\x`).
-fn display(hit: &Hit) -> String {
-    if hit.in_session
-        && let Ok(rest) = hit.canonical.strip_prefix(&hit.root)
-    {
+/// How a hit is named: relative to `own` (the session's own folder at its real location) when the file lies in it,
+/// else its full path in its everyday spelling (Windows: `C:\x`, never the canonical `\\?\C:\x`).
+///
+/// The window joins a relative name to the session's own folder (editor paths, `panel_read`, file chips, Copy
+/// path), so a name is never relative to any other folder: a chat working in a subfolder of its project's main
+/// folder may open files anywhere in the project, and a name relative to the main folder would join to another file.
+fn display(hit: &Hit, own: Option<&Path>) -> String {
+    if let Some(rest) = own.and_then(|own| hit.canonical.strip_prefix(own).ok()) {
         return rest
             .components()
             .map(|c| c.as_os_str().to_string_lossy().into_owned())
@@ -193,14 +195,36 @@ async fn blocking<T: Send + 'static>(
 impl Core {
     /// The scope of `session_id` (see `files_scope`): the same for the window and the Debug API.
     fn files_scope(&self, session_id: &str) -> Result<Scope, CoreError> {
+        let workspace = self.workspace_folder(session_id)?;
+        // A chat in a subfolder of its project's main folder names relative paths from where its agent works first;
+        // the scope itself stays the main folder (`Scope::cwd` grants nothing).
+        let cwd = workspace
+            .is_none()
+            .then(|| self.shared.names.cwd_of(&self.shared.store, session_id))
+            .flatten()
+            .map(PathBuf::from);
         Ok(Scope {
-            session: self
-                .workspace_folder(session_id)?
-                .map_or_else(|| self.project_of(session_id), Ok)?,
+            session: workspace.map_or_else(|| self.project_of(session_id), Ok)?,
+            cwd,
             picked: self.shared.gate.picked_roots(),
             home: home(),
             hidden: true,
         })
+    }
+
+    /// The folder shown names of `session_id` are relative to ([`display`]), at its real location: the New chat
+    /// screen's folder for its workspace key, else the session's own working folder. `None` when it is unknown or
+    /// cannot be read; every name is then a full path.
+    async fn own_folder(&self, session_id: &str) -> Result<Option<PathBuf>, CoreError> {
+        let folder = match self.workspace_folder(session_id)? {
+            Some(folder) => Some(folder),
+            None => self
+                .shared
+                .names
+                .cwd_of(&self.shared.store, session_id)
+                .map(PathBuf::from),
+        };
+        blocking(move || folder.and_then(|f| f.canonicalize().ok())).await
     }
 
     /// The handle's file, checked again against the session's scope.
@@ -243,9 +267,10 @@ impl Core {
                 let class = blocking(move || vw_platform::file_open_class(&probe))
                     .await?
                     .map_or(OpenClass::Refused, |(_, c)| c);
+                let own = self.own_folder(&session_id).await?;
                 Ok(result(FilesResult::Content {
                     content: FileContent {
-                        display: display(&hit),
+                        display: display(&hit, own.as_deref()),
                         name: name_of(&hit.canonical),
                         file,
                         kind: read.kind,
@@ -338,6 +363,8 @@ impl Core {
             )
         })
         .await?;
+        let own = self.own_folder(session_id).await?;
+        let own = own.as_deref();
         let mut handles = self
             .shared
             .files
@@ -347,13 +374,13 @@ impl Core {
         let refs = hits
             .into_iter()
             .map(|(text, mut hits)| {
-                hits.sort_by_key(display);
+                hits.sort_by_key(|hit| display(hit, own));
                 let total = hits.len();
                 if total == 1 {
                     let hit = &hits[0];
                     return FileRefView {
                         file: Some(handles.token_for(session_id, &hit.canonical)),
-                        display: Some(display(hit)),
+                        display: Some(display(hit, own)),
                         kind: Some(FileKind::guess(&name_of(&hit.canonical))),
                         size: Some(hit.size),
                         ok: true,
@@ -374,7 +401,7 @@ impl Core {
                             .take(50)
                             .map(|hit| FileChoice {
                                 file: handles.token_for(session_id, &hit.canonical),
-                                display: display(&hit),
+                                display: display(&hit, own),
                                 kind: FileKind::guess(&name_of(&hit.canonical)),
                                 size: hit.size,
                             })

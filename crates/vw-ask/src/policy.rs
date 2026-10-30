@@ -45,6 +45,7 @@ const NATIVE: &[&str] = &[
     "agents/uninstall",
     "config/proxy/write",
     "connector_catalog/auth/request",
+    "connector_catalog/connect",
     "mcp/add",
     "mcp/login",
     "mcp_catalog/add",

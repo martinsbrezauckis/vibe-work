@@ -26,6 +26,7 @@ const builtin: SkillRow = {
   installedVersion: null,
   latestVersion: null,
   updateAvailable: false,
+  modifiedAt: null,
 };
 const locked: SkillRow = {
   ...builtin,

@@ -14,8 +14,8 @@
 //! - Catalog reads, adds, sign-ins of servers, sign-outs, removals and toggles go to the lobby: Vibe writes
 //!   its user config once for every session. Afterwards each session with an open channel is asked to
 //!   refresh, so live sessions converge; a failing refresh is logged, never fatal.
-//! - A sign-in from the app's window needs no native dialog (`TRUSTED_SURFACE_METHODS`); from the Debug
-//!   API it always asks. Adding a server always asks (a new remote endpoint).
+//! - A sign-in or a Connect (a connector that needs no sign-in) from the app's window needs no native dialog
+//!   (`TRUSTED_SURFACE_METHODS`); from the Debug API it always asks. Adding a server always asks (a new remote endpoint).
 //! - At most one server sign-in runs (Vibe's callback port is fixed). It runs as an owned task that
 //!   holds only a weak reference to the core between steps and is aborted when the core goes away.
 //! - Nothing from a sign-in other than the page address passes through here: the browser gives the code to
@@ -190,6 +190,20 @@ impl Core {
                     session_id,
                     request_id,
                 }
+            }
+            ConnectorsRequest::Connect { session_id, alias } => {
+                checked_name(&alias)?;
+                if session_id.is_empty() {
+                    return Err(invalid(
+                        "a Mistral connector connects through a session: open a session first",
+                    ));
+                }
+                let params = json!({"sessionId": session_id, "alias": alias});
+                self.signed_call(origin, "connector_catalog/connect", params)
+                    .await?;
+                // The connecting session refreshed its own connectors; the other open sessions follow.
+                self.converge(Converge::Connectors).await;
+                self.view_result(origin).await
             }
             ConnectorsRequest::SetConnectorOff { alias, off } => {
                 checked_name(&alias)?;

@@ -91,6 +91,12 @@ export function waitingPrompts(core: CoreState): readonly Ask[] {
     .sort((a, b) => a.openedAt - b.openedAt);
 }
 
+/** The sessions that show at least one waiting prompt. */
+export function waitingSessions(core: CoreState): ReadonlySet<string> {
+  const hosts = waitingPrompts(core).map((ask) => promptHost(core, ask));
+  return new Set(hosts.filter((id): id is string => id !== null));
+}
+
 /** The prompts `sessionId` shows, oldest first. */
 export function promptsOf(core: CoreState, sessionId: string): readonly Ask[] {
   return waitingPrompts(core).filter((ask) => promptHost(core, ask) === sessionId);

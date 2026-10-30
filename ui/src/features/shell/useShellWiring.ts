@@ -39,6 +39,7 @@ import { registerSkillsRoutes } from "../skills/skillsRoutes";
 import { registerLibrariesRoutes } from "../libraries/librariesRoutes";
 import { registerWorktreeRoutes } from "../worktrees/worktreeRoutes";
 import { registerUpdatesRoutes } from "../updates/updatesRoutes";
+import { registerDefaultModelRoutes } from "../setup/defaultModelRoutes";
 import { registerProcessRoutes } from "./processRoutes";
 import { registerSearchRoutes } from "../search/searchRoutes";
 import { keyReadiness, vaultReadiness } from "../../state/keyReadiness";
@@ -52,6 +53,7 @@ export function useShellWiring(): void {
     [app],
   );
   useEffect(() => app.secretScan?.start(), [app]);
+  useEffect(() => app.configNotices?.start(), [app]);
   const theme = useShellState((s) => s.theme);
   useEffect(() => (app.core === null ? undefined : attachSecretScanActivity(app.core)), [app.core]);
 
@@ -155,6 +157,9 @@ export function useShellWiring(): void {
   useEffect(() => registerWorktreeRoutes(app), [app]);
   useEffect(() => app.worktrees?.watch(), [app]);
   useEffect(() => registerUpdatesRoutes(app), [app]);
+  useEffect(() => registerDefaultModelRoutes(app), [app]);
+  // Once Vibe runs: the default model's launch check (it may open the card that asks for a new one).
+  useEffect(() => app.defaultModel?.watch(), [app]);
   useEffect(() => {
     void app.updates?.start();
   }, [app]);

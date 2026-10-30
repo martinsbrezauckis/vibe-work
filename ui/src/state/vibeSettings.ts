@@ -1,10 +1,12 @@
 /**
  * More of Vibe's own settings in Settings:
  * the default access mode for new sessions, background processes,
- * subagents, the stalled-answer timeout, and a model's nucleus sampling and output cap.
+ * subagents, the stalled-answer timeout, each model's compaction point (`state/compaction`), and a model's nucleus
+ * sampling and output cap.
  * Read with Vibe's `config/fields/read` and written through a session with `config/write` (the
  * gate's allowlist checks every path and value).
- * Depends on: coreStore, protocol/core types, protocol/client (errors). Called by: settings/AgentDefaultsSettings.
+ * Depends on: coreStore, protocol/core types, protocol/client (errors), state/compaction. Called by:
+ * settings/AgentDefaultsSettings.
  * Invariants:
  * - A value a higher layer sets (environment, administrator, this session's overrides) is shown as set there and not
  *   offered for editing (a write to the user's file would be shadowed).
@@ -15,6 +17,7 @@
  */
 import type { JsonValue } from "../protocol/core";
 import { toCallError } from "../protocol/client/types";
+import { type CompactionRow, compactionRows } from "./compaction";
 import type { CoreController } from "./coreStore";
 import { modelTerm } from "../vocabulary";
 
@@ -49,6 +52,8 @@ export interface VibeSettings {
   backgroundProcesses: Field<boolean>;
   subagents: Field<boolean>;
   streamIdleTimeout: Field<number>;
+  /** Each configured model's compaction point. */
+  compaction: readonly CompactionRow[];
 }
 
 function topLayer(field: Obj | null): string | null {
@@ -122,6 +127,7 @@ export function parseVibeSettings(result: JsonValue): VibeSettings | null {
     backgroundProcesses: field(byName, "enable_background_processes", isBool),
     subagents: field(byName, "enable_subagents", isBool),
     streamIdleTimeout: field(byName, "api_stream_idle_timeout", isNumber),
+    compaction: compactionRows(byName),
   };
 }
 

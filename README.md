@@ -14,8 +14,8 @@ An independent open-source project, part of the ShellX family of apps
   <img src="docs/public/images/vibe-work-dark.webp" alt="Vibe Work with three projects, a pending one-line edit to approve, and the Changes panel." width="1920">
 </picture>
 
-Version 0.1.2 adds a Files tab with history and search, editors side by side, Vibe 3 as the engine, and
-permission choices you can review in Settings. You can use the files, editors, terminal and browser before sending
+Version 0.1.3 adds @-mentions of files and sessions, edit previews with line numbers, connectors that need no
+sign-in and a compaction point for each model. You can use the files, editors, terminal and browser before sending
 your first message. Something specific you want Vibe Work to do? Post it in
 [Discussions](https://github.com/martinsbrezauckis/vibe-work/discussions). Changes per version: `CHANGELOG.md`.
 Questions and reports: `CONTRIBUTING.md`.
@@ -24,11 +24,16 @@ Questions and reports: `CONTRIBUTING.md`.
 
 - **One-screen setup.** Installs Vibe after you confirm and keeps your Mistral API key in an encrypted vault. Vibe
   gets a placeholder; a local proxy adds the real key to Mistral requests.
-- **Chats in projects.** Pick a folder and a model and type; answers stream in with their steps. Temporary chats are
-  deleted when you quit.
-- **Approvals.** An edit or command card shows the diff or the exact command before you answer. Access modes:
+- **Chats in projects.** Pick a folder and a model and type; answers stream in with their steps. Type @ to mention a
+  file or another session in the same folder. Settings > Models and agent > Compaction point sets when each
+  model's chats are compacted. Temporary chats are deleted when you quit.
+- **Approvals.** An edit card shows the change with the file's line numbers, a command card the exact command,
+  before you answer. Access modes:
   [docs/public/VOCABULARY.md](docs/public/VOCABULARY.md#access-modes). A card says what Allow once or Allow for this
-  session covers. Saying No stops the turn. Unanswered cards wait until you answer.
+  session covers. Saying No on a card for Vibe's own tools (commands, file edits) stops the turn. A No in Vibe Work's
+  own prompts (Git guard, processes, vault, documents, protected folders, cards for Vibe Work's tools) answers only
+  that call and the turn goes on; the agent is told not to do it another way and to wait for your reply.
+  Unanswered cards wait until you answer.
   Review and revoke permissions in Settings > Allowed without asking.
 - **Changes and line comments.** Everything a session changed, hunk by hunk, with keep and revert. A line comment
   goes back to the agent.
@@ -58,7 +63,7 @@ Questions and reports: `CONTRIBUTING.md`.
   value, the agent never sees it. An optional check finds your stored secrets in saved chats and names those chats.
 - **Safety reminders.** Commands such as deleting your home folder, disk tools or shutdown are refused with a reason;
   each rule can be switched in Settings.
-- **Company networks.** Settings › Network: a proxy, the addresses that skip it and a company certificate, with a
+- **Company networks.** Settings > Network: a proxy, the addresses that skip it and a company certificate, with a
   connection test.
 - **Search, export, attachments.** Search across sessions, messages and files; export a session; attach images and
   documents by picker, paste or drop. Long pastes fold into an openable chip. Turn on Send to Vibe Work in
@@ -68,7 +73,8 @@ Questions and reports: `CONTRIBUTING.md`.
 - **Voice.** Dictation and voice chat through Mistral's Voxtral. Ask Vibe to read its last reply aloud once, with
   Skip and Stop, without turning on automatic narration.
 - **Tools.** A marketplace of reviewed skill packs, MCP servers and plugins, each pinned to a checksum, and
-  connectors you sign in to. Tools > Skills browses, installs, turns on, turns off and removes skills.
+  connectors you sign in to or, when they need no sign-in, connect with one click. Tools > Skills browses,
+  installs, turns on, turns off and removes skills, and shows when each skill you added last changed.
   Install offers show the source, licence and what runs before you confirm. A plugin you put in Vibe Work's plugins
   folder yourself stays off until you turn it on.
   For the Headless browser’s Chromium download, allow it in your antivirus or retry after its scan finishes.
@@ -129,15 +135,16 @@ An unlocked vault opens unlocked at the next start and after an update; Lock kee
 Lock the vault when Vibe Work quits turns on locking at every quit. Its key is kept in this computer's credential
 store while unlocked. After updating from 0.1.1 or 0.1.0 with Remember on this computer on, enter the password once.
 
-Permission cards show the action and wait until you answer. Saying No stops the turn; write what to do instead
-in the chat. Ctrl/Cmd+Shift+A goes to a waiting prompt. The session header lists its permissions; Settings > Allowed without asking lists permissions
+Permission cards show the action and wait until you answer. Saying No on a card for Vibe's own tools stops the
+turn; write what to do instead in the chat. A No in Vibe Work's own prompts answers only that call and the turn
+goes on; the agent is told not to do it another way and to wait for your reply. Ctrl/Cmd+Shift+A goes to a waiting prompt. The session header lists its permissions; Settings > Allowed without asking lists permissions
 you can revoke and links to the controls for lasting choices.
 
 ## What leaves your computer
 
 - **Mistral:** the agent's model calls, and what you use on purpose (voice, document OCR, Libraries, images), all on
   your API key.
-- **Vibe's usage telemetry** follows Vibe's own setting, shown and changed in Settings › Privacy and data.
+- **Vibe's usage telemetry** follows Vibe's own setting, shown and changed in Settings > Privacy and data.
 - **Installing Vibe:** downloads from PyPI and GitHub, each checked against a pinned checksum.
 - **GitHub Releases:** the update check, once after start.
 - **What you open:** pages in the preview or browser, connectors, tools you install, and your git remotes when you

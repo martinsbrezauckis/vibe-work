@@ -23,10 +23,17 @@ pub struct VisibilityReport {
 impl PreviewService {
     /// Replaces the window's current visibility facts after a UI state change.
     pub fn report_visibility(&self, report: VisibilityReport) {
+        self.report_view(report, |_| false);
+    }
+
+    /// [`Self::report_visibility`], where `new_chat` tells whether an id is the New chat screen's owner: the
+    /// window reports that id while no chat is selected, and a refusal then says so.
+    pub fn report_view(&self, report: VisibilityReport, new_chat: impl Fn(&str) -> bool) {
+        let on_new_chat = report.selected_session_id.as_deref().is_some_and(new_chat);
         *self
             .visibility
             .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(report);
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some((report, on_new_chat));
         self.visibility_changes
             .send_modify(|revision| *revision = revision.wrapping_add(1));
     }
@@ -42,7 +49,8 @@ impl PreviewService {
     }
 }
 
-/// First reason a screenshot of `target` is unavailable. The caller supplies its page label.
+/// First reason a screenshot of `target` is unavailable. The caller supplies its page label; `on_new_chat`: the
+/// reported selection is the New chat screen's owner (no chat is selected).
 pub(crate) fn screenshot_reason(
     report: Option<&VisibilityReport>,
     owner: &str,
@@ -50,6 +58,7 @@ pub(crate) fn screenshot_reason(
     label: &str,
     paused: bool,
     native_shown: bool,
+    on_new_chat: bool,
 ) -> Option<String> {
     let next = "Ask the user to show it, or check without a screenshot (browser_read text).";
     if let Some(report) = report {
@@ -61,6 +70,11 @@ pub(crate) fn screenshot_reason(
         if report.selected_session_id.is_none() {
             return Some(format!(
                 "The user is viewing another page, so {label} cannot be captured. Ask the user to open this session, or check without a screenshot (browser_read text)."
+            ));
+        }
+        if report.selected_session_id.as_deref() != Some(owner) && on_new_chat {
+            return Some(format!(
+                "No chat is selected, so {label} cannot be captured. Ask the user to open this session, or check without a screenshot (browser_read text)."
             ));
         }
         if report.selected_session_id.as_deref() != Some(owner) {
@@ -116,39 +130,39 @@ mod tests {
         let mut r = visible();
         r.window_visible = false;
         assert!(
-            screenshot_reason(Some(&r), "s", "s", "App preview", true, false)
+            screenshot_reason(Some(&r), "s", "s", "App preview", true, false, false)
                 .unwrap()
                 .contains("window is minimized or hidden")
         );
         r.window_visible = true;
         r.selected_session_id = Some("other".into());
         assert!(
-            screenshot_reason(Some(&r), "s", "s", "App preview", true, false)
+            screenshot_reason(Some(&r), "s", "s", "App preview", true, false, false)
                 .unwrap()
                 .contains("viewing another session")
         );
         r.selected_session_id = Some("s".into());
         r.browser_panel_open = false;
         assert!(
-            screenshot_reason(Some(&r), "s", "s", "App preview", true, false)
+            screenshot_reason(Some(&r), "s", "s", "App preview", true, false, false)
                 .unwrap()
                 .contains("Browser side panel is closed")
         );
         r.browser_panel_open = true;
         assert!(
-            screenshot_reason(Some(&r), "s", "s", "App preview", true, false)
+            screenshot_reason(Some(&r), "s", "s", "App preview", true, false, false)
                 .unwrap()
                 .contains("paused to save memory")
         );
         r.selected_page_key = Some("web".into());
         assert!(
-            screenshot_reason(Some(&r), "s", "s", "App preview", false, false)
+            screenshot_reason(Some(&r), "s", "s", "App preview", false, false, false)
                 .unwrap()
                 .contains("selected a web tab instead of App preview")
         );
         r.selected_page_key = Some("s".into());
         assert!(
-            screenshot_reason(Some(&r), "s", "web", "web tab 'Docs'", false, false)
+            screenshot_reason(Some(&r), "s", "web", "web tab 'Docs'", false, false, false)
                 .unwrap()
                 .contains("another tab instead of web tab 'Docs'")
         );
@@ -167,7 +181,7 @@ mod tests {
             },
         ] {
             assert!(
-                !screenshot_reason(Some(&r), "s", "s", "App preview", false, false)
+                !screenshot_reason(Some(&r), "s", "s", "App preview", false, false, false)
                     .unwrap()
                     .contains("preview_open with a width")
             );

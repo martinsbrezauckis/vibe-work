@@ -26,14 +26,7 @@ export function NotificationSettings() {
     <section>
       <h3>Notifications</h3>
       <div className="check" data-setting="notification-level">
-        <span>
-          Tell me about
-          <span className="d">
-            Shown by the system when the window is in the background or another session is open.
-            Clicking one opens the session and the full message. Use Notifications in the title bar
-            to read earlier messages.
-          </span>
-        </span>
+        <span>Tell me about</span>
         <Selector
           testId="shell.notification-settings-set-level"
           label="Notification level"

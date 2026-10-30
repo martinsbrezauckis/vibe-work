@@ -23,6 +23,7 @@ import { NOTIFY_LEVELS } from "../../state/osNotify";
 import { startFolderFor } from "../../state/projectStartFolder";
 import { summarize } from "../../state/sessionSummary";
 import { UiControlError } from "../../state/uiControl";
+import { waitingSessions } from "../ask/waiting";
 import type { App } from "../shell/AppContext";
 import {
   type ListModel,
@@ -79,8 +80,9 @@ const groupJson = (p: ProjectGroup): unknown => ({
 /** The list as the UI shows it, as plain JSON. */
 function listJson(app: App): unknown {
   const state = app.core?.store.get();
+  const waiting = state === undefined ? new Set<string>() : waitingSessions(state);
   const all = Object.values(state?.sessions ?? {}).map((entry) =>
-    summarize(entry, state?.stuck ?? {}),
+    summarize(entry, state?.stuck ?? {}, waiting),
   );
   const model: ListModel = buildList(
     all,

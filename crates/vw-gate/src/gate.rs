@@ -38,11 +38,12 @@ use crate::transport::Transport;
 
 /// Methods a trusted surface (the app's own main window) may confirm without the native dialog:
 /// commands the user types themselves (`!cmd` -> `session/shellCommand`), the composer access switch,
-/// and starting a sign-in the
+/// starting a sign-in the
 /// user clicked (`connector_catalog/auth/request` for a Mistral connector, `mcp_catalog/login`
-/// for a server already added). A sign-in only produces a page address; the user still opens it in the
+/// for a server already added), and Connect of a Mistral connector that needs no sign-in
+/// (`connector_catalog/connect`). A sign-in only produces a page address; the user still opens it in the
 /// link dialog and completes it at the vendor, and the token goes to Mistral or Vibe's keyring, never
-/// through the app. Everything else that needs a confirmation (installs, new servers such as
+/// through the app. Connect stores no secret (the key proxy refuses any credential value). Everything else that needs a confirmation (installs, new servers such as
 /// `mcp_catalog/add`, data leaving the machine, other access-mode changes) always goes through the native
 /// dialog. Which origins may use this list is the core's decision (`own_token`).
 pub const TRUSTED_SURFACE_METHODS: &[&str] = &[
@@ -50,6 +51,7 @@ pub const TRUSTED_SURFACE_METHODS: &[&str] = &[
     "session/agent/update",
     "connector_catalog/auth/request",
     "mcp_catalog/login",
+    "connector_catalog/connect",
 ];
 
 /// Installs the window may confirm with an install offer it showed first: skills Install and Update.

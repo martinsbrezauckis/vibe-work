@@ -19,6 +19,7 @@ import { reserve } from "../../components/nativeLayer";
 import { useStore } from "../../state/createStore";
 import { type NoticeAction, noticeFor } from "../../state/updates";
 import { useApp } from "../shell/AppContext";
+import { TEXT } from "../../vocabulary";
 import { ReleaseHost } from "./ReleaseHost";
 import { VibeUpdateCard } from "./VibeUpdate";
 
@@ -27,7 +28,7 @@ const LABELS: Record<NoticeAction, string> = {
   install: "Install and restart",
   openReleasePage: "Open release page",
   retry: "Try again",
-  later: "Later",
+  later: TEXT.later,
 };
 
 /** The update area: the Vibe Work notice and the Vibe card (each renders nothing when it has nothing to say). */

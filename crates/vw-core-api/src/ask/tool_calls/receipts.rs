@@ -55,7 +55,9 @@ pub(crate) async fn issue(shared: &Arc<Shared>, payload: &Value) -> Result<Value
     let mut prepared_args = args.clone();
     // The tool's own refusal (a vault Deny, a login-fill Cancel, a missing program) answers the agent as the
     // tool's result: inside run_typescript, Vibe shows a hook denial only as a generic skip, and the agent
-    // retried the call. A No that stopped the turn stays a denial with its own text.
+    // retried the call. A No in a Vibe Work prompt asked here (the document card, a Chrome card, the vault window)
+    // is such a refusal too: the hook answers with a decision whose tool call returns `vw_ask::DECLINED` and runs
+    // nothing, and the turn goes on. A No that stopped the turn stays a denial with its own text.
     let execution =
         match crate::agent_tools::prepare(shared, owner, source, call, tool, &mut prepared_args)
             .await

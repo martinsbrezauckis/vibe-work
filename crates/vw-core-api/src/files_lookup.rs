@@ -67,9 +67,11 @@ pub(crate) fn lookup(
     mut list: impl FnMut(&Path) -> Vec<String>,
 ) -> Vec<(String, Vec<Hit>)> {
     let mut names = None;
-    // A fallback may never use picked folders, including through a symlink into a picked folder.
+    // A fallback may never use picked folders, including through a symlink into a picked folder. The listed names
+    // are relative to the session folder, so they are never joined to the working folder.
     let own = Scope {
         picked: vec![],
+        cwd: None,
         ..scope.clone()
     };
     paths
@@ -179,6 +181,7 @@ mod tests {
         std::fs::create_dir_all(&folder).unwrap();
         let scope = Scope {
             session: folder.clone(),
+            cwd: None,
             picked: vec![],
             home: None,
             hidden: true,

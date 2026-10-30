@@ -36,6 +36,7 @@ pub(crate) async fn launch(
     program: &std::path::Path,
     secrets: &dyn SecretProvider,
     pid_slot: &std::sync::Mutex<Option<u32>>,
+    ids: &crate::live_ids::LiveIds,
 ) -> Result<Running, SupervisorError> {
     if let Some(check) = &config.before_launch {
         check(program).map_err(SupervisorError::BeforeLaunch)?;
@@ -64,7 +65,7 @@ pub(crate) async fn launch(
         cwd: config.cwd.clone(),
         watchdog_grace: config.watchdog_grace,
     };
-    let (child, pipes) = child::spawn(&launch).map_err(|source| SupervisorError::Spawn {
+    let (child, pipes) = child::spawn(&launch, ids).map_err(|source| SupervisorError::Spawn {
         program: program.into(),
         source,
     })?;

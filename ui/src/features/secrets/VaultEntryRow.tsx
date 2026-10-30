@@ -93,9 +93,12 @@ export function VaultEntryRow(props: {
           <span className="secrets-name ui-body" title={item.name}>
             {item.name}
           </span>
-          <span className="secrets-detail ui-caption vault-entry-address" title={address}>
-            {address ? originHost(address) : "—"}
-          </span>
+          {/* No address, no column: an empty placeholder would take the name's room in a narrow window. */}
+          {address ? (
+            <span className="secrets-detail ui-caption vault-entry-address" title={address}>
+              {originHost(address)}
+            </span>
+          ) : null}
           {entry.kind === "login" && (
             <span className="secrets-detail ui-caption" title={entry.item.username}>
               {entry.item.username}

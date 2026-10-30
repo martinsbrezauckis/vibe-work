@@ -207,7 +207,7 @@ reasoningEffort?: string, } | { "type": "setDefaultModel",
 /**
  * An alias offered by the current lobby config.
  */
-modelAlias: string, } | { "type": "setAccessMode",
+modelAlias: string, } | { "type": "checkDefaultModel", } | { "type": "setAccessMode",
 /**
  * Session id.
  */

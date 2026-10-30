@@ -315,7 +315,10 @@ fn build_updater<R: Runtime>(app: &AppHandle<R>) -> Result<tauri_plugin_updater:
 
 fn shut_down_core<R: Runtime>(app: &AppHandle<R>) {
     if let Some(host) = app.state::<HostHandle>().try_get() {
-        tauri::async_runtime::block_on(host.shutdown());
+        host.shutdown_at_exit(
+            tauri::async_runtime::handle().inner(),
+            vw_host::exit::EXIT_LIMIT,
+        );
     }
 }
 

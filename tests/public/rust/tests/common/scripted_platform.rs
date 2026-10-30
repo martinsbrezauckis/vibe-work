@@ -11,6 +11,27 @@ use serde_json::{Value, json};
 pub struct Platform {
     pub base: String,
     connected: BTreeSet<String>,
+    /// Also list DeepWiki, which needs no sign-in: Vibe's Connect (`PATCH .../user/credentials` with Vibe's exact
+    /// empty-header body) connects it.
+    pub no_sign_in: bool,
+    /// How many no-sign-in connects reached the platform.
+    pub connects: usize,
+}
+
+impl Platform {
+    /// A platform; `no_sign_in` also lists DeepWiki.
+    pub fn new(no_sign_in: bool) -> Self {
+        Self {
+            no_sign_in,
+            ..Self::default()
+        }
+    }
+}
+
+const NO_SIGN_IN: &str = "deepwiki";
+/// What Vibe 3.0.3 sends to connect a connector that needs no sign-in (`_connect_without_credentials`).
+fn connect_body() -> Value {
+    json!({"name": "default", "is_default": true, "credentials": {"headers": {}}})
 }
 
 const ALIASES: &[&str] = &[
@@ -49,8 +70,21 @@ impl Platform {
         if method == Method::GET && path == "/v1/users/me" {
             return Some(Json(json!({"id":"rv1-user","organization":{"id":"rv1-org","name":"Scripted organization"},"workspace":{"id":"rv1-workspace","name":"Scripted workspace"}})).into_response());
         }
+        if method == Method::PATCH
+            && self.no_sign_in
+            && path == format!("/v1/connectors/{NO_SIGN_IN}/user/credentials")
+        {
+            if *body != connect_body() {
+                return Some(
+                    (StatusCode::BAD_REQUEST, "unexpected credential body").into_response(),
+                );
+            }
+            self.connects += 1;
+            self.connected.insert(NO_SIGN_IN.to_owned());
+            return Some(Json(json!({"message": "Credentials saved"})).into_response());
+        }
         if method == Method::GET && path == "/v1/connectors/bootstrap" {
-            let connectors: Vec<_> = ALIASES.iter().map(|alias| {
+            let mut connectors: Vec<_> = ALIASES.iter().map(|alias| {
                 let ready = *alias == "web_search" || self.connected.contains(*alias);
                 let tools = if *alias == "web_search" { vec!["web_search", "news_search", "open", "find", "image_search"] }
                     else if ready { vec!["list_issues"] } else { vec![] };
@@ -59,6 +93,17 @@ impl Platform {
                     "bootstrap_errors": if *alias == "bigquery" {json!(["disabled: turned off by the scripted platform"])} else {json!([])},
                     "tools":tools.into_iter().map(tool).collect::<Vec<_>>()})
             }).collect();
+            if self.no_sign_in {
+                let ready = self.connected.contains(NO_SIGN_IN);
+                let tools = if ready {
+                    vec![tool("ask_question"), tool("read_wiki_structure")]
+                } else {
+                    vec![]
+                };
+                connectors.push(json!({"id": NO_SIGN_IN, "name": NO_SIGN_IN, "display_name": "DeepWiki",
+                    "protocol": "mcp", "status": {"is_ready": ready}, "auth_action": {"type": "no_auth_connect"},
+                    "bootstrap_errors": [], "tools": tools}));
+            }
             return Some(Json(json!({"connectors":connectors})).into_response());
         }
         if method == Method::GET

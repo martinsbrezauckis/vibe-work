@@ -198,6 +198,10 @@ pub enum Command {
         /// An alias offered by the current lobby config.
         model_alias: String,
     },
+    /// The launch check of the default model: Mistral's own Large 4 entry replaces Vibe Work's once it is no longer
+    /// marked preview (the default moves with it), and a default Vibe no longer offers is named so the window asks.
+    /// Answers `{gone, switchedTo}` (aliases or `null`).
+    CheckDefaultModel {},
     /// `session/agent/update`: switch the access mode (one of Vibe's profiles). The core supplies
     /// the token for the trusted window's typed switch; other Full access callers need consent.
     SetAccessMode {

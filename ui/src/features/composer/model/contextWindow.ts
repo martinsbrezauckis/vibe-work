@@ -10,12 +10,16 @@ import { type Obj } from "../../transcript/model/entries";
 // https://docs.mistral.ai/models/mistral-large
 // https://docs.mistral.ai/models/mistral-medium-3-5-26-04
 // https://docs.mistral.ai/models/zai-glm-5-3
+// The two Flash models have no model card yet: Mistral's `GET /v1/models` reports `max_context_length` 1,048,576 for
+// both, the same window GLM 5.3's card calls 1M. Replace with their cards when Mistral publishes them.
 const PUBLISHED_WINDOWS: ReadonlyMap<string, string> = new Map([
   ["mistral-large-4", "1M"],
   ["mistral-large-4-0", "1M"],
   ["mistral-medium-3-5", "256k"],
   ["mistral-medium-3.5", "256k"],
   ["zai-glm-5-3", "1M"],
+  ["zai-glm-5-3-flash", "1M"],
+  ["deepseek-v4-1-flash-1017", "1M"],
 ]);
 
 /**

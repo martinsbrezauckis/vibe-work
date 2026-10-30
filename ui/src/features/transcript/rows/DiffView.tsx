@@ -21,11 +21,20 @@ function baseName(path: string): string {
   return path.split(/[\\/]/).filter(Boolean).pop() ?? path;
 }
 
-/** One numbered diff line (also used by the Changes tab's hunks: one diff row, not a fork). */
-export function DiffLineRow({ line }: { line: DiffLine }): ReactElement {
+/**
+ * One numbered diff line (also used by the Changes tab's hunks: one diff row, not a fork). With `both` it shows the
+ * old and the new line number in two columns (a unified diff gutter), else one number (the new line, else the old).
+ */
+export function DiffLineRow({
+  line,
+  both = false,
+}: {
+  line: DiffLine;
+  both?: boolean;
+}): ReactElement {
   if (line.kind === "gap") {
     return (
-      <div className="dl gap" aria-label="unchanged lines skipped">
+      <div className={both ? "dl gap two" : "dl gap"} aria-label="unchanged lines skipped">
         ⋯
       </div>
     );
@@ -33,10 +42,25 @@ export function DiffLineRow({ line }: { line: DiffLine }): ReactElement {
   const sign = line.kind === "add" ? "+" : line.kind === "del" ? "-" : "";
   const cls = line.kind === "add" ? "dl a" : line.kind === "del" ? "dl d" : "dl";
   return (
-    <div className={cls} data-kind={line.kind}>
-      <span className="n">{line.newNo ?? line.oldNo ?? ""}</span>
+    <div
+      className={both ? `${cls} two` : cls}
+      data-kind={line.kind}
+      {...(line.cut === undefined ? {} : { "data-cut": line.cut })}
+    >
+      {both ? (
+        <>
+          <span className="n" data-side="old">
+            {line.oldNo ?? ""}
+          </span>
+          <span className="n" data-side="new">
+            {line.newNo ?? ""}
+          </span>
+        </>
+      ) : (
+        <span className="n">{line.newNo ?? line.oldNo ?? ""}</span>
+      )}
       <span className="s">{sign}</span>
-      <span className="c">{line.text}</span>
+      <span className="c">{line.cut === undefined ? line.text : `${line.text}…`}</span>
     </div>
   );
 }
@@ -46,10 +70,16 @@ export function DiffView({
   diff,
   id,
   headerActions,
+  both = false,
+  footer,
 }: {
   diff: FileDiff;
   id: string;
   headerActions?: ReactNode;
+  /** Old and new line numbers in two columns (the approval card's preview of an edit). */
+  both?: boolean;
+  /** Shown under the lines (the preview's count of lines the core left out). */
+  footer?: ReactNode;
 }): ReactElement {
   const { transcript } = useApp();
   const key = `diff:${id}`;
@@ -75,7 +105,7 @@ export function DiffView({
         {headerActions}
       </div>
       {lines.map((line, i) => (
-        <DiffLineRow key={i} line={line} />
+        <DiffLineRow key={i} line={line} both={both} />
       ))}
       {hidden > 0 ? (
         <Button
@@ -91,6 +121,7 @@ export function DiffView({
           Show all ({String(hidden)} more lines)
         </Button>
       ) : null}
+      {footer}
     </div>
   );
 }

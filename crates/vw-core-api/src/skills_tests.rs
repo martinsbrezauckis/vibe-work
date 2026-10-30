@@ -51,7 +51,11 @@ fn skills_authentication_uses_the_apps_key_state_and_keeps_the_catalog() {
     for (vibe_authenticated, usable_key) in [(true, false), (false, true)] {
         let mut view = board(Some(5));
         view.authenticated = vibe_authenticated;
-        let result = super::board(view, false, usable_key);
+        let places = crate::skill_times::SkillPlaces::new(
+            std::path::Path::new("/nonexistent-home"),
+            std::path::Path::new("/nonexistent-folder"),
+        );
+        let result = super::board(view, false, usable_key, &places);
         assert_eq!(result.authenticated, usable_key);
         assert!(result.catalog_loaded);
         assert_eq!(result.skills[0].name, "release-notes");

@@ -294,16 +294,17 @@ async fn list_all(shared: &Shared) -> Result<BTreeMap<String, Listed>, CoreError
                 CoreError::new(crate::ErrorCode::Timeout, "the session list did not answer")
             })?
             .map_err(|e| CoreError::from_gate("session/list", &e))?;
-        let items = reply
-            .result
+        let mut result = reply.result;
+        // The index and the name cache keep titles with vault-value parts withheld (`title_guard`).
+        crate::title_guard::withhold_in(shared, &mut result);
+        let items = result
             .get("items")
             .and_then(Value::as_array)
             .cloned()
             .unwrap_or_default();
         shared.names.note_listing(&items);
         all.extend(items.iter().filter_map(listed_of));
-        cursor = reply
-            .result
+        cursor = result
             .get("nextCursor")
             .and_then(Value::as_str)
             .map(str::to_owned);

@@ -74,7 +74,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     output.push_str("        _ => None,\n    }\n}\n");
     output.push_str(
-        "pub(crate) fn generated_text(id: &str) -> Option<&'static str> {\n    match id {\n",
+        "// One arm per vocabulary text: its length follows the vocabulary, not a design choice.\n#[allow(clippy::too_many_lines)]\npub(crate) fn generated_text(id: &str) -> Option<&'static str> {\n    match id {\n",
     );
     for (id, value) in texts {
         let text = value

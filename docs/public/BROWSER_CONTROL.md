@@ -1,6 +1,6 @@
 # Use your Chrome with Vibe Work
 
-**Not in Vibe Work 0.1.2.** This version has no Browser Control: Settings > Browser shows no Your Chrome section,
+**Not in Vibe Work 0.1.3.** This version has no Browser Control: Settings > Browser shows no Your Chrome section,
 and Vibe works in Vibe Work's own browser. The rest of this page describes the setup for a version that includes it.
 
 Vibe Work Browser Control lets Vibe use your own Chrome while you watch. It is separate from the Browser tab
@@ -39,7 +39,8 @@ Closing a tab you opened has its own choice: Settings > Browser > Delegation per
 It applies to both your Chrome and Vibe Work's browser. Vault permissions are separate; choosing a Chrome level
 does not grant a login.
 
-A prompt waits until you answer; saying No stops Vibe's turn. Ctrl/Cmd+Shift+A goes to a waiting prompt.
+A Chrome prompt waits until you answer; saying No answers only that call and the turn goes on, and the agent is told
+not to do it another way and to wait for your reply (a No on a card for Vibe's own tools stops the turn). Ctrl/Cmd+Shift+A goes to a waiting prompt.
 The session header lists session permissions with Revoke. Settings > Allowed without asking lets you review
 permissions and find the controls for lasting choices.
 

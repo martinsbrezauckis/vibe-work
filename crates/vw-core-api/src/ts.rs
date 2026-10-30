@@ -532,6 +532,7 @@ fn session_tools_decls(cfg: &Config) -> Vec<String> {
         crate::SessionToolsRequest::decl(cfg),
         crate::SessionToolsResult::decl(cfg),
         crate::SessionExportView::decl(cfg),
+        crate::SessionExcerptView::decl(cfg),
         crate::SearchRequest::decl(cfg),
         crate::SearchResult::decl(cfg),
         crate::MessageHit::decl(cfg),

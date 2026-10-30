@@ -50,6 +50,7 @@ mod confirm;
 pub mod default_model;
 mod documents;
 mod events;
+pub mod exit;
 mod export;
 mod extension_paths;
 mod files_routes;

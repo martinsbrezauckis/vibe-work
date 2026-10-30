@@ -1,5 +1,6 @@
 //! Session listing and completion signal for startup work. Depends on the gate, store and name cache;
 //! called by the dispatcher. The scanner is released only after the last listing page has loaded.
+//! Invariant: the chat `vibe --continue` resumes is named only when the Vibe CLI's session folder holds it.
 
 use crate::{CommandResult, Core, CoreError, ErrorCode, Origin, SessionRowView};
 use serde_json::{Map, Value, json};
@@ -76,13 +77,38 @@ impl Core {
         if reply.result.get("nextCursor").is_none_or(Value::is_null) {
             self.shared.secret_scan.loaded();
         }
+        let continue_session_id = match (
+            text("continueSessionId"),
+            self.shared.config.cli_session_dir.clone(),
+        ) {
+            (Some(id), Some(cli)) => {
+                crate::pages::blocking(move || cli_holds(&cli, &id).then_some(id))
+                    .await
+                    .unwrap_or(None)
+            }
+            _ => None,
+        };
         Ok(CommandResult::Sessions {
             rows: views,
             next_cursor: text("nextCursor"),
-            continue_session_id: text("continueSessionId"),
+            continue_session_id,
         })
     }
+}
 
+/// True when the Vibe CLI's session folder `cli` holds the chat `id`: Vibe keeps each chat's store in
+/// `<save dir>/unified/<id>` (Vibe 3.0.3 `app_server/_subagent_runs.py:223-227`). Vibe names its newest chat even when
+/// it saved nothing there (session logging off keeps chats in a throwaway folder), so the folder is checked. An id
+/// that is not one plain name is never joined to the path.
+fn cli_holds(cli: &std::path::Path, id: &str) -> bool {
+    let plain = !id.is_empty()
+        && id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
+    plain && cli.join("unified").join(id).is_dir()
+}
+
+impl Core {
     /// Fetches descendants without repeatedly sweeping the catalog for unchanged childless parents.
     async fn listed_children(
         &self,

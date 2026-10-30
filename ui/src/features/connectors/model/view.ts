@@ -3,14 +3,16 @@
  * plain words, grouped by category, filtered and searched; and the servers' status words. Pure.
  * Depends on: model/meta, the generated connector types. Called by: the connector views, the
  * `ui/connectors` route, tests.
- * Status words follow Vibe's own states: `readiness` (`ready`, `needs_auth`, `needs_setup`, `unavailable`)
- * plus the off flag; when a session's state was read, its status (`connected`, `disabled`,...) wins.
+ * Status words follow Vibe's own states: `readiness` (`ready`, `needs_auth`, `needs_setup`, `needs_connect`,
+ * `unavailable`) plus the off flag; when a session's state was read, its status (`connected`, `disabled`,...) wins.
+ * `needs_connect` (Vibe 3: a connector that needs no sign-in, e.g. DeepWiki) is the `connect` state: one Connect
+ * click makes the connection (`connector_catalog/connect`).
  */
 import type { ConnectorView, ConnectorsView, ServerView } from "../../../protocol/core";
 import { CATEGORIES, type CategoryId, type ConnectorMeta, metaOf } from "./meta";
 
 /** A tile's state. */
-export type TileStatus = "connected" | "signin" | "setup" | "unavailable" | "off";
+export type TileStatus = "connected" | "signin" | "connect" | "setup" | "unavailable" | "off";
 
 /** What the page shows for one connector. */
 export interface Tile {
@@ -38,6 +40,7 @@ export const FILTERS: readonly { id: Filter; label: string }[] = [
 const STATUS_TEXT: Readonly<Record<TileStatus, string>> = {
   connected: "Connected",
   signin: "Needs sign-in",
+  connect: "Not connected",
   setup: "Needs setup at Mistral",
   unavailable: "Unavailable",
   off: "Off",
@@ -50,19 +53,10 @@ export function tileStatus(c: ConnectorView): TileStatus {
   if (live === "connected" || (live === null && c.readiness === "ready")) return "connected";
   const state = live ?? c.readiness;
   if (state === "needs_auth") return "signin";
+  if (state === "needs_connect") return "connect";
   if (state === "needs_setup") return "setup";
   return "unavailable";
 }
-
-/**
- * Vibe 3's `needs_connect`: a connector that needs no sign-in, connected by one call (`connector_catalog/connect`)
- * that the gate does not offer yet (roadmap: connectors-that-need-no-sign-in). Said plainly instead of "Unavailable".
- */
-function noSignIn(c: ConnectorView): boolean {
-  return (c.sessionStatus ?? c.readiness) === "needs_connect";
-}
-
-const NO_SIGN_IN_REASON = "This connector needs no sign-in, but Vibe Work cannot connect it yet.";
 
 /** The tile of one connector. */
 export function tileOf(c: ConnectorView): Tile {
@@ -71,12 +65,8 @@ export function tileOf(c: ConnectorView): Tile {
     alias: c.alias,
     meta: metaOf(c.alias, c.displayName),
     status,
-    statusText: noSignIn(c) ? "Not connected" : STATUS_TEXT[status],
-    reason: noSignIn(c)
-      ? NO_SIGN_IN_REASON
-      : status === "unavailable"
-        ? (c.diagnostic ?? "Vibe gives no reason.")
-        : null,
+    statusText: STATUS_TEXT[status],
+    reason: status === "unavailable" ? (c.diagnostic ?? "Vibe gives no reason.") : null,
     connector: c,
   };
 }

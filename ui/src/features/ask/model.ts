@@ -10,7 +10,7 @@
  * never Vibe's `approve_permanently`; "Stop the turn" is never a card button (the composer's Stop does
  * it); a button exists only when its answer is offered, so a key is never bound to an absent button.
  */
-import { builtinTool, toolText } from "../transcript/model/toolLabels";
+import { builtinTool, toolFallback, toolText } from "../transcript/model/toolLabels";
 import type { AskRecord, Command, CoversPart } from "../../protocol/core";
 import { term } from "../../vocabulary";
 import { type Decision, approvalEffect, offeredDecisions } from "../transcript/model/callbacks";
@@ -175,7 +175,7 @@ export function approvalSummary(entry: Obj): string {
   const tool = str(effect["toolName"]) ?? "";
   return toolText(
     tool,
-    str(obj(effect["display"])?.["summary"]) ?? str(entry["title"]) ?? "request",
+    str(obj(effect["display"])?.["summary"]) ?? str(entry["title"]) ?? toolFallback(tool),
     str(obj(effect["input"])?.["command"]),
   );
 }

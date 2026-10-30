@@ -10,7 +10,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 static SETTINGS_NONCE: AtomicU64 = AtomicU64::new(0);
 
-fn save_setting(path: &std::path::Path, data: &[u8]) -> Result<(), PreviewError> {
+/// Writes `data` to `path` user-only, through a temporary file and a rename (the pool setting, the adopted data
+/// record of `service_adopt`).
+pub(super) fn save_setting(path: &std::path::Path, data: &[u8]) -> Result<(), PreviewError> {
     let nonce = SETTINGS_NONCE.fetch_add(1, Ordering::Relaxed);
     let temporary = path.with_extension(format!("json.tmp-{}-{nonce}", std::process::id()));
     let mut options = std::fs::OpenOptions::new();

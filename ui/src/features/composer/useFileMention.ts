@@ -1,11 +1,22 @@
-/** Caret, search and keys for the @ menu. Depends on core search and mention model; called by Composer. */
+/**
+ * Caret, search and keys for the @ menu: file names from the core's search, then the other sessions of the folder
+ * from the core store. Depends on core search, the core store and the mention model; called by Composer.
+ */
 import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
 import type { FileHit } from "../../protocol/core";
 import { toCallError } from "../../protocol/client/types";
 import { NEW_CHAT } from "../../state/newChatKey";
 import { useApp } from "../shell/AppContext";
+import { useCoreState } from "../shell/hooks";
 import { SEARCH_DEBOUNCE_MS } from "../search/useCoreSearch";
-import { chooseMention, mentionAt, mentionRows } from "./model/mentions";
+import {
+  type MentionRow,
+  chooseMention,
+  chooseSession,
+  mentionAt,
+  mentionRows,
+  sessionRows,
+} from "./model/mentions";
 import { keyAction, type KeyInfo } from "./model/keys";
 
 type Answer = { scope: string; hits: readonly FileHit[]; error: string | null };
@@ -29,10 +40,17 @@ export function useFileMention(
   const mention = dismissed === tokenKey ? null : token;
   const query = mention?.query ?? null;
   const scope = JSON.stringify([sessionId, project, query]);
-  const rows =
+  const sessions = useCoreState((s) => s.sessions);
+  const files =
     project === null || query === null || answer?.scope !== scope
       ? []
       : mentionRows(answer.hits, project, query);
+  const others =
+    project === null || query === null ? [] : sessionRows(sessions, project, sessionId, query);
+  const rows: MentionRow[] = [
+    ...files.map((hit) => ({ kind: "file" as const, hit })),
+    ...others.map((session) => ({ kind: "session" as const, session })),
+  ];
   const index =
     selection.scope === scope ? Math.min(selection.index, Math.max(0, rows.length - 1)) : 0;
   const error = answer?.scope === scope ? answer.error : null;
@@ -77,9 +95,14 @@ export function useFileMention(
     box.current?.setSelectionRange(next, next);
   }, [draft, box]);
 
-  const pick = (hit: FileHit) => {
+  const pick = (row: MentionRow) => {
     if (mention === null) return;
-    const next = chooseMention(app, sessionId, mention, hit);
+    const next =
+      row.kind === "file"
+        ? chooseMention(app, sessionId, mention, row.hit)
+        : chooseSession(app, sessionId, mention, row.session);
+    // The next @ starts at the first row again, also for the same query.
+    setSelection({ scope: "", index: 0 });
     pendingCaret.current = next;
     setCaret(next);
   };
@@ -105,8 +128,8 @@ export function useFileMention(
         setSelection({ scope, index: Math.max(0, Math.min(index + 1, rows.length - 1)) });
       else if (action === "slashPrev") setSelection({ scope, index: Math.max(index - 1, 0) });
       else if (action === "slashPick") {
-        const hit = rows[index];
-        if (hit !== undefined) pick(hit);
+        const row = rows[index];
+        if (row !== undefined) pick(row);
       } else return false;
       return true;
     },

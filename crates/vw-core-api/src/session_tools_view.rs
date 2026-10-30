@@ -1,5 +1,5 @@
 //! The `sessionTools` command's request and answer types: export a session as Markdown, the temporary
-//! sessions of this run, and the Subagents setting for new chats.
+//! sessions of this run, the Subagents setting for new chats, and a session's excerpt for a session mention.
 //!
 //! Depends on: serde, ts-rs (feature `ts`). Called by: `command`, `session_export`, `temporary`, the UI (generated
 //! `sessions.ts`), the Debug API (`POST /commands`).
@@ -51,6 +51,11 @@ pub enum SessionToolsRequest {
         /// The new value.
         enabled: bool,
     },
+    /// A bounded excerpt of a session for a session mention (`session_excerpt.rs`); reads, never takes it.
+    Excerpt {
+        /// The session.
+        session_id: String,
+    },
 }
 
 /// The answer.
@@ -91,6 +96,24 @@ pub enum SessionToolsResult {
         /// temporary chat and is deleted when Vibe Work quits; `null` when it is gone.
         leftover_session_id: Option<String>,
     },
+    /// `excerpt`.
+    Excerpt {
+        /// The excerpt.
+        excerpt: SessionExcerptView,
+    },
+}
+
+/// A session's title, first message and last answer, each bounded, vault values withheld (`session_excerpt.rs`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+pub struct SessionExcerptView {
+    /// The session's title (or its first-message preview, or the untitled-session label).
+    pub title: String,
+    /// The first message the person sent, when there is one.
+    pub first_user: Option<String>,
+    /// The last answer, when there is one.
+    pub last_answer: Option<String>,
 }
 
 /// The answer of `exportSession`.

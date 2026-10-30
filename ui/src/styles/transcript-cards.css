@@ -251,6 +251,13 @@
   color: var(--text-3);
   padding-left: 54px;
 }
+/* An edit preview's unified gutter: the old and the new line number. */
+.dl.two {
+  grid-template-columns: 38px 38px 16px 1fr;
+}
+.dl.gap.two {
+  padding-left: 92px;
+}
 
 /* Code blocks in Markdown */
 .md-code {

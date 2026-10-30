@@ -7,6 +7,7 @@ import type { NewChatDraft } from "../../state/newChatDraft";
 import { type ReactNode, createContext, useContext } from "react";
 
 import type { SecretScan } from "../../state/secretScan";
+import type { ConfigNotices } from "../../state/configNotices";
 import type { CoreController } from "../../state/coreStore";
 import type { Commands } from "../../state/commands";
 import type { Composer } from "../../state/composer";
@@ -27,6 +28,7 @@ import type { Toasts } from "../../state/toastStore";
 import type { Transcript } from "../../state/transcriptStore";
 import type { Updates } from "../../state/updates";
 import type { VibeInstall } from "../../state/vibeInstall";
+import type { DefaultModel } from "../../state/defaultModel";
 import type { UiControl } from "../../state/uiControl";
 import type { Voice } from "../../state/voice";
 import type { Worktrees } from "../../state/worktrees";
@@ -42,6 +44,8 @@ export interface App {
   core: CoreController | null;
   /** Session-log scan settings and retained finding actions. */
   secretScan: SecretScan | null;
+  /** Config problems Vibe reports, shown once each in the bell; `null` without a core. */
+  configNotices: ConfigNotices | null;
   /** Row and folder actions; `null` without a core. */
   sessions: SessionActions | null;
   /** The transcript's UI state and actions (open groups, callback answers, links). */
@@ -86,6 +90,8 @@ export interface App {
   keys: Keys | null;
   /** The Vibe install at setup; `null` without a core. */
   vibe: VibeInstall | null;
+  /** The launch check of the default model and its card; `null` without a core. */
+  defaultModel: DefaultModel | null;
   /** OS notification settings and watcher. */
   notifier: Notifier;
   shell: Shell;

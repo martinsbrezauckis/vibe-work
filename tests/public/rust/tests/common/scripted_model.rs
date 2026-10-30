@@ -110,6 +110,10 @@ pub struct Script {
     /// Optional scripted Mistral registry; real Vibe still implements every skills/* command.
     pub registry: Option<super::scripted_registry::Registry>,
     pub platform: bool,
+    /// The platform's catalog also lists DeepWiki, a connector that needs no sign-in (`no_auth_connect`).
+    pub no_sign_in: bool,
+    /// Mistral's model catalog answer (`GET /v1/model-catalog`, Vibe's `ModelCatalogResponse`), when set.
+    pub model_catalog: Option<Value>,
 }
 
 impl Script {
@@ -252,6 +256,7 @@ impl ScriptedModel {
 
     /// [`Self::start`]; paths other than the chat completions go to `fallback` (`http://127.0.0.1:<port>`).
     pub async fn start_with_fallback(script: Script, fallback: Option<String>) -> Self {
+        let platform = super::scripted_platform::Platform::new(script.no_sign_in);
         let inner = Arc::new(Mutex::new(Inner {
             expected_key: None,
             proxies: Vec::new(),
@@ -261,7 +266,7 @@ impl ScriptedModel {
             hook: None,
             log: Vec::new(),
             calls: 0,
-            platform: super::scripted_platform::Platform::default(),
+            platform,
         }));
         let app = axum::Router::new()
             .fallback(handle)
@@ -279,6 +284,11 @@ impl ScriptedModel {
 
     pub fn platform_enabled(&self) -> bool {
         self.inner.lock().unwrap().script.platform
+    }
+
+    /// How many no-sign-in connects reached the scripted platform.
+    pub fn platform_connects(&self) -> usize {
+        self.inner.lock().unwrap().platform.connects
     }
 
     /// A manually supplied KeyService may own a different fixture key than the seeding proxy.
@@ -567,6 +577,11 @@ async fn handle(
     request: axum::extract::Request,
 ) -> Response {
     let path = request.uri().path().to_owned();
+    if path == "/v1/model-catalog"
+        && let Some(catalog) = inner.lock().unwrap().script.model_catalog.clone()
+    {
+        return Json(catalog).into_response();
+    }
     let authorized = {
         let state = inner.lock().unwrap();
         let bearer = request
@@ -601,6 +616,7 @@ async fn handle(
             body["model"].as_str(),
             Some(
                 "mistral-large-4"
+                    | "mistral-large-4-0"
                     | "mistral-vibe-cli-latest"
                     | "mistral-vibe-cli-fast"
                     | "zai-glm-5-3"

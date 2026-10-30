@@ -644,7 +644,7 @@ impl Core {
                 PreviewResult::Done {}
             }
             PreviewRequest::Visibility { report } => {
-                service.report_visibility(report);
+                service.report_view(report, |id| crate::new_chat::is_draft(shared, id));
                 PreviewResult::Done {}
             }
             PreviewRequest::NativeWindowVisibility { visible } => {

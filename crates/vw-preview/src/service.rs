@@ -28,6 +28,8 @@ use crate::visibility::VisibilityReport;
 
 #[path = "service_accounts.rs"]
 mod service_accounts;
+#[path = "service_adopt.rs"]
+mod service_adopt;
 #[path = "service_console.rs"]
 mod service_console;
 #[path = "service_favicon.rs"]
@@ -146,6 +148,8 @@ pub struct PreviewService {
     config: Arc<PreviewConfig>,
     pool: Arc<std::sync::Mutex<PoolState>>,
     pool_op: Arc<tokio::sync::Mutex<()>>,
+    /// Sessions that took over a New chat screen's website data (`service_adopt`).
+    adoptions: Arc<std::sync::Mutex<service_adopt::Adoptions>>,
     activity: Arc<
         std::sync::Mutex<
             std::collections::HashMap<String, std::sync::Weak<tokio::sync::Mutex<()>>>,
@@ -154,7 +158,8 @@ pub struct PreviewService {
     pub(crate) layout_op: Arc<tokio::sync::Mutex<()>>,
     /// Refuses placements of a replaced main document; checked and advanced under `layout_op`.
     pub(crate) placement_gate: Arc<crate::PlacementGate>,
-    pub(crate) visibility: Arc<std::sync::Mutex<Option<VisibilityReport>>>,
+    /// The window's last report, with whether its selection is the New chat screen's owner.
+    pub(crate) visibility: Arc<std::sync::Mutex<Option<(VisibilityReport, bool)>>>,
     pub(crate) visibility_changes: Arc<tokio::sync::watch::Sender<u64>>,
     pub(crate) native_window_visible: Arc<std::sync::Mutex<Option<bool>>>,
 }
@@ -195,7 +200,9 @@ impl PreviewService {
         }
         engine.attach(Arc::new(Hooks(inner.clone())));
         let pool = PoolState::load(&config.storage_root, config.memory_probe.clone());
+        let adoptions = service_adopt::Adoptions::load(&config.storage_root);
         Self {
+            adoptions: Arc::new(std::sync::Mutex::new(adoptions)),
             inner,
             engine,
             config: Arc::new(config),
@@ -273,11 +280,12 @@ impl PreviewService {
         self.session_mutex(session_id).try_lock_owned().ok()
     }
 
-    /// The storage of a session's preview.
+    /// The storage of a session's preview: its owner's, or the New chat screen's that the owner adopted at its first
+    /// message (`adopt_storage`).
     #[must_use]
     pub fn storage(&self, session_id: &str) -> Storage {
         let owner = self.inner.lock().owner_of(session_id);
-        let key = crate::ids::StorageKey::of(&owner);
+        let key = self.storage_key_of(&owner);
         Storage {
             key,
             dir: key.data_dir(&self.config.storage_root),

@@ -14,6 +14,7 @@ import { toCallError } from "../protocol/client/types";
 import type { CoreController } from "./coreStore";
 import { newChatPick } from "../features/composer/model/models";
 import { modelTerm } from "../vocabulary";
+import { alwaysThinks, listedRows, offeredLevels } from "./thinkingLevels";
 
 /** One model Vibe's config lists. */
 interface ModelOption {
@@ -21,6 +22,8 @@ interface ModelOption {
   label: string;
   /** Only levels actually reported for this model; absent means no explicit level is offered. */
   thinkingLevels?: readonly string[];
+  /** The model always thinks (Large 4): High is its only level and a saved level shows as High. */
+  alwaysThinks?: true;
 }
 
 /** What the config says. */
@@ -34,28 +37,35 @@ function asObject(value: JsonValue | undefined): { [key in string]?: JsonValue }
   return typeof value === "object" && value !== null && !Array.isArray(value) ? value : null;
 }
 
-/** Reads the models out of a `config/read` result; `null` when the shape is not recognised. */
+/**
+ * Reads the models out of a `config/read` result (Mistral's own Large 4 left out beside ours, `thinkingLevels`);
+ * `null` when the shape is not recognised.
+ */
 export function parseModels(result: JsonValue): ModelList | null {
   const config = asObject(asObject(result)?.["config"]);
   const list = config?.["models"];
   if (config === null || !Array.isArray(list)) return null;
   const models: ModelOption[] = [];
+  const listed = listedRows(list.map(asObject));
   for (const entry of list) {
     const model = asObject(entry);
+    if (!listed(model)) continue;
     const alias = model?.["alias"];
     if (typeof alias !== "string" || alias === "") continue;
     const display = model?.["displayName"];
     const levels = model?.["thinkingLevels"];
+    const always = alwaysThinks(model);
     models.push({
       alias,
       label: modelTerm(alias, display).name,
       ...(Array.isArray(levels)
         ? {
-            thinkingLevels: [
+            thinkingLevels: offeredLevels(always, [
               ...new Set(levels.filter((l): l is string => typeof l === "string" && l !== "")),
-            ],
+            ]),
           }
         : {}),
+      ...(always ? { alwaysThinks: true as const } : {}),
     });
   }
   return { models, current: newChatPick(result).alias };

@@ -105,11 +105,30 @@ pub(crate) async fn run(
     target: Option<PickTarget>,
     tab_id: Option<String>,
 ) -> Result<vw_pages::Picked, CoreError> {
-    match (target, tab_id) {
+    let page = tab_id.clone().unwrap_or_else(|| session_id.to_owned());
+    let before = settled_url(service, &page);
+    let mut picked = match (target, tab_id) {
         (target, Some(tab)) => pick_in_tab(service, session_id, &tab, target.as_ref()).await,
         (Some(target), None) => pick_at(service, session_id, &target).await,
         (None, None) => pick(service, session_id).await,
-    }
+    }?;
+    // The pick script runs in the page's world, so the address it reports is the page's claim: the chip names the
+    // address the engine loaded instead. It counts only when the same settled page was there before and after the
+    // pick; a navigation in between (the page could start one right after answering) leaves the chip no address.
+    let after = settled_url(service, &page);
+    picked.url = match (before, after) {
+        (Some(before), Some(after)) if before == after => after.chars().take(512).collect(),
+        _ => String::new(),
+    };
+    Ok(picked)
+}
+
+/// The engine's address of `page` when it is not loading, else `None`.
+fn settled_url(service: &PreviewService, page: &str) -> Option<String> {
+    service
+        .view(page)
+        .filter(|view| !view.loading)
+        .and_then(|view| view.url)
 }
 
 /// A web page `tab` of `session_id`'s Browser tab, after its own menu's Point Vibe at this: the page's selection

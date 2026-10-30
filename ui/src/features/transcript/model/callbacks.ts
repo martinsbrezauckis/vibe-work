@@ -10,7 +10,7 @@
  * (`offeredDecisions`); a multi-select answer joins the chosen labels with ", " and sets
  * `isOther` when any part is free text (Vibe's own encoding, `vibe/acp/agent.py:254-262`).
  */
-import { toolText } from "./toolLabels";
+import { toolFallback, toolText } from "./toolLabels";
 import type { JsonValue } from "../../../protocol/core";
 import { term } from "../../../vocabulary";
 import { type Obj, arr, detailOf, obj, stateOf, str } from "./entries";
@@ -201,9 +201,12 @@ export function auditText(
   const state = stateOf(entry);
   const status = str(state["status"]) ?? "";
   const detail = detailOf(entry);
+  const tool = str(approvalEffect(entry)["toolName"]) ?? "";
   const summary = toolText(
-    str(approvalEffect(entry)["toolName"]) ?? "",
-    str(obj(approvalEffect(entry)["display"])?.["summary"]) ?? str(entry["title"]) ?? "request",
+    tool,
+    str(obj(approvalEffect(entry)["display"])?.["summary"]) ??
+      str(entry["title"]) ??
+      toolFallback(tool),
     str(obj(approvalEffect(entry)["input"])?.["command"]),
   );
   if (status === "cancelled" || status === "expired") {

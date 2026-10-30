@@ -17,8 +17,9 @@ import { type VibeNoticeAction, vibeNoticeFor } from "../../state/vibeUpdates";
 import { useVibeUi } from "../setup/VibeInstallStep";
 import { OfferDetails } from "../setup/VibeOfferDetails";
 import { useApp } from "../shell/AppContext";
+import { TEXT } from "../../vocabulary";
 
-const LABELS: Record<VibeNoticeAction, string> = { update: "Update", later: "Later" };
+const LABELS: Record<VibeNoticeAction, string> = { update: "Update", later: TEXT.later };
 
 /** The Vibe card of the update area, or nothing. */
 export function VibeUpdateCard(): ReactElement | null {

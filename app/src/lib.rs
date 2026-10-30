@@ -341,10 +341,14 @@ pub fn run() -> tauri::Result<()> {
         })
         .build(context)?;
     app.run(move |app_handle, event| {
+        // On this (UI) thread, bounded even when a runtime task waits for this thread (`vw_host::exit`).
         if let RunEvent::Exit = event
             && let Some(host) = app_handle.state::<HostHandle>().try_get()
         {
-            tauri::async_runtime::block_on(host.shutdown());
+            host.shutdown_at_exit(
+                tauri::async_runtime::handle().inner(),
+                vw_host::exit::EXIT_LIMIT,
+            );
         }
     });
     Ok(())

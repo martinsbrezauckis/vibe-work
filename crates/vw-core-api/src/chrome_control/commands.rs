@@ -275,7 +275,7 @@ impl Core {
                 } else {
                     AnsweredBy::Person
                 };
-                check::answer(&self.shared, &ask_id, answer, note, by).await?;
+                check::answer(&self.shared, &ask_id, answer, note, by)?;
                 Ok(self.chrome_result(None))
             }
             ChromeControlRequest::OfferSetup {} => {

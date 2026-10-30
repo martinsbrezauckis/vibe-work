@@ -109,6 +109,10 @@ pub struct CoreConfig {
     /// Session bookkeeping of Vibe Work's own: the temporary sessions' record. `None` (the default):
     /// memory only, so temporary sessions of a crashed run are not deleted at the next start.
     pub sessions_dir: Option<std::path::PathBuf>,
+    /// The Vibe CLI's session folder when this run's Vibe saves chats there (chats shared with the CLI). `None`
+    /// (the default): chats are kept separate, so `vibe --continue` in a terminal resumes none of them and the
+    /// listing names no chat for it (`session_listing`).
+    pub cli_session_dir: Option<std::path::PathBuf>,
     /// The File tab's viewer for HTML pages and PDFs: a third engine instance whose config uses
     /// `vw_pages::FILES_LABEL_PREFIX`. `None` (the default): HTML and PDF files show their source / a notice only.
     pub files_viewer: Option<crate::pages::PagesSetup>,
@@ -190,6 +194,7 @@ impl Default for CoreConfig {
             pages: None,
             projects_dir: None,
             sessions_dir: None,
+            cli_session_dir: None,
             files_viewer: None,
             app_version: None,
             gh_program: None,

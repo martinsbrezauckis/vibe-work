@@ -3,7 +3,8 @@
 //! Depends on: shape, profile, error, canonical. Called by: privileged.
 //! Invariants:
 //! - `config/write` accepts only paths on [`CONFIG_KEYS`], each with a value of its own type, and
-//!   `/models/<configured alias>/top_p` and `/max_output_tokens` with a value in range.
+//!   `/models/<configured alias>/top_p`, `/max_output_tokens` and `/auto_compact_threshold` with a value in
+//!   range.
 //!   Anything that can run code or redirect traffic (`/mcp_servers`, `/hooks`, `/providers`,
 //!   `/models`, `/tools/...`, proxy and TLS settings) is not listed, so it is refused.
 //! - One bad op refuses the whole call; nothing is partly applied.
@@ -234,14 +235,23 @@ pub(crate) fn model_write(
     Ok(())
 }
 
-/// The per-model fields the app may write (Vibe 2.26.1 `ModelConfig`): nucleus sampling and the output cap.
+/// The per-model fields the app may write (Vibe `ModelConfig`): nucleus sampling, the output cap and the compaction
+/// point.
 #[derive(Clone, Copy)]
 enum ModelField {
     /// `top_p`: (0, 1].
     TopP,
     /// `max_output_tokens`: 1 to 1,048,576.
     MaxOutputTokens,
+    /// `auto_compact_threshold` (Vibe 3.0.3): a whole token count in [`COMPACT_THRESHOLD`]. Vibe refuses 0 and a
+    /// count outside the range its model's window allows; the window is Vibe's to know, so this rule only keeps the
+    /// value a plain token count and the window check stays Vibe's.
+    AutoCompactThreshold,
 }
+
+/// The compaction point's outer range: Vibe's smallest allowed threshold for any window
+/// (`completion_profile/bounds.py` `THRESHOLD_MIN_FLOOR`) up to four times the largest window Mistral serves.
+const COMPACT_THRESHOLD: std::ops::RangeInclusive<u64> = 10_000..=4_194_304;
 
 /// `/models/<alias>/<field>` for a configured alias (the JSON-pointer token unescaped) and an allowed field.
 fn model_field(path: &str, aliases: &HashSet<String>) -> Option<ModelField> {
@@ -257,6 +267,7 @@ fn model_field(path: &str, aliases: &HashSet<String>) -> Option<ModelField> {
     match field {
         "top_p" => Some(ModelField::TopP),
         "max_output_tokens" => Some(ModelField::MaxOutputTokens),
+        "auto_compact_threshold" => Some(ModelField::AutoCompactThreshold),
         _ => None,
     }
 }
@@ -282,6 +293,9 @@ fn check_model_field(
                 ModelField::TopP => v.as_f64().is_some_and(|p| p > 0.0 && p <= 1.0),
                 ModelField::MaxOutputTokens => {
                     v.as_u64().is_some_and(|n| (1..=1_048_576).contains(&n))
+                }
+                ModelField::AutoCompactThreshold => {
+                    v.as_u64().is_some_and(|n| COMPACT_THRESHOLD.contains(&n))
                 }
             };
             if ok { Ok(None) } else { Err(bad()) }

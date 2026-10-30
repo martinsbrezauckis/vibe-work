@@ -28,6 +28,7 @@ use crate::config::{Recovering, SupervisorConfig, SupervisorError, SupervisorSta
 use crate::discovery::canonical_executable;
 use crate::env::SecretProvider;
 use crate::launch::{self, Running};
+use crate::live_ids::LiveIds;
 
 /// A channel opened on the current multiplexed server, with the server generation it belongs to (a
 /// restart makes every channel of the old generation dead).
@@ -49,6 +50,8 @@ struct Inner {
     mux: watch::Sender<Option<(Multiplexer, u64)>>,
     tracked: Mutex<BTreeSet<String>>,
     pid: Mutex<Option<u32>>,
+    /// The current server's unreaped leader and watchdog, for [`Supervisor::kill_now`].
+    live: LiveIds,
 }
 
 /// Supervises one `vibe-app-server` process.
@@ -405,6 +408,15 @@ impl Supervisor {
         }
     }
 
+    /// Last resort when [`Supervisor::stop`] cannot finish (the async runtime makes no progress at quit): SIGKILL
+    /// to the server's whole process group and to its crash watchdog, now, from the calling thread. Never waits and
+    /// never reaps (the owner task reaps if the runtime recovers, the OS once this process has exited). Signals only
+    /// processes that are still unreaped children of this process. Returns whether a server was running. On
+    /// Windows nothing is sent: the kill-on-close job object ends the tree when this process exits.
+    pub fn kill_now(&self) -> bool {
+        self.inner.live.kill_now()
+    }
+
     /// Clean shutdown: close the server's stdin, wait `shutdown_grace`, then kill the tree; reap
     /// everything. Returns the server's exit status if known.
     pub async fn shutdown(mut self) -> Option<ExitInfo> {
@@ -452,6 +464,7 @@ impl Inner {
             mux: watch::Sender::new(None),
             tracked: Mutex::new(BTreeSet::new()),
             pid: Mutex::new(None),
+            live: LiveIds::default(),
         })
     }
 
@@ -461,7 +474,14 @@ impl Inner {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .clone();
-        launch::launch(&self.config, &program, self.secrets.as_ref(), &self.pid).await
+        launch::launch(
+            &self.config,
+            &program,
+            self.secrets.as_ref(),
+            &self.pid,
+            &self.live,
+        )
+        .await
     }
 
     fn publish_ready(&self, running: &Running, generation: u64, needs_resume: Vec<String>) {

@@ -10,8 +10,9 @@
 //!
 //! Depends on: `kind`, `pages`, `local`, `assemble`, getrandom. Called by: vw-core-api (`documents`).
 //! Invariants: nothing here takes a path or bytes from a client (only Rust callers); at most
-//! [`MAX_DOCS`] documents and [`MAX_HELD_BYTES`] of original file bytes are held; a file over
-//! [`MAX_FILE_BYTES`] is refused before it is read in full; ids are random.
+//! [`MAX_DOCS`] documents and [`MAX_HELD_BYTES`] of original file bytes plus the text read from them are held
+//! (a document whose text would pass the budget is not kept); a file over [`MAX_FILE_BYTES`] is refused before it is
+//! read in full; ids are random.
 
 use std::fmt::Write as _;
 use std::io::Read;
@@ -30,7 +31,8 @@ use crate::pages::page_count;
 pub const MAX_FILE_BYTES: u64 = 50 * 1024 * 1024;
 /// Most documents held at once.
 pub const MAX_DOCS: usize = 8;
-/// Most file bytes held at once (documents waiting to be read).
+/// Most bytes held at once: the original files and every text read from them (the message text and the complete
+/// text kept for the saved reader).
 pub const MAX_HELD_BYTES: u64 = 200 * 1024 * 1024;
 /// Largest picture handed to the composer (the gate's image limit).
 pub const MAX_PICTURE_BYTES: usize = 10 * 1024 * 1024;
@@ -148,6 +150,22 @@ struct Entry {
     saved: Option<(String, PathBuf)>,
 }
 
+/// Bytes of `text` and `full_text` together.
+fn text_bytes(text: Option<&String>, full_text: Option<&String>) -> u64 {
+    [text, full_text]
+        .into_iter()
+        .flatten()
+        .map(|t| t.len() as u64)
+        .sum()
+}
+
+impl Entry {
+    /// What this document holds against [`MAX_HELD_BYTES`]: its file (also while OCR has the bytes) and its texts.
+    fn held(&self) -> u64 {
+        self.info.size + text_bytes(self.text.as_ref(), self.full_text.as_ref())
+    }
+}
+
 /// The pending-document store (one per core).
 #[derive(Default)]
 pub struct DocumentStore {
@@ -229,7 +247,7 @@ impl DocumentStore {
         // Reserve capacity under the same lock used to insert: concurrent adds cannot all parse
         // against one spare slot. Reject a full store before kind detection or local extraction.
         let mut entries = self.lock();
-        let held_now: u64 = entries.iter().map(|e| e.info.size).sum();
+        let held_now: u64 = entries.iter().map(Entry::held).sum();
         if entries.len() >= MAX_DOCS || held_now + bytes.len() as u64 > MAX_HELD_BYTES {
             return Err(AddError::Full);
         }
@@ -269,6 +287,10 @@ impl DocumentStore {
         } else {
             (Some(bytes), None)
         };
+        // The text read here counts like the file: a small package that expands to much text can fill the budget.
+        if held_now + info.size + text_bytes(text.as_ref(), full_text.as_ref()) > MAX_HELD_BYTES {
+            return Err(AddError::Full);
+        }
         entries.push(Entry {
             info: info.clone(),
             bytes: held,
@@ -391,12 +413,27 @@ impl DocumentStore {
         result: Result<OcrPages, String>,
     ) -> Option<DocumentInfo> {
         let mut entries = self.lock();
+        let others: u64 = entries
+            .iter()
+            .filter(|e| e.info.id != job.id)
+            .map(Entry::held)
+            .sum();
         let entry = entries.iter_mut().find(|e| e.info.id == job.id)?;
+        let result = result.and_then(|ocr| {
+            let full_text = crate::from_pages_with_limit(&job.name, &ocr.pages, usize::MAX).text;
+            let extracted = from_pages(&job.name, &ocr.pages);
+            // The read text counts like an added document's: past the budget it is not kept.
+            let held =
+                others + entry.info.size + text_bytes(Some(&extracted.text), Some(&full_text));
+            if held > MAX_HELD_BYTES {
+                Err(AddError::Full.to_string())
+            } else {
+                Ok((ocr, full_text, extracted))
+            }
+        });
         match result {
-            Ok(ocr) => {
-                entry.full_text =
-                    Some(crate::from_pages_with_limit(&job.name, &ocr.pages, usize::MAX).text);
-                let extracted = from_pages(&job.name, &ocr.pages);
+            Ok((ocr, full_text, extracted)) => {
+                entry.full_text = Some(full_text);
                 set_ready(&mut entry.info, &extracted);
                 entry.info.model = Some(ocr.model);
                 entry.info.pages_read = ocr.pages_processed.or(Some(u32_of(ocr.pages.len())));

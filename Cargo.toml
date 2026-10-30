@@ -61,7 +61,7 @@ tauri-runtime-wry = { path = "third_party/tauri-runtime-wry" }
 wry = { path = "third_party/wry" }
 
 [workspace.package]
-version = "0.1.2"
+version = "0.1.3"
 edition = "2024"
 license = "MIT"
 authors = ["Martins Brezauckis"]

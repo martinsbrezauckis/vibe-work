@@ -1,5 +1,8 @@
 //! Local Word and `PowerPoint` text in document/slide order, with tables, lists and notes.
 //! Uses bounded OOXML parts; called by `local::read_local`. No rendering, OCR, network or external objects.
+//! Invariant: each slide and notes part of a deck is read once (a repeated one refuses the deck).
+
+use std::collections::HashSet;
 
 use crate::kind::DocKind;
 use crate::office_xml::{Node, part, related};
@@ -98,19 +101,30 @@ fn drawing_text(node: &Node, out: &mut String) -> Result<(), String> {
     Ok(())
 }
 
+/// The deck's slides in order, each with its speaker notes. Every slide and notes part is read at most once: a deck
+/// that lists one slide again (the same or another relationship to the same part) or shares one notes page between
+/// slides is refused, so a tiny package cannot repeat one large text many times.
 fn slides(bytes: &[u8]) -> Result<String, String> {
+    const REPEATED: &str = "the deck lists one slide or notes page more than once";
     let source = "ppt/presentation.xml";
     let root = part(bytes, source)?;
     let links = related(bytes, source)?;
+    let mut read = HashSet::new();
     let mut out = String::new();
     for (index, slide) in root.all("sldId").iter().enumerate() {
         let (path, _) = links
             .get(slide.attr("r:id"))
             .ok_or("slide relationship is missing")?;
+        if !read.insert(path.clone()) {
+            return Err(REPEATED.to_owned());
+        }
         append(&mut out, &format!("## Slide {}\n", index + 1))?;
         drawing_text(&part(bytes, path)?, &mut out)?;
         for (notes, kind) in related(bytes, path)?.values() {
             if kind.ends_with("/notesSlide") {
+                if !read.insert(notes.clone()) {
+                    return Err(REPEATED.to_owned());
+                }
                 append(&mut out, "\n### Speaker notes\n")?;
                 drawing_text(&part(bytes, notes)?, &mut out)?;
             }

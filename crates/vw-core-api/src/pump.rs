@@ -62,6 +62,7 @@ pub(crate) fn callback_handler(
             )));
         };
         crate::agent_tools::shell_commands::project(&shared, &mut request.params);
+        crate::edit_preview::project(&shared, &mut request.params);
         if let Err(error) = crate::agent_tools::shell_commands::verified(&request.params) {
             return std::future::ready(Err(error));
         }
@@ -449,6 +450,9 @@ impl Pump {
                     }
                 }
                 crate::agent_tools::shell_commands::project(&shared, &mut n.params);
+                crate::edit_preview::project(&shared, &mut n.params);
+                // A title or preview change (an auto-title, a rename) holds no vault value from here on.
+                crate::title_guard::withhold_in(&shared, &mut n.params);
                 let applied = shared.store.apply(Notification::new(n.method, n.params));
                 self.after_apply(&shared, &applied);
             }
@@ -737,7 +741,10 @@ pub(crate) async fn refresh(shared: &Shared, session_id: &str) -> Option<Applied
             return None;
         }
     };
-    let loaded = state.map(|s| shared.store.load(s, LoadKind::Read));
+    let loaded = state.map(|mut s| {
+        crate::title_guard::withhold_in(shared, &mut s);
+        shared.store.load(s, LoadKind::Read)
+    });
     match loaded {
         Some(Ok(applied)) => Some(applied),
         Some(Err(error)) => {

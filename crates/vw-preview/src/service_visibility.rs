@@ -45,7 +45,7 @@ impl PreviewService {
             )));
         }
         if let Some(reason) = visibility::screenshot_reason(
-            report.as_ref(),
+            report.as_ref().map(|(report, _)| report),
             &owner,
             session_id,
             &label,
@@ -53,6 +53,7 @@ impl PreviewService {
                 && entry.server_status.is_none()
                 && entry.browser_mount != BrowserMountState::Waiting,
             state.is_shown(session_id) || entry.server_status.is_some(),
+            report.as_ref().is_some_and(|(_, on_new_chat)| *on_new_chat),
         ) {
             return Err(PreviewError::ScreenshotHidden(reason));
         }

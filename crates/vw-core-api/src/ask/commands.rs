@@ -108,8 +108,7 @@ impl Core {
                 answer.answer,
                 answer.note,
                 AnsweredBy::DebugApi,
-            )
-            .await?;
+            )?;
         } else if let Some(callback) = id.strip_prefix("callback:") {
             let output = if ask.kind == "user_input" {
                 if answer.answer != Choice::No {

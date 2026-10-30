@@ -67,9 +67,9 @@
 .vault-entry-line {
   flex-wrap: wrap;
 }
-/* The name's basis decides when the row wraps. At the 900 px window the line is ~462 px wide (the session list stays
-   docked from 900 px since 55b1f3a2b); 19ch + the picker + Project permissions needed ~466 px at 1ch = 9 px. 12ch, the
-   name's own basis, keeps the row one line there with ~59 px to spare; the name still takes all free width. */
+/* The disclosure's basis decides when the row wraps. At the 900 px window the line is ~462 px wide (the session list
+   stays docked from 900 px); 19ch + the picker + Project permissions needed ~466 px at 1ch = 9 px. 12ch keeps the row
+   one line there; inside it the name takes its full width first (below). */
 .vault-entry-line > .ui-disclosure {
   flex: 1 1 12ch;
   min-width: 0;
@@ -80,6 +80,14 @@
 }
 .vault-entry-line .ui-disclosure .secrets-detail {
   flex: 0 1 16ch;
+}
+/* The name comes first: the address and user name (full text in their titles) give way before the name is cut. */
+.vault-entry-line .ui-disclosure .secrets-name {
+  flex: 1 0 auto;
+  max-width: 100%;
+}
+.vault-entry-line .ui-disclosure .secrets-detail {
+  flex-shrink: 100;
 }
 .vault-entry-line > .ui-selector {
   flex: none;

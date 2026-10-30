@@ -66,6 +66,7 @@ const NEEDS_CHANNEL: &[&str] = &[
     // Vibe answers a connector sign-in only for the session its channel holds (`_target` in
     // `connector_catalog.py`; from the lobby it is `not_found`).
     "connector_catalog/auth/request",
+    "connector_catalog/connect",
 ];
 
 /// The session `method` needs on a channel, when it is one of [`NEEDS_CHANNEL`] (a fork names its

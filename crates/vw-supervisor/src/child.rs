@@ -22,6 +22,8 @@
 //!   `PR_SET_PDEATHSIG` (a signal at the crash skips Vibe's graceful cleanup, b; it also fires when
 //!   the spawning *thread* exits) and `PR_SET_CHILD_SUBREAPER` (reaping orphans would race tokio's own
 //!   child handling). On a normal stop or restart the watchdog is killed with the handle.
+//! - The leader's and the watchdog's ids are recorded in the supervisor's `LiveIds` while they are unreaped
+//!   children, for the synchronous last-resort stop at quit (`Supervisor::kill_now`).
 //! - The same `spawn` is the path for any other long-lived helper this core starts itself. A stdio MCP
 //!   server that Vibe starts is Vibe's child and must exit on stdin EOF.
 use std::ffi::OsString;
@@ -35,6 +37,8 @@ use tokio::sync::{mpsc, watch};
 use tokio::task::JoinHandle;
 use tracing::{debug, warn};
 use vw_rpc::ExitInfo;
+
+use crate::live_ids::LiveIds;
 
 /// What to start.
 pub(crate) struct Launch {
@@ -65,24 +69,30 @@ pub(crate) struct ServerChild {
     kill_tx: mpsc::Sender<()>,
     exit_rx: watch::Receiver<Option<ExitInfo>>,
     task: JoinHandle<()>,
+    ids: LiveIds,
 }
 
 impl Drop for ServerChild {
     /// Dropping the handle without `kill_and_reap` aborts the owner task, whose `TreeGuard` then
-    /// kills the tree: the server never outlives its supervisor.
+    /// kills the tree: the server never outlives its supervisor. Reaping is then tokio's (its orphan queue), so the
+    /// leader's id leaves `LiveIds` here.
     fn drop(&mut self) {
         self.task.abort();
+        self.ids.leader_gone(self.pid);
     }
 }
 
 /// The Unix crash watchdog process (see the module doc). Holds the write end of its stdin; dropping it
-/// kills the watchdog (it must not act on a deliberate stop) and reaps it.
-struct Watchdog(std::process::Child);
+/// kills the watchdog (it must not act on a deliberate stop) and reaps it, its id cleared from `LiveIds` first.
+struct Watchdog(std::process::Child, LiveIds);
 
 impl Drop for Watchdog {
     fn drop(&mut self) {
-        let _ = self.0.kill();
-        let _ = self.0.wait();
+        let Self(child, ids) = self;
+        ids.watchdog_gone(child.id(), || {
+            let _ = child.kill();
+            let _ = child.wait();
+        });
     }
 }
 
@@ -94,7 +104,7 @@ const WATCHDOG_SCRIPT: &str =
 /// Starts the watchdog for the process group `leader` (Unix). A failure is logged, not fatal: the next
 /// start's ledger sweep still covers a crash.
 #[cfg(unix)]
-fn start_watchdog(leader: Option<u32>, grace: Option<Duration>) -> Option<Watchdog> {
+fn start_watchdog(leader: Option<u32>, grace: Option<Duration>, ids: &LiveIds) -> Option<Watchdog> {
     use std::os::unix::process::CommandExt;
     let (leader, grace) = (leader?, grace?);
     let started = std::process::Command::new("/bin/sh")
@@ -111,7 +121,10 @@ fn start_watchdog(leader: Option<u32>, grace: Option<Duration>) -> Option<Watchd
         .process_group(0)
         .spawn();
     match started {
-        Ok(child) => Some(Watchdog(child)),
+        Ok(child) => {
+            ids.set_watchdog(Some(child.id()));
+            Some(Watchdog(child, ids.clone()))
+        }
         Err(error) => {
             warn!(%error, "crash watchdog not started; the ledger sweep remains");
             None
@@ -120,7 +133,11 @@ fn start_watchdog(leader: Option<u32>, grace: Option<Duration>) -> Option<Watchd
 }
 
 #[cfg(not(unix))]
-fn start_watchdog(_leader: Option<u32>, _grace: Option<Duration>) -> Option<Watchdog> {
+fn start_watchdog(
+    _leader: Option<u32>,
+    _grace: Option<Duration>,
+    _ids: &LiveIds,
+) -> Option<Watchdog> {
     None
 }
 
@@ -134,8 +151,8 @@ impl Drop for TreeGuard {
     }
 }
 
-/// Spawns the process and its owner task.
-pub(crate) fn spawn(launch: &Launch) -> std::io::Result<(ServerChild, Pipes)> {
+/// Spawns the process and its owner task; records the leader's and the watchdog's ids in `ids`.
+pub(crate) fn spawn(launch: &Launch, ids: &LiveIds) -> std::io::Result<(ServerChild, Pipes)> {
     let mut command = CommandWrap::with_new(&launch.program, |cmd| {
         cmd.args(&launch.args)
             .env_clear()
@@ -170,10 +187,15 @@ pub(crate) fn spawn(launch: &Launch) -> std::io::Result<(ServerChild, Pipes)> {
         stderr: child.stderr().take().ok_or_else(missing)?,
     };
     let pid = child.id();
-    let watchdog = start_watchdog(pid, launch.watchdog_grace);
+    ids.set_leader(pid);
+    let watchdog = start_watchdog(pid, launch.watchdog_grace, ids);
     let (kill_tx, kill_rx) = mpsc::channel(4);
     let (exit_tx, exit_rx) = watch::channel(None);
-    let task = tokio::spawn(own(TreeGuard(child), kill_rx, exit_tx));
+    let owner = Owner {
+        pid,
+        ids: ids.clone(),
+    };
+    let task = tokio::spawn(own(TreeGuard(child), kill_rx, exit_tx, owner));
     Ok((
         ServerChild {
             pid,
@@ -181,9 +203,16 @@ pub(crate) fn spawn(launch: &Launch) -> std::io::Result<(ServerChild, Pipes)> {
             kill_tx,
             exit_rx,
             task,
+            ids: ids.clone(),
         },
         pipes,
     ))
+}
+
+/// The leader's id as the owner task clears it once the leader is reaped.
+struct Owner {
+    pid: Option<u32>,
+    ids: LiveIds,
 }
 
 /// Owner loop: wait for the leader, kill on request, then kill and reap the rest of the tree.
@@ -191,6 +220,7 @@ async fn own(
     mut guard: TreeGuard,
     mut kill_rx: mpsc::Receiver<()>,
     exit_tx: watch::Sender<Option<ExitInfo>>,
+    owner: Owner,
 ) {
     let mut kill_requests_open = true;
     let status = loop {
@@ -208,6 +238,8 @@ async fn own(
             }
         }
     };
+    // Reaped: from here on the id may be reused, so the last-resort stop must not signal it.
+    owner.ids.leader_gone(owner.pid);
     let info = match &status {
         Ok(status) => exit_info(*status),
         Err(error) => {

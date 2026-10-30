@@ -30,7 +30,12 @@ pub fn plain_note(note: &str) -> String {
         .take(2000)
         .collect()
 }
-/// The outcome sentence; permission never adds text to an allowed tool's normal result.
+/// The result of a call the user said No to on a Vibe Work card or window. The agent's turn goes on with it, so
+/// the agent explains the need and offers other routes instead of repeating the call.
+pub const DECLINED: &str = "Not run: the user declined this. Do not do it another way. Tell the user why it is needed and wait for their reply before you go on with it.";
+
+/// The outcome sentence; permission never adds text to an allowed tool's normal result. A No is always
+/// [`DECLINED`], with no note or subject appended.
 #[must_use]
 pub fn agent_text(outcome: &Outcome, what: &str) -> String {
     match outcome {
@@ -38,14 +43,7 @@ pub fn agent_text(outcome: &Outcome, what: &str) -> String {
             format!("Vibe did not confirm the answer to {what}. The agent may still be waiting.")
         }
         Outcome::Allowed { .. } => String::new(),
-        Outcome::Refused { note, .. } => {
-            let mut text = format!("Not done: the user said No to {what}.");
-            if let Some(note) = note.as_deref().filter(|n| !n.trim().is_empty()) {
-                text.push_str(" The user's note: ");
-                text.push_str(&plain_note(note));
-            }
-            text
-        }
+        Outcome::Refused { .. } => DECLINED.to_owned(),
         Outcome::Cancelled { reason } => format!("Not done: {reason} before the user answered."),
         Outcome::Never => {
             format!("Not done: the user set {what} to Never in Vibe Work Settings.")

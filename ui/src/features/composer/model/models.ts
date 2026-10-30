@@ -10,6 +10,12 @@
  */
 import type { JsonValue } from "../../../protocol/core";
 import { offeredReasoning } from "../../../state/defaultReasoning";
+import {
+  alwaysThinks,
+  effectiveLevel,
+  listedRows,
+  offeredLevels,
+} from "../../../state/thinkingLevels";
 import { modelTerm, TEXT, vocabulary } from "../../../vocabulary";
 import { type Obj, obj } from "../../transcript/model/entries";
 import { contextWindowLabel } from "./contextWindow";
@@ -21,8 +27,10 @@ export const THINKING_LEVELS = Object.keys(vocabulary.thinkingLevels);
 export interface ModelChoice {
   alias: string;
   label: string;
-  /** Levels this model accepts (all when Vibe does not say). */
+  /** Levels this model accepts (all when Vibe does not say; High only for a model that always thinks). */
   thinkingLevels: readonly string[];
+  /** The model always thinks (Large 4): any set level shows as High (`state/thinkingLevels`). */
+  alwaysThinks?: true;
   supportsImages: boolean;
   /** One full-window label, from Mistral's model card or the custom model's configured count. */
   contextLabel: string;
@@ -46,12 +54,17 @@ function choiceOf(value: JsonValue): ModelChoice | null {
   if (m === null || typeof alias !== "string" || alias === "") return null;
   const display = m["displayName"];
   const levels = m["thinkingLevels"];
+  const always = alwaysThinks(m);
   return {
     alias,
     label: modelTerm(alias, display).name,
-    thinkingLevels: Array.isArray(levels)
-      ? levels.filter((l): l is string => typeof l === "string")
-      : THINKING_LEVELS,
+    thinkingLevels: offeredLevels(
+      always,
+      Array.isArray(levels)
+        ? levels.filter((l): l is string => typeof l === "string")
+        : THINKING_LEVELS,
+    ),
+    ...(always ? { alwaysThinks: true as const } : {}),
     supportsImages: m["supportsImages"] === true,
     contextLabel: contextWindowLabel(m),
     ...(typeof m["provider"] === "string" ? { provider: m["provider"] } : {}),
@@ -59,14 +72,16 @@ function choiceOf(value: JsonValue): ModelChoice | null {
   };
 }
 
-/** The configured models, in Vibe's order. */
+/** The configured models, in Vibe's order (Mistral's own Large 4 left out beside ours, `state/thinkingLevels`). */
 export function modelChoices(source: JsonValue | undefined): ModelChoice[] {
   const config = configView(source);
   const models = config?.["models"];
   if (!Array.isArray(models)) return [];
   const active = obj(config?.["activeModel"]);
+  const listed = listedRows(models.map(obj));
   return models.flatMap((m) => {
     const row = obj(m);
+    if (!listed(row)) return [];
     const choice = choiceOf(
       active !== null && row?.["alias"] === active["alias"] ? { ...row, ...active } : m,
     );
@@ -147,15 +162,30 @@ export function newChatPick(
   };
 }
 
-/** A saved new-chat preference admitted by the resolved model's reported levels, else no override. */
+/**
+ * A saved new-chat preference admitted by the resolved model's reported levels, else no override. For a model
+ * that always thinks (Large 4) a saved level is High, its only level.
+ */
 export function configuredReasoning(
   config: JsonValue | undefined,
   alias: string | null,
   level: string | null,
 ): string | null {
   const models = configView(config)?.["models"];
-  const model = Array.isArray(models) ? models.find((m) => obj(m)?.["alias"] === alias) : undefined;
-  return offeredReasoning(level, obj(model)?.["thinkingLevels"]);
+  const model = obj(
+    Array.isArray(models) ? models.find((m) => obj(m)?.["alias"] === alias) : undefined,
+  );
+  const always = alwaysThinks(model);
+  const levels = model?.["thinkingLevels"];
+  return offeredReasoning(
+    effectiveLevel(always, level),
+    Array.isArray(levels)
+      ? offeredLevels(
+          always,
+          levels.filter((l): l is string => typeof l === "string"),
+        )
+      : levels,
+  );
 }
 
 /** The saved model pin to apply before a first turn; unpinned defaults stay unpinned. */

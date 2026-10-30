@@ -175,6 +175,8 @@ pub fn plan(inputs: ProductInputs, settings: &HostSettings, core: &mut CoreConfi
         Some(dir) => format!("sessions shared with the Vibe CLI: {}", dir.display()),
         None => "sessions kept separate from the Vibe CLI".to_owned(),
     });
+    // The listing names the chat `vibe --continue` resumes only when the CLI holds it (shared folder).
+    core.cli_session_dir.clone_from(&cli_session_dir);
     let installed = inputs.vibe.server();
     notes.push(match &installed {
         Some(server) => format!("Vibe: {}", server.display()),

@@ -2,6 +2,49 @@
 
 All notable changes to Vibe Work. Versions follow [Semantic Versioning](https://semver.org/); dates are UTC.
 
+## 0.1.3 (2026-10-30)
+
+Built for Vibe 3.0.3 on Python 3.14.8. This release adds @-mentions, edit previews with line numbers and connectors that need no sign-in.
+
+- @-mentions: type @ in the message box to mention a file or another session in the same folder. Files are found by
+  fuzzy name match; a session adds a chip with its title, first message and last answer.
+- Edit previews: edit and write cards show the change with old and new line numbers and its +/− counts, as the file
+  was when the card opened. A shortened preview says what it left out; Show the whole change shows all of it.
+  Previews cover files inside the chat's folders.
+- Large 4 offers Low, Medium and High thinking, and each runs as picked.
+- When your default model is no longer offered, Vibe Work asks at launch: choose one of the models Vibe offers, or
+  Later.
+- Settings > Models and agent > Compaction point: choose for each model when a chat's history is compacted, or keep
+  Default.
+- Tools > Connectors: a connector that needs no sign-in shows Connect. One click connects it, and the next message
+  can use its tools.
+- Tools > Skills shows when each skill you added last changed. The built-in help skill is named Vibe Work help.
+- Vibe's configuration problems appear in the bell, one line each, with the file or folder first where there is one.
+  Each stays until you dismiss it; a dismissed one does not come back.
+- GLM 5.3 Flash shows its 1M-token context.
+- App preview: pages you signed in to before the first message stay signed in after you send it.
+- Saying No in one of Vibe Work’s own prompts (Git guard, processes, vault, documents, protected folders, cards for
+  Vibe Work’s tools) answers only that call and the turn goes on; the agent is told not to do it another way and to
+  wait for your reply. A No on a card for Vibe’s own tools (commands, file edits) still stops the turn and the
+  subagents it started.
+- macOS: Quit always finishes, also right after a reply.
+- Chat titles no longer show a vault value once the vault has been unlocked in this run: the matching part reads
+  [secret withheld] in the list, the header, the bell and the Debug API.
+- Point Vibe at this: an element picked in the App preview is marked as the page's words, and the chip names the
+  address the preview loaded, or none when the page changed during the pick.
+- Attached documents: the text read from them counts toward the 200 MB limit, and a PowerPoint deck that lists the
+  same slide twice is refused.
+- In a chat started in a subfolder, files are named from that subfolder and links in Vibe's replies open the file
+  there first. Files elsewhere in the project show their full path.
+- A chat waiting on one of Vibe Work's own prompts (Git guard, vault, document card) shows Needs input and is listed
+  under Needs you.
+- Secret-scan entries leave the bell once their finding is gone, for example after the chat is deleted.
+- Continues in CLI appears only on the chat that `vibe --continue` in a terminal resumes.
+- Action cards without a summary name the action, such as Read an open editor, and show no empty input.
+- Settings > Notifications and the New chat copy section show no explaining lines.
+- Layout at 900 px: the chat title stays readable with the chat list open, header tabs show only their icons when
+  the chat area is narrow, and vault names show in full.
+
 ## 0.1.2 (2026-10-29)
 
 Built for Vibe 3.0.3 on Python 3.14.8. This release adds files and history, editors side by side and clearer permissions.

@@ -24,15 +24,9 @@ export interface EditorSearch {
   wholeWord?: boolean;
 }
 
-export const SEARCH_COMMANDS = [
-  "next",
-  "previous",
-  "selectAll",
-  "replaceNext",
-  "replaceAll",
-  "close",
-] as const;
-export type SearchCommand = (typeof SEARCH_COMMANDS)[number];
+import type { SearchCommand } from "./searchCommands";
+
+export { SEARCH_COMMANDS, type SearchCommand } from "./searchCommands";
 
 /** Uses CodeMirror transactions and commands, including the same query options as its built-in search panel. */
 export function editorActions(editor: EditorView) {

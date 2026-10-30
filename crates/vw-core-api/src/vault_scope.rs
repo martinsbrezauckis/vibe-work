@@ -198,10 +198,12 @@ fn connectors_act(request: &ConnectorsRequest) -> Option<&'static str> {
         ConnectorsRequest::AllowServerKey { .. } => Some("connectors.allowServerKey"),
         // A key server's removal drops its vault binding; other servers are (`UserOnlyForKeyServer`).
         ConnectorsRequest::RemoveServer { .. } => Some("connectors.removeServer"),
-        // No vault: Vibe's catalog, OAuth sign-ins (tokens in Vibe's own keyring), plain servers, on/off.
+        // No vault: Vibe's catalog, OAuth sign-ins (tokens in Vibe's own keyring), connects without a secret,
+        // plain servers, on/off.
         ConnectorsRequest::Read { .. }
         | ConnectorsRequest::Refresh { .. }
         | ConnectorsRequest::SignIn { .. }
+        | ConnectorsRequest::Connect { .. }
         | ConnectorsRequest::SetConnectorOff { .. }
         | ConnectorsRequest::AddServer { .. }
         | ConnectorsRequest::SignInServer { .. }

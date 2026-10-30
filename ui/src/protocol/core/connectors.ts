@@ -22,6 +22,14 @@ sessionId: string,
 /**
  * The connector.
  */
+alias: string, } | { "op": "connect", 
+/**
+ * The session to ask through.
+ */
+sessionId: string, 
+/**
+ * The connector.
+ */
 alias: string, } | { "op": "setConnectorOff", 
 /**
  * The connector.

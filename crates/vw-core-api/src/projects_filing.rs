@@ -254,12 +254,16 @@ pub(crate) async fn sweep(shared: &Shared) -> Result<(), CoreError> {
         .await
         .map_err(|_| CoreError::new(ErrorCode::Timeout, "the session list did not answer"))?
         .map_err(|e| CoreError::from_gate("session/list", &e))?;
-        let items = reply
+        let mut items = reply
             .result
             .get("items")
             .and_then(Value::as_array)
             .cloned()
             .unwrap_or_default();
+        // The name cache keeps titles with vault-value parts withheld (`title_guard`).
+        for item in &mut items {
+            crate::title_guard::withhold_in(shared, item);
+        }
         shared.names.note_listing(&items);
         listed.extend(items.iter().filter_map(|i| seen_of(shared, i)));
         cursor = reply

@@ -10,6 +10,9 @@ import type { CoreEvent } from "../protocol/core";
 import { askWords, securityGuard, securityLine } from "./askBell";
 import type { CoreState } from "./coreModel";
 
+/** The start of the tool result the core returns for a call the user said No to. */
+const USER_DECLINED = /^Not run: the user declined this\./;
+
 /** Severity of a toast (drives its marker colour and whether it stays until dismissed). */
 type ToastKind = "info" | "warn" | "error";
 
@@ -116,9 +119,10 @@ export function notificationFor(event: CoreEvent, core?: CoreState): ToastSpec |
         bellKind: "security",
         sessionId: event.sessionId,
         guardRefusal: { ...event, title },
-        preserveSecurityText: /^Not done: the user said No\b/.test(event.what),
-        text: /^Not done: the user said No\b/.test(event.what)
-          ? `No was recorded in “${title}”: ${event.what.replace(/[.]+$/, "")}.`
+        preserveSecurityText: USER_DECLINED.test(event.what),
+        // The declined result is written for the agent; the person only needs to know their No was kept.
+        text: USER_DECLINED.test(event.what)
+          ? `No was recorded in “${title}”.`
           : `${event.what.replace(/[.]+$/, "")}${event.what.endsWith("…") ? "" : "."} In “${title}”.`,
       };
     }

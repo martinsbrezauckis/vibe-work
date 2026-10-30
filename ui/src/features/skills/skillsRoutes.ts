@@ -3,7 +3,8 @@
  * the route name (`crates/vw-host/src/host.rs` SHELL_ROUTES). Every action calls the same function a click calls,
  * through the Debug API's action set (`app.skills.debugApi`), so every core call carries the Debug API origin:
  * - `state` (default): whether the tab shows, loading, the list error, note, search, each row as drawn (name,
- *   group, version, latest, update, skillId, enabled, locked, expanded, its error) and the install offers
+ *   group, version, latest, update, skillId, enabled, locked, expanded, its error, when its skill file last
+ *   changed as `modifiedAt` in milliseconds since the epoch or null) and the install offers
  *   (`offers`: each open offer's phase, id, heading, fact lines, confirm words, notice and its kind changed/ranOut;
  *   read failures; the focus request);
  * - `open` (shows the Skills tab), `reload`, `search {text}`, `disclose {name}`;
@@ -56,6 +57,7 @@ function state(app: App): unknown {
       locked: r.locked,
       expanded: s.expanded.includes(r.name),
       error: s.errors[r.name] ?? null,
+      modifiedAt: r.modifiedAt,
     })),
     offers: offersReport(skills.offers.get()),
   };

@@ -294,7 +294,7 @@ export const SETTINGS_INDEX: readonly SettingEntry[] = [
     category: "models",
     label: TEXT.defaultModel,
     description: TEXT.defaultModelDescription,
-    keywords: "model medium devstral magistral reasoning",
+    keywords: "model large medium devstral magistral glm deepseek flash reasoning",
   },
   {
     id: "default-thinking",
@@ -354,6 +354,13 @@ export const SETTINGS_INDEX: readonly SettingEntry[] = [
     label: "A silent answer counts as stalled after",
     description: "How long Vibe waits in a silent answer before it retries.",
     keywords: "timeout stall stream idle network retry",
+  },
+  {
+    id: "compaction-point",
+    category: "models",
+    label: TEXT.compactionPoint,
+    description: TEXT.compactionPointDescription,
+    keywords: "compaction compact context threshold tokens history summary window",
   },
   {
     id: "image-generation",

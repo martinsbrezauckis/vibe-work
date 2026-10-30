@@ -1,10 +1,15 @@
 //! Fits Vibe's thinking level to what the Mistral reasoning models take. They do not take the same levels and
-//! the set changes on the live API (Large 4 refuses `none` but takes low and medium; Medium and Small take only
-//! `none` and `high`). A request without the field is taken by all of them and is Off on Medium and Small, as
-//! Vibe's own adapter sends Off (`vibe/adapters/mistral.py:80-85,135-138`). So Off, `none` and low go out without
-//! the field, and medium, max and xhigh as `high`; a level kept in an older config never fails a turn.
+//! the set changes on the live API (Large 4 refuses `none` but takes low, medium and high; Medium and Small take
+//! only `none` and `high`). A request without the field is taken by all of them and is Off on Medium and Small, as
+//! Vibe's own adapter sends Off (`vibe/adapters/mistral.py:80-85,135-138`). So Off and `none` go out without the
+//! field everywhere; Large 4 gets low, medium and high as picked (Mistral's own Large 4 entry offers those three),
+//! Medium and Small get low without the field and medium as `high`; max and xhigh go out as `high`. A level kept in
+//! an older config never fails a turn.
 //! Called on chat JSON by `compaction::prepare`; other explicit values pass unchanged. Unknown models and hosted
-//! GLM are left alone: picker levels alone do not prove what they take.
+//! GLM are left alone: picker levels alone do not prove what they take. That includes the new Flash models
+//! `deepseek-v4-1-flash-1017` and `zai-glm-5-3-flash`: Mistral's model list marks both as reasoning
+//! models but neither the list nor Mistral's reasoning page names the levels they take, so the level Vibe sends goes
+//! out as it is.
 //! Mistral capability reference: <https://docs.mistral.ai/studio/conversations/reasoning>
 use serde_json::{Value, json};
 
@@ -12,15 +17,15 @@ pub(crate) fn fit(request: &mut Value) -> bool {
     let Some(model) = request.get("model").and_then(Value::as_str) else {
         return false;
     };
-    let supported = matches!(
-        model,
-        "mistral-large-4"
-            | "mistral-large-4-0"
-            | "mistral-small-latest"
-            | "mistral-small-2603"
-            | "mistral-medium-latest"
-            | "mistral-medium-3-5"
-    );
+    let large_4 = matches!(model, "mistral-large-4" | "mistral-large-4-0");
+    let supported = large_4
+        || matches!(
+            model,
+            "mistral-small-latest"
+                | "mistral-small-2603"
+                | "mistral-medium-latest"
+                | "mistral-medium-3-5"
+        );
     if !supported {
         return false;
     }
@@ -28,6 +33,7 @@ pub(crate) fn fit(request: &mut Value) -> bool {
         None => return false,
         Some(Value::Null) => None,
         Some(level) => match level.as_str() {
+            Some("low" | "medium" | "high") if large_4 => return false,
             Some("none" | "low") => None,
             Some("medium" | "max" | "xhigh") => Some("high"),
             _ => return false,
@@ -68,7 +74,7 @@ mod tests {
         }
     }
 
-    /// A level some of these models refuse goes out as one all of them take (checked on the live API).
+    /// A level some of these models refuse goes out as one they take (checked on the live API).
     #[test]
     fn a_level_these_models_refuse_is_sent_as_the_nearest_one_they_take() {
         for (level, sent) in [
@@ -77,11 +83,7 @@ mod tests {
             ("max", Some("high")),
             ("xhigh", Some("high")),
         ] {
-            for model in [
-                "mistral-large-4",
-                "mistral-medium-3-5",
-                "mistral-small-latest",
-            ] {
+            for model in ["mistral-medium-3-5", "mistral-small-latest"] {
                 let mut body = json!({"model":model,"reasoning_effort":level});
                 assert!(fit(&mut body), "{model} {level}");
                 assert_eq!(
@@ -102,6 +104,9 @@ mod tests {
             json!({"model":"mistral-large-4","reasoning_effort":"high"}),
             json!({"model":"mistral-large-4"}),
             json!({"model":"zai-glm-5-3"}),
+            json!({"model":"zai-glm-5-3-flash","reasoning_effort":"low"}),
+            json!({"model":"deepseek-v4-1-flash-1017","reasoning_effort":"medium"}),
+            json!({"model":"deepseek-v4-1-flash-1017","reasoning_effort":null}),
             json!({"model":"mistral-large-4-0-3"}),
             json!({"model":"mistral-vibe-cli-latest"}),
             json!({"model":"custom"}),

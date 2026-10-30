@@ -85,6 +85,7 @@ fn fixture() -> Fixture {
 fn window(fx: &Fixture) -> Scope {
     Scope {
         session: fx.session.clone(),
+        cwd: None,
         picked: vec![fx.picked.clone()],
         home: Some(fx.session.join("home")),
         hidden: true,
@@ -319,4 +320,41 @@ fn the_file_scheme_is_recognised_in_any_letter_case() {
     for url in ["file://server/share/x.txt", "file://сервер/ā.txt"] {
         assert!(resolve_in(&scope, url, &RealFs).is_none(), "{url}");
     }
+}
+
+/// The folder the agent works in names a relative path first, then the session folder, and grants nothing: a
+/// working folder outside the session folder (or a relative path that leaves it) opens nothing more than before.
+#[test]
+fn a_working_folder_is_tried_first_and_widens_nothing() {
+    let fx = fixture();
+    let sub = fx.session.join("web");
+    write(&sub.join("src/main.rs"), "fn web() {}\n");
+    let working = Scope {
+        cwd: Some(sub.clone()),
+        ..window(&fx)
+    };
+    let own = resolve_in(&working, "src/main.rs", &RealFs).unwrap();
+    assert_eq!(
+        vw_platform::plain_path(&own.canonical),
+        sub.join("src/main.rs")
+    );
+    let main = resolve_in(&working, "My Docs/report.md", &RealFs).unwrap();
+    assert_eq!(
+        vw_platform::plain_path(&main.canonical),
+        fx.session.join("My Docs/report.md")
+    );
+    assert!(resolve_in(&working, "../../outside.txt", &RealFs).is_none());
+    // A working folder outside every allowed folder: its files stay refused, without being touched.
+    let elsewhere = Scope {
+        cwd: Some(fx.outside.parent().unwrap().to_path_buf()),
+        ..window(&fx)
+    };
+    let counting = Counting::default();
+    assert!(resolve_in(&elsewhere, "outside.txt", &counting).is_none());
+    // Only the session folder and its own `outside.txt` (the second candidate, as before) are touched.
+    assert!(
+        !counting.calls.borrow().contains(&fx.outside),
+        "{:?}",
+        counting.calls.borrow()
+    );
 }

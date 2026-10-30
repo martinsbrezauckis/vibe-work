@@ -12,6 +12,7 @@ import { computeLayout } from "../../state/panelLayout";
 import { TAB_KINDS, type TabKind, panelOf } from "../../state/shellState";
 import { filterCommands } from "../../state/commands";
 import { UiControlError } from "../../state/uiControl";
+import { waitingSessions } from "../ask/waiting";
 import type { App } from "./AppContext";
 import { awayFromHome, goHome, homeTarget } from "./home";
 import { openNewChat } from "./newChat";
@@ -141,9 +142,10 @@ export function registerShellRoutes(app: App): () => void {
       () => {
         const s = shell.store.get();
         const stuck = core?.store.get().stuck ?? {};
+        const waiting = core === null ? new Set<string>() : waitingSessions(core.store.get());
         const sessions = Object.values(core?.store.get().sessions ?? {}).map((entry) => ({
-          ...summarize(entry, stuck),
-          badge: badgeOf(entry, stuck),
+          ...summarize(entry, stuck, waiting),
+          badge: badgeOf(entry, stuck, waiting),
         }));
         return {
           theme: s.theme,

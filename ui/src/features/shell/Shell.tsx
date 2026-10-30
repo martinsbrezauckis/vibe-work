@@ -32,6 +32,7 @@ import { LinkDialog } from "../transcript/LinkDialog";
 import { EndDialog } from "../worktrees/EndDialog";
 import { UpdateNotice } from "../updates/UpdateNotice";
 import { VibeUpdateDialog } from "../updates/VibeUpdate";
+import { DefaultModelDialog } from "../setup/DefaultModelDialog";
 import { useLayout, useShellState } from "./hooks";
 import { useShellWiring } from "./useShellWiring";
 
@@ -99,6 +100,7 @@ export function Shell() {
       <LinkDialog />
       <EndDialog />
       <VibeUpdateDialog />
+      <DefaultModelDialog />
     </PathHome.Provider>
   );
 }

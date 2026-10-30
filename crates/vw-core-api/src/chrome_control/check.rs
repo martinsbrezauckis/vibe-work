@@ -289,7 +289,6 @@ async fn ask(
             }
             allow()
         }
-        Outcome::Refused { note, .. } => deny(&text::said_no(&summary, note.as_deref())),
         other => deny(&vw_ask::agent_text(&other, "this Chrome action")),
     }
 }
@@ -320,7 +319,7 @@ pub(super) fn publish(shared: &Shared, view: ChromeAskView) {
 ///
 /// # Errors
 /// The card is closed already, or the answer is not offered.
-pub(crate) async fn answer(
+pub(crate) fn answer(
     shared: &Arc<Shared>,
     ask_id: &str,
     choice: Choice,
@@ -345,11 +344,7 @@ pub(crate) async fn answer(
         .asks
         .reserve(ask_id, by)
         .ok_or_else(|| invalid("Already answered."))?;
-    if choice == Choice::No
-        && let Some(session) = ask.session
-    {
-        crate::ask::stop_after_no(shared, &session).await?;
-    }
+    // A No answers the held Chrome call with the declined result; the turn goes on.
     delivery.confirmed(outcome);
     Ok(())
 }

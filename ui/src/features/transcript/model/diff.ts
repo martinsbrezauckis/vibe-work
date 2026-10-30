@@ -23,6 +23,8 @@ export interface DiffLine {
   oldNo: number | null;
   newNo: number | null;
   text: string;
+  /** Characters a bounded preview cut from the end of this line (the core's edit preview only). */
+  cut?: number;
 }
 
 /** A diff for one file. */

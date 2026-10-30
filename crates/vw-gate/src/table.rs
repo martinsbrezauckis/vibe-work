@@ -177,9 +177,7 @@ static TABLE: &[Row] = &[
     deny!("session/turn/queue/edit/save", NoUserInterface),
     deny!("session/turn/queue/edit/cancel", NoUserInterface),
     deny!("session/turn/queue/edit/abandon", NoUserInterface),
-    // New in Vibe 3.0.1/3.0.2 (experimental upstream); no Vibe Work screen uses them in 0.1.2.
-    // `connector_catalog/connect` makes a no-login connector usable on the user's Mistral account.
-    deny!("connector_catalog/connect", NoUserInterface),
+    // New in Vibe 3.0.1/3.0.2 (experimental upstream); no Vibe Work screen uses the subagent reads.
     fwd!("session/subagents/interrupt", SessionSubagentsInterrupt),
     deny!("session/subagents/read", NoUserInterface),
     deny!("session/subagents/wait", NoUserInterface),
@@ -213,6 +211,9 @@ static TABLE: &[Row] = &[
         "connector_catalog/auth/request",
         ConnectorCatalogAuthRequest
     ),
+    // Connect of a connector that needs no sign-in: makes the user's own default connection on their Mistral
+    // account (no secret in it; the key proxy checks the body). The Tools board's Connect is the window's click.
+    p2!("connector_catalog/connect", ConnectorCatalogConnect),
     fwd!("connector_catalog/read", ConnectorCatalogRead),
     fwd!("connector_catalog/refresh", ConnectorCatalogRefresh),
     p1!("connector_catalog/toggle", ConnectorToggle),

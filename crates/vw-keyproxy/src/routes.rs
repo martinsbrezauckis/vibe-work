@@ -75,6 +75,9 @@ pub const ALLOWLIST: &[RouteSpec] = &[
     api("GET", "/v1/connectors/bootstrap"),
     api("GET", "/v1/connectors"),
     api("GET", "/v1/connectors/{}/auth_url"),
+    // Connect of a connector that needs no sign-in (Vibe 3.0.3 `connector_catalog/connect`): the user-scope
+    // credential write only, and only with an empty header set (`credentials.rs` checks the body).
+    api("PATCH", "/v1/connectors/{}/user/credentials"),
     api("GET", "/v1/connectors-gateway/{}/mcp"),
     api("POST", "/v1/connectors-gateway/{}/mcp"),
     api("DELETE", "/v1/connectors-gateway/{}/mcp"),

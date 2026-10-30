@@ -246,19 +246,14 @@ fn record_card_outcome(shared: &crate::core::Shared, card: &ChromeAskView) {
         return;
     }
     let session_permission = card.tool == "mcp_vw.use_your_chrome";
-    let text = match &record.outcome {
-        vw_ask::Outcome::Refused { note, .. } if !session_permission => {
-            text::said_no(&card.summary, note.as_deref())
-        }
-        outcome => vw_ask::agent_text(
-            outcome,
-            if session_permission {
-                "using your Chrome in this chat"
-            } else {
-                "this Chrome action"
-            },
-        ),
-    };
+    let text = vw_ask::agent_text(
+        &record.outcome,
+        if session_permission {
+            "using your Chrome in this chat"
+        } else {
+            "this Chrome action"
+        },
+    );
     shared.chrome_control.remember_outcome(
         Some(&card.ask_id),
         &card.session_id,

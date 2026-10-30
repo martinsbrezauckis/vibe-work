@@ -45,10 +45,12 @@ the local key proxy and vault handling, the installers and the update flow.
   and behavior. Vibe Work adds no operating-system sandbox in this version. The ordinary agent command environment
   strips inherited Git and forge sign-in channels; the command guard refuses push, GitHub writes and Git/gh
   credential commands. Common branch rewrites outside the session's own worktree branch need a separate
-  confirmation. These guardrails do not isolate other same-user credentials or interpret every shell expression.
+  confirmation. These guardrails do not isolate other same-user credentials or interpret every shell expression: a No
+  in a Vibe Work prompt refuses that call, the turn goes on, and the same action written another way (an
+  interpreter one-liner, for example) is not held.
 - The core process holds the Mistral key in memory. On Linux core dumps are off and other processes of the same user
   cannot attach a debugger to it or read its memory; on macOS only core dumps are turned off, and on Windows other
   processes of the same user can read its memory.
 - Browser web tabs are separate from the pinned App preview. The agent lists only its session's web tabs; closing a
-  tab you opened asks you to Close or Keep unless you enable Close tabs you opened in Settings › Browser. The agent
+  tab you opened asks you to Close or Keep unless you enable Close tabs you opened in Settings > Browser. The agent
   cannot change that permission or close App preview or another session's tab.

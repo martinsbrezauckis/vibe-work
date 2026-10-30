@@ -1,9 +1,26 @@
-/** File names above the message box. Depends on core hits and slash menu classes; called by Composer. */
+/**
+ * The @ menu above the message box: file names (name and muted folder), then the folder's other sessions (title and
+ * the muted word Session). Depends on the mention rows, the vocabulary and the slash menu classes; called by Composer.
+ */
 import { useEffect, useRef, type ReactElement } from "react";
-import type { FileHit } from "../../protocol/core";
-import { mentionName } from "./model/mentions";
+import { TEXT, vocabulary } from "../../vocabulary";
+import { type MentionRow, mentionName } from "./model/mentions";
 
-/** Renders the existing menu styles and the approved searching, empty, folder and error rows. */
+function rowText(row: MentionRow): { id: string; name: string; muted: string } {
+  if (row.kind === "session")
+    return {
+      id: row.session.id,
+      name: row.session.title,
+      muted: vocabulary.workNames.session.name,
+    };
+  const { name, folder } = mentionName(row.hit.path);
+  return { id: row.hit.path, name, muted: folder };
+}
+
+/**
+ * Renders the existing menu styles and the approved searching, empty, folder and error rows. Session rows show as
+ * soon as they match; file rows follow the core's answer.
+ */
 export function FileMentionMenu({
   rows,
   index,
@@ -14,13 +31,13 @@ export function FileMentionMenu({
   onPick,
   onHover,
 }: {
-  rows: readonly FileHit[];
+  rows: readonly MentionRow[];
   index: number;
   query: string;
   project: string | null;
   loading: boolean;
   error: string | null;
-  onPick: (hit: FileHit) => void;
+  onPick: (row: MentionRow) => void;
   onHover: (index: number) => void;
 }): ReactElement {
   const selected = useRef<HTMLDivElement>(null);
@@ -32,17 +49,17 @@ export function FileMentionMenu({
   const note =
     project === null
       ? "Choose a folder first to mention its files."
-      : loading
-        ? "Searching…"
-        : rows.length === 0
-          ? `No file names match "${query}".`
-          : null;
+      : rows.length > 0
+        ? null
+        : loading
+          ? "Searching…"
+          : `No file names match "${query}".`;
   return (
     <div
       data-testid="composer.file-mention-menu"
       className="slash"
       role="listbox"
-      aria-label="Files"
+      aria-label={TEXT.mentionMenu}
     >
       {error !== null ? (
         <div className="key-problem" role="alert">
@@ -54,30 +71,34 @@ export function FileMentionMenu({
         </div>
       ) : (
         <div className="slash-list">
-          {rows.map((hit, i) => {
-            const { name, folder } = mentionName(hit.path);
+          {rows.map((row, i) => {
+            const { id, name, muted } = rowText(row);
             return (
               <div
-                key={hit.path}
-                data-testid="composer.file-mention-option"
-                data-item-id={hit.path}
+                key={`${row.kind}:${id}`}
+                data-testid={
+                  row.kind === "file"
+                    ? "composer.file-mention-option"
+                    : "composer.session-mention-option"
+                }
+                data-item-id={id}
                 className="it"
                 role="option"
                 aria-selected={i === index}
-                aria-label={`${name} ${folder}`.trim()}
+                aria-label={`${name} ${muted}`.trim()}
                 ref={i === index ? selected : undefined}
                 onMouseDown={(event) => {
                   event.preventDefault();
                 }}
                 onClick={() => {
-                  onPick(hit);
+                  onPick(row);
                 }}
                 onMouseMove={() => {
                   if (i !== index) onHover(i);
                 }}
               >
                 <b>{name}</b>
-                <span className="ui-help">{folder}</span>
+                <span className="ui-help">{muted}</span>
               </div>
             );
           })}

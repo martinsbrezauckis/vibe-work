@@ -85,6 +85,7 @@ mod dispatch_compaction;
 mod document_save;
 mod documents;
 mod documents_view;
+pub mod edit_preview;
 mod entry_permissions;
 mod entry_projects;
 mod error;
@@ -121,7 +122,9 @@ mod git_publish;
 mod git_settings;
 mod git_view;
 mod guard_refusals;
+mod model_check;
 mod model_choices;
+mod model_facts;
 mod saved_documents;
 mod turn_start;
 pub use guard_refusals::GuardKind;
@@ -219,6 +222,7 @@ mod safety_view;
 mod save_file;
 mod search;
 mod search_files;
+mod search_fuzzy;
 mod search_html;
 mod search_index;
 mod search_text;
@@ -240,6 +244,7 @@ mod secrets_view;
 mod session_delete;
 mod session_delete_files;
 mod session_end;
+mod session_excerpt;
 mod session_export;
 mod session_folders;
 mod session_holder;
@@ -252,7 +257,9 @@ mod session_readonly;
 mod session_tools;
 mod session_tools_view;
 mod sessions;
+mod skill_times;
 mod skills;
+mod skills_rows;
 mod skills_view;
 mod speech;
 mod speech_view;
@@ -265,6 +272,7 @@ mod temporary;
 mod terminal_procmon;
 mod terminal_view;
 mod terminals;
+mod title_guard;
 mod tools_list;
 mod transport;
 mod vault_scope;
@@ -366,7 +374,9 @@ pub use secrets_view::{
     EntryPermissionView, FillGrantView, LoginPassword, LoginView, PasswordOptions,
     ProjectSecretView, SecretUseView, SecretsRequest, SecretsResult, ServerGrantView,
 };
-pub use session_tools_view::{SessionExportView, SessionToolsRequest, SessionToolsResult};
+pub use session_tools_view::{
+    SessionExcerptView, SessionExportView, SessionToolsRequest, SessionToolsResult,
+};
 pub use skills_view::{
     SkillDetail, SkillIssue, SkillRow, SkillsAction, SkillsRequest, SkillsResult, SkillsView,
 };

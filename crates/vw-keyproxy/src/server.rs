@@ -1,5 +1,4 @@
-//! The loopback server: token check, allowlist, key wait, forwarding with the real key, streamed
-//! answers.
+//! The loopback server: token check, allowlist, key wait, forwarding with the real key, streamed answers.
 //!
 //! Request order (each step refuses before anything leaves the machine):
 //! 1. `Authorization: Bearer <token>` must be the current token → else 401 (`vibe_work_proxy_token`);
@@ -10,11 +9,11 @@
 //!    (held, it outlasted Vibe's 30 s chat start);
 //! 4. the request goes upstream with hop-by-hop headers, `Host`, `Cookie` and `Authorization`
 //!    removed, `Authorization: Bearer <key>` (marked sensitive) added, the body streamed;
-//! 5. the answer's five `x-ratelimit-*` headers (exact names, numbers only, nothing else) are
-//!    handed to `ProxyConfig::on_rate_limits` (at most once per second, newest wins: `limits`); then the answer is streamed back (the connector catalog gains missing
-//!    tool descriptions); redirects are never
-//!    followed (a 3xx goes back unchanged, so the key only goes to the host the proxy chose); an
-//!    upstream that cannot be reached gives 502 (`vibe_work_upstream_unreachable`).
+//! 5. the answer's five `x-ratelimit-*` headers (exact names, numbers only, nothing else) are handed to
+//!    `ProxyConfig::on_rate_limits` (at most once per second, newest wins: `limits`); then the answer is streamed back
+//!    (the connector catalog gains missing tool descriptions); redirects are never followed (a 3xx goes back
+//!    unchanged, so the key only goes to the host the proxy chose); an unreachable upstream gives 502
+//!    (`vibe_work_upstream_unreachable`).
 //!
 //! Compaction calls omit image payloads and have a 60 s end-to-end deadline. Other
 //! calls bringing a new attachment have a 120 s deadline up to headers, then a 120 s idle limit.
@@ -23,12 +22,14 @@
 //! a read error on timeout.
 //!
 //! between steps 2 and 3, a `POST` to the connector gateway is read (at most `connectors::MAX_BODY`) and
-//! judged (`connectors.rs`): a forge-writing `tools/call` is answered here and never forwarded. A successful connector
-//! catalog answer is read (at most `connectors::MAX_CATALOG`) to learn the aliases and fill missing tool descriptions.
+//! judged (`connectors.rs`): a forge-writing `tools/call` is answered here and never forwarded. A credential write
+//! passes only as a connection without any secret (`credentials.rs`), else 400. A successful connector catalog answer
+//! is read (at most `connectors::MAX_CATALOG`) to learn the aliases and the connectable ids, and fill missing tool
+//! descriptions.
 //!
 //! Requests under `/vw-mcp/` skip steps 2-5: `mcp.rs` forwards them to an MCP server with its key.
 //!
-//! Depends on: axum, reqwest (vw-mistral's client), `key`, `routes`, `token`, `mcp`. Called by: vw-keys.
+//! Depends on: axum, reqwest (vw-mistral's client), `key`, `routes`, `token`, `mcp`, `credentials`. Called by: vw-keys.
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -148,6 +149,8 @@ struct Shared {
     config: ProxyConfig,
     /// connector aliases learned from the catalog answers this proxy relayed.
     aliases: crate::connectors::Aliases,
+    /// connectors the latest relayed catalog answer marks as needing no sign-in and not connected yet.
+    connectable: crate::credentials::Connectable,
     tokens: Arc<TokenSlot>,
     key: KeyCell,
     client: vw_mistral::ClientSlot,
@@ -188,6 +191,7 @@ impl ProxyHandle {
             limits: Arc::clone(&limits),
             config,
             aliases: crate::connectors::Aliases::default(),
+            connectable: crate::credentials::Connectable::default(),
             tokens: Arc::clone(&tokens),
             key: key.clone(),
             client: client.clone(),
@@ -263,7 +267,7 @@ impl ProxyHandle {
     }
 }
 
-fn error(status: StatusCode, kind: &str, message: &str) -> Response {
+pub(crate) fn error(status: StatusCode, kind: &str, message: &str) -> Response {
     let body = serde_json::json!({"error": {"type": kind, "message": message}, "object": "error"});
     (
         status,
@@ -417,81 +421,6 @@ async fn authorization(shared: &Shared, wait: bool) -> Result<HeaderValue, Refus
     Ok(auth)
 }
 
-/// The body to send upstream: streamed unread for every route but a `POST` to the connector gateway, which is read
-/// and judged first (`connectors.rs`). `Err` = the answer to give instead (never forwarded).
-async fn gateway_body(
-    shared: &Shared,
-    route: &RouteSpec,
-    parts: &axum::http::request::Parts,
-    body: Body,
-) -> Result<reqwest::Body, Box<Response>> {
-    if route.template != crate::connectors::GATEWAY_TEMPLATE
-        || parts.method != axum::http::Method::POST
-    {
-        return Ok(reqwest::Body::wrap_stream(body.into_data_stream()));
-    }
-    let Ok(bytes) = axum::body::to_bytes(body, crate::connectors::MAX_BODY).await else {
-        return Err(Box::new(error(
-            StatusCode::PAYLOAD_TOO_LARGE,
-            "vibe_work_connector_request",
-            "Vibe Work's model proxy refused a connector request that is too large to check.",
-        )));
-    };
-    // `/v1/connectors-gateway/<id>/mcp`: the id is the fourth segment (the allowlist checked its shape).
-    let id = parts.uri.path().split('/').nth(3).unwrap_or("");
-    match crate::connectors::judge(&bytes, id, &shared.aliases) {
-        crate::connectors::Verdict::Forward => Ok(reqwest::Body::from(bytes)),
-        crate::connectors::Verdict::Answer(value) => Err(Box::new(
-            (
-                StatusCode::OK,
-                [(axum::http::header::CONTENT_TYPE, "application/json")],
-                value.to_string(),
-            )
-                .into_response(),
-        )),
-        crate::connectors::Verdict::Refuse(reason) => Err(Box::new(error(
-            StatusCode::BAD_REQUEST,
-            "vibe_work_connector_request",
-            reason,
-        ))),
-    }
-}
-
-/// Learns connector aliases and fills missing tool descriptions in a successful catalog answer.
-/// An answer over `connectors::MAX_CATALOG` teaches nothing and passes through unchanged.
-async fn relay_catalog(
-    shared: &Shared,
-    mut out: axum::http::response::Builder,
-    response: reqwest::Response,
-) -> Response {
-    let unreachable = || {
-        error(
-            StatusCode::BAD_GATEWAY,
-            "vibe_work_upstream_unreachable",
-            "Mistral's answer could not be passed on.",
-        )
-    };
-    let Ok(body) = response.bytes().await else {
-        return unreachable();
-    };
-    if body.len() > crate::connectors::MAX_CATALOG {
-        return out.body(Body::from(body)).unwrap_or_else(|_| unreachable());
-    }
-    shared.aliases.learn(&body);
-    if let Some(described) = crate::connectors::describe_catalog(&body) {
-        if let Some(headers) = out.headers_mut() {
-            headers.remove(CONTENT_LENGTH);
-            if let Ok(length) = HeaderValue::from_str(&described.len().to_string()) {
-                headers.insert(CONTENT_LENGTH, length);
-            }
-        }
-        return out
-            .body(Body::from(described))
-            .unwrap_or_else(|_| unreachable());
-    }
-    out.body(Body::from(body)).unwrap_or_else(|_| unreachable())
-}
-
 struct PreparedBody {
     body: reqwest::Body,
     deadline: Option<tokio::time::Instant>,
@@ -579,7 +508,14 @@ async fn prepared_body(
             rewritten_len,
         })
     } else {
-        let body = gateway_body(shared, route, parts, body).await?;
+        let body = crate::connector_bodies::request_body(
+            &shared.aliases,
+            &shared.connectable,
+            route,
+            parts,
+            body,
+        )
+        .await?;
         Ok(PreparedBody {
             body,
             deadline: None,
@@ -785,7 +721,13 @@ async fn relay_response(
             .content_length()
             .is_none_or(|n| n <= crate::connectors::MAX_CATALOG as u64)
     {
-        return relay_catalog(shared, out, response).await;
+        return crate::connector_bodies::relay_catalog(
+            &shared.aliases,
+            &shared.connectable,
+            out,
+            response,
+        )
+        .await;
     }
     let stream = response.bytes_stream().map_err(std::io::Error::other);
     out.body(Body::from_stream(stream)).unwrap_or_else(|_| {

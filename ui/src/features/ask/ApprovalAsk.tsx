@@ -1,8 +1,9 @@
 /**
  * Vibe's approval callback as the one AskCard: the question per kind, who asks, the exact
- * effect (`display.summary` and its payload: the command, the edit as a diff, else the input), the covers line from
- * the core's grant offer when "Allow for this session" is offered, and Allow once / Allow for this session /
- * Always: {control} / No as offered. Once the core's ask closes, the card is replaced by its audit row.
+ * effect (`display.summary` and its payload: the command, the edit as a diff (with old and new file line numbers
+ * when the core previewed it, `editPreview.ts`), else the input), the covers line from the core's grant offer
+ * when "Allow for this session" is offered, and Allow once / Allow for this session / Always: {control} / No as
+ * offered. Once the core's ask closes, the card is replaced by its audit row.
  * Depends on: AskCard, AuditRow, model.ts, the transcript model (callbacks, diff, entries), DiffView, ShowAll, the
  * transcript store and the core store. Called by: RowView.
  * Invariants: answerable only while the core holds the callback open (`openCallbackIds`, or a subagent's card in
@@ -13,13 +14,15 @@
 import { type ReactElement } from "react";
 
 import type { JsonValue } from "../../protocol/core";
-import { TEXT } from "../../vocabulary";
+import { TEXT, wording } from "../../vocabulary";
+import { Button } from "../../components/Controls";
 import { useApp } from "../shell/AppContext";
 import { useCoreState } from "../shell/hooks";
 import { useHeldBy } from "../sessions/SessionHeldNote";
 import { useTranscriptUi } from "../transcript/hooks";
 import { approvalEffect, approvalOutput } from "../transcript/model/callbacks";
 import { editDiff, writeDiff } from "../transcript/model/diff";
+import { editPreview } from "../transcript/model/editPreview";
 import { type Obj, detailOf, entryId, obj, str } from "../transcript/model/entries";
 import { DiffView } from "../transcript/rows/DiffView";
 import { ShowAll } from "../transcript/rows/ShowAll";
@@ -46,23 +49,58 @@ function Payload({ entry }: { entry: Obj }): ReactElement | null {
   const id = `cb:${entryId(entry)}`;
   // The diff helpers read `detail.input`; the gated effect has not run yet, so there is no output.
   const asEntry: Obj = { detail: effect, state: {} };
+  const { transcript } = useApp();
+  const wholeKey = `whole:${id}`;
+  const whole = useTranscriptUi((s) => s.open[wholeKey] === true);
   switch (effect["kind"]) {
     case "shell":
       return <pre className="cmd">$ {str(input?.["command"]) ?? ""}</pre>;
     case "file_search":
       return <pre className="cmd">$ {str(effect["vwCommand"]) ?? "Command unavailable"}</pre>;
-    case "file_write": {
-      const diff = writeDiff(asEntry);
-      return diff === null ? null : <DiffView diff={diff} id={id} />;
-    }
+    case "file_write":
     case "file_edit": {
-      const diff = editDiff(asEntry);
+      // The core's preview numbers the lines in the file as it was when the card opened; without one the card
+      // shows the requested change on its own.
+      // A bounded preview never hides part of what is approved: it says what it left out and offers the whole
+      // requested change, which then replaces it.
+      const preview = whole ? null : editPreview(effect);
+      if (preview !== null)
+        return (
+          <DiffView
+            diff={preview.diff}
+            id={id}
+            both
+            footer={
+              preview.more > 0 || preview.cutChars > 0 ? (
+                <div className="dl gap two" data-testid="ask.edit-preview-cut">
+                  {wording(TEXT.editPreviewCut, {
+                    lines: String(preview.more),
+                    chars: String(preview.cutChars),
+                  })}{" "}
+                  <Button
+                    data-testid="ask.edit-preview-whole"
+                    type="button"
+                    appearance="expander"
+                    onClick={() => {
+                      transcript.toggle(wholeKey, true);
+                    }}
+                  >
+                    {TEXT.editPreviewWhole}
+                  </Button>
+                </div>
+              ) : null
+            }
+          />
+        );
+      const diff = effect["kind"] === "file_write" ? writeDiff(asEntry) : editDiff(asEntry);
       return diff === null ? null : <DiffView diff={diff} id={id} />;
     }
     default: {
       const display = obj(effect["display"]);
+      // An empty input says nothing about the call: no payload box.
       const text =
-        str(display?.["content"]) || (input === null ? "" : JSON.stringify(input, null, 2));
+        str(display?.["content"]) ||
+        (input === null || Object.keys(input).length === 0 ? "" : JSON.stringify(input, null, 2));
       return text === "" ? null : <ShowAll id={`${id}:payload`} text={text} />;
     }
   }

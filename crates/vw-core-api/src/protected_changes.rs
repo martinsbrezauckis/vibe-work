@@ -364,17 +364,8 @@ pub(crate) async fn decide(
             return Err(invalid("this proposal belongs to another session"));
         }
     }
-    if !approve && crate::stop_tree::owner(shared, &session_id).is_none() {
-        crate::ask::stop_after_no(shared, &session_id).await?;
-        return shared
-            .protected_changes
-            .lock()
-            .reviews
-            .entries
-            .get(&id)
-            .map(|saved| saved.view.clone())
-            .ok_or_else(|| invalid("this review is unavailable"));
-    }
+    // A No is settled like any decision: nothing is written, the proposal call returns the declined result and the
+    // turn goes on.
     let shared = shared.clone();
     tokio::task::spawn_blocking(move || {
         settle(

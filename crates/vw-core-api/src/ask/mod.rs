@@ -18,14 +18,6 @@ pub(crate) mod tool_calls;
 
 pub(crate) mod continuation;
 
-/// A person's No stops the owning root's tree, including when the prompt belongs to a child.
-pub(crate) async fn stop_after_no(
-    shared: &std::sync::Arc<crate::core::Shared>,
-    session: &str,
-) -> Result<(), crate::CoreError> {
-    stop_with_no(shared, session, std::future::ready(Ok(()))).await
-}
-
 /// A person's No on a root's own Vibe card: `cancel_turn` ends the root's turn, then the subagents that turn
 /// started stop through Stop's descendant path (the whole turn stops, as for a child's No).
 pub(crate) async fn root_no<T>(

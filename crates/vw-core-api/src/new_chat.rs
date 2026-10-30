@@ -11,6 +11,9 @@
 //! - A terminal's folder is the folder the core was told through `setFolder` and checked, else the home folder;
 //!   never a path in a terminal request.
 //! - Each draft has its own id, so the next draft never shares the adopted one's site data folder.
+//! - `adopt` gives the session the draft's App preview site data (re-keyed to the session, vw-preview
+//!   `adopt_storage`), so sign-ins made before the first message stay; `closeAll` wipes the draft's and renews the
+//!   id, so a wiped store is never used again.
 //! - `adopt` runs only for a loaded session and stops nothing: the same shells, processes, pages and ports.
 //! - After a restart the window shows the New chat folder it had; when that folder was picked for the screen, it works
 //!   again without a new pick (Files tab, terminals): a saved link spelling first needs native Keep naming its target.
@@ -197,17 +200,12 @@ impl Draft {
         self.state.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// The current owner id.
-    pub(crate) fn id(&self) -> String {
-        self.lock().id.clone()
-    }
-
     /// Whether `id` is the current owner id.
     pub(crate) fn is(&self, id: &str) -> bool {
         !id.is_empty() && self.lock().id == id
     }
 
-    /// Gives the screen a fresh id (after a hand-off); returns the old one.
+    /// Gives the screen a fresh id (after a hand-off or Close all); returns the old one.
     fn renew(&self) -> String {
         std::mem::replace(&mut self.lock().id, fresh_id())
     }
@@ -318,8 +316,17 @@ pub(crate) async fn adopt(
         );
     }
     tracing::info!("new chat: handing what is open to the started session");
+    // The screen's App preview website data (sign-ins made there) becomes the session's, before any page moves so
+    // none of the session's mounts its own empty store first. A session that already has website data of its own
+    // keeps it (not expected for a session the first message just started); the screen's data is wiped below then.
+    let adopted = match &shared.preview {
+        Some(hub) => hub.service.adopt_storage(&old, session_id).await,
+        None => false,
+    };
     crate::handoff::move_running(shared, &old, session_id).await;
-    // Pages moved with their own storage; only the old owner's App preview data is left, cleared here.
+    // The old owner is gone: its end wipes its App preview data unless the session adopted it (the preview service
+    // never wipes an adopted store for the old owner; the session's delete wipes it).
+    tracing::debug!(adopted, "new chat: App preview site data");
     crate::previews::session_ended(shared, &old, true).await;
     // Files open on the screen follow when the session works in the screen's folder (not in a copy), as the window
     // moves its editors: their handles become the session's, so the session can read and save them.
@@ -336,9 +343,11 @@ pub(crate) async fn adopt(
     Ok(())
 }
 
-/// Stops the New chat screen's terminals, releases its lease and closes its pages (local site data cleared).
+/// Stops the New chat screen's terminals, releases its lease and closes its pages (local site data cleared), and
+/// gives the screen a fresh id: a wiped store is never used again (on Linux a closed preview's web context keeps
+/// what it holds until quit), so the next first message can only adopt data made after Close all.
 pub(crate) async fn close_all(shared: &std::sync::Arc<Shared>) {
-    let id = shared.new_chat.id();
+    let id = shared.new_chat.renew();
     crate::terminals::close_session(shared, &id).await;
     crate::processes::end_session(shared, &id, false).await;
     crate::previews::session_ended(shared, &id, true).await;

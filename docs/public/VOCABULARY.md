@@ -86,6 +86,7 @@ Models use Vibe's reported display name, falling back to the configured alias. D
 | `vibe:skill-creator` | Create a skill | Helps Vibe create and update reusable skills for your tasks. | Helps Vibe create and update reusable skills for your tasks. |
 | `vibe:vibe` | Vibe setup and help | Helps Vibe explain and change its own setup. | Helps Vibe explain and change its own setup. |
 | `vibe:worktree` | Work in a separate copy | Helps Vibe create and manage separate working copies of a Git project. | Helps Vibe create and manage separate working copies of a Git project. |
+| `vw:app` | Vibe Work help | Helps Vibe explain Vibe Work, its settings and panels. | Helps Vibe explain Vibe Work, its settings and panels. |
 | `vw:browser` | Browse the web | Lets Vibe open pages, search and use web apps in Vibe Work’s browser. | Lets Vibe open pages, search and use web apps in Vibe Work’s browser. |
 | `vw:capture` | Capture a page | Lets Vibe save a page’s design, content and images, or compare two captures. | Lets Vibe save a page’s design, content and images, or compare two captures. |
 | `vw:data-analysis` | Analyse data | Helps Vibe turn spreadsheets and data files into findings, tables and charts. | Helps Vibe turn spreadsheets and data files into findings, tables and charts. |

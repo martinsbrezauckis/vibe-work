@@ -102,9 +102,17 @@ export function projectOf(cwd: string | null): string {
   return parts[parts.length - 1] ?? "No folder";
 }
 
-/** The badge for a session entry (`stuck` wins: nothing can run until the user acts). */
-export function badgeOf(entry: SessionEntry, stuck: StuckMap = {}): Badge {
+/**
+ * The badge for a session entry (`stuck` wins: nothing can run until the user acts). `waiting`: the sessions that
+ * show a waiting app-owned prompt (a card, or a window of its own), worked out by the caller from the core's asks.
+ */
+export function badgeOf(
+  entry: SessionEntry,
+  stuck: StuckMap = {},
+  waiting: ReadonlySet<string> = new Set(),
+): Badge {
   if (entry.id in stuck) return "stuck";
+  if (waiting.has(entry.id)) return "input";
   if ((entry.childCallbackIds?.length ?? 0) > 0) return "input";
   if (pendingHistoryAsks(entry.state?.["history"]).length > 0) return "input";
   const type = statusType(entry.session);
@@ -122,8 +130,12 @@ export function sessionTitle(session: SessionEntry["session"] | undefined): stri
   return str(session?.["title"]) ?? str(session?.["preview"]) ?? "Untitled session";
 }
 
-/** Derives the row for one entry. */
-export function summarize(entry: SessionEntry, stuck: StuckMap = {}): SessionSummary {
+/** Derives the row for one entry (`waiting`: see `badgeOf`). */
+export function summarize(
+  entry: SessionEntry,
+  stuck: StuckMap = {},
+  waiting: ReadonlySet<string> = new Set(),
+): SessionSummary {
   const s = entry.session;
   const cwd = str(s["cwd"]);
   const updated = s["updatedAt"];
@@ -136,7 +148,7 @@ export function summarize(entry: SessionEntry, stuck: StuckMap = {}): SessionSum
     title: sessionTitle(s),
     project: projectOf(cwd),
     cwd,
-    badge: badgeOf(entry, stuck),
+    badge: badgeOf(entry, stuck, waiting),
     unread: s["isUnseen"] === true,
     updatedAt: typeof updated === "number" ? updated : 0,
     bumpedAt: num(s["bumpedAt"]) ?? (typeof updated === "number" ? updated : 0),

@@ -102,6 +102,7 @@ step "rust: fmt" cargo fmt --all --check
 # Release builds of the Tauri crate embed ui/dist, so the bundle is built first; this also
 # proves the UI compiles before the (slower) Rust steps run.
 step "ui: build (typecheck + bundle)" capped pnpm --filter vibe-work-ui build
+step "ui: first-paint check" node scripts/public/check_first_paint.mjs
 step "rust: clippy" capped cargo clippy --workspace --all-targets -- -D warnings
 # The TypeScript generator is behind the `ts` feature, which the workspace build leaves off.
 step "rust: clippy (core TS generator)" capped cargo clippy -p vw-core-api --all-targets --features ts -- -D warnings

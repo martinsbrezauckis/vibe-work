@@ -147,7 +147,8 @@
   color: var(--green);
   border-color: transparent;
 }
-.cstat.signin {
+.cstat.signin,
+.cstat.connect {
   background: var(--orange-soft);
   color: var(--orange-3);
   border-color: transparent;

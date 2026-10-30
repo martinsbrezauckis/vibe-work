@@ -6,7 +6,8 @@
  * - `read` (default): page open, filter, search, groups with each connector's status, the servers, the
  *   sign-in in progress (kind, id, phase, page address, message), prompts, selection, add dialog, note;
  * - `open`, `close`, `filter {filter}`, `search {text}`, `select {id|null}`, `refresh`;
- * - `signIn {alias}`, `stopWaiting`, `turnOff {alias}`, `turnOn {alias}`;
+ * - `signIn {alias}`, `connect {alias}` (a connector that needs no sign-in), `stopWaiting`, `turnOff {alias}`,
+ *   `turnOn {alias}`;
  * - `addServer {url, name?}`, `signInServer {name}`, `signOutServer {name}`, `removeServer {name}`,
  *   `serverOff {name}`, `serverOn {name}`;
  * -: `addKeyServer {url, name?, secretId? | newSecret {name, value}, header?}` and `allowServerKey {name}`:
@@ -143,6 +144,11 @@ async function handleConnectors(app: App, body: unknown): Promise<unknown> {
       case "signIn":
         await a.signIn(text(input, "alias"));
         break;
+      case "connect": {
+        const n = name("alias");
+        await a.connect(n.alias, n.label);
+        break;
+      }
       case "stopWaiting":
         await a.stopWaiting();
         break;

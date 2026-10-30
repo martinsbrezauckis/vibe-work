@@ -7,7 +7,7 @@ mod text;
 pub use chrome::ChromeSettings;
 pub use grant::{CoversPart, GrantOffer, GrantPermission, SessionGrant};
 pub use policy::{Policy, always_settings, policies, policy};
-pub use text::{agent_text, is_hidden_char, plain_note};
+pub use text::{DECLINED, agent_text, is_hidden_char, plain_note};
 
 /// Who supplied the answer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

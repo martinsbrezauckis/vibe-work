@@ -11,6 +11,7 @@ import { createStore, useStore } from "../../state/createStore";
 import { type Layout, computeLayout } from "../../state/panelLayout";
 import { type ShellState } from "../../state/shellState";
 import { type SessionSummary, summarize } from "../../state/sessionSummary";
+import { waitingSessions } from "../ask/waiting";
 import { useApp } from "./AppContext";
 
 /** The model shown when no client could be created (a production bundle in a plain browser). */
@@ -33,10 +34,12 @@ export function useCoreState<S>(select: (state: CoreState) => S): S {
 export function useSessionSummaries(): readonly SessionSummary[] {
   const sessions = useCoreState((s) => s.sessions);
   const stuck = useCoreState((s) => s.stuck);
-  return useMemo(
-    () => Object.values(sessions).map((entry) => summarize(entry, stuck)),
-    [sessions, stuck],
-  );
+  // Joined into a string so the selection stays the same value while the set of waiting sessions does.
+  const waiting = useCoreState((s) => [...waitingSessions(s)].join("\n"));
+  return useMemo(() => {
+    const ids = new Set(waiting.split("\n"));
+    return Object.values(sessions).map((entry) => summarize(entry, stuck, ids));
+  }, [sessions, stuck, waiting]);
 }
 
 /** The window's inner width, kept current. */

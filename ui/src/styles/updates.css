@@ -59,6 +59,14 @@
   font-size: var(--text-12);
 }
 
+/* The default-model card: one button per offered model, stacked. */
+.default-model-list {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+}
+
 /* The Vibe update consent dialog: the offer can be long (sources, commands). */
 .vibe-update-dialog section {
   max-height: min(60vh, 520px);
