@@ -9,9 +9,7 @@ import { type ReactElement, memo } from "react";
 import type { Row } from "../model/build";
 import { detailOf, entryId } from "../model/entries";
 import { protectedChangeOf } from "../model/protectedChange";
-import type { ChromeAskView } from "../../../protocol/core";
 import { ApprovalAsk } from "../../ask/ApprovalAsk";
-import { ChromeAsk } from "../../ask/ChromeAsk";
 import { ProtectedAsk } from "../../ask/ProtectedAsk";
 import { QuestionAsk } from "../../ask/QuestionAsk";
 import { AssistantRow, UserRow } from "./MessageRows";
@@ -50,14 +48,6 @@ function Body({ row, sessionId }: { row: Row; sessionId: string }): ReactElement
         <OtherRow entry={row.entry} />
       ) : (
         <ProtectedAsk proposal={proposal} sessionId={sessionId} />
-      );
-    }
-    case "chromeAsk": {
-      const view = row.entry["chromeAsk"] as unknown as ChromeAskView | undefined;
-      return view === undefined ? (
-        <OtherRow entry={row.entry} />
-      ) : (
-        <ChromeAsk view={view} sessionId={sessionId} />
       );
     }
     case "notice":

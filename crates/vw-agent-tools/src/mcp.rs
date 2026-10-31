@@ -136,10 +136,12 @@ fn handle(
                 .as_array()
                 .cloned()
                 .unwrap_or_default();
-            if package && chrome {
-                let chrome =
-                    crate::specs::with_receipts(Value::Array(crate::chrome_specs::tool_list()));
-                list.extend(chrome.as_array().cloned().unwrap_or_default());
+            if package
+                && chrome
+                && let Ok(catalog) = forward.call(tools::CHROME_TOOL_LIST, json!({}))
+            {
+                let catalog = crate::specs::with_receipts(catalog);
+                list.extend(catalog.as_array().cloned().unwrap_or_default());
             }
             reply(&id, &json!({"tools":list}))
         }
@@ -273,5 +275,23 @@ mod package_tests {
             assert!(!text.contains("use_your_chrome"));
             assert!(!text.contains("Chrome Control"));
         }
+    }
+    #[test]
+    fn search_is_read_only_and_uses_the_existing_mcp_transport() {
+        let listing = tool_list();
+        let search = listing
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|t| t["name"] == "search")
+            .unwrap();
+        assert_eq!(search["annotations"]["readOnlyHint"], true);
+        assert!(crate::wire::tools::SESSION_TOOLS.contains(&"search"));
+        let mut out = Vec::new();
+        serve(&b"{\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"search\",\"arguments\":{\"query\":\"needle\"}}}\n"[..],&mut out,|name:&str,args:Value| {
+            assert_eq!(name,"search");assert_eq!(args["query"],"needle");Ok(Value::String("src/a.rs:2: needle".into()))
+        }).unwrap();
+        let answer: Value = serde_json::from_slice(&out).unwrap();
+        assert_eq!(answer["result"]["content"][0]["text"], "src/a.rs:2: needle");
     }
 }

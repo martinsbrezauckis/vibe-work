@@ -10,8 +10,8 @@
 //! Modules: [`pin`] (embedded, generated pin), [`manager`] (state machine, consent), `run` (the install task),
 //! [`fetch`] (checksum-verified download), [`steps`] (contained uv processes), [`existing`] (other installs),
 //! [`layout`] (folders and records), [`view`] (what the UI and the Debug API see); [`support`] (the
-//! signed supported-Vibe manifest; its rollback record in `seen`) and [`update`] (its check and the consent-bound
-//! Vibe update).
+//! signed supported-Vibe manifest; its rollback record in `seen`, its Chrome store state in [`extension_store`]) and
+//! [`update`] (its check and the consent-bound Vibe update).
 //!
 //! Depends on: vw-mistral (HTTPS client), vw-supervisor (discovery, environment allowlist, initialize params).
 //! Called by: vw-core-api (`vibe` commands, the deferred server start), the app, the private tests.
@@ -19,6 +19,7 @@
 #![forbid(unsafe_code)]
 
 pub mod existing;
+pub mod extension_store;
 pub mod fetch;
 pub mod layout;
 pub mod manager;
@@ -33,7 +34,7 @@ pub mod view;
 
 pub use manager::{InstallError, InstallerConfig, Limits, OnReady, VibeInstaller};
 pub use pin::{PinError, Sources, UvAsset, this_target};
-pub use support::{Manifest, SupportError, SupportedVibe};
+pub use support::{ExtensionStore, Manifest, SupportError, SupportedVibe};
 pub use update::SupportConfig;
 pub use view::{
     ExistingView, FailKind, InstallOffer, InstallPhase, InstallSource, InstallView, SourceView,

@@ -60,6 +60,13 @@ function PaletteDialog(): ReactElement {
   const dialog = useRef<HTMLDivElement>(null);
   const list = useRef<HTMLUListElement>(null);
   const [query, setQuery] = useState(carried);
+  // A new search handed over while the palette is open replaces the field's text (set during render, React's
+  // pattern for state that follows a prop).
+  const [shownCarried, setShownCarried] = useState(carried);
+  if (carried !== shownCarried) {
+    setShownCarried(carried);
+    setQuery(carried);
+  }
   const filesOnly = useShellState((s) => s.paletteFiles);
   const [filter, setFilter] = useState<Filter>(filesOnly ? "file" : "all");
   const close = () => {

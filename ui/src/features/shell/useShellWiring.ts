@@ -7,7 +7,9 @@
  * the UI-control loop only polls while the Debug API is on, or always in browser dev mode where
  * the Debug API is the transport itself.
  */
+import { guardActivationClick } from "./activationClick";
 import { editorLayoutOf } from "../../state/editorLayout";
+import { startChromeSelections } from "../composer/chromeSelections";
 import { useEffect } from "react";
 import { attachSecretScanActivity } from "../../state/secretScanActivity";
 import { registerClipboard } from "../../state/clipboard";
@@ -47,6 +49,7 @@ import { keyReadiness, vaultReadiness } from "../../state/keyReadiness";
 /** Installs the shell's wiring for the lifetime of the component. */
 export function useShellWiring(): void {
   const app = useApp();
+  useEffect(guardActivationClick, []);
   useEffect(
     () =>
       app.core === null ? undefined : registerClipboard(app.core, () => app.uiControl.serving()),
@@ -136,6 +139,7 @@ export function useShellWiring(): void {
   }, [app]);
 
   useEffect(() => startAskAnnouncements(app), [app]);
+  useEffect(() => startChromeSelections(app), [app]);
   useEffect(() => startChatPrompts(app), [app]);
   useEffect(() => registerShellRoutes(app), [app]);
   useEffect(() => registerPointShortcut(app), [app]);

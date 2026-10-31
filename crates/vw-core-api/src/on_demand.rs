@@ -1,25 +1,7 @@
-//! Tools that load only when needed.
-//!
-//! - **Off when a chat opens.** Every session-opening request the core sends gets `agentConfig.disabledTools` with the
-//!   pattern of each on-demand tool set that is not on for that session ([`OnDemand::disabled_patterns`], added by
-//!   `agent_tools::AgentTools::inject` after the gate, next to our MCP server). Vibe 2.26.1 filters the session's MCP
-//!   tools, plugin servers included, by these patterns (`_mcp_naming.py:55`, display name `{server}_{tool}`).
-//! - **On after the gateway call.** `use_your_chrome` / `use_headless_browser` (our MCP server) mark the session
-//!   ([`tool`]). Vibe cannot change a running turn's tools (`_session.py:857-866`), so the switch waits for the turn
-//!   to end: the pump calls [`observe`] for every finished turn; once the session is quiet the core closes its channel
-//!   and reopens it (the ordinary idle close and reopen: the resume carries the new filter), then, when the turn that
-//!   asked completed and is still the latest, sends one injected turn (`injected: true`, not shown in the chat) that
-//!   continues the chat. A stopped or failed turn only switches; the user's next message has the tools.
-//! - **First use of Chrome asks.** `chrome_control::session` opens the one `AskCard` before Chrome is enabled in a
-//!   chat. The existing pre-tool Chrome guard waits outside Vibe's short MCP timeout; a direct gateway call enforces
-//!   the same check. After Allow, every Chrome operation still passes the guard and the user's level. Vibe's own
-//!   approval for the gateway is answered automatically (`approve_without_dialog`), avoiding a second card.
-//! - **Lifetime.** Memory only, per session, for this run: an idle close and reopen keeps it, a hand-off moves it, a
-//!   deleted session drops it, an app restart forgets it (the agent asks again, one step).
-//!
-//! Depends on: `core::Shared` (store, channels, Chrome Control's setup view, the Vibe home), `recovery::quiet`,
-//! `Core::attach_session` / `Core::forward`. Called by: `agent_tools` (inject, the tool, hand-off, delete), `pump`.
-use std::collections::{BTreeSet, HashMap, HashSet};
+//! The headless browser plugin loads on demand after the requesting turn ends.
+//! Session reopen preserves history and waits for pending work; Stop cancels automatic continuation.
+//! Called by agent tools, session lifecycle and the event pump.
+use std::collections::{BTreeSet, HashMap};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
@@ -36,20 +18,17 @@ const QUIET_WAIT: Duration = Duration::from_secs(30);
 /// One tool set that loads only when needed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) enum ToolSet {
-    /// Chrome Control (the user's own Chrome).
-    YourChrome,
     /// The marketplace's headless browser plugin (Microsoft's Playwright MCP, server `browser`).
     HeadlessBrowser,
 }
 
 impl ToolSet {
     /// Every on-demand set.
-    pub(crate) const ALL: [Self; 2] = [Self::YourChrome, Self::HeadlessBrowser];
+    pub(crate) const ALL: [Self; 1] = [Self::HeadlessBrowser];
 
     /// The set a gateway tool turns on.
     pub(crate) fn of_tool(tool: &str) -> Option<Self> {
         match tool {
-            names::USE_YOUR_CHROME => Some(Self::YourChrome),
             names::USE_HEADLESS_BROWSER => Some(Self::HeadlessBrowser),
             _ => None,
         }
@@ -61,7 +40,6 @@ impl ToolSet {
     /// `browser_browser_*`. Measured on Vibe 2.26.1 (`live_brw1_on_demand`).
     pub(crate) fn pattern(self) -> &'static str {
         match self {
-            Self::YourChrome => "re:vw_chrome_(status|task|execute)",
             Self::HeadlessBrowser => "re:browser_browser_.+",
         }
     }
@@ -69,7 +47,6 @@ impl ToolSet {
     /// Vibe's tool group for the set (`mcp_<server>`), as the agent finds it with `search_tool_functions`.
     fn group(self) -> &'static str {
         match self {
-            Self::YourChrome => "mcp_vw",
             Self::HeadlessBrowser => "mcp_browser",
         }
     }
@@ -77,7 +54,6 @@ impl ToolSet {
     /// What the set is, in the agent's words.
     fn name(self) -> &'static str {
         match self {
-            Self::YourChrome => "Chrome Control's tools",
             Self::HeadlessBrowser => "The headless browser's tools",
         }
     }
@@ -85,10 +61,6 @@ impl ToolSet {
     /// The refusal when the set's plugin is not there.
     fn not_there(self) -> &'static str {
         match self {
-            Self::YourChrome => {
-                "Chrome Control is not set up in Vibe Work. Tell the user they can set it up in Settings › Browser › \
-                 Your Chrome, then ask again. Until then use Vibe Work's own browser only if the user agrees."
-            }
             Self::HeadlessBrowser => {
                 "The headless browser plugin is not installed. It is a developer tool from Tools > Marketplace; do not \
                  suggest it unless the user asks for it. Use Vibe Work's own browser."
@@ -99,12 +71,6 @@ impl ToolSet {
     /// The answer while the set turns on.
     fn turning_on(self) -> String {
         let rest = match self {
-            Self::YourChrome => {
-                "End this reply now with one short sentence (for example \"Opening your Chrome.\"). Do not use Vibe \
-                 Work's own browser for this task. Every Chrome step still follows the user's Chrome settings in Vibe \
-                 Work; a refused step comes back \"Tool execution was skipped by Runtime policy\": then call \
-                 `tools.mcp_vw.chrome_outcome({})` for the user's answer."
-            }
             Self::HeadlessBrowser => {
                 "End this reply now with one short sentence (for example \"Starting the headless browser.\")."
             }
@@ -127,12 +93,6 @@ impl ToolSet {
     /// One line of the continuation turn for this set.
     fn continue_line(self) -> String {
         let how = match self {
-            Self::YourChrome => {
-                "Continue the user's last request in their own Chrome. Every Chrome step follows the user's Chrome \
-                 settings. A Chrome step that comes back \"Tool execution was skipped by Runtime policy\" was not \
-                 done: the user refused it in Vibe Work; call \
-                 `tools.mcp_vw.chrome_outcome({})` for the user's answer and tell the user."
-            }
             Self::HeadlessBrowser => "Continue the user's last request with the headless browser.",
         };
         format!(
@@ -158,8 +118,6 @@ struct Inner {
     on: HashMap<String, BTreeSet<ToolSet>>,
     pending: HashMap<String, Pending>,
     interrupts: HashMap<String, usize>,
-    chrome_allowed: HashSet<String>,
-    chrome_waits: HashMap<String, Arc<tokio::sync::Mutex<()>>>,
 }
 
 /// The on-demand tool sets of every session of this run.
@@ -214,25 +172,6 @@ impl OnDemand {
 
     fn awaiting_interrupt(&self, session: &str) -> bool {
         self.inner().interrupts.contains_key(session)
-    }
-
-    /// Serializes the first-use card for this chat, including concurrent agent calls.
-    pub(crate) fn chrome_wait(&self, session: &str) -> Arc<tokio::sync::Mutex<()>> {
-        self.inner()
-            .chrome_waits
-            .entry(session.to_owned())
-            .or_default()
-            .clone()
-    }
-
-    /// Whether the person has allowed Chrome in this chat during this run.
-    pub(crate) fn chrome_allowed(&self, session: &str) -> bool {
-        self.inner().chrome_allowed.contains(session)
-    }
-
-    /// Remembers only the session answer; this changes no Chrome level or operation grant.
-    pub(crate) fn allow_chrome(&self, session: &str) {
-        self.inner().chrome_allowed.insert(session.to_owned());
     }
 
     /// The patterns of every set that is not on for `session` (`None`: a session that does not exist yet).
@@ -290,12 +229,6 @@ impl OnDemand {
     /// Session `old` continues as `new` (`/clear`, a rewind into a new id): its sets follow it.
     pub(crate) fn hand_off(&self, old: &str, new: &str) {
         let mut inner = self.inner();
-        if inner.chrome_allowed.remove(old) {
-            inner.chrome_allowed.insert(new.to_owned());
-        }
-        if let Some(wait) = inner.chrome_waits.remove(old) {
-            inner.chrome_waits.insert(new.to_owned(), wait);
-        }
         if let Some(on) = inner.on.remove(old) {
             inner.on.insert(new.to_owned(), on);
         }
@@ -304,26 +237,11 @@ impl OnDemand {
         }
     }
 
-    /// Remove revokes Chrome in every chat without changing other on-demand tools.
-    pub(crate) fn remove_chrome(&self) {
-        let mut inner = self.inner();
-        inner.chrome_allowed.clear();
-        for on in inner.on.values_mut() {
-            on.remove(&ToolSet::YourChrome);
-        }
-        inner.pending.retain(|_, pending| {
-            pending.sets.remove(&ToolSet::YourChrome);
-            !pending.sets.is_empty()
-        });
-    }
-
     /// A deleted session's sets are dropped.
     pub(crate) fn forget(&self, session: &str) {
         let mut inner = self.inner();
         inner.on.remove(session);
         inner.pending.remove(session);
-        inner.chrome_allowed.remove(session);
-        inner.chrome_waits.remove(session);
     }
 }
 
@@ -348,13 +266,7 @@ pub(crate) fn add_patterns(config: &mut serde_json::Map<String, Value>, patterns
 }
 
 /// Whether the set's plugin is in the Vibe home's `plugins/` (its tools exist in a chat).
-pub(crate) fn present(shared: &Shared, set: ToolSet) -> bool {
-    if set == ToolSet::YourChrome {
-        return shared
-            .chrome_control
-            .dir()
-            .is_some_and(|dir| dir.join("setup.json").is_file());
-    }
+pub(crate) fn present(shared: &Shared, _set: ToolSet) -> bool {
     shared
         .instructions
         .own_home
@@ -385,8 +297,7 @@ fn latest_turn(shared: &Shared, session: &str) -> Option<(String, String)> {
     ))
 }
 
-/// `use_your_chrome` / `use_headless_browser` for `session`. Setup refusals are plain sentences; Chrome's session
-/// answer is a normal result and refusals are also kept for `chrome_outcome`.
+/// Activates the installed headless plugin after this turn.
 pub(crate) fn tool(
     shared: &Arc<Shared>,
     state: &OnDemand,
@@ -415,7 +326,7 @@ pub(crate) fn tool(
     }
 }
 
-/// Vibe's own gateway approval is redundant: Chrome's session `AskCard` already decided in the pre-tool guard.
+/// Chrome applies current-mode checks in the tool; headless activation has its own lifecycle.
 pub(crate) fn approve_without_dialog(callback: &Value) -> bool {
     callback.pointer("/detail/kind").and_then(Value::as_str) == Some("approval")
         && callback
@@ -592,58 +503,24 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_new_session_gets_every_pattern_and_an_on_set_drops_only_its_own() {
+    fn headless_activation_does_not_filter_chrome() {
         let state = OnDemand::default();
+        assert_eq!(state.disabled_patterns(None), ["re:browser_browser_.+"]);
+        assert_eq!(ToolSet::of_tool("use_your_chrome"), None);
         assert_eq!(
-            state.disabled_patterns(None),
-            [
-                "re:vw_chrome_(status|task|execute)",
-                "re:browser_browser_.+"
-            ]
-        );
-        assert_eq!(
-            state.request("s", ToolSet::YourChrome, Some("t1".into()), 0),
+            state.request("a", ToolSet::HeadlessBrowser, Some("t1".into()), 0),
             Requested::TurningOn
         );
-        // Pending is not on: the session still opens without the tools until the turn ends.
-        assert_eq!(state.disabled_patterns(Some("s")).len(), 2);
-        let pending = state.take_pending("s").unwrap();
-        assert_eq!(pending.turn_id.as_deref(), Some("t1"));
-        assert_eq!(
-            state.disabled_patterns(Some("s")),
-            ["re:browser_browser_.+"]
-        );
-        assert_eq!(state.disabled_patterns(Some("other")).len(), 2);
-        assert_eq!(
-            state.request("s", ToolSet::YourChrome, None, 0),
-            Requested::AlreadyOn
-        );
-        assert!(
-            state.take_pending("s").is_none(),
-            "nothing waits after an already-on call"
-        );
-    }
-
-    #[test]
-    fn hand_off_moves_and_delete_forgets() {
-        let state = OnDemand::default();
-        state.allow_chrome("a");
-        state.request("a", ToolSet::YourChrome, None, 0);
-        state.take_pending("a");
-        state.request("a", ToolSet::HeadlessBrowser, None, 0);
         state.hand_off("a", "b");
-        assert!(state.chrome_allowed("b"));
-        assert!(!state.chrome_allowed("a"));
-        assert_eq!(state.disabled_patterns(Some("a")).len(), 2);
-        assert_eq!(
-            state.disabled_patterns(Some("b")),
-            ["re:browser_browser_.+"]
-        );
         assert!(state.has_pending("b"));
+        assert_eq!(
+            state.take_pending("b").unwrap().turn_id.as_deref(),
+            Some("t1")
+        );
+        assert_eq!(state.disabled_patterns(Some("b")), [] as [&str; 0]);
+        assert_eq!(state.disabled_patterns(Some("a")).len(), 1);
         state.forget("b");
-        assert!(!state.chrome_allowed("b"));
-        assert_eq!(state.disabled_patterns(Some("b")).len(), 2);
-        assert!(!state.has_pending("b"));
+        assert_eq!(state.disabled_patterns(Some("b")).len(), 1);
     }
 
     #[test]
@@ -651,12 +528,12 @@ mod tests {
         let mut config = serde_json::Map::new();
         config.insert(
             "disabledTools".into(),
-            json!(["bash", "re:vw_chrome_(status|task|execute)"]),
+            json!(["bash", "re:vw_chrome_(status|session|execute)"]),
         );
         add_patterns(
             &mut config,
             &[
-                "re:vw_chrome_(status|task|execute)",
+                "re:vw_chrome_(status|session|execute)",
                 "re:browser_browser_.+",
             ],
         );
@@ -664,7 +541,7 @@ mod tests {
             config["disabledTools"],
             json!([
                 "bash",
-                "re:vw_chrome_(status|task|execute)",
+                "re:vw_chrome_(status|session|execute)",
                 "re:browser_browser_.+"
             ])
         );
@@ -680,7 +557,7 @@ mod tests {
     fn only_the_turning_on_calls_skip_vibes_card() {
         let card =
             |tool: &str| json!({"detail": {"kind": "approval", "effect": {"toolName": tool}}});
-        assert!(approve_without_dialog(&card("mcp_vw.use_your_chrome")));
+        assert!(!approve_without_dialog(&card("mcp_vw.use_your_chrome")));
         assert!(approve_without_dialog(&card("mcp_vw.use_headless_browser")));
         assert!(!approve_without_dialog(&card("mcp_vw.process_start")));
         assert!(!approve_without_dialog(&card(
@@ -689,25 +566,5 @@ mod tests {
         assert!(!approve_without_dialog(&card("use_your_chrome")));
         let question = json!({"detail": {"kind": "question", "effect": {"toolName": "mcp_vw.use_your_chrome"}}});
         assert!(!approve_without_dialog(&question));
-    }
-
-    #[test]
-    fn the_words_the_agent_reads() {
-        let on = ToolSet::YourChrome.turning_on();
-        assert!(
-            on.starts_with("Chrome Control's tools turn on for this chat when this reply ends"),
-            "{on}"
-        );
-        assert!(on.contains("End this reply now"), "{on}");
-        let line = ToolSet::YourChrome.continue_line();
-        assert_eq!(
-            line,
-            "Chrome Control's tools are on in this chat now (group `mcp_vw`; find them with `search_tool_functions`). Continue the user's last request in their own Chrome. Every Chrome step follows the user's Chrome settings. A Chrome step that comes back \"Tool execution was skipped by Runtime policy\" was not done: the user refused it in Vibe Work; call `tools.mcp_vw.chrome_outcome({})` for the user's answer and tell the user."
-        );
-        assert!(
-            ToolSet::YourChrome
-                .not_there()
-                .contains("Settings › Browser › Your Chrome")
-        );
     }
 }

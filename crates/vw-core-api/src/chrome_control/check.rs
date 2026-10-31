@@ -1,350 +1,251 @@
-//! `chrome_check`: the Chrome Control guard's question for one call, answered from the user's level.
-//!
-//! - **Nothing needed** (status, task, tab handover), the level includes the call's group, or an "Allow for this
-//!   session" for that group on that site is kept: allow. Vibe's own approval card for the same call (when the
-//!   session's access mode asks) is then answered for the user (`one_ask`): one approval.
-//! - **Above the level**, bookmarks and history (at every level), closing one of the user's tabs while "Close tabs
-//!   you opened" is off, or a tool Vibe Work does not know: the one `AskCard` opens in the session and this call
-//!   waits in its hook until the person answers or stops the turn.
-//!   "Allow for this session" keeps exactly that group on that site (a grant never reaches further than what
-//!   the user saw); no card raises the level.
-//!
-//! Depends on: `vw_ask::chrome`, the ask service and grants, `one_ask`, `browser_delegation` (closing tabs).
-//! Called by: `agent_tools::server` (hook credential only).
-use std::sync::Arc;
-
-use serde::Deserialize;
-use serde_json::{Value, json};
-use vw_ask::chrome::{self, Group, Need};
-use vw_ask::{AnsweredBy, Choice, CoversPart, Outcome, Scope};
-
-use super::{ChromeAskView, text};
+//! Browser authority from the current chat mode. Called at execution and by tool discovery.
+//! No Chrome check opens a card or waits for a decision.
 use crate::core::Shared;
-use crate::event::CoreEvent;
+use serde_json::{Value, json};
+use std::sync::Arc;
+use vw_ask::chrome::Tier;
 
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct Question {
-    #[serde(default)]
-    session_id: String,
-    #[serde(default)]
-    parent_session_id: Option<String>,
-    #[serde(default)]
-    tool_name: String,
-    #[serde(default)]
-    tool_input: Value,
-}
-
-fn allow() -> Value {
-    json!({"decision": "allow"})
-}
-
-fn deny(reason: &str) -> Value {
-    json!({"decision": "deny", "reason": reason})
-}
-
-/// The session a card for this call belongs to: the hook's session when the store has it, else its parent (a
-/// subagent's call is shown in the parent's transcript).
-fn owning_session(shared: &Shared, question: &Question) -> Option<String> {
-    if shared.store.view(&question.session_id).is_some() {
-        return Some(question.session_id.clone());
-    }
-    question
-        .parent_session_id
-        .clone()
-        .filter(|p| shared.store.view(p).is_some())
-}
-
-fn turn_of(shared: &Shared, session: &str) -> Option<String> {
-    let view = shared.store.view(session)?;
-    view.state
-        .pointer("/session/status/activeTurnId")
-        .and_then(Value::as_str)
-        .map(str::to_owned)
-}
-
-/// What one ask is about: its kind, the card's reason and covers words, its group, and the session grant it would
-/// keep (key and words for the grants list).
-struct Asking {
-    kind: &'static str,
-    group: Option<Group>,
-    reason: String,
-    covers: Vec<CoversPart>,
-    grant: (String, String),
-}
-
-/// The session grant key of `group` on `site` (`forms@shop.example`; just the group for a call naming no site).
-fn grant_key(group: Group, site: Option<&str>) -> String {
-    site.map_or_else(
-        || group.id().to_owned(),
-        |site| format!("{}@{site}", group.id()),
-    )
-}
-
-/// What the user's level says about one call: run, or the card.
-fn decide(
-    shared: &Shared,
-    need: Need,
-    settings: vw_ask::ChromeSettings,
-    session: &str,
-    site: Option<&str>,
-    restricted: bool,
-) -> Option<Asking> {
-    match need {
-        Need::Nothing => None,
-        Need::Group(group) => {
-            if settings.allows(group) && !restricted {
-                return None;
-            }
-            let key = grant_key(group, site);
-            if let Some(grant) = shared
-                .ask_grants
-                .chrome_grant(session, &key)
-                .filter(|_| !restricted)
-            {
-                if shared
-                    .ask_grants
-                    .record_use(&grant.id, shared.asks.now_ms())
-                {
-                    shared.emit(crate::ask::grants::event(shared));
-                }
-                return None;
-            }
-            Some(Asking {
-                kind: group.ask_kind(),
-                group: Some(group),
-                reason: text::reason(settings, group),
-                covers: text::covers(group, site),
-                grant: (key, text::name(group.id()).to_owned()),
-            })
-        }
-        Need::CloseUserTabs => {
-            if crate::browser_delegation::load(shared).close_user_tabs
-                || shared
-                    .ask_grants
-                    .chrome_grant(session, "closeTabs")
-                    .is_some()
-            {
-                return None;
-            }
-            Some(Asking {
-                kind: chrome::CLOSE_TABS_KIND,
-                group: None,
-                reason: text::close_tabs_reason(),
-                covers: text::close_tabs_covers(),
-                grant: ("closeTabs".to_owned(), "Close your tabs".to_owned()),
-            })
-        }
-        Need::Unknown => Some(Asking {
-            kind: chrome::OTHER_KIND,
-            group: None,
-            reason: text::UNKNOWN_REASON.to_owned(),
-            covers: Vec::new(),
-            grant: (String::new(), String::new()),
-        }),
-    }
-}
-
-/// The gateway shares the existing Chrome guard's long wait, before the MCP tool starts.
-async fn session_gateway(shared: &Arc<Shared>, question: &Question) -> Value {
-    let Some(session) = owning_session(shared, question) else {
-        return deny("Not done: Vibe Work could not find this chat to ask about Chrome.");
-    };
-    if !crate::on_demand::present(shared, crate::on_demand::ToolSet::YourChrome) {
-        // Let the gateway return its normal Set up explanation; there is no Chrome authority to enable yet.
-        return allow();
-    }
-    let Some(tools) = shared.agent_tools.as_ref() else {
-        return deny("Not done: Chrome Control is not available in this chat.");
-    };
-    match super::session::ensure(shared, &tools.on_demand, &session, &question.session_id).await {
-        Ok(()) => allow(),
-        Err(reason) => deny(&reason),
-    }
-}
-
-/// Answers one `chrome_check`.
-///
-/// # Errors
-/// A text reason when the request is not one.
-pub(crate) async fn check(shared: &Arc<Shared>, args: Value) -> Result<Value, String> {
-    if !shared.chrome_control.config.available() {
-        return Ok(deny(super::setup::ABSENT));
-    }
-    let question: Question =
-        serde_json::from_value(args).map_err(|_| "bad chrome_check request".to_owned())?;
-    if vw_agent_tools::chrome_guard::is_session_gateway(&question.tool_name) {
-        return Ok(session_gateway(shared, &question).await);
-    }
-    let leaf = question
-        .tool_name
-        .strip_prefix("mcp_vw.")
-        .unwrap_or(&question.tool_name);
-    if !super::gateway::is_tool(leaf) {
-        return Err("unknown Chrome tool".to_owned());
-    }
-    let need = super::mapping::need(leaf, &question.tool_input);
-    let action = super::mapping::action(leaf, &question.tool_input);
-    let settings = shared.chrome_control.settings();
-    let Some(session) = owning_session(shared, &question) else {
-        return Ok(deny(
-            "Not run: Vibe Work could not find this session to ask the user about this Chrome action.",
-        ));
-    };
-    if !shared
-        .agent_tools
-        .as_ref()
-        .is_some_and(|tools| tools.on_demand.chrome_allowed(&session))
-    {
-        return Ok(deny(
-            "Not run: use_your_chrome must be allowed in this chat first.",
-        ));
-    }
-    if super::gateway::restricted(shared, &action) == Some("never") {
-        return Ok(deny(
-            "Not run: this Chrome action was turned off in Chrome.",
-        ));
-    }
-    let site = text::site(
-        question
-            .tool_input
-            .get("args")
-            .unwrap_or(&question.tool_input),
-    );
-    let asking = decide(
-        shared,
-        need,
-        settings,
-        &session,
-        site.as_deref(),
-        super::gateway::restricted(shared, &action) == Some("ask"),
-    );
-    let Some(asking) = asking else {
-        return Ok(allow());
-    };
-    Ok(ask(shared, &question, &session, &action, &asking).await)
-}
-
-async fn ask(
-    shared: &Arc<Shared>,
-    question: &Question,
-    session: &str,
-    action: &str,
-    asking: &Asking,
-) -> Value {
-    let summary = text::summary(
-        &format!("chrome_{}", action.replace('.', "_")),
-        question
-            .tool_input
-            .get("args")
-            .unwrap_or(&question.tool_input),
-    );
-    let offers = if asking.covers.is_empty() {
-        vec![Choice::Once, Choice::No]
-    } else {
-        vec![Choice::Once, Choice::Session, Choice::No]
-    };
-    let outcome = match super::pending::answer(shared, session, || {
-        let handle = shared.asks.open_own(
-            asking.kind,
-            Some(question.session_id.clone()),
-            vw_ask::Requester::Agent,
-            offers,
-            None,
-        );
-        let card = ChromeAskView {
-            ask_id: handle.ask.id.clone(),
-            session_id: session.to_owned(),
-            turn_id: turn_of(shared, session),
-            created_at_ms: shared.asks.now_ms(),
-            tool: question.tool_name.clone(),
-            summary: summary.clone(),
-            group: asking.group,
-            reason: asking.reason.clone(),
-            covers: asking.covers.clone(),
-            input: question.tool_input.clone(),
-            open: true,
-        };
-        (handle, card)
+pub(crate) fn mode(shared: &Shared, session: &str) -> Option<String> {
+    shared.access.remembered(session).or_else(|| {
+        shared.store.runtime(session).and_then(|runtime| {
+            runtime
+                .pointer("/activeAgent/name")
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+        })
     })
-    .await
-    {
-        Ok(outcome) => outcome,
-        Err(reason) => return deny(&reason),
+}
+/// Whether the session's current mode has a browser tier (tests; the tool list itself is `gateway::list`).
+#[cfg(test)]
+pub(crate) fn available(shared: &Shared, session: &str) -> bool {
+    shared.chrome_control.enabled()
+        && mode(shared, session)
+            .as_deref()
+            .and_then(Tier::from_mode)
+            .is_some()
+}
+pub(super) fn authorize(
+    shared: &Shared,
+    session: &str,
+    tool: &str,
+    args: &Value,
+) -> Result<Tier, String> {
+    if shared.store.view(session).is_none() {
+        return Err("Not run: this chat is not open.".into());
+    }
+    if !shared.chrome_control.enabled() {
+        return Err(format!(
+            "Not run: {} is off.",
+            vw_vocabulary::label("builtinSkills", "vw:chrome")
+        ));
+    }
+    let mode = mode(shared, session).ok_or("Not run: this chat's access mode is unavailable.")?;
+    let tier =
+        Tier::from_mode(&mode).ok_or("Not run: Chrome is unavailable in this access mode.")?;
+    let required = super::mapping::required(tool, args).ok_or("Not run: unknown Chrome action.")?;
+    if required > tier {
+        let label = if mode == "smart-approve" {
+            vw_vocabulary::label("accessModes", "smart-approve")
+        } else {
+            tier.label()
+        };
+        let action = super::mapping::action(tool, args);
+        let action = if action == "page.commit" {
+            "sending this form"
+        } else {
+            action.as_str()
+        };
+        return Err(format!(
+            "Not run: {action} needs {}; this chat is in {label}.",
+            required.required_label()
+        ));
+    }
+    Ok(tier)
+}
+/// `chrome_status`'s action list: each action says whether this chat's current mode allows it, and if not, the modes
+/// that would. Read at each call, so a mode change shows at once; the call-time [`authorize`] stays the authority.
+pub(super) fn annotate_modes(shared: &Shared, session: &str, tool: &str, result: &mut Value) {
+    if tool != "chrome_status" {
+        return;
+    }
+    let tier = mode(shared, session).as_deref().and_then(Tier::from_mode);
+    // The person's Local network switch, and whether Chrome has it yet.
+    if result["structuredContent"].is_object() {
+        result["structuredContent"]["localNetwork"] = json!({
+            "on": shared.chrome_control.local_network(),
+            "applied": shared.chrome_control.local_network_applied(),
+        });
+    }
+    let Some(rows) = result["structuredContent"]["capabilities"]["actions"].as_array_mut() else {
+        return;
     };
-    match outcome {
-        Outcome::Allowed { scope, by } => {
-            if scope == Scope::Session {
-                let (key, label) = &asking.grant;
-                let grant = shared.ask_grants.keep_chrome(
-                    session,
-                    key,
-                    label,
-                    asking.covers.clone(),
-                    by,
-                    shared.asks.now_ms(),
-                );
-                tracing::info!(session = %session, grant = %grant.id, "Chrome Control session grant kept");
-                shared.emit(crate::ask::grants::event(shared));
-            }
-            allow()
+    for row in rows {
+        let action = row["action"].as_str().unwrap_or_default().to_owned();
+        // page.key's tier depends on the key: navigation keys (Tab, Escape, arrows…) are marked; typing keys are noted.
+        let args = if action == "page.key" {
+            json!({"key":"Tab"})
+        } else {
+            json!({})
+        };
+        let Some(needed) =
+            super::mapping::required("chrome_execute", &json!({"action":action,"args":args}))
+        else {
+            continue;
+        };
+        let allowed = tier.is_some_and(|tier| needed <= tier);
+        row["allowedInThisMode"] = json!(allowed);
+        if !allowed {
+            row["needs"] = json!(needed.required_label());
         }
-        other => deny(&vw_ask::agent_text(&other, "this Chrome action")),
+        if action == "page.key" && tier.is_none_or(|tier| tier < Tier::AcceptEdits) {
+            row["typingKeysNeed"] = json!(Tier::AcceptEdits.required_label());
+        }
     }
 }
-
-/// Publishes the card as closed when dropped.
-pub(super) struct Closing {
-    pub(super) shared: Arc<Shared>,
-    pub(super) card: ChromeAskView,
-}
-
-impl Drop for Closing {
-    fn drop(&mut self) {
-        super::record_card_outcome(&self.shared, &self.card);
-        let mut card = self.card.clone();
-        card.open = false;
-        publish(&self.shared, card);
-    }
-}
-
-/// Keeps the card entry and tells the window (the session's transcript shows it at once).
-pub(super) fn publish(shared: &Shared, view: ChromeAskView) {
-    shared.chrome_control.upsert(view.clone());
-    shared.emit(CoreEvent::ChromeAsk { entry: view });
-}
-
-/// The window's answer to a Chrome Control card (`chromeControl answer`). `by` is the person in the window or the
-/// Debug API acting as the user.
-///
-/// # Errors
-/// The card is closed already, or the answer is not offered.
-pub(crate) fn answer(
-    shared: &Arc<Shared>,
-    ask_id: &str,
-    choice: Choice,
-    note: Option<String>,
-    by: AnsweredBy,
-) -> Result<(), crate::CoreError> {
-    let invalid = |m: &str| crate::CoreError::new(crate::ErrorCode::InvalidCommand, m);
-    let ask = shared
-        .asks
-        .get(ask_id)
-        .filter(|a| a.kind.starts_with("chrome/ask/"))
-        .ok_or_else(|| invalid("Already answered."))?;
-    if !ask.offers.contains(&choice) {
-        return Err(invalid("This answer is not offered."));
-    }
-    let outcome = match choice {
-        Choice::Once => crate::ask::allowed(by, Scope::Once),
-        Choice::Session => crate::ask::allowed(by, Scope::Session),
-        Choice::No => crate::ask::refused(by, note),
+pub(crate) fn check(shared: &Arc<Shared>, args: &Value) -> Value {
+    let session = args["sessionId"].as_str().unwrap_or_default();
+    let session = if shared.store.view(session).is_some() {
+        session
+    } else {
+        args["parentSessionId"].as_str().unwrap_or(session)
     };
-    let delivery = shared
-        .asks
-        .reserve(ask_id, by)
-        .ok_or_else(|| invalid("Already answered."))?;
-    // A No answers the held Chrome call with the declined result; the turn goes on.
-    delivery.confirmed(outcome);
-    Ok(())
+    let tool = args["toolName"]
+        .as_str()
+        .unwrap_or_default()
+        .strip_prefix("mcp_vw.")
+        .unwrap_or(args["toolName"].as_str().unwrap_or_default());
+    // Without the package every Chrome tool is refused here too, with the same sentence as the tool itself.
+    if !shared.chrome_control.config.available() {
+        return json!({"decision":"deny","reason":super::setup::ABSENT});
+    }
+    // Execute performs the tier check itself so the refusal reaches the model as a tool receipt.
+    if tool == "chrome_execute" {
+        return json!({"decision":"allow"});
+    }
+    match authorize(shared, session, tool, &args["toolInput"]) {
+        Ok(_) => json!({"decision":"allow"}),
+        Err(reason) => json!({"decision":"deny","reason":reason}),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[tokio::test]
+    async fn current_mode_controls_every_call_without_cards() {
+        let core = crate::offline_core::start("chrome-current-mode").await;
+        let shared = &core.shared;
+        let _ = shared
+            .store
+            .load(
+                json!({"session":{"id":"s"},"history":[],"turns":[]}),
+                vw_session::LoadKind::New,
+            )
+            .unwrap();
+        for (mode, allowed) in [
+            ("ask", false),
+            ("accept-edits", true),
+            ("smart-approve", true),
+            ("auto-approve", true),
+            ("ask", false),
+        ] {
+            shared
+                .access
+                .observe_request("session/agent/update", "s", &json!({"agentName":mode}));
+            let typed = authorize(
+                shared,
+                "s",
+                "chrome_execute",
+                &json!({"action":"page.type"}),
+            );
+            assert_eq!(typed.is_ok(), allowed, "{mode}: {typed:?}");
+            if !allowed {
+                assert!(
+                    typed
+                        .unwrap_err()
+                        .contains(&Tier::AcceptEdits.required_label())
+                );
+            }
+            assert_eq!(shared.asks.list(), [] as [vw_ask::Ask; 0]);
+        }
+        for mode in ["vw-plan", "explore", "unknown"] {
+            shared
+                .access
+                .observe_request("session/agent/update", "s", &json!({"agentName":mode}));
+            assert!(!available(shared, "s"));
+            assert_eq!(super::super::gateway::list(shared, "s"), json!([]));
+        }
+        core.shutdown().await;
+    }
+
+    /// Seen in a survey run: in Ask, `chrome_status` showed typing as available; the refusal came only at the
+    /// call. PREDICT (before the change): the listed actions carry no fact about this chat's current mode.
+    #[tokio::test]
+    async fn the_action_list_says_what_this_chats_current_mode_allows() {
+        let core = crate::offline_core::start_with("chrome-status-modes", |config, dir| {
+            config.chrome_control.package = Some(dir.join("chrome-package"));
+        })
+        .await;
+        let shared = &core.shared;
+        let _ = shared
+            .store
+            .load(
+                json!({"session":{"id":"s"},"history":[],"turns":[]}),
+                vw_session::LoadKind::New,
+            )
+            .unwrap();
+        let _seen = shared.chrome_control.owner.answering(|_, _| {
+            json!({"isError":false,"content":[{"type":"text","text":"status"}],"structuredContent":{"capabilities":{
+                "actions":[{"action":"page.read"},{"action":"page.type"},{"action":"raw.execute"},{"action":"page.key"}]}}})
+        });
+        for (mode, typing, script) in [
+            ("ask", false, false),
+            ("accept-edits", true, false),
+            ("auto-approve", true, true),
+        ] {
+            shared
+                .access
+                .observe_request("session/agent/update", "s", &json!({"agentName":mode}));
+            let status = super::super::gateway::call(shared, "s", "chrome_status", json!({}))
+                .await
+                .unwrap();
+            let rows =
+                status["vwMcpResult"]["structuredContent"]["untrustedPageContent"]["capabilities"]
+                    ["actions"]
+                    .as_array()
+                    .unwrap()
+                    .clone();
+            let row = |id: &str| rows.iter().find(|r| r["action"] == id).unwrap().clone();
+            assert_eq!(row("page.read")["allowedInThisMode"], true, "{mode}");
+            assert_eq!(row("page.type")["allowedInThisMode"], typing, "{mode}");
+            assert_eq!(row("raw.execute")["allowedInThisMode"], script, "{mode}");
+            if !typing {
+                assert_eq!(
+                    row("page.type")["needs"],
+                    Tier::AcceptEdits.required_label()
+                );
+            }
+            if !script {
+                assert_eq!(
+                    row("raw.execute")["needs"],
+                    Tier::FullAccess.required_label()
+                );
+            }
+            assert!(row("page.read").get("needs").is_none());
+            // W3 T11: page.key was marked not allowed in Ask, yet Tab and Escape ran there; the mark follows the
+            // navigation keys, and the keys that type say what they need.
+            assert_eq!(row("page.key")["allowedInThisMode"], true, "{mode}");
+            assert_eq!(
+                row("page.key").get("typingKeysNeed").cloned(),
+                (!typing).then(|| json!(Tier::AcceptEdits.required_label())),
+                "{mode}"
+            );
+            // The model reads the text part: the same facts are there.
+            let text = status["vwMcpResult"]["content"][0]["text"]
+                .as_str()
+                .unwrap();
+            assert!(text.contains("allowedInThisMode"), "{text}");
+        }
+        core.shutdown().await;
+    }
 }

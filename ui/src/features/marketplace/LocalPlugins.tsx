@@ -5,6 +5,7 @@
 import { term } from "../../vocabulary";
 import { PathLine } from "../../components/PathLine";
 import { Button, RowDisclosure } from "../../components/Controls";
+import { Icon } from "../../components/Icon";
 import { builtinPluginText, builtinSkillText } from "../../state/builtinToolsText";
 import { displayPluginName } from "../../state/pluginText";
 import { type ReactElement, type ReactNode, useState } from "react";
@@ -45,7 +46,8 @@ function Contents({ kinds, children }: { kinds: readonly string[]; children: Rea
           setOpen(!open);
         }}
       >
-        {contentsLine(kinds)}
+        <Icon name={open ? "chevron-down" : "chevron-right"} size={14} />
+        <span>{contentsLine(kinds)}</span>
       </RowDisclosure>
       {open && <ul className="ctools">{children}</ul>}
     </>

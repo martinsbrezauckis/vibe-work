@@ -124,16 +124,20 @@ for scope, folders in candidates:
                 row["issues"].append(f"Vibe selected the plugin with this name from {winner.root}.")
             row["issues"].extend(issue.message for issue in resolution.issues if issue.file.is_relative_to(folder.resolve()))
             rows.append(row)
+dropped = [{"file": str(issue.file), "message": issue.message} for issue in resolution.issues]
 # Off folders are app-owned inventory, outside Vibe's discovery roots. Resolve
 # each independently so a live namesake cannot hide an off plugin from the board.
 for root in (home / "plugins-off", cwd / ".vibe" / "plugins-off"):
     if root.is_dir() and not root.is_symlink():
         for folder in resolver._child_dirs([root]):
             reader = ToolsReader(plugin_dirs=[folder])
-            off_rows = project(reader.resolve(), True) + unreadable_rows(reader, True)  # noqa: F821 - plugin_read_guard.py is prepended by Rust.
+            off = reader.resolve()
+            off_rows = project(off, True) + unreadable_rows(reader, True)  # noqa: F821 - plugin_read_guard.py is prepended by Rust.
             for row in off_rows:
                 row["scope"] = "global" if root.parent == home else "project"
             rows.extend(off_rows)
-print(json.dumps({"plugins": rows, "dropped": [
-    {"file": str(issue.file), "message": issue.message} for issue in resolution.issues
-]}))
+            # A folder Vibe could not read as a plugin (no supported manifest, say) has no row to carry its issue.
+            roots = [plugin.root for plugin in off.plugins]
+            dropped.extend({"file": str(issue.file), "message": issue.message} for issue in off.issues
+                           if not any(issue.file.is_relative_to(r) for r in roots))
+print(json.dumps({"plugins": rows, "dropped": dropped}))

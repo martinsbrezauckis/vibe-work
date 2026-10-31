@@ -51,6 +51,7 @@ pub mod default_model;
 mod documents;
 mod events;
 pub mod exit;
+pub mod experiment_pins;
 mod export;
 mod extension_paths;
 mod files_routes;

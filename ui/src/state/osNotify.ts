@@ -13,6 +13,7 @@
  * - A session seen for the first time produces no transition (opening the app must not announce
  *   every old session), and a child (subagent) session never announces "finished".
  */
+import { promptHost } from "../features/ask/waiting";
 import { cardAsks, toolTransport } from "./askBell";
 import { pendingHistoryAsks } from "../features/transcript/model/protectedChange";
 import { type CoreState, subagentCardsOf } from "./coreModel";
@@ -37,6 +38,8 @@ export interface Transition {
   title: string;
   /** The exact permission card, when the transition opened one. */
   callbackId?: string;
+  /** The subject of a native prompt, separate from its chat title. */
+  subject?: string;
   /** Vibe's full failed-status message, when present. */
   detail?: string;
 }
@@ -49,7 +52,35 @@ function object(value: unknown): Record<string, unknown> | null {
     : null;
 }
 
-/** Notifications `prev` -> `next` calls for (one per newly opened callback). */
+/** The callbacks a parent chat hosts as subagent cards, by callback id -> the hosting parent. */
+export function hostedCards(state: CoreState): Map<string, string> {
+  const hosted = new Map<string, string>();
+  for (const [id, entry] of Object.entries(state.sessions))
+    for (const card of subagentCardsOf(state.subagentCards, id, entry.state?.["childSessions"]))
+      hosted.set(card.callbackId, id);
+  return hosted;
+}
+
+/** The announcement of a subagent card that parent chat `hostId` hosts (the card is in the parent's view). */
+export function hostedCardTransition(
+  state: CoreState,
+  hostId: string,
+  callbackId: string,
+): Transition {
+  return {
+    sessionId: hostId,
+    kind: "permission",
+    title: `Subagent in ${sessionTitle(state.sessions[hostId]?.session)}`,
+    callbackId,
+  };
+}
+
+/**
+ * Notifications `prev` -> `next` calls for (one per newly opened callback). A child chat's callback that its
+ * parent hosts as a subagent card is announced once, by the parent, even when the child chat is loaded too. One the
+ * loaded child announced before the card arrived is not announced again; the notifier moves that entry to the
+ * parent (`notifyStore`), whose view has the card.
+ */
 export function transitions(prev: CoreState, next: CoreState): Transition[] {
   if (
     prev.sessions === next.sessions &&
@@ -58,6 +89,8 @@ export function transitions(prev: CoreState, next: CoreState): Transition[] {
   )
     return [];
   const found: Transition[] = [];
+  const hosted = hostedCards(next);
+  const hostedBefore = hostedCards(prev);
   for (const ask of Object.values(next.asks)) {
     if (
       ask.surface === "native" &&
@@ -65,10 +98,12 @@ export function transitions(prev: CoreState, next: CoreState): Transition[] {
       (ask.requester !== "debugApi" || ask.personOnly) &&
       prev.asks[ask.id] === undefined
     ) {
+      const sessionId = promptHost(next, ask) ?? "";
       found.push({
-        sessionId: ask.session ?? "",
+        sessionId,
         kind: "permission",
-        title: ask.title,
+        title: sessionTitle(next.sessions[sessionId]?.session),
+        subject: ask.title,
         callbackId: ask.id,
       });
     }
@@ -84,12 +119,17 @@ export function transitions(prev: CoreState, next: CoreState): Transition[] {
       ...cardAsks(prev, id),
       ...pendingHistoryAsks(before.state?.["history"]),
     ];
+    const hostedElsewhere = (c: string): boolean => (hosted.get(c) ?? id) !== id;
     const opened = [
       ...entry.openCallbackIds,
       ...cardAsks(next, id),
       ...pendingHistoryAsks(entry.state?.["history"]),
     ].filter(
-      (c, i, all) => all.indexOf(c) === i && !earlier.includes(c) && !toolTransport(next, id, c),
+      (c, i, all) =>
+        all.indexOf(c) === i &&
+        !earlier.includes(c) &&
+        !toolTransport(next, id, c) &&
+        !hostedElsewhere(c),
     );
     const earlierChildren = new Set(
       subagentCardsOf(prev.subagentCards, id, before.state?.["childSessions"]).map(
@@ -98,13 +138,11 @@ export function transitions(prev: CoreState, next: CoreState): Transition[] {
     );
     for (const card of subagentCardsOf(next.subagentCards, id, entry.state?.["childSessions"])) {
       if (earlierChildren.has(card.callbackId) || opened.includes(card.callbackId)) continue;
+      // Already announced by the loaded child chat before the parent's card arrived.
+      if (!hostedBefore.has(card.callbackId) && openIn(prev, card.sessionId, card.callbackId))
+        continue;
       // The parent hosts this card; the child has no independently loaded transcript to open.
-      found.push({
-        sessionId: id,
-        kind: "permission",
-        title: `Subagent in ${title}`,
-        callbackId: card.callbackId,
-      });
+      found.push(hostedCardTransition(next, id, card.callbackId));
     }
     const isChild = typeof entry.session["parentSessionId"] === "string";
     const kinds: NotifyKind[] = [];
@@ -140,6 +178,17 @@ export function transitions(prev: CoreState, next: CoreState): Transition[] {
     }
   }
   return found;
+}
+
+/** Whether callback `c` was open in session `id` in `state` (its own list, card asks or a pending history ask). */
+function openIn(state: CoreState, id: string, c: string): boolean {
+  const entry = state.sessions[id];
+  return (
+    entry !== undefined &&
+    (entry.openCallbackIds.includes(c) ||
+      cardAsks(state, id).includes(c) ||
+      pendingHistoryAsks(entry.state?.["history"]).includes(c))
+  );
 }
 
 /** Whether a prompt of session `id` waits in `state`: a card, a pending history ask, or a window of its own. */
@@ -188,7 +237,13 @@ const SUMMARY: Record<NotifyKind, string> = {
 
 /** Short, readable OS title and body. The session name is bounded for system displays. */
 export function textFor(t: Transition): { title: string; body: string } {
-  const prefix = `${SUMMARY[t.kind]} · `;
+  const subject =
+    t.subject === undefined
+      ? undefined
+      : t.subject.length > 60
+        ? `${t.subject.slice(0, 59)}…`
+        : t.subject;
+  const prefix = `${subject === undefined ? SUMMARY[t.kind] : `Needs your answer: ${subject}`} · `;
   const remaining = BODY_LIMIT - prefix.length;
   const name = sessionTitle({ title: t.title });
   const bounded = name.length > remaining ? `${name.slice(0, remaining - 1)}…` : name;
@@ -197,6 +252,8 @@ export function textFor(t: Transition): { title: string; body: string } {
 
 /** Full text retained in the app and shown after notification activation. */
 export function fullTextFor(t: Transition): string {
+  if (t.kind === "permission" && t.subject !== undefined)
+    return `Vibe needs your answer about ${t.subject} in “${t.title}”.`;
   const summary: Record<NotifyKind, string> = {
     error: "stopped with an error",
     permission: "needs your answer to continue",

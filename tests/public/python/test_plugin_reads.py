@@ -95,6 +95,13 @@ class PluginReads(unittest.TestCase):
                 self.refused()
                 path.unlink()
 
+    def test_native_hook_commands_are_not_approvable(self):
+        self.write("plugin.json", json.dumps({"$schema": SCHEMA, "name": "candidate",
+                   "extensions": {"ai.mistral.vibe": {"schemaVersion": 1}}}))
+        self.write("ai.mistral.vibe/hooks.toml",
+                   "[[hooks]]\nname = 'bypass'\ntype = 'pre_tool'\ncommand = 'echo unguarded'\n")
+        self.refused()
+
     def test_standalone_formats_accept_bounded_and_reject_oversized_manifests(self):
         for manifest in MANIFESTS:
             with self.subTest(manifest=manifest):

@@ -10,7 +10,9 @@
  * While Vibe Work's own `large-4` entry is listed, Mistral's own Large 4 entry (from Mistral's lists: `growthbook` or
  * `catalog`, the row `crates/vw-core-api/src/model_check.rs` fills with facts) is left out of the composer and
  * Settings lists: it is the same model, and its alias comes from the account's list, which can name an id Mistral no
- * longer serves. A chat or default already on that alias keeps it and takes the usual fallback when it fails.
+ * longer serves and leaves the list when "Take part in Mistral's experiments" is off. A chat or default already on
+ * that alias keeps it: its list shows that entry as its one Large 4 in place of ours (nothing moves), and it takes the
+ * usual fallback when the entry is gone.
  * Depends on nothing. Called by: composer/model/models (the composer menu and new-chat preference),
  * modelChoice (Settings, the default-model card).
  * Invariants: pure; an unknown model shape is never treated as Large 4.
@@ -28,19 +30,28 @@ const isLarge4 = (row: Row): boolean => {
   return typeof name === "string" && LARGE_4.has(name);
 };
 
+/** Mistral's own Large 4 row (from Mistral's lists), never Vibe Work's own entry. */
+const isMistrals = (row: Row): boolean =>
+  isLarge4(row) &&
+  row?.["alias"] !== OWN_ALIAS &&
+  (row?.["source"] === "growthbook" || row?.["source"] === "catalog");
+
 /**
- * A filter for a model list (`ModelConfigView` rows): false for Mistral's own Large 4 row while Vibe Work's own
- * `large-4` entry is in the same list, true for every other row.
+ * A filter for a model list (`ModelConfigView` rows) that keeps one Large 4 where Vibe Work's own `large-4` entry is
+ * in the same list: ours, or, when `inUse` (the chat's model or the Settings default) is Mistral's own Large 4 entry,
+ * that entry in place of ours. True for every other row.
  */
-export function listedRows(rows: readonly Row[]): (row: Row) => boolean {
+export function listedRows(
+  rows: readonly Row[],
+  inUse: string | null = null,
+): (row: Row) => boolean {
   const ours = rows.some((row) => row?.["alias"] === OWN_ALIAS && isLarge4(row));
+  if (!ours) return () => true;
+  if (!rows.some((row) => isMistrals(row) && row?.["alias"] === inUse)) {
+    return (row) => !isMistrals(row);
+  }
   return (row) =>
-    !(
-      ours &&
-      isLarge4(row) &&
-      row?.["alias"] !== OWN_ALIAS &&
-      (row?.["source"] === "growthbook" || row?.["source"] === "catalog")
-    );
+    isMistrals(row) ? row?.["alias"] === inUse : !(row?.["alias"] === OWN_ALIAS && isLarge4(row));
 }
 
 /**

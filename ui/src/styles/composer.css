@@ -488,6 +488,36 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* The Chrome tab picker: rows are buttons (keyboard reachable), so the browser's button look is reset; the
+   title is plain menu text over the muted profile and address, not the command style above. */
+.chrome-tabs-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-right: 4px;
+}
+.chrome-tabs .it {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 2px;
+  width: 100%;
+  margin: 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-size: var(--text-13);
+  text-align: left;
+}
+.chrome-tabs .it:hover,
+.chrome-tabs .it:focus-visible {
+  background: var(--hover);
+  color: var(--text);
+}
+.chrome-tab-title {
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .slash-empty {
   padding: 10px;
   font-size: var(--text-13);

@@ -120,3 +120,7 @@ pub(crate) async fn check(shared: &Arc<Shared>) -> Result<Value, CoreError> {
     let gone = crate::model_choices::unavailable_default_alias(&reply["config"]);
     Ok(json!({"gone": gone}))
 }
+
+#[cfg(all(test, unix))]
+#[path = "model_check_tests.rs"]
+mod tests;

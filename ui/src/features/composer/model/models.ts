@@ -72,13 +72,17 @@ function choiceOf(value: JsonValue): ModelChoice | null {
   };
 }
 
-/** The configured models, in Vibe's order (Mistral's own Large 4 left out beside ours, `state/thinkingLevels`). */
+/**
+ * The configured models, in Vibe's order, with one Large 4 (`state/thinkingLevels`): Mistral's own entry is left out
+ * beside ours unless it is the active model.
+ */
 export function modelChoices(source: JsonValue | undefined): ModelChoice[] {
   const config = configView(source);
   const models = config?.["models"];
   if (!Array.isArray(models)) return [];
   const active = obj(config?.["activeModel"]);
-  const listed = listedRows(models.map(obj));
+  const inUse = active?.["alias"];
+  const listed = listedRows(models.map(obj), typeof inUse === "string" ? inUse : null);
   return models.flatMap((m) => {
     const row = obj(m);
     if (!listed(row)) return [];

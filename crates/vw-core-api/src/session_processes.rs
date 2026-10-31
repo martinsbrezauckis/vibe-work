@@ -1,7 +1,9 @@
 //! The processes panel: one session's processes, their latest output, and Stop. The window also
 //! shows a "Left running" list; this module serves the session part.
 //!
-//! Two kinds, and why both: Vibe's own background processes (session state `backgroundProcesses`; output through
+//! Three kinds. A server the person started in the session's Terminal tab (`terminal`: a listening process in a
+//! terminal shell's tree, named by its executable, never its arguments; the output is in the Terminal tab; the
+//! person's Stop here stops it). Vibe's own background processes (session state `backgroundProcesses`; output through
 //! `session/backgroundProcess/output` with `fromEnd`; Stop through `session/backgroundProcess/stop`, which since Vibe
 //! 2.26.1 also stops what they started) end with Vibe or the session's channel; the processes the agent
 //! started through Vibe Work's `process_start` keep running until stopped (output from their log; Stop
@@ -10,7 +12,8 @@
 //! Depends on: the gate (Vibe calls), `agent_tools::panel`, `processes` (blocking, `stop_process_for_user`),
 //! base64. Called by: `left_running` (`processes` command ops `session`, `output`, `stopSession`).
 //! Invariants: an id names a process of THIS session (a `vibe:` id must be in the session's state, a `started:` id
-//! among its live started processes) or the request is `notFound`; nothing is stopped without that check.
+//! among its live started processes, a `terminal:` id among the listening processes of its terminals) or the request
+//! is `notFound`; nothing is stopped without that check.
 
 use base64::Engine as _;
 use serde_json::{Value, json};
@@ -35,8 +38,16 @@ fn started_id(process: ProcessRef) -> String {
     format!("started:{}-{}", process.pid, process.start.0)
 }
 
+fn terminal_id(process: ProcessRef) -> String {
+    format!("terminal:{}-{}", process.pid, process.start.0)
+}
+
 fn parse_started(id: &str) -> Option<ProcessRef> {
-    let (pid, start) = id.strip_prefix("started:")?.split_once('-')?;
+    parse_ref(id.strip_prefix("started:")?)
+}
+
+fn parse_ref(id: &str) -> Option<ProcessRef> {
+    let (pid, start) = id.split_once('-')?;
     Some(ProcessRef {
         pid: pid.parse().ok()?,
         start: StartToken(start.parse().ok()?),
@@ -98,12 +109,81 @@ impl Core {
             .collect())
     }
 
+    /// The listening processes started in the session's Terminal tab: each listening process in a terminal shell's
+    /// tree (the shell itself excluded), named by its executable.
+    async fn terminal_processes(
+        &self,
+        session_id: &str,
+    ) -> Result<Vec<SessionProcessView>, CoreError> {
+        let monitor = self.shared.procmon.clone();
+        let id = session_id.to_owned();
+        blocking(move || {
+            let Ok(snapshot) = monitor.scan() else {
+                return Vec::new();
+            };
+            let shells: Vec<ProcessRef> = monitor
+                .registry()
+                .for_session(&id)
+                .into_iter()
+                .filter(|p| p.label == crate::terminal_procmon::LABEL)
+                .map(|p| p.process)
+                .filter(|shell| {
+                    snapshot
+                        .alive(shell.pid)
+                        .is_some_and(|p| p.start == Some(shell.start))
+                })
+                .collect();
+            let mut found: Vec<SessionProcessView> = Vec::new();
+            for listener in &snapshot.listeners {
+                let Some(info) = listener.pid.and_then(|pid| snapshot.alive(pid)) else {
+                    continue;
+                };
+                let Some(process) = info.reference() else {
+                    continue;
+                };
+                if !shells
+                    .iter()
+                    .any(|shell| shell.pid != info.pid && snapshot.descends_from(info.pid, *shell))
+                {
+                    continue;
+                }
+                let item_id = terminal_id(process);
+                if let Some(item) = found.iter_mut().find(|i| i.id == item_id) {
+                    if !item.ports.contains(&listener.port) {
+                        item.ports.push(listener.port);
+                        item.ports.sort_unstable();
+                    }
+                    continue;
+                }
+                found.push(SessionProcessView {
+                    id: item_id,
+                    kind: "terminal".to_owned(),
+                    command: info.exe_name(),
+                    status: "running".to_owned(),
+                    pid: Some(info.pid),
+                    ports: vec![listener.port],
+                    earlier: false,
+                });
+            }
+            found
+        })
+        .await
+    }
+
     /// `processes session`.
     pub(crate) async fn session_panel(
         &self,
         session_id: &str,
     ) -> Result<ProcessesResult, CoreError> {
         let mut items = self.started_processes(session_id).await?;
+        let started: Vec<Option<u32>> = items.iter().map(|i| i.pid).collect();
+        // A process the agent started is listed once, as the agent's, also when a terminal is its ancestor.
+        items.extend(
+            self.terminal_processes(session_id)
+                .await?
+                .into_iter()
+                .filter(|t| !started.contains(&t.pid)),
+        );
         items.extend(self.vibe_processes(session_id));
         // Running first, then the rest in the order found.
         items.sort_by_key(|i| i.status != "running");
@@ -138,6 +218,22 @@ impl Core {
                 id: id.to_owned(),
                 available: text.is_some(),
                 text: text.unwrap_or_default(),
+            });
+        }
+        if id.starts_with("terminal:") {
+            if !self
+                .terminal_processes(session_id)
+                .await?
+                .iter()
+                .any(|p| p.id == id)
+            {
+                return Err(not_here());
+            }
+            // Its output is in the Terminal tab.
+            return Ok(ProcessesResult::Output {
+                id: id.to_owned(),
+                available: false,
+                text: String::new(),
             });
         }
         let process = parse_started(id).ok_or_else(not_here)?;
@@ -181,15 +277,29 @@ impl Core {
                 .map_err(|e| CoreError::from_gate("session/backgroundProcess/stop", &e))?;
             return Ok(ProcessesResult::StoppedSession { id: id.to_owned() });
         }
-        let process = parse_started(id).ok_or_else(not_here)?;
-        if !self
-            .started_processes(session_id)
-            .await?
-            .iter()
-            .any(|p| p.id == id)
-        {
-            return Err(not_here());
-        }
+        let process = if let Some(rest) = id.strip_prefix("terminal:") {
+            let process = parse_ref(rest).ok_or_else(not_here)?;
+            if !self
+                .terminal_processes(session_id)
+                .await?
+                .iter()
+                .any(|p| p.id == id)
+            {
+                return Err(not_here());
+            }
+            process
+        } else {
+            let process = parse_started(id).ok_or_else(not_here)?;
+            if !self
+                .started_processes(session_id)
+                .await?
+                .iter()
+                .any(|p| p.id == id)
+            {
+                return Err(not_here());
+            }
+            process
+        };
         let outcome = self.stop_process_for_user(process).await?;
         if !outcome.gone {
             return Err(CoreError::new(

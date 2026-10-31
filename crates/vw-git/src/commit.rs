@@ -205,6 +205,7 @@ pub struct Expected {
 /// # Errors
 /// `Blocked` (detached, operation in progress, program check, empty message or list), `Stale` (the branch,
 /// `HEAD` or a listed path moved), `Rejected` (git refused the commit; its words), git failures.
+#[allow(clippy::too_many_arguments)]
 pub fn commit(
     root: &Path,
     git_dir: &Path,
@@ -213,6 +214,7 @@ pub fn commit(
     expected: &Expected,
     scratch: &Path,
     run_hooks: bool,
+    author: Option<&crate::identity::CommitIdentity>,
 ) -> Result<Committed, GitError> {
     if message.trim().is_empty() {
         return Err(GitError::Blocked(
@@ -272,7 +274,7 @@ pub fn commit(
     let message_file = scratch.join("commit-message");
     write_private(&paths_file, &raw)?;
     write_private(&message_file, message.as_bytes())?;
-    let result = run_commit(root, &paths_file, &message_file, run_hooks);
+    let result = run_commit(root, &paths_file, &message_file, run_hooks, author);
     let _ = std::fs::remove_file(&paths_file);
     let _ = std::fs::remove_file(&message_file);
     let output = result?;
@@ -286,6 +288,7 @@ fn run_commit(
     paths_file: &Path,
     message_file: &Path,
     run_hooks: bool,
+    author: Option<&crate::identity::CommitIdentity>,
 ) -> Result<String, GitError> {
     let mut spec = std::ffi::OsString::from("--pathspec-from-file=");
     spec.push(paths_file);
@@ -303,9 +306,17 @@ fn run_commit(
             clip(&add.stderr, 400)
         )));
     }
-    let mut call = Call::new(root, Index::User)
-        .profile(Profile::Worktree)
-        .args(["--literal-pathspecs", "commit", "--pathspec-file-nul"]);
+    let mut call = Call::new(root, Index::User).profile(Profile::Worktree);
+    // An author for this commit only (a copy, whose config is shared): never written into any config.
+    if let Some(author) = author {
+        call = call.args([
+            "-c".to_owned(),
+            format!("user.name={}", author.name.trim()),
+            "-c".to_owned(),
+            format!("user.email={}", author.email.trim()),
+        ]);
+    }
+    let mut call = call.args(["--literal-pathspecs", "commit", "--pathspec-file-nul"]);
     if run_hooks {
         // The user's own commit runs the repository's commit hooks, like `git commit` in a terminal (switch on).
         call = call.with_repo_hooks().timeout(HOOKS_TIMEOUT);

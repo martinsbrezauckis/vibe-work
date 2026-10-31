@@ -34,6 +34,10 @@ pub(crate) struct TitleGuard {
 }
 
 impl TitleGuard {
+    /// Whether text holds a known vault value by the title-withholding rule.
+    pub(crate) fn contains(&self, text: &str) -> bool {
+        self.withheld(text).is_some()
+    }
     /// `text` with the parts of a vault value withheld, or `None` when nothing is withheld.
     fn withheld(&self, text: &str) -> Option<String> {
         let values = self.values.read().unwrap_or_else(PoisonError::into_inner);
@@ -138,5 +142,57 @@ pub(crate) async fn watch(shared: Weak<Shared>, mut events: broadcast::Receiver<
             return;
         };
         refresh(&shared).await;
+    }
+}
+
+#[cfg(test)]
+mod history_tests {
+    use super::*;
+    #[tokio::test]
+    async fn typed_history_never_writes_a_prompt_containing_a_vault_value_or_matching_part() {
+        let f = crate::feature_test_core::Fixture::new().await;
+        let value = "feAT907$Synthet1c_K3y!long";
+        f.core
+            .shared
+            .titles
+            .values
+            .write()
+            .unwrap()
+            .push(VaultScanSecret {
+                id: "invented".into(),
+                name: "invented".into(),
+                login_id: None,
+                modified_ms: 0,
+                website_password: false,
+                value: vw_vault::SecretString::exact(value),
+            });
+        let path = f.root.join("cli/vibehistory");
+        for text in [
+            format!("send {value}"),
+            "matching Synthet1c_K3y here".to_owned(),
+        ] {
+            f.core
+                .execute(
+                    crate::Origin::Ui,
+                    crate::Command::PromptHistory { text: Some(text) },
+                )
+                .await
+                .unwrap();
+            assert!(!path.exists());
+        }
+        f.core
+            .execute(
+                crate::Origin::Ui,
+                crate::Command::PromptHistory {
+                    text: Some("ordinary prompt".into()),
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "\"ordinary prompt\"\n"
+        );
+        f.finish().await;
     }
 }

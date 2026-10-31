@@ -141,19 +141,6 @@ pub fn drives(route: &str, body: &Value) -> bool {
 pub fn for_request(route: &str, body: &Value, facts: Option<&dyn GrantFacts>) -> Vec<Grant> {
     let action = text(body, "action").unwrap_or("");
     match (route, action) {
-        ("settings", "chrome") if text(body, "do") == Some("level") => text(body, "level")
-            .filter(|level| matches!(*level, "browse" | "fill" | "act"))
-            .map(|level| {
-                vec![Grant::new(
-                    "settings.chrome.level",
-                    vec![
-                        ("/type", json!("chromeControl")),
-                        ("/request/op", json!("setLevel")),
-                        ("/request/level", json!(level)),
-                    ],
-                )]
-            })
-            .unwrap_or_default(),
         // Folders are given as paths: the page's `pickFolder` for exactly this path.
         ("worktrees", "folder") => text(body, "path")
             .map(|path| vec![pick_folder("worktrees.folder", path)])

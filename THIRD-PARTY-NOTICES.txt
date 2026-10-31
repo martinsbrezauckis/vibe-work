@@ -109,7 +109,7 @@ Production dependency notices
 -----------------------------
 
 The npm closure below contains 176 production packages of the user interface. The Cargo rows
-contain 649 unique package/version/licence/source records of the shipped binaries; each lists the
+contain 653 unique package/version/licence/source records of the shipped binaries; each lists the
 supported target graphs that include it. Build-only and test-only dependencies are excluded.
 
 npm production dependency closure
@@ -393,6 +393,8 @@ Cargo normal dependency graphs
 - cpufeatures@0.3.1 — MIT OR Apache-2.0; crates.io; linux,macos,windows
 - crc32fast@1.5.2 — MIT OR Apache-2.0; crates.io; linux,macos,windows
 - crossbeam-channel@0.5.17 — MIT OR Apache-2.0; crates.io; linux,macos,windows
+- crossbeam-deque@0.8.8 — MIT OR Apache-2.0; crates.io; linux,macos,windows
+- crossbeam-epoch@0.9.21 — MIT OR Apache-2.0; crates.io; linux,macos,windows
 - crossbeam-utils@0.8.23 — MIT OR Apache-2.0; crates.io; linux,macos,windows
 - crypto-common@0.1.7 — MIT OR Apache-2.0; crates.io; linux,macos,windows
 - crypto-common@0.2.2 — MIT OR Apache-2.0; crates.io; linux,macos,windows
@@ -505,6 +507,7 @@ Cargo normal dependency graphs
 - glib-macros@0.18.5 — MIT; crates.io; linux
 - glib-sys@0.18.1 — MIT; crates.io; linux
 - glob@0.3.4 — MIT OR Apache-2.0; crates.io; linux,macos,windows
+- globset@0.4.21 — Unlicense OR MIT; crates.io; linux,macos,windows
 - gobject-sys@0.18.0 — MIT; crates.io; linux
 - gtk@0.18.2 — MIT; crates.io; linux
 - gtk-sys@0.18.2 — MIT; crates.io; linux
@@ -546,6 +549,7 @@ Cargo normal dependency graphs
 - ident_case@1.0.1 — MIT/Apache-2.0; crates.io; linux,macos,windows
 - idna@1.1.0 — MIT OR Apache-2.0; crates.io; linux,macos,windows
 - idna_adapter@1.2.2 — Apache-2.0 OR MIT; crates.io; linux,macos,windows
+- ignore@0.4.34 — Unlicense OR MIT; crates.io; linux,macos,windows
 - indexmap@1.9.3 — Apache-2.0 OR MIT; crates.io; linux,macos,windows
 - indexmap@2.14.2 — Apache-2.0 OR MIT; crates.io; linux,macos,windows
 - infer@0.22.0 — MIT; crates.io; linux,macos,windows

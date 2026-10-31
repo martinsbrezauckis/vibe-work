@@ -167,6 +167,31 @@ fn over_budget_plugin_cannot_inherit_approval_at_launch() {
     assert!(!home.join("plugin-data").exists());
 }
 
+#[test]
+fn native_hooks_cannot_inherit_a_manual_or_market_approval() {
+    let scratch = Scratch::new("plugin-hooks");
+    let home = scratch.0.join("home");
+    let folder = home.join("plugins/candidate");
+    std::fs::create_dir_all(folder.join("ai.mistral.vibe")).unwrap();
+    std::fs::write(folder.join("plugin.json"), r#"{"$schema":"https://agent-plugins.org/schemas/1.0.0/plugin.schema.json","name":"candidate","extensions":{"ai.mistral.vibe":{"schemaVersion":1}}}"#).unwrap();
+    std::fs::write(
+        folder.join("ai.mistral.vibe/hooks.toml"),
+        "[[hooks]]\nname = 'bypass'\ntype = 'pre_tool'\ncommand = 'echo unguarded'\n",
+    )
+    .unwrap();
+    let identity = crate::plugin_identity::PluginIdentity::new(Some(python()));
+    assert_eq!(identity.name(&folder, &home).unwrap(), None);
+    // An old name approval must not authorize hooks added later, including a changed Market install.
+    let approvals = crate::plugin_approvals::PluginApprovals::new(&home).unwrap();
+    approvals.set(&folder, Some("candidate")).unwrap();
+    approvals.before_launch(&server()).unwrap();
+    assert!(!folder.exists());
+    assert!(
+        home.join("plugins-off/candidate/ai.mistral.vibe/hooks.toml")
+            .exists()
+    );
+}
+
 /// The Tools reader reads, of the folders in `plugins/`, only those its sweep kept: a folder copied in after the
 /// sweep is not read (and so not listed) until a sweep has checked it.
 #[tokio::test]
@@ -229,6 +254,38 @@ async fn the_reader_reports_each_plugins_version_and_author() {
         .unwrap_or_else(|| panic!("{view}"));
     assert_eq!(row["version"], "1.4.2", "{row}");
     assert_eq!(row["author"], "Example Maker", "{row}");
+}
+
+/// A turned-off plugin Vibe cannot read (here a `plugin.json` without `$schema`) is not listed as a plugin; Vibe's
+/// reason reaches the board's dropped notes instead of disappearing.
+#[tokio::test]
+async fn an_off_plugin_vibe_cannot_read_is_reported_as_dropped() {
+    let scratch = Scratch::new("plugin-off-unread");
+    let home = scratch.0.join("home");
+    let folder = home.join("plugins-off/noschema");
+    std::fs::create_dir_all(&folder).unwrap();
+    std::fs::write(folder.join("plugin.json"), r#"{"name":"noschema"}"#).unwrap();
+    let cwd = scratch.0.join("project");
+    std::fs::create_dir_all(&cwd).unwrap();
+    let options = serde_json::json!({"builtinRoots": [], "workspaceRoots": [], "kept": []});
+    let mut command = discovery_command(&python(), &home, &cwd, &options);
+    let output = inventory_output(&mut command, Duration::from_secs(30))
+        .await
+        .unwrap();
+    let view: serde_json::Value = serde_json::from_slice(&output).unwrap();
+    let dropped = view["dropped"].as_array().unwrap();
+    assert!(
+        dropped.iter().any(|d| d["file"]
+            .as_str()
+            .is_some_and(|f| std::path::Path::new(f).starts_with(&folder))
+            && d["message"].as_str().is_some_and(|m| !m.is_empty())),
+        "{view}"
+    );
+    let notes = crate::market_project::dropped(&serde_json::json!({"plugins": view}));
+    assert!(
+        notes.iter().any(|n| n.file.starts_with("noschema")),
+        "the board shows it: {notes:?}"
+    );
 }
 
 /// Timing, run by hand: the sweep before each Vibe load checks every approved plugin's manifest name with one

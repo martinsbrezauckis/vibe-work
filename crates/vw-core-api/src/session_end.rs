@@ -6,8 +6,8 @@
 //! (`left_running.rs` asks the user about them). An archived session may still be finishing a turn ("closing now
 //! would end a running turn"), so its channel closes when it is quiet, and its resources (terminals, own processes,
 //! preview, page and file viewers, lease) end at that moment too, not mid-turn. Unarchiving before that cancels the
-//! wait. Archive is refused before Vibe for a quiet chat without a turn: Vibe has not saved it, so
-//! an archive could not be undone after restarting. Confirmed delete still ends such a chat.
+//! wait. Archive is refused before Vibe for a quiet chat Vibe never stored (no turn, no message ever): an archive
+//! of it could not be undone after restarting. Confirmed delete still ends such a chat.
 //!
 //! Depends on: `core::Shared`, `processes`, `terminals`, `previews`, `pages`, `files`, `projects_filing`,
 //! `worktrees`, `recovery` (`working`), `names`. Called by: `sessions::observe` (delete, for typed commands and the
@@ -87,7 +87,11 @@ pub(crate) fn missing_reply(
     }
 }
 
-/// The core's copy of a quiet chat that has no turn: one Vibe never stored.
+/// The core's copy of a quiet chat Vibe never stored: no turn, and Vibe never recorded a message for it.
+///
+/// No turns alone is not enough: Vibe's answer to an in-place rewind drops every turn, even when the history keeps
+/// earlier turns' entries. Vibe stores a chat at its first accepted message and moves its `bumpedAt` then (it only
+/// ever moves forward); a chat without one reads `bumpedAt == createdAt` (`PublicSession._default_bumped_at`).
 fn never_ran(shared: &Shared, params: &Value) -> Option<Value> {
     let id = params.get("sessionId").and_then(Value::as_str)?;
     let view = shared.store.view(id)?;
@@ -97,7 +101,13 @@ fn never_ran(shared: &Shared, params: &Value) -> Option<Value> {
             .and_then(Value::as_str),
         Some("running" | "blocked")
     );
+    let session = &view.state["session"];
+    let stored = matches!(
+        (session["bumpedAt"].as_i64(), session["createdAt"].as_i64()),
+        (Some(bumped), Some(created)) if bumped > created
+    );
     (quiet
+        && !stored
         && view
             .state
             .get("turns")
@@ -183,6 +193,7 @@ pub(crate) async fn deletion_children(
 
 /// A session was deleted (Vibe confirmed `session/delete`): everything of it ends now.
 pub(crate) async fn deleted(shared: &Shared, id: &str) {
+    crate::chrome_control::end_chat(shared, id, true);
     locked(&shared.ends.pending).remove(id);
     // The title is read before the store forgets the session (the "left running" list names it).
     if let Some(title) = shared.names.title_of(&shared.store, id) {
@@ -293,3 +304,7 @@ async fn teardown_archived(shared: &Shared, id: &str) {
     crate::pages::session_ended(shared, id).await;
     crate::files::session_ended(shared, id).await;
 }
+
+#[cfg(test)]
+#[path = "session_end_tests.rs"]
+mod tests;

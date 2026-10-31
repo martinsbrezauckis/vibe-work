@@ -39,6 +39,9 @@ pub(crate) struct SessionEntry {
     pub(crate) hole_read: Option<(u64, u64)>,
     /// Set when a read dropped held events past a hole: the load asks for ONE delayed re-read.
     pub(crate) reread_later: bool,
+    /// A turn listed from Vibe's `turn/start` reply before any event of Vibe's named it
+    /// (`SessionStore::note_accepted_turn`); cleared when Vibe reports that turn or the state is replaced.
+    pub(crate) accepted_turn: Option<String>,
 }
 
 /// Reads `state.eventId` as an unsigned integer (0 when absent: a fresh session has none).
@@ -61,7 +64,18 @@ impl SessionEntry {
             resynced_for_entry: None,
             hole_read: None,
             reread_later: false,
+            accepted_turn: None,
         }
+    }
+
+    /// True when the session lists no turn of Vibe's own: none at all, or only the one accepted from a
+    /// `turn/start` reply whose events have not arrived.
+    pub(crate) fn no_reported_turn(&self) -> bool {
+        self.state["turns"].as_array().is_some_and(|turns| {
+            turns.iter().all(|t| {
+                t["id"].as_str().is_some() && t["id"].as_str() == self.accepted_turn.as_deref()
+            })
+        })
     }
 
     /// Session id of the held state.
@@ -109,6 +123,7 @@ impl SessionEntry {
             self.log.clear();
         }
         self.state = state;
+        self.accepted_turn = None;
         self.resync_pending = false;
         let mark = self.last_event_id;
         let mut backlog: Vec<(u64, Notification)> = self

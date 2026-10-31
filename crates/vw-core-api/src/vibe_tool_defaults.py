@@ -13,7 +13,7 @@ with several usable classes gets the union of their defaults: an entry any of th
 import inspect
 import json
 
-from vibe.core.tools.manager import DEFAULT_TOOL_DIR, ToolManager
+from vibe.core.tools.manager import builtin_tool_classes
 
 
 def available(cls):
@@ -26,7 +26,7 @@ def available(cls):
 
 
 variants = {}
-for cls in ToolManager._iter_tool_classes([DEFAULT_TOOL_DIR.path]):
+for cls in builtin_tool_classes():
     try:
         variants.setdefault(cls.get_name(), []).append(cls)
     except Exception:

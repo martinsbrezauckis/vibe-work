@@ -33,7 +33,7 @@ import { RowView } from "./rows/RowView";
 import { TodoStrip } from "./TodoStrip";
 import { onCardFocusRequest, pendingCardFocus } from "../ask/cardFocus";
 import { protectedChangeOf } from "./model/protectedChange";
-import { obj, str } from "./model/entries";
+import { str } from "./model/entries";
 import { useFollow } from "./useFollow";
 import { useQuoteMenu } from "./useQuoteMenu";
 
@@ -47,16 +47,13 @@ function list(value: JsonValue | undefined): readonly JsonValue[] {
 function waiting(row: Row): boolean {
   if (row.kind === "callback") return true;
   if (row.kind === "protectedChange") return protectedChangeOf(row.entry)?.status === "pending";
-  if (row.kind !== "chromeAsk") return false;
-  const card = row.entry["chromeAsk"];
-  return typeof card === "object" && card !== null && !Array.isArray(card) && card["open"] === true;
+  return false;
 }
 
 /** The AskCard id a row holds (`AskCard`'s `id`), if it is a card. */
 function cardIdOfRow(row: Row): string | null {
   if (row.kind === "protectedChange") return row.key;
   if (row.kind === "callback") return str(row.entry["callbackId"]);
-  if (row.kind === "chromeAsk") return str(obj(row.entry["chromeAsk"])?.["askId"]);
   return null;
 }
 

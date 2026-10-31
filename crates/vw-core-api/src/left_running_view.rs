@@ -62,12 +62,15 @@ pub enum ProcessesRequest {
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct SessionProcessView {
-    /// Opaque handle for `output` and `stopSession` (`vibe:<processId>` or `started:<pid>-<start token>`).
+    /// Opaque handle for `output` and `stopSession` (`vibe:<processId>`, `started:<pid>-<start token>` or
+    /// `terminal:<pid>-<start token>`).
     pub id: String,
-    /// `vibe` (Vibe's background process: it ends when Vibe or the session's channel ends) or `started` (started
-    /// for the agent by Vibe Work: it keeps running until stopped, also across quit).
+    /// `vibe` (Vibe's background process: it ends when Vibe or the session's channel ends), `started` (started
+    /// for the agent by Vibe Work: it keeps running until stopped, also across quit) or `terminal` (a server the
+    /// person started in the session's Terminal tab).
     pub kind: String,
-    /// The command as the agent wrote it, when known.
+    /// The command as the agent wrote it, when known; for a `terminal` one its program's executable name (never its
+    /// arguments).
     pub command: Option<String>,
     /// `running`, `exited`, `orphaned`, ... (Vibe's word for its own; `running` for a live started one).
     pub status: String,

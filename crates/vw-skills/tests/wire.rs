@@ -190,15 +190,15 @@ fn optional_fields_are_none_and_declared_defaults_match_vibe() {
 
 #[test]
 fn model_thinking_levels_use_vibes_factory_when_missing() {
-    let model: ModelConfigView = serde_json::from_value(json!({"name":"m", "alias":"a", "thinking":ThinkingLevel::Off, "supportsImages":false, "displayName":"fixture-model"})).unwrap();
+    let model: ModelConfigView = serde_json::from_value(json!({"name":"m", "alias":"a", "thinking":"off".to_owned(), "supportsImages":false, "displayName":"fixture-model"})).unwrap();
     assert_eq!(
         model.thinking_levels,
         vec![
-            ThinkingLevel::Off,
-            ThinkingLevel::Low,
-            ThinkingLevel::Medium,
-            ThinkingLevel::High,
-            ThinkingLevel::Max
+            "off".to_owned(),
+            "low".to_owned(),
+            "medium".to_owned(),
+            "high".to_owned(),
+            "max".to_owned()
         ]
     );
 }
@@ -208,11 +208,11 @@ fn thinking_levels_match_the_vibe_wire_values_in_both_directions() {
     let fixture: Value =
         serde_json::from_str(include_str!("fixtures/thinking-levels.json")).unwrap();
     let levels = vec![
-        ThinkingLevel::Off,
-        ThinkingLevel::Low,
-        ThinkingLevel::Medium,
-        ThinkingLevel::High,
-        ThinkingLevel::Max,
+        "off".to_owned(),
+        "low".to_owned(),
+        "medium".to_owned(),
+        "high".to_owned(),
+        "max".to_owned(),
     ];
     assert_eq!(serde_json::to_value(&levels).unwrap(), fixture);
     assert_eq!(
@@ -226,13 +226,13 @@ fn a_later_vibes_thinking_level_never_fails_a_model_answer() {
     let model: ModelConfigView = serde_json::from_value(json!({"name":"m", "alias":"a", "thinking":"xhigh",
         "thinkingLevels":["off","xhigh","future-level"], "supportsImages":false, "displayName":"fixture-model"}))
     .unwrap();
-    assert_eq!(model.thinking, ThinkingLevel::Xhigh);
+    assert_eq!(model.thinking, "xhigh".to_owned());
     assert_eq!(
         model.thinking_levels,
         vec![
-            ThinkingLevel::Off,
-            ThinkingLevel::Xhigh,
-            ThinkingLevel::Unrecognized
+            "off".to_owned(),
+            "xhigh".to_owned(),
+            "future-level".to_owned()
         ]
     );
 }
@@ -261,4 +261,20 @@ fn missing_required_fields_and_wrong_known_types_are_rejected() {
         .is_err()
     );
     assert!(serde_json::from_value::<RuntimeMutationResponse>(json!({"runtime":{}})).is_err());
+}
+
+#[test]
+fn provider_thinking_strings_survive_a_round_trip() {
+    let model: ModelConfigView = serde_json::from_value(json!({
+        "name":"m", "alias":"a", "thinking":"provider-future",
+        "thinkingLevels":["off","xhigh","provider-future"],
+        "supportsImages":false, "displayName":"fixture-model"
+    }))
+    .unwrap();
+    let encoded = serde_json::to_value(model).unwrap();
+    assert_eq!(encoded["thinking"], "provider-future");
+    assert_eq!(
+        encoded["thinkingLevels"],
+        json!(["off", "xhigh", "provider-future"])
+    );
 }

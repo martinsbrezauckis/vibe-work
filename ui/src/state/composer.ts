@@ -327,10 +327,14 @@ export function createComposer(deps: {
         const request = ++menuRequest;
         composer.setMenu(kind === null ? null : { sessionId, kind });
         if (kind === null) return;
-        // Attached chats receive Vibe's runtime updates. The new-chat menu reads the lobby.
+        // The new-chat menu reads the lobby. A chat's menu re-reads the chat's models: its runtime can be older
+        // than Vibe's list (a reopened chat kept the models of its last read). A read already running answers it
+        // (`coreStore` run).
         if (kind === "model" && sessionId === NEW_CHAT) {
           const loaded = await deferred.loadConfig();
           if (!loaded && request === menuRequest) composer.setMenu(null);
+        } else if (kind === "model") {
+          await deferred.loadRuntime(sessionId);
         }
       },
       setAccess(sessionId: string, agentName: string, trustedClick = false): Promise<boolean> {
@@ -504,6 +508,7 @@ export function createComposer(deps: {
             "Context",
           source: item.source.trim().slice(0, 40) || "context",
           text: item.text,
+          ...(item.modelText === undefined ? {} : { modelText: item.modelText }),
           ...(item.ref === undefined ? {} : { ref: item.ref }),
           ...(origin === "debug-api" ? { by: "debug-api" as const } : {}),
         });

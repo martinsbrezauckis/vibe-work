@@ -62,6 +62,11 @@
       "title": "Enableupdatechecks",
       "type": "boolean"
     },
+    "experimentalEnableLocalProjects": {
+      "default": false,
+      "title": "Experimentalenablelocalprojects",
+      "type": "boolean"
+    },
     "experimentalEnableRegistrySkills": {
       "default": false,
       "title": "Experimentalenableregistryskills",

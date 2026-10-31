@@ -1,5 +1,5 @@
 //! Session-scoped tab listing and agent close decisions for `browser_act`.
-//! Depends on the tab registry, native confirmer, Stop signal and session action log.
+//! Depends on the tab registry, chat access mode, Stop signal and session action log.
 //! Called before agent page selection so a list or close never opens or fronts a tab.
 
 use std::sync::Arc;
@@ -7,15 +7,27 @@ use std::sync::Arc;
 use serde_json::{Value, json};
 use vw_browser::delegation::DelegationAuthority;
 use vw_browser::{Actor, Outcome};
-use vw_gate::{ConfirmationRequest, Requester, dialog_value};
 use vw_preview::{PageTab, PageTabKind, PageTabOwner, PreviewService, PreviewState};
 
 use crate::browser::browser;
 use crate::core::Shared;
 use crate::previews::hub;
 
-/// Native confirmation method for a user-origin tab. The host shows Close and Keep.
-pub(crate) const CLOSE_METHOD: &str = "vibe-work/browserCloseTab";
+fn close_allowed(shared: &Shared, owner: &str, user_origin: bool) -> Result<(), String> {
+    let mode = crate::chrome_control::check::mode(shared, owner);
+    let tier = mode
+        .as_deref()
+        .and_then(vw_ask::chrome::Tier::from_mode)
+        .ok_or("Not run: closing browser tabs is unavailable in this access mode.")?;
+    if user_origin && tier < vw_ask::chrome::Tier::AcceptEdits {
+        return Err(format!(
+            "Not run: closing this tab needs {}; this chat is in {}.",
+            vw_ask::chrome::Tier::AcceptEdits.required_label(),
+            vw_ask::chrome::Tier::Ask.label()
+        ));
+    }
+    Ok(())
+}
 
 fn bounded(value: Option<&str>, max: usize) -> Option<String> {
     value.map(|value| value.chars().take(max).collect())
@@ -61,7 +73,7 @@ fn still_running(shared: &Shared, owner: &str, key: &str) -> Result<(), String> 
     Ok(())
 }
 
-pub(crate) async fn prepare_close(
+pub(crate) fn prepare_close(
     shared: &Arc<Shared>,
     owner: &str,
     key: &str,
@@ -86,7 +98,7 @@ pub(crate) async fn prepare_close(
     let prepared = match key {
         "" => Err("close_tab needs an explicit tab id".to_owned()),
         "new" => Err("close_tab needs an existing web tab id".to_owned()),
-        _ => prepare_close_action(shared, owner, key).await,
+        _ => prepare_close_action(shared, owner, key),
     };
     let action = match prepared {
         Ok(action) => action,
@@ -122,7 +134,7 @@ fn log_close(shared: &Shared, owner: &str, target: &str, result: &Result<Value, 
     }
 }
 
-async fn prepare_close_action(
+fn prepare_close_action(
     shared: &Arc<Shared>,
     owner: &str,
     key: &str,
@@ -141,37 +153,7 @@ async fn prepare_close_action(
         .handoff_review_fingerprint(owner, key)
         .map_err(|error| error.to_string())?;
     let user_origin = tab.owner_kind != Some(PageTabOwner::Agent);
-    let permission = crate::browser_delegation::load(shared).close_user_tabs;
-    let mut permitted_by_answer = false;
-    if user_origin && !permission {
-        let title = tab
-            .preview
-            .as_ref()
-            .and_then(|view| view.title.as_deref())
-            .unwrap_or("Untitled tab");
-        let displayed_site = site(&tab).unwrap_or_else(|| "unknown site".to_owned());
-        let request = ConfirmationRequest {
-            method: CLOSE_METHOD.to_owned(),
-            summary: format!(
-                "Close this browser tab? Title: {}. Site: {}. Choose Close to remove it or Keep to leave it open.",
-                dialog_value(title, 80),
-                dialog_value(&displayed_site, 100),
-            ),
-            params: json!({"sessionId": owner, "tabId": key, "fingerprint": fingerprint}),
-            requester: Requester::Agent,
-            always: None,
-        };
-        let approved = tokio::select! {
-            biased;
-            _ = owner_cancel.changed() => return Err("browser tab close was canceled".to_owned()),
-            _ = page_cancel.changed() => return Err("browser tab close was canceled".to_owned()),
-            answer = crate::ask::guards::answer(shared, request, "closing this tab") => answer?.0,
-        };
-        if !approved.approved() {
-            return Err(approved.agent_text("closing this tab"));
-        }
-        permitted_by_answer = true;
-    }
+    close_allowed(shared, owner, user_origin)?;
     let weak = Arc::downgrade(shared);
     let owner = owner.to_owned();
     let key = key.to_owned();
@@ -191,21 +173,14 @@ async fn prepare_close_action(
             .handoff_review_fingerprint(owner, key)
             .map_err(|error| error.to_string())?;
         if fingerprint != actual || now.owner_kind != tab.owner_kind {
-            return Err("browser tab changed while closing; ask again".to_owned());
+            return Err("Not run: the tab changed before it could be closed.".to_owned());
         }
-        if user_origin
-            && !permitted_by_answer
-            && !crate::browser_delegation::load(shared).close_user_tabs
-        {
-            return Err("permission to close user tabs changed; ask again".to_owned());
-        }
+        close_allowed(shared, owner, user_origin)?;
         let admit = || {
             let allowed = !owner_cancel.has_changed().unwrap_or(true)
                 && !page_cancel.has_changed().unwrap_or(true)
                 && still_running(shared, owner, key).is_ok()
-                && (!user_origin
-                    || permitted_by_answer
-                    || crate::browser_delegation::load(shared).close_user_tabs);
+                && close_allowed(shared, owner, user_origin).is_ok();
             if allowed {
                 driver.sessions().cancel_actions(key);
                 driver.clear_secret_choice(key);
@@ -221,7 +196,6 @@ async fn prepare_close_action(
             driver,
             owner,
             &tab,
-            permitted_by_answer,
             restore_error.map(|error| error.to_string()),
         ))
     }))
@@ -231,24 +205,13 @@ fn close_receipt(
     driver: &vw_browser::Browser,
     owner: &str,
     tab: &PageTab,
-    permitted_by_answer: bool,
     restore_error: Option<String>,
 ) -> Value {
     let user_origin = tab.owner_kind != Some(PageTabOwner::Agent);
-    let result = if permitted_by_answer {
-        "closed with your permission"
-    } else if user_origin {
-        "closed by your permission"
-    } else {
-        "closed"
-    };
+    let result = "closed";
     let mut receipt = json!({"action":"close_tab", "ok":true, "tab":{"id":tab.page_key,"site":site(tab)}, "result":result});
     if user_origin {
-        let authority = if permitted_by_answer {
-            DelegationAuthority::ConfirmedByYou
-        } else {
-            DelegationAuthority::CloseUserTabs
-        };
+        let authority = DelegationAuthority::AccessMode;
         if let Err(error) =
             driver.record_user_tab_close(owner, &site(tab).unwrap_or_default(), authority)
         {
@@ -295,7 +258,54 @@ pub(crate) async fn call(
             Ok(json!({"action":"list_tabs", "ok":true, "tabs":tabs,
                 "untrustedPageContent":{"tabs":content}}))
         }
-        Some("close_tab") => prepare_close(shared, owner, tab.unwrap_or("")).await?.await,
+        Some("close_tab") => prepare_close(shared, owner, tab.unwrap_or(""))?.await,
         _ => Err("unknown browser tab action".to_owned()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[tokio::test]
+    async fn current_mode_controls_closing_without_a_saved_permission_or_dialog() {
+        let core = crate::offline_core::start("browser-close-mode").await;
+        let _ = core
+            .shared
+            .store
+            .load(
+                json!({"session":{"id":"s"},"history":[],"turns":[]}),
+                vw_session::LoadKind::New,
+            )
+            .unwrap();
+        for (mode, own, user) in [
+            ("ask", true, false),
+            ("accept-edits", true, true),
+            ("smart-approve", true, true),
+            ("auto-approve", true, true),
+            ("ask", true, false),
+            ("vw-plan", false, false),
+            ("explore", false, false),
+        ] {
+            core.shared.access.observe_request(
+                "session/agent/update",
+                "s",
+                &json!({"agentName":mode}),
+            );
+            assert_eq!(
+                close_allowed(&core.shared, "s", false).is_ok(),
+                own,
+                "{mode}"
+            );
+            assert_eq!(
+                close_allowed(&core.shared, "s", true).is_ok(),
+                user,
+                "{mode}"
+            );
+            assert_eq!(core.shared.asks.list(), [] as [vw_ask::Ask; 0]);
+        }
+        let old: vw_browser::delegation::BrowserPermissions =
+            serde_json::from_value(json!({"closeUserTabs":true})).unwrap();
+        assert_eq!(serde_json::to_value(old).unwrap(), json!({}));
+        core.shutdown().await;
     }
 }

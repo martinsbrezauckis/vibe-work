@@ -34,7 +34,7 @@ import type { GitResult } from "./git";
 import type { GitBrowserRequest, GitBrowserResult } from "./git_browser";
 import type { LibrariesRequest, LibrariesResult, ImagesRequest, ImagesResult } from "./work";
 import type { GithubReadsView, GithubReadsRequest } from "./github_reads";
-import type { AskGrantsRequest, SessionGrant, GrantOffer, VibeRulesRequest, VibeRule, ChromeControlRequest, ChromeControlView } from "./ask";
+import type { AskGrantsRequest, SessionGrant, GrantOffer, VibeRulesRequest, VibeRule, ChromeControlRequest, ChromeControlView, ChromeSelection, ChromeTab } from "./ask";
 import type { KeepAwakeView, KeepAwakeRequest } from "./keep_awake";
 import type { NewChatRequest, NewChatView } from "./new_chat";
 import type { SecretScanRequest, SecretScanView } from "./secret_scan";
@@ -71,7 +71,11 @@ export type * from "./keep_awake";
 export type * from "./new_chat";
 export type * from "./secret_scan";
 
-export type Command = { "type": "copyText",
+export type Command = { "type": "promptHistory",
+/**
+ * Absent reads; present appends in CLI format before reading.
+ */
+text?: string, } | { "type": "copyText",
 /**
  * The text to copy (at most one million bytes).
  */
@@ -433,7 +437,11 @@ request: SessionToolsRequest, } | { "type": "search",
  */
 request: SearchRequest, };
 
-export type CommandResult = { "type": "protectedChange",
+export type CommandResult = { "type": "promptHistory",
+/**
+ * Submitted prompts, without known vault values.
+ */
+entries: Array<string>, } | { "type": "protectedChange",
 /**
  * Final review state.
  */
@@ -447,7 +455,7 @@ rows: Array<SessionRowView>,
  */
 nextCursor: string | null,
 /**
- * The session `vibe --continue` would resume (the response's `continueSessionId`).
+ * Retained for client compatibility; Vibe no longer supplies a CLI continuation target.
  */
 continueSessionId: string | null, } | { "type": "session",
 /**
@@ -616,13 +624,21 @@ offers: Array<GrantOffer>,
  */
 removed: number, } | { "type": "chromeControl",
 /**
- * The rows, the level and the setup status.
+ * Availability, connection and chat work states.
  */
 view: ChromeControlView,
 /**
  * The set up offer the window shows before the click (`offerSetup` only).
  */
-offer: ToolsInstallOffer | null, } | { "type": "vibeRules",
+offer: ToolsInstallOffer | null, } | { "type": "chromeTabs",
+/**
+ * Tabs in all connected profiles.
+ */
+tabs: Array<ChromeTab>, } | { "type": "chromeSelection",
+/**
+ * Absent when another window already claimed it.
+ */
+selection: ChromeSelection | null, } | { "type": "vibeRules",
 /**
  * Each rule: a tool-wide `always`, or one added allowlist pattern.
  */

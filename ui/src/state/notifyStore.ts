@@ -30,6 +30,8 @@ import type { AskRecord } from "../protocol/core";
 import {
   DEFAULT_NOTIFY_LEVEL,
   fullTextFor,
+  hostedCardTransition,
+  hostedCards,
   type NotifyLevel,
   NOTIFY_LEVELS,
   shouldNotify,
@@ -127,6 +129,25 @@ export function createNotifier(options: { persist?: boolean } = {}) {
       return core.store.subscribe(() => {
         const next = core.store.get();
         const found = transitions(last, next);
+        // A loaded child chat announced its callback before the parent's subagent card arrived: the one entry now
+        // opens the parent, which shows the card (the child's view has none). Still one entry per card.
+        const hosted = hostedCards(next);
+        for (const [key, retained] of [...retainedCallbacks]) {
+          const host = hosted.get(retained.callbackId);
+          if (host === undefined || host === retained.sessionId || retained.stopped === true)
+            continue;
+          const moved = hostedCardTransition(next, host, retained.callbackId);
+          update?.(retained.id, {
+            kind: "info",
+            bellKind: "approval",
+            text: fullTextFor(moved),
+            sessionId: host,
+          });
+          retainedCallbacks.delete(key);
+          const movedKey = `${host}\u0000${retained.callbackId}`;
+          seenCallbacks.add(movedKey);
+          retainedCallbacks.set(movedKey, { ...retained, sessionId: host });
+        }
         for (const [key, retained] of retainedCallbacks) {
           // Metadata may arrive after callbacksChanged. A transport callback never asks the person.
           if (toolTransport(next, retained.sessionId, retained.callbackId)) {

@@ -48,6 +48,7 @@ impl CoreSubscription {
         store.set_waker(move || waker.notify_one());
         let mut cleanup_notices = shared.temporary.notices();
         cleanup_notices.extend(shared.asks.replay());
+        cleanup_notices.extend(crate::git_identity_ask::replay(shared));
         if shared
             .network_notice
             .load(std::sync::atomic::Ordering::Relaxed)
@@ -123,9 +124,6 @@ impl CoreSubscription {
                 crate::edit_preview::project(&shared, &mut snapshot.state);
                 shared
                     .protected_changes
-                    .overlay(&snapshot.session_id, &mut snapshot.state);
-                shared
-                    .chrome_control
                     .overlay(&snapshot.session_id, &mut snapshot.state);
                 crate::ask::tool_calls::overlay(&shared, &snapshot.session_id, &mut snapshot.state);
                 snapshot.access_mode = crate::restore::display_mode(

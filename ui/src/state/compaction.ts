@@ -10,6 +10,8 @@
  *   table of known models, else Vibe's assumed 262,144. A model Vibe does not know gets that assumed window's range.
  * - "Default" removes the user's own value; what it then means (another layer's value, else Vibe's default for the
  *   window) is shown in its label. A value a higher layer sets is shown with that layer and is not editable.
+ * - Vibe Work's own Large 4 entry (`large-4`) has its own default, 800,000, which the launch writes into the user's
+ *   file (`crates/vw-host/src/default_model.rs`): that value shows as Default, and Default writes it back.
  * - Parsing is defensive: what is not recognised gives no row, never a throw.
  */
 import type { JsonValue } from "../protocol/core";
@@ -66,6 +68,9 @@ export function thresholdBounds(window: number): ThresholdBounds | null {
   return { minimum, maximum, default: Math.max(minimum, Math.min(preferred, maximum)) };
 }
 
+/** Vibe Work's own Large 4 entry and the compaction point its launch seeds (`crates/vw-host/src/default_model.rs`). */
+const OWN_LARGE_4 = { alias: "large-4", name: "mistral-large-4", threshold: 800_000 };
+
 /** One model's compaction point. */
 export interface CompactionRow {
   alias: string;
@@ -75,6 +80,8 @@ export interface CompactionRow {
   own: number | null;
   /** What Default means for this model. */
   fallback: number;
+  /** The value Default writes, where Default is a value of Vibe Work's own (`large-4`); absent: Default removes. */
+  resetTo?: number;
   /** The points offered (the user's own value included), lowest first. */
   choices: readonly number[];
   /** The layer that decides it when that layer is above the user's file, else `null`. */
@@ -149,6 +156,15 @@ export function compactionRows(byName: ReadonlyMap<string, Obj>): CompactionRow[
     // Vibe keeps a model's own threshold from any layer, else takes the global one, else its window's default.
     const fallback = (below === undefined ? null : at(below)) ?? global.value ?? bounds.default;
     const shown = global.admin ? global.value : above === undefined ? own : at(above);
+    // Our own entry, decided by the user's file and holding a value: its seeded point is its Default.
+    const seeded =
+      alias === OWN_LARGE_4.alias &&
+      name === OWN_LARGE_4.name &&
+      !global.admin &&
+      above === undefined &&
+      own !== null
+        ? OWN_LARGE_4.threshold
+        : null;
     const inRange = LADDER.filter((n) => n >= bounds.minimum && n <= bounds.maximum);
     const choices = [...new Set([...inRange, ...(shown === null ? [] : [shown])])].sort(
       (a, b) => a - b,
@@ -157,8 +173,9 @@ export function compactionRows(byName: ReadonlyMap<string, Obj>): CompactionRow[
       {
         alias,
         model,
-        own: shown,
-        fallback,
+        own: seeded !== null && shown === seeded ? null : shown,
+        fallback: seeded ?? fallback,
+        ...(seeded === null ? {} : { resetTo: seeded }),
         choices,
         setBy: global.admin ? "admin" : (above?.layer ?? null),
       },

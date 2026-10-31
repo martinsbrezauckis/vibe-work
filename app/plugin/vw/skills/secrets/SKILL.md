@@ -1,15 +1,15 @@
 ---
 name: secrets
-description: Read this when a command needs an API key, token or password (a deploy, an API call, a CLI login), or when a web page shows a new key the user wants to keep.
+description: Vibe Work's vault tools - secret_list and secret_run give a command an API key, token or password (a deploy, an API call, a CLI login) without showing its value; keys a web page shows.
 ---
 
-The user's keys live in their vault. You never see a value and never ask the user to paste one into the chat. Use the `mcp_vw` tools inside `run_typescript`:
+The user's keys live in their vault; their values never reach the agent. The tools are on `mcp_vw` inside `run_typescript`:
 
 ```ts
 const { secrets } = await tools.mcp_vw.secret_list({}); // [{ id, name, fields }]: names only
 ```
 
-Then, in a new call:
+In a later call:
 
 ```ts
 const result = await tools.mcp_vw.secret_run({
@@ -18,17 +18,17 @@ const result = await tools.mcp_vw.secret_run({
   env: [{ name: "STRIPE_API_KEY", secret: "Stripe test key" }], // which secret goes into which variable
   purpose: "deploy the site to staging", // context in the tool call
 });
-// { exitCode, stdout, stderr } — or { status: "running", requestId } while the program still runs:
-// Keep requestId. In a NEW call, use tools.mcp_vw.secret_run_status({ requestId }).
-// Never loop here and never repeat secret_run for a request that has started.
+// { exitCode, stdout, stderr } — or { status: "running", requestId } while the program still runs.
+// tools.mcp_vw.secret_run_status({ requestId }) reads that result in a later program (one program has 60 s);
+// a second secret_run starts the command again.
 ```
 
-1. The vault asks the person when needed; do not ask for permission yourself.
-2. Code given inline (`sh -c`, `python -c`, `node -e`) is refused: write a script file in the project and run it (`program: "sh", args: ["deploy.sh"]`).
-3. Output that contains a value comes back as `[secret withheld: vaultValue]`. Do not try to print, encode or send a value anywhere: the program gets it to do its job, nothing more.
-4. A secret is not in `secret_list`: ask the user to add it in Vibe Work (Settings > Project secrets).
-5. **A key on a web page:** stop and ask the user to select the key in the browser panel, press **Save to vault**, name it and confirm; do not read or copy the key. `browser_capture_secret` stays listed to explain this rule and always refuses. After the user saves it, find its name with `secret_list` and use it with `secret_run`.
-6. **A key for an MCP server**: after the user saves it, tell them to add the server in Tools, pick that key, and choose "Always (until revoked)" (recommended: no prompt on every start). The MCP label only helps the user find the key; it changes no permission.
-7. Vibe Work stops some commands before they run as a safety reminder (deleting your home or a drive, disk tools, shutdown, rules the user added). The reason says what to do instead; if the user really wants it, tell them the exact command so they can run it themselves.
+1. The vault asks the user when the secret's permission needs it.
+2. Code given inline (`sh -c`, `python -c`, `node -e`) is refused; a script file in the project runs (`program: "sh", args: ["deploy.sh"]`).
+3. Output that contains a value comes back as `[secret withheld: vaultValue]`.
+4. The user adds secrets in Vibe Work (Settings > Project secrets); one that is missing is not in `secret_list`.
+5. **A key on a web page:** saving it is the user's action: they select the key in the browser panel, press **Save to vault**, name it and confirm. `browser_capture_secret` always refuses. The saved key then appears in `secret_list` for `secret_run`.
+6. **A key for an MCP server:** the user adds the server in Tools and picks the saved key; "Always (until revoked)" starts it without a prompt each time. The MCP label only helps the user find the key; it changes no permission.
+7. Vibe Work refuses some commands before they run as a safety reminder (deleting your home or a drive, disk tools, shutdown, rules the user added); the refusal names the reason. The user can run such a command in their own terminal.
 
 `secret_run_status` reads the result of a long command using the request id returned by `secret_run`.

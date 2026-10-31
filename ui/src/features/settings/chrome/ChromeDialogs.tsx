@@ -3,7 +3,10 @@
  * - Set up, step 1: what Set up installs (the core's single-use offer: name, publisher, from, what it runs) and one
  *   Set up button that confirms exactly that offer; Cancel first. Step 2: "Add the extension in Chrome" with the
  *   live status line (re-read every few seconds while open), Open the store page again, and Turn on its tools (the
- *   existing Turn on with its own confirmation: giving the agent new tools keeps its question).
+ *   existing Turn on with its own confirmation: giving the agent new tools keeps its question). While the store
+ *   listing is in Google's review (`setup.storeReview`, from the signed release manifest), one line stands in place
+ *   of the store button and the store instruction is hidden (it points at a page most people cannot open); both
+ *   follow the core's `chromeControl` events, so a change shows without a restart.
  * - Remove: the destructive confirmation (Cancel first); then the status says to remove the extension in Chrome.
  * Depends on: Controls, useModalFocus, useChromeControl, chromeRows, the typed core client.
  * Called by: YourChromeSettings.
@@ -79,9 +82,6 @@ export function ChromeSetupDialog({
               <h2 id="chrome-setup-title">Set up Chrome Control?</h2>
             </header>
             <section>
-              <p>
-                Vibe will be able to work in your own Chrome, in tabs you pick, while you watch.
-              </p>
               {offer === null ? (
                 <p className="key-line" role="status">
                   {chrome.status?.alert === true ? "" : "Reading what Set up installs…"}
@@ -127,13 +127,20 @@ export function ChromeSetupDialog({
               <h2 id="chrome-setup-title">Add the extension in Chrome</h2>
             </header>
             <section>
-              <p>
-                In the Chrome Web Store page, click Add to Chrome. Then open the extension and pair
-                with Vibe Work once. Compare the identity below with the one Chrome shows.
-              </p>
+              {view.setup.storeReview ? null : (
+                <p>
+                  In the Chrome Web Store page, click Add to Chrome. Then open the extension and
+                  pair with Vibe Work once. Compare the identity below with the one Chrome shows.
+                </p>
+              )}
               <p className="key-line" role="status" aria-live="polite" data-chrome-setup-status="">
                 {setupLine(view)}
               </p>
+              {view.setup.fingerprint !== null ? (
+                <p className="key-line" data-chrome-fingerprint="">
+                  <code>{view.setup.fingerprint}</code>
+                </p>
+              ) : null}
               {chrome.status?.alert === true ? (
                 <p className="key-problem" role="alert">
                   {chrome.status.text}
@@ -141,15 +148,25 @@ export function ChromeSetupDialog({
               ) : null}
             </section>
             <section className="skills-actions">
+              {view.setup.storeReview ? (
+                <p className="key-line" data-chrome-store-review="">
+                  Waiting for Google's review
+                </p>
+              ) : (
+                <Button
+                  data-testid="settings.chrome-setup-store"
+                  data-dialog-initial-focus="true"
+                  disabled={busy}
+                  onClick={() => void run({ op: "openStore" }, "openStore")}
+                >
+                  Open the store page again
+                </Button>
+              )}
               <Button
-                data-testid="settings.chrome-setup-store"
-                data-dialog-initial-focus="true"
-                disabled={busy}
-                onClick={() => void run({ op: "openStore" }, "openStore")}
+                data-testid="settings.chrome-setup-close"
+                data-dialog-initial-focus={view.setup.storeReview ? "true" : undefined}
+                onClick={onClose}
               >
-                Open the store page again
-              </Button>
-              <Button data-testid="settings.chrome-setup-close" onClick={onClose}>
                 Close
               </Button>
             </section>
@@ -191,8 +208,8 @@ export function ChromeRemoveDialog({
         <section>
           <p>
             Removes the helper from Vibe Work's folder and from Chrome's settings, turns its tools
-            off and deletes its saved level. Your Chrome, its tabs and the extension stay: remove
-            the extension in Chrome.
+            off and deletes its connection. Your Chrome, its tabs and the extension stay: remove the
+            extension in Chrome.
           </p>
         </section>
         <section className="skills-actions">

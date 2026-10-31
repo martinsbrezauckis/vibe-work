@@ -97,85 +97,6 @@
       "tooltip": "Hidden from the agent. MCP forwarding is blocked while the default or any project is User only."
     }
   },
-  "browserPermissions": {
-    "closeUserTabs": {
-      "name": "Close tabs you opened",
-      "description": "Choose whether the agent asks before closing a tab you opened or took over.",
-      "tooltip": "Ask me requests Close or Keep for each tab you opened or took over. Allow skips that question. The App preview cannot be closed."
-    },
-    "closeAsk": {
-      "name": "Ask me (default)",
-      "description": "Ask before the agent closes a tab you opened or took over.",
-      "tooltip": "Ask you to Close or Keep each tab you opened or took over."
-    },
-    "closeAllow": {
-      "name": "Allow",
-      "description": "Let the agent close tabs you opened or took over during your task.",
-      "tooltip": "The agent may close tabs you opened or took over during your task without asking again."
-    }
-  },
-  "chromeControl": {
-    "browse": {
-      "name": "Basic browser control",
-      "description": "Vibe reads pages and sees your open tabs, goes to sites, clicks, scrolls and types into text fields, never password fields.",
-      "tooltip": "Vibe reads pages and sees your open tabs, goes to sites, clicks, scrolls and types into text fields, never password fields."
-    },
-    "fill": {
-      "name": "Advanced",
-      "description": "Everything in Basic, plus filling in forms without sending them, downloading files and uploading a file you picked.",
-      "tooltip": "Everything in Basic, plus filling in forms without sending them, downloading files and uploading a file you picked."
-    },
-    "act": {
-      "name": "Full: works on your behalf",
-      "description": "Everything in Advanced, plus sending forms and confirming (buy, book, delete), signing in with a vault login you allowed, changing cookies and site data and running page scripts.",
-      "tooltip": "Everything in Advanced, plus sending forms and confirming (buy, book, delete), signing in with a vault login you allowed, changing cookies and site data and running page scripts."
-    },
-    "read": {
-      "name": "Read pages and see your tabs",
-      "description": "Read pages, take screenshots, and see the titles and addresses of your open tabs.",
-      "tooltip": "Read pages, take screenshots, and see the titles and addresses of your open tabs."
-    },
-    "navigate": {
-      "name": "Go to sites, click and type",
-      "description": "Go to sites, open and close the tabs Vibe opened, click, scroll, press keys and type into text fields. Never password fields.",
-      "tooltip": "Go to sites, open and close the tabs Vibe opened, click, scroll, press keys and type into text fields. Never password fields."
-    },
-    "forms": {
-      "name": "Fill in forms and handle files",
-      "description": "Fill in forms without sending them, download files, and upload a file you picked.",
-      "tooltip": "Fill in forms without sending them, download files, and upload a file you picked."
-    },
-    "send": {
-      "name": "Send forms and confirm",
-      "description": "Send forms and confirm: buy, book, delete.",
-      "tooltip": "Send forms and confirm: buy, book, delete."
-    },
-    "signIn": {
-      "name": "Sign in with saved logins",
-      "description": "Sign in with a vault login you allowed for the agent. Vibe does not see the password.",
-      "tooltip": "Sign in with a vault login you allowed for the agent. Vibe does not see the password."
-    },
-    "siteData": {
-      "name": "Change cookies and site data",
-      "description": "Read and change cookies and what sites store in your Chrome.",
-      "tooltip": "Read and change cookies and what sites store in your Chrome."
-    },
-    "scripts": {
-      "name": "Run page scripts",
-      "description": "Run scripts on a page.",
-      "tooltip": "Run scripts on a page."
-    },
-    "bookmarks": {
-      "name": "Bookmarks",
-      "description": "Read and change your bookmarks.",
-      "tooltip": "Read and change your bookmarks."
-    },
-    "history": {
-      "name": "Browsing history",
-      "description": "Read and delete entries in your history.",
-      "tooltip": "Read and delete entries in your history."
-    }
-  },
   "locks": {
     "agentPause": {
       "name": "Pause agent access to secrets",
@@ -243,8 +164,6 @@
     "vaultUnlockedStatus": "Vault: unlocked",
     "vaultSharedLockNote": "Lock also locks this vault in ShellX the next time it starts.",
     "permissionNeedsProject": "Choose a project to change permissions.",
-    "browserDelegationTitle": "Delegation permissions",
-    "browserDelegationHint": "Tab closing permissions apply only while the agent does a task you gave it. Ask me asks before closing one of your tabs.",
     "secretPermissionsTitle": "Secret permissions",
     "secretPermissionsSummary": "Choose each Vault entry's permission in Vault. Browser delegation does not change secret access.",
     "secretPermissionsOpenVault": "Open Vault",
@@ -270,11 +189,6 @@
     "askWaitingMany": "{count} prompts are waiting · {shortcut}",
     "askArrived": "Vibe asks you in “{session}”: {question} {summary}. Press {shortcut} to go there.",
     "askKeysHint": "Press {keys}, or Tab to the buttons.",
-    "chromeLevelTitle": "What Vibe may do in your Chrome",
-    "chromeLevelHelp": "Anything above your choice, Vibe asks you about first, in the chat. For your bookmarks and browsing history Vibe always asks.",
-    "chromeSaved": "Saved. Applies from Vibe's next action in Chrome.",
-    "chromeReading": "Reading Chrome Control's permissions…",
-    "chromeSaveFailed": "Could not save Chrome Control's permissions: {reason}. Nothing changed. Try again, or restart Vibe Work if it keeps failing.",
     "mentionMenu": "Files and sessions",
     "mentionSessionLabel": "Session · {title}",
     "mentionSessionText": "The session \"{title}\" in this project (session id {id}).",
@@ -296,7 +210,12 @@
     "compactionPointDescription": "When a chat's history is compacted, per model, in tokens.",
     "compactionDefault": "Default ({count})",
     "setByProjectSettings": "this project's Vibe settings",
-    "skillChanged": "Changed {date}"
+    "skillChanged": "Changed {date}",
+    "chromeWorkActive": "Chrome active",
+    "chromeWorkConnecting": "Chrome connecting",
+    "chromeWorkStopping": "Chrome stopping",
+    "chromeWorkStopped": "Chrome stopped",
+    "chromeWorkDisconnected": "Chrome disconnected"
   },
   "workNames": {
     "projectTab": {
@@ -372,6 +291,11 @@
       "name": "Capture a page",
       "description": "Lets Vibe save a page’s design, content and images, or compare two captures.",
       "tooltip": "Lets Vibe save a page’s design, content and images, or compare two captures."
+    },
+    "vw:chrome": {
+      "name": "Use my Chrome",
+      "description": "Lets Vibe open, read and use pages in your own Chrome, within this chat’s access mode.",
+      "tooltip": "Lets Vibe open, read and use pages in your own Chrome, within this chat’s access mode."
     },
     "vw:data-analysis": {
       "name": "Analyse data",

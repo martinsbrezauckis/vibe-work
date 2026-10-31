@@ -38,9 +38,9 @@ describe("security bell", () => {
       "Vibe Work stopped 3 actions in “First chat”",
     );
     expect(app.toasts.store.get()).toHaveLength(1);
-    // The reason leads, so a narrow toast keeps it (a long chat title is cut instead).
+    // The guard and chat identify the decision, followed by its reason.
     expect(app.toasts.store.get()[0]?.text).toBe(
-      "Not run: this action was refused. In “First chat”.",
+      "Git guard in “First chat”: Not run: this action was refused.",
     );
     act(() => {
       client.emit(refusal("s2", "process", null, 4000));

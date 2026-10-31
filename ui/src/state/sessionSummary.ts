@@ -8,6 +8,7 @@
  */
 import { pendingHistoryAsks } from "../features/transcript/model/protectedChange";
 import type { JsonValue } from "../protocol/core";
+import type { TurnRetry } from "./turnRetry";
 
 /** The badge shown next to a session, including failure state. */
 export type Badge = "run" | "input" | "done" | "idle" | "failed" | "stuck";
@@ -79,6 +80,8 @@ export interface SessionEntry {
    * carried one (the composer's pickers); absent until one arrived.
    */
   runtime?: JsonValue;
+  /** The running turn's model-request retry (`turnRetry.ts`); absent when there is none. */
+  retry?: TurnRetry;
 }
 
 function str(value: JsonValue | undefined): string | null {

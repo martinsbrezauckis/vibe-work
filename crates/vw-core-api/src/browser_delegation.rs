@@ -20,33 +20,15 @@ fn path(shared: &Shared) -> Result<PathBuf, CoreError> {
         .ok_or_else(|| CoreError::new(ErrorCode::Denied, "the browser is not available"))
 }
 
-/// Missing, corrupt or unreadable settings give no permission. Obsolete fields are ignored by the contract.
-pub(crate) fn load(shared: &Shared) -> BrowserPermissions {
-    path(shared)
-        .ok()
-        .and_then(|path| std::fs::read(path).ok())
-        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
-        .unwrap_or_default()
-}
-
-/// Reads or atomically stores the user/Debug API's browser tab-close permission.
+/// Legacy permission requests have no authority and never write a settings file.
 pub(crate) fn settings(
     shared: &Shared,
-    permissions: Option<BrowserPermissions>,
+    _permissions: Option<BrowserPermissions>,
 ) -> Result<BrowserResult, CoreError> {
-    let permissions = if let Some(permissions) = permissions {
-        let path = path(shared)?;
-        let bytes = serde_json::to_vec_pretty(&permissions)
-            .map_err(|error| CoreError::new(ErrorCode::Internal, error.to_string()))?;
-        vw_platform::replace_private(&path, &bytes)
-            .map_err(|error| CoreError::new(ErrorCode::Internal, error.to_string()))?;
-        shared.emit(crate::event::CoreEvent::BrowserChanged { session_id: None });
-        permissions
-    } else {
-        path(shared)?;
-        load(shared)
-    };
-    Ok(BrowserResult::Permissions { permissions })
+    path(shared)?;
+    Ok(BrowserResult::Permissions {
+        permissions: BrowserPermissions::default(),
+    })
 }
 
 struct NativeDelegation {

@@ -1,6 +1,7 @@
 /**
  * Settings › Models and agent, "Compaction point": one row per configured model with the point (in tokens) where
- * Vibe compacts a chat's history. Default removes the user's own value; a pick writes the model's
+ * Vibe compacts a chat's history. Default removes the user's own value (or writes back Vibe Work's own default where
+ * the row has one, `resetTo`); a pick writes the model's
  * `auto_compact_threshold` through `config/write` (`state/vibeSettings` `writeConfig`).
  * Depends on: state/compaction (rows and their choices), Controls, Selector, composer contextWindow (the model's
  * context label), vocabulary. Called by: settings/AgentDefaultsSettings, which owns the read and the write.
@@ -72,7 +73,9 @@ export function CompactionRows(props: {
                 const path = thresholdPath(row.alias);
                 props.onWrite(
                   value === ""
-                    ? [{ op: "remove", path }]
+                    ? row.resetTo === undefined
+                      ? [{ op: "remove", path }]
+                      : [{ op: "set", path, value: row.resetTo }]
                     : [{ op: "set", path, value: Number(value) }],
                 );
               }}

@@ -73,6 +73,8 @@ pub mod tools {
     pub const KILL_CHECK: &str = "kill_check";
     /// The git guard's question (hook credential only).
     pub const GIT_CHECK: &str = "git_check";
+    /// After a tool call: did the person allow this call in a guard's dialog (hook credential only)?
+    pub const USER_ALLOWED: &str = "user_allowed";
     /// The folder guard's question (hook credential only): may this session work in that copy now (one
     /// active session per copy)?
     pub const COPY_CHECK: &str = "copy_check";
@@ -141,6 +143,8 @@ pub mod tools {
     pub const READ_ALOUD: &str = "read_aloud";
     /// What the user has open beside the chat (editor tabs, unsaved text, selection, the Files tab). Reads only.
     pub const PANEL_READ: &str = "panel_read";
+    /// Find text and file names in this chat's folders, read only.
+    pub const SEARCH: &str = "search";
     /// Capture protected-folder changes and wait (bounded) for the owner review.
     pub const PROPOSE_PROTECTED_CHANGE: &str = "propose_protected_change";
     /// The outcome of a proposal whose review was still open when `propose_protected_change` answered.
@@ -148,26 +152,20 @@ pub mod tools {
     /// The protected-folder review tools.
     pub const PROTECTED_CHANGE_TOOLS: [&str; 2] =
         [PROPOSE_PROTECTED_CHANGE, PROTECTED_CHANGE_STATUS];
-    /// Turn Chrome Control's tools on for this chat (only when the user asks for their Chrome).
-    pub const USE_YOUR_CHROME: &str = "use_your_chrome";
     /// Turn the headless browser plugin's tools on for this chat (developers only, a separate install).
     pub const USE_HEADLESS_BROWSER: &str = "use_headless_browser";
-    /// Why a Chrome Control step of this chat was not done, in Vibe Work's own words (inside `run_typescript`
-    /// Vibe 2.26.1 gives the agent only "Tool execution was skipped by Runtime policy" for a refused step).
-    pub const CHROME_OUTCOME: &str = "chrome_outcome";
     /// Private discovery request: returns only this chat's helper tool schemas.
     pub const CHROME_TOOL_LIST: &str = "chrome_tool_list";
     /// Browser tools forwarded through the checked core gateway.
-    pub const CHROME_TOOLS: [&str; 3] = ["chrome_status", "chrome_task", "chrome_execute"];
+    pub const CHROME_TOOLS: [&str; 3] = ["chrome_status", "chrome_session", "chrome_execute"];
     /// Every Chrome entry point, including private discovery, shares the package gate.
     #[must_use]
     pub fn is_chrome(name: &str) -> bool {
-        matches!(name, USE_YOUR_CHROME | CHROME_OUTCOME | CHROME_TOOL_LIST)
-            || CHROME_TOOLS.contains(&name)
+        name == CHROME_TOOL_LIST || CHROME_TOOLS.contains(&name)
     }
 
     /// Every tool a session credential may call.
-    pub const SESSION_TOOLS: [&str; 33] = [
+    pub const SESSION_TOOLS: [&str; 32] = [
         PROCESSES_LIST,
         PORT_LEASE,
         PROCESS_START,
@@ -193,13 +191,12 @@ pub mod tools {
         DOCUMENT_READ,
         READ_ALOUD,
         PANEL_READ,
+        SEARCH,
         PROPOSE_PROTECTED_CHANGE,
         PROTECTED_CHANGE_STATUS,
-        USE_YOUR_CHROME,
         USE_HEADLESS_BROWSER,
-        CHROME_OUTCOME,
         "chrome_status",
-        "chrome_task",
+        "chrome_session",
         "chrome_execute",
     ];
 }

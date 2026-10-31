@@ -122,6 +122,9 @@ pub(crate) struct State {
     pub(crate) support: crate::update::SupportState,
     /// The update offer's install data, until it is confirmed or replaced.
     pub(crate) update_job: Option<crate::update::PendingUpdate>,
+    /// The Chrome extension store state of the last accepted manifest ([`crate::extension_store`]); kept when a
+    /// later check fails.
+    pub(crate) extension_store: Option<crate::support::ExtensionStore>,
 }
 
 pub(crate) struct Inner {
@@ -198,6 +201,7 @@ impl VibeInstaller {
             update: VibeUpdatePhase::Idle {},
             support: crate::update::SupportState::default(),
             update_job: None,
+            extension_store: crate::extension_store::load(&config.root),
         };
         let view = watch::Sender::new(snapshot(&pinned, &state));
         Self {
@@ -241,6 +245,14 @@ impl VibeInstaller {
     #[must_use]
     pub fn view(&self) -> InstallView {
         self.inner.view.borrow().clone()
+    }
+
+    /// The Chrome extension store state of the last accepted supported-Vibe manifest (this run's, else the one
+    /// recorded by an earlier run); `None` when none stated a known one. A change is published on the view channel
+    /// (the core re-reads it there).
+    #[must_use]
+    pub fn extension_store(&self) -> Option<crate::support::ExtensionStore> {
+        self.inner.lock().extension_store
     }
 
     /// Every view change, current one first.

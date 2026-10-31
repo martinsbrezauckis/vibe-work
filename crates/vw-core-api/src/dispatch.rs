@@ -432,6 +432,9 @@ impl Core {
             Command::SessionTools { request } => Ok(CommandResult::SessionTools {
                 result: self.session_tools(origin, request).await?,
             }),
+            Command::PromptHistory { text } => {
+                crate::prompt_history_command::execute(&self.shared, text).await
+            }
             Command::Search { request } => Ok(CommandResult::Search {
                 result: self.search(request).await?,
             }),

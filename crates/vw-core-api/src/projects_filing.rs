@@ -135,11 +135,17 @@ fn rule_folder(shared: &Shared, id: &str, session: &Value) -> Option<String> {
         .map(str::to_owned)
 }
 
+/// A listed session to file, or `None` for one of the app's helper chats (they run in the server working folder and
+/// never belong to a project).
 fn seen_of(shared: &Shared, item: &Value) -> Option<Seen> {
     let id = item.get("id").and_then(Value::as_str)?;
+    let folder = rule_folder(shared, id, item);
+    if folder.as_deref().is_some_and(|f| server_work(shared, f)) {
+        return None;
+    }
     Some(Seen {
         id: id.to_owned(),
-        folder: rule_folder(shared, id, item),
+        folder,
     })
 }
 
@@ -164,6 +170,15 @@ pub(crate) async fn loaded(shared: &Shared, params: &Value, state: &Value, new: 
         return;
     };
     let rule = rule_folder(shared, &id, session);
+    // The app's helper chats run in the server working folder: never filed, so no project is made for it.
+    let started_in = params.pointer("/agentConfig/cwd").and_then(Value::as_str);
+    if [rule.as_deref(), started_in]
+        .into_iter()
+        .flatten()
+        .any(|folder| server_work(shared, folder))
+    {
+        return;
+    }
     let now = vw_projects::now_ms();
     if !new {
         let seen = vec![Seen { id, folder: rule }];
@@ -239,6 +254,7 @@ pub(crate) fn inherit_hint(shared: &Shared, source: &str) -> Option<Hint> {
 /// `timeout` / gate errors of a page (nothing was changed by the failed page; earlier pages were only filed).
 pub(crate) async fn sweep(shared: &Shared) -> Result<(), CoreError> {
     let _one = shared.projects.sweeping.lock().await;
+    retire_work_project(shared).await;
     let mut listed: Vec<Seen> = Vec::new();
     let mut cursor: Option<String> = None;
     let mut complete = false;
@@ -333,6 +349,17 @@ pub(crate) fn sweep_once(shared: &Arc<Shared>) {
         .unwrap_or_else(PoisonError::into_inner) = Some(task);
 }
 
+/// True when `folder` is Vibe's server working folder (`<data>/work`), where the app's helper chats run.
+fn server_work(shared: &Shared, folder: &str) -> bool {
+    vw_projects::same_folder(folder, &shared.supervisor.work_dir().to_string_lossy())
+}
+
+/// Removes the empty automatic project the server working folder got before its chats were left unfiled.
+pub(crate) async fn retire_work_project(shared: &Shared) {
+    let work = shared.supervisor.work_dir().to_string_lossy().into_owned();
+    file(shared, move |s| usize::from(s.retire_auto_project(&work))).await;
+}
+
 /// The folder whose handbook session `id` shows in its Project tab: its project's main folder,
 /// unless the session works in that folder or in a copy of it (then its own folder, `cwd`).
 pub(crate) fn handbook_folder(shared: &Shared, id: &str, cwd: &str) -> PathBuf {
@@ -373,3 +400,7 @@ pub(crate) fn main_folders(shared: &Shared) -> Vec<String> {
             .collect()
     })
 }
+
+#[cfg(test)]
+#[path = "projects_filing_tests.rs"]
+mod tests;

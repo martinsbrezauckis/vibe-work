@@ -149,7 +149,7 @@ fingerprint: string,
  */
 notes: Array<string>, 
 /**
- * Turns that changed files (effects mode), oldest first.
+ * File effects grouped by turn; includes child authors in Git mode.
  */
 turns: Array<TurnChanges>, 
 /**

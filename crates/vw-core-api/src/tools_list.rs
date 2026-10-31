@@ -33,6 +33,10 @@ pub(crate) async fn answer(
 /// The tool list in a `runtime/read` snapshot.
 pub(crate) fn from_runtime(runtime: &Value) -> Value {
     let mut tools: Vec<Value> = runtime["tools"].as_array().cloned().unwrap_or_default();
+    // Vibe 3.0.4 omits this flag on built-ins; the legacy tools/list shape still includes it.
+    for tool in tools.iter_mut().filter_map(Value::as_object_mut) {
+        tool.entry("isCustom").or_insert(Value::Bool(false));
+    }
     for source in runtime
         .pointer("/mcp/sources")
         .and_then(Value::as_array)
@@ -60,7 +64,7 @@ mod tests {
     #[test]
     fn builtin_tools_then_each_servers_enabled_tools() {
         let runtime = json!({
-            "tools": [{"name": "bash", "isCustom": false}],
+            "tools": [{"name": "bash", "isCustom": false}, {"name": "read_file"}],
             "mcp": {"sources": [
                 {"name": "chrome_control", "status": "enabled", "tools": [
                     {"name": "chrome_status", "enabled": true},
@@ -74,6 +78,7 @@ mod tests {
             from_runtime(&runtime),
             json!({"tools": [
                 {"name": "bash", "isCustom": false},
+                {"name": "read_file", "isCustom": false},
                 {"name": "chrome_control.chrome_status", "isCustom": true},
                 {"name": "chrome_control.chrome_open", "isCustom": true}
             ]})

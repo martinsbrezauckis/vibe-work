@@ -20,7 +20,7 @@ use vw_procmon::{
 use vw_terminal::{PortLeaseSource, TerminalEvent, TerminalInfo};
 
 /// Label shown for a registered terminal shell.
-const LABEL: &str = "terminal";
+pub(crate) const LABEL: &str = "terminal";
 
 /// The session's lease as `PORT`: the first leased port, leasing on the first terminal of a session.
 pub(crate) struct MonitorLeases(pub(crate) ProcMon);

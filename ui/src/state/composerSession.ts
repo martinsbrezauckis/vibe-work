@@ -264,7 +264,8 @@ export function createSessionControls(deps: {
               const error = toCallError(thrown).error;
               if (error.code !== "cancelled" || error.serverCode !== "compactionStopped")
                 throw thrown;
-              composer.note(sessionId, error.message);
+              // The stopped channel cannot report the background compaction completing.
+              composer.note(sessionId, null);
               return done();
             } finally {
               if (compactionRuns.get(sessionId) === run) {

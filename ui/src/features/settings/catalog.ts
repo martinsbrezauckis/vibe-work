@@ -9,7 +9,7 @@
  * appear in the entry's text), so results are predictable, with label hits ranked before description hits.
  */
 import type { IconName } from "../../components/Icon";
-import { term, TEXT } from "../../vocabulary";
+import { TEXT } from "../../vocabulary";
 import { MISTRAL_LINKS } from "./mistralLinks";
 import { chromeCatalog } from "./chrome/chromeRows";
 
@@ -334,14 +334,6 @@ export const SETTINGS_INDEX: readonly SettingEntry[] = [
   },
   ...chromeCatalog(),
   {
-    id: "browser-close-user-tabs",
-    category: "browser",
-    label: term("browserPermissions", "closeUserTabs").name,
-    description: term("browserPermissions", "closeUserTabs").description,
-    keywords:
-      "browser agent close user tabs opened delegation permission keep ask me default allow",
-  },
-  {
     id: "browser-secret-permissions",
     category: "browser",
     label: TEXT.secretPermissionsTitle,
@@ -509,6 +501,13 @@ export const SETTINGS_INDEX: readonly SettingEntry[] = [
     description:
       "Lets an agent or script on this computer drive and test Vibe Work, on 127.0.0.1 only.",
     keywords: "debug api agent automation script localhost developer",
+  },
+  {
+    id: "chrome-local-network",
+    category: "developer",
+    label: "Local network pages for the agent in Chrome",
+    description: "Lets the agent open and use pages on your local network in your Chrome.",
+    keywords: "local network lan router nas intranet private address chrome agent developer",
   },
   {
     id: "debug-token",

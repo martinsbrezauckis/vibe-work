@@ -247,9 +247,35 @@ pub fn downscale(image: &Rgba, width: u32) -> Rgba {
 /// A text reason when the PNG cannot be decoded or still does not fit.
 pub fn shape(png_bytes: &[u8]) -> Result<Shot, String> {
     let decoded = decode(png_bytes)?;
+    shape_image(&decoded)
+}
+
+/// Shapes a viewport capture at the host's CSS width, independent of monitor scale or page zoom.
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // Finite, positive dimensions bounded before allocation.
+pub(crate) fn shape_css(png_bytes: &[u8], css_width: f64) -> Result<Shot, String> {
+    let image = decode(png_bytes)?;
+    if !css_width.is_finite() || css_width <= 0.0 {
+        return shape_image(&image);
+    }
+    let width = css_width.round().clamp(1.0, f64::from(MAX_WIDTH)) as u32;
+    let height = (f64::from(image.height) * f64::from(width) / f64::from(image.width.max(1)))
+        .round()
+        .max(1.0) as u32;
+    if u64::from(width) * u64::from(height) * 4 > MAX_DECODE_BYTES as u64 {
+        return shape_image(&image);
+    }
+    let scaled = if width < image.width {
+        downscale(&image, width)
+    } else {
+        crate::compose::fit(&image, width, height)
+    };
+    shape_image(&scaled)
+}
+
+fn shape_image(decoded: &Rgba) -> Result<Shot, String> {
     let mut width = decoded.width.min(MAX_WIDTH);
     for _ in 0..6 {
-        let scaled = downscale(&decoded, width);
+        let scaled = downscale(decoded, width);
         let png = encode(&scaled)?;
         if png.len() <= MAX_BYTES {
             return Ok(Shot {

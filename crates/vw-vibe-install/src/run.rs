@@ -6,9 +6,11 @@
 //! 2. Install Python: `uv python install <py> --no-bin` (+ `--no-registry` on Windows: no PEP 514 registry entry)
 //!    into the install folder (`UV_PYTHON_INSTALL_DIR`); nothing on PATH.
 //! 3. Create the environment: `uv venv --python <py> --no-project --no-config <venv>` (no Python download here).
-//! 4. Install Vibe: `uv pip install --require-hashes --only-binary:all: --compile-bytecode --link-mode copy
-//!    --index-url https://pypi.org/simple --no-config -r requirements.txt` (every package and hash pinned; no
-//!    source builds; bytecode compiled once so the first start is fast; copies, so the uv cache can go).
+//! 4. Install Vibe: `uv pip install --require-hashes --only-binary:all: --no-deps --compile-bytecode --link-mode
+//!    copy --index-url https://pypi.org/simple --no-config -r requirements.txt` (every package and hash pinned; no
+//!    source builds; `--no-deps`: the file is the complete install set, so a security override in it is installed
+//!    even where `mistral-vibe`'s own metadata pins the older version, and nothing outside the file is resolved in;
+//!    bytecode compiled once so the first start is fast; copies, so the uv cache can go).
 //! 5. Check: the `mistral_vibe-<version>.dist-info` and the server executable exist; sizes; `installed.json`.
 //! 6. Start Vibe: the `on_ready` hook.
 //!
@@ -135,6 +137,9 @@ pub(crate) fn steps(sources: &Sources, layout: &Layout, limits: &Limits) -> Vec<
                 os("--require-hashes"),
                 os("--only-binary"),
                 os(":all:"),
+                // The requirements file is the complete, hash-locked set (generate_pin.py checks it against the
+                // wheel's Requires-Dist and applies its SECURITY_OVERRIDES); see step 4 above.
+                os("--no-deps"),
                 os("--compile-bytecode"),
                 os("--link-mode"),
                 os("copy"),

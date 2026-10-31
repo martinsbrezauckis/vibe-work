@@ -109,7 +109,6 @@ async fn serve_one(stream: TcpStream, shared: Weak<Shared>) {
                                 | names::TOOL_RECEIPT
                                 | names::KILL_CHECK
                                 | names::CHROME_CHECK
-                                | names::USE_YOUR_CHROME
                                 | names::PROCESS_START
                                 | names::PROCESS_RESTART
                                 | names::PROPOSE_PROTECTED_CHANGE
@@ -213,13 +212,23 @@ async fn answer(shared: &Weak<Shared>, request: Request) -> Answer {
         Some(Holder::Hook) if tool == names::TOOL_RECEIPT => {
             crate::ask::tool_calls::receipts::issue(&shared, &request.args).await
         }
-        Some(Holder::Session(session_id))
-            if (names::SESSION_TOOLS.contains(&tool) || tool == names::CHROME_TOOL_LIST) =>
-        {
+        // The Chrome tool list is the MCP server's own tools/list step, not a tool call: it carries no pre-tool hook
+        // receipt (tools::call requires one and refused it, so sessions got no Chrome tools) and grants nothing;
+        // every Chrome call still passes the hook and the mode check.
+        Some(Holder::Session(session_id)) if tool == names::CHROME_TOOL_LIST => {
+            Ok(crate::chrome_control::gateway::list(&shared, &session_id))
+        }
+        Some(Holder::Session(session_id)) if names::SESSION_TOOLS.contains(&tool) => {
             let outcome =
                 super::tools::call(&shared, &tools, &session_id, tool, request.args).await;
             log(tool, Some(&session_id), &outcome);
             outcome
+        }
+        // Vibe lists a session's MCP tools once, inside session/start, while its credential is still pending (the
+        // session id is not known yet): the Chrome tool list grants nothing (each call needs the session's
+        // credential and passes the mode check), so it is answered here; without it no session got Chrome tools.
+        Some(Holder::Pending) if tool == names::CHROME_TOOL_LIST => {
+            Ok(crate::chrome_control::gateway::list(&shared, ""))
         }
         Some(Holder::Hook) if tool == names::GUARD_REFUSED => {
             crate::guard_refusals::hook(&shared, request.args)
@@ -232,11 +241,26 @@ async fn answer(shared: &Weak<Shared>, request: Request) -> Answer {
             log(tool, None, &outcome);
             outcome
         }
-        // may this Chrome Control call run (the user's rows; a card in the session for Ask each time)?
+        // Chrome authority follows the current chat mode without a permission card.
         Some(Holder::Hook) if tool == names::CHROME_CHECK => {
-            let outcome = crate::chrome_control::check::check(&shared, request.args).await;
+            let outcome = Ok(crate::chrome_control::check::check(&shared, &request.args));
             log(tool, None, &outcome);
             outcome
+        }
+        // did the user allow this bash call in a guard's dialog (its result then says so)?
+        Some(Holder::Hook) if tool == names::USER_ALLOWED => {
+            let field = |name: &str| {
+                request
+                    .args
+                    .get(name)
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_owned()
+            };
+            let allowed = crate::one_ask::of(&shared).is_some_and(|ledger| {
+                ledger.user_allowed(&field("sessionId"), &field("toolCallId"))
+            });
+            Ok(serde_json::json!({"allowed": allowed}))
         }
         Some(Holder::Hook) if tool == names::GIT_CHECK => {
             let outcome = super::gitcheck::check(&shared, request.args).await;

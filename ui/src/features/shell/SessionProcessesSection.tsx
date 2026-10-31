@@ -1,6 +1,6 @@
 /**
  * The open session's part of the Processes dialog: its dev servers and long commands, each with
- * its command, kind, ports, Output (live while shown) and Stop.
+ * its command, kind, ports, Output (live while shown; a Terminal tab server's output is in that tab) and Stop.
  * Depends on: AppContext, state/createStore, state/sessionProcesses. Called by: LeftRunning (the Processes dialog).
  * Invariants: renders only; output is text in a `<pre>` (never HTML); Stop never asks again (the click is the
  * decision, the window's own trusted surface).
@@ -17,6 +17,13 @@ const KIND_TEXT: Record<string, string> = {
   vibe: "Vibe's background process: it ends when Vibe or this session's connection ends.",
   started:
     "Started for the agent by Vibe Work: it keeps running until you stop it, also after you quit.",
+};
+
+/** The short kind words of a row. */
+const KIND_WORDS: Record<string, string> = {
+  started: "started for the agent",
+  terminal: "started in the Terminal",
+  vibe: "Vibe background process",
 };
 
 function Row({
@@ -40,7 +47,7 @@ function Row({
             {title}
           </span>
           <span className="d" title={KIND_TEXT[item.kind] ?? ""}>
-            {item.kind === "started" ? "started for the agent" : "Vibe background process"}
+            {KIND_WORDS[item.kind] ?? KIND_WORDS["vibe"]}
             {` · ${item.status}`}
             {item.ports.length > 0 &&
               ` · port${item.ports.length === 1 ? "" : "s"} ${item.ports.join(", ")}`}
@@ -48,16 +55,18 @@ function Row({
             {item.earlier && " · from last time"}
           </span>
         </span>
-        <Button
-          data-testid="shell.session-processes-section-toggle-output"
-          aria-expanded={output !== undefined}
-          aria-label={`${output === undefined ? "Show" : "Hide"} the output of ${title}`}
-          onClick={() => {
-            procs.toggleOutput(item.id);
-          }}
-        >
-          Output
-        </Button>
+        {item.kind !== "terminal" && (
+          <Button
+            data-testid="shell.session-processes-section-toggle-output"
+            aria-expanded={output !== undefined}
+            aria-label={`${output === undefined ? "Show" : "Hide"} the output of ${title}`}
+            onClick={() => {
+              procs.toggleOutput(item.id);
+            }}
+          >
+            Output
+          </Button>
+        )}
         <Button
           data-testid="shell.session-processes-section-stop"
           variant="danger"

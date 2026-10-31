@@ -21,18 +21,9 @@ export function pendingProtectedChanges(history: JsonValue | undefined): readonl
   });
 }
 
-/** The ask ids of the Chrome Control cards in `history` that wait for the user's answer (the core's `open`). */
-function openChromeAsks(history: JsonValue | undefined): readonly string[] {
-  if (!Array.isArray(history)) return [];
-  return history.flatMap((entry) => {
-    const card = obj(obj(entry)?.["chromeAsk"]);
-    return card?.["open"] === true && typeof card["askId"] === "string" ? [card["askId"]] : [];
-  });
-}
-
-/** Every ask in `history` that waits for the user: pending protected changes and open Chrome Control cards. */
+/** Pending review entries in the transcript. */
 export function pendingHistoryAsks(history: JsonValue | undefined): readonly string[] {
-  return [...pendingProtectedChanges(history), ...openChromeAsks(history)];
+  return pendingProtectedChanges(history);
 }
 /** Converts captured unified text to the existing read-only DiffView lines. */
 export function protectedDiff(file: ProtectedFileView): FileDiff {

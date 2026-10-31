@@ -1,5 +1,5 @@
 {
-  "_comment": "Method -> Pydantic model name table for Vibe app-server 3.0.3. Vibe has no central registry (the server dispatches with match statements), so this table is our own data, derived from the dispatch code and live-validated by the protocol bench. generate.py fails on drift: every name in protocol.SERVER_METHODS must be a key of `requests`, every key must be a real method, and every model name must exist. A null model means Vibe declares none for that side.",
+  "_comment": "Method -> Pydantic model name table for Vibe app-server 3.0.4. Vibe has no central registry (the server dispatches with match statements), so this table is our own data, derived from the dispatch code and live-validated by the protocol bench. generate.py fails on drift: every name in protocol.SERVER_METHODS must be a key of `requests`, every key must be a real method, and every model name must exist. A null model means Vibe declares none for that side.",
   "requests": {
     "initialize": {
       "params": "InitializeParams",
@@ -632,6 +632,66 @@
     "session/turn/queue/edit/abandon": {
       "params": "TurnQueueEditAbandonParams",
       "result": "TurnQueueEditAbandonResponse"
+    },
+    "projects/create": {
+      "params": "ProjectsCreateParams",
+      "result": "ProjectMutationResponse"
+    },
+    "projects/list": {
+      "params": "ProjectsListParams",
+      "result": "ProjectsListResponse"
+    },
+    "projects/remove": {
+      "params": "ProjectsRemoveParams",
+      "result": "EmptyResponse"
+    },
+    "projects/rename": {
+      "params": "ProjectsRenameParams",
+      "result": "ProjectMutationResponse"
+    },
+    "setup/oidc-cancel": {
+      "params": "OidcAttemptParams",
+      "result": "ProtocolModel"
+    },
+    "setup/oidc-clear": {
+      "params": "ProtocolModel",
+      "result": "ProtocolModel"
+    },
+    "setup/oidc-headers": {
+      "params": "OidcHeadersParams",
+      "result": "OidcHeadersResponse"
+    },
+    "setup/oidc-poll": {
+      "params": "OidcAttemptParams",
+      "result": "OidcPollResponse"
+    },
+    "setup/oidc-probe": {
+      "params": "ProtocolModel",
+      "result": "OidcProbeResponse"
+    },
+    "setup/oidc-start": {
+      "params": "ProtocolModel",
+      "result": "OidcStartResponse"
+    },
+    "skills/local/delete": {
+      "params": "SkillsLocalDeleteParams",
+      "result": "EmptyResponse"
+    },
+    "skills/local/list": {
+      "params": "SkillsLocalListParams",
+      "result": "SkillsLocalListResponse"
+    },
+    "skills/local/read": {
+      "params": "SkillsLocalReadParams",
+      "result": "SkillsLocalReadResponse"
+    },
+    "skills/local/setEnabled": {
+      "params": "SkillsLocalSetEnabledParams",
+      "result": "SkillsLocalSetEnabledResponse"
+    },
+    "skills/local/write": {
+      "params": "SkillsLocalWriteParams",
+      "result": "SkillsLocalWriteResponse"
     }
   },
   "notifications": {

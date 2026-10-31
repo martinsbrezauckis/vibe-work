@@ -611,9 +611,11 @@ pub(crate) fn emit_if_changed(shared: &Shared, changed: bool, view: &ChangesView
     shared.emit(CoreEvent::ChangesUpdated {
         session_id: view.session_id.clone(),
         mode: view.mode,
-        files: u32::try_from(
-            view.files.len() + view.turns.iter().map(|t| t.files.len()).sum::<usize>(),
-        )
+        files: u32::try_from(if view.mode == ChangesMode::Effects {
+            view.turns.iter().map(|t| t.files.len()).sum::<usize>()
+        } else {
+            view.files.len()
+        })
         .unwrap_or(u32::MAX),
         fingerprint: view.fingerprint.clone(),
     });
@@ -713,8 +715,15 @@ pub(crate) fn build_view(
         tracker.review = Some(lost_review(repo, &dir, reason));
         return build_view(hub, session_id, tracker, session);
     }
+    if view.mode == ChangesMode::Git {
+        view.turns =
+            crate::changes_effects::child_turns(session, view.repo_root.as_deref().map(Path::new));
+    }
     view.took_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
-    tracker.fingerprint = view.fingerprint.clone();
+    // Child history may arrive after the file watcher. Publish newly known authors even if the diff is unchanged;
+    // the public fingerprint remains Git's own so Keep/Revert admission uses the original diff identity.
+    let authors = serde_json::to_vec(&view.turns).unwrap_or_default();
+    tracker.fingerprint = format!("{}:{}", view.fingerprint, vw_changes::fnv_hex(&[&authors]));
     view
 }
 
@@ -767,3 +776,7 @@ fn label_turns(
         }
     }
 }
+
+#[cfg(test)]
+#[path = "changes_attribution_tests.rs"]
+mod attribution_tests;

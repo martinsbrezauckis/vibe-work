@@ -155,7 +155,7 @@ fn bypasses(runtime: &Value) -> bool {
 
 /// Whether the session of a switch already runs in Full access: the profile this core last saw for it
 /// is `auto-approve`, or Vibe's latest runtime for that profile runs every tool without asking.
-fn in_full_access(shared: &Shared, params: &Value) -> bool {
+pub(crate) fn in_full_access(shared: &Shared, params: &Value) -> bool {
     let Some(id) = params.get("sessionId").and_then(Value::as_str) else {
         return false;
     };

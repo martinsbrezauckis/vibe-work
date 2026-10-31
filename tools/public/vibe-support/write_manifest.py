@@ -15,8 +15,12 @@ requirements file must be uploaded with the manifest, to the same release.
 
 Usage: python3 -I write_manifest.py --out <dir> --entry <pin dir>,min=0.1.0[,max=0.1.9] [--entry ...]
          [--pypi-latest 2.27.0 | --pypi-latest-from-pypi] [--sequence N] [--previous <old vibe-support.json>]
+         [--chrome-store review|available]
   --sequence   default: the current Unix time; must be higher than --previous's (the app refuses a lower one).
   --pypi-latest-from-pypi  reads `info.version` of https://pypi.org/pypi/mistral-vibe/json (network).
+  --chrome-store  adds `"chromeExtension": {"store": ...}`: `review` while the Chrome extension's store listing is in
+                  Google's review (Your Chrome's setup then says so instead of linking to the store), `available` once
+                  it is listed. Default: the field is left out (the app shows the store link).
 Needs: Python 3.10+, stdlib only. Called by: the release step, maintainers, the tests.
 """
 
@@ -36,6 +40,8 @@ SCHEMA = 1
 PLAIN = re.compile(r"^[0-9]+(\.[0-9]+)*$")
 SEMVER = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$")
 HEX64 = re.compile(r"^[0-9a-f]{64}$")
+# The Chrome extension's store states the app reads (`chromeExtension.store`).
+CHROME_STORE = ("review", "available")
 
 
 # Published Vibe versions no Vibe Work may install, with the reason the refusal names.
@@ -80,6 +86,8 @@ def load_entry(folder: Path, minimum: str, maximum: str | None, out: Path) -> di
     app_max = version_key(maximum.split("-")[0].split("+")[0]) if maximum else None
     if version in NEVER_OFFER:
         raise ManifestError(f"Vibe {version} is never offered: {NEVER_OFFER[version]}")
+    if version_key(version) >= (3, 0, 4) and app_min < (0, 1, 4):
+        raise ManifestError("Vibe 3.0.4 or later needs min=0.1.4 or later")
     if version_key(version) >= (3, 0, 0) and app_min < (0, 1, 2):
         raise ManifestError("Vibe 3 needs min=0.1.2 or later")
     if version == "2.26.1" and (app_max is None or app_max > (0, 1, 1)):
@@ -120,7 +128,7 @@ def pypi_latest() -> str:
 
 
 def build(out: Path, entries: list[str], sequence: int | None, previous: Path | None,
-          latest: str | None) -> dict:
+          latest: str | None, chrome_store: str | None = None) -> dict:
     """Writes the manifest and the requirements files into `out`; returns the manifest."""
     out.mkdir(parents=True, exist_ok=True)
     floor = 0
@@ -144,6 +152,10 @@ def build(out: Path, entries: list[str], sequence: int | None, previous: Path | 
         "pypiLatest": latest,
         "versions": versions,
     }
+    if chrome_store is not None:
+        if chrome_store not in CHROME_STORE:
+            raise ManifestError(f"--chrome-store {chrome_store!r}: one of {', '.join(CHROME_STORE)}")
+        manifest["chromeExtension"] = {"store": chrome_store}
     (out / "vibe-support.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8", newline="\n")
     return manifest
 
@@ -157,15 +169,18 @@ def main(argv: list[str]) -> int:
     group = parser.add_mutually_exclusive_group()
     group.add_argument("--pypi-latest")
     group.add_argument("--pypi-latest-from-pypi", action="store_true")
+    parser.add_argument("--chrome-store", choices=CHROME_STORE)
     args = parser.parse_args(argv)
     latest = pypi_latest() if args.pypi_latest_from_pypi else args.pypi_latest
     try:
-        manifest = build(args.out, args.entry, args.sequence, args.previous, latest)
+        manifest = build(args.out, args.entry, args.sequence, args.previous, latest, args.chrome_store)
     except ManifestError as error:
         print(f"refused: {error}", file=sys.stderr)
         return 1
     listed = ", ".join(f"{v['version']} (Vibe Work {v['minVibeWork']}+)" for v in manifest["versions"])
-    print(f"sequence {manifest['sequence']}; pypiLatest {manifest['pypiLatest']}; versions: {listed}")
+    store = manifest.get("chromeExtension", {}).get("store", "not set")
+    print(f"sequence {manifest['sequence']}; pypiLatest {manifest['pypiLatest']}; chrome store {store}; "
+          f"versions: {listed}")
     for name in sorted(p.name for p in args.out.iterdir()):
         print(f"  {args.out / name}")
     return 0

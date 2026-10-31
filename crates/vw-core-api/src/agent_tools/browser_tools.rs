@@ -22,7 +22,7 @@ fn target(chrome_available: bool, args: &Value) -> Result<(), String> {
     }
     match args.get("target").and_then(Value::as_str) {
         None | Some("builtin") => Ok(()),
-        Some("chrome") => Err("Use use_your_chrome for the user's Chrome.".to_owned()),
+        Some("chrome") => Err("This tool operates only in Vibe Work's browser.".to_owned()),
         Some(other) => Err(format!(
             "unknown target '{}': use 'builtin'",
             other.chars().take(20).collect::<String>()
@@ -66,7 +66,6 @@ pub(super) async fn prepare(
             owner,
             args["tab"].as_str().unwrap_or_default(),
         )
-        .await
         .map(Some);
     }
     if args["action"] != "fill" {
@@ -279,7 +278,7 @@ mod tests {
     fn legacy_chrome_target_points_to_the_users_chrome_tools() {
         assert_eq!(
             target(true, &json!({"target": "chrome"})),
-            Err("Use use_your_chrome for the user's Chrome.".to_owned())
+            Err("This tool operates only in Vibe Work's browser.".to_owned())
         );
     }
 }

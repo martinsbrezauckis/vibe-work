@@ -1,6 +1,7 @@
 /**
- * Settings › Developer: the Debug API switch and its token file (moved from the old Settings dialog).
- * Depends on: AppContext, hooks, protocol/client types. Called by: SettingsPage.
+ * Settings › Developer: the Debug API switch and its token file (moved from the old Settings dialog), and the
+ * Chrome Control switch for local-network pages (shown when this build has Chrome Control).
+ * Depends on: AppContext, hooks, protocol/client types, useChromeControl. Called by: SettingsPage.
  * Invariants: the switch calls the host (Tauri command) and the indicator follows the core's flag event, never the
  * click; in browser dev mode the switch is disabled with the reason; the token never crosses the bridge, only the
  * path of the file that holds it.
@@ -12,6 +13,8 @@ import { type ReactElement, useEffect, useState } from "react";
 import { toCallError } from "../../protocol/client/types";
 import { useApp } from "../shell/AppContext";
 import { useCoreState } from "../shell/hooks";
+import { chromeAvailable } from "./chrome/chromeRows";
+import { useChromeControl } from "./chrome/useChromeControl";
 
 /** The Developer section. */
 export function DeveloperSettings(): ReactElement {
@@ -20,6 +23,10 @@ export function DeveloperSettings(): ReactElement {
   const reason = useCoreState((s) => s.debugApi.reason);
   const canSwitch = core?.client.kind === "tauri";
   const [tokenFile, setTokenFile] = useState<string | null>(null);
+  const chrome = useChromeControl();
+  const localNetwork = chrome.view?.localNetwork ?? false;
+  // A paired Chrome that has not taken the switch's current value yet (the core keeps sending it).
+  const notApplied = chrome.view?.setup.pairing === "Paired" && !chrome.view.localNetworkApplied;
   useEffect(() => {
     if (core === null || !canSwitch) return;
     let live = true;
@@ -84,6 +91,23 @@ export function DeveloperSettings(): ReactElement {
           onClick={flip}
         />
       </div>
+      {chromeAvailable(chrome.view) && (
+        <div className="check" data-setting="chrome-local-network">
+          <span>
+            Local network pages for the agent in Chrome
+            {notApplied && <span className="d">Not applied in Chrome yet</span>}
+          </span>
+          <Switch
+            data-testid="settings.developer-settings-local-network"
+            aria-label="Local network pages for the agent in Chrome"
+            aria-checked={localNetwork}
+            disabled={chrome.busy !== null}
+            onClick={() => {
+              void chrome.run({ op: "setLocalNetwork", enabled: !localNetwork }, "setLocalNetwork");
+            }}
+          />
+        </div>
+      )}
       {canSwitch && (
         <div className="check" data-setting="debug-token">
           <span>

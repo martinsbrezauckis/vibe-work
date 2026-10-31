@@ -9,13 +9,11 @@ use std::path::PathBuf;
 
 use serde_json::Value;
 
-const GROUPS: [&str; 10] = [
+const GROUPS: [&str; 8] = [
     "accessModes",
     "thinkingLevels",
     "vaultKinds",
     "vaultPermissions",
-    "browserPermissions",
-    "chromeControl",
     "locks",
     "workNames",
     "builtinPlugins",

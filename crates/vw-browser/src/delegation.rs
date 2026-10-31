@@ -9,11 +9,7 @@ use crate::sessions::{Actor, Outcome};
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
-pub struct BrowserPermissions {
-    /// Let the agent close user-origin web tabs without a per-tab confirmation.
-    #[serde(default)]
-    pub close_user_tabs: bool,
-}
+pub struct BrowserPermissions {}
 
 /// A recognized act requiring delegation authority.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -29,23 +25,13 @@ pub enum DelegatedAct {
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub enum DelegationAuthority {
-    /// The close-user-tabs permission.
-    CloseUserTabs,
+    /// The current chat access mode.
+    AccessMode,
+    /// A retained receipt from the removed tab-close setting.
+    #[serde(rename = "closeUserTabs")]
+    PreviousPermission,
     /// A native confirmation answered by the user for this act only.
     ConfirmedByYou,
-}
-
-impl BrowserPermissions {
-    /// The existing permission for `act`, or `None` when native confirmation is required.
-    #[must_use]
-    pub fn authority(&self, act: DelegatedAct) -> Option<DelegationAuthority> {
-        match act {
-            DelegatedAct::CloseUserTabs if self.close_user_tabs => {
-                Some(DelegationAuthority::CloseUserTabs)
-            }
-            DelegatedAct::CloseUserTabs => None,
-        }
-    }
 }
 
 /// One retained session receipt. Wording, form values, paths and query strings are never stored here.

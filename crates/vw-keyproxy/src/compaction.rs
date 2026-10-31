@@ -1,8 +1,8 @@
 //! Bounds and rewrites Unified Harness compaction requests at the model proxy.
 //! Depends on: `serde_json`. Called by: `server` for Mistral chat completions.
-//! Vibe also uses nonstreaming `secondary_call` for vision. Compaction requests end in a text-only
-//! user summary request after the historical images; vision requests carry the image in their last
-//! user message. The built-in prompt also identifies image-free compaction for its deadline.
+//! Vibe also uses `secondary_call` for vision. Compaction requests (streamed since Vibe 3.0.3) end in a
+//! text-only user summary request after the historical images; vision requests carry the image in their
+//! last user message. The built-in prompt also identifies image-free compaction for its deadline.
 
 use serde_json::{Value, json};
 
@@ -13,12 +13,29 @@ pub(crate) const MAX_CHAT_BODY: usize = 128 * 1024 * 1024;
 #[derive(Default)]
 pub(crate) struct ChatShape {
     pub(crate) compaction: bool,
+    /// A side request ([`side`]): its answer's rate limits can be another model's than the chat's, so they do not
+    /// replace the readout.
+    pub(crate) side: bool,
     /// Only the new user input, never history or a follow-up after tool/assistant output.
     pub(crate) new_attachment: bool,
     pub(crate) images: usize,
     pub(crate) attachment_notes: usize,
     pub(crate) image_url_bytes: usize,
     pub(crate) omitted: usize,
+}
+
+/// A side request of Vibe's (`ChatShape::side`): the title or the smart-approve classifier (by their call type), or a
+/// request that is not streamed and is no compaction (the turn summary). The chat's own turns are streamed, and its
+/// compaction runs on the chat's model.
+fn side(request: &Value, compaction: bool) -> bool {
+    matches!(
+        request
+            .pointer("/metadata/call_type")
+            .and_then(Value::as_str),
+        Some("title_generation" | "smart_approve")
+    ) || (request.get("messages").is_some()
+        && request.get("stream") != Some(&Value::Bool(true))
+        && !compaction)
 }
 
 fn is_attachment_note(text: &str) -> bool {
@@ -71,15 +88,16 @@ pub(crate) fn prepare(bytes: &[u8]) -> (Option<Vec<u8>>, ChatShape) {
             Some(builtin || historical_image)
         })
         .unwrap_or(false);
+    // Streamed or not: Vibe 3.0.3 and later stream their compaction call; earlier versions did not.
     let mut shape = ChatShape {
-        compaction: request.get("stream") == Some(&Value::Bool(false))
-            && request
-                .pointer("/metadata/call_type")
-                .and_then(Value::as_str)
-                == Some("secondary_call")
+        compaction: request
+            .pointer("/metadata/call_type")
+            .and_then(Value::as_str)
+            == Some("secondary_call")
             && compaction_prompt,
         ..ChatShape::default()
     };
+    shape.side = side(&request, shape.compaction);
     let Some(messages) = request.get_mut("messages").and_then(Value::as_array_mut) else {
         return (None, shape);
     };
@@ -175,7 +193,10 @@ mod tests {
                     .unwrap()
                     .contains("original message")
             );
-            for (stream, call_type) in [(true, "secondary_call"), (false, "main_call")] {
+            // Streamed, as Vibe 3.0.3 and later send it: still a compaction.
+            let (rewritten, shape) = prepare(&request(count, true, "secondary_call"));
+            assert!(shape.compaction && shape.omitted == count && rewritten.is_some());
+            for (stream, call_type) in [(true, "main_call"), (false, "main_call")] {
                 let bytes = request(count, stream, call_type);
                 let (unchanged, shape) = prepare(&bytes);
                 assert!(unchanged.is_none());

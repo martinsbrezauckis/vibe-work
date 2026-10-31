@@ -18,13 +18,22 @@ impl Confirmer for NoPrompt {
 
 /// A started core with no Vibe server, its folders under the workspace's `target/tmp/<name>-<pid>`.
 pub(crate) async fn start(name: &str) -> crate::Core {
+    start_with(name, |_, _| {}).await
+}
+
+/// [`start`] with a config change (for example a Chrome Control package path, which nothing reads until Set up).
+pub(crate) async fn start_with(
+    name: &str,
+    edit: impl FnOnce(&mut crate::CoreConfig, &std::path::Path),
+) -> crate::Core {
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join(format!("../../target/tmp/{name}-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
-    let config = crate::CoreConfig {
+    let mut config = crate::CoreConfig {
         start_vibe: false,
         ..crate::CoreConfig::default()
     };
+    edit(&mut config, &dir);
     crate::Core::start(
         vw_supervisor::SupervisorConfig::new(
             dir.join("no-server-requested"),

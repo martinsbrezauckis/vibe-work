@@ -35,7 +35,6 @@ import {
 } from "../ask/model";
 import { protectedChangeOf } from "./model/protectedChange";
 import { grantsAction } from "../ask/grantsRoute";
-import { chromeAnswer, chromeRowJson } from "../ask/chromeRoute";
 import { type Row, rowEntries } from "./model/build";
 import { createTranscriptBuilder } from "./model/memo";
 import { subagentRows } from "./model/subagentRows";
@@ -94,7 +93,6 @@ function rowJson(
   choices: TranscriptUi["open"],
   expanded: boolean,
   askOf: (callbackId: string) => CardAsk,
-  app: App,
 ): unknown {
   const base = { kind: row.kind, key: row.key, entryIds: rowEntries(row).map(entryId) };
   switch (row.kind) {
@@ -142,8 +140,6 @@ function rowJson(
       const p = protectedChangeOf(row.entry);
       return { ...base, proposalId: p?.id ?? null, status: p?.status ?? null };
     }
-    case "chromeAsk":
-      return { ...base, ...chromeRowJson(app, row.entry) };
     case "turnEnd":
       return { ...base, status: str(row.turn["status"]), turnId: str(row.turn["id"]) };
     case "hook":
@@ -222,23 +218,17 @@ export function registerTranscriptRoutes(app: App): () => void {
       answered: app.transcript.store.get().answered,
       problems: app.transcript.store.get().problems,
       rows: rows.map((row) =>
-        rowJson(
-          row,
-          choices,
-          expanded,
-          (id) => {
-            const core = app.core?.store.get();
-            const ask = core?.asks[`callback:${id}`];
-            const covers = core?.askGrants.offers.find((o) => o.callbackId === id)?.covers;
-            return {
-              offers: ask?.offers,
-              alwaysSetting: ask?.alwaysSetting,
+        rowJson(row, choices, expanded, (id) => {
+          const core = app.core?.store.get();
+          const ask = core?.asks[`callback:${id}`];
+          const covers = core?.askGrants.offers.find((o) => o.callbackId === id)?.covers;
+          return {
+            offers: ask?.offers,
+            alwaysSetting: ask?.alwaysSetting,
 
-              covers: covers ?? null,
-            };
-          },
-          app,
-        ),
+            covers: covers ?? null,
+          };
+        }),
       ),
     };
   };
@@ -392,8 +382,6 @@ export function registerTranscriptRoutes(app: App): () => void {
         return answer(input);
       case "protected":
         return decide(input);
-      case "chrome":
-        return { ...(await chromeAnswer(app, input)), ...read(sessionOf(input)) };
       case "link":
         app.transcript.askLink(text(input["url"], "url"));
         return { link: app.transcript.store.get().link };

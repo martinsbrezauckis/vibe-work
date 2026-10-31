@@ -12,12 +12,11 @@ const source = JSON.parse(
 const destination = new URL("docs/public/VOCABULARY.md", root);
 const debugDestination = new URL("docs/public/DEBUG_API.md", root);
 const debugSource = readFileSync(debugDestination, "utf8");
-const browser = source.browserPermissions;
 const kinds = source.vaultKinds;
 const permissions = source.vaultPermissions;
 const debugCopy = {
   fullAccess: source.accessModes["auto-approve"].name,
-  browser: `\nThe window calls this choice **${browser.closeUserTabs.name}**.\nFor closing tabs you opened, **${browser.closeAsk.name}** asks **Close** or **Keep** each time; **${browser.closeAllow.name}** lets the agent close them during your task. These are \`closeUserTabs: false\` and \`true\` on the wire. App preview cannot be closed by the agent.\n`,
+  browser: `\nTab closing follows the chat access mode. Ask can close agent-owned tabs; Accept edits and Full access can close user-origin tabs. App preview cannot be closed.\n`,
   vault: `\nThe window names them **${kinds.vibeWork.name}**, **${kinds.shellx.name}** and **${kinds.desktop.name}**. Its per-project entry\npermissions are **${permissions.askEachTime.name}**, **${permissions.allowed.name}** and **${permissions.never.name}** (\`askEachTime\`, \`allowed\`, \`never\` on the wire).\n**${source.locks.agentPause.name}** pauses agents' use of secrets while sessions keep working;\n**${source.locks.vaultLock.name}** closes the vault (its contents stay encrypted) and pauses model requests until unlock.\n`,
 };
 const found = new Set();
@@ -39,7 +38,6 @@ const sections = {
   thinkingLevels: source.texts.thinkingLevel,
   vaultKinds: "Vault kinds",
   vaultPermissions: "Vault permissions",
-  browserPermissions: "Browser delegation permissions",
   locks: "Agent access and vault lock",
   workNames: "Projects and sessions",
   builtinPlugins: "Built-in plugins",

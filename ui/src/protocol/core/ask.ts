@@ -5,8 +5,6 @@
  * scripts/public/check.sh fails when this file and the Rust types disagree.
  */
 
-import type { JsonValue } from "./index";
-
 export type Requester = "agent" | "window" | "debugApi" | "core";
 
 export type Ask = {
@@ -233,79 +231,27 @@ tool: string,
  */
 pattern: string | null, };
 
-export type ChromeLevel = "browse" | "fill" | "act";
-
-export type ChromeGroup = "read" | "navigate" | "forms" | "send" | "signIn" | "siteData" | "scripts" | "bookmarks" | "history";
-
-export type ChromeSettings = {
+export type ChromeControlRequest = { "op": "read", } | { "op": "takeSelection",
 /**
- * The trust level.
+ * The pending selection identity.
  */
-level: ChromeLevel, };
-
-export type ChromeAskView = {
+selectionId: string, } | { "op": "tabs", } | { "op": "tabContext",
 /**
- * The ask's id (`asks`, `askRecords`).
+ * Connected profile identity.
  */
-askId: string,
+profileId: string,
 /**
- * The session the card belongs to.
+ * Exact tab identity.
  */
-sessionId: string,
+tabId: number, } | { "op": "setEnabled",
 /**
- * The turn it happened in, when known.
+ * Whether Chrome tools are available.
  */
-turnId: string | null,
+enabled: boolean, } | { "op": "setLocalNetwork",
 /**
- * Unix milliseconds.
+ * Whether local-network pages are allowed for the agent in Chrome.
  */
-createdAtMs: number,
-/**
- * Vibe's tool name (`mcp_vw.chrome_execute`).
- */
-tool: string,
-/**
- * What the call does, in plain words ("Send a form or confirm on shop.example").
- */
-summary: string,
-/**
- * The group whose row decided; `None` for closing one of the user's tabs or an unknown tool.
- */
-group: ChromeGroup | null,
-/**
- * Why Vibe asks (the card's reason line), or why it was refused.
- */
-reason: string,
-/**
- * What "Allow for this session" covers, in words; empty when the card offers no session answer.
- */
-covers: Array<CoversPart>,
-/**
- * The call's input as Vibe sent it (the card's payload).
- */
-input: JsonValue,
-/**
- * The card waits for the user's answer (the session shows Needs input); false once it closed.
- */
-open: boolean, };
-
-export type ChromeControlRequest = { "op": "read", } | { "op": "setLevel",
-/**
- * The level.
- */
-level: ChromeLevel, } | { "op": "answer",
-/**
- * The card's ask id.
- */
-askId: string,
-/**
- * once, session or no.
- */
-answer: Choice,
-/**
- * Optional note sent with No.
- */
-note: string | null, } | { "op": "offerSetup", } | { "op": "setup",
+enabled: boolean, } | { "op": "offerSetup", } | { "op": "setup",
 /**
  * The offer's id.
  */
@@ -313,17 +259,91 @@ offerId: string, } | { "op": "openStore", } | { "op": "remove", };
 
 export type ChromeControlView = {
 /**
- * The level.
+ * Whether Chrome tools are available.
  */
-level: ChromeLevel,
+enabled: boolean,
 /**
- * The extension lowered at least one permission; reselecting a level asks before restoring it.
+ * Settings > Developer: local-network pages are allowed for the agent in Chrome.
  */
-lowered: boolean,
+localNetwork: boolean,
+/**
+ * The running helper acknowledged `local_network`'s current value (false while a change is still being sent).
+ */
+localNetworkApplied: boolean,
+/**
+ * Recent chat work, bounded and independent of permissions.
+ */
+work: Array<ChromeWorkView>,
+/**
+ * Pending selected-text deliveries, claimed once by a composer.
+ */
+pendingSelections: Array<string>,
+/**
+ * A bounded delivery failure state.
+ */
+selectionError: string | null,
 /**
  * Where the setup stands.
  */
 setup: ChromeSetupView, };
+
+export type ChromeWorkView = {
+/**
+ * The owning app chat.
+ */
+sessionId: string,
+/**
+ * Active, connecting, stopping, stopped or disconnected.
+ */
+state: string, };
+
+export type ChromeSelection = {
+/**
+ * Stable delivery identity.
+ */
+selectionId: string,
+/**
+ * Owning chat, or New chat when no chat owns the window.
+ */
+sessionId: string | null,
+/**
+ * Page title, rendered as text.
+ */
+title: string,
+/**
+ * Page URL, rendered as text.
+ */
+url: string,
+/**
+ * The selected page text.
+ */
+text: string,
+/**
+ * The page content inside the browser's untrusted-content boundary.
+ */
+modelText: string, };
+
+export type ChromeTab = {
+/**
+ * Connected profile identity.
+ */
+profileId: string,
+/**
+ * Profile display label.
+ */
+profileName: string,
+/**
+ * Exact Chrome tab identity.
+ */
+tabId: number,
+/**
+ * Page title, rendered as text.
+ */
+title: string,
+/**
+ * Page URL, rendered as text.
+ */
+url: string, };
 
 export type ChromeSetupView = {
 /**
@@ -346,6 +366,11 @@ profiles: Array<string>,
  * The store page.
  */
 storeUrl: string,
+/**
+ * The store listing is in Google's review (the last accepted signed release manifest says so): the setup shows
+ * that in place of the store button. False when no manifest stated it (the store link).
+ */
+storeReview: boolean,
 /**
  * Pairing state reported by the owned helper, in plain words.
  */

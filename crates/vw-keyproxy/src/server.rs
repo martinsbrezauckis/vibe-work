@@ -425,6 +425,8 @@ struct PreparedBody {
     body: reqwest::Body,
     deadline: Option<tokio::time::Instant>,
     compaction: bool,
+    /// A side chat request (`ChatShape::side`): its answer's rate limits are not offered.
+    side: bool,
     rewritten_len: Option<usize>,
 }
 
@@ -505,6 +507,7 @@ async fn prepared_body(
             body,
             deadline,
             compaction: shape.compaction,
+            side: shape.side,
             rewritten_len,
         })
     } else {
@@ -520,8 +523,18 @@ async fn prepared_body(
             body,
             deadline: None,
             compaction: false,
+            side: false,
             rewritten_len: None,
         })
+    }
+}
+
+/// The upstream base URL of `route`.
+fn upstream_base<'a>(shared: &'a Shared, route: &RouteSpec) -> &'a str {
+    match route.upstream {
+        Upstream::Api => &shared.config.upstreams.api,
+        Upstream::Console => &shared.config.upstreams.console,
+        Upstream::Chat => &shared.config.upstreams.chat,
     }
 }
 
@@ -546,6 +559,7 @@ async fn handle(State(shared): State<Arc<Shared>>, request: Request) -> Response
         body,
         deadline,
         compaction,
+        side,
         rewritten_len,
     } = match prepared_body(&shared, route, &parts, body, arrived).await {
         Ok(prepared) => prepared,
@@ -566,11 +580,7 @@ async fn handle(State(shared): State<Arc<Shared>>, request: Request) -> Response
             Err(r) => return error(r.status, r.kind, r.message),
         },
     };
-    let base = match route.upstream {
-        Upstream::Api => &shared.config.upstreams.api,
-        Upstream::Console => &shared.config.upstreams.console,
-        Upstream::Chat => &shared.config.upstreams.chat,
-    };
+    let base = upstream_base(&shared, route);
     let path = parts.uri.path();
     let rest = path.strip_prefix(route.strip).unwrap_or(path);
     let query = parts
@@ -628,7 +638,7 @@ async fn handle(State(shared): State<Arc<Shared>>, request: Request) -> Response
             "Vibe Work could not reach Mistral. Check the network or proxy settings.",
         );
     };
-    relay_response(&shared, route, response, deadline, compaction).await
+    relay_response(&shared, route, response, deadline, compaction, side).await
 }
 
 /// Relay a complete compaction answer or stream the ordinary endpoint's answer.
@@ -638,6 +648,7 @@ async fn relay_response(
     response: reqwest::Response,
     deadline: Option<tokio::time::Instant>,
     compaction: bool,
+    side: bool,
 ) -> Response {
     shared.stats.forwarded.fetch_add(1, Ordering::Relaxed);
     debug!(
@@ -645,8 +656,9 @@ async fn relay_response(
         status = response.status().as_u16(),
         "model proxy: forwarded"
     );
-    // Only the five rate-limit header names are read (never a body, never other headers).
-    if let Some(limits) = RateLimits::from_headers(response.headers(), now_ms()) {
+    // Only the five rate-limit header names are read (never a body, never other headers). Mistral's limits are per
+    // model: a side request's answer (title, classifier, summary) is another model's and keeps the chat's readout.
+    if !side && let Some(limits) = RateLimits::from_headers(response.headers(), now_ms()) {
         shared.limits.offer(limits);
     }
     let upstream_status = response.status();

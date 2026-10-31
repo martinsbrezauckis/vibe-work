@@ -31,8 +31,17 @@ pub enum GitRequest {
     Identity,
     /// Saves the app commit identity in private app data. Both empty means ask during init.
     SetIdentity {
-        /// The author details; never written to global Git config.
+        /// The author details (saved in app data only).
         identity: vw_git::identity::CommitIdentity,
+    },
+    /// The person's answer to the Git identity question (`gitIdentityAsked`): an `identity` is saved in Git's global
+    /// settings (a field that already has a value there is kept) and as the app commit identity, and the waiting
+    /// `git init` / `git commit` runs; none (Cancel) refuses it. Takes no `sessionId` or `repo`.
+    AnswerIdentity {
+        /// The question.
+        ask_id: String,
+        /// The name and email, or none for Cancel.
+        identity: Option<vw_git::identity::CommitIdentity>,
     },
     /// The branch bar: branch, base, counts, the cached PR card. Reads only, no network.
     Status {

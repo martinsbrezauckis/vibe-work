@@ -7,19 +7,15 @@
  * they turn on when the reply ends and Vibe continues by itself, they are already on, or it was refused.
  * Pure. Depends on: entries. Called by: StepItem.
  * Invariant: no operation names or codes in the words; `null` for a step that is not Chrome Control's or still runs.
+ * Invariant: every line is one of this file's fixed lines. An answer's words (an error's message or details, a page's
+ * text) never reach it; from the untrusted page envelope only the error code is read, as a key into a closed list.
  */
 import { type Obj, detailOf, effectView, obj, outputOf, outputText, str } from "./entries";
 
-const CHROME_TOOL = /^mcp_vw\.chrome_(status|task|execute)$/i;
+const CHROME_TOOL = /^mcp_vw\.chrome_(status|session|execute)$/i;
 
 /** The tools that turn a tool set on for the chat (`on_demand` in the core), and their lines by answer status. */
 const TURN_ON: Readonly<Record<string, Readonly<Record<string, string>>>> = {
-  "mcp_vw.use_your_chrome": {
-    turningOn: "Chrome Control turns on for this chat.",
-    alreadyOn: "Chrome Control is already on in this chat.",
-    refused:
-      "Not done: Chrome Control is not set up. Set it up in Settings › Browser › Your Chrome.",
-  },
   "mcp_vw.use_headless_browser": {
     turningOn: "The headless browser turns on for this chat.",
     alreadyOn: "The headless browser is already on in this chat.",
@@ -81,22 +77,100 @@ function field(answer: Obj | null, name: string): string | null {
   return null;
 }
 
-const BY_CODE: Readonly<Record<string, string>> = {
-  POLICY_DENIED: "Not done: Chrome Control refused it.",
-  REQUEST_DENIED: "Not done: the request was refused in Chrome.",
-  CONTROL_SUSPENDED: "Paused in Chrome. Vibe waits until you press Resume.",
-  TRANSPORT_LOST: "Not known: Chrome Control lost the connection. Check the page in Chrome.",
-  ACTION_TIMEOUT: "Not known: Chrome Control did not finish in time. Check the page in Chrome.",
-  OWNER_APPROVAL_REQUIRED: "Waiting for you to pair in Chrome.",
-  OWNER_IDENTITY_MISMATCH: "Chrome shows a different Vibe Work — pair again.",
-  OWNER_CONFLICT: "Chrome shows a different Vibe Work — pair again.",
-  OUTCOME_UNKNOWN:
-    "Not known: Chrome Control cannot tell whether this happened. Check the page in Chrome.",
-  PROFILE_NOT_FOUND: "Not done: no Chrome is connected to Vibe Work right now.",
-  ADAPTER_DISCONNECTED: "Not done: Chrome was disconnected.",
-  ADAPTER_UNAVAILABLE: "Not done: no Chrome is connected to Vibe Work right now.",
-  TASK_STOPPED: "Not done: the task was stopped in Chrome.",
-};
+const REFUSED = "Not done: Chrome Control refused it.";
+const NO_CHROME = "Not done: no Chrome is connected to Vibe Work right now.";
+const DISCONNECTED = "Not done: Chrome was disconnected.";
+const PAUSED = "Paused in Chrome. Vibe waits until you press Resume.";
+const LOST = "Not known: Chrome Control lost the connection. Check the page in Chrome.";
+const LATE = "Not known: Chrome Control did not finish in time. Check the page in Chrome.";
+const UNKNOWN =
+  "Not known: Chrome Control cannot tell whether this happened. Check the page in Chrome.";
+const PAIR = "Waiting for you to pair in Chrome.";
+const OTHER_APP = "Chrome shows a different Vibe Work — pair again.";
+const STOPPED = "Not done: the task was stopped in Chrome.";
+const EXPIRED = "Not done: the request ran out in Chrome.";
+const TAB_CLOSED = "Not done: the tab was closed.";
+const CHANGED = "Not done: the page changed.";
+const BUSY = "Not done: Chrome is busy.";
+/** The line for a failure whose code is not in {@link BY_CODE}, or whose reason did not reach Vibe Work. */
+const ANY_PROBLEM = "Not done: Chrome Control reported a problem.";
+
+/** Each line and the codes that give it. */
+const LINES: readonly (readonly [string, readonly string[]])[] = [
+  [
+    REFUSED,
+    // Helper (broker) and extension refusals; DENIED is the helper's code for a "denied" status.
+    ["FORBIDDEN", "forbidden", "DENIED", "CAPABILITY_REQUIRED", "OWNERSHIP_MISMATCH"],
+  ],
+  [
+    REFUSED,
+    [
+      "not_owned",
+      "out_of_scope",
+      "LOCAL_NETWORK",
+      "ADDRESS_REFUSED",
+      "HTTPS_REQUIRED",
+      "SOCKET_GUARD",
+    ],
+  ],
+  [NO_CHROME, ["ADAPTER_UNAVAILABLE", "OWNER_REQUIRED"]],
+  [DISCONNECTED, ["ADAPTER_DISCONNECTED", "disconnected"]],
+  [PAUSED, ["CONTROL_SUSPENDED"]],
+  [LOST, ["TRANSPORT_LOST", "EMPTY_RESPONSE"]],
+  [LATE, ["ACTION_TIMEOUT", "timeout", "operation_timeout", "page_tool_timeout"]],
+  [
+    UNKNOWN,
+    [
+      "OUTCOME_UNKNOWN",
+      "OUTCOME_UNREPORTED",
+      "UNKNOWN",
+      "RESULT_REFUSED",
+      "dialog_outcome_unknown",
+    ],
+  ],
+  [PAIR, ["OWNER_APPROVAL_REQUIRED"]],
+  [OTHER_APP, ["OWNER_IDENTITY_MISMATCH", "OWNER_CONFLICT"]],
+  [STOPPED, ["STOP_REQUESTED", "CANCEL_REQUESTED", "CANCELLED", "cancelled"]],
+  [EXPIRED, ["LEASE_EXPIRED", "CONTEXT_EXPIRED", "request_expired"]],
+  [TAB_CLOSED, ["TARGET_CLOSED", "window_closed"]],
+  [
+    CHANGED,
+    [
+      "DOCUMENT_CHANGED",
+      "SESSION_CHANGED",
+      "STALE_REF",
+      "STALE_REFERENCE",
+      "stale_ref",
+      "stale_document",
+      "stale_frame",
+    ],
+  ],
+  [BUSY, ["BUSY", "TAB_BUSY", "OPERATION_BUSY", "busy"]],
+];
+
+/**
+ * The closed list of codes the window knows: Chrome Control's helper and extension codes (Chrome Control 0.1.3) and
+ * the core's own (`OWNER_REQUIRED`, `TRANSPORT_LOST`, `BUSY`). Inside the page envelope any other code gives
+ * {@link ANY_PROBLEM}.
+ */
+const BY_CODE: ReadonlyMap<string, string> = new Map(
+  LINES.flatMap(([line, codes]) => codes.map((code) => [code, line] as const)),
+);
+
+/**
+ * The failure line of an answer, or `null`. A helper answer is wrapped by the core (`untrustedPageContent`,
+ * content.rs): there only `error.code` is read, never its message or details, which can carry page text, and a code
+ * not in the list gives {@link ANY_PROBLEM}. The core's own failures and older answers carry the code outside; there
+ * only a known code gives a line. A status of "unknown" never says "Not done" (the effect may have happened).
+ */
+function failureLine(answer: Obj | null, status: string | null): string | null {
+  const page = obj(answer?.["untrustedPageContent"]);
+  const code = page === null ? field(answer, "code") : str(obj(page["error"])?.["code"]);
+  if (code === null || code === "") return null;
+  const line = BY_CODE.get(code) ?? (page === null ? null : ANY_PROBLEM);
+  if (line === null) return null;
+  return status === "unknown" && !line.startsWith("Not known:") ? UNKNOWN : line;
+}
 
 const BY_STATUS: Readonly<Record<string, string>> = {
   queued: "Sent to Chrome. Chrome Control has not reported yet whether it finished.",
@@ -122,15 +196,9 @@ export function chromeOutcome(entry: Obj): string | null {
   const view = effectView(entry);
   if (view.live || view.status === "skipped") return null;
   const answer = answerOf(entry);
-  const code = field(answer, "code");
-  if (code !== null && Object.hasOwn(BY_CODE, code)) return BY_CODE[code] ?? null;
   const status = field(answer, "status")?.toLowerCase() ?? null;
+  const failure = failureLine(answer, status);
+  if (failure !== null) return failure;
   if (status !== null && Object.hasOwn(BY_STATUS, status)) return BY_STATUS[status] ?? null;
-  if (view.status === "failed") {
-    const message = field(answer, "message");
-    return message !== null && message !== "The MCP tool returned an error"
-      ? `Not done: ${message}`
-      : "Not done: Chrome Control reported a problem.";
-  }
-  return null;
+  return view.status === "failed" ? ANY_PROBLEM : null;
 }

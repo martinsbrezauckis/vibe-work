@@ -28,7 +28,7 @@
  *   full text back in place of each marker, so what is sent is the message as pasted. Only what the user
  *   can see is a command: a message that starts with a marker is sent as text (`literal`).
  */
-import type { JsonValue } from "../protocol/core";
+import type { ChromeTab, JsonValue } from "../protocol/core";
 import {
   type DraftBy,
   type Drafts,
@@ -86,6 +86,14 @@ export interface RewindDialog {
   busy: boolean;
 }
 
+/** The visible Chrome tab picker, bound to the composer that opened it. */
+export interface ChromePicker {
+  sessionId: string;
+  rows: readonly ChromeTab[];
+  loading: boolean;
+  error: string | null;
+}
+
 /** The composer's state. */
 export interface ComposerState {
   drafts: Drafts;
@@ -119,6 +127,7 @@ export interface ComposerState {
   slashIndex: number;
   editing: { sessionId: string; queueItemId: string; text: string } | null;
   rewind: RewindDialog | null;
+  chromePicker: ChromePicker | null;
   /** Sessions whose draft the app put back (a rewound message): sent as text until the user edits it. */
   literal: Readonly<Record<string, true>>;
   /** Sessions whose draft text a Debug API client wrote (until the user edits it). */
@@ -173,6 +182,7 @@ const EMPTY: ComposerState = {
   slashIndex: 0,
   editing: null,
   rewind: null,
+  chromePicker: null,
   literal: {},
   draftBy: {},
   newChat: NO_PICKS,
@@ -254,6 +264,7 @@ function setIn<T>(
 
 /** Creates the store; `persist` keeps drafts and explicit default reasoning picks in app storage. */
 export function createComposerStore(persist: boolean) {
+  const history = createStore<readonly string[]>([]);
   const stored = persist ? loadDrafts() : { drafts: {}, by: {} };
   const marks = (by: string) =>
     Object.fromEntries(
@@ -305,7 +316,11 @@ export function createComposerStore(persist: boolean) {
   };
 
   return {
+    history,
     store,
+    setChromePicker(chromePicker: ChromePicker | null): void {
+      store.set((s) => ({ ...s, chromePicker }));
+    },
     /** Documents install the save step for attachments held before a chat exists. */
     setPrepareContext(prepare: typeof prepareContext): void {
       prepareContext = prepare;

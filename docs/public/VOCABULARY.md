@@ -44,14 +44,6 @@ Models use Vibe's reported display name, falling back to the configured alias. D
 | `allowed` | Always | Standing permission during delegated tasks. Local sign-ins still ask each time; MCP forwarding also needs its server grant. | Standing permission during delegated tasks. Local sign-ins still ask each time; MCP forwarding also needs its server grant. |
 | `never` | User only | Hidden from the agent in this project. | Hidden from the agent. MCP forwarding is blocked while the default or any project is User only. |
 
-## Browser delegation permissions
-
-| ID | Name | Description | Tooltip |
-| --- | --- | --- | --- |
-| `closeUserTabs` | Close tabs you opened | Choose whether the agent asks before closing a tab you opened or took over. | Ask me requests Close or Keep for each tab you opened or took over. Allow skips that question. The App preview cannot be closed. |
-| `closeAsk` | Ask me (default) | Ask before the agent closes a tab you opened or took over. | Ask you to Close or Keep each tab you opened or took over. |
-| `closeAllow` | Allow | Let the agent close tabs you opened or took over during your task. | The agent may close tabs you opened or took over during your task without asking again. |
-
 ## Agent access and vault lock
 
 | ID | Name | Description | Tooltip |
@@ -89,6 +81,7 @@ Models use Vibe's reported display name, falling back to the configured alias. D
 | `vw:app` | Vibe Work help | Helps Vibe explain Vibe Work, its settings and panels. | Helps Vibe explain Vibe Work, its settings and panels. |
 | `vw:browser` | Browse the web | Lets Vibe open pages, search and use web apps in Vibe Work’s browser. | Lets Vibe open pages, search and use web apps in Vibe Work’s browser. |
 | `vw:capture` | Capture a page | Lets Vibe save a page’s design, content and images, or compare two captures. | Lets Vibe save a page’s design, content and images, or compare two captures. |
+| `vw:chrome` | Use my Chrome | Lets Vibe open, read and use pages in your own Chrome, within this chat’s access mode. | Lets Vibe open, read and use pages in your own Chrome, within this chat’s access mode. |
 | `vw:data-analysis` | Analyse data | Helps Vibe turn spreadsheets and data files into findings, tables and charts. | Helps Vibe turn spreadsheets and data files into findings, tables and charts. |
 | `vw:deep-research` | Research a topic | Helps Vibe compare sources and write a report with references. | Helps Vibe compare sources and write a report with references. |
 | `vw:editor` | Work with open files | Lets Vibe read and edit the files you have open in Vibe Work. | Lets Vibe read and edit the files you have open in Vibe Work. |

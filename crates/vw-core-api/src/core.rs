@@ -43,6 +43,8 @@ use vw_terminal::TerminalManager;
 pub(crate) struct Shared {
     pub(crate) deletes: Arc<crate::session_delete::Deletes>,
     pub(crate) guard_asks: crate::ask::guards::Calls,
+    /// The question for the person's Git name and email, when the agent's commit has none.
+    pub(crate) identity_asks: crate::git_identity_ask::IdentityAsks,
     pub(crate) asks: Arc<crate::ask::Service>,
     /// "Allow for this session" answers Vibe Work keeps for Vibe's approvals; Vibe gets `approve` only.
     pub(crate) ask_grants: crate::ask::grants::Grants,
@@ -245,7 +247,8 @@ async fn start_supervisor(
 }
 
 /// lets the installer start the first server when Vibe is installed (or an existing install is
-/// chosen), and re-emits its view changes as `vibeInstall` events until the core goes away.
+/// chosen), and re-emits its view changes as `vibeInstall` events until the core goes away (and a `chromeControl`
+/// event when the accepted manifest's Chrome store state changed).
 fn connect_vibe_install(shared: &Arc<Shared>) {
     let Some(installer) = shared.config.vibe_install.clone() else {
         return;
@@ -277,6 +280,8 @@ fn connect_vibe_install(shared: &Arc<Shared>) {
         tracing::warn!(%error, "could not prepare the updated app's Vibe install");
     }
     let weak = Arc::downgrade(shared);
+    // A check that changes the Chrome store state also refreshes Your Chrome (no restart).
+    let mut extension = installer.extension_store();
     let task = tokio::spawn(async move {
         while views.changed().await.is_ok() {
             let view = views.borrow_and_update().clone();
@@ -284,6 +289,17 @@ fn connect_vibe_install(shared: &Arc<Shared>) {
                 return;
             };
             shared.emit(CoreEvent::VibeInstall { view });
+            let now = shared
+                .config
+                .vibe_install
+                .as_ref()
+                .and_then(vw_vibe_install::VibeInstaller::extension_store);
+            if now != extension {
+                extension = now;
+                shared.emit(CoreEvent::ChromeControl {
+                    view: crate::chrome_control::commands::view(&shared),
+                });
+            }
         }
     });
     *shared
@@ -453,6 +469,9 @@ impl Core {
             chrome_control,
             install_offers: crate::install_offers::Offers::default(),
             guard_asks: crate::ask::guards::Calls::default(),
+            identity_asks: crate::git_identity_ask::IdentityAsks::new(
+                config.git_global_config.clone(),
+            ),
             guard_refusals: crate::guard_refusals::Refusals::default(),
             edit_previews: crate::edit_preview::Previews::default(),
             protected_changes: crate::protected_changes::Hub::of(&config),
@@ -568,7 +587,6 @@ impl Core {
         crate::github_reads::watch(&shared);
         crate::keep_awake::publish(&shared);
         crate::secret_scan::start(&shared);
-        crate::chrome_control::restore_at_start(&shared);
         crate::chrome_control::start_owner(&shared).await;
         info!("core started");
         Ok(Self { shared })

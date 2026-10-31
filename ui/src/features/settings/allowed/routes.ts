@@ -4,7 +4,7 @@
  * - `{do: "read"}` (default): the page as shown (count line, groups, sub-groups, rows shown, bulk links, the open
  *   confirmation, status and problem lines), the Safety summary and the level rows;
  * - `open {sessionId?}` (the session grants list's link), `review` (Safety's Review link), `level {row}` (a level
- *   row's link: access, chrome, askFirst, closeTabs);
+ *   row's link: access, chrome, closeTabs);
  * - `find {query}` (also matches a project's folder name), `clear` (Clear the search), `toggle {key}` (a group or
  *   sub-group header), `more {key}` (Show 20 more);
  * - `revoke {key}` (a row's Revoke), `revokeAll {key}` (opens the confirmation), `cancel`, `confirm`;
@@ -78,7 +78,7 @@ function allowedRead(app: App) {
   };
 }
 
-const LEVELS: readonly LevelRowId[] = ["access", "chrome", "askFirst", "closeTabs"];
+const LEVELS: readonly LevelRowId[] = ["access", "chrome"];
 
 /** A refused action becomes the route's error, in the core's words. */
 function report(outcome: Outcome): void {

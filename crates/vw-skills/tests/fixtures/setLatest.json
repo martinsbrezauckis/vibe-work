@@ -11,7 +11,7 @@
         "activeModel": {
           "name": "example",
           "alias": "example",
-          "thinking": "off",
+          "thinking": "example",
           "supportsImages": false,
           "displayName": "example",
           "maxContextLength": null,
@@ -51,6 +51,7 @@
         "experimentalEnableTabStatus": false,
         "enableTelemetry": true,
         "experimentalEnableRegistrySkills": false,
+        "experimentalEnableLocalProjects": false,
         "models": [],
         "transcribeModels": [],
         "ttsModels": [],

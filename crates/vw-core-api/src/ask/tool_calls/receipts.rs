@@ -22,7 +22,33 @@ fn clean(args: &Value) -> Result<Value, String> {
         .ok_or("Tool input must be an object.")?
         .clone();
     args.remove(names::RECEIPT_FIELD);
-    Ok(Value::Object(args))
+    let mut args = Value::Object(args);
+    whole_numbers(&mut args);
+    Ok(args)
+}
+/// One spelling per JSON number: a whole number written as a float (`1793404800000.0`, as a JavaScript runtime may
+/// send `Date.now()`) becomes the integer the other copy of the same input has, so the comparison sees one value.
+/// Only exact whole numbers within 2^53 change; any other number keeps its spelling.
+fn whole_numbers(value: &mut Value) {
+    match value {
+        Value::Number(number) if number.is_f64() => {
+            const EXACT: f64 = 9_007_199_254_740_992.0;
+            if let Some(float) = number
+                .as_f64()
+                .filter(|f| f.fract() == 0.0 && f.abs() <= EXACT)
+            {
+                #[allow(
+                    clippy::cast_possible_truncation,
+                    reason = "a whole number within 2^53 is exact"
+                )]
+                let whole = float as i64;
+                *value = json!(whole);
+            }
+        }
+        Value::Array(items) => items.iter_mut().for_each(whole_numbers),
+        Value::Object(fields) => fields.values_mut().for_each(whole_numbers),
+        _ => {}
+    }
 }
 
 /// Only the hook credential reaches this route; model arguments cannot supply the source or call.
@@ -184,6 +210,52 @@ mod tests {
             ),
         ] {
             assert!(verify(&calls, owner, source, call, tool, &input).is_err());
+        }
+    }
+
+    /// Seen with Mistral: `history.read {startTime: dayStart, endTime: Date.now()}` was denied "Tool
+    /// decision does not match this call." The hook's copy and the tool call's copy of the same arguments can spell a
+    /// whole number beyond 32 bits differently (1793404800000 and 1793404800000.0); they are the same JSON number.
+    /// PREDICT (before the change): the float spelling of the hook's integer is refused as a mismatch.
+    #[test]
+    fn the_same_number_in_either_spelling_matches_and_a_different_number_does_not() {
+        let calls = Calls::default();
+        let decided: Value =
+            serde_json::from_str(r#"{"steps":[{"action":"history.read","args":{"startTime":1793404800000,"limit":100}}]}"#)
+                .unwrap();
+        calls.transports.lock().unwrap().push_back(Receipt {
+            key: "decision".into(),
+            owner: "chat".into(),
+            source: "chat".into(),
+            call: "call-1".into(),
+            tool: "chrome_execute".into(),
+            args: clean(&decided).unwrap(),
+            prepared_args: Value::Null,
+            execution: None,
+            stop: 0,
+        });
+        let called = |text: &str| -> Value { serde_json::from_str(text).unwrap() };
+        let same = called(
+            r#"{"steps":[{"action":"history.read","args":{"startTime":1793404800000.0,"limit":100.0}}],"_vwReceipt":"decision"}"#,
+        );
+        assert!(verify(&calls, "chat", "chat", "call-1", "chrome_execute", &same).is_ok());
+        for other in [
+            r#"{"steps":[{"action":"history.read","args":{"startTime":1793404800001.0,"limit":100}}],"_vwReceipt":"decision"}"#,
+            r#"{"steps":[{"action":"history.read","args":{"startTime":1793404800000.5,"limit":100}}],"_vwReceipt":"decision"}"#,
+            r#"{"steps":[{"action":"history.read","args":{"startTime":"1793404800000","limit":100}}],"_vwReceipt":"decision"}"#,
+        ] {
+            assert!(
+                verify(
+                    &calls,
+                    "chat",
+                    "chat",
+                    "call-1",
+                    "chrome_execute",
+                    &called(other)
+                )
+                .is_err(),
+                "{other}"
+            );
         }
     }
 }

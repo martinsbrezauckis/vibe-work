@@ -21,10 +21,63 @@ pub enum GitKind {
     Change,
     /// Credential command.
     Credential,
+    /// Sets the Git identity (the name and email Git writes into commits): the user's to set, refused.
+    Identity,
+}
+
+/// Git config keys that make up the identity commits carry (compared in lower case).
+pub(crate) const IDENTITY_KEYS: [&str; 6] = [
+    "user.name",
+    "user.email",
+    "author.name",
+    "author.email",
+    "committer.name",
+    "committer.email",
+];
+
+/// Environment variables that set the identity of a commit (compared in upper case).
+const IDENTITY_VARIABLES: [&str; 4] = [
+    "GIT_AUTHOR_NAME",
+    "GIT_AUTHOR_EMAIL",
+    "GIT_COMMITTER_NAME",
+    "GIT_COMMITTER_EMAIL",
+];
+
+/// True when `key` is one of [`IDENTITY_KEYS`].
+pub(crate) fn identity_key(key: &str) -> bool {
+    IDENTITY_KEYS.contains(&key.to_ascii_lowercase().as_str())
+}
+
+/// True when the segment assigns one of [`IDENTITY_VARIABLES`]: as leading assignments (`NAME=x git ...`), after
+/// `export`/`declare`/`typeset`/`readonly`/`env`, with `setx NAME value`, or as PowerShell's `$env:NAME=...`.
+fn assigns_identity(segment: &[&str]) -> bool {
+    let named = |word: &str| {
+        let word = word
+            .get(..5)
+            .filter(|p| p.eq_ignore_ascii_case("$env:"))
+            .map_or(word, |_| &word[5..]);
+        let name = word.split_once('=').map_or("", |(name, _)| name);
+        IDENTITY_VARIABLES.contains(&name.to_ascii_uppercase().as_str())
+    };
+    let Some((&first, rest)) = segment.split_first() else {
+        return false;
+    };
+    match first.to_ascii_lowercase().as_str() {
+        "export" | "declare" | "typeset" | "readonly" | "env" => rest.iter().any(|w| named(w)),
+        "setx" => rest
+            .first()
+            .is_some_and(|w| IDENTITY_VARIABLES.contains(&w.to_ascii_uppercase().as_str())),
+        _ => segment
+            .iter()
+            .take_while(|w| w.contains('='))
+            .any(|w| named(w)),
+    }
 }
 
 /// Reason for refusing credential commands.
 pub const CREDENTIAL_REASON: &str = "Not run: the agent cannot use the user's stored Git or GitHub sign-in. Continue without reading credentials; the user can push or create a PR in the Changes tab.";
+/// Reason for refusing a Git identity the agent sets itself.
+pub const IDENTITY_REASON: &str = "Not run: the name and email Git writes into commits are the user's to set. When a commit needs them, Vibe Work asks the user.";
 /// Reason for refusing a GitHub CLI command while reads are off.
 pub const GH_WRITE_REASON: &str = "GitHub reads are off. The user can turn them on in Settings > General. For GitHub data use the GitHub connector.";
 
@@ -74,11 +127,30 @@ impl GitScan {
     }
 
     #[must_use]
-    /// True when an operation needs refusal or own-branch ownership.
+    /// True when an operation needs refusal, own-branch ownership or the person's Git identity.
     pub fn needs_core(&self) -> bool {
+        self.needs_identity()
+            || self.ops.iter().any(|o| {
+                matches!(
+                    o.kind,
+                    GitKind::Deny | GitKind::Own | GitKind::Credential | GitKind::Identity
+                )
+            })
+    }
+
+    #[must_use]
+    /// True for a `git init` or `git commit`: the core makes sure the person's name and email exist first (it asks
+    /// the person when Git has none).
+    pub fn needs_identity(&self) -> bool {
         self.ops
             .iter()
-            .any(|o| matches!(o.kind, GitKind::Deny | GitKind::Own | GitKind::Credential))
+            .any(|o| o.what == "git init" || o.what == "git commit")
+    }
+
+    #[must_use]
+    /// True when the command sets the Git identity ([`GitKind::Identity`]).
+    pub fn identity_set(&self) -> bool {
+        self.ops.iter().any(|o| o.kind == GitKind::Identity)
     }
 
     #[must_use]
@@ -139,6 +211,14 @@ fn scan_reading<'a>(reading: impl Iterator<Item = Vec<&'a str>>) -> GitScan {
     let mut out = GitScan::default();
     let mut elsewhere = false;
     for segment in reading {
+        if assigns_identity(&segment) {
+            out.mentions = true;
+            Sink(&mut out).op(
+                GitKind::Identity,
+                "GIT_AUTHOR_* / GIT_COMMITTER_* (the user's Git identity)",
+                elsewhere,
+            );
+        }
         let words = command_words(&segment);
         let Some((&name, args)) = words.split_first() else {
             continue;

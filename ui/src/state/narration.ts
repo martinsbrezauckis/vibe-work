@@ -14,10 +14,11 @@
  * - One sound at a time; automatic narration queues at most 3; at most 2 requested readings outstanding.
  *   Stop clears it, Skip skips the whole current reading and plays the next.
  * - What is sent to Mistral is the user's text and the turn's answer (capped), as the CLI narrator does.
+ * - A sound that cannot play (`PlaybackError`) ends its item with a "Could not play the sound" note.
  */
 import type { CoreEvent, JsonValue } from "../protocol/core";
 import { toCallError } from "../protocol/client/types";
-import type { Player } from "../features/voice/audioPlayer";
+import { PlaybackError, type Player } from "../features/voice/audioPlayer";
 import { speakable, readingChunks } from "../features/voice/speechText";
 export { speakable } from "../features/voice/speechText";
 import {
@@ -213,6 +214,12 @@ export function createNarration(deps: {
         played = await player.play(audio);
       } catch (thrown) {
         if (quietOnKeyLoss()) return;
+        // No sound can leave (no audio output, undecodable audio): the reading ends here with the reason,
+        // so the bar never stays on "Reading aloud".
+        if (thrown instanceof PlaybackError) {
+          if (mine === generation) setNote(`Could not play the sound: ${thrown.message}.`);
+          return;
+        }
         throw thrown;
       }
       if (quietOnKeyLoss()) return;

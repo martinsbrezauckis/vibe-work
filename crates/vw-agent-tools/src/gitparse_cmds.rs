@@ -47,8 +47,18 @@ pub(crate) fn git(args: &[&str], elsewhere: bool, switched: &mut bool, mut sink:
                 flagged = true;
                 i += 2;
             }
-            "-c" | "--config-env" => i += 2,
-            _ if a.starts_with("-c") || a.starts_with("--config-env=") => i += 1,
+            "-c" | "--config-env" => {
+                config_option(args.get(i + 1).copied().unwrap_or(""), away, &mut sink);
+                i += 2;
+            }
+            _ if a.starts_with("--config-env=") => {
+                config_option(&a["--config-env=".len()..], away, &mut sink);
+                i += 1;
+            }
+            _ if a.starts_with("-c") => {
+                config_option(&a[2..], away, &mut sink);
+                i += 1;
+            }
             "--version" | "--help" | "-h" => return flagged,
             _ if a.starts_with("--git-dir=") => {
                 git_dir = a.strip_prefix("--git-dir=");
@@ -82,6 +92,62 @@ pub(crate) fn git(args: &[&str], elsewhere: bool, switched: &mut bool, mut sink:
     subcommand(sub, rest, away, switched, &mut sink);
     sink.paths(start, git_dir, work_tree);
     flagged
+}
+
+/// A `-c key=value` / `--config-env key=VAR` option: an identity key sets the user's identity for this command.
+fn config_option(option: &str, away: bool, sink: &mut Sink<'_>) {
+    let key = option.split_once('=').map_or(option, |(key, _)| key);
+    if crate::gitparse::identity_key(key) {
+        sink.op(
+            GitKind::Identity,
+            format!(
+                "git -c {} (the user's Git identity)",
+                key.to_ascii_lowercase()
+            ),
+            away,
+        );
+    }
+}
+
+/// `git config ...` writing an identity key: `set <key> <value>`, `<key> <value>`, or `--add`/`--replace-all`/
+/// `--unset[-all]` of one. Reads (`get`, `list`, `--get*`, `--list`, a key alone) are not writes.
+fn config_sets_identity(rest: &[&str]) -> bool {
+    const READS: [&str; 8] = [
+        "--get",
+        "--get-all",
+        "--get-regexp",
+        "--get-urlmatch",
+        "--list",
+        "-l",
+        "--get-color",
+        "--get-colorbool",
+    ];
+    if has(rest, &READS) {
+        return false;
+    }
+    let pos = positionals(
+        rest,
+        &[
+            "-f",
+            "--file",
+            "--blob",
+            "--type",
+            "--default",
+            "--comment",
+            "--value",
+        ],
+    );
+    let (key, value) = match pos.first().copied() {
+        Some("get" | "list" | "edit") => return false,
+        Some("set" | "unset" | "rename-section" | "remove-section") => {
+            (pos.get(1).copied(), pos.get(2).copied())
+        }
+        key => (key, pos.get(1).copied()),
+    };
+    let writes = value.is_some()
+        || matches!(pos.first().copied(), Some("set" | "unset"))
+        || has(rest, &["--add", "--replace-all", "--unset", "--unset-all"]);
+    key.is_some_and(crate::gitparse::identity_key) && writes
 }
 
 fn has(rest: &[&str], flags: &[&str]) -> bool {
@@ -280,10 +346,28 @@ fn subcommand(sub: &str, rest: &[&str], away: bool, switched: &mut bool, sink: &
             }
         }
         "submodule" => sink.op(GitKind::Change, "git submodule", away),
+        // A new repository: its first commit needs the person's name and email (`GitScan::needs_identity`).
+        "init" => sink.op(GitKind::Change, "git init", away),
         // These ordinary local changes need no special reader or dialog.
+        "commit"
+            if rest
+                .iter()
+                .any(|a| *a == "--author" || a.starts_with("--author=")) =>
+        {
+            sink.op(
+                GitKind::Identity,
+                "git commit --author (the user's Git identity)",
+                away,
+            );
+        }
         "commit" | "cherry-pick" | "revert" | "am" | "merge" | "remote" | "lfs" | "reflog"
         | "tag" | "clean" | "filter-branch" | "filter-repo" | "fast-import" | "receive-pack"
         | "replace" => sink.op(GitKind::Change, format!("git {sub}"), away),
+        "config" if config_sets_identity(rest) => sink.op(
+            GitKind::Identity,
+            "git config (the user's Git identity)",
+            away,
+        ),
         "config" => sink.op(GitKind::Change, "git config", away),
         // The user's stored credentials must never reach the agent.
         _ if sub.starts_with("credential") => {

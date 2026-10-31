@@ -330,11 +330,9 @@ mod transport_tests {
             names::PROPOSE_PROTECTED_CHANGE,
             names::PROTECTED_CHANGE_STATUS,
             names::BROWSER_CAPTURE_SECRET,
-            names::USE_YOUR_CHROME,
-            names::CHROME_OUTCOME,
             names::CHROME_TOOL_LIST,
             "chrome_status",
-            "chrome_task",
+            "chrome_session",
             "chrome_execute",
         ] {
             assert!(asks_inside(name, &json!({})), "{name}");
@@ -342,11 +340,7 @@ mod transport_tests {
         for action in ["fill", "close_tab"] {
             assert!(asks_inside(names::BROWSER_ACT, &json!({"action":action})));
         }
-        for name in [
-            names::READ_ALOUD,
-            names::USE_YOUR_CHROME,
-            names::USE_HEADLESS_BROWSER,
-        ] {
+        for name in [names::READ_ALOUD, names::USE_HEADLESS_BROWSER] {
             let card = json!({"detail":{"kind":"approval","effect":{"toolName":format!("mcp_vw.{name}")}}});
             assert!(
                 crate::read_aloud::approve_without_dialog(&card)

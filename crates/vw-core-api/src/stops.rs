@@ -101,6 +101,7 @@ pub(crate) fn requested(shared: &Shared, command: &Command) -> Vec<String> {
 
 /// Invalidate earlier decisions immediately and stop protected-change work.
 pub(crate) fn stopped(shared: &Shared, session: &str) {
+    crate::chrome_control::stop_chat(shared, session);
     let id = shared.channels.canonical(session);
     {
         let mut chats = shared.stops.chats();

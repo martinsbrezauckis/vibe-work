@@ -8,8 +8,8 @@
 //!   Anything that can run code or redirect traffic (`/mcp_servers`, `/hooks`, `/providers`,
 //!   `/models`, `/tools/...`, proxy and TLS settings) is not listed, so it is refused.
 //! - One bad op refuses the whole call; nothing is partly applied.
-//! - `config/model/write` accepts only a model alias Vibe reported in `runtime/read` and one of
-//!   the five reasoning levels, with `sessionOnly: true`; chat picks never write the user default.
+//! - `config/model/write` accepts a model alias Vibe reported in `runtime/read`, a non-blank
+//!   provider level, or both, with `sessionOnly: true`; chat picks never write the user default.
 //! - Making `auto-approve` the default profile is an escalation (needs a native confirmation).
 //! - The two privacy switches (`/enable_telemetry`, `/experiments/enable`) take a
 //!   boolean. Turning one OFF is free (less data leaves the machine). Turning one ON, and removing
@@ -70,9 +70,6 @@ const PRIVACY_ON: &str = "Turn on data sharing with Mistral: usage telemetry and
 /// Most ops in one `config/write`.
 const MAX_OPS: usize = 16;
 
-/// Reasoning levels Vibe accepts (`ModelConfigView.thinkingLevels`).
-const REASONING_LEVELS: &[&str] = &["off", "low", "medium", "high", "xhigh", "max"];
-
 const CONFIG_WRITE_FIELDS: &[Field] = &[
     req("sessionId", Kind::Text(128)),
     req("ops", Kind::Any),
@@ -84,7 +81,7 @@ const MODEL_WRITE_FIELDS: &[Field] = &[
     req("sessionId", Kind::Text(128)),
     req("sessionOnly", Kind::Bool),
     opt("modelAlias", Kind::Text(128)),
-    opt("reasoningEffort", Kind::OneOf(REASONING_LEVELS)),
+    opt("reasoningEffort", Kind::Text(128)),
 ];
 
 fn policy(method: &str, rule: &str) -> GateError {
@@ -221,6 +218,16 @@ pub(crate) fn model_write(
     }
     let alias = object.get("modelAlias").filter(|v| !v.is_null());
     let effort = object.get("reasoningEffort").filter(|v| !v.is_null());
+    // 3.0.4 preserves provider-defined words; the provider's catalogue owns their meaning.
+    if effort
+        .and_then(Value::as_str)
+        .is_some_and(|s| s.chars().any(char::is_whitespace))
+    {
+        return Err(invalid(
+            method,
+            "`reasoningEffort` must be a non-blank word",
+        ));
+    }
     if alias.is_none() && effort.is_none() {
         return Err(invalid(method, "needs `modelAlias` or `reasoningEffort`"));
     }
@@ -311,6 +318,52 @@ mod tests {
     use serde_json::json;
 
     #[test]
+    fn outgoing_model_picks_accept_provider_words() {
+        for level in [
+            "off",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max",
+            "turbo",
+            "provider-future",
+        ] {
+            assert!(
+                model_write(
+                    "config/model/write",
+                    &json!({
+                        "sessionId":"chat", "sessionOnly":true, "reasoningEffort":level
+                    }),
+                    &HashSet::new()
+                )
+                .is_ok(),
+                "{level}"
+            );
+        }
+        for level in [
+            json!(""),
+            json!(" \t"),
+            json!("two words"),
+            json!("high\n"),
+            json!("x".repeat(129)),
+            json!(true),
+            json!(123),
+        ] {
+            assert!(
+                model_write(
+                    "config/model/write",
+                    &json!({
+                        "sessionId":"chat", "sessionOnly":true, "reasoningEffort":level
+                    }),
+                    &HashSet::new()
+                )
+                .is_err()
+            );
+        }
+    }
+
+    #[test]
     fn model_picks_require_session_scope_and_keep_the_closed_shape() {
         let aliases = HashSet::from(["large-4".to_owned()]);
         let method = "config/model/write";
@@ -336,7 +389,7 @@ mod tests {
         for params in [
             json!({"sessionId":"a","sessionOnly":true}),
             json!({"sessionId":"a","sessionOnly":true,"modelAlias":"unknown"}),
-            json!({"sessionId":"a","sessionOnly":true,"reasoningEffort":"extreme"}),
+            json!({"sessionId":"a","sessionOnly":true,"reasoningEffort":" "}),
         ] {
             assert!(model_write(method, &params, &aliases).is_err());
         }

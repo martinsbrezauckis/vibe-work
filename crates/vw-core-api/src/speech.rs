@@ -275,6 +275,9 @@ pub(crate) async fn execute(
             cancelled: shared.dictations.cancel(&stream_id),
         })),
         SpeechRequest::Speak { text, voice } => speak(shared, &text, voice).await,
+        SpeechRequest::AudioOutput {} => Ok(result(SpeechResult::AudioOutput {
+            available: crate::audio_output::available(),
+        })),
         SpeechRequest::Voices {} => {
             let voices = keys(shared)?.voices().await.map_err(|e| failure(&e))?;
             Ok(result(SpeechResult::Voices {

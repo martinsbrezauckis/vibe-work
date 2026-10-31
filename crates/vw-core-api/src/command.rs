@@ -53,6 +53,13 @@ pub(crate) use crate::command_origin::requester;
     deny_unknown_fields
 )]
 pub enum Command {
+    /// Reads shared CLI prompt history, or appends one submitted prompt.
+    PromptHistory {
+        /// Absent reads; present appends in CLI format before reading.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[cfg_attr(feature = "ts", ts(optional))]
+        text: Option<String>,
+    },
     /// Writes ordinary owner text to the native clipboard; no clipboard contents are read back.
     CopyText {
         /// The text to copy (at most one million bytes).
@@ -513,6 +520,11 @@ pub enum Command {
     rename_all_fields = "camelCase"
 )]
 pub enum CommandResult {
+    /// Shared prompt history, oldest first (at most 100).
+    PromptHistory {
+        /// Submitted prompts, without known vault values.
+        entries: Vec<String>,
+    },
     /// The protected-folder decision and its readable record.
     ProtectedChange {
         /// Final review state.
@@ -524,7 +536,7 @@ pub enum CommandResult {
         rows: Vec<SessionRowView>,
         /// Cursor for the next page, when there is one.
         next_cursor: Option<String>,
-        /// The session `vibe --continue` would resume (the response's `continueSessionId`).
+        /// Retained for client compatibility; Vibe no longer supplies a CLI continuation target.
         continue_session_id: Option<String>,
     },
     /// Every command that loads or reads one session.
@@ -722,10 +734,20 @@ pub enum CommandResult {
     },
     /// `chromeControl`: Settings › Browser › Your Chrome after the request.
     ChromeControl {
-        /// The rows, the level and the setup status.
+        /// Availability, connection and chat work states.
         view: crate::ChromeControlView,
         /// The set up offer the window shows before the click (`offerSetup` only).
         offer: Option<crate::ToolsInstallOffer>,
+    },
+    /// Connected tabs for the composer picker.
+    ChromeTabs {
+        /// Tabs in all connected profiles.
+        tabs: Vec<crate::ChromeTab>,
+    },
+    /// A selected Chrome context item claimed by a composer.
+    ChromeSelection {
+        /// Absent when another window already claimed it.
+        selection: Option<crate::ChromeSelection>,
     },
     /// `vibeRules`: the lasting rules after the request.
     VibeRules {

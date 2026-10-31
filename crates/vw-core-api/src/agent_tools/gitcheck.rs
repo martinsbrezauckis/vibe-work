@@ -181,12 +181,12 @@ async fn decide(
     .map_err(|e| format!("Not run: Vibe Work could not check this git command ({e})."))?;
     let (found, own_branch, occupied) = reading;
     let own_branch = own_branch.as_deref();
-    let (verdict, how) = if found.forge_write() {
-        (Err(GH_WRITE_REASON.to_owned()), "denied (forge write)")
-    } else if found.denied() {
-        (Err(PUSH_REASON.to_owned()), "denied (push)")
-    } else if found.credential_read() {
-        (Err(CREDENTIAL_REASON.to_owned()), "denied (credentials)")
+    let (verdict, how) = if let Some((reason, how)) = refused(&found) {
+        (Err(reason.to_owned()), how)
+    } else if found.needs_identity()
+        && let Err(reason) = crate::git_identity_ask::ensure(shared, session, cwd).await
+    {
+        (Err(reason), "refused (no identity)")
     } else {
         let mut asks = needs_user(&found, own_branch);
         asks.extend(occupied);
@@ -219,6 +219,24 @@ async fn decide(
     };
     tracing::info!(session, ops = found.ops.len(), decision = how, "git guard");
     verdict
+}
+
+/// The fixed refusals (forge writes, pushes, credentials, an identity the agent sets) and how they are logged.
+fn refused(found: &vw_agent_tools::gitparse::GitScan) -> Option<(&'static str, &'static str)> {
+    if found.forge_write() {
+        Some((GH_WRITE_REASON, "denied (forge write)"))
+    } else if found.denied() {
+        Some((PUSH_REASON, "denied (push)"))
+    } else if found.credential_read() {
+        Some((CREDENTIAL_REASON, "denied (credentials)"))
+    } else if found.identity_set() {
+        Some((
+            vw_agent_tools::gitparse::IDENTITY_REASON,
+            "denied (identity)",
+        ))
+    } else {
+        None
+    }
 }
 
 /// Why a rename onto `to` is held, from `git show-ref --verify --quiet`'s exit code: 0 = that branch exists, 1 = it
@@ -338,7 +356,7 @@ fn needs_user(found: &GitScan, own_branch: Option<&str>) -> Vec<String> {
         .ops
         .iter()
         .filter(|o| match o.kind {
-            GitKind::Deny | GitKind::Credential | GitKind::Change => false,
+            GitKind::Deny | GitKind::Credential | GitKind::Change | GitKind::Identity => false,
             // An explicit target (`git rebase main other`, `git branch -f x`) is held
             // unless it names the session's branch.
             GitKind::Own => {

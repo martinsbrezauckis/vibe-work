@@ -17,7 +17,7 @@ import type { DictationUpdate } from "./speech";
 import type { InstallProgress } from "./market";
 import type { InstallView } from "./vibe";
 import type { GithubReadsView } from "./github_reads";
-import type { Ask, AskRecord, SessionGrant, GrantOffer, ChromeAskView, ChromeControlView } from "./ask";
+import type { Ask, AskRecord, SessionGrant, GrantOffer, ChromeControlView } from "./ask";
 import type { KeepAwakeView } from "./keep_awake";
 import type { SecretScanView } from "./secret_scan";
 export type CoreEvent = { "type": "askOpened",
@@ -36,11 +36,7 @@ grants: Array<SessionGrant>,
 /**
  * What "Allow for this session" would keep on each open card that offers it (its covers line).
  */
-offers: Array<GrantOffer>, } | { "type": "chromeAsk",
-/**
- * The card's entry; its outcome is the ask record with the same id.
- */
-entry: ChromeAskView, } | { "type": "chromeControl",
+offers: Array<GrantOffer>, } | { "type": "chromeControl",
 /**
  * The view after the change.
  */
@@ -182,7 +178,19 @@ code: string,
 /**
  * Why, without params values.
  */
-reason: string, } | { "type": "alert",
+reason: string, } | { "type": "gitIdentityAsked",
+/**
+ * The chat whose call waits.
+ */
+sessionId: string,
+/**
+ * The question.
+ */
+askId: string, } | { "type": "gitIdentityAskClosed",
+/**
+ * The question.
+ */
+askId: string, } | { "type": "alert",
 /**
  * Session concerned, when there is one.
  */

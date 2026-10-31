@@ -96,17 +96,33 @@ fn action_sentence<'a>(method: &str, params: &Value, base: &'a str) -> &'a str {
     }
 }
 
-/// Adds settings changes, translating access-profile values only for their known setting.
+/// Adds one line per settings change. The privacy switches and the default access mode read as the Settings page
+/// names them; any other key keeps its config path (every change of the write stays visible: only the last
+/// escalation is the dialog's sentence).
 fn append_config_changes(params: &Value, parts: &mut Vec<String>) {
     let Some(ops) = params.get("ops").and_then(Value::as_array) else {
         return;
     };
     for op in ops {
-        if let (Some(path), Some(kind)) = (
+        let (Some(path), Some(kind)) = (
             op.get("path").and_then(Value::as_str),
             op.get("op").and_then(Value::as_str),
-        ) {
-            let value = op.get("value").map_or_else(String::new, |value| {
+        ) else {
+            continue;
+        };
+        let named = match path {
+            "/enable_telemetry" => Some(("Send usage data to Mistral", "on")),
+            "/experiments/enable" => Some(("Take part in Mistral's experiments", "on")),
+            "/default_agent" => Some(("Default access mode", "")),
+            _ => None,
+        };
+        let value = op.get("value");
+        let line = match (named, kind, value) {
+            (Some((label, default)), "remove", _) if !default.is_empty() => {
+                format!("{label}: back to the default ({default})")
+            }
+            (Some((label, _)), "remove", _) => format!("{label}: back to the default"),
+            (Some((label, _)), _, Some(value)) => {
                 let display = if path == "/default_agent" {
                     value
                         .as_str()
@@ -115,10 +131,14 @@ fn append_config_changes(params: &Value, parts: &mut Vec<String>) {
                     None
                 }
                 .unwrap_or_else(|| plain_value(value));
-                format!(" to {display}")
-            });
-            parts.push(format!("{kind} setting {}{value}", dialog_quote(path)));
-        }
+                format!("{label}: {display}")
+            }
+            (_, _, value) => {
+                let value = value.map_or_else(String::new, |v| format!(" to {}", plain_value(v)));
+                format!("{kind} setting {}{value}", dialog_quote(path))
+            }
+        };
+        parts.push(line);
     }
 }
 
@@ -189,8 +209,8 @@ pub(crate) fn confirmation_summary(method: &str, params: &Value, base: &str) -> 
         ("purpose", "Purpose"),
         ("prompt", "Prompt sent to Vibe Code"),
     ] {
-        // The session of a proxy change is a helper chat the user never saw: its id would only confuse.
-        if method == "config/proxy/write" && key == "sessionId" {
+        // The session of a proxy or settings change is a helper chat the user never saw: its id would only confuse.
+        if matches!(method, "config/proxy/write" | "config/write") && key == "sessionId" {
             continue;
         }
         if let Some(value) = named(
@@ -358,6 +378,40 @@ mod tests {
             "{summary}"
         );
         assert!(!summary.contains("proxy.corp"), "{summary}");
+    }
+
+    /// A settings write runs through a helper chat the person never saw: no session id, and every change by the
+    /// name the Settings page gives it (a change that is not the escalation itself stays visible too).
+    #[test]
+    fn a_settings_write_names_each_change_plainly_without_the_helper_session() {
+        let summary = confirmation_summary(
+            "config/write",
+            &json!({"sessionId": "3f1c2a9e-helper", "ops": [
+                {"op": "set", "path": "/enable_telemetry", "value": true},
+                {"op": "remove", "path": "/experiments/enable"},
+                {"op": "set", "path": "/default_agent", "value": "auto-approve"}
+            ]}),
+            "Turn on data sharing with Mistral",
+        );
+        assert!(!summary.contains("3f1c2a9e-helper"), "{summary}");
+        // The raw `Session "<id>"` line is gone (the bare word is a canonical display name in the shared vocabulary).
+        assert!(!summary.contains("Session \""), "{summary}");
+        assert!(!summary.contains("/enable_telemetry"), "{summary}");
+        assert!(!summary.contains("set setting"), "{summary}");
+        for line in [
+            "Turn on data sharing with Mistral",
+            "Send usage data to Mistral: on",
+            "Take part in Mistral's experiments: back to the default (on)",
+        ] {
+            assert!(summary.contains(line), "{line}\n{summary}");
+        }
+        assert!(
+            summary.contains(&format!(
+                "Default access mode: {}",
+                crate::dialog::dialog_quote(vw_vocabulary::label("accessModes", "auto-approve"))
+            )),
+            "{summary}"
+        );
     }
 
     #[test]

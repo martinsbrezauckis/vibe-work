@@ -142,7 +142,7 @@ fn is_active(shared: &Shared, session: &str) -> bool {
 }
 
 /// The one decision: `Ok` takes (or keeps) `copy` for `caller`.
-fn decide(
+pub(super) fn decide(
     shared: &Shared,
     locks: &CopyLocks,
     caller: &str,

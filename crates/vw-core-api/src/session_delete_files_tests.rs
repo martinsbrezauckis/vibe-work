@@ -178,3 +178,66 @@ fn junction_at_target_or_inside_is_refused() {
         clean(&dir);
     }
 }
+
+/// Vibe keeps each chat's plugin data in `<save>/plugins/data/<id>/<plugin>` and never removes it: the chat's own
+/// folder goes with the chat; other chats' folders and the shared folders stay.
+#[test]
+fn the_chats_plugin_data_folder_goes_with_it() {
+    let (dir, targets) = fixture();
+    let data = targets.save_dir.join("plugins/data");
+    for id in [ID, OTHER] {
+        std::fs::create_dir_all(data.join(id).join("plugin/cache")).unwrap();
+        std::fs::write(data.join(id).join("plugin/cache/state"), id).unwrap();
+    }
+    std::fs::create_dir_all(data.join(ID).join("empty")).unwrap();
+    finish(&targets, ID).unwrap();
+    assert!(!targets.save_dir.join("unified").join(ID).exists());
+    assert!(!data.join(ID).exists(), "the chat's plugin data stays");
+    assert_eq!(
+        std::fs::read_to_string(data.join(OTHER).join("plugin/cache/state")).unwrap(),
+        OTHER
+    );
+    // No plugin folder at all is fine too.
+    let (bare, targets) = fixture();
+    finish(&targets, ID).unwrap();
+    assert!(!targets.save_dir.join("unified").join(ID).exists());
+    clean(&dir);
+    clean(&bare);
+}
+
+/// Plugin data is the plugins' own: a link in it (or at it) is never followed or removed, and it does not stop the
+/// chat's own deletion.
+#[cfg(unix)]
+#[test]
+fn a_link_in_plugin_data_is_left_and_never_followed() {
+    use std::os::unix::fs::symlink;
+    for place in ["plugins", "data", "chat", "inside"] {
+        let (dir, targets) = fixture();
+        let outside = dir.join("outside");
+        std::fs::create_dir(&outside).unwrap();
+        std::fs::write(outside.join("keep"), "outside").unwrap();
+        let chat = targets.save_dir.join("plugins/data").join(ID);
+        std::fs::create_dir_all(chat.join("plugin")).unwrap();
+        std::fs::write(chat.join("plugin/state"), "plugin").unwrap();
+        let link = match place {
+            "plugins" => targets.save_dir.join("plugins"),
+            "data" => targets.save_dir.join("plugins/data"),
+            "chat" => chat.clone(),
+            "inside" => chat.join("plugin/link"),
+            _ => unreachable!(),
+        };
+        if link.exists() {
+            std::fs::rename(&link, dir.join("original")).unwrap();
+        }
+        symlink(&outside, &link).unwrap();
+        finish(&targets, ID).unwrap();
+        assert!(!targets.save_dir.join("unified").join(ID).exists());
+        assert_eq!(
+            std::fs::read_to_string(outside.join("keep")).unwrap(),
+            "outside",
+            "{place}"
+        );
+        assert!(std::fs::symlink_metadata(&link).is_ok(), "{place}");
+        clean(&dir);
+    }
+}

@@ -1,5 +1,6 @@
 //! App commit identity in a private atomic JSON file; called by Git Settings, Commit and init.
-//! Depends on vw-git identity validation and vw-platform storage. Never writes global Git config.
+//! Depends on vw-git identity validation and vw-platform storage. Never writes global Git config (only the person's
+//! answer to the agent's commit without an identity does, `git_identity_ask`).
 use crate::error::{CoreError, ErrorCode};
 use crate::git_cmd::{GitHub, git_error};
 use crate::git_view::{GitIdentitySettings, GitIdentitySource};

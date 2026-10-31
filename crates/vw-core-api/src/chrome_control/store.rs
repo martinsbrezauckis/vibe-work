@@ -1,49 +1,61 @@
-//! The saved Chrome Control level: `permissions.json` in the state folder, atomically written with
-//! `replace_private` (user-only). A record is untrusted state: the parser checks its shape and version only.
-//! Missing, unreadable or older records read as Browse. `restore` requires native person-only consent before a
-//! parsed level above Browse becomes effective, even when the JSON has exactly the shape this version writes.
-//! Depends on: vw-platform (private files), `vw_ask::chrome`. Called by: `chrome_control`.
+//! The Browser setting stores availability only. Legacy permissions files are never read.
+//! Called by `ChromeControl`; action authority always comes from the current chat mode.
 use std::path::Path;
-
-use vw_ask::ChromeSettings;
-use vw_ask::chrome::Level;
-
-const FILE: &str = "permissions.json";
-const VERSION: u32 = 2;
-
-#[derive(serde::Serialize, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Saved {
-    version: u32,
-    level: Level,
-}
-
-/// The untrusted saved level, or the default when its shape/version cannot be read.
-pub(super) fn load(dir: &Path) -> ChromeSettings {
-    let path = dir.join(FILE);
-    match std::fs::read(&path) {
-        Ok(bytes) => match serde_json::from_slice::<Saved>(&bytes) {
-            Ok(saved) if saved.version == VERSION => ChromeSettings { level: saved.level },
-            _ => {
-                tracing::warn!("Chrome Control's saved level could not be read; using the default");
-                ChromeSettings::default()
-            }
-        },
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => ChromeSettings::default(),
-        Err(e) => {
-            tracing::warn!(%e, "Chrome Control's saved level could not be read; using the default");
-            ChromeSettings::default()
-        }
+pub(super) fn enabled(dir: &Path) -> bool {
+    match std::fs::read(dir.join("enabled.json")) {
+        Ok(bytes) => serde_json::from_slice::<bool>(&bytes).unwrap_or(false),
+        Err(error) => error.kind() == std::io::ErrorKind::NotFound,
     }
 }
+pub(super) fn save_enabled(dir: &Path, enabled: bool) -> Result<(), String> {
+    std::fs::create_dir_all(dir).map_err(|_| "Could not save Chrome setting.")?;
+    std::fs::write(
+        dir.join("enabled.json"),
+        if enabled { "true" } else { "false" },
+    )
+    .map_err(|_| "Could not save Chrome setting.".to_owned())
+}
 
-/// Writes the level atomically.
-pub(super) fn save(dir: &Path, settings: ChromeSettings) -> Result<(), String> {
-    vw_platform::ensure_private_dir(dir).map_err(|e| e.to_string())?;
-    let bytes = serde_json::to_vec_pretty(&Saved {
-        version: VERSION,
-        level: settings.level,
-    })
-    .map_err(|e| e.to_string())?;
-    vw_platform::replace_private(&dir.join(FILE), &bytes).map_err(|e| e.to_string())
+/// Settings > Developer > Local network pages for the agent (Chrome Control only). Missing or corrupt = off.
+pub(super) fn local_network(dir: &Path) -> bool {
+    std::fs::read(dir.join("local-network.json"))
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<bool>(&bytes).ok())
+        .unwrap_or(false)
+}
+pub(super) fn save_local_network(dir: &Path, on: bool) -> Result<(), String> {
+    std::fs::create_dir_all(dir).map_err(|_| "Could not save the setting.")?;
+    std::fs::write(
+        dir.join("local-network.json"),
+        if on { "true" } else { "false" },
+    )
+    .map_err(|_| "Could not save the setting.".to_owned())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn leftover_permissions_never_change_availability_or_authority() {
+        let dir = std::env::temp_dir().join(format!("chrome-setting-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        for value in ["broken", "{\"level\":\"act\"}", "{\"level\":\"browse\"}"] {
+            std::fs::write(dir.join("permissions.json"), value).unwrap();
+            assert!(enabled(&dir));
+            assert_eq!(
+                vw_ask::chrome::Tier::from_mode("ask"),
+                Some(vw_ask::chrome::Tier::Ask)
+            );
+        }
+        save_enabled(&dir, false).unwrap();
+        assert!(!enabled(&dir));
+        std::fs::write(dir.join("enabled.json"), "broken").unwrap();
+        assert!(!enabled(&dir));
+        assert!(!local_network(&dir), "absent: off");
+        std::fs::write(dir.join("local-network.json"), "yes").unwrap();
+        assert!(!local_network(&dir), "corrupt: off");
+        save_local_network(&dir, true).unwrap();
+        assert!(local_network(&dir));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 }

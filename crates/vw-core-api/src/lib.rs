@@ -38,6 +38,7 @@ pub(crate) mod agent_tools;
 mod app_context;
 mod app_settings;
 mod attachment_save;
+mod audio_output;
 mod background_output;
 mod browser;
 mod browser_accounts;
@@ -63,8 +64,8 @@ mod channels;
 mod chrome_control;
 mod command;
 pub use chrome_control::{
-    CHROME_RESTORE_DIALOG_METHOD, ChromeAskView, ChromeControlConfig, ChromeControlRequest,
-    ChromeControlView, ChromeSetupView,
+    ChromeControlConfig, ChromeControlRequest, ChromeControlView, ChromeSelection, ChromeSetupView,
+    ChromeTab, ChromeWorkView,
 };
 mod command_decode;
 mod confirmer;
@@ -98,6 +99,7 @@ mod explorer_tests;
 mod explorer_view;
 #[cfg(test)]
 mod export_contract_tests;
+mod export_hooks;
 mod export_md;
 mod files;
 mod files_lookup;
@@ -117,6 +119,7 @@ mod git_cmd;
 mod git_discovery;
 mod git_draft;
 mod git_identity;
+mod git_identity_ask;
 mod git_pr;
 mod git_publish;
 mod git_settings;
@@ -197,6 +200,8 @@ pub use protected_changes_view::{
     ProtectedChangeProblem, ProtectedChangeStatus, ProtectedChangeView, ProtectedFileView,
 };
 #[cfg(test)]
+mod feature_test_core;
+#[cfg(test)]
 mod offline_core;
 mod own_server;
 mod panel_read;
@@ -209,6 +214,8 @@ mod project_instructions_view;
 mod projects;
 mod projects_filing;
 mod projects_view;
+mod prompt_history;
+mod prompt_history_command;
 mod provider_errors;
 mod pump;
 mod queue_return;
@@ -221,12 +228,15 @@ mod safety;
 mod safety_view;
 mod save_file;
 mod search;
+mod search_agent;
 mod search_files;
 mod search_fuzzy;
 mod search_html;
 mod search_index;
+mod search_read_rules;
 mod search_text;
 mod search_view;
+mod search_walk;
 mod secret_generate;
 mod secret_path;
 mod secret_replace;

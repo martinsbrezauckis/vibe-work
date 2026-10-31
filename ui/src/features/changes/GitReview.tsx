@@ -14,7 +14,7 @@ import { changedFileMenu } from "./changesMenus";
 import { useStore } from "../../state/createStore";
 import type { ChangesView } from "../../protocol/core";
 import { FileReview } from "./FileReview";
-import { completionText, fileNote, shownFile, shownInFull, statText, turnText } from "./model";
+import { completionText, fileNote, shownFile, shownInFull, statText, fileTurnText } from "./model";
 import type { Changes } from "./store";
 
 /** The review of a git session. */
@@ -104,7 +104,7 @@ export function GitReview(props: {
         </div>
         <ul className="files" aria-label={`${String(n)} changed ${n === 1 ? "file" : "files"}`}>
           {view.files.map((f) => {
-            const turn = turnText(f.turn);
+            const turn = fileTurnText(f, view.turns);
             return (
               <li data-item-id={f.path} key={f.path} {...fileMenu.triggers(f.path)}>
                 <button
@@ -200,6 +200,7 @@ export function GitReview(props: {
           changes={changes}
           sessionId={view.sessionId}
           file={file}
+          turns={view.turns}
           busy={busy}
           readOnly={readOnly}
         />

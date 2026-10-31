@@ -83,6 +83,7 @@ export function SearchResults({
           </p>
         </div>
       ))}
+      {state.searchUnreadable && <p className="key-problem">This folder could not be read</p>}
       {state.searchLimited && (
         <p className="key-notice">
           {state.hits.length >= 500
@@ -104,7 +105,7 @@ export function SearchResults({
       {state.searchVersions.length === 50 && (
         <p className="ui-help">First 50 matching commits. Refine the search to see others.</p>
       )}
-      {count === 0 && !state.searching && (
+      {count === 0 && !state.searching && !state.searchUnreadable && (
         <p className="key-line">Nothing matches “{state.query}”.</p>
       )}
     </div>

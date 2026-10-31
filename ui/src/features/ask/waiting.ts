@@ -3,7 +3,7 @@
  * tabs) and the way to them: "Go to the waiting prompt" (Ctrl/Cmd+Shift+A, the palette, the composer's hint) moves
  * the focus to the oldest waiting prompt of the open session, else the oldest anywhere (opening its session); pressed
  * again while several wait there, it goes to the next one of the same session. A card gets the focus; a window comes to the front. Showing a
- * chat brings its waiting windows to the front (`showChatPrompts`). The words of the arrival announcements.
+ * chat brings its waiting windows to the front (`showChatPrompts`), and so does a new window prompt of the chat shown. The words of the arrival announcements.
  * Depends on: the core model (asks, subagent cards, child sessions), askWordsFor, cardFocus, the announcer, goHome,
  * vocabulary, the client's `showPrompt`.
  * Called by: the shell actions, useAskAnnouncements, the composer hint, AskCard, the session view.
@@ -26,14 +26,13 @@ export const GO_TO_PROMPT_KEYS = "Mod+Shift+A";
 const SUMMARY_MAX = 120;
 
 /**
- * The AskCard id of `ask` (`AskCard`'s `id`): a callback's id, `protected:{id}`, a Chrome Control card's ask id;
+ * The AskCard id of `ask` (`AskCard`'s `id`): a callback's id or `protected:{id}`;
  * `null` for asks with no card.
  */
 export function cardIdOf(ask: Ask): string | null {
   if (ask.surface !== "card") return null;
   if (ask.id.startsWith("callback:")) return ask.id.slice("callback:".length);
   if (ask.id.startsWith("proposal:")) return `protected:${ask.id.slice("proposal:".length)}`;
-  if (ask.kind.startsWith("chrome/ask/")) return ask.id;
   return null;
 }
 
@@ -113,15 +112,36 @@ export function showChatPrompts(app: App, sessionId: string): void {
   for (const ask of [...windows].reverse()) void core.client.showPrompt(ask.id).catch(() => false);
 }
 
-/** Starts "showing a chat brings its waiting windows to the front" for `app`; returns the stop function. */
+/**
+ * Starts "showing a chat brings its waiting windows to the front" for `app`, and a new window prompt of the chat
+ * already shown comes to the front as it opens; returns the stop function.
+ */
 export function startChatPrompts(app: App): () => void {
   let selected = app.shell.store.get().selected;
-  return app.shell.store.subscribe(() => {
+  const stopShell = app.shell.store.subscribe(() => {
     const now = app.shell.store.get().selected;
     if (now === selected) return;
     selected = now;
     if (now !== null) showChatPrompts(app, now);
   });
+  const core = app.core;
+  if (core === null) return stopShell;
+  let asks = core.store.get().asks;
+  const stopCore = core.store.subscribe(() => {
+    const state = core.store.get();
+    if (state.asks === asks) return;
+    const before = asks;
+    asks = state.asks;
+    const open = app.shell.store.get().selected;
+    if (open === null || core.client.showPrompt === undefined) return;
+    for (const ask of Object.values(state.asks))
+      if (before[ask.id] === undefined && isWindowPrompt(ask) && promptHost(state, ask) === open)
+        void core.client.showPrompt(ask.id).catch(() => false);
+  });
+  return () => {
+    stopShell();
+    stopCore();
+  };
 }
 
 /** The prompt "Go to the waiting prompt" went to last (its next press goes to the one after it). */

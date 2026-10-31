@@ -58,7 +58,7 @@ text: string,
 /**
  * A voice from `voices` (`null`: the default, `gb_jane_neutral`).
  */
-voice: string | null, } | { "op": "voices", };
+voice: string | null, } | { "op": "voices", } | { "op": "audioOutput", };
 
 export type SpeechResult = { "kind": "reading", 
 /**
@@ -128,7 +128,11 @@ chars: number, } | { "kind": "voices",
 /**
  * Presets first, then the user's own.
  */
-voices: Array<VoiceView>, };
+voices: Array<VoiceView>, } | { "kind": "audioOutput", 
+/**
+ * False only when sound would play into nothing (the Linux `AppImage` without a sound server).
+ */
+available: boolean, };
 
 export type DictationMode = "realtime" | "batch";
 

@@ -45,7 +45,10 @@ export interface WorktreesState {
   orphans: readonly OrphanWorktree[];
   /** A fresh "New chat here" choice resets the copy switch, even for the same folder. */
   newChatRequest: number;
-  /** Explicit choice from the Git tree, applied when its folder's composer opens. */
+  /**
+   * Explicit choice from the Git tree for the next new chat only: cleared when its copy starts, a chat opens or
+   * another folder choice is made.
+   */
   newChatCopy: boolean | null;
   /** What `.worktreeinclude` copied into each session's copy this run (not kept across restarts). */
   included: Readonly<Record<string, IncludeReport>>;
@@ -93,6 +96,13 @@ export function createWorktrees(deps: {
   });
   const notices = createWorktreeNotifications(deps.persist ?? true);
   let counting = Promise.resolve();
+  /** Ends a "New task here" switch choice: it holds for that one new chat only. */
+  let releaseCopy: (() => void) | null = null;
+  const forgetCopy = (): void => {
+    releaseCopy?.();
+    releaseCopy = null;
+    store.set((s) => (s.newChatCopy === null ? s : { ...s, newChatCopy: null }));
+  };
   /** Sessions whose archive the user started with "Throw away this copy". */
 
   const fail = (thrown: unknown): void => {
@@ -108,7 +118,11 @@ export function createWorktrees(deps: {
     return result.result;
   }
 
-  async function inspect(choice: EndChoice): Promise<void> {
+  /**
+   * Reads the inspection for the open dialog. `refresh`: a re-read after a copy change elsewhere; a record that
+   * is gone by then (NotFound) closes the dialog without a toast, as there is nothing left to remove.
+   */
+  async function inspect(choice: EndChoice, refresh = false): Promise<void> {
     try {
       const result = await run({ op: "inspect", sessionId: choice.sessionId });
       if (result.kind !== "inspection") return;
@@ -119,7 +133,7 @@ export function createWorktrees(deps: {
       );
     } catch (thrown) {
       store.set((s) => ({ ...s, end: null }));
-      fail(thrown);
+      if (!(refresh && toCallError(thrown).error.code === "notFound")) fail(thrown);
     }
   }
 
@@ -160,7 +174,7 @@ export function createWorktrees(deps: {
         ) {
           void countCopies();
           const end = store.get().end;
-          if (end !== null && !end.busy) void inspect(end);
+          if (end !== null && !end.busy) void inspect(end, true);
         }
       });
     },
@@ -179,8 +193,22 @@ export function createWorktrees(deps: {
     ): Promise<void> {
       if (origin === "debug-api")
         await core.run({ type: "pickFolder", path }).catch(() => undefined);
-      shell.actions.setNewFolder(path, origin === "debug-api" ? "debug-api" : "session");
+      const by = origin === "debug-api" ? "debug-api" : "session";
+      forgetCopy();
+      shell.actions.setNewFolder(path, by);
       store.set((s) => ({ ...s, newChatRequest: s.newChatRequest + 1, newChatCopy: copy }));
+      if (copy === null) return;
+      // Another folder choice (Choose folder, even of the same folder) or an opened chat ends the choice.
+      const chosen = shell.store.get();
+      releaseCopy = shell.store.subscribe(() => {
+        const now = shell.store.get();
+        if (
+          now.newFolder !== path ||
+          now.newFolderBy !== by ||
+          (now.selected !== null && now.selected !== chosen.selected)
+        )
+          forgetCopy();
+      });
     },
 
     /**
@@ -198,6 +226,7 @@ export function createWorktrees(deps: {
           branch: spec.branch,
         });
         if (result.kind !== "started") return null;
+        forgetCopy();
         const id = result.snapshot.sessionId;
         if (result.include.found) {
           store.set((s) => ({ ...s, included: { ...s.included, [id]: result.include } }));

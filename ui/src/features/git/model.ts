@@ -18,8 +18,8 @@ export function branchOf(status: GitStatusView): string | null {
 }
 
 /** Why Commit is not possible now (null: it is). */
-export function commitBlocked(status: GitStatusView): string | null {
-  if (status.running) return "Vibe is still working. Commit when the turn has finished.";
+export function commitBlocked(status: GitStatusView, working = false): string | null {
+  if (working || status.running) return "Vibe is still working. Commit when the turn has finished.";
   if (status.blocker !== null) return status.blocker;
   if ((status.uncommitted ?? 0) === 0) return "Nothing to commit.";
   return null;

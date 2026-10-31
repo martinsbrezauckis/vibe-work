@@ -19,11 +19,8 @@ from pydantic import TypeAdapter
 
 CRATE = Path(__file__).resolve().parents[1]
 REPO = CRATE.parents[1]
-TAG = "3.0.3"
+TAG = (REPO / "tools/public/codegen/vibe.pin").read_text().strip()
 MODULES = ("protocol", "models", "config")
-# Value sets Vibe grows between versions (3.0.3 added `xhigh`): an unknown value decodes instead of failing the
-# whole answer. Only answers carry them; Vibe Work never sends `Unrecognized`.
-OPEN_ENUMS = {"ThinkingLevel"}
 METHODS = {
     "list": ("SkillsListParams", "SkillsListResponse"),
     "installed": ("SkillsInstalledParams", "SkillsInstalledResponse"),
@@ -79,31 +76,33 @@ def rust_type(schema):
             raise ValueError(f"Unsupported type: {schema}")
 
 
-def literal(value, schema):
+def literal(value, schema, definitions):
     ty = rust_type(schema)
     if value is None:
         return "None" if ty.startswith("Option<") else "serde_json::Value::Null"
     if "$ref" in schema:
+        target = definitions[schema["$ref"].rsplit("/", 1)[1]]
+        if target.get("type") == "string" and "enum" not in target:
+            return literal(value, target, definitions)
         return f"{ty}::{variant(value)}"
     if isinstance(value, str):
         return f"{json.dumps(value)}.to_owned()"
     if isinstance(value, bool):
         return str(value).lower()
     if isinstance(value, list):
-        return "vec![" + ", ".join(literal(v, schema["items"]) for v in value) + "]"
+        return "vec![" + ", ".join(literal(v, schema["items"], definitions) for v in value) + "]"
     return repr(value)
 
 
-def render(name, schema, classes):
+def render(name, schema, classes, definitions):
     ty = rust_name(name)
     if "enum" in schema or "const" in schema:
         lines = [f"/// Vibe's `{name}` wire values.", "#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]", f"pub enum {ty} {{"]
         for value in schema.get("enum", [schema.get("const")]):
             lines += [f"    /// Wire value `{value}`.", f"    #[serde(rename = {json.dumps(value)})]", f"    {variant(value)},"]
-        if name in OPEN_ENUMS:
-            lines += ["    /// A value this Vibe version does not define (a later Vibe adds levels); decoding never fails on it.",
-                      "    #[serde(other)]", "    Unrecognized,"]
         return "\n".join(lines + ["}", ""])
+    if schema.get("type") == "string":
+        return f"/// Vibe's `{name}` accepts provider-defined strings.\npub type {ty} = String;\n"
     cls = classes[name]
     lines = [f"/// Vibe's `{name}` model; unknown extra fields are ignored.", "#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]", f"pub struct {ty} {{"]
     if sum(prop.get("type") == "boolean" for prop in schema["properties"].values()) > 3:
@@ -120,7 +119,7 @@ def render(name, schema, classes):
             else:
                 fn = f"default_{snake(ty)}_{field}"
                 lines += [f'    #[serde(default = "{fn}")]']
-                defaults += [f"fn {fn}() -> {rust_type(prop)} {{", f"    {literal(default, prop)}", "}", ""]
+                defaults += [f"fn {fn}() -> {rust_type(prop)} {{", f"    {literal(default, prop, definitions)}", "}", ""]
         lines += [f"    pub {field}: {rust_type(prop)},"]
     lines += ["}", "", *defaults]
     # This model has an after-validator in Vibe: blank labels use the stable id.
@@ -203,11 +202,13 @@ def generate():
             imports.add("RuntimeMutationResponse")
         if imports:
             contents += "use super::{" + ", ".join(rust_name(name) for name in sorted(imports)) + "};\n\n"
-        contents += "\n".join(render(name, definitions[name], classes) for name in sorted(names))
+        contents += "\n".join(render(name, definitions[name], classes, definitions) for name in sorted(names))
         if group == "params":
             for method in ("Import", "SetVersion", "SetLatest", "SetAlias", "Remove", "SetEnabled"):
                 contents += f"\n/// Full runtime result of `skills/{method[0].lower() + method[1:]}`.\npub type Skills{method}Response = RuntimeMutationResponse;\n"
         output[CRATE / f"src/wire/{group}.rs"] = contents
+    levels = classes["ModelConfigView"].model_fields["thinking_levels"].get_default(call_default_factory=True)
+    output[CRATE / "tests/fixtures/thinking-levels.json"] = json.dumps(levels) + "\n"
     protocol = modules[0]
     skill = {"name": "review", "description": "Review code", "prompt": "Review the changes.", "source": "registry", "registry": {"skillId": "skill-review", "version": 2}}
     project = {**skill, "description": "Project review", "scope": "project", "registry": {"skillId": "skill-project-review", "version": 3}}

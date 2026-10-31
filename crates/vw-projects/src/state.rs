@@ -354,6 +354,26 @@ impl State {
         filed
     }
 
+    /// Removes the automatic projects made for `folder` that nothing is filed in (a project a person made, or one
+    /// with any chat, stays). Returns true when one was removed.
+    pub fn retire_auto_project(&mut self, folder: &str) -> bool {
+        let before = self.projects.len();
+        let filed: BTreeSet<&str> = self
+            .members
+            .values()
+            .flatten()
+            .map(String::as_str)
+            .collect();
+        self.projects.retain(|p| {
+            !(p.auto
+                && !filed.contains(p.id.as_str())
+                && p.main_folder
+                    .as_deref()
+                    .is_some_and(|m| same_folder(m, folder)))
+        });
+        self.projects.len() != before
+    }
+
     /// Forgets a session Vibe deleted. Returns true when it was a member.
     pub fn forget(&mut self, session: &str) -> bool {
         self.missing.remove(session);
@@ -397,3 +417,7 @@ impl State {
         outcome
     }
 }
+
+#[cfg(test)]
+#[path = "state_tests.rs"]
+mod tests;

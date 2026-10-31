@@ -666,7 +666,11 @@ impl PreviewService {
             self.engine.screenshot(&id),
         )
         .await?;
-        shot::shape(&png).map_err(PreviewError::Image)
+        match self.css_viewport_width(session_id) {
+            Some(width) => shot::shape_css(&png, width),
+            None => shot::shape(&png),
+        }
+        .map_err(PreviewError::Image)
     }
 
     /// The engine's own PNG of what the session's preview shows, at full size for stitching and comparing.

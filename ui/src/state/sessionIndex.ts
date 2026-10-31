@@ -24,7 +24,7 @@ export interface IndexState {
   nextCursor: string | null;
   /** Archived sessions are requested from Vibe (the archive filter is on). */
   includeArchived: boolean;
-  /** `continueSessionId` of the first page: what `vibe --continue` resumes ("Last in CLI"). */
+  /** Retained for older listing clients; the sidebar no longer advertises a CLI continuation target. */
   continueSessionId: string | null;
   /** A page fetch is in flight. */
   loading: boolean;

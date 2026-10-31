@@ -1,6 +1,5 @@
 //! Explicit permission methods. Depends on no runtime state; core and policy drift tests consult this table.
 use crate::Surface;
-use crate::chrome::{self, Group};
 /// Presentation and identity constraints for one class of permission.
 #[derive(Debug, Clone, Copy)]
 pub struct Policy {
@@ -23,22 +22,7 @@ pub struct Policy {
 }
 /// Settings controls a policy row may name as its `always_setting`; the drift tests check every entry against the
 /// Settings catalog.
-const ALWAYS_SETTINGS: &[(&str, &str)] = &[(chrome::CLOSE_TABS_KIND, "browser-close-user-tabs")];
-/// The Chrome Control cards (`chrome.rs`): one kind per group, closing a tab the user opened, and an unknown tool.
-const CHROME_CARDS: &[&str] = &[
-    Group::Read.ask_kind(),
-    Group::Navigate.ask_kind(),
-    Group::Forms.ask_kind(),
-    Group::Send.ask_kind(),
-    Group::SignIn.ask_kind(),
-    Group::SiteData.ask_kind(),
-    Group::Scripts.ask_kind(),
-    Group::Bookmarks.ask_kind(),
-    Group::History.ask_kind(),
-    chrome::CLOSE_TABS_KIND,
-    chrome::OTHER_KIND,
-    chrome::SESSION_KIND,
-];
+const ALWAYS_SETTINGS: &[(&str, &str)] = &[];
 const NATIVE: &[&str] = &[
     "worktrees/start",
     "agents/install",
@@ -87,7 +71,6 @@ const NATIVE: &[&str] = &[
     "vibe-work/killGuard",
     "vibe-work/secretRun",
     "vibe-work/fillLogin",
-    "vibe-work/browserCloseTab",
     "vibe-work/providerConsent",
     "vibe-work/gitPush",
     "vibe-work/gitBringIn",
@@ -106,8 +89,6 @@ const NATIVE: &[&str] = &[
     "files/open",
     "processes/stop",
     "vibe-work/projectInstructions/delete",
-    chrome::LOOSEN_KIND,
-    chrome::RESTORE_KIND,
     "newChat/restoreFolder",
     "chrome/control/fill",
 ];
@@ -128,16 +109,12 @@ pub fn always_settings() -> impl Iterator<Item = (&'static str, &'static str)> {
 }
 /// Every known policy key; unknown runtime methods still fail closed as native asks.
 pub fn policies() -> impl Iterator<Item = &'static str> {
-    NATIVE
-        .iter()
-        .copied()
-        .chain([
-            "approval",
-            "user_input",
-            "connector_auth",
-            "protected_change",
-        ])
-        .chain(CHROME_CARDS.iter().copied())
+    NATIVE.iter().copied().chain([
+        "approval",
+        "user_input",
+        "connector_auth",
+        "protected_change",
+    ])
 }
 /// Resolve a method's fixed presentation policy. None means the method needs an explicit policy row.
 #[must_use]
@@ -146,7 +123,7 @@ pub fn policy(kind: &str) -> Option<Policy> {
     let card = matches!(
         key,
         "approval" | "user_input" | "connector_auth" | "protected_change"
-    ) || CHROME_CARDS.contains(&key);
+    );
     let title = match key {
         "approval" => "this tool call",
         "user_input" => "this question",
@@ -155,16 +132,11 @@ pub fn policy(kind: &str) -> Option<Policy> {
         "vibe-work/killGuard" => "this process-stop command",
         "vibe-work/secretRun" => "this use of a secret",
         "vibe-work/fillLogin" => "this saved login",
-        "vibe-work/browserCloseTab" => "closing this tab",
         "vibe-work/providerConsent" => "this account access",
-        chrome::SESSION_KIND => "using your Chrome in this chat",
-        chrome::RESTORE_KIND => "the saved Chrome Control level",
         // The canonical "New chat" name lives in the shared vocabulary.
         "newChat/restoreFolder" => {
             vw_vocabulary::text("askRestoreFolderSubject").unwrap_or("the saved folder")
         }
-        chrome::LOOSEN_KIND => "this change to Chrome Control's permissions",
-        _ if CHROME_CARDS.contains(&key) => "this action in your Chrome",
         _ => "this request",
     };
     Some(Policy {

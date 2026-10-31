@@ -151,7 +151,7 @@ impl SeenSequence {
 }
 
 /// 64 random bits (hex) plus the process id: unique per write, and `create_new` refuses a collision anyway.
-fn temp_suffix() -> String {
+pub(crate) fn temp_suffix() -> String {
     let mut bytes = [0_u8; 8];
     if getrandom::fill(&mut bytes).is_err() {
         let nanos = std::time::SystemTime::now()

@@ -7,8 +7,9 @@
 //!   gone would deny every bash call), and the reason is returned for the log.
 //! - **Git Bash (Windows):** a copy of the binary runs Vibe's Git Bash in a kill-on-close job ([`crate::git_bash`]).
 //! - **`hooks.toml`:** Vibe Work owns this `VIBE_HOME`; our hook lives in a marked block that is replaced
-//!   on every start (new binary or data path) and anything outside it is kept. Hooks in a built-in plugin never
-//!   fire, so this file is the only place that works, also in auto-approve.
+//!   on every start (new binary or data path) and anything outside it is kept. Vibe 3.0.4 can run native plugin
+//!   hooks; VW refuses those subprocesses because they bypass our tool guards. Our guards stay in this file,
+//!   also in auto-approve, and the bundled plugin contains no hooks.
 //! - **Plugin:** `vibe-app-server --additional-builtin-plugin-root <dir>` with `<dir>/vw/` (skill
 //!   `vw:processes`). Built-in plugins run fully trusted: the folder comes from the app's own files only.
 //! - **The Vibe Work note** (`vw_core_api::working_note`): the short "where you are, which skill when" map
@@ -120,21 +121,29 @@ fn guard_description(guard: Guard) -> &'static str {
         Guard::Receipt => {
             "Vibe Work: wait for permission and bind the decision to its originating agent and call"
         }
+        Guard::Allowed => {
+            "Vibe Work: a command the user allowed in a guard's dialog says so in its result"
+        }
     }
 }
 
 /// Our `hooks.toml` block for `binary` and the core's endpoint file: one `[[hooks]]` entry per guard,
-/// in [`Guard::ALL`] order, each named so Vibe's refusal notice says which guard spoke.
+/// in [`Guard::ALL`] order, then the after-call entries ([`Guard::AFTER`]), each named so Vibe's notice says which
+/// guard spoke.
 /// The folder guard precedes git so another session's copy is refused before git can ask for approval.
 #[must_use]
 pub fn hook_block(binary: &Path, endpoint_file: &Path) -> String {
     let mut out = format!("{BEGIN}\n");
-    for guard in Guard::ALL {
+    for guard in Guard::ALL.into_iter().chain(Guard::AFTER) {
         let command = hook_command(binary, endpoint_file, guard, cfg!(windows));
+        // The guards before a call are strict (a crash refuses it); the note after a call is not (a failure leaves
+        // the result as it is).
+        let strict = guard.event() == "pre_tool";
         let _ = write!(
             out,
-            "[[hooks]]\nname = {}\ntype = \"pre_tool\"\nmatch = {}\nstrict = true\ntimeout = {}\ndescription = {}\ncommand = {}\n\n",
+            "[[hooks]]\nname = {}\ntype = {}\nmatch = {}\nstrict = {strict}\ntimeout = {}\ndescription = {}\ncommand = {}\n\n",
             toml_string(guard.hook_name()),
+            toml_string(guard.event()),
             toml_string(guard.matcher()),
             guard.timeout_secs(),
             toml_string(guard_description(guard)),

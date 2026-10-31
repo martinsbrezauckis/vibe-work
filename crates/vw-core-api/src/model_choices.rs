@@ -53,7 +53,9 @@ impl Choice {
         } else {
             &self.display_name
         };
-        if self.effort == "off" {
+        if self.effort.is_empty() {
+            name.clone()
+        } else if self.effort == "off" {
             format!("{name} with thinking off")
         } else {
             let level = if self.effort == "max" {
@@ -146,7 +148,12 @@ pub(crate) struct Choices {
     // Without this, a second reopen could restore an older, still-valid Vibe pin.
     fallbacks: Records,
     handed_off: Mutex<std::collections::BTreeSet<(String, String)>>,
+    /// Display names by alias from the model lists seen in this run ([`Self::learn`]).
+    names: Mutex<BTreeMap<String, String>>,
 }
+
+/// Aliases whose display name is remembered (a model list holds a few dozen at most).
+const MAX_NAMES: usize = 512;
 
 impl Choices {
     pub(crate) fn load(dir: Option<&std::path::Path>) -> Self {
@@ -155,7 +162,60 @@ impl Choices {
             remembered: Records::load(dir, "chat-models.json"),
             fallbacks: Records::load(dir, "model-fallbacks.json"),
             handed_off: Mutex::default(),
+            names: Mutex::default(),
         }
+    }
+
+    /// Remembers the display name of every model in a runtime's or configuration's model list (`config.models`), so
+    /// a model that later leaves Vibe's list can still be named ([`Self::named`]).
+    pub(crate) fn learn(&self, runtime: &Value) {
+        let Some(models) = runtime.pointer("/config/models").and_then(Value::as_array) else {
+            return;
+        };
+        let mut names = self.names.lock().unwrap_or_else(PoisonError::into_inner);
+        for model in models {
+            if let (Some(alias), Some(name)) = (
+                model["alias"].as_str().filter(|a| !a.is_empty()),
+                model["displayName"]
+                    .as_str()
+                    .filter(|n| !n.trim().is_empty()),
+            ) {
+                if names.len() >= MAX_NAMES && !names.contains_key(alias) {
+                    continue;
+                }
+                names.insert(alias.to_owned(), name.to_owned());
+            }
+        }
+    }
+
+    /// `choice` with a display name when it has none: from the last model list that listed its alias, else from a
+    /// chat's saved choice of that alias. Unknown stays unnamed (the alias is never shown).
+    pub(crate) fn named(&self, mut choice: Choice) -> Choice {
+        if !choice.display_name.is_empty() {
+            return choice;
+        }
+        let saved = |records: &Records| {
+            records
+                .pending
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .values()
+                .find(|c| c.alias == choice.alias && !c.display_name.is_empty())
+                .map(|c| c.display_name.clone())
+        };
+        let known = self
+            .names
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(&choice.alias)
+            .cloned()
+            .or_else(|| saved(&self.remembered))
+            .or_else(|| saved(&self.fallbacks))
+            .or_else(|| saved(&self.pending));
+        if let Some(name) = known {
+            choice.display_name = name;
+        }
+        choice
     }
 
     pub(crate) fn forget(&self, id: &str) {
@@ -214,20 +274,29 @@ fn load(file: &std::path::Path) -> std::io::Result<BTreeMap<String, Choice>> {
     if bytes.len() as u64 > MAX {
         return Err(std::io::Error::other("pending-models.json exceeds 1 MiB"));
     }
-    let pending: BTreeMap<String, Choice> = serde_json::from_slice(&bytes)?;
-    if pending.iter().any(|(id, choice)| {
-        id.is_empty()
-            || id.len() > 128
-            || choice.alias.is_empty()
-            || choice.alias.len() > 128
-            || !matches!(
-                choice.effort.as_str(),
-                "off" | "low" | "medium" | "high" | "xhigh" | "max"
-            )
-    }) {
-        return Err(std::io::Error::other("invalid saved chat model choice"));
-    }
-    Ok(pending)
+    let pending: BTreeMap<String, Value> = serde_json::from_slice(&bytes)?;
+    // Provider-defined levels are wire strings. A damaged record belongs to one chat,
+    // so it must not discard every other chat's saved model choice.
+    Ok(pending
+        .into_iter()
+        .filter_map(|(id, value)| {
+            let choice: Choice = serde_json::from_value(value).ok()?;
+            if id.is_empty()
+                || id.len() > 128
+                || choice.alias.is_empty()
+                || choice.alias.len() > 128
+                || choice.effort.is_empty()
+                || choice.effort.len() > 128
+                || choice
+                    .effort
+                    .chars()
+                    .any(|c| c.is_whitespace() || c.is_control())
+            {
+                return None;
+            }
+            Some((id, choice))
+        })
+        .collect())
 }
 
 /// Capture the stored alias before the resume/profile runtime replaces the store snapshot.
@@ -335,6 +404,43 @@ pub(crate) async fn turn_started(shared: &Shared, params: &Value) {
         {
             shared.model_choices.pending.forget(id);
             shared.model_choices.fallbacks.forget(id);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Records;
+    use serde_json::json;
+
+    #[test]
+    fn saved_choices_preserve_other_chats_and_unknown_provider_levels() {
+        let dir = std::env::temp_dir().join(format!("vw-choice-levels-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("choices.json"),
+            serde_json::to_vec(&json!({
+                "known": {"alias":"large-4", "effort":"high"},
+                "future": {"alias":"custom", "effort":"provider-future"},
+                "damaged": {"alias":"custom", "effort":17},
+                "blank": {"alias":"custom", "effort":" \t"},
+                "spaced": {"alias":"custom", "effort":"two words"}
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        let records = Records::load(Some(&dir), "choices.json");
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert_eq!(
+            records.get("known").map(|choice| choice.effort),
+            Some("high".into())
+        );
+        assert_eq!(
+            records.get("future").map(|choice| choice.effort),
+            Some("provider-future".into())
+        );
+        for id in ["damaged", "blank", "spaced"] {
+            assert!(records.get(id).is_none(), "{id}");
         }
     }
 }

@@ -27,7 +27,6 @@
 //! - Nothing here decides ownership: the core does, from the process monitor (vw-procmon).
 
 pub mod agent_env;
-pub mod chrome_guard;
 mod chrome_specs;
 pub mod cli;
 mod command_segments;
@@ -62,4 +61,10 @@ pub const CRATE_ROLE: &str =
 #[must_use]
 pub fn version() -> &'static str {
     env!("CARGO_PKG_VERSION")
+}
+
+/// The typed browser tools forwarded by the core after checking the current chat mode.
+#[must_use]
+pub fn chrome_tool_list() -> Vec<serde_json::Value> {
+    chrome_specs::tool_list()
 }

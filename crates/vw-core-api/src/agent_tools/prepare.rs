@@ -22,14 +22,35 @@ pub(crate) async fn prepare(
     if tool == names::DOCUMENT_READ && !super::document_consent::registered(shared, owner, args) {
         super::document_consent::attach(shared, owner, source, call, args).await?;
     }
-    if tool == names::USE_YOUR_CHROME || names::CHROME_TOOLS.contains(&tool) {
-        let decision = crate::chrome_control::check::check(shared, json!({"sessionId":source,"parentSessionId":owner,"toolName":format!("mcp_vw.{tool}"),"toolInput":args})).await?;
+    if names::CHROME_TOOLS.contains(&tool) {
+        let decision = crate::chrome_control::check::check(
+            shared,
+            &json!({"sessionId":source,"parentSessionId":owner,"toolName":format!("mcp_vw.{tool}"),"toolInput":args}),
+        );
         if decision["decision"] != "allow" {
             return Err(decision["reason"]
                 .as_str()
                 .unwrap_or("Chrome was not allowed.")
                 .into());
         }
+    }
+    if tool == "chrome_execute"
+        && args["steps"].as_array().is_some_and(|steps| {
+            steps.iter().any(|step| {
+                ["auth.fill", "auth.basic"].contains(&step["action"].as_str().unwrap_or_default())
+            })
+        })
+    {
+        return crate::chrome_control::batch::prepare(shared, owner, args.clone())
+            .await
+            .map(Some);
+    }
+    if tool == "chrome_execute"
+        && ["auth.fill", "auth.basic"].contains(&args["action"].as_str().unwrap_or_default())
+    {
+        return crate::chrome_control::login::prepare(shared, owner, args.clone())
+            .await
+            .map(Some);
     }
     if tool == names::BROWSER_ACT
         && let Some(execution) = super::browser_tools::prepare(shared, owner, args).await?

@@ -13,7 +13,8 @@
 //!   (`Authority::Session`): the process group may only hold processes proven to be that session's, so a group
 //!   shared with the Vibe server, this app or another app is refused (`GroupShared`), never signalled.
 //! - Reading the list drops processes that are gone (or whose pid now names another process), so it never grows
-//!   past what is still running.
+//!   past what is still running, and names each by what listens now (its own ports and its descendants'; a shell
+//!   parent by its listening child's executable).
 
 use crate::attribution::{Adopted, SessionContext};
 use crate::ledger::{Ledger, LedgerEntry};
@@ -21,8 +22,35 @@ use crate::monitor::ProcMon;
 use crate::os;
 use crate::registry::{ProcessClass, ProcessGroup};
 use crate::stop::{Authority, StopError, StopOutcome, StopRefusal, stop};
-use crate::types::ProcessRef;
+use crate::types::{ProcessRef, Snapshot};
 use crate::view::ProcessView;
+
+/// Refreshes `entry`'s ports from `snapshot`: every port its process or a descendant listens on. When the process
+/// itself listens on none, the name is the executable of the descendant that listens (the lowest pid of them), so a
+/// server under a shell is named by the server. Names still come from the OS-reported executable only.
+fn listening(entry: &mut LedgerEntry, snapshot: &Snapshot) {
+    let mut ports: Vec<(u32, u16)> = snapshot
+        .listeners
+        .iter()
+        .filter_map(|l| Some((l.pid?, l.port)))
+        .filter(|(pid, _)| *pid == entry.process.pid || snapshot.descends_from(*pid, entry.process))
+        .collect();
+    if ports.is_empty() {
+        return;
+    }
+    ports.sort_unstable();
+    if !ports.iter().any(|(pid, _)| *pid == entry.process.pid)
+        && let Some(name) = snapshot
+            .alive(ports[0].0)
+            .and_then(crate::types::ProcessInfo::exe_name)
+    {
+        entry.name = Some(name);
+    }
+    let mut numbers: Vec<u16> = ports.into_iter().map(|(_, port)| port).collect();
+    numbers.sort_unstable();
+    numbers.dedup();
+    entry.ports = numbers;
+}
 
 impl ProcMon {
     fn lock_left(&self) -> std::sync::MutexGuard<'_, Vec<LedgerEntry>> {
@@ -44,9 +72,19 @@ impl ProcMon {
     /// from the list here. Blocking (one liveness check per entry).
     #[must_use]
     pub fn left_running(&self) -> Vec<LedgerEntry> {
-        let mut left = self.lock_left();
-        left.retain(|e| os::is_alive(e.process));
-        left.clone()
+        let mut left = {
+            let mut left = self.lock_left();
+            left.retain(|e| os::is_alive(e.process));
+            left.clone()
+        };
+        // Named by what listens: a server started through a shell that stays its parent (`python3 ...; true`)
+        // listens in the shell's child, so the shell's own executable and its (empty) ports said nothing useful.
+        if let Ok(snapshot) = os::snapshot() {
+            for entry in &mut left {
+                listening(entry, &snapshot);
+            }
+        }
+        left
     }
 
     /// A session was deleted: its agent processes (re-attached ones, and those `end_session` just listed in

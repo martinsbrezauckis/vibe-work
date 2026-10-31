@@ -91,6 +91,10 @@ pub struct CoreConfig {
     /// Where the Changes tab keeps review baselines (made user-only). `None` (the default): the
     /// Changes tab is off. The app sets a folder in its data directory.
     pub changes_dir: Option<std::path::PathBuf>,
+    /// The Git settings file the person's identity is read from and saved in when the agent's `git init` or
+    /// `git commit` has none (`git_identity_ask`). `None` (the default): Git's own global settings.
+    /// Tests point it at a test home's file.
+    pub git_global_config: Option<std::path::PathBuf>,
     /// Longest a session's review baseline may take before its first piece of work is sent to Vibe without
     /// one. A baseline still running at this point is discarded when it ends (taken late, it could
     /// contain the agent's first edits) and the review is reported unavailable until the user starts it
@@ -188,6 +192,7 @@ impl Default for CoreConfig {
             read_aloud_available: None,
             agent_tools: None,
             changes_dir: None,
+            git_global_config: None,
             changes_baseline_limit: crate::changes::BASELINE_LIMIT,
             changes_test_hooks: None,
             preview: None,

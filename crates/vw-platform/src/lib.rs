@@ -5,7 +5,7 @@
 //! canonical path (no Windows `\\?\` prefix in what people read), the startup accessibility bus check
 //! (Linux) and keeping that check's run-only setting out of the programs the app starts (`child_env`), and the
 //! "Send to Vibe Work" right-click entries (`send_to`), and the system version (`system_version`: macOS and the
-//! Windows build; `glibc_version` on Linux);
+//! Windows build; `glibc_version` on Linux), the final path of an open file handle (`final_path`);
 //! PTY/ConPTY live in vw-terminal (the OS credential store is used by vw-vault).
 //!
 //! Depends on: nothing of ours (`thiserror` for errors, `url` for link checks, `dunce` for plain paths, `dbus`
@@ -15,7 +15,7 @@
 //! Invariant: the only crate allowed to relax the `unsafe_code` ban, and only behind a safe API with a SAFETY comment.
 //! Only `process` (macOS `proc_pidinfo`, Windows process handles) and `webview` (feature `webview`: `WebView2` and
 //! `WKWebView` screenshots), `native_click` (scoped webview input), `private_file` (Windows DACLs and
-//! owners), `background` (per-thread scheduling), `window_keys` (the main window's bare Alt tap),
+//! owners), `background` (per-thread scheduling), `window_keys` (the main window's bare Alt tap), `final_path` (Windows: `GetFinalPathNameByHandleW`),
 //! `a11y_bus` (Linux: `NO_AT_BRIDGE` for one run, set only while the process has one thread),
 //! `content_rules` (macOS `WKContentRuleList` per preview webview, with URL rules), `web_transport` (macOS: the
 //! WebTransport preference of one preview webview), `exec_inherit` (Linux: close-on-exec for inherited
@@ -46,6 +46,7 @@ pub mod content_rules;
 #[cfg(target_os = "linux")]
 #[allow(unsafe_code)]
 mod exec_inherit;
+pub mod final_path;
 mod harden;
 pub mod keep_awake;
 #[cfg(windows)]

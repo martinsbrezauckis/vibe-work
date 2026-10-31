@@ -7,7 +7,7 @@
  * Called by: createApp; tests pass fakes for `prepare` and `player`.
  * Invariants: without a core there is no voice (`createApp` passes `null`).
  */
-import { createWebAudioPlayer, type Player } from "../features/voice/audioPlayer";
+import { createWebAudioPlayer, type Player, withOutputCheck } from "../features/voice/audioPlayer";
 import { type PrepareCapture, prepareCapture } from "../features/voice/pcmCapture";
 import type { Composer } from "./composer";
 import type { CoreController } from "./coreStore";
@@ -31,7 +31,15 @@ export function createVoice(deps: {
   canUseKey?: () => boolean;
 }) {
   const settings = createVoiceSettings(deps.persist);
-  const player = deps.player ?? createWebAudioPlayer();
+  // Every sound first asks the host whether it can be heard (the AppImage without a sound server cannot).
+  const player = withOutputCheck(deps.player ?? createWebAudioPlayer(), async () => {
+    const answer = await deps.core.run({ type: "speech", request: { op: "audioOutput" } });
+    return !(
+      answer.type === "speech" &&
+      answer.result.kind === "audioOutput" &&
+      !answer.result.available
+    );
+  });
   const prepare = deps.prepare ?? prepareCapture;
   let narration: ReturnType<typeof createNarration> | null = null;
   let voiceChat: ReturnType<typeof createVoiceChat> | null = null;

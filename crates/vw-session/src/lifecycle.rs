@@ -107,6 +107,19 @@ impl SessionStore {
         })
     }
 
+    /// Vibe answered `turn/start` for `session_id` with `turn`. Vibe runs an accepted turn at once but publishes
+    /// its events for it only later (seconds, on a busy computer tens of seconds), and until then the chat would read
+    /// idle: a second send would then start a turn Vibe refuses as a conflict instead of steering or queuing.
+    ///
+    /// A running (`in_progress`) turn whose id the session does not list yet is appended and published as
+    /// `TurnUpserted`; while the session reads idle, its status gets the same patch Vibe's own turn start sends
+    /// (`activeTurnId`, `type: running`), published as `SessionPatched`. A turn Vibe already reported (its events
+    /// can overtake the reply) is never touched. Vibe's later events replace both as usual (its start patch is an
+    /// `add` and a `replace`, which apply over this one), and so does any snapshot or read.
+    pub fn note_accepted_turn(&self, session_id: &str, turn: &Value) -> Applied {
+        self.with(|inner| inner.note_accepted_turn(session_id, turn))
+    }
+
     /// Drops a session (deleted or closed), e.g. after `session/delete`.
     pub fn remove(&self, session_id: &str) -> Applied {
         self.with(|inner| {
@@ -181,6 +194,50 @@ fn session_id_of(state: &Value) -> Option<&str> {
 }
 
 impl Inner {
+    pub(crate) fn note_accepted_turn(&mut self, session_id: &str, turn: &Value) -> Applied {
+        let Some(id) = turn
+            .get("id")
+            .and_then(Value::as_str)
+            .filter(|_| turn["status"] == "in_progress")
+        else {
+            return Applied::default();
+        };
+        let Some(entry) = self.sessions.get_mut(session_id) else {
+            return Applied::default();
+        };
+        if !entry.state.get("turns").is_some_and(Value::is_array) {
+            entry.state["turns"] = Value::Array(Vec::new());
+        }
+        let Some(turns) = entry.state["turns"].as_array_mut() else {
+            return Applied::default();
+        };
+        if turns.iter().any(|t| t["id"] == id) {
+            return Applied::default();
+        }
+        turns.push(turn.clone());
+        entry.accepted_turn = Some(id.to_owned());
+        let mut changes = Vec::new();
+        if let Some(session) = entry.state.get_mut("session")
+            && session["status"]["type"] == "idle"
+        {
+            let patch = vec![
+                serde_json::json!({"op":"add", "path":"/status/activeTurnId", "value":id}),
+                serde_json::json!({"op":"replace", "path":"/status/type", "value":"running"}),
+            ];
+            if crate::patch::apply_patch(session, &patch).is_ok() {
+                changes.push(Change::SessionPatched {
+                    session_id: session_id.to_owned(),
+                    patch,
+                });
+            }
+        }
+        changes.push(Change::TurnUpserted {
+            session_id: session_id.to_owned(),
+            turn: turn.clone(),
+        });
+        self.emit_all(changes)
+    }
+
     pub(crate) fn load(&mut self, state: Value, kind: LoadKind) -> Result<Applied, LoadError> {
         let sid = session_id_of(&state)
             .ok_or(LoadError::MissingSessionId)?
@@ -268,3 +325,7 @@ impl Inner {
         (replay, interrupted)
     }
 }
+
+#[cfg(test)]
+#[path = "lifecycle_tests.rs"]
+mod tests;

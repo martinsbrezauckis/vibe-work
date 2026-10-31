@@ -24,8 +24,8 @@
 //! bounded preview says what it left out: `more` (lines), `cutChars` (characters of cut lines) and a line's own `cut`,
 //! so the card can mark it and offer the whole requested change.
 //!
-//! Depends on: `similar` (line diff with a deadline), `files_scope`, `names` (the session's folder), the gate (picked
-//! folders), `title_guard`. Called by: `pump` (the callback request and events), `sessions` and `subscription`
+//! Depends on: `similar` (line diff with a deadline), `files_scope`, `vw_platform::final_path` (the opened file's own
+//! path), `names` (the session's folder), the gate (picked folders), `title_guard`. Called by: `pump` (the callback request and events), `sessions` and `subscription`
 //! (snapshots), tests ([`preview`]).
 
 use std::collections::VecDeque;
@@ -243,15 +243,21 @@ fn open(path: &Path) -> std::io::Result<std::fs::File> {
     std::fs::File::open(path)
 }
 
-/// True when the open `file` is the one now at `path` (Unix: same device and inode, `path` not followed).
+/// True when the open `file` is the file now at the checked canonical `path`: the handle's own final path is `path`
+/// (a folder on the path swapped for a link or junction after the check leaves the handle on another file, and its
+/// final path differs; every error refuses), and on Unix also the same device and inode, `path` not followed.
+fn same_file(file: &std::fs::File, meta: &std::fs::Metadata, path: &Path) -> bool {
+    vw_platform::final_path::final_path(file).is_ok_and(|at| at == path) && same_inode(meta, path)
+}
+
 #[cfg(unix)]
-fn same_file(file: &std::fs::Metadata, path: &Path) -> bool {
+fn same_inode(file: &std::fs::Metadata, path: &Path) -> bool {
     use std::os::unix::fs::MetadataExt;
     std::fs::symlink_metadata(path).is_ok_and(|at| at.dev() == file.dev() && at.ino() == file.ino())
 }
 
 #[cfg(not(unix))]
-fn same_file(_file: &std::fs::Metadata, _path: &Path) -> bool {
+fn same_inode(_file: &std::fs::Metadata, _path: &Path) -> bool {
     true
 }
 
@@ -262,7 +268,7 @@ fn read_text(path: &Path) -> Option<String> {
     use std::io::Read;
     let file = open(path).ok()?;
     let meta = file.metadata().ok()?;
-    if !meta.is_file() || meta.len() > MAX_FILE || !same_file(&meta, path) {
+    if !meta.is_file() || meta.len() > MAX_FILE || !same_file(&file, &meta, path) {
         return None;
     }
     let mut bytes = Vec::new();

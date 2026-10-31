@@ -9,6 +9,7 @@
  * action set (`app.composer.debugApi`, origin bound at creation) and everything it writes is marked as
  * Debug API content, so nothing it leaves behind runs later with the window's origin.
  */
+import { openChromeTabs, pickChromeTab } from "./chromeTabs";
 import { NEW_CHAT } from "../../state/newChatKey";
 import { pasteIntoDraft } from "../../state/composerPaste";
 import { lineCount, pastesIn } from "./model/pastes";
@@ -130,6 +131,10 @@ export async function handleComposer(app: App, body: unknown): Promise<unknown> 
       })),
       sending: s.sending[sessionId] === true,
       compacting: s.compacting[sessionId] === true,
+      chromePicker: s.chromePicker?.sessionId === sessionId ? s.chromePicker : null,
+      chromeState:
+        app.core?.store.get().chromeControl?.work.find((row) => row.sessionId === sessionId)
+          ?.state ?? null,
       note: s.notes[sessionId] ?? null,
       running: runningTurnId(state, session),
       queue: queuedTurns(state),
@@ -152,6 +157,24 @@ export async function handleComposer(app: App, body: unknown): Promise<unknown> 
     switch (action) {
       case "read":
         await actions.prepareSession(sessionId);
+        return read(sessionId);
+      case "chromeTabs":
+        await openChromeTabs(app, sessionId, "debug-api");
+        return read(sessionId);
+      case "chromeTab": {
+        const tabId = input["tabId"];
+        if (typeof tabId !== "number" || !Number.isSafeInteger(tabId) || tabId < 0)
+          throw new UiControlError("invalidParams", "tabId must be a tab identity");
+        await pickChromeTab(
+          app,
+          sessionId,
+          { profileId: text(input["profileId"], "profileId"), tabId },
+          "debug-api",
+        );
+        return read(sessionId);
+      }
+      case "chromeTabsClose":
+        app.composer.setChromePicker(null);
         return read(sessionId);
       case "type":
         app.composer.setDraftFromDebugApi(sessionId, text(input["text"], "text", true));

@@ -40,6 +40,8 @@ export interface ToolsProps {
   onFiles: (files: File[]) => void;
   /** The microphone button; absent: none. */
   mic?: ReactNode;
+  /** The open-tab context picker. */
+  chromeTab?: ReactNode;
   onSend: () => void;
   /** Voice chat: the slot's face while the box is empty; absent: the slot stays empty. */
   voiceChat?: ReactNode;
@@ -140,6 +142,7 @@ export function ComposerTools(p: ToolsProps): ReactElement {
           if (files.length > 0) p.onFiles(files);
         }}
       />
+      {p.chromeTab ?? null}
       <AccessMenu
         {...(p.defaultAccessLabel === undefined ? {} : { defaultLabel: p.defaultAccessLabel })}
         modes={p.modes}

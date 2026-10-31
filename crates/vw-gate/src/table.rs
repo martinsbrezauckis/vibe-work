@@ -155,6 +155,10 @@ macro_rules! deny {
 /// justifies forwarding it anyway. A test fails if this list and the report disagree.
 pub const FORWARDED_WITHOUT_UNIFIED_EVIDENCE: &[(&str, &str)] = &[
     (
+        "session/lease/subscribe",
+        "real unified-server regression vw_se1_holder covers foreign ownership, refusal before resume, release and our own server; the older bench predates this use",
+    ),
+    (
         "session/rewind",
         "the bench's rewind runs: rewind in place and as a fork works on the unified harness when turn/start carries clientUserMessageId; the final report only has the earlier legacy-harness run",
     ),
@@ -170,6 +174,22 @@ pub const FORWARDED_WITHOUT_UNIFIED_EVIDENCE: &[(&str, &str)] = &[
 
 static TABLE: &[Row] = &[
     deny!("initialize", InternalOnly),
+    // These upstream features have no Vibe Work command surface; OIDC exposes credentials.
+    deny!("projects/create", NoEvidence),
+    deny!("projects/list", NoEvidence),
+    deny!("projects/remove", NoEvidence),
+    deny!("projects/rename", NoEvidence),
+    deny!("skills/local/delete", NoUserInterface),
+    deny!("skills/local/list", NoEvidence),
+    deny!("skills/local/read", NoEvidence),
+    deny!("skills/local/setEnabled", NoUserInterface),
+    deny!("skills/local/write", NoUserInterface),
+    deny!("setup/oidc-cancel", Credential),
+    deny!("setup/oidc-clear", Credential),
+    deny!("setup/oidc-headers", Credential),
+    deny!("setup/oidc-poll", Credential),
+    deny!("setup/oidc-probe", Credential),
+    deny!("setup/oidc-start", Credential),
     deny!("imports/discover", NoUserInterface),
     deny!("imports/start", NoUserInterface),
     deny!("imports/read", NoUserInterface),
@@ -280,10 +300,8 @@ static TABLE: &[Row] = &[
     fwd!("session/fork", SessionFork),
     fwd!("session/history/clear", SessionHistoryClear),
     fwd!("session/history/list", SessionHistoryList),
-    // New in Vibe 2.26.1: streams which client holds each session's lease
-    // (`session/lease/updated|ended` notifications, `app_server/_session_lease_subscription.py`). Read-only, never
-    // exercised by the bench, unused by Vibe Work: denied until a scenario covers it (same rule as above).
-    deny!("session/lease/subscribe", NoEvidence),
+    // Fresh native lease snapshot; never resumes or takes ownership of a session.
+    fwd!("session/lease/subscribe", SessionLeaseSubscribe),
     fwd!("session/list", SessionList),
     fwd!("session/log/read", SessionLogRead),
     fwd!("session/markAsSeen", SessionMarkAsSeen),
@@ -393,6 +411,17 @@ pub fn forwarded_without_unified_evidence() -> &'static [(&'static str, &'static
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_generated_request_is_classified_once() {
+        for method in vw_protocol::REQUEST_METHODS {
+            assert_eq!(
+                TABLE.iter().filter(|row| row.method == *method).count(),
+                1,
+                "{method}"
+            );
+        }
+    }
 
     #[test]
     fn plugin_reload_can_only_run_inside_the_core_refresh() {

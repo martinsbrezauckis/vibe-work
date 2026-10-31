@@ -56,7 +56,11 @@ impl Core {
         by_path
             .into_iter()
             .filter(|(path, _)| path.is_absolute() && path.is_dir())
-            .map(|(path, session_id)| Folder { path, session_id })
+            .filter_map(|(path, session_id)| {
+                vw_platform::canonical_plain(&path)
+                    .ok()
+                    .map(|path| Folder { path, session_id })
+            })
             .collect()
     }
 
@@ -132,7 +136,7 @@ impl Core {
                             .flatten()
                         {
                             folders.push(Folder {
-                                path,
+                                path: vw_platform::canonical_plain(&path).unwrap_or(path),
                                 session_id: None,
                             });
                         } else {

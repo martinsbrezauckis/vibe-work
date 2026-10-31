@@ -2,48 +2,52 @@
 
 All notable changes to Vibe Work. Versions follow [Semantic Versioning](https://semver.org/); dates are UTC.
 
+## 0.1.4 (2026-10-31)
+
+Built for Vibe 3.0.4 on Python 3.14.8. This release adds Your Chrome, a search tool for the agent and a current web engine on Linux.
+
+- Your Chrome: when you ask for it, the agent works in your own Chrome, where you are already signed in, through the
+  Vibe Work extension (Settings > Browser > Your Chrome > Set up). Each chat gets its own Chrome window and can use
+  your open tabs; its access mode decides what the agent may do, a window one chat is working in stays its own, and
+  Stop ends Chrome for the rest of that turn. Vault logins you allowed for a site sign in there too, without the
+  agent seeing the password. The Vibe Work extension is in review at the Chrome Web Store: until Google publishes it,
+  Your Chrome says it is waiting for that review, and the extension can be added once it is published.
+- Local-network pages are off for the agent in Chrome; Settings > Developer > Local network pages for the agent in
+  Chrome turns them on.
+- The agent can search text and file names in the chat's folders, respecting ignored files.
+- Recall earlier prompts with Up and Down in an empty message box, shared with the Vibe CLI.
+- When the agent starts a Git repository or commits and Git has no name and email for you, Vibe Work asks you once
+  and saves them in Git's settings (a value you already have is kept).
+- The Processes dialog lists servers you start in a chat's Terminal tab, with their ports and Stop.
+- While Vibe retries a model request, the chat shows the attempt and the reason.
+- Changes names each subagent that edited a file.
+- Linux: the .deb and the AppImage bring their own, current web engine instead of the system's, which Ubuntu no longer
+  updates. Supported: Ubuntu 24.04 and 26.04, Debian 13; Debian 12 is not supported.
+- Large 4 summarises a long chat later, at 800,000 tokens instead of 256,000; a compaction point you set yourself
+  is kept.
+- Works with Mistral Vibe 3.0.4.
+- Many smaller fixes.
+
 ## 0.1.3 (2026-10-30)
 
 Built for Vibe 3.0.3 on Python 3.14.8. This release adds @-mentions, edit previews with line numbers and connectors that need no sign-in.
 
 - @-mentions: type @ in the message box to mention a file or another session in the same folder. Files are found by
   fuzzy name match; a session adds a chip with its title, first message and last answer.
-- Edit previews: edit and write cards show the change with old and new line numbers and its +/− counts, as the file
-  was when the card opened. A shortened preview says what it left out; Show the whole change shows all of it.
-  Previews cover files inside the chat's folders.
-- Large 4 offers Low, Medium and High thinking, and each runs as picked.
+- Edit previews: edit and write cards show the change with old and new line numbers and its +/− counts. Show the
+  whole change shows all of it.
 - When your default model is no longer offered, Vibe Work asks at launch: choose one of the models Vibe offers, or
   Later.
 - Settings > Models and agent > Compaction point: choose for each model when a chat's history is compacted, or keep
   Default.
 - Tools > Connectors: a connector that needs no sign-in shows Connect. One click connects it, and the next message
   can use its tools.
-- Tools > Skills shows when each skill you added last changed. The built-in help skill is named Vibe Work help.
+- Tools > Skills shows when each skill you added last changed.
 - Vibe's configuration problems appear in the bell, one line each, with the file or folder first where there is one.
-  Each stays until you dismiss it; a dismissed one does not come back.
-- GLM 5.3 Flash shows its 1M-token context.
-- App preview: pages you signed in to before the first message stay signed in after you send it.
 - Saying No in one of Vibe Work’s own prompts (Git guard, processes, vault, documents, protected folders, cards for
-  Vibe Work’s tools) answers only that call and the turn goes on; the agent is told not to do it another way and to
-  wait for your reply. A No on a card for Vibe’s own tools (commands, file edits) still stops the turn and the
-  subagents it started.
-- macOS: Quit always finishes, also right after a reply.
-- Chat titles no longer show a vault value once the vault has been unlocked in this run: the matching part reads
-  [secret withheld] in the list, the header, the bell and the Debug API.
-- Point Vibe at this: an element picked in the App preview is marked as the page's words, and the chip names the
-  address the preview loaded, or none when the page changed during the pick.
-- Attached documents: the text read from them counts toward the 200 MB limit, and a PowerPoint deck that lists the
-  same slide twice is refused.
-- In a chat started in a subfolder, files are named from that subfolder and links in Vibe's replies open the file
-  there first. Files elsewhere in the project show their full path.
-- A chat waiting on one of Vibe Work's own prompts (Git guard, vault, document card) shows Needs input and is listed
-  under Needs you.
-- Secret-scan entries leave the bell once their finding is gone, for example after the chat is deleted.
-- Continues in CLI appears only on the chat that `vibe --continue` in a terminal resumes.
-- Action cards without a summary name the action, such as Read an open editor, and show no empty input.
-- Settings > Notifications and the New chat copy section show no explaining lines.
-- Layout at 900 px: the chat title stays readable with the chat list open, header tabs show only their icons when
-  the chat area is narrow, and vault names show in full.
+  Vibe Work’s tools) answers only that call and the turn goes on. A No on a card for Vibe’s own tools (commands,
+  file edits) still stops the turn.
+- Many smaller fixes.
 
 ## 0.1.2 (2026-10-29)
 
@@ -104,8 +108,8 @@ Built for Vibe 3.0.3 on Python 3.14.8. This release adds files and history, edit
 - Secret command status remembers already reported outcomes. Permission decisions stay in Settings history.
 - Identical pending Git commands share one permission sheet.
 - Access-mode changes stay responsive while Vibe refreshes its configuration.
-- Loops stay with the chat that created them when you use /new. The strip explains that /new pauses that chat's
-  loops until it is reopened. Deleting a loop updates that chat's loop label and leaves other chats' loops alone.
+- Loops stay with the chat that created them when you use /new; that chat's loops pause until it is reopened.
+  Deleting a loop updates that chat's loop label and leaves other chats' loops alone.
 - Provider errors offer a plain explanation and details with stored secrets removed.
 - Secret commands on Windows use the agent shell’s tool folders.
 - Thinking Off turns off the reasoning response on supported Mistral models. The picker offers the levels the

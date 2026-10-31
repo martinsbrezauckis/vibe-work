@@ -69,7 +69,8 @@ pub fn ctx(id: &str, folder: &Path) -> SessionContext {
 /// A test port: `offset` (1..=999) inside this test process's own block of 1000 ports. Each test binary
 /// claims a free block from 20000-31999 (outside every default ephemeral range) by holding a listener on
 /// the block's first port for its whole lifetime, so parallel worktrees never share ports (saw a
-/// `port_free` collision with the old fixed 28100-28999). `VW_TEST_PORT_BASE` overrides the base.
+/// `port_free` collision with the old fixed 28100-28999); with all 12 taken it waits for one. `VW_TEST_PORT_BASE`
+/// overrides the base.
 pub fn port(offset: u16) -> u16 {
     assert!((1..=999).contains(&offset), "test port offsets are 1..=999");
     port_base() + offset
@@ -89,14 +90,23 @@ fn port_base() -> u16 {
                 .duration_since(std::time::UNIX_EPOCH)
                 .map_or(0, |d| d.subsec_nanos())
                 ^ std::process::id();
-            for step in 0..12u32 {
-                let block = u16::try_from(seed.wrapping_add(step) % 12).unwrap();
-                let base = 20_000 + block * 1000;
-                if let Ok(claim) = TcpListener::bind((Ipv4Addr::LOCALHOST, base)) {
-                    return (base, Some(claim));
+            // There are 12 blocks: when more test binaries run at once, this one waits for a block to come free
+            // (a binary ends and drops its claim) instead of failing all its tests.
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(600);
+            loop {
+                for step in 0..12u32 {
+                    let block = u16::try_from(seed.wrapping_add(step) % 12).unwrap();
+                    let base = 20_000 + block * 1000;
+                    if let Ok(claim) = TcpListener::bind((Ipv4Addr::LOCALHOST, base)) {
+                        return (base, Some(claim));
+                    }
                 }
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "no free test port block in 20000-31999 for 10 minutes"
+                );
+                std::thread::sleep(std::time::Duration::from_millis(200));
             }
-            panic!("no free test port block in 20000-31999");
         })
         .0
 }

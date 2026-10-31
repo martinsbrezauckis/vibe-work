@@ -18,6 +18,7 @@ import { useStore } from "../../state/createStore";
 import { useApp } from "../shell/AppContext";
 import type { Git } from "../../state/git";
 import { baseStat, barShown, branchOf, commitBlocked, prBlocked, pushBlocked } from "./model";
+import { useSessionWorking } from "./useSessionWorking";
 import { PrCard } from "./PrCard";
 
 /** The bar for `sessionId`. */
@@ -29,6 +30,7 @@ export function BranchBar({
   sessionId: string;
 }): ReactElement | null {
   const { sessions, worktrees } = useApp();
+  const working = useSessionWorking(sessionId);
   const status = useStore(git.store, (s) => s.status[sessionId]);
   const busy = useStore(git.store, (s) => s.busy[sessionId] === true);
   const notice = useStore(git.store, (s) => s.notice[sessionId] ?? null);
@@ -40,7 +42,7 @@ export function BranchBar({
   const base = state?.base ?? null;
   const stat = baseStat(status);
   const files = status.uncommitted ?? 0;
-  const commitWhy = commitBlocked(status);
+  const commitWhy = commitBlocked(status, working);
   const pushWhy = pushBlocked(status);
   const prWhy = prBlocked(status);
   const copy = status.location === "copy" && status.repo === ".";

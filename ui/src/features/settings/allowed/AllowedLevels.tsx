@@ -11,9 +11,9 @@ import type { ReactElement } from "react";
 import { LinkButton, SettingsRow } from "../../../components/Controls";
 import { useApp } from "../../shell/AppContext";
 import { useVibeSettings } from "../vibeSettingRows";
-import { askFirstLine, chromeAvailable, safetyLine } from "../chrome/chromeRows";
+import { chromeAvailable, safetyLine } from "../chrome/chromeRows";
 import { useChromeControl } from "../chrome/useChromeControl";
-import { accessValue, closeTabsValue, levelRows, openLevel, useBrowserPermissions } from "./levels";
+import { accessValue, levelRows, openLevel } from "./levels";
 import { openAllowed } from "./open";
 import { useAllowed } from "./useAllowed";
 
@@ -21,7 +21,6 @@ import { useAllowed } from "./useAllowed";
 export function AllowedLevels(): ReactElement | null {
   const app = useApp();
   const vibe = useVibeSettings();
-  const browser = useBrowserPermissions();
   const chrome = useChromeControl();
   const { summary } = useAllowed();
   if (app.core === null) return null;
@@ -34,13 +33,7 @@ export function AllowedLevels(): ReactElement | null {
   return (
     <section aria-labelledby="allowed-levels-title" className="allow-levels">
       <h3 id="allowed-levels-title">How much Vibe may do without asking</h3>
-      {levelRows(
-        access,
-        closeTabsValue(browser.permissions, browser.error),
-        safetyLine(chrome.view),
-        askFirstLine(chrome.view),
-        chromeAvailable(chrome.view),
-      ).map((row) => (
+      {levelRows(access, safetyLine(chrome.view), chromeAvailable(chrome.view)).map((row) => (
         <SettingsRow key={row.id} data-level={row.id}>
           <span>
             {row.label}

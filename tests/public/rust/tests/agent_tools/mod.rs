@@ -282,6 +282,8 @@ pub async fn call(who: &(String, String), tool: &str, args: Value) -> Result<Val
 }
 
 /// Completes hook policy before a test controls the tool's own wire connection.
+/// Subscribes before the request and waits for an actual registered ask, answering each card once.
+/// History can expose a card before its ask exists and can still report it open after an answer.
 pub async fn prepare_call(
     who: &(String, String),
     tool: &str,
@@ -298,19 +300,24 @@ pub async fn prepare_call(
         );
         let payload = json!({"session_id":session,"tool_call_id":call,"tool_name":format!("mcp_vw.{tool}"),"tool_input":args});
         let endpoint = who.0.clone();
+        let mut events = core.subscribe(Some(session.clone()));
+        let mut answered = std::collections::HashSet::new();
         let mut pending = tokio::task::spawn_blocking(move || {
             wire::call(&endpoint, &hook, wire::tools::TOOL_RECEIPT, payload, None)
         });
         args = loop {
             tokio::select! {
                 result = &mut pending => break result.unwrap()?,
-                () = tokio::time::sleep(Duration::from_millis(10)) => {
+                event = events.next() => {
+                    if event.is_none() { break pending.await.unwrap()?; }
                     let state = core.execute(Origin::Ui, Command::ReadSession { session_id:session.clone() }).await;
                     if let Ok(CommandResult::Session { snapshot, .. }) = state {
                         for entry in snapshot.state["history"].as_array().into_iter().flatten() {
                             if entry["vwSourceCallId"] == call && entry["state"]["status"] == "open" {
                                 let id = format!("callback:{}", entry["id"].as_str().unwrap());
-                                core.answer_ask(&id, serde_json::from_value(json!({"answer":"once","note":null})).unwrap()).await.unwrap();
+                                if core.asks().iter().any(|ask| ask.id == id) && answered.insert(id.clone()) {
+                                    core.answer_ask(&id, serde_json::from_value(json!({"answer":"once","note":null})).unwrap()).await.unwrap();
+                                }
                             }
                         }
                     }

@@ -115,7 +115,13 @@ pub enum Guard {
     Connector,
     /// Binds an MCP call to the Vibe source and call ID, using the private hook credential.
     Receipt,
+    /// After a command ran (`post_tool`): when the person allowed it in the kill or git guard's dialog, its result
+    /// says so ([`ALLOWED_NOTE`]), so the agent knows a guard held it and the person let it run.
+    Allowed,
 }
+
+/// The line added to the result of a command the person allowed in a guard's dialog: a fact, nothing to do.
+pub const ALLOWED_NOTE: &str = "The user allowed this command.";
 
 impl Guard {
     /// Every guard, in the order the hook block lists them (the first refusal wins in Vibe).
@@ -128,6 +134,18 @@ impl Guard {
         Self::Receipt,
     ];
 
+    /// The guards that run after a tool call (`post_tool`), listed after [`Self::ALL`] in the hook block.
+    pub const AFTER: [Self; 1] = [Self::Allowed];
+
+    /// Vibe's hook type for this guard's entry.
+    #[must_use]
+    pub const fn event(self) -> &'static str {
+        match self {
+            Self::Allowed => "post_tool",
+            _ => "pre_tool",
+        }
+    }
+
     /// The name on the command line (`vw-agent-tools guard <arg>`).
     #[must_use]
     pub const fn arg(self) -> &'static str {
@@ -138,13 +156,17 @@ impl Guard {
             Self::Folder => "folder",
             Self::Connector => "connector",
             Self::Receipt => "receipt",
+            Self::Allowed => "allowed",
         }
     }
 
     /// The guard for a command-line name.
     #[must_use]
     pub fn from_arg(arg: &str) -> Option<Self> {
-        Self::ALL.into_iter().find(|g| g.arg() == arg)
+        Self::ALL
+            .into_iter()
+            .chain(Self::AFTER)
+            .find(|g| g.arg() == arg)
     }
 
     /// The hook's name in `hooks.toml`: what Vibe shows next to a refusal ("vibe-work git guard: Denied tool 'bash'").
@@ -157,6 +179,7 @@ impl Guard {
             Self::Folder => "vibe-work folder guard",
             Self::Connector => "vibe-work connector guard",
             Self::Receipt => "vibe-work tool receipt",
+            Self::Allowed => "vibe-work allowed note",
         }
     }
 
@@ -178,6 +201,11 @@ impl Guard {
             Self::Safety | Self::Process | Self::Git | Self::Folder => "*",
             Self::Connector => "re:connector_.+|mcp_.+",
             Self::Receipt => "mcp_vw.*",
+            // Only the command routes a guard holds (the shells, the sandbox's background processes): a note is not a
+            // guard, so it need not run after every tool.
+            Self::Allowed => {
+                "re:(.+\\.)?(bash|experimental_bash|powershell|powershell_stdin)|process\\.(start|write)"
+            }
         }
     }
 
@@ -186,6 +214,7 @@ impl Guard {
     pub const fn timeout_secs(self) -> f64 {
         match self {
             Self::Process | Self::Git | Self::Receipt => f64::INFINITY,
+            Self::Allowed => 10.0,
             _ => 25.0,
         }
     }
@@ -201,6 +230,7 @@ impl Guard {
             Self::Connector => decide_connector(payload, endpoint_file),
             // The core records its own outcomes (a Never in the bell, the user's No only in the session).
             Self::Receipt => return crate::receipt_hook::decide(payload, endpoint_file),
+            Self::Allowed => return decide_allowed(payload, endpoint_file),
         };
         answer.map(|answer| report_refusal(self, payload, endpoint_file, answer))
     }
@@ -229,6 +259,30 @@ pub fn decide(payload: &str, endpoint_file: &Path) -> Option<String> {
         }
     }
     rewritten
+}
+
+/// After a shell call: `{"hook_specific_output": {"additional_context": ALLOWED_NOTE}}` when the core says the person
+/// allowed this call in a guard's dialog; nothing otherwise (also on any error: the result stays as it is).
+fn decide_allowed(payload: &str, endpoint_file: &Path) -> Option<String> {
+    let payload = serde_json::from_str::<Value>(payload).ok()?;
+    let call_id = payload
+        .get("tool_call_id")
+        .and_then(Value::as_str)
+        .filter(|id| !id.is_empty())?;
+    let file = read_endpoint(endpoint_file).ok()?;
+    let answer = wire::call(
+        &file.endpoint,
+        &file.credential,
+        tools::USER_ALLOWED,
+        json!({
+            "sessionId": payload.get("session_id").and_then(Value::as_str).unwrap_or(""),
+            "toolCallId": call_id,
+        }),
+        Some(std::time::Duration::from_secs(5)),
+    )
+    .ok()?;
+    (answer.get("allowed").and_then(Value::as_bool) == Some(true))
+        .then(|| json!({"hook_specific_output": {"additional_context": ALLOWED_NOTE}}).to_string())
 }
 
 /// The folder guard's half: Vibe's file tools and bash paths inside another session's copy.
@@ -436,6 +490,9 @@ fn decide_git(payload: &str, endpoint_file: &Path) -> Option<String> {
     {
         return Some(deny(gitparse::CREDENTIAL_REASON));
     }
+    if found.identity_set() {
+        return Some(deny(gitparse::IDENTITY_REASON));
+    }
     let args = json!({
         "sessionId": payload.get("session_id").and_then(Value::as_str).unwrap_or(""),
         "parentSessionId": payload.get("parent_session_id").and_then(Value::as_str),
@@ -568,7 +625,7 @@ fn report_refusal(guard: Guard, payload: &str, endpoint_file: &Path, answer: Str
         Guard::Connector | Guard::Safety => "safetyRule",
         Guard::Folder => "folder",
         Guard::Process => "process",
-        Guard::Receipt => return answer,
+        Guard::Receipt | Guard::Allowed => return answer,
     };
     let result = read_endpoint(endpoint_file).and_then(|file| wire::call(
         &file.endpoint, &file.credential, tools::GUARD_REFUSED,

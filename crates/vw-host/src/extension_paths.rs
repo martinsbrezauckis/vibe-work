@@ -1,6 +1,8 @@
 //! Keeps only absolute folders in the extension path settings of the app-owned config before launch: Vibe Work
 //! passes Vibe every extension folder as an absolute path. Depends on TOML and std; called by launch. Only
 //! relative string entries and their commas change; errors warn and never stop launch.
+//! Vibe 3.0.4 removes `tool_paths` during migration; that half remains for older selected runtimes.
+//! `agent_paths` still needs this check.
 
 use std::io::{self, Write};
 use std::ops::Range;

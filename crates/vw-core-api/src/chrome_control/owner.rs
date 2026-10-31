@@ -12,14 +12,48 @@ use crate::core::Shared;
 
 use super::{mapping, setup};
 
-pub(super) const TOOLS: [&str; 3] = ["chrome_status", "chrome_task", "chrome_execute"];
+pub(super) const TOOLS: [&str; 3] = ["chrome_status", "chrome_session", "chrome_execute"];
 const UNKNOWN: &str =
     "Outcome unknown: Chrome Control's connection ended. Check Chrome before trying again.";
 
 struct Call {
     name: String,
     args: Value,
-    reply: oneshot::Sender<Value>,
+    reply: oneshot::Sender<Answer>,
+}
+
+/// An owner answer and who wrote it. The helper's answers can carry page-derived text (titles, URLs, page text and
+/// errors, console lines, dialog text, download names), so they reach the model inside the untrusted-content envelope
+/// (`content::for_model`). The core's own failures (not running, busy, restarting, connection lost) hold only Vibe
+/// Work's fixed words and reach the model as the tool's own error, outside it.
+pub(super) enum Answer {
+    Helper(Value),
+    Own(Value),
+}
+
+impl Answer {
+    pub(super) fn value(&self) -> &Value {
+        match self {
+            Self::Helper(value) | Self::Own(value) => value,
+        }
+    }
+
+    pub(super) fn value_mut(&mut self) -> &mut Value {
+        match self {
+            Self::Helper(value) | Self::Own(value) => value,
+        }
+    }
+
+    pub(super) fn into_value(self) -> Value {
+        match self {
+            Self::Helper(value) | Self::Own(value) => value,
+        }
+    }
+}
+
+/// The core's own failure as an answer (never wrapped as page content).
+pub(super) fn own(text: &str, code: &str) -> Answer {
+    Answer::Own(failure(text, code))
 }
 
 struct Running {
@@ -36,6 +70,58 @@ pub(super) struct Owner {
 }
 
 impl Owner {
+    pub(super) fn control(&self, args: Value) {
+        let send = self
+            .running
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .as_ref()
+            .map(|run| run.send.clone());
+        if let Some(send) = send {
+            let (reply, _answer) = oneshot::channel();
+            let call = Call {
+                name: "chrome_session".into(),
+                args,
+                reply,
+            };
+            if let Err(tokio::sync::mpsc::error::TrySendError::Full(call)) = send.try_send(call) {
+                tokio::spawn(async move {
+                    let _ = send.send(call).await;
+                });
+            }
+        }
+    }
+
+    /// Tests: the owner as if running, answering each call with `answer(name, args)`; returns every call it saw.
+    #[cfg(test)]
+    pub(super) fn answering(
+        &self,
+        answer: impl Fn(&str, &Value) -> Value + Send + 'static,
+    ) -> std::sync::Arc<Mutex<Vec<(String, Value)>>> {
+        let seen = std::sync::Arc::new(Mutex::new(Vec::new()));
+        let (send, mut calls) = mpsc::channel::<Call>(16);
+        let (stop, mut stopped) = watch::channel(false);
+        let log = seen.clone();
+        // Ends on `stop()` like the real owner task (which holds the sender, so the channel never closes first).
+        let task = tokio::spawn(async move {
+            loop {
+                let call = tokio::select! {
+                    call = calls.recv() => call,
+                    _ = stopped.changed() => None,
+                };
+                let Some(call) = call else { break };
+                let value = answer(&call.name, &call.args);
+                log.lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .push((call.name, call.args));
+                let _ = call.reply.send(Answer::Helper(value));
+            }
+        });
+        *self.running.lock().unwrap_or_else(PoisonError::into_inner) =
+            Some(Running { send, stop, task });
+        seen
+    }
+
     pub(super) async fn stop(&self) {
         let running = self
             .running
@@ -49,6 +135,14 @@ impl Owner {
         self.clear_connection();
     }
 
+    /// Whether the owner task runs (a helper connection may still be coming).
+    pub(super) fn is_running(&self) -> bool {
+        self.running
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .is_some()
+    }
+
     fn clear_connection(&self) {
         self.tools
             .lock()
@@ -58,7 +152,7 @@ impl Owner {
             ("Chrome Control is not connected".to_owned(), None);
     }
 
-    pub(super) async fn call(&self, name: &str, args: Value) -> Value {
+    pub(super) async fn call(&self, name: &str, args: Value) -> Answer {
         let send = self
             .running
             .lock()
@@ -66,7 +160,7 @@ impl Owner {
             .as_ref()
             .map(|run| run.send.clone());
         let Some(send) = send else {
-            return failure("Not run: Chrome Control is not running.", "OWNER_REQUIRED");
+            return own("Not run: Chrome Control is not running.", "OWNER_REQUIRED");
         };
         let (reply, answer) = oneshot::channel();
         if send
@@ -78,11 +172,11 @@ impl Owner {
             .await
             .is_err()
         {
-            return failure(UNKNOWN, "TRANSPORT_LOST");
+            return own(UNKNOWN, "TRANSPORT_LOST");
         }
         answer
             .await
-            .unwrap_or_else(|_| failure(UNKNOWN, "TRANSPORT_LOST"))
+            .unwrap_or_else(|_| own(UNKNOWN, "TRANSPORT_LOST"))
     }
 }
 
@@ -129,6 +223,9 @@ pub(super) fn state_dir(config: &setup::ChromeControlConfig) -> Option<PathBuf> 
 
 pub(crate) async fn start(shared: &Arc<Shared>) -> Result<(), String> {
     let chrome = &shared.chrome_control;
+    if !chrome.enabled() {
+        return Ok(());
+    }
     let Some(dir) = chrome.dir() else {
         return Ok(());
     };
@@ -151,14 +248,6 @@ pub(crate) async fn start(shared: &Arc<Shared>) -> Result<(), String> {
         .keys
         .as_ref()
         .ok_or("Chrome Control needs the OS credential store.")?;
-    let restrictions = keys
-        .chrome_restrictions()
-        .await
-        .map_err(|_| "Could not read Chrome Control's saved permissions.")?;
-    *chrome
-        .lowered
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner) = restrictions;
     let secret = keys
         .chrome_owner()
         .await
@@ -188,93 +277,31 @@ pub(crate) async fn start(shared: &Arc<Shared>) -> Result<(), String> {
     Ok(())
 }
 
-fn policy(shared: &Shared) -> Value {
-    let mut value = mapping::policy(
-        shared.chrome_control.settings(),
-        crate::browser_delegation::load(shared).close_user_tabs,
-    );
-    for (cap, lower) in shared
-        .chrome_control
-        .lowered
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .iter()
-    {
-        value["policy"][cap] = json!(lower);
-    }
-    value
-}
-
-pub(super) fn publish(shared: &Arc<Shared>) {
-    let core = crate::Core {
-        shared: shared.clone(),
-    };
+pub(super) fn publish(shared: &Shared) {
     shared.emit(crate::CoreEvent::ChromeControl {
-        view: core.chrome_view(),
+        view: super::commands::view(shared),
     });
 }
 
-pub(super) async fn observe(shared: &Weak<Shared>, message: &Value) -> Result<(), ()> {
+pub(super) fn observe(shared: &Weak<Shared>, message: &Value) -> Result<(), ()> {
     let Some(shared) = shared.upgrade() else {
         return Err(());
     };
-    let chrome = &shared.chrome_control;
-    if message["method"] == "notifications/owner/pairing" {
-        if let Some(result) = pairing_result(&message["params"]) {
-            update_pairing(&Arc::downgrade(&shared), &result);
+    if message["method"] == "notifications/client/selection" {
+        let changed = shared
+            .chrome_control
+            .selections
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .receive(&message["params"], |id| shared.store.view(id).is_some());
+        if changed {
+            publish(&shared);
         }
-        return Ok(());
     }
-    if message["method"] == "notifications/owner/policy_lowered" {
-        let _held = chrome.lifecycle.lock().await;
-        let params = &message["params"];
-        let current = mapping::policy(
-            chrome.settings(),
-            crate::browser_delegation::load(&shared).close_user_tabs,
-        );
-        let saved = {
-            let mut lower = chrome
-                .lowered
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner);
-            if let Some(rows) = params["policy"].as_object() {
-                for (cap, value) in rows {
-                    let rank = |v: &str| match v {
-                        "allow" => 2,
-                        "ask" => 1,
-                        _ => 0,
-                    };
-                    if let Some(value) = value
-                        .as_str()
-                        .filter(|v| matches!(*v, "allow" | "ask" | "never"))
-                    {
-                        let before = lower.get(cap).map_or_else(
-                            || current["policy"][cap].as_str().unwrap_or("never"),
-                            String::as_str,
-                        );
-                        if rank(value) < rank(before) {
-                            lower.insert(cap.clone(), value.to_owned());
-                        }
-                    }
-                }
-            }
-            lower.clone()
-        };
-        if let Some(keys) = &shared.config.keys {
-            keys.save_chrome_restrictions(saved).await.map_err(|_| ())?;
-        }
-        // A lowered level is also effective immediately. This never restores a saved raise.
-        if let Ok(level) = serde_json::from_value(params["level"].clone()) {
-            let mut state = chrome.current();
-            if level < state.effective.level {
-                state.effective.level = level;
-                state.restore = None;
-                if let Some(dir) = chrome.dir() {
-                    let _ = super::store::save(dir, state.effective);
-                }
-            }
-        }
-        publish(&shared);
+    if message["method"] == "notifications/owner/pairing"
+        && let Some(result) = pairing_result(&message["params"])
+    {
+        update_pairing(&Arc::downgrade(&shared), &result);
     }
     Ok(())
 }
@@ -335,6 +362,43 @@ pub(super) fn update_pairing(shared: &Weak<Shared>, result: &Value) {
     }
 }
 
+#[cfg(test)]
+pub(super) fn update_work_for_test(shared: &Arc<Shared>, result: &Value) {
+    update_work(&Arc::downgrade(shared), result, tokio::time::Instant::now());
+}
+
+fn update_work(shared: &Weak<Shared>, result: &Value, started: tokio::time::Instant) {
+    let Some(shared) = shared.upgrade() else {
+        return;
+    };
+    let Some(rows) = result["structuredContent"]["sessions"].as_array() else {
+        return;
+    };
+    let mut tasks = shared
+        .chrome_control
+        .tasks
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner);
+    let mut work = shared
+        .chrome_control
+        .work
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner);
+    // A live session the helper reports stopped without Vibe Work asking: the person's Stop in Chrome.
+    let stopped = work.stopped_unasked(rows, started);
+    let changed = work.observe(rows, &mut tasks, started);
+    drop(work);
+    drop(tasks);
+    shared.chrome_control.person_stopped(&stopped);
+    if changed {
+        publish(&shared);
+    }
+}
+
+#[allow(
+    clippy::too_many_lines,
+    reason = "one connection loop: launch, synchronize, serve calls and polls, then report why it ended"
+)]
 async fn supervise(
     shared: Weak<Shared>,
     package: setup::ChromeControlConfig,
@@ -350,6 +414,9 @@ async fn supervise(
             _ = stop.changed() => return,
             result = super::pipe::Pipe::launch(&package, &dir, expected, &secret, shared.clone()) => result,
         };
+        if result.is_err() {
+            tracing::debug!("Chrome Control helper did not start or was refused");
+        }
         if let Ok(mut pipe) = result {
             if let Some(shared) = shared.upgrade() {
                 shared
@@ -360,43 +427,80 @@ async fn supervise(
                     .clear();
             }
             let mut sent_policy = Value::Null;
+            if synchronize(&shared, &mut pipe, &mut sent_policy)
+                .await
+                .is_err()
+            {
+                pipe.abort().await;
+                continue;
+            }
+            // A new helper connection has acknowledged no switch value yet: send the current one (retried
+            // until acknowledged).
+            if let Some(core) = shared.upgrade() {
+                core.chrome_control.forget_local_network_ack();
+                tokio::spawn(async move { super::send_local_network(&core).await });
+            }
+            let mut pending = std::collections::HashMap::<
+                u64,
+                (Option<oneshot::Sender<Answer>>, tokio::time::Instant),
+            >::new();
             let mut poll = tokio::time::interval(Duration::from_secs(2));
+            let mut expiry = tokio::time::interval(Duration::from_millis(100));
+            // Diagnostics: why this connection ended (a fixed word; no helper or page text).
+            let mut ended = "stopped";
             loop {
                 tokio::select! {
                     biased;
-                    _ = stop.changed() => { pipe.close().await; return; }
-                    _ = pipe.child.wait() => break,
-                    call = requests.recv() => {
-                        let Some(call) = call else { pipe.close().await; return };
-                        if call.reply.is_closed() { continue; }
-                        let operation = async {
-                            synchronize(&shared, &mut pipe, &mut sent_policy).await?;
-                            pipe.rpc("tools/call", json!({"name":call.name,"arguments":call.args})).await
-                        };
-                        let result = tokio::select! {
-                            _ = stop.changed() => Err(()),
-                            result = operation => result,
-                        };
-                        if let Ok(result) = result { update_pairing(&shared, &result); let _ = call.reply.send(result); }
-                        else { let _ = call.reply.send(failure(UNKNOWN, "TRANSPORT_LOST")); break; }
+                    _ = stop.changed() => { break; }
+                    reply = pipe.next() => {
+                        let Ok((id, result)) = reply else { ended = "helper pipe closed"; break };
+                        let Some((reply, started)) = pending.remove(&id) else { ended = "unexpected reply"; break };
+                        update_pairing(&shared, &result);
+                        update_work(&shared, &result, started);
+                        if let Some(reply) = reply { let _ = reply.send(Answer::Helper(result)); }
                     }
-                    _ = poll.tick() => {
-                        let operation = async {
-                            synchronize(&shared, &mut pipe, &mut sent_policy).await?;
-                            pipe.rpc("tools/call", json!({"name":"chrome_status","arguments":{}})).await
-                        };
-                        let result = tokio::select! {
-                            _ = stop.changed() => Err(()),
-                            result = operation => result,
-                        };
-                        match result { Ok(result) => update_pairing(&shared, &result), Err(()) => break }
+                    call = requests.recv() => {
+                        let Some(call) = call else { ended = "requests closed"; break };
+                        if call.reply.is_closed() && !(call.name == "chrome_session" && matches!(call.args["action"].as_str(), Some("stop" | "delete" | "cancel"))) { continue; }
+                        if pending.len() >= 32 && call.name != "chrome_session" {
+                            let _ = call.reply.send(own("Not run: Chrome is busy.", "BUSY"));
+                            continue;
+                        }
+                        if let Ok(id) = pipe.begin("tools/call", json!({"name":call.name,"arguments":call.args})).await {
+                            pending.insert(id, (Some(call.reply), tokio::time::Instant::now()));
+                        } else { let _ = call.reply.send(own(UNKNOWN, "TRANSPORT_LOST")); ended = "send failed"; break; }
+                    }
+                    _ = poll.tick(), if !pending.values().any(|(reply, _)| reply.is_none()) => {
+                        if let Ok(id) = pipe.begin("tools/call", json!({"name":"chrome_status","arguments":{}})).await {
+                            pending.insert(id, (None, tokio::time::Instant::now()));
+                        } else { ended = "status poll send failed"; break }
+                    }
+                    _ = expiry.tick() => {
+                        if pending.values().any(|(_, start)| start.elapsed() >= Duration::from_secs(35)) { ended = "a call outlived 35 s"; break; }
                     }
                 }
             }
-            pipe.close().await;
+            tracing::warn!(reason = ended, "Chrome Control connection ended");
+            for (_, (reply, _)) in pending {
+                if let Some(reply) = reply {
+                    let _ = reply.send(own(UNKNOWN, "TRANSPORT_LOST"));
+                }
+            }
+
+            pipe.abort().await;
         }
         if let Some(core) = shared.upgrade() {
             core.chrome_control.owner.clear_connection();
+            core.chrome_control
+                .work
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .disconnected();
+            core.chrome_control
+                .tasks
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .clear();
             publish(&core);
         }
         // Refuse queued and new work for the whole backoff; traffic cannot shorten it or replay work.
@@ -406,7 +510,7 @@ async fn supervise(
                 _ = stop.changed() => return,
                 () = tokio::time::sleep_until(until) => break,
                 call = requests.recv() => {
-                    if let Some(call) = call { let _ = call.reply.send(failure("Not run: Chrome Control is restarting. Ask the user to check Chrome.", "OWNER_CLOSED")); }
+                    if let Some(call) = call { let _ = call.reply.send(own("Not run: Chrome Control is restarting. Ask the user to check Chrome.", "OWNER_CLOSED")); }
                     else { return; }
                 }
             }
@@ -423,7 +527,8 @@ async fn synchronize(
     // Read trusted lowerings before sending any policy. An unchanged policy is never re-applied over one.
     pipe.notify("notifications/owner/drain", json!({})).await?;
     pipe.rpc("ping", json!({})).await?;
-    let next = shared.upgrade().map(|core| policy(&core)).ok_or(())?;
+    shared.upgrade().ok_or(())?;
+    let next = mapping::policy();
     if *sent != next {
         pipe.notify("notifications/owner/policy", next.clone())
             .await?;

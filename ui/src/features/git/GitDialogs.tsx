@@ -8,6 +8,7 @@ import { useStore } from "../../state/createStore";
 import type { Git } from "../../state/git";
 import { BringDialog } from "./BringDialog";
 import { CommitDialog } from "./CommitDialog";
+import { useSessionWorking } from "./useSessionWorking";
 import { PrDialog } from "./PrDialog";
 
 /** The dialog for `sessionId`. */
@@ -18,6 +19,7 @@ export function GitDialogs({
   git: Git;
   sessionId: string;
 }): ReactElement | null {
+  const working = useSessionWorking(sessionId);
   const dialog = useStore(git.store, (s) => s.dialog);
   const busy = useStore(git.store, (s) => s.busy[sessionId] === true);
   const notice = useStore(git.store, (s) => s.notice[sessionId] ?? null);
@@ -25,7 +27,7 @@ export function GitDialogs({
   const error = notice?.kind === "error" ? notice.text : null;
   switch (dialog.kind) {
     case "commit":
-      return <CommitDialog git={git} dialog={dialog} busy={busy} error={error} />;
+      return <CommitDialog git={git} dialog={dialog} busy={busy || working} error={error} />;
     case "pr":
       return <PrDialog git={git} dialog={dialog} busy={busy} error={error} />;
     case "bring":

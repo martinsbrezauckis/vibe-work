@@ -59,11 +59,6 @@ pub enum CoreEvent {
         /// What "Allow for this session" would keep on each open card that offers it (its covers line).
         offers: Vec<vw_ask::GrantOffer>,
     },
-    /// A Chrome Control card opened, or a call the user set to Never was refused (the session's transcript shows it).
-    ChromeAsk {
-        /// The card's entry; its outcome is the ask record with the same id.
-        entry: crate::ChromeAskView,
-    },
     /// Settings › Browser › Your Chrome changed (rows saved, set up, removed).
     ChromeControl {
         /// The view after the change.
@@ -191,6 +186,19 @@ pub enum CoreEvent {
         code: String,
         /// Why, without params values.
         reason: String,
+    },
+    /// The agent's `git init` or `git commit` waits for the person's name and email for Git commits (none is set):
+    /// the window asks once; `git answerIdentity` with this `askId` answers.
+    GitIdentityAsked {
+        /// The chat whose call waits.
+        session_id: String,
+        /// The question.
+        ask_id: String,
+    },
+    /// The Git identity question closed (answered, or no call waits any more).
+    GitIdentityAskClosed {
+        /// The question.
+        ask_id: String,
     },
     /// Something the user must see at once.
     Alert {
@@ -630,7 +638,6 @@ impl CoreEvent {
             Self::AskOpened { ask } => ask.session.as_deref().is_none_or(|s| s == id),
             Self::AskClosed { record } => record.ask.session.as_deref().is_none_or(|s| s == id),
             Self::ProtectedChange { proposal } => proposal.session_id == id,
-            Self::ChromeAsk { entry } => entry.session_id == id,
             Self::Snapshot { snapshot } => snapshot.session_id == id,
             Self::Change { change } => change.concerns(id),
             Self::GuardRefused { session_id, .. }
@@ -676,7 +683,9 @@ impl CoreEvent {
             | Self::GithubReads { .. }
             | Self::AskGrants { .. }
             | Self::ChromeControl { .. }
-            | Self::SecretScan { .. } => true,
+            | Self::SecretScan { .. }
+            | Self::GitIdentityAsked { .. }
+            | Self::GitIdentityAskClosed { .. } => true,
         }
     }
 }

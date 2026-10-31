@@ -28,6 +28,7 @@ import { droppedItems, runDrop } from "../files/drop";
 import { fileItems } from "../files/attachments";
 import { registerComposerFocus } from "../../state/composerFocus";
 import { NEW_CHAT } from "../../state/newChatKey";
+import { retryLabel } from "../../state/turnRetry";
 import { useApp } from "../shell/AppContext";
 import { useKeyReadiness } from "../shell/KeyNotice";
 import { useHeldBy } from "../sessions/SessionHeldNote";
@@ -39,7 +40,12 @@ import { DocumentChips } from "./DocumentChips";
 import { PasteChips, usePasteFold } from "./PasteChips";
 import { SlashMenu } from "./ComposerMenus";
 import { FileMentionMenu } from "./FileMentionMenu";
+import { usePromptHistory } from "./usePromptHistory";
 import { useFileMention } from "./useFileMention";
+import { ChromeTabPicker } from "./ChromeTabPicker";
+import { openChromeTabs } from "./chromeTabs";
+import { ChromeWorkNote } from "./ChromeWorkNote";
+import { chromeUsable } from "../settings/chrome/chromeRows";
 import { LoopsStrip } from "./LoopsStrip";
 import { useAutoHeight } from "./autoHeight";
 import { ComposerTools } from "./ComposerTools";
@@ -66,6 +72,7 @@ export default function Composer({ sessionId }: { sessionId: string }): ReactEle
   const app = useApp();
   const { composer, core, documents, market } = app;
   const key = useKeyReadiness();
+  const chromeEnabled = useCoreState((s) => chromeUsable(s.chromeControl));
   const readOnly = useHeldBy(sessionId) !== null;
   const heldKind = useCoreState((s) => s.heldKind[sessionId]);
   const entry = useCoreState((s) => s.sessions[sessionId]);
@@ -101,6 +108,7 @@ export default function Composer({ sessionId }: { sessionId: string }): ReactEle
   const newFolder = useShellState((s) => s.newFolder);
   const held = useComposerState((s) => s.newChat);
   const box = useRef<HTMLTextAreaElement>(null);
+  const history = usePromptHistory(sessionId, draft, box);
   const reportCaret = useDictationCaret(sessionId, box);
   const cwd = entry?.session["cwd"];
   const project = isNew ? newFolder : typeof cwd === "string" ? cwd : null;
@@ -168,11 +176,13 @@ export default function Composer({ sessionId }: { sessionId: string }): ReactEle
       ? "Waiting for you."
       : inputWaiting
         ? "Vibe is waiting for input."
-        : compacting
-          ? "Compacting context…"
-          : queued.length > 0
-            ? `${String(queued.length)} queued.`
-            : "";
+        : running && entry?.retry !== undefined
+          ? retryLabel(entry.retry)
+          : compacting
+            ? "Compacting context…"
+            : queued.length > 0
+              ? `${String(queued.length)} queued.`
+              : "";
   const problem = running ? null : lastTurnProblem(state);
   const pickSlash = (item: MenuItem) => {
     if (item.kind === "manage") {
@@ -273,6 +283,8 @@ export default function Composer({ sessionId }: { sessionId: string }): ReactEle
             onStop={() => void actions.stop(sessionId)}
           />
         ) : null}
+        <ChromeWorkNote sessionId={sessionId} />
+        <ChromeTabPicker sessionId={sessionId} />
         <DocumentChips sessionId={sessionId} />
         <ChipsRow
           onOpenRef={(ref) => void openCodeRef(app, sessionId, ref)}
@@ -317,7 +329,9 @@ export default function Composer({ sessionId }: { sessionId: string }): ReactEle
                   : "Ask Vibe to build, fix, or explain something"
           }
           value={draft}
+          onFocus={history.refresh}
           onChange={(e) => {
+            history.edit();
             composer.setDraft(sessionId, e.target.value);
             reportCaret();
             mention.reportCaret();
@@ -347,6 +361,7 @@ export default function Composer({ sessionId }: { sessionId: string }): ReactEle
               e.preventDefault();
               return;
             }
+            if (items === null && history.key(e)) return;
             const action = keyAction(
               {
                 key: e.key,
@@ -382,6 +397,18 @@ export default function Composer({ sessionId }: { sessionId: string }): ReactEle
           }}
         />
         <ComposerTools
+          chromeTab={
+            chromeEnabled ? (
+              <Button
+                type="button"
+                appearance="choice"
+                data-testid="composer.chrome-tabs-open"
+                onClick={() => void openChromeTabs(app, sessionId, "window")}
+              >
+                Chrome tab
+              </Button>
+            ) : null
+          }
           {...(config === null
             ? {}
             : {

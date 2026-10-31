@@ -93,6 +93,8 @@ struct CardYes {
 #[derive(Default)]
 struct Inner {
     guard_yes: VecDeque<GuardYes>,
+    /// Calls the user allowed in a guard's dialog whose result has not said so yet: (sessions, call id).
+    allowed: VecDeque<(Vec<String>, String)>,
     cards: VecDeque<Card>,
     card_yes: VecDeque<CardYes>,
 }
@@ -141,6 +143,10 @@ impl Ledger {
             .map(|s| (*s).to_owned())
             .collect();
         names.dedup();
+        inner.allowed.push_back((names.clone(), call_id.to_owned()));
+        while inner.allowed.len() > MAX {
+            inner.allowed.pop_front();
+        }
         inner.guard_yes.push_back(GuardYes {
             sessions: names,
             call_id: call_id.to_owned(),
@@ -149,6 +155,20 @@ impl Ledger {
         while inner.guard_yes.len() > MAX {
             inner.guard_yes.pop_front();
         }
+    }
+
+    /// True once when the user allowed the bash call `call_id` of `session` in a guard's dialog (the after-call
+    /// hook then adds that fact to the call's result). The memory is used up.
+    pub(crate) fn user_allowed(&self, session: &str, call_id: &str) -> bool {
+        if call_id.is_empty() {
+            return false;
+        }
+        let mut inner = self.lock();
+        let found = inner
+            .allowed
+            .iter()
+            .position(|(sessions, id)| id == call_id && sessions.iter().any(|s| s == session));
+        found.is_some_and(|at| inner.allowed.remove(at).is_some())
     }
 
     /// True when Vibe's approval card `callback` asks about a call whose guard already answered for the user: the

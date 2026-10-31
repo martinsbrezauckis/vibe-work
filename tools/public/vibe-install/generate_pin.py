@@ -17,7 +17,14 @@ Sources (all official, all fetched at generation time and written into the data 
 Consistency checks (generation fails otherwise): the export names exactly the packages and versions that the
 published wheel's `Requires-Dist` pins; a wheel exists for every target we ship.
 
-Usage: python3 -I generate_pin.py --vibe 3.0.3 --commit <sha> --uv 0.12.24 --python 3.14.8 --out <crate>/pin [--work <scratch>]
+Security overrides ([`SECURITY_OVERRIDES`]): a dependency that Vibe's lock pins at a version with a published
+advisory is replaced in the requirements file by its fixed release (version and hashes from PyPI's JSON API), until
+a Vibe tag locks the fixed version itself. Because `mistral-vibe`'s own metadata pins every dependency exactly
+(`Requires-Dist: x==v`), a resolving install would refuse the replacement; the installer therefore runs uv with
+`--no-deps`: this file is the complete install set (the check above proves it names every package the wheel
+requires), so nothing is resolved and nothing outside it can be installed. Every package keeps `--require-hashes`.
+
+Usage: python3 -I generate_pin.py --vibe 3.0.4 --commit <sha> --uv 0.12.24 --python 3.14.8 --out <crate>/pin [--work <scratch>]
 Needs: git, uv, network. Writes `vibe-install.json` and `vibe.requirements.txt` into --out.
 Called by: maintainers when bumping Vibe (with tools/public/codegen/vibe.pin, regenerated types, bench, gate).
 """
@@ -42,6 +49,43 @@ TARGETS = {
     "aarch64-apple-darwin": ("aarch64-apple-darwin.tar.gz", "macosx_11_0_arm64"),
     "x86_64-pc-windows-msvc": ("x86_64-pc-windows-msvc.zip", "win_amd64"),
 }
+
+# Security overrides: package -> (fixed version, the advisories it fixes). Generation fails when an entry is stale
+# (the tag's lock already has that version or a later one) or names a package the lock does not have: remove it then.
+# The fixed release must be a pure-Python wheel (`py3-none-any`, not yanked), so one file serves every target.
+SECURITY_OVERRIDES = {
+    "pyasn1": ("0.6.5", "GHSA-2qm8-x737-gmw5, GHSA-9m75-vc3g-4x39, GHSA-fm9c-5rcf-2q5p, GHSA-mm57-4v3p-rchx"),
+}
+
+
+def version_key(version: str) -> tuple[int, ...]:
+    if not re.fullmatch(r"\d+(\.\d+)*", version):
+        raise SystemExit(f"review version {version!r}: only plain dotted releases are compared")
+    return tuple(map(int, version.split(".")))
+
+
+def apply_overrides(export: str, overrides: dict, pypi_files: dict) -> str:
+    """Replaces each overridden package's version and hashes in the export (markers and `# via` lines stay)."""
+    for name, (version, advisories) in overrides.items():
+        if not advisories:
+            raise SystemExit(f"security override {name}: name the advisories it fixes")
+        block = re.compile(rf"^({re.escape(name)})==([^\s;]+)((?: ;[^\\\n]*)?) \\\n((?:    --hash=sha256:[0-9a-f]{{64}}(?: \\)?\n)+)",
+                           re.M)
+        found = list(block.finditer(export))
+        if len(found) != 1:
+            raise SystemExit(f"security override {name}: the lock has {len(found)} entries for it (remove the override?)")
+        locked = found[0].group(2)
+        if version_key(locked) >= version_key(version):
+            raise SystemExit(f"security override {name}: the lock has {locked}, not older than {version}: remove it")
+        files = [f for f in pypi_files[name] if not f.get("yanked")]
+        if not any(f["packagetype"] == "bdist_wheel" and f["filename"].endswith("-py3-none-any.whl") for f in files):
+            raise SystemExit(f"security override {name} {version}: no pure-Python wheel on PyPI (review it by hand)")
+        hashes = " \\\n".join(f"    --hash=sha256:{f['digests']['sha256']}"
+                              for f in sorted(files, key=lambda f: f["filename"]))
+        start, end = found[0].span()
+        export = f"{export[:start]}{name}=={version}{found[0].group(3)} \\\n{hashes}\n{export[end:]}"
+    return export
+
 
 def check_python(python: str, required: str, lock_required: str) -> None:
     """Require an exact patch and matching published/locked Python floors; unknown specifiers fail closed."""
@@ -113,6 +157,10 @@ def main() -> int:
         raise SystemExit(f"run the generator with uv {args.uv}, found {uv_version}")
     export = exported(tag_dir)
     check_consistency(export, pypi["info"]["requires_dist"] or [])
+    pypi_files = {name: json.loads(fetch(f"https://pypi.org/pypi/{name}/{version}/json"))["urls"]
+                  for name, (version, _advisories) in SECURITY_OVERRIDES.items()}
+    export = apply_overrides(export, SECURITY_OVERRIDES, pypi_files)
+    overridden = "; ".join(f"{name} {version} ({advisories})" for name, (version, advisories) in SECURITY_OVERRIDES.items())
     wheels = {}
     for target, (_asset, platform_tag) in TARGETS.items():
         found = [u for u in pypi["urls"] if u["packagetype"] == "bdist_wheel" and u["filename"].endswith(f"{platform_tag}.whl")]
@@ -123,8 +171,9 @@ def main() -> int:
     hashes = " \\\n".join(f"    --hash=sha256:{w['sha256']}" for w in sorted(wheels.values(), key=lambda w: w["filename"]))
     requirements = (f"# Generated by tools/public/vibe-install/generate_pin.py: mistral-vibe {args.vibe} (tag v{args.vibe},"
                     f" commit {args.commit}).\n# Dependencies: `uv export --frozen --no-dev --no-emit-project` of the tag's"
-                    f" uv.lock; mistral-vibe: Mistral's published wheels on PyPI.\n# Installed with --require-hashes"
-                    f" --only-binary :all:. Do not edit by hand.\nmistral-vibe=={args.vibe} \\\n{hashes}\n{export}")
+                    f" uv.lock; mistral-vibe: Mistral's published wheels on PyPI.\n# Security overrides (generate_pin.py"
+                    f" SECURITY_OVERRIDES): {overridden or 'none'}.\n# Installed with --require-hashes --only-binary :all:"
+                    f" --no-deps (this file is the complete set). Do not edit by hand.\nmistral-vibe=={args.vibe} \\\n{hashes}\n{export}")
 
     release = json.loads(fetch(f"https://api.github.com/repos/astral-sh/uv/releases/tags/{args.uv}"))
     by_name = {a["name"]: a for a in release["assets"]}

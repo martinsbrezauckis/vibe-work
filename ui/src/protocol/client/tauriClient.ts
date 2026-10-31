@@ -33,6 +33,15 @@ async function call<T>(name: string, args: Record<string, unknown>): Promise<T> 
   }
 }
 
+/**
+ * This page load's id, sent with every core command: a command the replaced document sent just before a reload keeps
+ * that document's native-placement generation in the host (`HostHandle::document_generation`), so it never places a
+ * page over the new document.
+ */
+const DOCUMENT = Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) =>
+  b.toString(16).padStart(2, "0"),
+).join("");
+
 /** True when running inside the Tauri webview. */
 export function insideTauri(): boolean {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -43,7 +52,7 @@ export function createTauriClient(): CoreClient {
   return {
     kind: "tauri",
     // Every command is the window's: nothing here can claim the Debug API origin (`app/src/commands.rs`).
-    execute: (command: Command) => call<CommandResult>("core_execute", { command }),
+    execute: (command: Command) => call<CommandResult>("core_execute", { command, doc: DOCUMENT }),
     async subscribe(onEvent) {
       const channel = new Channel<CoreEvent>();
       channel.onmessage = onEvent;

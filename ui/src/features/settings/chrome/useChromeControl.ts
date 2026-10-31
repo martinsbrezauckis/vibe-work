@@ -1,10 +1,4 @@
-/**
- * Settings › Browser › Your Chrome: the view the core last said (`chromeControl`, kept in the core store) and the
- * changes the section makes. A change that lets Vibe do more opens the core's native confirmation; Cancel there
- * comes back as `confirmationDeclined` and the section says "Not changed." (the level the core sends is the truth).
- * Depends on: the typed command client, the core store, vocabulary. Called by: YourChromeSettings, the dialogs.
- * Invariant: controls show only what the core confirmed; nothing is applied optimistically.
- */
+/** Confirmed Chrome connection state and settings commands. Used by the Browser section and dialogs. */
 import { useCallback, useEffect, useState } from "react";
 
 import type {
@@ -13,7 +7,6 @@ import type {
   CommandResult,
 } from "../../../protocol/core";
 import { toCallError } from "../../../protocol/client/types";
-import { TEXT, wording } from "../../../vocabulary";
 import { useApp } from "../../shell/AppContext";
 import { useCoreState } from "../../shell/hooks";
 
@@ -26,7 +19,7 @@ interface ChromeStatus {
 /** What the section reads and does. */
 export interface ChromeControlState {
   view: ChromeControlView | null;
-  /** The request in flight (`setLevel`, `setRow:send`, …), or null. */
+  /** The request in flight (`setEnabled`, `setup`, …), or null. */
   busy: string | null;
   status: ChromeStatus | null;
   readError: string | null;
@@ -60,18 +53,14 @@ export function useChromeControl(): ChromeControlState {
       setStatus(null);
       try {
         const result = await core.run({ type: "chromeControl", request });
-        if (request.op === "setLevel") setStatus({ text: TEXT.chromeSaved, alert: false });
-        if (request.op === "remove")
-          setStatus({ text: "Removed. Remove the extension in Chrome too.", alert: false });
+        if (request.op === "remove") setStatus({ text: "Removed", alert: false });
         return result;
       } catch (thrown) {
         const error = toCallError(thrown).error;
         setStatus(
           error.code === "confirmationDeclined"
             ? { text: "Not changed.", alert: false }
-            : request.op === "setLevel"
-              ? { text: wording(TEXT.chromeSaveFailed, { reason: error.message }), alert: true }
-              : { text: error.message, alert: true },
+            : { text: error.message, alert: true },
         );
         return null;
       } finally {

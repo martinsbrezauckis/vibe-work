@@ -14,9 +14,9 @@ An independent open-source project, part of the ShellX family of apps
   <img src="docs/public/images/vibe-work-dark.webp" alt="Vibe Work with three projects, a pending one-line edit to approve, and the Changes panel." width="1920">
 </picture>
 
-Version 0.1.3 adds @-mentions of files and sessions, edit previews with line numbers, connectors that need no
-sign-in and a compaction point for each model. You can use the files, editors, terminal and browser before sending
-your first message. Something specific you want Vibe Work to do? Post it in
+Version 0.1.4 lets the agent work in your own Chrome, search the chat's folders and ask you once for your Git name
+and email; Up and Down recall earlier prompts, and the Linux packages bring their own web engine. Something specific
+you want Vibe Work to do? Post it in
 [Discussions](https://github.com/martinsbrezauckis/vibe-work/discussions). Changes per version: `CHANGELOG.md`.
 Questions and reports: `CONTRIBUTING.md`.
 
@@ -25,8 +25,10 @@ Questions and reports: `CONTRIBUTING.md`.
 - **One-screen setup.** Installs Vibe after you confirm and keeps your Mistral API key in an encrypted vault. Vibe
   gets a placeholder; a local proxy adds the real key to Mistral requests.
 - **Chats in projects.** Pick a folder and a model and type; answers stream in with their steps. Type @ to mention a
-  file or another session in the same folder. Settings > Models and agent > Compaction point sets when each
-  model's chats are compacted. Temporary chats are deleted when you quit.
+  file or another session in the same folder; Up and Down in an empty message box recall earlier prompts, shared
+  with the Vibe CLI. The agent searches text and file names in the chat's folders, respecting ignored files.
+  Settings > Models and agent > Compaction point sets when each model's chats are compacted. Temporary chats are
+  deleted when you quit.
 - **Approvals.** An edit card shows the change with the file's line numbers, a command card the exact command,
   before you answer. Access modes:
   [docs/public/VOCABULARY.md](docs/public/VOCABULARY.md#access-modes). A card says what Allow once or Allow for this
@@ -41,6 +43,8 @@ Questions and reports: `CONTRIBUTING.md`.
   file copies files such as `.env` into each new copy. A copy is removed only when you choose Remove.
 - **Commit, push, pull request.** Commit with a message drafted in your repository's style, Push with your own git
   sign-in, and pull requests through `gh` or the forge's page (GitHub, GitLab.com, Codeberg) with checks and reviews.
+  Your Git name and email stay yours: when the agent starts a repository or commits and Git has none, Vibe Work asks
+  you once and saves them in Git's settings.
 - **Files and history.** Browse folders, search names and text, and open a result at its line. History shows saved
   versions, who changed what and what has not been published. Its repository view includes the project, subfolders
   and session copies, with Commit, Publish branch and Bring into main.
@@ -53,12 +57,18 @@ Questions and reports: `CONTRIBUTING.md`.
   picture.
 - **Agent browser.** Web tabs the agent opens, reads, fills in and clicks through while you watch, with Stop. Logins
   come from the vault for sites you allow; the agent never sees the password.
+- **Your Chrome.** With the Chrome extension set up (Settings > Browser > Your Chrome), the agent works in your own
+  Chrome: each chat in its own window, as far as the chat's access mode allows, with Stop in the extension and on the
+  page. Local-network pages stay off for it until you turn on Settings > Developer > Local network pages for the agent
+  in Chrome; while that is off, it opens named sites over https only. Manual:
+  [docs/public/BROWSER_CONTROL.md](docs/public/BROWSER_CONTROL.md).
 - **Capture from a page.** A page's design system, structure, assets, text, full-page pictures and before/after
   differences, saved under `capture/`. The Browser tab's Capture menu also saves a PDF or one HTML file with pictures
   and styles for sharing.
 - **Handbook and Projects overview.** Plans, notes, decisions and clickable prototypes as pages beside the chat; the
   plan panel follows the agent's progress. The Projects page shows every project's status and plans.
 - **Processes.** Every process and port is tied to its session; running ones are listed in the status bar with Stop.
+  Servers you start in a chat's Terminal tab are listed too, with their ports.
 - **Project secrets.** Keys and tokens in the vault, each set to Ask, Always or User only; a command gets the
   value, the agent never sees it. An optional check finds your stored secrets in saved chats and names those chats.
 - **Safety reminders.** Commands such as deleting your home folder, disk tools or shutdown are refused with a reason;
@@ -71,7 +81,8 @@ Questions and reports: `CONTRIBUTING.md`.
 - **Right-click actions.** Point Vibe at a file, a line, selected terminal output, a web page or a handbook section.
   The menu also offers the relevant open, history, compare, copy and revert actions.
 - **Voice.** Dictation and voice chat through Mistral's Voxtral. Ask Vibe to read its last reply aloud once, with
-  Skip and Stop, without turning on automatic narration.
+  Skip and Stop, without turning on automatic narration. When the computer has no audio output, the reading bar says
+  so.
 - **Tools.** A marketplace of reviewed skill packs, MCP servers and plugins, each pinned to a checksum, and
   connectors you sign in to or, when they need no sign-in, connect with one click. Tools > Skills browses,
   installs, turns on, turns off and removes skills, and shows when each skill you added last changed.
@@ -101,20 +112,22 @@ Download the installer for your system from
 |---|---|---|
 | Windows 10 1809 (build 10.0.17763) or later (x64) | `.exe` installer, per user, no administrator rights | in the app |
 | macOS 11 or later (Apple silicon) | `.dmg`, signed and notarized | in the app |
-| Linux (x86_64) | `.AppImage` | in the app |
-| Debian and Ubuntu (x86_64) | `.deb` | install the next `.deb` |
+| Linux (x86_64): Ubuntu 24.04 and 26.04, Debian 13 | `.AppImage` | in the app |
+| Ubuntu 24.04 and 26.04, Debian 13 (x86_64) | `.deb` | install the next `.deb` |
 
 On first start Vibe Work offers to install Vibe (Mistral's `mistral-vibe` from PyPI, through Astral's `uv`) into its
 own folder and shows the source, version, checksums and size before you confirm. A Vibe you already have can be used
 instead. Then add your Mistral API key. You need the key and an internet connection.
 
-Linux also needs the system library (glibc) version required by the download. This is measured from each release
-AppImage and its bundled programs; it is not one fixed minimum for every build. Before downloading an update,
-Settings > Updates checks the announced macOS version, Windows build or glibc version and says if yours is too old.
+Both Linux packages bring their own web engine (WebKitGTK), so the system's engine version does not matter. Debian 12
+is not supported: its system library (glibc) is older than the packages need. The glibc version required is measured
+from each release AppImage and its bundled programs; it is not one fixed minimum for every build. Before downloading
+an update, Settings > Updates checks the announced macOS version, Windows build or glibc version and says if yours
+is too old.
 
 Updates are signed and installed when you click Install and restart. How to check a download's checksum and
 signature: [docs/public/RELEASE_VERIFICATION.md](docs/public/RELEASE_VERIFICATION.md). Vibe Work installs the Vibe versions it has been
-tested with (3.0.3 for this release); newer tested versions arrive through a signed list, without a new app release.
+tested with (3.0.4 for this release); newer tested versions arrive through a signed list, without a new app release.
 
 ## Send files or text to a chat
 
@@ -147,8 +160,8 @@ you can revoke and links to the controls for lasting choices.
 - **Vibe's usage telemetry** follows Vibe's own setting, shown and changed in Settings > Privacy and data.
 - **Installing Vibe:** downloads from PyPI and GitHub, each checked against a pinned checksum.
 - **GitHub Releases:** the update check, once after start.
-- **What you open:** pages in the preview or browser, connectors, tools you install, and your git remotes when you
-  push or open a pull request.
+- **What you open:** pages in the preview, the browser or your Chrome, connectors, tools you install, and your git
+  remotes when you push or open a pull request.
 
 Vibe Work sends no telemetry of its own. Sessions are stored by Vibe; settings and records stay in Vibe Work's data
 folder; keys stay in the encrypted vault.
@@ -173,15 +186,15 @@ Requirements: Rust 1.99.0 (pinned by `rust-toolchain.toml`), Node 22 or later, p
 A development build starts Vibe from a `data/` folder in the repository (git-ignored):
 
 ```sh
-# The pinned Vibe (version in tools/public/codegen/vibe.pin), hash-locked like the app installs it, in data/vibe-3.0.3/venv.
-uv venv --python 3.14.8 data/vibe-3.0.3/venv
-uv pip install --python data/vibe-3.0.3/venv --require-hashes --only-binary :all: -r crates/vw-vibe-install/pin/vibe.requirements.txt
+# The pinned Vibe (version in tools/public/codegen/vibe.pin), hash-locked like the app installs it, in data/vibe-3.0.4/venv.
+uv venv --python 3.14.8 data/vibe-3.0.4/venv
+uv pip install --python data/vibe-3.0.4/venv --require-hashes --only-binary :all: --no-deps -r crates/vw-vibe-install/pin/vibe.requirements.txt
 # The included minimal Vibe config is copied into each run folder; your own ~/.vibe stays untouched.
 mkdir -p data/vibe-home-template
 cp tools/public/dev/vibe-config.template.toml data/vibe-home-template/config.toml
 
 pnpm install --frozen-lockfile
-VW_DEV_SERVER_BIN="$PWD/data/vibe-3.0.3/venv/bin/vibe-app-server" VW_DEV_KEYS=1 pnpm tauri dev
+VW_DEV_SERVER_BIN="$PWD/data/vibe-3.0.4/venv/bin/vibe-app-server" VW_DEV_KEYS=1 pnpm tauri dev
 ```
 
 `VW_DEV_SERVER_BIN`, `VW_DEV_HOME_TEMPLATE` and `VW_DEV_RUN_DIR` (absolute paths) override the Vibe program, the
@@ -209,8 +222,8 @@ cleanup of settings and of session data, each unchecked by default.
   marketplace, platform code).
 - `app/`: the Tauri application crate and the built-in Vibe plugin with Vibe Work's skills.
 - `ui/`: the React and TypeScript user interface.
-- `docs/public/`: the Debug API manual, the handbook format, the shared vocabulary, browser pools and how to verify a
-  release.
+- `docs/public/`: the Debug API manual, the handbook format, the shared vocabulary, browser pools, Chrome Control and
+  how to verify a release.
 - `scripts/public/`: build and check scripts. `release/public-paths.json`: what the public source contains.
 
 ## License

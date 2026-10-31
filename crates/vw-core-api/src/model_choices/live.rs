@@ -23,6 +23,7 @@ pub(crate) fn admission(method: &str, params: &Value) -> Value {
 
 pub(crate) async fn publish(shared: &Arc<Shared>, id: &str, runtime: Value) {
     shared.access.observe_runtime(id, &runtime);
+    shared.model_choices.learn(&runtime);
     let applied = shared.store.apply(vw_session::Notification::new(
         "runtime/updated",
         json!({"sessionId":id,"runtime":runtime}),

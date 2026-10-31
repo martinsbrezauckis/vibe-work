@@ -13,7 +13,7 @@ import { UiControlError } from "../../state/uiControl";
 import type { App } from "../shell/AppContext";
 import { commentAction, commentsState } from "./commentRoutes";
 import type { LineComments } from "./lineComments";
-import { fileNote, hasChanges, historyOfferShown, shownFile, turnText } from "./model";
+import { fileNote, hasChanges, historyOfferShown, shownFile, fileTurnText } from "./model";
 import type { Changes } from "./store";
 
 function asObject(body: unknown): Record<string, unknown> {
@@ -46,7 +46,7 @@ export function registerChangesRoute(
         removed: f.removed,
         hunks: f.hunks.length,
         note: fileNote(f),
-        turn: turnText(f.turn),
+        turn: fileTurnText(f, view?.turns ?? []),
       })),
       shown:
         file === null

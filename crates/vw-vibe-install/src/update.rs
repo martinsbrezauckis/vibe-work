@@ -5,6 +5,8 @@
 //!   it; never on its own timer, so there is no network beyond that check). It fetches `vibe-support.json` and its
 //!   `.sig` from the same channel as `latest.json`, verifies them with the build's updater key, refuses a rollback,
 //!   and evaluates ([`crate::support`]). Any failure empties the offers (fail closed) and says why in `checkError`.
+//!   An accepted manifest also sets the Chrome extension store state ([`crate::extension_store`]); a failed check
+//!   keeps the last accepted one.
 //! - [`VibeInstaller::prepare_update`] makes an offer (the same shape as the setup's, plus the requirements file's
 //!   source and SHA-256) under a random id; [`VibeInstaller::confirm_update`] must name it (single use). The window's
 //!   click and the Debug API's request are both the user's consent, as in setup.
@@ -136,7 +138,17 @@ impl VibeInstaller {
         let outcome = fetch_verified(config, &seen).await;
         let running = self.running();
         let checked_at = Some(now());
+        // Signed, well formed and not a rollback: its Chrome store state is the one that holds from now on.
+        let extension = outcome.as_ref().ok().map(Manifest::extension_store);
+        if let Some(store) = extension
+            && let Err(error) = crate::extension_store::save(&self.inner.config.root, store)
+        {
+            info!(%error, "the Chrome store state could not be recorded (it applies to this run)");
+        }
         let mut state = self.inner.lock();
+        if let Some(store) = extension {
+            state.extension_store = store;
+        }
         let result = match outcome {
             Ok(manifest) => {
                 let eval = crate::support::evaluate(

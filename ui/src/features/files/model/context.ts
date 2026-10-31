@@ -29,9 +29,10 @@ export interface FileChip {
 
 /** The core's display path is relative inside the session folder, otherwise absolute. */
 export function absoluteFilePath(display: string, project: string): string {
-  return /^(?:\/|[a-z]:[\\/]|\\\\)/i.test(display)
+  const path = /^(?:\/|[a-z]:[\\/]|\\\\)/i.test(display)
     ? display
     : `${project.replace(/[\\/]+$/, "")}/${display}`;
+  return /^[a-z]:[\\/]|^\\\\/i.test(path) ? path.replaceAll("/", "\\") : path;
 }
 
 /** Builds a selection snapshot or a whole-file reference without reading or uploading the file. */
@@ -45,7 +46,8 @@ export function fileChip(input: {
   const project = input.project?.replace(/[\\/]+$/, "").replaceAll("\\", "/");
   const absolute = input.path.replaceAll("\\", "/");
   const inside = project != null && absolute.startsWith(`${project}/`);
-  const path = inside ? absolute.slice(project.length + 1) : input.path;
+  const relative = inside ? absolute.slice(project.length + 1) : input.path;
+  const path = /^[a-z]:[\\/]|^\\\\/i.test(input.path) ? relative.replaceAll("/", "\\") : relative;
   const selection = input.selection;
   if (selection == null || selection.text === "")
     return {
@@ -87,7 +89,8 @@ export function folderChip(input: { path: string; project: string | null }): {
   const project = input.project?.replace(/[\\/]+$/, "").replaceAll("\\", "/");
   const absolute = input.path.replaceAll("\\", "/");
   const inside = project != null && absolute.startsWith(`${project}/`);
-  const path = inside ? absolute.slice(project.length + 1) : input.path;
+  const relative = inside ? absolute.slice(project.length + 1) : input.path;
+  const path = /^[a-z]:[\\/]|^\\\\/i.test(input.path) ? relative.replaceAll("/", "\\") : relative;
   const name = path.split(/[\\/]/).filter(Boolean).pop() ?? path;
   return {
     source: "folder",

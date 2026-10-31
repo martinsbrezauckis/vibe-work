@@ -71,6 +71,11 @@ pub(crate) async fn observe(
     }
     shared.model_choices.observe(method, params, result)?;
     if method == "turn/start" {
+        // The chat runs the turn Vibe answered with before Vibe's own events for it arrive. Subscribers (the window,
+        // the Debug API) see it now; the pump's turn bookkeeping waits for Vibe's events, as before.
+        if let (Some(id), Some(turn)) = (params["sessionId"].as_str(), result.get("turn")) {
+            let _ = shared.store.note_accepted_turn(id, turn);
+        }
         crate::model_choices::turn_started(shared, params).await;
     }
     match effect(method) {
@@ -165,7 +170,6 @@ pub(crate) fn snapshot(shared: &Shared, id: &str) -> Result<SessionSnapshot, Cor
             super::agent_tools::shell_commands::project(shared, &mut snapshot.state);
             crate::edit_preview::project(shared, &mut snapshot.state);
             shared.protected_changes.overlay(id, &mut snapshot.state);
-            shared.chrome_control.overlay(id, &mut snapshot.state);
             crate::ask::tool_calls::overlay(shared, id, &mut snapshot.state);
             snapshot.access_mode =
                 crate::restore::display_mode(shared, id, &snapshot.state["session"]);
@@ -216,3 +220,7 @@ pub(crate) fn project_result(shared: &Shared, method: &str, params: &Value, resu
         }
     }
 }
+
+#[cfg(test)]
+#[path = "sessions_tests.rs"]
+mod tests;

@@ -143,7 +143,7 @@ pub(crate) async fn open_channel(
     }
 }
 
-/// The child Stop and configuration-switch adapter, passed to the environment's Python with `-c`.
+/// The Stop, configuration-switch and plugin-hook guards, passed to the environment's Python with `-c`.
 pub const CHILD_STOP_ADAPTER: &str = include_str!("vibe_child_stop.py");
 
 /// The interpreter the server is started with when `program` (canonical) runs through [`CHILD_STOP_ADAPTER`]:

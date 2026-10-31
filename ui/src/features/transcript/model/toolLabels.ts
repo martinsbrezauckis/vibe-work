@@ -115,8 +115,6 @@ const APP_ACTIONS: Readonly<Record<string, string>> = {
   process_start: "Start a background command",
   process_stop: "Stop a program",
   process_restart: "Restart a program",
-  use_your_chrome: "Use your Chrome",
-  chrome_outcome: "Read the Chrome outcome",
   use_headless_browser: "Use the background browser",
   secret_list: "List project secrets",
   secret_run: "Run a command with secrets",
@@ -139,6 +137,6 @@ const APP_ACTIONS: Readonly<Record<string, string>> = {
   chrome_tool_list: "List Chrome actions",
   browser_capture: "Capture a browser page",
   chrome_status: "Read Chrome status",
-  chrome_task: "Use your Chrome",
+  chrome_session: "Use your Chrome",
   chrome_execute: "Use your Chrome",
 };

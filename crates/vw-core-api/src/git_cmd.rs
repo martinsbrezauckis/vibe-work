@@ -164,6 +164,15 @@ impl Core {
                     blocking(move || crate::git_identity::save(&shared.git, &identity)).await??;
                 Ok(GitResult::Identity { settings })
             }
+            GitRequest::AnswerIdentity { ask_id, identity } => {
+                let _guard = self.shared.git.lock.lock().await;
+                let shared = self.shared.clone();
+                blocking(move || crate::git_identity_ask::answer(&shared, &ask_id, identity))
+                    .await??;
+                let shared = self.shared.clone();
+                let settings = blocking(move || crate::git_identity::load(&shared.git)).await??;
+                Ok(GitResult::Identity { settings })
+            }
             GitRequest::Status { session_id, repo } => {
                 self.git_status(&session_id, repo.as_deref()).await
             }
@@ -420,13 +429,14 @@ impl Core {
         let (_, place) = self.git_selected_place(session_id, repo)?;
         let settings = self.git_settings(&place.main_root);
         let p = place.clone();
-        let (state, listed, author, details, hooks) = blocking(move || {
+        let (state, listed, author, details, hooks, shared_config) = blocking(move || {
             (
                 state::read_state(&p.root, &p.git_dir, None),
                 commit::list(&p.root),
                 commit::author(&p.root),
                 identity::read(&p.root),
                 vw_git::hooks::hooks(&p.root),
+                identity::shares_config(&p.root).unwrap_or(false),
             )
         })
         .await?;
@@ -452,7 +462,11 @@ impl Core {
         };
         let (author_name, author_email) = details.map_err(git_error)?;
         let author_problem = if author_name.is_none() || author_email.is_none() {
-            Some("Enter your name and email. They are saved for this repository.".to_owned())
+            Some(if shared_config {
+                "Enter your name and email.".to_owned()
+            } else {
+                "Enter your name and email. They are saved for this repository.".to_owned()
+            })
         } else {
             author_problem
         };
@@ -540,13 +554,27 @@ impl Core {
         let wanted = paths.clone();
         let done = blocking(move || {
             let (name, email) = identity::read(&p.root)?;
+            // A copy shares its repository's config: the entered author is used for this commit only there.
+            let mut this_commit = None;
             if (name.is_none() || email.is_none())
                 && let Some(identity) = identity
             {
-                identity::save(&p.root, &identity)?;
+                if identity::shares_config(&p.root)? {
+                    identity::validate(&identity)?;
+                    this_commit = Some(identity);
+                } else {
+                    identity::save(&p.root, &identity)?;
+                }
             }
             commit::commit(
-                &p.root, &p.git_dir, &wanted, &message, &expected, &scratch, run_hooks,
+                &p.root,
+                &p.git_dir,
+                &wanted,
+                &message,
+                &expected,
+                &scratch,
+                run_hooks,
+                this_commit.as_ref(),
             )
         })
         .await?

@@ -12,7 +12,6 @@
  */
 import { builtinTool, toolFallback, toolText } from "../transcript/model/toolLabels";
 import type { AskRecord, Command, CoversPart } from "../../protocol/core";
-import { term } from "../../vocabulary";
 import { type Decision, approvalEffect, offeredDecisions } from "../transcript/model/callbacks";
 import { type Obj, arr, detailOf, obj, str } from "../transcript/model/entries";
 
@@ -46,21 +45,8 @@ export interface AlwaysControl {
   command: Command;
 }
 
-const closeTabs = term("browserPermissions", "closeUserTabs").name;
-
-/** The controls Vibe Work owns that an "Always" may set. A setting id not listed here offers no "Always". */
-export const ALWAYS_CONTROLS: Readonly<Record<string, AlwaysControl>> = {
-  "browser-close-user-tabs": {
-    action: `turn on ${closeTabs}`,
-    control: closeTabs,
-    done: `turned on “${closeTabs}”`,
-    after: `“${closeTabs}” is on in Settings › Browser.`,
-    command: {
-      type: "browser",
-      request: { op: "setPermissions", permissions: { closeUserTabs: true } },
-    },
-  },
-};
+/** Only current controls may back a persistent answer. */
+export const ALWAYS_CONTROLS: Readonly<Record<string, AlwaysControl>> = {};
 
 /** The "Always" control an ask offers, or `null` (no setting, or a setting the window does not know). */
 export function alwaysControl(setting: string | null | undefined): AlwaysControl | null {

@@ -74,6 +74,8 @@ pub enum SpeechRequest {
     },
     /// The voices the key can use (presets first). Read-only.
     Voices {},
+    /// Whether sound can leave the app now (asked before each sound is played; `audio_output`).
+    AudioOutput {},
 }
 
 /// How a dictation turns speech into text.
@@ -150,6 +152,11 @@ pub enum SpeechResult {
     Voices {
         /// Presets first, then the user's own.
         voices: Vec<VoiceView>,
+    },
+    /// `audioOutput`.
+    AudioOutput {
+        /// False only when sound would play into nothing (the Linux `AppImage` without a sound server).
+        available: bool,
     },
 }
 

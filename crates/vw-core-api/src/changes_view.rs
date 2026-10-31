@@ -197,7 +197,7 @@ pub struct ChangesView {
     pub fingerprint: String,
     /// Things to tell the user (files not shown and why).
     pub notes: Vec<String>,
-    /// Turns that changed files (effects mode), oldest first.
+    /// File effects grouped by turn; includes child authors in Git mode.
     pub turns: Vec<TurnChanges>,
     /// Show the one-time "turn on version history" line (effects mode, code folder, not dismissed).
     pub offer_history: bool,

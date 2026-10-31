@@ -54,6 +54,8 @@ export const EVENT_NAMES = [
   "gitBrowserChanged",
   "secretsChanged",
   "secretScan",
+  "gitIdentityAsked",
+  "gitIdentityAskClosed",
   "protectedChange",
   "guardRefused",
   "dictation",
@@ -66,7 +68,6 @@ export const EVENT_NAMES = [
   "askOpened",
   "askClosed",
   "askGrants",
-  "chromeAsk",
   "chromeControl",
 ] as const;
 

@@ -72,8 +72,9 @@ async fn default_choice(shared: &Shared, choice: &mut Choice) -> Result<(Choice,
             choice.effort = row.effort;
         }
     }
+    shared.model_choices.learn(&reply.result);
     if let Some(missing) = unavailable_default(&reply.result["config"]) {
-        return Ok((missing, false));
+        return Ok((shared.model_choices.named(missing), false));
     }
     actual(&json!({"runtime":reply.result}))
         .map(|choice| (choice, true))
@@ -323,6 +324,39 @@ mod tests {
             ),
             "Your Settings default model is unavailable right now. This chat now uses Current display with high thinking."
         );
+    }
+
+    /// A Settings default Vibe no longer lists was "your Settings default model" without a name. Its
+    /// display name from the last list that had it names it now (never the alias; unknown keeps the unnamed words).
+    /// PREDICT (before the fix): the gone default's name is never learned, so the message stays unnamed.
+    #[test]
+    fn a_removed_default_is_named_from_the_last_list_that_had_it() {
+        let choices = super::super::Choices::load(None);
+        choices.learn(&json!({"config":{"models":[
+            {"alias":"raw-flash-id","displayName":"GLM Flash"},
+            {"alias":"raw-large-id","displayName":"Large 4"}
+        ]}}));
+        let mut gone = model("raw-flash-id", "", "");
+        gone.name = String::new();
+        let gone = choices.named(gone);
+        let chosen = model("raw-chosen-id", "Chosen display", "off");
+        let runtime = json!({"config":{"activeModel":{
+            "alias":"raw-large-id","thinking":"high","displayName":"Large 4"
+        }}});
+        let message = notice(
+            &chosen,
+            Some(&gone),
+            &runtime,
+            "is unavailable right now",
+            Some("is unavailable right now"),
+        );
+        assert_eq!(
+            message,
+            "Chosen display with thinking off is unavailable right now, and your Settings default model, GLM Flash, \
+             is unavailable right now. This chat now uses Large 4 with high thinking."
+        );
+        let unknown = choices.named(model("raw-never-seen", "", ""));
+        assert_eq!(unknown.display_name, "");
     }
 
     #[test]

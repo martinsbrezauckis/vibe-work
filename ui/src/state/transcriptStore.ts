@@ -246,7 +246,7 @@ export function createTranscript(deps: {
         const error = toCallError(thrown).error;
         const problem: AnswerProblem =
           error.code === "callbackRefused"
-            ? { kind: "refused", message: "Already answered." }
+            ? { kind: "refused", message: "This turn was stopped." }
             : { kind: "error", message: error.message };
         store.set((s) => ({ ...s, problems: { ...s.problems, [callbackId]: problem } }));
         return false;
@@ -269,49 +269,6 @@ export function createTranscript(deps: {
     ): Promise<boolean> {
       if (!(await setAlways(callbackId, control))) return false;
       return transcript.answer(sessionId, callbackId, output, via);
-    },
-
-    /**
-     * Answers a Chrome Control card (`chromeControl answer`; the card's id is its ask id). Same states as
-     * [`answer`]. Never throws.
-     */
-    async answerChrome(
-      askId: string,
-      choice: "once" | "session" | "no",
-      note: string | null,
-      via: AnswerVia,
-    ): Promise<boolean> {
-      if (core === null || store.get().sending[askId] === true) return false;
-      store.set((s) => ({
-        ...s,
-        sending: { ...s.sending, [askId]: true },
-        problems: without(s.problems, askId),
-      }));
-      try {
-        await core.run({
-          type: "chromeControl",
-          request: { op: "answer", askId, answer: choice, note: choice === "no" ? note : null },
-        });
-        store.set((s) => ({ ...s, answered: { ...s.answered, [askId]: via } }));
-        saveAnswered(persist, store.get().answered);
-        return true;
-      } catch (thrown) {
-        const error = toCallError(thrown).error;
-        const problem: AnswerProblem =
-          error.message === "Already answered."
-            ? { kind: "refused", message: "Already answered." }
-            : { kind: "error", message: error.message };
-        store.set((s) => ({ ...s, problems: { ...s.problems, [askId]: problem } }));
-        return false;
-      } finally {
-        store.set((s) => ({ ...s, sending: without(s.sending, askId) }));
-      }
-    },
-
-    /** "Always: …" on a Chrome Control card: its control first (with its native confirmation), then once. */
-    async answerChromeAlways(askId: string, control: AlwaysSet, via: AnswerVia): Promise<boolean> {
-      if (!(await setAlways(askId, control))) return false;
-      return transcript.answerChrome(askId, "once", "", via);
     },
 
     /**

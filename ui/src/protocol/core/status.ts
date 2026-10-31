@@ -395,16 +395,19 @@ ports: Array<number>, };
 
 export type SessionProcessView = { 
 /**
- * Opaque handle for `output` and `stopSession` (`vibe:<processId>` or `started:<pid>-<start token>`).
+ * Opaque handle for `output` and `stopSession` (`vibe:<processId>`, `started:<pid>-<start token>` or
+ * `terminal:<pid>-<start token>`).
  */
 id: string, 
 /**
- * `vibe` (Vibe's background process: it ends when Vibe or the session's channel ends) or `started` (started
- * for the agent by Vibe Work: it keeps running until stopped, also across quit).
+ * `vibe` (Vibe's background process: it ends when Vibe or the session's channel ends), `started` (started
+ * for the agent by Vibe Work: it keeps running until stopped, also across quit) or `terminal` (a server the
+ * person started in the session's Terminal tab).
  */
 kind: string, 
 /**
- * The command as the agent wrote it, when known.
+ * The command as the agent wrote it, when known; for a `terminal` one its program's executable name (never its
+ * arguments).
  */
 command: string | null, 
 /**

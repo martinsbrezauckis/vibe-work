@@ -1,5 +1,6 @@
 //! Feeds channel notifications into the store, resyncs, maintains callbacks and model aliases,
 //! restores sessions after server restarts, closes idle channels and answers `callback/call`.
+//! Vibe's lobby lease reports (`session/lease/updated`) go to `session_holder`.
 //! Depends on: vw-rpc (subscriptions, server requests), vw-session (store), vw-gate (callbacks,
 //! aliases), `core::Shared`, `channels`, `event`, `view`, `recovery`. Called by: `core` (spawns `run`,
 //! installs `callback_handler` on the supervisor).
@@ -441,6 +442,9 @@ impl Pump {
                     );
                     return true;
                 }
+                if n.method == "session/lease/updated" && item.key.is_none() {
+                    crate::session_holder::lease_updated(&shared, session);
+                }
                 if n.method == "runtime/updated" {
                     shared.gate.observe_runtime(&n.params);
                     // Not while the core restores the session's profile: right after a resume Vibe
@@ -555,6 +559,22 @@ impl Pump {
 
     /// Keeps browser protection in step with turn events and replacement snapshots.
     fn browser_changed(&mut self, shared: &Arc<Shared>, change: &Change) {
+        if let Change::TurnUpserted { session_id, turn } = change
+            && matches!(
+                turn["status"].as_str(),
+                Some("completed" | "failed" | "interrupted")
+            )
+        {
+            crate::chrome_control::end_turn(shared, session_id);
+        }
+        if let Change::Replaced { session_id } = change
+            && let Some(view) = shared.store.view(session_id)
+            && !view.state["turns"]
+                .as_array()
+                .is_some_and(|turns| turns.iter().any(|turn| turn["status"] == "in_progress"))
+        {
+            crate::chrome_control::end_turn(shared, session_id);
+        }
         if let Change::Replaced { session_id } = change
             && let Some(hub) = &shared.preview
             && let Some(view) = shared.store.view(session_id)

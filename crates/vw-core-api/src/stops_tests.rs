@@ -56,7 +56,7 @@ async fn a_failed_turn_invalidates_decisions_without_releasing_held_hooks() {
     let core = crate::offline_core::start("stops-failed-turn").await;
     let shared = &core.shared;
     let handle = shared.asks.open_own(
-        vw_ask::chrome::OTHER_KIND,
+        "approval",
         Some("s".into()),
         vw_ask::Requester::Agent,
         vec![Choice::Once, Choice::No],
@@ -259,7 +259,7 @@ async fn a_stop_by_an_imported_id_cancels_the_current_ids_cards() {
         .store
         .load(chat("b", &[("t1", "completed")]), vw_session::LoadKind::New);
     let card = shared.asks.open_own(
-        vw_ask::chrome::OTHER_KIND,
+        "approval",
         Some("b".into()),
         vw_ask::Requester::Agent,
         vec![Choice::Once, Choice::No],
@@ -380,7 +380,7 @@ async fn stop_marks_descendants_but_leaves_branches_independent() {
         state["session"]["parentSessionId"] = json!(parent);
         let _ = shared.store.load(state, vw_session::LoadKind::New);
         shared.asks.open_own(
-            vw_ask::chrome::OTHER_KIND,
+            "approval",
             Some(id.into()),
             vw_ask::Requester::Agent,
             vec![Choice::Once, Choice::No],
@@ -422,7 +422,7 @@ async fn idle_parent_is_not_quiet_while_owned_children_work() {
     let _ = shared.store.load(state, vw_session::LoadKind::New);
     assert!(crate::recovery::quiet(shared, "parent"));
     let ask = shared.asks.open_own(
-        vw_ask::chrome::OTHER_KIND,
+        "approval",
         Some("child".into()),
         vw_ask::Requester::Agent,
         vec![Choice::Once, Choice::No],

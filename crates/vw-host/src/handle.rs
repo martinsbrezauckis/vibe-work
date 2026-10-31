@@ -7,8 +7,9 @@
 //! Depends on: tokio (`watch`), [`crate::Host`]. Called by: `app`. Invariants: the host is set
 //! exactly once; waiting after it is set returns immediately; a command that arrives before the
 //! host is ready waits instead of failing. Each main-document load gets the next generation before any of its
-//! window commands can start; a window command keeps the generation it started under.
+//! window commands can start; a window command keeps the generation of the document that sent it.
 
+use std::collections::VecDeque;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
@@ -24,7 +25,13 @@ pub struct HostHandle {
     slot: Arc<watch::Sender<Option<Arc<Host>>>>,
     ui_load: Arc<Mutex<watch::Receiver<bool>>>,
     ui_generation: Arc<AtomicU64>,
+    /// Main documents seen, with the generation each one's commands run under (newest last, at most
+    /// [`KEPT_DOCUMENTS`]).
+    docs: Arc<Mutex<VecDeque<(String, u64)>>>,
 }
+
+/// Main documents whose generation is remembered: a reload replaces one at a time, so a few cover every straggler.
+const KEPT_DOCUMENTS: usize = 16;
 
 impl Default for HostHandle {
     fn default() -> Self {
@@ -40,6 +47,7 @@ impl HostHandle {
             slot: Arc::new(watch::Sender::new(None)),
             ui_load: Arc::new(Mutex::new(watch::channel(true).1)),
             ui_generation: Arc::new(AtomicU64::new(0)),
+            docs: Arc::new(Mutex::new(VecDeque::new())),
         }
     }
 
@@ -79,14 +87,39 @@ impl HostHandle {
         self.ui_generation.load(Ordering::SeqCst)
     }
 
-    /// Runs one main-window command ([`Host::execute_window`]) after the placement resets of earlier main-document
-    /// loads. It keeps the generation it started under, so once a later load has reset the native placements, its
-    /// Browser, Project and File viewer placements place nothing.
+    /// The generation a window command from main document `doc` runs under: the generation current when that
+    /// document's first command arrived, kept for it. Tauri starts an async command on a runtime worker, so a command
+    /// the replaced document sent just before a reload can start after the load event; it keeps the replaced
+    /// document's generation and its placements place nothing. A command without a document id takes the current one.
+    #[must_use]
+    pub fn document_generation(&self, doc: Option<&str>) -> u64 {
+        let Some(doc) = doc else {
+            return self.window_generation();
+        };
+        let mut docs = self.docs.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some((_, generation)) = docs.iter().find(|(id, _)| id == doc) {
+            return *generation;
+        }
+        let generation = self.window_generation();
+        if docs.len() >= KEPT_DOCUMENTS {
+            docs.pop_front();
+        }
+        docs.push_back((doc.to_owned(), generation));
+        generation
+    }
+
+    /// Runs one main-window command from main document `doc` ([`Host::execute_window`]) after the placement resets
+    /// of earlier main-document loads. It keeps its document's generation ([`Self::document_generation`]), so once a
+    /// later load has reset the native placements, its Browser, Project and File viewer placements place nothing.
     ///
     /// # Errors
     /// As [`Host::execute_window`].
-    pub async fn execute_window(&self, command: Command) -> Result<CommandResult, CoreError> {
-        let generation = self.window_generation();
+    pub async fn execute_window(
+        &self,
+        doc: Option<&str>,
+        command: Command,
+    ) -> Result<CommandResult, CoreError> {
+        let generation = self.document_generation(doc);
         vw_core_api::for_window_generation(generation, async {
             self.get_for_window().await.execute_window(command).await
         })
@@ -161,6 +194,27 @@ mod tests {
             2,
             "a command of the new document never takes the old generation, even before any reset ran"
         );
+    }
+
+    /// Tauri creates and first polls an async command's future on a runtime worker, so a command
+    /// the replaced document sent just before the reload can start after the load event. Reading the current
+    /// generation then gave it the NEW document's generation and its placement passed the gate.
+    /// PREDICT (before the fix): the straggler from document "a" gets generation 2, the new document's.
+    #[tokio::test]
+    async fn a_command_of_the_replaced_document_keeps_its_generation_when_it_starts_late() {
+        let handle = HostHandle::new();
+        let runtime = Handle::current();
+        handle.main_ui_load_started(&runtime);
+        assert_eq!(handle.document_generation(Some("a")), 1);
+        handle.main_ui_load_started(&runtime);
+        assert_eq!(
+            handle.document_generation(Some("a")),
+            1,
+            "a straggler of the replaced document must not take the new document's generation"
+        );
+        assert_eq!(handle.document_generation(Some("b")), 2);
+        assert_eq!(handle.document_generation(Some("b")), 2);
+        assert_eq!(handle.document_generation(None), 2);
     }
 
     #[tokio::test]

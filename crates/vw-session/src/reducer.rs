@@ -48,11 +48,12 @@ impl SessionEntry {
         // with bumpedAt. Do not let an old setup gap hold that new stream indefinitely.
         // A session that never bumped reads `bumpedAt == createdAt` (Vibe 3.0.1+
         // `PublicSession._default_bumped_at`; 3.0.0 sent null).
+        // A turn listed from the `turn/start` reply alone is not one of Vibe's (`no_reported_turn`).
         if event_id == 1
             && n.method == "session/updated"
             && self.state["session"]["harness"] == "unified"
             && self.state["session"]["bumpedAt"] == self.state["session"]["createdAt"]
-            && self.state["turns"].as_array().is_some_and(Vec::is_empty)
+            && self.no_reported_turn()
             && self.state["history"].as_array().is_some_and(Vec::is_empty)
             && n.params["patch"].as_array().is_some_and(|patch| {
                 patch.len() == 1
@@ -179,6 +180,7 @@ impl SessionEntry {
             ));
         }
         self.state = merged_with_prefix(&self.state, state);
+        self.accepted_turn = None;
         let _ = self.fold_runtime_into_session();
         Ok(vec![Change::Replaced { session_id: sid }])
     }
@@ -342,6 +344,9 @@ impl SessionEntry {
     /// Upserts a turn by id (`turns` may be null before the first turn).
     fn upsert_turn(&mut self, turn: Value) -> Result<(), Failure> {
         let id = str_field(&turn, "id")?.to_owned();
+        if self.accepted_turn.as_deref() == Some(id.as_str()) {
+            self.accepted_turn = None;
+        }
         if !self.state.get("turns").is_some_and(Value::is_array) {
             self.state["turns"] = json!([]);
         }

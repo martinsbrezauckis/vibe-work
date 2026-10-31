@@ -24,8 +24,6 @@ export const rawClasses = new Map([
   ["sessions/SessionRow.tsx", new Set(["srow-main", "srow-more", "twist"])],
   ["sessions/UnfiledSection.tsx", new Set(["proj-h"])],
   ["settings/ImageSettings.tsx", new Set(["ext-link"])],
-  // The level cards of Your Chrome: the vault setup's choice card as a radio.
-  ["settings/chrome/YourChromeSettings.tsx", new Set(["vault-choice"])],
   ["setup/VaultStartStep.tsx", new Set(["vault-choice"])],
   ["terminal/TerminalPanel.tsx", new Set(["ibtn", "vw-term-new", "vw-term-tool"])],
   ["transcript/FindBar.tsx", new Set(["find-scope"])],

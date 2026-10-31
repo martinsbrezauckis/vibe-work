@@ -38,7 +38,8 @@ function asObject(value: JsonValue | undefined): { [key in string]?: JsonValue }
 }
 
 /**
- * Reads the models out of a `config/read` result (Mistral's own Large 4 left out beside ours, `thinkingLevels`);
+ * Reads the models out of a `config/read` result, with one Large 4 (`thinkingLevels`: Mistral's own entry left out
+ * beside ours unless it is the default);
  * `null` when the shape is not recognised.
  */
 export function parseModels(result: JsonValue): ModelList | null {
@@ -46,7 +47,8 @@ export function parseModels(result: JsonValue): ModelList | null {
   const list = config?.["models"];
   if (config === null || !Array.isArray(list)) return null;
   const models: ModelOption[] = [];
-  const listed = listedRows(list.map(asObject));
+  const current = newChatPick(result).alias;
+  const listed = listedRows(list.map(asObject), current);
   for (const entry of list) {
     const model = asObject(entry);
     if (!listed(model)) continue;
@@ -68,7 +70,7 @@ export function parseModels(result: JsonValue): ModelList | null {
       ...(always ? { alwaysThinks: true as const } : {}),
     });
   }
-  return { models, current: newChatPick(result).alias };
+  return { models, current };
 }
 
 /** A session for settings RPCs that require one: the open one, else the most recently updated. */

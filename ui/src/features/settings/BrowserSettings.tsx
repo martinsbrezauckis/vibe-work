@@ -7,8 +7,7 @@ import { YourChromeSettings } from "./chrome/YourChromeSettings";
 /** Errors belong to the Browser page rather than to both section cards. */
 export function BrowserSettings() {
   const [poolError, setPoolError] = useState<string | null>(null);
-  const [delegationError, setDelegationError] = useState<string | null>(null);
-  const error = poolError ?? delegationError;
+  const error = poolError;
   return (
     <>
       {error !== null && (
@@ -18,7 +17,7 @@ export function BrowserSettings() {
       )}
       <BrowserPoolSettings onError={setPoolError} />
       <YourChromeSettings />
-      <BrowserDelegationSettings onError={setDelegationError} />
+      <BrowserDelegationSettings />
     </>
   );
 }

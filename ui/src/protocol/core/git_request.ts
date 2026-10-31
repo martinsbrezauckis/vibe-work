@@ -8,9 +8,17 @@
 import type { PreparedKind, CommitIdentity } from "./git";
 export type GitRequest = { "op": "identity" } | { "op": "setIdentity",
 /**
- * The author details; never written to global Git config.
+ * The author details (saved in app data only).
  */
-identity: CommitIdentity, } | { "op": "status",
+identity: CommitIdentity, } | { "op": "answerIdentity",
+/**
+ * The question.
+ */
+askId: string,
+/**
+ * The name and email, or none for Cancel.
+ */
+identity: CommitIdentity | null, } | { "op": "status",
 /**
  * Session id.
  */

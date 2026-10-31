@@ -32,6 +32,8 @@ pub fn default_initialize_params() -> InitializeParams {
             client_tools: None,
             // Vibe Work does not offer `session/spawn`, so the agent gets no `vibe.start_session` tool.
             session_spawn: None,
+            // Cross-chat tools need a separate design for VW's folder and vault boundaries.
+            session_peers: None,
             disabled_notifications: None,
             // Vibe Work does not lend its sign-in tokens to Vibe, so Vibe never sends
             // `platformCredentials/resolve` and keeps its own sign-in.
@@ -64,4 +66,13 @@ pub async fn handshake(
         })?;
     conn.notify("initialized", json!({})).await?;
     Ok(response)
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn peers_stay_off_in_the_handshake() {
+        let params = serde_json::to_value(super::default_initialize_params()).unwrap();
+        assert!(params["capabilities"].get("sessionPeers").is_none());
+    }
 }

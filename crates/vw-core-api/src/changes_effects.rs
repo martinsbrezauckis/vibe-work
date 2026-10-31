@@ -49,13 +49,20 @@ fn turns_of(
     turns
 }
 
+/// Child effect ownership in Git's path space (the parent keeps every child's turn ids separate).
+pub(crate) fn child_turns(session: &Facts, base: Option<&Path>) -> Vec<TurnChanges> {
+    session
+        .subagents
+        .iter()
+        .flat_map(|(child, facts)| turns_of(facts, base, Some(child)))
+        .collect()
+}
+
 /// Files from the session and its descendants, with paths relative to the shown session's folder.
 pub(crate) fn effects_view(hub: &Hub, tracker: &Tracker, session: &Facts, view: &mut ChangesView) {
     let base = session.cwd.as_deref();
     let mut turns = turns_of(session, base, None);
-    for (child, facts) in &session.subagents {
-        turns.extend(turns_of(facts, base, Some(child)));
-    }
+    turns.extend(child_turns(session, base));
     if turns.is_empty() {
         view.mode = ChangesMode::None;
         view.fingerprint = "none".into();

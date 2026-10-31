@@ -101,15 +101,7 @@ impl Core {
         if !ask.offers.contains(&answer.answer) {
             return Err(invalid("This answer is not offered."));
         }
-        if ask.kind.starts_with("chrome/ask/") {
-            crate::chrome_control::check::answer(
-                &self.shared,
-                id,
-                answer.answer,
-                answer.note,
-                AnsweredBy::DebugApi,
-            )?;
-        } else if let Some(callback) = id.strip_prefix("callback:") {
+        if let Some(callback) = id.strip_prefix("callback:") {
             let output = if ask.kind == "user_input" {
                 if answer.answer != Choice::No {
                     return Err(invalid("Answer the question through the callback route."));

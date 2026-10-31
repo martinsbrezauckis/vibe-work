@@ -35,7 +35,7 @@ import {
   turnIdOf,
 } from "./entries";
 import { isWebSearch } from "./sources";
-import { hookLine, isHookNotice, transcriptEntries } from "./hookNotices";
+import { hookLine, isHookNotice, refusedSteps, transcriptEntries } from "./hookNotices";
 
 /** The `searches` of an answer without web searches (one shared list: rows stay comparable). */
 const NO_SEARCHES: readonly Obj[] = Object.freeze([]);
@@ -78,8 +78,6 @@ export type Row =
       answerFor?: string;
     }
   | { kind: "protectedChange"; key: string; entry: Obj }
-  /** A Chrome Control card, or its audit row (a `chrome_ask` entry the core weaves into the history). */
-  | { kind: "chromeAsk"; key: string; entry: Obj }
   | { kind: "notice"; key: string; entry: Obj }
   | { kind: "hook"; key: string; entry: Obj; text: string; error: boolean }
   | { kind: "divider"; key: string; entry: Obj }
@@ -216,7 +214,12 @@ function stepsRow(items: StepItem[], forceLive: boolean): Row {
 }
 
 /** Rows of one segment: the entries after a user message (or a turn's start) up to the next one. */
-function segmentRows(segment: readonly Obj[], byId: Map<string, Obj>, rows: Row[]): void {
+function segmentRows(
+  segment: readonly Obj[],
+  byId: Map<string, Obj>,
+  steps: ReadonlyMap<string, Obj>,
+  rows: Row[],
+): void {
   let lastStep = -1;
   segment.forEach((entry, i) => {
     if (isStep(entry)) lastStep = i;
@@ -237,10 +240,6 @@ function segmentRows(segment: readonly Obj[], byId: Map<string, Obj>, rows: Row[
       case "protected_change":
         flush();
         rows.push({ kind: "protectedChange", key: `protected:${id}`, entry });
-        return;
-      case "chrome_ask":
-        flush();
-        rows.push({ kind: "chromeAsk", key: id, entry });
         return;
       case "effect":
         group.push({ kind: "effect", entry });
@@ -271,7 +270,7 @@ function segmentRows(segment: readonly Obj[], byId: Map<string, Obj>, rows: Row[
       case "notice":
         flush();
         if (isHookNotice(entry)) {
-          const line = hookLine(entry, byId);
+          const line = hookLine(entry, steps);
           if (line !== null) rows.push({ kind: "hook", key: `hook:${id}`, entry, ...line });
           return;
         }
@@ -290,20 +289,25 @@ function segmentRows(segment: readonly Obj[], byId: Map<string, Obj>, rows: Row[
   flush();
 }
 
-function blockRows(block: Block, info: TurnInfo | undefined, byId: Map<string, Obj>): Row[] {
+function blockRows(
+  block: Block,
+  info: TurnInfo | undefined,
+  byId: Map<string, Obj>,
+  steps: ReadonlyMap<string, Obj>,
+): Row[] {
   const rows: Row[] = [];
   let segment: Obj[] = [];
   let users = 0;
   for (const entry of block.entries) {
     if (roleOf(entry) === "user") {
-      segmentRows(segment, byId, rows);
+      segmentRows(segment, byId, steps, rows);
       segment = [];
       const steer = users > 0 || entry["source"] === "turn_steer";
       users += 1;
       rows.push({ kind: "user", key: `user:${entryId(entry)}`, entry, steer });
     } else segment.push(entry);
   }
-  segmentRows(segment, byId, rows);
+  segmentRows(segment, byId, steps, rows);
   if (info === undefined) return rows;
   const status = str(info.turn["status"]) ?? "";
   const last = rows[rows.length - 1];
@@ -336,8 +340,9 @@ export function buildRows(history: readonly JsonValue[], turns: readonly JsonVal
     return { ...entry, generationStatus: "completed", message: "Context compaction interrupted" };
   });
   const byId = new Map(settled.map((entry) => [entryId(entry), entry]));
-  return blocksOf(transcriptEntries(settled), table).flatMap((block) =>
-    blockRows(block, block.turnId === null ? undefined : table.get(block.turnId), byId),
+  const steps = refusedSteps(settled);
+  return blocksOf(transcriptEntries(settled, steps), table).flatMap((block) =>
+    blockRows(block, block.turnId === null ? undefined : table.get(block.turnId), byId, steps),
   );
 }
 

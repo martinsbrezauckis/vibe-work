@@ -28,6 +28,7 @@ import type {
 import { applyChange } from "./sessionChanges";
 import { type IndexState, initialIndex, mergeRows } from "./sessionIndex";
 import type { SessionEntry, StuckMap } from "./sessionSummary";
+import { retryOfState, withRetryNotice, withoutRetry } from "./turnRetry";
 
 /** What the status bar and header say about the Vibe server. */
 type ServerView =
@@ -42,6 +43,8 @@ type ServerView =
 
 /** The whole core model. */
 export interface CoreState {
+  /** The open question for the person's Git name and email (`gitIdentityAsked`), kept so a dialog made later shows it. */
+  identityAsk: { askId: string; sessionId: string } | null;
   /** Open permissions and the newest terminal receipts from the shared core service. */
   asks: Readonly<Record<string, Ask>>;
   askRecords: Readonly<Record<string, AskRecord>>;
@@ -100,6 +103,7 @@ export interface SubagentCardEntry {
 
 /** The state before anything has arrived. */
 export const initialCore: CoreState = {
+  identityAsk: null,
   asks: {},
   askRecords: {},
   askGrants: { grants: [], offers: [] },
@@ -146,6 +150,7 @@ function entryFromSnapshot(
   const object = typeof state === "object" && state !== null && !Array.isArray(state) ? state : {};
   const session = object["session"];
   const accessMode = snapshot.accessMode ?? previous?.accessMode;
+  const retry = retryOfState(object);
   return {
     id: snapshot.sessionId,
     session:
@@ -160,6 +165,7 @@ function entryFromSnapshot(
       .map(([id]) => id),
     // A snapshot carries no runtime: keep the last one.
     ...(previous?.runtime === undefined ? {} : { runtime: previous.runtime }),
+    ...(retry === undefined ? {} : { retry }),
   };
 }
 
@@ -223,26 +229,6 @@ export function applyEvent(state: CoreState, event: CoreEvent): CoreState {
     case "askGrants":
       return { ...state, askGrants: { grants: event.grants, offers: event.offers } };
 
-    // A Chrome Control card (or a Never refusal) joins its session's history, as the core weaves it into snapshots.
-    case "chromeAsk": {
-      const view = event.entry;
-      const entry = state.sessions[view.sessionId];
-      if (entry?.state === null || entry === undefined) return state;
-      const history = Array.isArray(entry.state["history"]) ? entry.state["history"] : [];
-      const id = `chrome:${view.askId}`;
-      const item = {
-        id,
-        type: "chrome_ask",
-        createdAt: view.createdAtMs,
-        turnId: view.turnId,
-        chromeAsk: view,
-      } as unknown as JsonValue;
-      const at = history.findIndex(
-        (e) => typeof e === "object" && e !== null && !Array.isArray(e) && e["id"] === id,
-      );
-      const next = at < 0 ? [...history, item] : history.map((e, i) => (i === at ? item : e));
-      return withSession(state, { ...entry, state: { ...entry.state, history: next } });
-    }
     case "chromeControl":
       return { ...state, chromeControl: event.view };
     case "protectedChange": {
@@ -281,13 +267,23 @@ export function applyEvent(state: CoreState, event: CoreEvent): CoreState {
       };
     case "change": {
       const change = event.change;
-      if (change.kind === "notice") return state;
+      if (change.kind === "notice") {
+        const target = change.sessionId === null ? undefined : state.sessions[change.sessionId];
+        return change.method === "turn/retrying" && target !== undefined
+          ? withSession(state, withRetryNotice(target, change.params))
+          : state;
+      }
       if (change.kind === "removed")
         return { ...state, sessions: without(state.sessions, change.sessionId) };
       const entry = state.sessions[change.sessionId];
       if (entry === undefined) return state;
       const applied = applyChange(entry, change);
-      const next = withSession(state, applied.entry);
+      // The turn moved on: its retry, if any, is over.
+      const moved =
+        change.kind === "entryUpserted" ||
+        change.kind === "entryPatched" ||
+        change.kind === "turnUpserted";
+      const next = withSession(state, moved ? withoutRetry(applied.entry) : applied.entry);
       return applied.ok
         ? next
         : { ...next, needsRefresh: [...new Set([...state.needsRefresh, entry.id])] };
@@ -345,6 +341,10 @@ export function applyEvent(state: CoreState, event: CoreEvent): CoreState {
     // `secretsChanged` itself. The Vibe install has its own store (`state/vibeInstall.ts`).
     case "rateLimits":
       return { ...state, rateLimits: event.limits };
+    case "gitIdentityAsked":
+      return { ...state, identityAsk: { askId: event.askId, sessionId: event.sessionId } };
+    case "gitIdentityAskClosed":
+      return state.identityAsk?.askId === event.askId ? { ...state, identityAsk: null } : state;
     case "refused":
     case "alert":
     case "terminal":

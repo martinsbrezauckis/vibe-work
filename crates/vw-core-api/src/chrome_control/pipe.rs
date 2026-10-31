@@ -28,6 +28,7 @@ pub(super) struct Pipe {
     input: Option<ChildStdin>,
     output: BufReader<tokio::io::Take<ChildStdout>>,
     id: u64,
+    read_buffer: Vec<u8>,
     shared: Weak<Shared>,
 }
 
@@ -108,6 +109,7 @@ impl Pipe {
             input: Some(input),
             output: BufReader::new(output.take(1024 * 1024 + 2)),
             id: 0,
+            read_buffer: Vec::new(),
             shared,
         };
         if pipe.initialize(secret).await.is_err() {
@@ -167,48 +169,74 @@ impl Pipe {
             return Err(());
         }
         line.push(b'\n');
-        self.input
-            .as_mut()
-            .ok_or(())?
-            .write_all(&line)
-            .await
-            .map_err(|_| ())
+        tokio::time::timeout(
+            Duration::from_millis(500),
+            self.input.as_mut().ok_or(())?.write_all(&line),
+        )
+        .await
+        .map_err(|_| ())?
+        .map_err(|_| ())
+    }
+
+    pub(super) async fn begin(&mut self, method: &str, params: Value) -> Result<u64, ()> {
+        self.id += 1;
+        self.send(&json!({"jsonrpc":"2.0","id":self.id,"method":method,"params":params}))
+            .await?;
+        Ok(self.id)
+    }
+
+    // The buffer lives across select cancellation, including a partially read line.
+    pub(super) async fn next(&mut self) -> Result<(u64, Value), ()> {
+        loop {
+            self.output
+                .get_mut()
+                .set_limit((1024 * 1024 + 2 - self.read_buffer.len()) as u64);
+            let n = self
+                .output
+                .read_until(b'\n', &mut self.read_buffer)
+                .await
+                .map_err(|_| ())?;
+            if n == 0
+                || self.read_buffer.len() > 1024 * 1024 + 1
+                || self.read_buffer.last() != Some(&b'\n')
+            {
+                return Err(());
+            }
+            let line = std::mem::take(&mut self.read_buffer);
+            let value: Value = serde_json::from_slice(&line).map_err(|_| ())?;
+            if let Some(id) = value.get("id") {
+                return Ok((
+                    id.as_u64().ok_or(())?,
+                    value.get("result").cloned().ok_or(())?,
+                ));
+            }
+            super::owner::observe(&self.shared, &value)?;
+            if value["method"] == "notifications/owner/error" {
+                return Err(());
+            }
+        }
     }
 
     pub(super) async fn rpc(&mut self, method: &str, params: Value) -> Result<Value, ()> {
-        self.id += 1;
-        let id = self.id;
         tokio::time::timeout(Duration::from_secs(35), async {
-            self.send(&json!({"jsonrpc":"2.0","id":id,"method":method,"params":params}))
-                .await?;
-            loop {
-                self.output.get_mut().set_limit(1024 * 1024 + 2);
-                let mut line = Vec::new();
-                let n = self
-                    .output
-                    .read_until(b'\n', &mut line)
-                    .await
-                    .map_err(|_| ())?;
-                if n == 0 || n > 1024 * 1024 + 1 || line.last() != Some(&b'\n') {
-                    return Err(());
-                }
-                let value: Value = serde_json::from_slice(&line).map_err(|_| ())?;
-                if value["id"] == id {
-                    return value.get("result").cloned().ok_or(());
-                }
-                if value.get("id").is_some() {
-                    return Err(());
-                }
-                super::owner::observe(&self.shared, &value).await?;
-                if value["method"] == "notifications/owner/error" {
-                    return Err(());
-                }
+            let id = self.begin(method, params).await?;
+            let (reply, value) = self.next().await?;
+            if reply != id {
+                return Err(());
             }
+            Ok(value)
         })
         .await
         .map_err(|_| ())?
     }
 
+    pub(super) async fn abort(mut self) {
+        let _ = self.child.kill().await;
+        let _ = self.child.wait().await;
+    }
+
+    // Only the unix reply-identity test closes a pipe gracefully.
+    #[cfg(all(test, unix))]
     pub(super) async fn close(mut self) {
         drop(self.input.take());
         if tokio::time::timeout(Duration::from_secs(2), self.child.wait())

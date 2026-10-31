@@ -433,58 +433,6 @@ impl Grants {
             .map(|k| k.grant.clone())
     }
 
-    /// The kept "Allow for this session" of a Chrome Control key (`forms@shop.example`, a group with no site, or
-    /// `closeTabs`) in `session`. Keyed by what the user saw on the card, not by Vibe's tool name.
-    pub(crate) fn chrome_grant(&self, session: &str, key: &str) -> Option<SessionGrant> {
-        let tool = chrome_tool(key);
-        self.lock()
-            .kept
-            .iter()
-            .find(|k| k.grant.session == session && k.grant.tool == tool)
-            .map(|k| k.grant.clone())
-    }
-
-    /// Keeps a Chrome Control "Allow for this session" for `key` (a group on a site; an equal one already kept is
-    /// returned). `label` names it in the grants list.
-    pub(crate) fn keep_chrome(
-        &self,
-        session: &str,
-        key: &str,
-        label: &str,
-        covers: Vec<CoversPart>,
-        by: AnsweredBy,
-        now: u64,
-    ) -> SessionGrant {
-        let tool = chrome_tool(key);
-        let mut state = self.lock();
-        if let Some(kept) = state
-            .kept
-            .iter()
-            .find(|k| k.grant.session == session && k.grant.tool == tool)
-        {
-            return kept.grant.clone();
-        }
-        state.next += 1;
-        let grant = SessionGrant {
-            id: format!("grant-{}", state.next),
-            session: session.to_owned(),
-            tool,
-            permissions: Vec::new(),
-            labels: vec![label.to_owned()],
-            every_call: true,
-            created_at: now,
-            by,
-            covers,
-            uses: 0,
-            last_used_at: None,
-        };
-        state.kept.push(Kept {
-            grant: grant.clone(),
-            owner: session.to_owned(),
-        });
-        grant
-    }
-
     /// Ends every grant whose tool `gone` names (a removed connector's tools). True when one ended.
     pub(crate) fn end_tools(&self, gone: impl Fn(&str) -> bool) -> bool {
         let mut state = self.lock();
@@ -553,12 +501,6 @@ impl Grants {
             .retain(|k| k.grant.session != session && k.owner != session);
         state.kept.len() != before
     }
-}
-
-/// The tool name a Chrome Control group grant keeps (`chrome:send`): never one of Vibe's tool names, so a Vibe
-/// approval can never match it.
-pub(crate) fn chrome_tool(key: &str) -> String {
-    format!("chrome:{key}")
 }
 
 /// Whether a permission of approval `entry` is a literal scope whose invocation is not the pattern text itself

@@ -309,7 +309,6 @@ pub const CONTINUE: &str = "Continue";
 /// - A request that offers "always": `Allow once` / the request's `always` label / `Don't allow`.
 /// - An MCP server's key ("always" is the recommended choice): the
 ///   `always` label / `Allow until Vibe Work closes` / `Don't allow`.
-/// - An agent asking to close a user tab: `Close` / `Keep`.
 /// - Otherwise `Continue` / `Cancel`.
 ///
 /// The pressed label decides the answer ([`dialog_answer`]), so the order never changes what a label means.
@@ -318,12 +317,7 @@ pub fn dialog_buttons(request: &ConfirmationRequest) -> Vec<String> {
     if request.method == vw_core_api::NEW_CHAT_RESTORE_DIALOG_METHOD {
         return vec!["Keep".to_owned(), "Pick again".to_owned()];
     }
-    if request.method == vw_core_api::CHROME_RESTORE_DIALOG_METHOD {
-        return vec!["Keep".to_owned(), "Lower to Browse".to_owned()];
-    }
-    if request.method == "vibe-work/browserCloseTab" {
-        return vec!["Close".to_owned(), "Keep".to_owned()];
-    }
+
     if let Some(always) = &request.always
         && request.method == "vibe-work/secretRun"
     {
@@ -392,16 +386,9 @@ pub fn dialog_heading(text: &str) -> (String, String) {
 pub fn dialog_answer(request: &ConfirmationRequest, pressed: Option<&str>) -> Confirmation {
     if matches!(
         request.method.as_str(),
-        vw_core_api::CHROME_RESTORE_DIALOG_METHOD | vw_core_api::NEW_CHAT_RESTORE_DIALOG_METHOD
+        vw_core_api::NEW_CHAT_RESTORE_DIALOG_METHOD
     ) {
         return if pressed == Some("Keep") {
-            Confirmation::Approved
-        } else {
-            Confirmation::Declined
-        };
-    }
-    if request.method == "vibe-work/browserCloseTab" {
-        return if pressed == Some("Close") {
             Confirmation::Approved
         } else {
             Confirmation::Declined

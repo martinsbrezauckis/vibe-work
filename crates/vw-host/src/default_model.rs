@@ -2,7 +2,8 @@
 //!
 //! Depends on the filesystem and TOML parser. Called by [`crate::launch::ProductLaunch`] before the
 //! other config defaults. Existing Large 4 entries gain the missing published prices, the
-//! missing output-token cap, the missing thinking levels and the missing default level (High);
+//! missing output-token cap, the missing thinking levels, the missing default level (High) and the
+//! missing compaction point (800,000 tokens);
 //! a window or price that still holds the value an earlier version seeded takes the published one.
 //! Every other configured value and the user's model choice remain unchanged.
 
@@ -36,6 +37,10 @@ const THINKING_LEVELS: [&str; 3] = ["low", "medium", "high"];
 // The level a chat thinks at until it picks one: High, as Large 4 always ran before its levels were
 // listed (with an unset level Vibe would run the lowest listed one, Low).
 const DEFAULT_THINKING: &str = "high";
+// Where a chat on Large 4 compacts: the point Mistral's own Large 4 entry uses for this window (Vibe's
+// default for an entry without one is 256,000). A person's own value is kept, and so is a person's own
+// global point (top-level `auto_compact_threshold`): our entry then gets none.
+const AUTO_COMPACT_THRESHOLD: i64 = 800_000;
 
 const FIRST_CONFIG: &str = "active_model = \"large-4\"\n\n\
 [[models]]\n\
@@ -50,7 +55,8 @@ thinking_levels = [\"low\", \"medium\", \"high\"]\n\
 thinking = \"high\"\n\
 input_price = 0.7\n\
 cached_input_price = 0.07\n\
-output_price = 2.1\n";
+output_price = 2.1\n\
+auto_compact_threshold = 800000\n";
 
 /// Writes the initial model config, or fills missing Large 4 defaults in an existing one.
 ///
@@ -91,13 +97,17 @@ fn fill_missing_defaults(path: &Path) -> io::Result<()> {
     vw_platform::replace_private(path, updated.as_bytes()).map_err(io::Error::other)
 }
 
-/// The config text with the missing prices, output cap, thinking levels and default level added
+/// The config text with the missing prices, output cap, thinking levels, default level and
+/// compaction point added
 /// to our exact Large 4 entry (`name = "mistral-large-4"`, `provider = "mistral"`,
 /// `alias = "large-4"`), or `None` when
 /// nothing is missing or the text is not a config with a `[[models]]` array. Keys already
 /// present keep their value, whatever it is; other model entries are not touched.
 fn with_missing_defaults(original: &str) -> Option<String> {
     let mut config: DocumentMut = original.parse().ok()?;
+    // A person's own global compaction point is theirs for every model: Vibe takes a model's own point
+    // over it, so our entry then gets none.
+    let global_threshold = config.contains_key("auto_compact_threshold");
     let models = config.get_mut("models")?.as_array_of_tables_mut()?;
     let mut changed = false;
     for model in models.iter_mut() {
@@ -168,6 +178,10 @@ fn with_missing_defaults(original: &str) -> Option<String> {
             });
         if !model.contains_key("thinking") && offers_default {
             model["thinking"] = value(DEFAULT_THINKING);
+            changed = true;
+        }
+        if !global_threshold && !model.contains_key("auto_compact_threshold") {
+            model["auto_compact_threshold"] = value(AUTO_COMPACT_THRESHOLD);
             changed = true;
         }
     }

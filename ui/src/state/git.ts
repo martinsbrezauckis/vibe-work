@@ -27,6 +27,8 @@ import { branchOf, httpsLink } from "../features/git/model";
 import { toCallError } from "../protocol/client/types";
 import type { CoreController } from "./coreStore";
 import { createStore } from "./createStore";
+import { sessionWorking } from "./sessionWorking";
+import type { ComposerStore } from "./composerStore";
 import { pruneSessions } from "./prune";
 
 /** The Commit dialog. */
@@ -108,16 +110,18 @@ export const CARD_POLL_MS = 60_000;
 /** Creates the git controller. `insertChip` puts a prepared message into a session's composer. */
 export function createGit(deps: {
   core: CoreController;
+  composer?: ComposerStore;
   insertChip: (sessionId: string, label: string, text: string, origin: "ui" | "debug-api") => void;
 }) {
   const { core, insertChip } = deps;
   const store = createStore<GitUi>(initial);
+  const working = (id: string) => sessionWorking(core.store.get(), deps.composer?.store.get(), id);
 
   const currentRepo = (id: string) =>
     store.get().selected[id] ?? store.get().status[id]?.repo ?? undefined;
   const isCurrent = (id: string, repo: string) => currentRepo(id) === repo;
   async function run(
-    request: Exclude<GitRequest, { op: "identity" | "setIdentity" }>,
+    request: Exclude<GitRequest, { op: "identity" | "setIdentity" | "answerIdentity" }>,
     repo = currentRepo(request.sessionId),
     origin?: "window",
   ): Promise<GitResult> {
@@ -286,6 +290,7 @@ export function createGit(deps: {
 
     /** Opens the Commit dialog and asks for a drafted message. */
     async openCommit(sessionId: string): Promise<void> {
+      if (working(sessionId)) return;
       const repo = currentRepo(sessionId);
       if (repo === undefined) return;
       await act(sessionId, async () => {
@@ -359,7 +364,7 @@ export function createGit(deps: {
     /** Commits as the dialog says; `then` continues with Push or the PR dialog. Returns true on success. */
     async commit(then: "none" | "push" | "pr" = "none"): Promise<boolean> {
       const d = store.get().dialog;
-      if (d?.kind !== "commit") return false;
+      if (d?.kind !== "commit" || working(d.sessionId)) return false;
       const paths = d.plan.files.map((f) => f.path).filter((p) => !d.excluded.includes(p));
       const done = await act(d.sessionId, async () => {
         const result = await run(

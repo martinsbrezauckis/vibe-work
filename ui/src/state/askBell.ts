@@ -63,17 +63,6 @@ export function cardAsks(core: CoreState, sessionId: string): string[] {
     .map((ask) => ask.id.slice(9));
 }
 
-/** The summary of Chrome Control card `askId` in `sessionId`'s history, if the window holds it. */
-function chromeCard(core: CoreState | undefined, sessionId: string, askId: string): string | null {
-  const history = core?.sessions[sessionId]?.state?.["history"];
-  if (!Array.isArray(history)) return null;
-  for (const item of history) {
-    const card = obj(obj(item)?.["chromeAsk"]);
-    if (card?.["askId"] === askId && typeof card["summary"] === "string") return card["summary"];
-  }
-  return null;
-}
-
 /**
  * The words for ask `record` (falls back to the record's value-free title). `hostSessionId` names the session whose
  * title the words use when it is not the record's own (a subagent's card is shown in its parent's transcript).
@@ -110,15 +99,6 @@ export function askWordsFor(
   }
   if (ask.kind === "user_input")
     return { session, question: "Vibe asks", summary: "Vibe's question" };
-  if (ask.kind.startsWith("chrome/ask/")) {
-    const card = chromeCard(core, ask.session ?? sessionId, ask.id);
-    return {
-      session,
-      question:
-        ask.kind === "chrome/ask/closeTabs" ? "Close your tab?" : "Allow this in your Chrome?",
-      summary: card ?? ask.title,
-    };
-  }
   if (ask.kind === "protected_change")
     return {
       session,

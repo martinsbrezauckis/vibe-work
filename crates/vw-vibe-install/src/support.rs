@@ -9,8 +9,14 @@
 //!  "versions": [{"version": "2.26.2", "python": "3.14.8", "minVibeWork": "0.1.0", "maxVibeWork": null,
 //!                "requirements": "vibe-2.26.2.requirements.txt", "requirementsSha256": "<hex>",
 //!                "requirementsBytes": 80872, "packages": 101,
-//!                "wheels": {"x86_64-unknown-linux-gnu": {"filename": "...", "bytes": 1, "sha256": "<hex>"}}}]}
+//!                "wheels": {"x86_64-unknown-linux-gnu": {"filename": "...", "bytes": 1, "sha256": "<hex>"}}}],
+//!  "chromeExtension": {"store": "review"}}
 //! ```
+//! `chromeExtension` is optional (`write_manifest.py --chrome-store`): `"review"` while the Chrome extension's
+//! store listing is in Google's review (Your Chrome's setup then says so in place of the store button), `"available"`
+//! once it is listed. It is covered by the signature like every other byte, but it only changes a label: an absent
+//! field, an unknown `store` value or a field that is not such an object all read as absent (the store link), and
+//! never make an otherwise valid manifest fail. The last accepted value is kept by [`crate::extension_store`].
 //! The signature is `vibe-support.json.sig`: base64 of the minisign signature text, exactly the encoding the Tauri
 //! CLI writes for update packages (`tools/public/vibe-support/sign`).
 //!
@@ -140,6 +146,47 @@ pub struct Manifest {
     pub pypi_latest: Option<String>,
     /// The tested versions.
     pub versions: Vec<SupportedVibe>,
+    /// The Chrome extension's store state, when the release states a known one (module docs).
+    #[serde(
+        default,
+        deserialize_with = "known_extension",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub chrome_extension: Option<ChromeExtension>,
+}
+
+/// Where the Chrome extension's store listing stands, as the signed manifest says.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ExtensionStore {
+    /// In Google's review: not installable from the store for most people yet.
+    Review,
+    /// Listed: the store link works.
+    Available,
+}
+
+/// `chromeExtension` of the manifest.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChromeExtension {
+    /// The listing's state.
+    pub store: ExtensionStore,
+}
+
+impl Manifest {
+    /// The extension's store state this manifest states (`None`: absent or not a known value).
+    #[must_use]
+    pub fn extension_store(&self) -> Option<ExtensionStore> {
+        self.chrome_extension.map(|c| c.store)
+    }
+}
+
+/// Reads `chromeExtension` leniently: anything but `{"store": "review" | "available"}` is absent (module docs).
+fn known_extension<'de, D>(deserializer: D) -> Result<Option<ChromeExtension>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = serde_json::Value::deserialize(deserializer)?;
+    Ok(serde_json::from_value::<ChromeExtension>(value).ok())
 }
 
 /// Compares two plain dotted versions numerically (`2.26.10` > `2.26.9`; `2.26` = `2.26.0`). `None` when either

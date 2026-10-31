@@ -1,6 +1,6 @@
 /**
  * One session in the list: badge, title, unread dot, voice chat state, the mark for loops (recurring prompts),
- * local and CLI continuation tags,
+ * local tags,
  * the folder chip (for a session outside its project's main folder), a "more" button and child fold controls.
  * Right click, the context-menu key, Shift+F10 and the more button open the same action menu; F2 renames,
  * Delete asks for the native delete confirmation (not on a subagent's row: Vibe deletes a subagent's chat only
@@ -53,7 +53,6 @@ export function SessionRow({
   const s = node.session;
   const selected = useShellState((x) => x.selected === s.id);
   const expanded = useShellState((x) => x.expanded[s.id] === true);
-  const cliId = useCoreState((x) => x.index.continueSessionId);
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const [renaming, setRenaming] = useState(false);
   const hasChildren = node.children.length > 0;
@@ -243,14 +242,6 @@ export function SessionRow({
             )}
             <VoiceChatTag sessionId={s.id} />
             <LoopsTag sessionId={s.id} />
-            {s.id === cliId && (
-              <Badge
-                presentation="cli-session"
-                title="Continues in CLI: `vibe --continue` in a terminal resumes this session"
-              >
-                Continues in CLI
-              </Badge>
-            )}
             {s.localOnly && (
               <Badge presentation="session" title="local">
                 local

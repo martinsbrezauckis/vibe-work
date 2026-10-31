@@ -8,9 +8,9 @@ import type { ReactElement } from "react";
 
 import { Selector } from "../../components/Selector";
 import { useStore } from "../../state/createStore";
-import type { FileChange } from "../../protocol/core";
+import type { FileChange, ChangesView } from "../../protocol/core";
 import { HunkBlock } from "./HunkBlock";
-import { fileActions, fileNote, turnText } from "./model";
+import { fileActions, fileNote, fileTurnText } from "./model";
 import type { Changes } from "./store";
 
 /** The review of one file. */
@@ -18,6 +18,7 @@ export function FileReview(props: {
   changes: Changes;
   sessionId: string;
   file: FileChange;
+  turns?: ChangesView["turns"];
   busy: boolean;
   /** No keep/revert (the session's starting point was lost; changes are against the last commit). */
   readOnly?: boolean;
@@ -25,7 +26,7 @@ export function FileReview(props: {
   const { changes, sessionId, file, busy } = props;
   const readOnly = props.readOnly === true;
   const layout = useStore(changes.store, (s) => s.layout);
-  const turn = turnText(file.turn);
+  const turn = fileTurnText(file, props.turns ?? []);
   return (
     <div className="file-review">
       <div className="filebar">

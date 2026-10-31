@@ -176,7 +176,12 @@ class ReadOnlyPluginResolver(PluginResolver):
     def _load_plugin(self, plugin_dir, scope):
         try:
             check_plugin_tree(plugin_dir)
-            return super()._load_plugin(plugin_dir, scope)
+            candidate = super()._load_plugin(plugin_dir, scope)
+            # A name approval is not authority to run native hook subprocesses outside
+            # Vibe Work's tool guards. Covers manual enable, Market commit and later edits.
+            if candidate is not None and any(h.protocol.value == "vibe" for h in candidate.runtime_hooks):
+                raise ValueError("Native plugin hooks are not supported by Vibe Work")
+            return candidate
         except (OSError, ValueError) as error:
             message = f"Plugin is not readable: {error}"
             self.unreadable[str(plugin_dir.absolute())] = (scope, message)

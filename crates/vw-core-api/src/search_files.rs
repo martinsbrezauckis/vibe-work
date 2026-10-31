@@ -27,17 +27,17 @@ use crate::search_text::{Query, find, snippet};
 use crate::search_view::FileHit;
 
 /// Largest file read.
-const MAX_FILE: u64 = 1 << 20;
+pub(crate) const MAX_FILE: u64 = 1 << 20;
 /// Most files read per search.
-const MAX_FILES: u32 = 20_000;
+pub(crate) const MAX_FILES: u32 = 20_000;
 /// Most bytes read per search.
-const MAX_BYTES: u64 = 200 << 20;
+pub(crate) const MAX_BYTES: u64 = 200 << 20;
 /// Longest a search may take.
 const DEADLINE: Duration = Duration::from_secs(4);
 /// Hits counted at most.
 const COUNT_CAP: u32 = 1000;
 /// Folders a walk never enters (dependencies, builds, caches); hidden folders are skipped too.
-const SKIP_DIRS: &[&str] = &[
+pub(crate) const SKIP_DIRS: &[&str] = &[
     "node_modules",
     "target",
     "dist",
@@ -69,79 +69,11 @@ pub(crate) struct Found {
 
 /// Shared listing of visible file names in `folder`, with dependency/build folders omitted.
 pub(crate) fn candidates(folder: &Path) -> Vec<String> {
-    let listed = vw_changes::git::Call::new(folder, vw_changes::git::Index::User)
-        .args(["ls-files", "-co", "--exclude-standard", "-z"])
-        .timeout(Duration::from_secs(3))
-        .max_output(32 << 20)
-        .output();
-    match listed {
-        Ok(out) if out.ok() => {
-            let names: Vec<String> = out
-                .stdout
-                .split(|b| *b == 0)
-                .filter(|name| !name.is_empty())
-                .map(|name| String::from_utf8_lossy(name).into_owned())
-                .collect();
-            // Keep standalone session folders that an enclosing repository ignores searchable. An empty
-            // list inside the session's repository must stay empty: walking would expose ignored files.
-            if names.is_empty()
-                && std::fs::symlink_metadata(folder.join(".git")).is_err()
-                && vw_changes::git::Call::new(folder, vw_changes::git::Index::User)
-                    .args(["check-ignore", "-q", "."])
-                    .timeout(Duration::from_secs(3))
-                    .max_output(1024)
-                    .output()
-                    .is_ok_and(|out| out.ok())
-            {
-                walk(folder)
-            } else {
-                names
-            }
-        }
-        _ => walk(folder),
-    }
-    .into_iter()
-    .filter(|rel| {
-        plain_relative(rel)
-            && !rel
-                .split('/')
-                .any(|part| part.starts_with('.') || SKIP_DIRS.contains(&part))
-    })
-    .collect()
-}
-
-/// A plain walk (no git): every file under `folder`, hidden and [`SKIP_DIRS`] folders skipped, links not followed.
-fn walk(folder: &Path) -> Vec<String> {
-    let mut out = Vec::new();
-    let mut stack: Vec<PathBuf> = vec![PathBuf::new()];
-    while let Some(rel) = stack.pop() {
-        let Ok(entries) = std::fs::read_dir(folder.join(&rel)) else {
-            continue;
-        };
-        for entry in entries.flatten() {
-            let name = entry.file_name().to_string_lossy().into_owned();
-            let Ok(kind) = entry.file_type() else {
-                continue;
-            };
-            let child = rel.join(&name);
-            if kind.is_dir() {
-                if !name.starts_with('.') && !SKIP_DIRS.contains(&name.as_str()) {
-                    stack.push(child);
-                }
-            } else if kind.is_file() {
-                out.push(child.to_string_lossy().replace('\\', "/"));
-            }
-            if out.len() >= MAX_FILES as usize * 2 {
-                return out;
-            }
-        }
-    }
-    out.sort();
-    out
+    crate::search_walk::candidates(folder, Instant::now() + DEADLINE, &|_| true).0
 }
 
 /// True when `rel` is a plain relative path (no `..`, no root, no prefix).
-fn plain_relative(rel: &str) -> bool {
+pub(crate) fn plain_relative(rel: &str) -> bool {
     Path::new(rel)
         .components()
         .all(|c| matches!(c, Component::Normal(_) | Component::CurDir))
@@ -149,9 +81,7 @@ fn plain_relative(rel: &str) -> bool {
 
 /// A listed name that can be shown: a regular file, not a link, not under a linked folder.
 fn listable(folder: &Path, rel: &str) -> bool {
-    let path = folder.join(rel);
-    std::fs::symlink_metadata(&path).is_ok_and(|meta| meta.is_file())
-        && !vw_changes::has_symlinked_parent(folder, &path)
+    crate::search_walk::open(folder, rel).is_ok()
 }
 
 /// Name-only search: no content is read (`scanned` stays 0). Every listed name is ranked by [`search_fuzzy::score`]
@@ -240,23 +170,10 @@ pub(crate) fn search(
                 found.total = found.total.saturating_add(1).min(COUNT_CAP);
                 names.push(hit(None, rel.clone()));
             }
-            let path = folder.path.join(&rel);
-            // No links (they may point outside the folder), only regular files under the size cap.
-            let Ok(meta) = std::fs::symlink_metadata(&path) else {
-                continue;
-            };
-            if !meta.is_file() || meta.len() > MAX_FILE {
-                continue;
-            }
-            // Nor a file under a linked folder: git lists names from its index, and a tracked folder replaced by a
-            // link would lead outside, including through a symlinked parent.
-            if vw_changes::has_symlinked_parent(&folder.path, &path) {
-                continue;
-            }
             let Some(query) = query else {
                 continue;
             };
-            let Ok(content) = std::fs::read(&path) else {
+            let Some(content) = crate::search_walk::read(&folder.path, &rel) else {
                 continue;
             };
             found.scanned += 1;
@@ -305,6 +222,7 @@ mod tests {
     fn html_output_limit_marks_search_truncated() {
         let root = std::env::temp_dir().join(format!("vw-search-limit-{}", std::process::id()));
         std::fs::create_dir_all(&root).unwrap();
+        let root = vw_platform::canonical_plain(&root).unwrap();
         std::fs::write(root.join("page.html"), "\n".repeat(1 << 19)).unwrap();
         let found = search(
             &[Folder {
@@ -325,6 +243,7 @@ mod tests {
     fn html_file_hits_show_visible_words_and_keep_source_lines() {
         let root = std::env::temp_dir().join(format!("vw-search-visible-{}", std::process::id()));
         std::fs::create_dir_all(&root).unwrap();
+        let root = vw_platform::canonical_plain(&root).unwrap();
         let html = "<!doctype html><html><head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>Where forecasts are cached</title>\n<meta name=\"description\" content=\"Where forecasts are cached.\"><style>forecast { color: red }</style>\n<script>\nconst forecast = '<p>hidden</p>';\n</script></head><body><h1>Where forecasts are cached</h1>\n<p>The forecast should <b>still show</b> when the network drops &amp; returns.</p></body></html>";
         std::fs::write(root.join("decision.html"), html).unwrap();
         std::fs::write(root.join("decision.htm"), html).unwrap();

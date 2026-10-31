@@ -104,7 +104,7 @@ jobs:
         run: |
           python -m venv "$RUNNER_TEMP/vibe"
           if [ "$RUNNER_OS" = Windows ]; then py="$RUNNER_TEMP/vibe/Scripts/python.exe"; else py="$RUNNER_TEMP/vibe/bin/python"; fi
-          "$py" -m pip install --disable-pip-version-check --no-input --require-hashes --only-binary :all: \
+          "$py" -m pip install --disable-pip-version-check --no-input --require-hashes --only-binary :all: --no-deps \
             -r crates/vw-vibe-install/pin/vibe.requirements.txt
           "$py" -c "import importlib.metadata as m; print('mistral-vibe', m.version('mistral-vibe'))"
           echo "VIBE_PYTHON=$py" >> "$GITHUB_ENV"

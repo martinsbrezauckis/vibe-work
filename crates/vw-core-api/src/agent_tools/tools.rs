@@ -131,8 +131,7 @@ pub(crate) async fn call(
     }
 }
 
-/// The tools answered in one call by their own modules (read aloud, the side panel, the on-demand switches and
-/// `chrome_outcome`); `None` for every other tool.
+/// The tools answered in one call by their own modules; `None` for every other tool.
 async fn small_tool(
     shared: &Arc<Shared>,
     tools: &Arc<AgentTools>,
@@ -153,12 +152,12 @@ async fn small_tool(
     }
 
     Some(match tool {
+        names::SEARCH => super::search_tool::call(shared, session_id, args.clone()).await,
         names::READ_ALOUD => crate::read_aloud::tool(shared, session_id, args).await,
         names::PANEL_READ => crate::panel_read::tool(shared, session_id, args).await,
-        names::USE_YOUR_CHROME | names::USE_HEADLESS_BROWSER => {
+        names::USE_HEADLESS_BROWSER => {
             crate::on_demand::tool(shared, &tools.on_demand, session_id, tool)
         }
-        names::CHROME_OUTCOME => Ok(crate::chrome_control::outcome_tool(shared, session_id)),
         _ => return None,
     })
 }

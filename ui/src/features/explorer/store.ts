@@ -33,6 +33,7 @@ export interface ExplorerState {
   hits: readonly ExplorerHit[];
   searchVersions: readonly ExplorerVersion[];
   searchLimited: boolean;
+  searchUnreadable: boolean;
   versions: readonly ExplorerVersion[];
   cursor: string | null;
   historyLoading: boolean;
@@ -74,6 +75,7 @@ const initial: ExplorerState = {
   hits: [],
   searchVersions: [],
   searchLimited: false,
+  searchUnreadable: false,
   versions: [],
   cursor: null,
   historyLoading: false,
@@ -365,6 +367,7 @@ export function createExplorer(core: CoreController) {
         searchVersions: [],
         searching: !!query.trim(),
         searchLimited: false,
+        searchUnreadable: false,
       }));
       if (!folder || !query.trim()) return;
       // Search in this folder: the core searches only there, so its 500-hit cap counts inside the folder.
@@ -382,7 +385,7 @@ export function createExplorer(core: CoreController) {
               store.set((s) => ({ ...s, hits: result.hits, searchLimited: result.truncated }));
           })
           .catch(() => {
-            if (alive()) store.set((s) => ({ ...s, searchLimited: true }));
+            if (alive()) store.set((s) => ({ ...s, searchUnreadable: true }));
           })
           .finally(finish);
         void run(folder, { op: "history", cursor: null, query })

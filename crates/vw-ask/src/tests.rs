@@ -121,48 +121,7 @@ fn a_session_grant_covers_only_an_equal_permission_set() {
 }
 
 /// "Always" only for rows naming a separate Settings control: "Close tabs you opened" on its Chrome card.
-#[test]
-fn no_policy_row_offers_always_without_a_settings_control() {
-    for kind in policies() {
-        let row = policy(kind).unwrap();
-        assert_eq!(
-            row.always_setting,
-            always_settings().find(|(k, _)| *k == kind).map(|(_, s)| s),
-            "{kind}"
-        );
-    }
-    let named: Vec<_> = always_settings().collect();
-    assert_eq!(
-        named,
-        vec![(chrome::CLOSE_TABS_KIND, "browser-close-user-tabs")]
-    );
-    for group in chrome::Group::ALL {
-        let row = policy(group.ask_kind()).unwrap();
-        assert_eq!(row.surface, Surface::Card);
-        assert_eq!(
-            row.always_setting, None,
-            "no card raises the level: {group:?}"
-        );
-    }
-    assert_eq!(policy(chrome::OTHER_KIND).unwrap().always_setting, None);
-    assert!(!policy(chrome::LOOSEN_KIND).unwrap().person_only);
-}
 
-#[test]
-fn owner_debug_api_can_answer_non_vault_restorations_and_permission_changes() {
-    for kind in [
-        chrome::LOOSEN_KIND,
-        chrome::RESTORE_KIND,
-        "newChat/restoreFolder",
-    ] {
-        let row = policy(kind).unwrap();
-        assert_eq!(row.surface, Surface::Native);
-        assert!(
-            !row.person_only,
-            "{kind}: only vault actions require a person"
-        );
-    }
-}
 #[test]
 fn notes_show_hidden_format_characters_as_escapes() {
     // Direction overrides, zero-width and line/paragraph separators would change how the note reads to the agent

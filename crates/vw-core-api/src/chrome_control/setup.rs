@@ -8,11 +8,12 @@ use serde::{Deserialize, Serialize};
 /// Chrome Control's native messaging host name (the helper registers under it; the extension connects to it).
 pub const HOST_NAME: &str = "com.vibework.chrome_control";
 /// The extension's id in the Chrome Web Store: the store item's id, derived from its public key.
-pub const EXTENSION_ID: &str = "gdkmdhknnlblijooalnfaenjabeifadd";
-/// The extension's name in the Chrome Web Store and in Chrome. Google's trademark rule
+pub const EXTENSION_ID: &str = "gnlamocfdabihichplpepjpehlbafhng";
+/// The extension's name in the Chrome Web Store and in Chrome (the app's own name: say "the Vibe Work extension" where
+/// text could mean the app). Google's trademark rule
 /// keeps "Chrome" out of the name (the listing says "for Google Chrome"); the same family name will serve other
 /// browsers later. The one place to change it on Vibe Work's side; Vibe Work's Settings section stays "Your Chrome".
-pub const STORE_LISTING_NAME: &str = "Vibe Work Browser Control";
+pub const STORE_LISTING_NAME: &str = "Vibe Work";
 /// The Chrome Control installation offer key.
 pub const PLUGIN: &str = "chrome-control";
 
@@ -129,6 +130,9 @@ pub struct ChromeSetupView {
     pub profiles: Vec<String>,
     /// The store page.
     pub store_url: String,
+    /// The store listing is in Google's review (the last accepted signed release manifest says so): the setup shows
+    /// that in place of the store button. False when no manifest stated it (the store link).
+    pub store_review: bool,
     /// Pairing state reported by the owned helper, in plain words.
     pub pairing: String,
     /// Short public identity to compare with Chrome (never the owner secret).
@@ -241,6 +245,7 @@ pub(crate) fn view(
             browsers: Vec::new(),
             profiles: Vec::new(),
             store_url: String::new(),
+            store_review: false,
             pairing: ABSENT.to_owned(),
             fingerprint: None,
         };
@@ -262,6 +267,7 @@ pub(crate) fn view(
         browsers: receipt.map(|r| r.browsers).unwrap_or_default(),
         profiles,
         store_url: store_url(&config.extension_id),
+        store_review: false,
         pairing: package
             .err()
             .unwrap_or_else(|| "Chrome Control is not connected".to_owned()),
@@ -342,7 +348,7 @@ fn write_file(made: &mut Made, path: &Path, bytes: &[u8]) -> Result<(), String> 
 fn host_manifest(helper: &Path, extension_id: &str) -> Vec<u8> {
     let manifest = serde_json::json!({
         "name": HOST_NAME,
-        "description": format!("{STORE_LISTING_NAME} helper"),
+        "description": format!("{STORE_LISTING_NAME} extension helper"),
         "path": helper,
         "type": "stdio",
         "allowed_origins": [format!("chrome-extension://{extension_id}/")],

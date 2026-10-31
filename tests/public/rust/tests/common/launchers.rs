@@ -7,8 +7,8 @@
 //! lease helper.
 
 /// The Vibe process behind `pid`, a server program that already answered (so its launchers have started everything):
-/// from `pid` down, the only child that names the same program, as long as there is one. `pid` itself on Unix or when
-/// nothing names it below.
+/// from `pid` down, the only child that runs the same server ([`relaunches`]), as long as there is one. `pid` itself
+/// on Unix or when no child runs it.
 #[must_use]
 pub fn interpreter(pid: u32) -> u32 {
     if !cfg!(windows) {
@@ -23,17 +23,33 @@ pub fn interpreter(pid: u32) -> u32 {
     let mut current = pid;
     // A launcher has exactly one child; more than one (or none) ends the chain.
     for _ in 0..8 {
+        let Some(parent) = snapshot.alive(current).map(|p| p.cmdline.clone()) else {
+            break;
+        };
         let children: Vec<u32> = snapshot
             .processes
             .values()
             .filter(|p| p.alive && p.ppid == Some(current) && snapshot.parent_of(p).is_some())
-            .filter(|p| p.cmdline.iter().take(2).any(|arg| arg == &program))
+            .filter(|p| relaunches(&program, &parent, &p.cmdline))
             .map(|p| p.pid)
             .collect();
         let [child] = children.as_slice() else { break };
         current = *child;
     }
     current
+}
+
+/// Whether `child` (a child of the launcher running `parent`) is the next process of the server that the started
+/// command `program` names. Two launcher kinds:
+/// - an entry point (`vibe-app-server.exe`) or CPython's venv `python.exe`: the child names `program` itself as its
+///   first or second argument (`<python> <entry point> ...`; CPython's venv launcher keeps the spelled `argv[0]`);
+/// - uv's venv `python.exe` (a `uv venv` environment): the child is `<base python>` followed by exactly the parent's
+///   arguments; only `argv[0]` changes. The supervisor starts Vibe as `<env python> -P -c <adapter> <entry point>`,
+///   so there no argument names the started program.
+#[must_use]
+pub fn relaunches(program: &str, parent: &[String], child: &[String]) -> bool {
+    child.iter().take(2).any(|arg| arg == program)
+        || (parent.len() > 1 && child.get(1..) == parent.get(1..))
 }
 
 /// `root` and every live process below it (start-consistent parent links).

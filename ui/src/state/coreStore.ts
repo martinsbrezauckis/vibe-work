@@ -224,6 +224,8 @@ export function createCore(
   // A session we created is "local" until Vibe lists it, which happens once a turn has run. A turn
   // that ends on a local-only session therefore schedules one refresh (debounced, no timer loop).
   let localTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Runtime reads on their way, by their params (`run`). */
+  const runtimeReads = new Map<string, Promise<CommandResult>>();
   const refreshSoon = (): void => {
     localTimer ??= setTimeout(() => {
       localTimer = null;
@@ -293,14 +295,33 @@ export function createCore(
             };
       });
     },
-    async run(command, options) {
-      try {
-        const result = await client.execute(command, options);
-        fold(result);
-        return result;
-      } catch (thrown) {
-        throw thrown instanceof CoreCallError ? thrown : toCallError(thrown);
+    run(command, options) {
+      // A chat's runtime read that is already on its way answers every caller that asks meanwhile (the model menu
+      // re-reads when it opens; it never doubles a read still running).
+      const key =
+        command.type === "call" && command.method === "runtime/read"
+          ? JSON.stringify(command.params)
+          : null;
+      const running = key === null ? undefined : runtimeReads.get(key);
+      if (running !== undefined) return running;
+      const result = (async () => {
+        try {
+          const result = await client.execute(command, options);
+          fold(result);
+          return result;
+        } catch (thrown) {
+          throw thrown instanceof CoreCallError ? thrown : toCallError(thrown);
+        }
+      })();
+      if (key !== null) {
+        runtimeReads.set(key, result);
+        void result
+          .catch(() => undefined)
+          .finally(() => {
+            runtimeReads.delete(key);
+          });
       }
+      return result;
     },
     stop() {
       if (localTimer !== null) clearTimeout(localTimer);

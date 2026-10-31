@@ -172,6 +172,7 @@ export function effectView(entry: Obj): EffectView {
   const live = effectLive(entry);
   const status = statusOf(entry);
   const label = live ? liveLabel(call) : settledLabel(call, settled);
+  if (!live && (status === "skipped" || state["decision"] === "skip")) label.verb = "Stopped";
   const toolName = str(detail["toolName"]) ?? str(entry["title"]) ?? "";
   // unified Vibe labels connector tool steps with the raw name (`connector_linear.list_issues`);
   // show "Linear: list issues" instead.

@@ -20,7 +20,9 @@ use vw_host::{HostEvent, HostHandle, NotifyRequest, TerminalAttached, UiReply, U
 use crate::dialogs;
 use crate::updater::UpdatesHandle;
 
-/// Executes one core command for the window (`origin = ui`; the host's grants aside, module docs).
+/// Executes one core command for the window (`origin = ui`; the host's grants aside, module docs). `doc` is the
+/// sending main document's id (one per page load, `tauriClient.ts`): a command the replaced document sent keeps
+/// that document's placement generation even when it starts after a reload (`HostHandle::document_generation`).
 ///
 /// # Errors
 /// The core's [`CoreError`] (serialized to the JS side as the rejection value).
@@ -28,8 +30,9 @@ use crate::updater::UpdatesHandle;
 pub async fn core_execute(
     host: State<'_, HostHandle>,
     command: Command,
+    doc: Option<String>,
 ) -> Result<CommandResult, CoreError> {
-    host.execute_window(command).await
+    host.execute_window(doc.as_deref(), command).await
 }
 
 /// Starts (or restarts) the event stream into `events`: first a snapshot of every loaded session,

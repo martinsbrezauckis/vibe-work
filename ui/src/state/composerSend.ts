@@ -18,6 +18,7 @@
  *   `classify`; the Debug API acts as the user, and the core supplies its confirmation); a call the
  *   gate still wants confirmed (the window's own dialog) is asked for here, like the session delete flow.
  */
+import { syncPromptHistory } from "./promptHistory";
 import type { CommandResult, JsonValue } from "../protocol/core";
 import { type CoreCallError, toCallError } from "../protocol/client/types";
 import {
@@ -157,7 +158,12 @@ export function createSendActions(deps: {
     content: SentContent,
   ): Promise<SendOutcome> => {
     const previous = chains.get(sessionId) ?? Promise.resolve();
-    const next = previous.then(() => deliver(sessionId, wanted, content));
+    const next = previous.then(async () => {
+      const outcome = await deliver(sessionId, wanted, content);
+      if (outcome.ok && content.restoreOnFailure !== false && content.text.trim() !== "")
+        void syncPromptHistory(core, composer, content.text);
+      return outcome;
+    });
     chains.set(
       sessionId,
       next.catch(() => undefined),
@@ -324,8 +330,8 @@ export function createSendActions(deps: {
         try {
           await core.run({ type: "stopSession", sessionId });
           composer.setCompacting(sessionId, false);
-          // A compaction in flight still finishes after the Stop; a message sent now waits for it and is not lost.
-          composer.note(sessionId, "Still compacting. Your next message is sent after that.");
+          // Stop closes the channel; no later result tells this window when background compaction ends.
+          composer.note(sessionId, null);
           return true;
         } catch (thrown) {
           fail(sessionId, "stop", toCallError(thrown));

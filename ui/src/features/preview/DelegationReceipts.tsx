@@ -6,16 +6,15 @@
 import type { ReactElement } from "react";
 
 import type { DelegationReceipt } from "../../protocol/core";
-import { term, TEXT, wording } from "../../vocabulary";
+import { TEXT } from "../../vocabulary";
 
 const ACTIONS: Record<DelegationReceipt["act"], string> = {
-  closeUserTabs: term("browserPermissions", "closeUserTabs").name,
+  closeUserTabs: "Close tab",
 };
 
 const AUTHORITY: Record<DelegationReceipt["authority"], string> = {
-  closeUserTabs: wording(TEXT.browserPermissionAuthority, {
-    name: term("browserPermissions", "closeUserTabs").name,
-  }),
+  accessMode: "Chat access mode",
+  closeUserTabs: "Previous permission",
   confirmedByYou: TEXT.browserConfirmedAuthority,
 };
 

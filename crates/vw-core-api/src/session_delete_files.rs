@@ -1,6 +1,7 @@
 //! Exact Vibe deletion targets, inspected and removed through no-follow directory handles.
 //! Depends on cap-std/cap-fs-ext; `session_delete` supplies configured storage and authorized UUIDs.
 //! Refuses every link/reparse point, including ancestors and descendants; never chmods or follows one.
+//! The chat's plugin data folder goes too, but only as a best effort: a link in it leaves it in place.
 
 use std::io::{self, Read};
 use std::path::{Component, Path, PathBuf};
@@ -258,7 +259,28 @@ pub(crate) fn finish(targets: &Targets, id: &str) -> io::Result<()> {
     if let Some(name) = &targets.legacy {
         remove(&dir, Path::new(name), &mut budget, 0)?;
     }
+    plugin_data(&dir, id);
     Ok(())
+}
+
+/// The chat's plugin data (`plugins/data/<id>`: Vibe creates one folder per plugin there and never removes it).
+/// Its content is the plugins' own, so a link anywhere in it, or a tree past the budget, leaves the whole folder in
+/// place (never followed, never removed) instead of stopping the chat's deletion; it is inspected completely before
+/// anything is removed.
+fn plugin_data(save: &Dir, id: &str) {
+    let walked = || -> io::Result<()> {
+        let data = child(&child(save, Path::new("plugins"))?, Path::new("data"))?;
+        let mut budget = 100_000;
+        inspect(&data, Path::new(id), &mut budget, 0)?;
+        let mut budget = 100_000;
+        remove(&data, Path::new(id), &mut budget, 0)
+    };
+    match walked() {
+        Err(e) if e.kind() != io::ErrorKind::NotFound => {
+            tracing::warn!(error = %e, "a deleted chat's plugin data was left in place");
+        }
+        _ => {}
+    }
 }
 
 #[cfg(test)]

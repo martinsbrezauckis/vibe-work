@@ -1,22 +1,7 @@
-//! `chromeControl`: Settings › Browser › Your Chrome and the Chrome Control cards, for the window and the Debug API
-//! (both act as the user; the agent has no route here).
-//!
-//! - `read`: the level and the setup status;
-//! - `setLevel`: lowering saves at once; raising asks the native confirmation. The owner Debug API's request
-//!   answers its confirmation; a window request still waits for its answer. Cancel keeps the level;
-//! - `answer`: the user's answer on a Chrome Control card;
-//! - `offerSetup` / `setup`: the one-click set up: the window shows the
-//!   offer, the click confirms it, installs and turns Chrome Control's tools on (no second confirmation);
-//! - `openStore`: the store page in Chrome; `remove`: deletes what the set up made.
-//!
-//! Depends on: `chrome_control` (`check`, `setup`, `text`), the native confirmer, the install offers.
-//! Called by: `dispatch`.
-use serde_json::json;
-use vw_ask::chrome::Level;
-use vw_ask::{AnsweredBy, Choice, ChromeSettings};
-use vw_gate::{Confirmation, ConfirmationRequest, Confirmer};
+//! Browser availability and connection setup for Settings and the Debug API.
+//! Called by core dispatch; permissions come from chat access modes.
 
-use super::{check, setup, text};
+use super::setup;
 use crate::install_offers::{OfferKey, ToolsInstallOffer};
 use crate::{CommandResult, Core, CoreError, ErrorCode, Origin};
 
@@ -30,22 +15,31 @@ use crate::{CommandResult, Core, CoreError, ErrorCode, Origin};
     deny_unknown_fields
 )]
 pub enum ChromeControlRequest {
-    /// The level and the setup status.
+    /// Availability, connection and chat work states.
     Read {},
-    /// Choose the level.
-    SetLevel {
-        /// The level.
-        level: Level,
+    /// Claim one selected-text item for the composer.
+    TakeSelection {
+        /// The pending selection identity.
+        selection_id: String,
     },
-    /// Answer an open Chrome Control card.
-    Answer {
-        /// The card's ask id.
-        ask_id: String,
-        /// once, session or no.
-        answer: Choice,
-        /// Optional note sent with No.
-        #[serde(default)]
-        note: Option<String>,
+    /// List connected tabs without opening a chat window.
+    Tabs {},
+    /// Read the exact tab selected by the person.
+    TabContext {
+        /// Connected profile identity.
+        profile_id: String,
+        /// Exact tab identity.
+        tab_id: u32,
+    },
+    /// Turn Chrome tools on or off.
+    SetEnabled {
+        /// Whether Chrome tools are available.
+        enabled: bool,
+    },
+    /// Settings > Developer: let the agent use local-network pages in Chrome (off by default).
+    SetLocalNetwork {
+        /// Whether local-network pages are allowed for the agent in Chrome.
+        enabled: bool,
     },
     /// What Set up installs, as an offer the click confirms.
     OfferSetup {},
@@ -65,10 +59,18 @@ pub enum ChromeControlRequest {
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct ChromeControlView {
-    /// The level.
-    pub level: Level,
-    /// The extension lowered at least one permission; reselecting a level asks before restoring it.
-    pub lowered: bool,
+    /// Whether Chrome tools are available.
+    pub enabled: bool,
+    /// Settings > Developer: local-network pages are allowed for the agent in Chrome.
+    pub local_network: bool,
+    /// The running helper acknowledged `local_network`'s current value (false while a change is still being sent).
+    pub local_network_applied: bool,
+    /// Recent chat work, bounded and independent of permissions.
+    pub work: Vec<super::ChromeWorkView>,
+    /// Pending selected-text deliveries, claimed once by a composer.
+    pub pending_selections: Vec<String>,
+    /// A bounded delivery failure state.
+    pub selection_error: Option<String>,
     /// Where the setup stands.
     pub setup: setup::ChromeSetupView,
 }
@@ -77,40 +79,71 @@ fn invalid(message: &str) -> CoreError {
     CoreError::new(ErrorCode::InvalidCommand, message)
 }
 
-fn not_changed() -> CoreError {
-    CoreError::new(ErrorCode::ConfirmationDeclined, "Not changed.")
-}
-
 const OFFER_KIND: &str = "chromeControl";
 
-impl Core {
-    pub(super) fn chrome_view(&self) -> ChromeControlView {
-        let chrome = &self.shared.chrome_control;
-        let mut setup = setup::view(
-            &chrome.config,
-            chrome.dir(),
-            &self.shared.instructions.own_home,
-        );
-        let pairing = chrome
-            .owner
-            .pairing
+/// The store listing is in Google's review: the last manifest the Vibe installer accepted says `"review"`.
+/// No installer, no manifest, `"available"` or an unknown value: the normal store link.
+pub(crate) fn store_review(shared: &crate::core::Shared) -> bool {
+    shared
+        .config
+        .vibe_install
+        .as_ref()
+        .is_some_and(|installer| {
+            installer.extension_store() == Some(vw_vibe_install::ExtensionStore::Review)
+        })
+}
+
+pub(crate) fn view(shared: &crate::core::Shared) -> ChromeControlView {
+    let chrome = &shared.chrome_control;
+    let mut setup = setup::view(&chrome.config, chrome.dir(), &shared.instructions.own_home);
+    setup.store_review = setup.state != setup::SetupState::Absent && store_review(shared);
+    let pairing = chrome
+        .owner
+        .pairing
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if setup.package && !pairing.0.is_empty() {
+        setup.pairing.clone_from(&pairing.0);
+    }
+    if setup.package {
+        setup.fingerprint.clone_from(&pairing.1);
+    }
+    let selections = chrome
+        .selections
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    ChromeControlView {
+        pending_selections: selections.ids(),
+        selection_error: selections.error.clone(),
+        enabled: chrome.enabled(),
+        local_network: chrome.local_network(),
+        local_network_applied: chrome.local_network_applied(),
+        work: chrome
+            .work
             .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if setup.package && !pairing.0.is_empty() {
-            setup.pairing.clone_from(&pairing.0);
-        }
-        if setup.package {
-            setup.fingerprint.clone_from(&pairing.1);
-        }
-        ChromeControlView {
-            level: chrome.settings().level,
-            lowered: !chrome
-                .lowered
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .is_empty(),
-            setup,
-        }
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .view(),
+        setup,
+    }
+}
+
+impl Core {
+    /// Settings > Developer > Local network pages for the agent in Chrome.
+    async fn set_local_network(&self, enabled: bool) -> Result<CommandResult, CoreError> {
+        self.shared
+            .chrome_control
+            .set_local_network(enabled)
+            .map_err(|reason| invalid(&reason))?;
+        // Chrome's live tabs take the switch at once (the helper holds new actions until Chrome confirms).
+        super::send_local_network(&self.shared).await;
+        self.shared.emit(crate::CoreEvent::ChromeControl {
+            view: self.chrome_view(),
+        });
+        Ok(self.chrome_result(None))
+    }
+
+    pub(super) fn chrome_view(&self) -> ChromeControlView {
+        view(&self.shared)
     }
 
     fn chrome_result(&self, offer: Option<ToolsInstallOffer>) -> CommandResult {
@@ -120,81 +153,18 @@ impl Core {
         }
     }
 
-    /// Saves `next`, asking the native confirmation first when it raises the level.
-    async fn chrome_change(&self, origin: Origin, next: ChromeSettings) -> Result<(), CoreError> {
-        let chrome = &self.shared.chrome_control;
-        let now = chrome.settings();
-        let restrictions = chrome
-            .lowered
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .clone();
-        let next_policy = super::mapping::policy(
-            next,
-            crate::browser_delegation::load(&self.shared).close_user_tabs,
-        );
-        let rank = |value: &str| match value {
-            "allow" => 2,
-            "ask" => 1,
-            _ => 0,
-        };
-        let restores = restrictions.iter().any(|(cap, value)| {
-            rank(next_policy["policy"][cap].as_str().unwrap_or("never")) > rank(value)
-        });
-        if now.raises(next) || restores {
-            let request = ConfirmationRequest {
-                method: vw_ask::chrome::LOOSEN_KIND.to_owned(),
-                summary: text::raise_summary(now, next),
-                params: json!({"level": next.level}),
-                requester: crate::command::requester(origin),
-                always: None,
-            };
-            if self.shared.confirmer.confirm(&request).await != Confirmation::Approved {
-                return Err(not_changed());
-            }
-            // Another change landed while the dialog was open: the user confirmed a change from another level.
-            if chrome.settings() != now {
-                return Err(not_changed());
-            }
-        }
-        let _held = chrome.lifecycle.lock().await;
-        if chrome.settings() != now
-            || *chrome
-                .lowered
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                != restrictions
-        {
-            return Err(not_changed());
-        }
-        chrome.save(next).map_err(|reason| {
-            CoreError::new(
-                ErrorCode::Internal,
-                vw_vocabulary::text("chromeSaveFailed")
-                    .unwrap_or("Could not save the Chrome Control level: {reason}.")
-                    .replace("{reason}", &reason),
-            )
-        })?;
-        if let Some(keys) = &self.shared.config.keys {
-            keys.save_chrome_restrictions(std::collections::BTreeMap::new())
-                .await
-                .map_err(|_| invalid("Could not save Chrome Control's permissions."))?;
-        }
-        chrome
-            .lowered
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .clear();
-        tracing::info!(level = next.level.id(), "Chrome Control level saved");
-        self.shared.emit(crate::CoreEvent::ChromeControl {
-            view: self.chrome_view(),
-        });
-        Ok(())
-    }
-
     fn setup_offer(&self) -> Result<ToolsInstallOffer, CoreError> {
         let config = &self.shared.chrome_control.config;
         setup::packaged_helper(config).map_err(|reason| invalid(&reason))?;
+        // In Google's review the store page is not opened (the setup says so instead), so the offer does not say it.
+        let store = if store_review(&self.shared) {
+            String::new()
+        } else {
+            format!(
+                " Opens the Chrome Web Store page so you can add the {} extension.",
+                setup::STORE_LISTING_NAME
+            )
+        };
         self.shared.install_offers.make(
             OfferKey::new(OFFER_KIND, setup::PLUGIN, ""),
             ToolsInstallOffer {
@@ -207,14 +177,62 @@ impl Core {
                 // The store and Chrome show the extension under its listing name, not "Chrome Control".
                 runs: format!(
                     "Installs the Chrome Control helper in Vibe Work's own folder, for your user only (no \
-                     administrator), tells Google Chrome where it is, and makes Chrome Control available when you allow it in a chat. Opens the Chrome Web Store page so you can add the extension, {}.",
-                    setup::STORE_LISTING_NAME
+                     administrator), tells Google Chrome where it is, and connects Chrome Control to Vibe Work.{store}"
                 ),
                 version: None,
                 expires_at: 0,
             },
             self.shared.asks.now_ms(),
         )
+    }
+
+    /// `chromeControl` `setup`: takes the one-time offer, stores the owner identity and installs the helper.
+    async fn chrome_setup(&self, offer_id: String) -> Result<CommandResult, CoreError> {
+        let chrome = &self.shared.chrome_control;
+        let _held = chrome.lifecycle.lock().await;
+        if chrome
+            .dir()
+            .is_some_and(|dir| dir.join("setup.json").is_file())
+        {
+            return Err(invalid("Chrome Control is already set up."));
+        }
+        self.shared.install_offers.take(
+            &offer_id,
+            &OfferKey::new(OFFER_KIND, setup::PLUGIN, ""),
+            self.shared.asks.now_ms(),
+        )?;
+        let state = chrome.dir().ok_or_else(|| {
+            invalid("Could not set up Chrome Control: Vibe Work has no app folder.")
+        })?;
+        let keys = self
+            .shared
+            .config
+            .keys
+            .as_ref()
+            .ok_or_else(|| invalid("Chrome Control needs the OS credential store."))?;
+        keys.create_chrome_owner().await.map_err(|_| {
+            invalid("Could not store Chrome Control's owner identity. Nothing was changed.")
+        })?;
+        if let Err(reason) =
+            setup::install(&chrome.config, state, &self.shared.instructions.own_home)
+        {
+            let _ = keys.delete_chrome_owner().await;
+            return Err(CoreError::new(
+                ErrorCode::Internal,
+                format!("Could not set up Chrome Control: {reason}. Nothing was changed."),
+            ));
+        }
+        super::start_owner(&self.shared).await;
+        tracing::info!("Chrome Control set up");
+        if store_review(&self.shared) {
+            tracing::info!("the store listing is in review: the store page is not opened");
+        } else if let Err(problem) = setup::open_store(&chrome.config) {
+            tracing::warn!(%problem, "the Chrome Web Store page could not be opened");
+        }
+        self.shared.emit(crate::CoreEvent::ChromeControl {
+            view: self.chrome_view(),
+        });
+        Ok(self.chrome_result(None))
     }
 
     async fn chrome_remove(&self) -> Result<CommandResult, CoreError> {
@@ -231,7 +249,6 @@ impl Core {
         }
         let removed = setup::remove(state);
         chrome.reset();
-        super::removed(&self.shared);
         removed.map_err(|reason| {
             CoreError::new(
                 ErrorCode::Internal,
@@ -247,12 +264,11 @@ impl Core {
     /// `chromeControl`.
     ///
     /// # Errors
-    /// `confirmationDeclined` ("Not changed.") when a raise was not confirmed; `invalidCommand` for a closed
-    /// card or an answer not offered; `invalidParams`/`staleOffer` for a used or expired setup offer; `internal` when
-    /// a save, the set up or the remove failed (nothing changed).
+    /// `invalidParams`/`staleOffer` for a used or expired setup offer; `internal` when
+    /// saving availability, setup or removal fails.
     pub(crate) async fn chrome_control(
         &self,
-        origin: Origin,
+        _origin: Origin,
         request: ChromeControlRequest,
     ) -> Result<CommandResult, CoreError> {
         let chrome = &self.shared.chrome_control;
@@ -261,71 +277,45 @@ impl Core {
         }
         match request {
             ChromeControlRequest::Read {} => Ok(self.chrome_result(None)),
-            ChromeControlRequest::SetLevel { level } => {
-                self.chrome_change(origin, ChromeSettings { level }).await?;
-                Ok(self.chrome_result(None))
+            ChromeControlRequest::TakeSelection { selection_id } => {
+                let mut selection = chrome
+                    .selections
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .take(&selection_id);
+                if let Some(selection) = &mut selection {
+                    selection.keep_live_chat(|id| self.shared.store.view(id).is_some());
+                }
+                super::owner::publish(&self.shared);
+                Ok(CommandResult::ChromeSelection { selection })
             }
-            ChromeControlRequest::Answer {
-                ask_id,
-                answer,
-                note,
-            } => {
-                let by = if crate::command_origin::debug_api_acts(&self.shared, origin) {
-                    AnsweredBy::DebugApi
+            ChromeControlRequest::Tabs {} => super::tabs::read(&self.shared, chrome).await,
+            ChromeControlRequest::TabContext { profile_id, tab_id } => {
+                super::tabs::pick(&self.shared, chrome, &profile_id, tab_id).await
+            }
+            ChromeControlRequest::SetEnabled { enabled } => {
+                chrome
+                    .set_enabled(enabled)
+                    .map_err(|reason| invalid(&reason))?;
+                if enabled {
+                    super::start_owner(&self.shared).await;
                 } else {
-                    AnsweredBy::Person
-                };
-                check::answer(&self.shared, &ask_id, answer, note, by)?;
-                Ok(self.chrome_result(None))
-            }
-            ChromeControlRequest::OfferSetup {} => {
-                let offer = self.setup_offer()?;
-                Ok(self.chrome_result(Some(offer)))
-            }
-            ChromeControlRequest::Setup { offer_id } => {
-                let _held = chrome.lifecycle.lock().await;
-                if chrome
-                    .dir()
-                    .is_some_and(|dir| dir.join("setup.json").is_file())
-                {
-                    return Err(invalid("Chrome Control is already set up."));
-                }
-                self.shared.install_offers.take(
-                    &offer_id,
-                    &OfferKey::new(OFFER_KIND, setup::PLUGIN, ""),
-                    self.shared.asks.now_ms(),
-                )?;
-                let state = chrome.dir().ok_or_else(|| {
-                    invalid("Could not set up Chrome Control: Vibe Work has no app folder.")
-                })?;
-                let keys = self
-                    .shared
-                    .config
-                    .keys
-                    .as_ref()
-                    .ok_or_else(|| invalid("Chrome Control needs the OS credential store."))?;
-                keys.create_chrome_owner().await.map_err(|_| {
-                    invalid("Could not store Chrome Control's owner identity. Nothing was changed.")
-                })?;
-                if let Err(reason) =
-                    setup::install(&chrome.config, state, &self.shared.instructions.own_home)
-                {
-                    let _ = keys.delete_chrome_owner().await;
-                    return Err(CoreError::new(
-                        ErrorCode::Internal,
-                        format!("Could not set up Chrome Control: {reason}. Nothing was changed."),
-                    ));
-                }
-                super::start_owner(&self.shared).await;
-                tracing::info!("Chrome Control set up");
-                if let Err(problem) = setup::open_store(&chrome.config) {
-                    tracing::warn!(%problem, "the Chrome Web Store page could not be opened");
+                    super::stop_owner(&self.shared).await;
+                    chrome.reset();
                 }
                 self.shared.emit(crate::CoreEvent::ChromeControl {
                     view: self.chrome_view(),
                 });
                 Ok(self.chrome_result(None))
             }
+            ChromeControlRequest::SetLocalNetwork { enabled } => {
+                self.set_local_network(enabled).await
+            }
+            ChromeControlRequest::OfferSetup {} => {
+                let offer = self.setup_offer()?;
+                Ok(self.chrome_result(Some(offer)))
+            }
+            ChromeControlRequest::Setup { offer_id } => self.chrome_setup(offer_id).await,
             ChromeControlRequest::OpenStore {} => {
                 setup::open_store(&chrome.config)
                     .map_err(|reason| CoreError::new(ErrorCode::Internal, reason))?;

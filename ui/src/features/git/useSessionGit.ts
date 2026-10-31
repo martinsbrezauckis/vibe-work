@@ -31,18 +31,20 @@ function sessionHasGit(status: GitStatusView | undefined): boolean {
 export function useSessionGit(sessionId: string): GitStatusView | undefined {
   const { git, core } = useApp();
   const cwd = useCoreState((s) => s.sessions[sessionId]?.session["cwd"]);
+  // A chosen stored session is read once it is open: until its snapshot the core answers "not open".
+  const opened = useCoreState((s) => s.sessions[sessionId]?.state !== null);
   const status = useStore(git?.store ?? NO_GIT, (s) => s.status[sessionId]);
   useEffect(() => {
-    if (git === null) return;
+    if (git === null || !opened) return;
     void git.load(sessionId, "window");
     return core?.listen((event) => {
       if (event.type === "worktreesChanged" || event.type === "gitBrowserChanged")
         void git.load(sessionId, "window");
     });
-  }, [git, core, sessionId, cwd]);
+  }, [git, core, sessionId, cwd, opened]);
   const hasGit = sessionHasGit(status);
   useEffect(() => {
-    if (git === null || hasGit) return;
+    if (git === null || hasGit || !opened) return;
     let live = true;
     let timer: ReturnType<typeof setTimeout>;
     const poll = async () => {
@@ -54,6 +56,6 @@ export function useSessionGit(sessionId: string): GitStatusView | undefined {
       live = false;
       clearTimeout(timer);
     };
-  }, [git, sessionId, cwd, hasGit]);
+  }, [git, sessionId, cwd, hasGit, opened]);
   return status;
 }

@@ -137,6 +137,12 @@ fn message_body(entry: &Value) -> String {
                     .unwrap_or("picture");
                 notes.push(format!("*[picture: {alias}]*"));
             }
+            // The app's own context block is not something the person attached.
+            Some("resource")
+                if block
+                    .pointer("/resource/uri")
+                    .and_then(Value::as_str)
+                    .is_some_and(|uri| uri.starts_with("vw://app/")) => {}
             Some("resource") => {
                 let name = block
                     .pointer("/resource/name")
@@ -240,10 +246,34 @@ fn hunks(old: &str, new: &str) -> String {
     diff.unified_diff().context_radius(3).to_string()
 }
 
-/// `--- a/<path>` / `+++ b/<path>` and the hunks, capped at [`MAX_DIFF_LINES`].
+/// The path a diff header names: relative to the chat's folder `cwd` when the file is inside it.
+fn shown_path<'a>(path: &'a str, cwd: Option<&str>) -> &'a str {
+    cwd.map(|cwd| cwd.trim_end_matches(['/', '\\']))
+        .filter(|cwd| !cwd.is_empty())
+        .and_then(|cwd| path.strip_prefix(cwd))
+        .and_then(|rest| rest.strip_prefix(['/', '\\']))
+        .filter(|rest| !rest.is_empty())
+        .unwrap_or(path)
+}
+
+/// True for `/x`, `\\x` and `C:\x` / `C:/x`.
+fn absolute(path: &str) -> bool {
+    let bytes = path.as_bytes();
+    path.starts_with(['/', '\\'])
+        || (bytes.len() > 2
+            && bytes[0].is_ascii_alphabetic()
+            && bytes[1] == b':'
+            && matches!(bytes[2], b'/' | b'\\'))
+}
+
+/// `--- a/<path>` / `+++ b/<path>` (an absolute path as it is) and the hunks, capped at [`MAX_DIFF_LINES`].
 fn unified(path: &str, body: &str) -> String {
     let path = path.replace(['\n', '\r'], " ");
-    let text = format!("--- a/{path}\n+++ b/{path}\n{body}");
+    let text = if absolute(&path) {
+        format!("--- {path}\n+++ {path}\n{body}")
+    } else {
+        format!("--- a/{path}\n+++ b/{path}\n{body}")
+    };
     let lines: Vec<&str> = text.lines().collect();
     if lines.len() <= MAX_DIFF_LINES {
         return text.trim_end().to_owned();
@@ -260,7 +290,7 @@ fn unified(path: &str, body: &str) -> String {
 /// The diff of a completed `file_edit` (`state.output.occurrences`, one hunk group per occurrence; hunk line numbers
 /// count from the edited text, the file's line is in the text after the path) or `file_write`
 /// (`state.output.{content, previousContent}`).
-fn effect_diff(entry: &Value) -> Option<String> {
+fn effect_diff(entry: &Value, cwd: Option<&str>) -> Option<String> {
     if entry.pointer("/state/status").and_then(Value::as_str) != Some("completed") {
         return None;
     }
@@ -273,8 +303,8 @@ fn effect_diff(entry: &Value) -> Option<String> {
     let path = s(output, "file")
         .or_else(|| s(output, "filePath"))
         .or_else(|| input.and_then(|i| s(i, "filePath")))
-        .unwrap_or("file")
-        .to_owned();
+        .unwrap_or("file");
+    let path = shown_path(path, cwd).to_owned();
     match kind {
         "file_edit" => {
             let parts: Vec<String> = output
@@ -328,8 +358,13 @@ pub(crate) fn render(head: &ExportHead, entries: &[Value]) -> (String, ExportCou
     let mut body = String::new();
     let mut last_section: Option<&str> = None;
     let mut in_steps = false;
+    let by_id = crate::export_hooks::by_id(entries);
+    let refused = crate::export_hooks::refused_calls(entries, &by_id);
     for entry in entries {
-        if entry.pointer("/outcome/type").and_then(Value::as_str) == Some("discarded") {
+        if entry.pointer("/outcome/type").and_then(Value::as_str) == Some("discarded")
+            || s(entry, "id")
+                .is_some_and(|id| s(entry, "type") == Some("effect") && refused.contains(id))
+        {
             continue;
         }
         match (s(entry, "type"), s(entry, "role")) {
@@ -362,14 +397,20 @@ pub(crate) fn render(head: &ExportHead, entries: &[Value]) -> (String, ExportCou
                 }
                 counts.steps += 1;
                 let _ = writeln!(body, "{}", step_line(entry));
-                if let Some(diff) = effect_diff(entry) {
+                if let Some(diff) = effect_diff(entry, head.cwd.as_deref()) {
                     counts.diffs += 1;
                     let fence = fence_for(&diff);
                     let _ = write!(body, "\n{fence}diff\n{diff}\n{fence}\n\n");
                 }
             }
             (Some("notice"), _) => {
-                if let Some(text) = nonempty(s(entry, "message").or_else(|| s(entry, "text"))) {
+                let hook = crate::export_hooks::is_hook_notice(entry)
+                    .then(|| crate::export_hooks::line(entry, &by_id));
+                let line = match &hook {
+                    Some(line) => line.as_deref(),
+                    None => s(entry, "message").or_else(|| s(entry, "text")),
+                };
+                if let Some(text) = nonempty(line) {
                     let _ = write!(body, "\n> {}\n", text.replace('\n', "\n> "));
                     in_steps = false;
                 }

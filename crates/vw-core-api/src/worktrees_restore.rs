@@ -1,6 +1,8 @@
 //! Reconcile a recorded copy after Vibe restores it onto a fresh recovery branch.
 //! Uses only the successful resume's cwd and the original repository's Git listing; called by sessions.
 //! No new copy or vault authority is inferred, and an adopted recovery branch is never deleted here.
+//! A restored copy is a new folder holding only what git kept, so the `.worktreeinclude` files are copied into it
+//! again, as at its start, never over a file it already has.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -51,6 +53,7 @@ pub(crate) async fn resumed(shared: &Arc<Shared>, state: &Value) -> Result<(), C
                 r.created_branch = false;
             })
             .map_err(core_error)?;
+        restore_includes(&record.repo_root, &path);
         Ok(true)
     })
     .await??;
@@ -58,4 +61,20 @@ pub(crate) async fn resumed(shared: &Arc<Shared>, state: &Value) -> Result<(), C
         shared.emit(crate::CoreEvent::WorktreesChanged {});
     }
     Ok(())
+}
+
+/// Applies the repository's current `.worktreeinclude` plan to the restored copy `dest` (`include::apply` creates new
+/// files only: a file the restore brought back stays as it is). Problems are logged; the resume itself goes on.
+fn restore_includes(root: &std::path::Path, dest: &std::path::Path) {
+    if std::fs::symlink_metadata(root.join(vw_worktrees::include::INCLUDE_FILE)).is_err() {
+        return;
+    }
+    let others: Vec<PathBuf> = vw_worktrees::repo_info::worktrees(root)
+        .map(|list| list.into_iter().skip(1).map(|w| w.path).collect())
+        .unwrap_or_default();
+    let plan = vw_worktrees::include::plan(root, &others);
+    let done = vw_worktrees::include::apply(root, dest, &plan);
+    if let Some(stopped) = done.stopped {
+        tracing::warn!(%stopped, "a restored copy did not get its .worktreeinclude files");
+    }
 }

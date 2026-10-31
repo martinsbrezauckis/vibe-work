@@ -33,6 +33,10 @@ vw-logscan = { path = "../vw-logscan" }
 # Guessable Vault values must never reach the session-log comparison engine.
 zxcvbn = "3"
 walkdir = "2"
+# Shared Files/agent matching and gitignore parsing (no OS search commands).
+regex = "1"
+globset = "0.4"
+ignore = "0.4"
 notify = "8.2.0"
 vw-vocabulary = { path = "../vw-vocabulary" }
 # The Vibe install at setup (`vibe` commands) and the deferred first server start.

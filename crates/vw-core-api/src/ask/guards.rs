@@ -1,5 +1,5 @@
 //! Native guard prompts stay with their connected caller until answered.
-//! Uses the shared confirmer; Git duplicates share a sheet and only one consumes its Allow.
+//! Uses the shared confirmer; identical pending Git calls share one sheet, and its answer answers each of them.
 use crate::core::Shared;
 use std::{
     collections::HashMap,
@@ -69,13 +69,18 @@ fn pending(
             .0
             .lock()
             .unwrap_or_else(PoisonError::into_inner);
-        // Git duplicates join the exact pending command. Only one caller may consume an Allow and run it.
+        // Git duplicates join the exact pending command and all get its answer.
         // Other guards retain their existing per-call policy.
         if !git && calls.get(&key).is_some_and(|p| p.result.borrow().is_none()) {
             key = format!(
                 "{key}:concurrent:{}",
                 NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
             );
+        }
+        // An answered sheet answers only the calls that joined it while it was open; a later identical call gets
+        // its own sheet (the earlier waiters keep their own copy of the answer).
+        if git && calls.get(&key).is_some_and(|p| p.result.borrow().is_some()) {
+            calls.remove(&key);
         }
         if let Some(pending) = calls.get_mut(&key) {
             pending.waiters += 1;
@@ -147,23 +152,19 @@ async fn decision(
         .await
         .map_err(|_| "Permission prompt closed.".to_owned())?;
     let answer = (*result.borrow()).unwrap_or(Confirmation::Declined);
-    let pending = {
+    {
         let mut calls = shared
             .guard_asks
             .0
             .lock()
             .unwrap_or_else(PoisonError::into_inner);
-        // A late waiter for the previous sheet must not consume a newer exact-command request.
+        // The first waiter to wake closes this sheet's entry; a newer sheet for the same exact command keeps its own.
         if calls.get(&owner.key).is_some_and(|p| p.id == id) {
-            calls.remove(&owner.key)
-        } else {
-            None
+            calls.remove(&owner.key);
         }
-    };
+    }
     owner.cancel = false;
-    let Some(_) = pending else {
-        return Err("Already answered.".into());
-    };
+    // Every call that joined this sheet gets its answer: an Allow lets each joined duplicate run, a No refuses each.
     if answer.approved() || include_refusal {
         let record = shared.asks.outcome(&id);
         Ok((

@@ -39,6 +39,7 @@ const BUTTON_APPEARANCE = {
   "text-link": "link-btn",
   link: "ext-link",
   "browser-menu": "browser-menu-item",
+  "menu-option": "it",
   icon: "ibtn",
   status: "sb-vault",
   "file-reference": "fref",

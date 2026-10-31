@@ -17,13 +17,9 @@ function IdentitySettings({ identity }: { identity: ReturnType<typeof gitIdentit
     <section aria-labelledby="git-settings-title">
       <h3 id="git-settings-title">Git</h3>
       <div data-setting="git-identity">
-        <p className="key-line">
-          Name and email for commits made in Vibe Work. Saved in this app’s private data folder.
-          Git’s global config is never changed.
-        </p>
         {state.view?.source === "global" && (
           <p className="key-line">
-            Prefilled from Git’s global config (read only). Save to use these details in Vibe Work.
+            {`Git identity: ${state.view.identity.name} ${state.view.identity.email} (saved in Git’s settings)`}
           </p>
         )}
         <GitIdentityFields

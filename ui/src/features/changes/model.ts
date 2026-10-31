@@ -81,6 +81,16 @@ export function turnText(label: TurnLabel | null): string | null {
     : `during turn ${String(label.number)}`;
 }
 
+/** Names every child whose file effects contributed to this Git diff, keeping session-local turn ids separate. */
+export function fileTurnText(file: FileChange, turns: ChangesView["turns"]): string | null {
+  const children = turns.flatMap((turn) =>
+    turn.subagent !== undefined && turn.files.some((f) => f.path === file.path)
+      ? [`${turn.subagent.name} · turn ${String(turn.number)}`]
+      : [],
+  );
+  return children.length > 0 ? [...new Set(children)].join(" · ") : turnText(file.turn);
+}
+
 /** Per-hunk actions apply to text files that exist on both sides. */
 export function hunkActions(file: FileChange): boolean {
   return file.content === "text" && (file.status === "modified" || file.status === "renamed");

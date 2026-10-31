@@ -198,7 +198,7 @@ pub(crate) async fn prepare(
     by: Actor,
     requester: Requester,
 ) -> Result<crate::ask::tool_calls::receipts::Execution, String> {
-    crate::agent_access::check_for(shared, "vibe-work/fillLogin", session_id)?;
+    crate::agent_access::check_for(shared, METHOD, session_id)?;
     let owner = crate::previews::hub(shared)
         .map_err(|error| error.message)?
         .service
@@ -210,9 +210,84 @@ pub(crate) async fn prepare(
         .fill_check(session_id, &wanted.reference, by)
         .await
         .map_err(|e| note(driver, session_id, by, &wanted.reference, &e))?;
+    let record = |text: &str| driver.fill_refused(session_id, by, &wanted.reference, text);
+    let authorized = authorize(shared, &owner, &wanted.login, &target, requester, &record).await?;
+    let shared = Arc::downgrade(shared);
+    let session_id = session_id.to_owned();
+    Ok(Box::pin(async move {
+        let shared = shared.upgrade().ok_or("Vibe Work closed.")?;
+        let driver = crate::browser::browser(&shared).map_err(|e| e.message)?;
+        let session_id = session_id.as_str();
+        let writer = BrowserLoginWriter {
+            driver,
+            session_id,
+            by,
+        };
+        let record = |text: &str| driver.fill_refused(session_id, by, &wanted.reference, text);
+        authorized
+            .write(&shared, &target, &writer, &record)
+            .await
+            .map(|filled| filled.summary)
+    }))
+}
+
+/// A browser-specific write repeats the target checks without returning the password.
+pub(crate) trait LoginWriter: Sync {
+    fn write(
+        &self,
+        target: &FillTarget,
+        login: &Login,
+        value: &str,
+    ) -> impl std::future::Future<Output = Result<Value, String>> + Send;
+}
+struct BrowserLoginWriter<'a> {
+    driver: &'a Browser,
+    session_id: &'a str,
+    by: Actor,
+}
+impl LoginWriter for BrowserLoginWriter<'_> {
+    async fn write(
+        &self,
+        target: &FillTarget,
+        _login: &Login,
+        value: &str,
+    ) -> Result<Value, String> {
+        self.driver
+            .fill_write(self.session_id, target, value, self.by)
+            .await
+            .map_err(|e| refused(e.check, &e.text))?;
+        Ok(Value::Null)
+    }
+}
+pub(crate) struct FilledLogin {
+    pub receipt: Value,
+    pub summary: Value,
+}
+
+/// Records a refusal in the route's own action log (the built-in browser's); the Chrome route has none.
+type Record<'a> = dyn Fn(&str) + Sync + 'a;
+
+/// Steps (2) to (4), done: the login, the policy read for it and the user's decision. The write re-reads the policy.
+struct Authorized {
+    owner: String,
+    project: crate::entry_permissions::Identity,
+    policy: crate::entry_permissions::Policy,
+    login: Login,
+    decision: &'static str,
+}
+
+/// Steps (2) to (4) for both browser routes: the login, its entry policy, and the grant or the native dialog.
+async fn authorize(
+    shared: &Arc<Shared>,
+    owner: &str,
+    wanted: &str,
+    target: &FillTarget,
+    requester: Requester,
+    record: &Record<'_>,
+) -> Result<Authorized, String> {
     let fail = |check: &'static str, text: String| {
-        let refusal = FillRefusal { check, text };
-        note(driver, session_id, by, &wanted.reference, &refusal)
+        record(&text);
+        refused(check, &text)
     };
     // (2) the login.
     let keys = shared.config.keys.as_ref().ok_or_else(|| {
@@ -222,15 +297,13 @@ pub(crate) async fn prepare(
         )
     })?;
     let folders =
-        crate::agent_tools::session::folders(shared, &owner).map_err(|e| fail("project", e))?;
-    let project = crate::agent_tools::permission_project_of(shared, &owner, &folders)
+        crate::agent_tools::session::folders(shared, owner).map_err(|e| fail("project", e))?;
+    let project = crate::agent_tools::permission_project_of(shared, owner, &folders)
         .map_err(|e| fail("project", e))?;
     let logins = crate::agent_tools::visible_logins(shared, &project)
         .await
         .map_err(|e| fail("vault", e))?;
-    let login = pick(&logins, &wanted.login, &target).inspect_err(|text| {
-        driver.fill_refused(session_id, by, &wanted.reference, text);
-    })?;
+    let login = pick(&logins, wanted, target).inspect_err(|text| record(text))?;
     let policy = project.policy(keys, &login.id).await.map_err(|_| {
         fail(
             "permission",
@@ -238,7 +311,7 @@ pub(crate) async fn prepare(
         )
     })?;
     if policy.permission == vw_keys::EntryPermission::Never {
-        return Err(missing_login(&wanted.login));
+        return Err(missing_login(wanted));
     }
     if target.role == LoginRole::Username && login.username.is_empty() {
         return Err(fail("login", "this login has no user name".to_owned()));
@@ -252,77 +325,112 @@ pub(crate) async fn prepare(
     } else {
         decide(
             shared,
-            &owner,
-            &target,
+            owner,
+            target,
             login,
             requester,
             policy.permission == vw_keys::EntryPermission::Allowed,
         )
         .await
         .map_err(|(decision, reason)| {
-            log(shared, &owner, &target, login, decision);
+            log(shared, owner, target, login, decision);
             fail("grant", reason)
         })?
     };
-    let login = login.clone();
-    let shared = Arc::downgrade(shared);
-    let session_id = session_id.to_owned();
-    Ok(Box::pin(async move {
-        let shared = shared.upgrade().ok_or("Vibe Work closed.")?;
-        let driver = crate::browser::browser(&shared).map_err(|e| e.message)?;
-        let keys = shared.config.keys.as_ref().ok_or("Vault closed.")?;
-        let session_id = session_id.as_str();
-        let login = &login;
+    Ok(Authorized {
+        owner: owner.to_owned(),
+        project,
+        policy,
+        login: login.clone(),
+        decision,
+    })
+}
+
+impl Authorized {
+    /// Steps (5) and (6): the policy again, the password only now, then the route's write.
+    async fn write<W: LoginWriter>(
+        self,
+        shared: &Arc<Shared>,
+        target: &FillTarget,
+        writer: &W,
+        record: &Record<'_>,
+    ) -> Result<FilledLogin, String> {
         let fail = |check: &'static str, text: String| {
-            note(
-                driver,
-                session_id,
-                by,
-                &wanted.reference,
-                &FillRefusal { check, text },
-            )
+            record(&text);
+            refused(check, &text)
         };
+        let keys = shared.config.keys.as_ref().ok_or("Vault closed.")?;
+        let login = &self.login;
         if target.role == LoginRole::Username {
-            if project.policy(keys, &login.id).await.ok().as_ref() != Some(&policy) {
+            if self.project.policy(keys, &login.id).await.ok().as_ref() != Some(&self.policy) {
                 return Err(fail(
                     "permission",
                     "the entry permission changed meanwhile".to_owned(),
                 ));
             }
-            driver
-                .fill_write(session_id, &target, &login.username, by)
-                .await
-                .map_err(|e| refused(e.check, &e.text))?;
-            return Ok(answer(&target, login));
+            let receipt = writer.write(target, login, &login.username).await?;
+            return Ok(FilledLogin {
+                receipt,
+                summary: answer(target, login),
+            });
         }
-        crate::agent_access::check(&shared)?;
+        crate::agent_access::check(shared)?;
         // (5) the password, only now.
         let password = keys
             .login_password(login.id.clone())
             .await
             .map_err(|e| fail("vault", format!("the password could not be read ({e})")))?;
-        crate::agent_access::check(&shared)?;
-        if project.policy(keys, &login.id).await.ok().as_ref() != Some(&policy) {
+        crate::agent_access::check(shared)?;
+        if self.project.policy(keys, &login.id).await.ok().as_ref() != Some(&self.policy) {
             return Err(fail(
                 "permission",
                 "the entry permission changed meanwhile".to_owned(),
             ));
         }
         // (6) the write (the page repeats every check).
-        let written = driver
-            .fill_write(session_id, &target, password.expose(), by)
-            .await;
+        let written = writer.write(target, login, password.expose()).await;
         drop(password);
         log(
-            &shared,
-            &owner,
-            &target,
+            shared,
+            &self.owner,
+            target,
             login,
-            if written.is_ok() { decision } else { "refused" },
+            if written.is_ok() {
+                self.decision
+            } else {
+                "refused"
+            },
         );
-        written.map_err(|e| refused(e.check, &e.text))?;
-        tracing::info!(decision, "a vault login was filled into a page");
-        Ok(answer(&target, login))
+        let receipt = written?;
+        tracing::info!(
+            decision = self.decision,
+            "a vault login was filled into a page"
+        );
+        Ok(FilledLogin {
+            receipt,
+            summary: answer(target, login),
+        })
+    }
+}
+
+/// The Chrome hook settles consent before the running tool reads or writes a password.
+pub(crate) async fn prepare_checked<W: LoginWriter + Send + 'static>(
+    shared: &Arc<Shared>,
+    owner: &str,
+    wanted: &str,
+    target: FillTarget,
+    requester: Requester,
+    writer: W,
+) -> Result<crate::ask::tool_calls::receipts::Execution, String> {
+    crate::agent_access::check_for(shared, METHOD, owner)?;
+    let authorized = authorize(shared, owner, wanted, &target, requester, &|_| {}).await?;
+    let shared = Arc::downgrade(shared);
+    Ok(Box::pin(async move {
+        let shared = shared.upgrade().ok_or("Vibe Work closed.")?;
+        authorized
+            .write(&shared, &target, &writer, &|_| {})
+            .await
+            .map(|filled| filled.receipt)
     }))
 }
 

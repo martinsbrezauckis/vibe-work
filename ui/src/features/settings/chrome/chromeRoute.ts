@@ -1,28 +1,9 @@
-/**
- * The `chrome` action family of the `ui/settings` UI-control route (Settings › Browser › Your Chrome). Each action
- * sends the same `chromeControl` request the section's control sends (with the Debug API origin):
- * - `{do: "read"}` (default): the view as the section shows it (status line, chosen level or Custom, every row);
- * - `level {level}` (a level card);
- * - `offer` (Set up…: the offer the dialog shows), `setup {offerId}` (its Set up button), `store` (Open the store
- *   page again), `remove` (Remove's confirm button).
- * A typed level request receives a one-use core grant for that exact level; generic clicks get no grant.
- * Depends on: state/uiControl, AppContext types, chromeRows. Called by: settingsRoutes.
- */
-import type { ChromeControlRequest, ChromeLevel } from "../../../protocol/core";
+/** Browser settings actions shared with the Debug API. Uses the same commands as the visible controls. */
+import type { ChromeControlRequest } from "../../../protocol/core";
 import { toCallError } from "../../../protocol/client/types";
 import { UiControlError } from "../../../state/uiControl";
 import type { App } from "../../shell/AppContext";
-import { LEVELS, chromeAvailable, setupLine } from "./chromeRows";
-
-function pick<T extends string>(
-  input: Record<string, unknown>,
-  name: string,
-  values: readonly T[],
-): T {
-  const value = input[name];
-  if (typeof value === "string" && (values as readonly string[]).includes(value)) return value as T;
-  throw new UiControlError("invalidParams", `${name} must be one of ${values.join(", ")}`);
-}
+import { chromeAvailable, setupLine } from "./chromeRows";
 
 /** Runs the action; returns the view after it (and the offer, for `offer`). */
 export async function chromeAction(
@@ -39,8 +20,10 @@ export async function chromeAction(
     case "read":
       request = { op: "read" };
       break;
-    case "level":
-      request = { op: "setLevel", level: pick<ChromeLevel>(input, "level", LEVELS) };
+    case "enabled":
+      if (typeof input["enabled"] !== "boolean")
+        throw new UiControlError("invalidParams", "enabled must be a boolean");
+      request = { op: "setEnabled", enabled: input["enabled"] };
       break;
     case "offer":
       request = { op: "offerSetup" };
@@ -61,7 +44,7 @@ export async function chromeAction(
     default:
       throw new UiControlError(
         "invalidParams",
-        "do must be read, level, offer, setup, store or remove",
+        "do must be read, enabled, offer, setup, store or remove",
       );
   }
   try {

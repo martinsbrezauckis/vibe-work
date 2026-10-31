@@ -101,7 +101,7 @@ export function notificationFor(event: CoreEvent, core?: CoreState): ToastSpec |
           sessionId: ask.session ?? "",
           title: words.session,
           guard: securityGuard(record),
-          what,
+          what: `“${words.session}”: ${what}.`,
           stepId: ask.id,
           at: record.closedAt,
           refusalId: `ask:${ask.id}`,
@@ -114,16 +114,17 @@ export function notificationFor(event: CoreEvent, core?: CoreState): ToastSpec |
         event.title.trim() === "" || event.title === event.sessionId
           ? sessionTitle(core?.sessions[event.sessionId]?.session)
           : event.title;
+      // The declined result is written for the agent; the person only needs to know their No was kept.
+      const text = USER_DECLINED.test(event.what)
+        ? `No was recorded in “${title}”.`
+        : `${GUARD_NAMES[event.guard]} in “${title}”: ${event.what.charAt(0).toUpperCase()}${event.what.slice(1).replace(/[.]+$/, "")}${event.what.endsWith("…") ? "" : "."}`;
       return {
         kind: "warn",
         bellKind: "security",
         sessionId: event.sessionId,
-        guardRefusal: { ...event, title },
+        guardRefusal: { ...event, title, what: text },
         preserveSecurityText: USER_DECLINED.test(event.what),
-        // The declined result is written for the agent; the person only needs to know their No was kept.
-        text: USER_DECLINED.test(event.what)
-          ? `No was recorded in “${title}”.`
-          : `${event.what.replace(/[.]+$/, "")}${event.what.endsWith("…") ? "" : "."} In “${title}”.`,
+        text,
       };
     }
 

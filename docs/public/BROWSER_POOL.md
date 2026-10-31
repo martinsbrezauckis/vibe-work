@@ -6,7 +6,7 @@ uses its current web tab; its browsing never replaces App preview. User-created 
 require a reviewed handoff before the agent can control them. Taking a tab back cancels
 pending agent use. Tab handoff grants no vault access.
 
-These limits apply to Vibe Work's Browser tab. Your Chrome uses Vibe Work Browser Control separately; see
+These limits apply to Vibe Work's Browser tab. Your Chrome uses the Vibe Work extension separately; see
 [setup and permissions](BROWSER_CONTROL.md).
 
 Settings > Browser controls how many Browser page engines can stay live across sessions.

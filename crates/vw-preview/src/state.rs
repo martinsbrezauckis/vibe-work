@@ -195,6 +195,7 @@ pub(crate) struct Entry {
     pub(crate) console_seen: u64,
     pub(crate) downloads: Vec<DownloadRecord>,
     pub(crate) downloads_dir: Option<PathBuf>,
+    /// This page's refused URLs, as the window shows them (cleared with the console when another page starts).
     pub(crate) refused: VecDeque<String>,
     /// This page's refused URLs with their reasons.
     pub(crate) refused_why: VecDeque<(String, String)>,
@@ -355,8 +356,11 @@ impl Entry {
         }
     }
 
+    /// A new page starts (or the preview closes): the console and the refusals belong to the page before it.
+    /// `refusals_seen` stays, so an action's receipt still sees a refusal its own click caused.
     pub(crate) fn reset_console(&mut self) {
         self.console.clear();
+        self.refused.clear();
         self.refused_why.clear();
         self.console_dropped = 0;
         self.console_epoch = self.console_epoch.wrapping_add(1);
@@ -539,3 +543,7 @@ impl State {
         self.by_label.get(label).map(String::as_str)
     }
 }
+
+#[cfg(test)]
+#[path = "state_tests.rs"]
+mod tests;

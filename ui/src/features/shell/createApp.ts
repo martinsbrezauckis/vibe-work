@@ -165,6 +165,7 @@ export function createApp(options: CreateAppOptions): App {
       ? null
       : createGit({
           core,
+          composer,
           insertChip: (sessionId, label, text, origin) => {
             const facade = origin === "debug-api" ? composer.debugApi : composer.actions;
             facade?.insertContext(sessionId, { label, source: "git", text });

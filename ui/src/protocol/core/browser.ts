@@ -340,15 +340,11 @@ element: string,
  */
 valueLength: number, };
 
-export type BrowserPermissions = {
-/**
- * Let the agent close user-origin web tabs without a per-tab confirmation.
- */
-closeUserTabs: boolean, };
+export type BrowserPermissions = Record<symbol, never>;
 
 export type DelegatedAct = "closeUserTabs";
 
-export type DelegationAuthority = "closeUserTabs" | "confirmedByYou";
+export type DelegationAuthority = "accessMode" | "closeUserTabs" | "confirmedByYou";
 
 export type DelegationReceipt = {
 /**

@@ -35,6 +35,7 @@ pub(crate) use secret_run::{permission_project_of, visible_logins};
 mod document_consent;
 mod document_tools;
 mod prepare;
+mod search_tool;
 mod server;
 pub(crate) mod session;
 pub(crate) mod shell_commands;
@@ -264,15 +265,13 @@ impl AgentTools {
     /// `args`, `env` and `cwd` here and refuses the whole session-opening request for any other field; it applies its
     /// default tool-call time to this server, so every tool answers within it (a long user decision answers Waiting
     /// and is collected with a status tool).
-    fn server_entry(&self, credential: &str, session: Option<&str>) -> Value {
+    fn server_entry(&self, credential: &str, _session: Option<&str>) -> Value {
         // Pass this chat's discovery state at launch. The distinct arguments also make Vibe refresh its
         // persisted descriptors on first enable; each actual Chrome call still goes through the core's checks.
-        let args = if !self.chrome_package {
-            vec!["mcp", wire::WITHOUT_CHROME_ARG]
-        } else if session.is_some_and(|session| self.on_demand.chrome_allowed(session)) {
+        let args = if self.chrome_package {
             vec!["mcp", wire::CHROME_CATALOG_ARG]
         } else {
-            vec!["mcp"]
+            vec!["mcp", wire::WITHOUT_CHROME_ARG]
         };
         json!({
             "transport": "stdio",
