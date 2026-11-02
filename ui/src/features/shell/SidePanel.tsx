@@ -119,6 +119,9 @@ export function SidePanel({ onDragging }: { onDragging: (dragging: boolean) => v
       className="panel"
       id="panel"
       aria-label="Side panel"
+      data-focus-region="panel"
+      data-testid="shell.side-panel"
+      tabIndex={-1}
       aria-hidden={!layout.panelOpen || covered}
     >
       <div

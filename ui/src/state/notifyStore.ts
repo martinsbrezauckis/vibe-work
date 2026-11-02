@@ -10,6 +10,12 @@
  *   "Off in system settings" when the host reports the OS refused; it never throws to the caller.
  * - `focusOverride` (a test hook behind the Debug API route) replaces the real focus signal; `null`
  *   means real. It only changes whether a notification is shown, never what it says.
+ * - With the real signal and the webview unfocused, a notification carries `skipWhenAppInFront`: the host shows
+ *   nothing while one of the app's own windows (such as the confirmation window of that very request) is in front,
+ *   so the request the person is looking at is not announced over it; behind another app the toast shows.
+ * - With the real signal, a request shown in the app's own confirmation window always carries `skipWhenAppInFront`,
+ *   whichever chat is on screen: that window comes in front by itself, so while the app is in front the toast would
+ *   only repeat it. A card of a chat that is not on screen still gets its toast while the webview has the focus.
  * - The log is bounded (`LOG_MAX`).
  */
 import { statusType } from "./sessionSummary";
@@ -188,7 +194,7 @@ export function createNotifier(options: { persist?: boolean } = {}) {
             // The record normally arrives with the close. One that is late cannot keep a stale "needs your answer"
             // entry, and the entry is not deleted either (it may have run out): after WAIT_MS it says the session
             // stopped waiting, stays until dismissed, and a record that comes later still decides.
-            retained.closedAt ??= Date.now();
+            retained.closedAt ??= performance.now();
             if (fate.kind === "wait") {
               // A waiting receipt can end the transport callback while its card still waits for the person.
               if (
@@ -201,7 +207,7 @@ export function createNotifier(options: { persist?: boolean } = {}) {
               }
               if (
                 retained.stopped === undefined &&
-                (ended || Date.now() - retained.closedAt >= WAIT_MS)
+                (ended || performance.now() - retained.closedAt >= WAIT_MS)
               ) {
                 retained.stopped = true;
                 update?.(retained.id, {
@@ -220,6 +226,9 @@ export function createNotifier(options: { persist?: boolean } = {}) {
         last = next;
         const state = store.get();
         const focused = state.focusOverride ?? documentFocused();
+        // The real signal only: a webview without focus may be behind the app's own confirmation window.
+        const hostDecidesFocus = state.focusOverride === null && !focused;
+        const open = openSession();
         for (const t of found) {
           const callbackKey =
             t.callbackId === undefined ? null : `${t.sessionId}\u0000${t.callbackId}`;
@@ -227,7 +236,9 @@ export function createNotifier(options: { persist?: boolean } = {}) {
             if (seenCallbacks.has(callbackKey)) continue;
             seenCallbacks.add(callbackKey);
           }
-          const announce = shouldNotify(state.level, t, { focused, openSessionId: openSession() });
+          const announce = shouldNotify(state.level, t, { focused, openSessionId: open });
+          const skipWhenAppInFront =
+            hostDecidesFocus || (state.focusOverride === null && t.inConfirmationWindow === true);
           // Waiting cards and stopped work belong in the bell even while the user is looking.
           // Finished turns are retained only when the user's level and attention warrant it.
           if (t.kind === "finished" && !announce) continue;
@@ -247,6 +258,7 @@ export function createNotifier(options: { persist?: boolean } = {}) {
               ? { notificationId }
               : {}),
             ...textFor(t),
+            ...(skipWhenAppInFront ? { skipWhenAppInFront: true } : {}),
           };
           if (callbackKey !== null && notificationId !== undefined && t.callbackId !== undefined)
             retainedCallbacks.set(callbackKey, {

@@ -1,4 +1,5 @@
 /** Browser settings actions shared with the Debug API. Uses the same commands as the visible controls. */
+import { TEXT } from "../../../vocabulary";
 import type { ChromeControlRequest } from "../../../protocol/core";
 import { toCallError } from "../../../protocol/client/types";
 import { UiControlError } from "../../../state/uiControl";
@@ -13,7 +14,7 @@ export async function chromeAction(
   const core = app.core;
   if (core === null) throw new UiControlError("notFound", "this run has no core");
   if (!chromeAvailable(core.store.get().chromeControl))
-    throw new UiControlError("notFound", "Chrome Control is not in this version of Vibe Work.");
+    throw new UiControlError("notFound", TEXT.chromeUnavailable);
   const action = input["do"] ?? "read";
   let request: ChromeControlRequest;
   switch (action) {

@@ -53,7 +53,7 @@ export function SecurityEntry({ toast, onNavigate }: { toast: Toast; onNavigate:
                   {new Date(line.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                 </time>
                 <span className="ui-caption">{GUARD_NAMES[line.guard]}</span>
-                <span className="security-what ui-body" title={line.what}>
+                <span className="security-what ui-body" title={line.fullText ?? line.what}>
                   {line.what}
                 </span>
                 <LinkButton

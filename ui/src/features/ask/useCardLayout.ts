@@ -25,13 +25,31 @@ export function useCardLayout(frame: RefObject<HTMLDivElement | null>): number |
   return height;
 }
 
-/** Gives the first offered answer focus without allowing browser focus scrolling to hide the header. */
-export function focusCard(card: HTMLDivElement | null): void {
+/** Focuses the first answer; arrival preserves the newest prompt's view, directed navigation reveals its own card. */
+export function focusCard(
+  card: HTMLDivElement | null,
+  reveal: "focused" | "newest" = "focused",
+): void {
   if (!card) return;
-  (card.querySelector<HTMLElement>(".choices button:not(:disabled)") ?? card).focus({
+  // A question's first option (its picked one, if any) comes before Submit and Skip: focusing never answers.
+  (
+    card.querySelector<HTMLElement>(".q-opts input:checked:not(:disabled)") ??
+    card.querySelector<HTMLElement>(".q-opts input:not(:disabled)") ??
+    card.querySelector<HTMLElement>(".choices button:not(:disabled)") ??
+    card
+  ).focus({
     preventScroll: true,
   });
-  card.scrollIntoView({ block: "nearest" });
+  // Several cards can finish measuring together. An older card's delayed arrival focus must not scroll the
+  // newest question and answers away after the transcript has followed them. Focus ownership stays unchanged.
+  const latest =
+    reveal === "newest"
+      ? [
+          ...(card.closest(".tx-list")?.querySelectorAll<HTMLElement>(".approval:not([hidden])") ??
+            []),
+        ].at(-1)
+      : undefined;
+  (latest ?? card).scrollIntoView({ block: "nearest" });
 }
 
 /**

@@ -20,7 +20,10 @@ pub struct ChromeTab {
     pub url: String,
 }
 fn unavailable() -> CoreError {
-    CoreError::new(ErrorCode::InvalidCommand, "Chrome tab unavailable")
+    CoreError::new(
+        ErrorCode::InvalidCommand,
+        "Chrome did not answer. Check that Chrome is open and paired, then try again.",
+    )
 }
 pub(super) fn list(reply: &Value) -> Result<Vec<ChromeTab>, CoreError> {
     let rows = reply["structuredContent"]["tabs"]

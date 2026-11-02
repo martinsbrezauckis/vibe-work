@@ -1,30 +1,34 @@
 //! Native webview calls the preview engine (vw-webview) needs and Tauri does not offer, each behind a
-//! safe function: a PNG of a `WebView2` webview (`DevTools` Protocol `Page.captureScreenshot`, the path ShellX
-//! uses on Windows), a PNG of a `WKWebView`
-//! (`takeSnapshotWithConfiguration:completionHandler:`; a sharp one of a zoomed preview in `sharp_mac`, sized by
-//! [`sharp`]), and the macOS major version (identified data stores need macOS 14). For `WebView2`, this adds: what storage a webview really got ([`StorageFacts`]: the effective
-//! user data folder and profile, so the engine can refuse a preview without its own profile), and a request
-//! barrier for document requests ([`guard_requests`]): `WebView2` sends the GET of a navigation the
-//! host cancels in `NavigationStarting` (Microsoft Learn, `ICoreWebView2NavigationStartingEventArgs::put_Cancel`:
-//! "GET HTTP requests may happen, while the host is responding"; reproduced on Windows 11 for a direct navigation and a
-//! 302), so the refusal must happen in `WebResourceRequested`, which answers before the request is sent. The barrier
-//! also covers every other request of the webview (scripts, images, `fetch`, frames' sub-requests):
-//! Chromium sends loopback traffic around a proxy, so the agent browser's loopback and private-network rule is
-//! decided here per webview (its mount and page class) on Windows.
+//! safe function. It provides snapshots, storage checks, browser frame evaluation and request barriers.
+//! `WebView2` document requests need a barrier because GETs may start during `NavigationStarting`;
+//! the barrier and network policy also cover frame documents and subrequests.
 //!
-//! Feature `webview` (off by default, so crates that do not show webviews never compile these bindings).
 //! Depends on: `webview2-com` + windows (Windows), objc2 / objc2-web-kit / objc2-app-kit / block2 (macOS), base64 and
 //! `serde_json` (the `DevTools` answer). Called by: vw-webview `platform` (inside Tauri's `with_webview`, on the UI
 //! thread).
-//! Invariants:
 //! - Every function answers through its callback exactly once (also on failure), so a waiting task never hangs.
 //! - `unsafe` is confined to the platform calls, each with its SAFETY comment.
 //!
-//! For `WebView2`, this also reports: whether a setting puts every environment of the app into one shared user data
-//! folder, and which ([`user_data_folder_override`]: the environments then share one browser process and must use
-//! identical browser arguments). The macOS content rules live in `content_rules`.
 
+#[cfg(target_os = "linux")]
+#[allow(unsafe_code)]
+mod content_filter_linux;
+#[cfg(target_os = "linux")]
+pub use content_filter_linux::set_content_filter;
+
+/// Native `WebView2` frame registry and script evaluation.
+#[cfg(windows)]
+#[allow(unsafe_code)]
+pub mod agent_frames_win;
+/// The `WebView2` `DevTools` protocol channel (isolated-world frame evaluation).
+#[cfg(windows)]
+#[allow(unsafe_code)]
+pub mod devtools_win;
 mod full_clip;
+/// Full-screen changes of a page (an agent act's is left again at once).
+#[cfg(windows)]
+#[allow(unsafe_code)]
+pub mod full_screen_win;
 mod pdf;
 pub mod sharp;
 mod site_data;
@@ -37,6 +41,22 @@ pub use site_data::clear_service_workers;
 mod sharp_mac;
 #[cfg(target_os = "macos")]
 pub use sharp_mac::snapshot_png_sharp;
+/// The agent's own script world in every frame (macOS 27 configured world, named world before).
+#[cfg(target_os = "macos")]
+#[allow(unsafe_code)]
+pub mod agent_world_mac;
+/// The agent's click marker: a short ring in the person's view, never in the page.
+#[cfg(target_os = "macos")]
+#[allow(unsafe_code)]
+pub mod click_marker_mac;
+/// Element full screen off while an agent act runs.
+#[cfg(target_os = "macos")]
+#[allow(unsafe_code)]
+pub mod full_screen_mac;
+/// The private, watch-only request log (Settings > Developer only).
+#[cfg(target_os = "macos")]
+#[allow(unsafe_code)]
+pub mod request_watch_mac;
 
 #[cfg(windows)]
 #[allow(unsafe_code)]
@@ -75,29 +95,8 @@ pub struct CookieIdentity {
     pub domain: String,
 }
 
-/// A request barrier's answer (a host-name lookup never blocks the UI thread).
-pub enum Verdict {
-    /// Send the request.
-    Allow,
-    /// Answer `403` without sending it.
-    Deny,
-    /// Decided later: called with the callback that receives the verdict (`true`: send it) from any thread; the
-    /// request is held meanwhile (a `WebView2` deferral, completed back on the UI thread through [`PostToUi`]).
-    Later(LaterVerdict),
-}
-
-/// Receives a held request's verdict (`true`: send it).
-pub type VerdictDone = Box<dyn FnOnce(bool) + Send>;
-
-/// Registers the callback a held request's verdict goes to.
-pub type LaterVerdict = Box<dyn FnOnce(VerdictDone) + Send>;
-
-/// Decides a request: its URL as text and whether it is a document request (main frame or frame). Called on the UI
-/// thread; must return at once.
-pub type DecideRequest = Box<dyn Fn(&str, bool) -> Verdict + Send + Sync>;
-
-/// Runs a closure on the UI thread (the app's main thread, which owns the `WebView2` objects).
-pub type PostToUi = std::sync::Arc<dyn Fn(Box<dyn FnOnce() + Send>) + Send + Sync>;
+mod barrier;
+pub use barrier::{DecideRequest, LaterVerdict, PostToUi, Verdict, VerdictDone};
 
 #[cfg(windows)]
 pub use windows_impl::{

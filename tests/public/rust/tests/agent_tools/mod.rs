@@ -69,6 +69,8 @@ pub struct Rig {
     /// `{"method", "params"}` of every request the real Vibe received, in arrival order.
     pub params_log: PathBuf,
     pub confirmer: FakeConfirmer,
+    /// Requests as the scripted model saw them, including programmatic tool results.
+    pub model: crate::common::scripted_model::ScriptedModel,
 }
 
 /// Tool requests formerly hidden in protocol fixtures now come from the loopback model.
@@ -149,6 +151,7 @@ pub async fn rig_with_script(
         agent_log,
         params_log,
         confirmer,
+        model,
     }
 }
 

@@ -40,6 +40,8 @@ export interface Transition {
   callbackId?: string;
   /** The subject of a native prompt, separate from its chat title. */
   subject?: string;
+  /** The request is shown in the app's own confirmation window (a native prompt), not on a card. */
+  inConfirmationWindow?: true;
   /** Vibe's full failed-status message, when present. */
   detail?: string;
 }
@@ -105,6 +107,7 @@ export function transitions(prev: CoreState, next: CoreState): Transition[] {
         title: sessionTitle(next.sessions[sessionId]?.session),
         subject: ask.title,
         callbackId: ask.id,
+        inConfirmationWindow: true,
       });
     }
   }

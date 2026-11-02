@@ -80,6 +80,7 @@ const UNREAD: KeyReadiness = {
 export function keyReadiness(state: KeyUi): KeyReadiness | null {
   if (state.availability === "failed") return UNREAD;
   if (state.availability !== "ready") return null;
+  if (state.status?.vaultState === "selectedVaultMissing") return VAULT_MISSING;
   switch (stepOf(state.status).kind) {
     case "create":
       return SETUP;
@@ -109,3 +110,10 @@ export function vaultReadiness(state: KeyUi): KeyReadiness | null {
 }
 
 const VAULT_SETUP: KeyReadiness = { ...SETUP, action: "Set up vault" };
+const VAULT_MISSING: KeyReadiness = {
+  kind: "blocked",
+  message: "Selected vault not found.",
+  status: "Vault not found",
+  action: "Choose a vault",
+  destination: "setup",
+};

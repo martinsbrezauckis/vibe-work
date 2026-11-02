@@ -24,6 +24,10 @@ import { createStore } from "./createStore";
 import type { Shell } from "./shellStore";
 import type { Toasts } from "./toastStore";
 
+/** A delete that Windows refused because one of the chat's files is still open somewhere. */
+const FILE_IN_USE =
+  "This chat could not be deleted because Windows still has one of its files open. Try again in a moment.";
+
 /** The actions, bound to one app's stores. */
 export function createSessionActions(deps: {
   core: CoreController;
@@ -226,6 +230,12 @@ export function createSessionActions(deps: {
         if (asked.type !== "confirmation") return false;
         await call("session/delete", params, asked.token);
       } catch (thrown) {
+        // Windows refuses to remove a file another program still has open, and Vibe passes the raw exception on.
+        // The person gets one plain sentence; the raw text stays in the app's log (the core logs every failed command).
+        if (/\[WinError 32\]/.test(toCallError(thrown).error.message)) {
+          toasts.push({ kind: "error", bellKind: "failure", text: FILE_IN_USE });
+          return false;
+        }
         fail(thrown);
         return false;
       }

@@ -326,13 +326,14 @@ select:disabled {
   width: 14px;
   height: 14px;
   border-radius: var(--radius-round);
-  background: var(--on-accent);
+  background: var(--primary-bg);
   transition: left 0.15s;
 }
 .switch[aria-checked="true"] {
   background: var(--orange);
 }
 .switch[aria-checked="true"]::after {
+  background: var(--on-accent);
   left: 17px;
 }
 

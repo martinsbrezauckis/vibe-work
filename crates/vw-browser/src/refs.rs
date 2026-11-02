@@ -46,6 +46,14 @@ impl Browser {
         session_id: &str,
         action: &Action,
     ) -> Result<Option<MountId>, ActError> {
+        if let Action::Drag { to, .. } = action {
+            self.check_ref(
+                session_id,
+                &Action::Hover {
+                    reference: to.clone(),
+                },
+            )?;
+        }
         let Some(reference) = action.reference() else {
             return Ok(None);
         };

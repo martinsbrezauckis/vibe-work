@@ -318,6 +318,36 @@ impl PreviewService {
         Ok(())
     }
 
+    /// A shaped screenshot of the session's visible preview, with the mount it shows. A suspended preview is opened
+    /// again first. Callers that hand the pixels to the agent compare that mount with the current one afterwards
+    /// (a mount's page class never changes, so the same mount means the same local-network verdict).
+    ///
+    /// # Errors
+    /// [`PreviewError::NothingOpen`], engine failures and timeouts, or [`PreviewError::Image`].
+    pub async fn screenshot_of_mount(
+        &self,
+        session_id: &str,
+    ) -> Result<(crate::shot::Shot, MountId), PreviewError> {
+        let _activity = self.session_lock(session_id).await;
+        if self.shots_blocked(session_id) {
+            return Err(PreviewError::Image(crate::browse::SHOTS_BLOCKED.to_owned()));
+        }
+        self.require_visible_screenshot(session_id)?;
+        let id = self.ensure_mounted(session_id).await?;
+        let png = super::bounded(
+            self.config.shot_timeout,
+            "screenshot",
+            self.engine.screenshot(&id),
+        )
+        .await?;
+        let shot = match self.css_viewport_width(session_id) {
+            Some(width) => crate::shot::shape_css(&png, width),
+            None => crate::shot::shape(&png),
+        }
+        .map_err(PreviewError::Image)?;
+        Ok((shot, id))
+    }
+
     /// The mount of a session, mounting a suspended preview again (hidden) when it has a URL.
     pub(super) async fn ensure_mounted(&self, session_id: &str) -> Result<MountId, PreviewError> {
         self.close_unready(session_id).await?;

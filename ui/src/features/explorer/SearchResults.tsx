@@ -83,7 +83,9 @@ export function SearchResults({
           </p>
         </div>
       ))}
-      {state.searchUnreadable && <p className="key-problem">This folder could not be read</p>}
+      {state.searchUnreadable && (
+        <p className="key-problem">Search failed in this folder. Nothing was changed.</p>
+      )}
       {state.searchLimited && (
         <p className="key-notice">
           {state.hits.length >= 500

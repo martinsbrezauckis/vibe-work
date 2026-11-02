@@ -3,19 +3,27 @@
 //!
 //! The handle owns the window: dropping it closes the dialog, so a request that ends without an answer (its deadline)
 //! takes its window with it.
+//!
+//! A button's programmatic press (`BM_CLICK`: UI Automation's Invoke for Narrator, NVDA and Voice Access, a dialog
+//! mnemonic) is turned into the task dialog's own `TDM_CLICK_BUTTON` for that button. The common-controls button
+//! ignores a `BM_CLICK` sent from another thread while it is the focused default button (the declining first button
+//! when the dialog opens), so an accessibility press of that button would otherwise do nothing.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
-use windows::Win32::Foundation::{HWND, LPARAM, S_OK, WPARAM};
+use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, S_OK, WPARAM};
 use windows::Win32::UI::Controls::{
     TASKDIALOG_BUTTON, TASKDIALOG_NOTIFICATIONS, TASKDIALOGCONFIG, TASKDIALOGCONFIG_0,
     TD_WARNING_ICON, TDF_ALLOW_DIALOG_CANCELLATION, TDF_POSITION_RELATIVE_TO_WINDOW,
     TDF_SIZE_TO_CONTENT, TDM_CLICK_BUTTON, TDN_CREATED, TDN_DESTROYED, TaskDialogIndirect,
 };
+use windows::Win32::UI::Shell::{DefSubclassProc, RemoveWindowSubclass, SetWindowSubclass};
 use windows::Win32::UI::WindowsAndMessaging::{
-    BringWindowToTop, IDCANCEL, PostMessageW, SetForegroundWindow,
+    BM_CLICK, BringWindowToTop, EnumChildWindows, GA_ROOT, GetAncestor, GetClassNameW,
+    GetWindowTextW, IDCANCEL, PostMessageW, SetForegroundWindow, WM_NCDESTROY,
 };
+use windows::core::BOOL;
 use windows::core::{HRESULT, PCWSTR};
 
 use super::{ConfirmSpec, Reply};
@@ -24,12 +32,17 @@ use super::{ConfirmSpec, Reply};
 /// IDCONTINUE 11), so IDCANCEL (Escape, the close button) is never taken for a button.
 const FIRST_ID: i32 = 100;
 
+/// Our id among a button's subclasses ("VWCB").
+const PRESS_SUBCLASS_ID: usize = 0x5657_4342;
+
 /// What the dialog's thread and the handle share.
 struct Shared {
     /// The dialog's window while it exists (`TDN_CREATED` .. `TDN_DESTROYED`), as a raw handle value.
     window: Mutex<Option<isize>>,
     /// Set by [`OpenConfirmation::close`]: the window closes, and a press that still arrives is not reported.
     closed: AtomicBool,
+    /// The button labels in the shown order (button `n` has the id `FIRST_ID + n`).
+    labels: Vec<String>,
 }
 
 impl Shared {
@@ -64,6 +77,7 @@ unsafe extern "system" fn notified(
     let shared = unsafe { &*(data as *const Shared) };
     if msg == TDN_CREATED {
         *shared.window.lock().unwrap_or_else(PoisonError::into_inner) = Some(hwnd.0 as isize);
+        route_programmatic_presses(hwnd, &shared.labels);
         if shared.closed.load(Ordering::Acquire) {
             shared.cancel_window();
         }
@@ -71,6 +85,93 @@ unsafe extern "system" fn notified(
         *shared.window.lock().unwrap_or_else(PoisonError::into_inner) = None;
     }
     S_OK
+}
+
+/// A button's subclass: its `BM_CLICK` becomes the task dialog's `TDM_CLICK_BUTTON` for the button's id
+/// (`data`), posted, so the dialog ends with that button exactly as a click does. Everything else is the button's own.
+unsafe extern "system" fn button_pressed(
+    hwnd: HWND,
+    msg: u32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+    _id: usize,
+    data: usize,
+) -> LRESULT {
+    if msg == BM_CLICK {
+        // SAFETY: `hwnd` is the live button this subclass is on; its root is the task dialog. Posting to it is
+        // allowed from any thread, and a dialog that ended meanwhile simply does not get the message.
+        unsafe {
+            let dialog = GetAncestor(hwnd, GA_ROOT);
+            let _ = PostMessageW(
+                Some(dialog),
+                u32::try_from(TDM_CLICK_BUTTON.0).unwrap_or_default(),
+                WPARAM(data),
+                LPARAM(0),
+            );
+        }
+        return LRESULT(0);
+    }
+    if msg == WM_NCDESTROY {
+        // SAFETY: removing our own subclass from the window being destroyed, on its thread (the documented place).
+        let _ = unsafe { RemoveWindowSubclass(hwnd, Some(button_pressed), PRESS_SUBCLASS_ID) };
+    }
+    // SAFETY: forwarding the exact arguments the OS gave this subclass procedure, on the window's thread.
+    unsafe { DefSubclassProc(hwnd, msg, wparam, lparam) }
+}
+
+/// The id of the button labelled `text` among `labels` that is not `taken` yet (marked taken), if any.
+fn button_id_for(text: &str, labels: &[String], taken: &mut [bool]) -> Option<i32> {
+    let index = labels
+        .iter()
+        .zip(taken.iter())
+        .position(|(label, used)| !used && label == text)?;
+    taken[index] = true;
+    FIRST_ID.checked_add(i32::try_from(index).ok()?)
+}
+
+/// What `route_programmatic_presses` hands each child window.
+struct Routing<'a> {
+    labels: &'a [String],
+    taken: Vec<bool>,
+}
+
+/// Puts [`button_pressed`] on each of the dialog's push buttons that shows one of `labels` (on the dialog's thread,
+/// at `TDN_CREATED`). A button that is not found keeps the common control's own behaviour.
+fn route_programmatic_presses(dialog: HWND, labels: &[String]) {
+    unsafe extern "system" fn each(child: HWND, data: LPARAM) -> BOOL {
+        // SAFETY: `data` is the `Routing` that `route_programmatic_presses` keeps alive for the whole enumeration.
+        let routing = unsafe { &mut *(data.0 as *mut Routing<'_>) };
+        let mut class = [0u16; 16];
+        // SAFETY: reads the class name of a live child window into a local buffer.
+        let class_len = usize::try_from(unsafe { GetClassNameW(child, &mut class) }).unwrap_or(0);
+        if String::from_utf16_lossy(&class[..class_len]) != "Button" {
+            return true.into();
+        }
+        let mut text = [0u16; 512];
+        // SAFETY: reads the text of a live child window into a local buffer.
+        let text_len = usize::try_from(unsafe { GetWindowTextW(child, &mut text) }).unwrap_or(0);
+        let text = String::from_utf16_lossy(&text[..text_len]);
+        if let Some(id) = button_id_for(&text, routing.labels, &mut routing.taken) {
+            // SAFETY: a button of this thread's task dialog (enumerated on the dialog's thread at TDN_CREATED);
+            // `button_pressed` is a plain function that lives for the program and removes itself at WM_NCDESTROY.
+            let _ = unsafe {
+                SetWindowSubclass(
+                    child,
+                    Some(button_pressed),
+                    PRESS_SUBCLASS_ID,
+                    usize::try_from(id).unwrap_or_default(),
+                )
+            };
+        }
+        true.into()
+    }
+    let mut routing = Routing {
+        labels,
+        taken: vec![false; labels.len()],
+    };
+    // SAFETY: `dialog` is the live task dialog; `routing` outlives the synchronous enumeration.
+    let _ =
+        unsafe { EnumChildWindows(Some(dialog), Some(each), LPARAM(&raw mut routing as isize)) };
 }
 
 /// A NUL-terminated UTF-16 copy of `text`.
@@ -192,6 +293,7 @@ pub fn show(parent: isize, spec: &ConfirmSpec, reply: Reply) -> Result<OpenConfi
     let shared = Arc::new(Shared {
         window: Mutex::new(None),
         closed: AtomicBool::new(false),
+        labels: spec.buttons.clone(),
     });
     let mine = shared.clone();
     let spec = spec.clone();
@@ -237,5 +339,21 @@ mod tests {
         );
         // A press that arrives after a close from outside is never reported.
         assert_eq!(answer_for(Some(101), 3, true), None);
+    }
+
+    #[test]
+    fn a_painted_label_finds_its_own_button_once() {
+        let labels: Vec<String> = ["Deny", "Allow once", "Deny"]
+            .iter()
+            .map(|l| (*l).to_owned())
+            .collect();
+        let mut taken = vec![false; 3];
+        assert_eq!(button_id_for("Allow once", &labels, &mut taken), Some(101));
+        // The same label twice: each window gets the next button with that label, in the shown order.
+        assert_eq!(button_id_for("Deny", &labels, &mut taken), Some(100));
+        assert_eq!(button_id_for("Deny", &labels, &mut taken), Some(102));
+        assert_eq!(button_id_for("Deny", &labels, &mut taken), None);
+        // Text that is no button's label (the title bar, a link) keeps the control's own behaviour.
+        assert_eq!(button_id_for("Close", &labels, &mut taken), None);
     }
 }

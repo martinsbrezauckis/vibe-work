@@ -76,12 +76,16 @@ fn vault_detection_skips_the_entire_prompt_before_creating_a_file() {
 #[test]
 fn concurrent_appends_are_complete_json_records() {
     let h = History::new();
-    // The file exists first: on macOS concurrent first creations through a folder handle can fail (0.1.5 retries).
-    std::fs::write(&h.0, "").unwrap();
+    assert!(!h.0.exists());
+    let barrier = std::sync::Barrier::new(20);
     std::thread::scope(|scope| {
         for n in 0..20 {
             let p = &h.0;
-            scope.spawn(move || append(p, &format!("entry {n}\nsecond line"), &|_| true).unwrap());
+            let barrier = &barrier;
+            scope.spawn(move || {
+                barrier.wait();
+                append(p, &format!("entry {n}\nsecond line"), &|_| true).unwrap();
+            });
         }
     });
     let bytes = std::fs::read_to_string(&h.0).unwrap();
@@ -123,4 +127,38 @@ fn preserves_leading_spaces_that_make_cli_mode_characters_literal() {
         std::fs::read_to_string(&h.0).unwrap(),
         "\"  !echo example\"\n"
     );
+}
+
+#[test]
+fn first_missing_open_is_retried_once_without_losing_the_entry() {
+    let h = History::new();
+    let mut attempts = 0;
+    append_with_open("first", &|_| true, &mut || {
+        attempts += 1;
+        if attempts == 1 {
+            Err(io::ErrorKind::NotFound.into())
+        } else {
+            open(&h.0, true)
+        }
+    })
+    .unwrap();
+    assert_eq!(attempts, 2);
+    assert_eq!(read(&h.0).unwrap(), ["first"]);
+    for kind in [io::ErrorKind::PermissionDenied, io::ErrorKind::NotFound] {
+        let mut attempts = 0;
+        let error = append_with_open("next", &|_| true, &mut || {
+            attempts += 1;
+            Err(kind.into())
+        })
+        .unwrap_err();
+        assert_eq!(error.kind(), kind);
+        assert_eq!(
+            attempts,
+            if kind == io::ErrorKind::NotFound {
+                2
+            } else {
+                1
+            }
+        );
+    }
 }

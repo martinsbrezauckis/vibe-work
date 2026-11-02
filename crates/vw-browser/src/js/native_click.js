@@ -69,7 +69,7 @@ const nativeClickPoint = (el, admittedPoint = null) => {
           v.visualViewport.offsetLeft !== 0 ||
           v.visualViewport.offsetTop !== 0))
     ) {
-      return fail("native click viewport changed; read the page again");
+      return fail("native click viewport changed (zoomed or offset), so the click point no longer matches; read the page again");
     }
     if (
       x < 0 ||

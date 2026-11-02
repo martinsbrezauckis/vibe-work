@@ -108,6 +108,14 @@ pub(crate) fn interpret(answer: PageAnswer, action: &Action) -> Result<PageAnswe
                 reasons.join("; ")
             )))
         }
+        "notFileField" => Err(refused(format!(
+            "not attached: {reference} takes no file, and no single file field belongs to it. Read the page again \
+             and use the ref of its file field (or of the label or button next to it)."
+        ))),
+        "notMultiple" => Err(refused(
+            "not attached: this file field takes one file. Upload one file, or use a field that takes several."
+                .to_owned(),
+        )),
         "noOption" => Err(refused(format!(
             "no such option in {reference}; the options are: {}",
             answer

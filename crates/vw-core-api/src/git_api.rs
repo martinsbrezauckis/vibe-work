@@ -61,25 +61,26 @@ async fn get(client: &reqwest::Client, url: &str) -> Option<Answer> {
     })
 }
 
-/// Refreshes `cached` from the public API (or explains why not). `now` is ms since the epoch.
+/// Refreshes `cached` from the public API (or explains why not). `now` pairs its receipt date with the monotonic read clock.
 pub(crate) async fn fetch(
     shared: &Shared,
     forge: &Forge,
     head: &str,
     cached: CardCache,
-    now: u64,
+    now: crate::clock::ClockReading,
 ) -> CardCache {
-    let resume = *shared
+    let resume = shared
         .git
-        .api_resume_ms
+        .api_pause
         .lock()
-        .unwrap_or_else(PoisonError::into_inner);
-    if now < resume {
+        .unwrap_or_else(PoisonError::into_inner)
+        .left(now);
+    if resume > 0 {
         return CardCache {
             note: Some(format!(
                 "GitHub's public API limit is nearly used up; the card refreshes again in about {} minutes. Install and \
                  sign in to gh for live updates.",
-                (resume - now) / 60_000 + 1
+                resume / 60_000 + 1
             )),
             ..cached
         };
@@ -106,7 +107,8 @@ pub(crate) async fn fetch(
     };
     let failed = |why: &str| CardCache {
         source: Some(PrSource::None),
-        fetched_at_ms: now,
+        fetched_at_ms: now.wall_ms,
+        fetched_clock: Some(now),
         note: Some(why.to_owned()),
         ..cached.clone()
     };
@@ -131,7 +133,8 @@ pub(crate) async fn fetch(
             None => CardCache {
                 card: None,
                 source: Some(PrSource::PublicApi),
-                fetched_at_ms: now,
+                fetched_at_ms: now.wall_ms,
+                fetched_clock: Some(now),
                 note: None,
             },
             Some(number) => {
@@ -142,7 +145,8 @@ pub(crate) async fn fetch(
                 CardCache {
                     card,
                     source: Some(PrSource::PublicApi),
-                    fetched_at_ms: now,
+                    fetched_at_ms: now.wall_ms,
+                    fetched_clock: Some(now),
                     note: None,
                 }
             }
@@ -151,12 +155,12 @@ pub(crate) async fn fetch(
     if let Some((left, reset)) = budget
         && left < LOW_BUDGET
     {
-        let until = reset.map_or(now + 3_600_000, |s| s.saturating_mul(1000));
-        *shared
+        shared
             .git
-            .api_resume_ms
+            .api_pause
             .lock()
-            .unwrap_or_else(PoisonError::into_inner) = until;
+            .unwrap_or_else(PoisonError::into_inner)
+            .set(now, reset);
     }
     result
 }
@@ -210,13 +214,14 @@ pub(crate) async fn annotations(
     forge: &Forge,
     check_run: u64,
 ) -> Result<Option<String>, String> {
-    let now = vw_changes::now_ms();
-    let resume = *shared
+    let now = crate::clock::ClockReading::now();
+    let resume = shared
         .git
-        .api_resume_ms
+        .api_pause
         .lock()
-        .unwrap_or_else(PoisonError::into_inner);
-    if now < resume {
+        .unwrap_or_else(PoisonError::into_inner)
+        .left(now);
+    if resume > 0 {
         return Err(
             "GitHub's public API limit is nearly used up; sign in to gh to include the log"
                 .to_owned(),
@@ -234,11 +239,12 @@ pub(crate) async fn annotations(
     if answer.remaining.is_some_and(|r| r < LOW_BUDGET)
         && let Some(reset) = answer.reset_s
     {
-        *shared
+        shared
             .git
-            .api_resume_ms
+            .api_pause
             .lock()
-            .unwrap_or_else(PoisonError::into_inner) = reset.saturating_mul(1000);
+            .unwrap_or_else(PoisonError::into_inner)
+            .set(now, Some(reset));
     }
     if answer.status != 200 {
         return Err(format!(

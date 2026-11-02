@@ -76,7 +76,7 @@ fn stream_error(error: StreamError) -> CoreError {
     }
 }
 
-fn start(
+pub(crate) fn start(
     shared: &Shared,
     origin: Origin,
     sample_rate: u32,
@@ -117,7 +117,7 @@ fn append(shared: &Shared, id: &str, pcm: &str) -> Result<CommandResult, CoreErr
     Ok(result(SpeechResult::Appended { seconds, at_limit }))
 }
 
-async fn stop(shared: &Shared, id: &str) -> Result<CommandResult, CoreError> {
+pub(crate) async fn stop(shared: &Shared, id: &str) -> Result<CommandResult, CoreError> {
     let stopped = shared.dictations.take_for_stop(id).map_err(stream_error)?;
     let seconds = vw_mistral::audio::seconds_at_16k(stopped.samples.len());
     let wait = shared.dictations.config().stop_wait;
@@ -241,11 +241,18 @@ impl Core {
 /// `invalidParams` (limits, formats), `notFound` for a stream that is gone,
 /// `confirmationDeclined`, `keyService` (no key service; `keyNeeded`), `serverError` (Mistral's answer).
 pub(crate) async fn execute(
-    shared: &Shared,
+    shared: &Arc<Shared>,
     origin: Origin,
     request: SpeechRequest,
 ) -> Result<CommandResult, CoreError> {
     match request {
+        SpeechRequest::PromptSession { .. }
+        | SpeechRequest::PromptPrepare { .. }
+        | SpeechRequest::PromptStart { .. }
+        | SpeechRequest::PromptAnswer { .. }
+        | SpeechRequest::PromptCancel { .. } => {
+            crate::voice_prompts::execute(shared, origin, request).await
+        }
         SpeechRequest::ReadingReady {
             request_id,
             available,
@@ -269,12 +276,22 @@ pub(crate) async fn execute(
             sample_rate,
             language,
         } => start(shared, origin, sample_rate, language),
-        SpeechRequest::Append { stream_id, pcm } => append(shared, &stream_id, &pcm),
+        SpeechRequest::Append { stream_id, pcm } => {
+            crate::voice_prompts::audio_allowed(shared, origin, &stream_id)?;
+            append(shared, &stream_id, &pcm)
+        }
         SpeechRequest::Stop { stream_id } => stop(shared, &stream_id).await,
-        SpeechRequest::Cancel { stream_id } => Ok(result(SpeechResult::Cancelled {
-            cancelled: shared.dictations.cancel(&stream_id),
-        })),
+        SpeechRequest::Cancel { stream_id } => {
+            let cancelled = shared.dictations.cancel(&stream_id);
+            crate::voice_prompts::cancel_stream(shared, &stream_id);
+            Ok(result(SpeechResult::Cancelled { cancelled }))
+        }
         SpeechRequest::Speak { text, voice } => speak(shared, &text, voice).await,
+        SpeechRequest::ScreenReader {} => Ok(result(SpeechResult::ScreenReader {
+            active: tokio::task::spawn_blocking(vw_platform::screen_reader::active)
+                .await
+                .unwrap_or(None),
+        })),
         SpeechRequest::AudioOutput {} => Ok(result(SpeechResult::AudioOutput {
             available: crate::audio_output::available(),
         })),

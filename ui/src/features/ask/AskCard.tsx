@@ -2,9 +2,11 @@
 import {
   type KeyboardEvent,
   type MouseEvent,
+  type PointerEvent,
   type ReactElement,
   type ReactNode,
   useEffect,
+  useId,
   useRef,
 } from "react";
 import { Button } from "../../components/Controls";
@@ -12,6 +14,7 @@ import { useFirstSight } from "../../hooks/useFirstSight";
 import type { CoversPart } from "../../protocol/core";
 import { TEXT, wording } from "../../vocabulary";
 import { registerCardFocus } from "./cardFocus";
+import { usePermissionArrival } from "./permissionArrival";
 import { type AskButton, type AskChoice } from "./model";
 import { focusCard, jumpToCard, revealCardControl, useCardLayout } from "./useCardLayout";
 
@@ -39,10 +42,20 @@ export interface AskCardProps {
   /** The card-state line (sending, refused, not offered, native confirmation). */
   state: string;
   stateRole?: "status" | "alert";
+  /**
+   * Controls that must stay on screen while the payload scrolls (a protected change's "Show all {n} files"): shown
+   * between the scrolling body and the answers, never inside the body (voice control presses only what is shown).
+   */
+  footer?: ReactNode;
   /** Buttons other than the answer set (a question's Submit / Skip). */
   actions?: ReactNode;
   /** Keys 1-4 answer (not for a question). */
   keys?: boolean;
+  /**
+   * A question's own keys (number keys pick options, Enter submits): called for every key pressed in the card outside
+   * a text field, with whether the arrival grace has passed. The card's own answer keys are then off.
+   */
+  onKeys?: (event: KeyboardEvent<HTMLDivElement>, ready: boolean) => void;
   /** Extra attributes for automation (`data-callback-id`, `data-entry-id`). */
   data?: Readonly<Record<`data-${string}`, string>>;
   /** Wire decision per answer, kept on the buttons for automation (`data-decision`). */
@@ -63,6 +76,9 @@ function keyList(buttons: readonly AskButton[]): string {
 function description(buttons: readonly AskButton[], keys: boolean): string {
   return keys && buttons.length > 0 ? wording(TEXT.askKeysHint, { keys: keyList(buttons) }) : "";
 }
+
+/** Frames the arrival focus is retried for while the card's row is not shown yet (it is shown within one or two). */
+const ARRIVAL_FOCUS_FRAMES = 30;
 
 /** True when the focused element takes typing (the arrival focus never steals it). */
 function typing(): boolean {
@@ -92,27 +108,71 @@ function CoversLine({ parts }: { parts: readonly CoversPart[] }): ReactElement {
 
 /** Renders one ask. */
 export function AskCard(props: AskCardProps): ReactElement {
+  return <PermissionCard key={props.id} {...props} />;
+}
+
+function PermissionCard(props: AskCardProps): ReactElement {
   const { buttons, disabled, onChoose } = props;
+  const arrival = usePermissionArrival(props.keys !== false);
   const fresh = useFirstSight(`card:${props.id}`);
   const frame = useRef<HTMLDivElement>(null);
+  // The answer button a primary pointer is pressed on (cleared when the pointer leaves it or is cancelled): the
+  // click that ends that press is a pointer click even when its `detail` is 0, as the Debug API's ui/click is
+  // (a pointer press and release, then the element's own click()). Keyboard activations never press a pointer.
+  const pressed = useRef<AskChoice | null>(null);
   const maxHeight = useCardLayout(frame);
+  // Each answer is described by the card's question and summary: a screen reader moving straight to a button
+  // does not announce the surrounding group's name, so the question would never be spoken.
+  const textId = useId();
+  const describedBy = props.summary === undefined ? `${textId}-q` : `${textId}-q ${textId}-s`;
   useEffect(() => {
-    if (fresh && !disabled && !typing() && !inAnotherCard(frame.current)) focusCard(frame.current);
-  }, [fresh, disabled]);
+    if (!arrival.visible || !fresh || disabled) return;
+    // The transcript's virtual list shows a new row only once it has measured it (`visibility: hidden` until then,
+    // a frame or two), and a hidden element refuses focus: retry on the next frames until the focus lands, unless
+    // the user starts typing or moves the focus meanwhile.
+    const before = document.activeElement;
+    let left = ARRIVAL_FOCUS_FRAMES;
+    let pending = 0;
+    const attempt = () => {
+      const card = frame.current;
+      if (card === null || typing() || inAnotherCard(card)) return;
+      if (left < ARRIVAL_FOCUS_FRAMES && document.activeElement !== before) return;
+      focusCard(card, "newest");
+      if (!card.contains(document.activeElement) && left-- > 0)
+        pending = requestAnimationFrame(attempt);
+    };
+    attempt();
+    return () => {
+      cancelAnimationFrame(pending);
+    };
+  }, [arrival.visible, fresh, disabled]);
   // "Go to the waiting prompt" asks for this card by id.
   useEffect(
     () =>
-      registerCardFocus(props.id, () => {
-        jumpToCard(frame.current);
-      }),
-    [props.id],
+      !arrival.visible
+        ? undefined
+        : registerCardFocus(props.id, () => {
+            jumpToCard(frame.current);
+          }),
+    [props.id, arrival.visible],
   );
   const choose = (choice: AskChoice) => {
     if (!disabled) onChoose?.(choice);
   };
   const onKey = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (props.onKeys !== undefined) {
+      const target = event.target;
+      const typed =
+        (target instanceof HTMLInputElement &&
+          target.type !== "radio" &&
+          target.type !== "checkbox") ||
+        target instanceof HTMLTextAreaElement;
+      if (!typed && !event.altKey && !event.ctrlKey && !event.metaKey)
+        props.onKeys(event, arrival.keysReady() && !event.repeat);
+      return;
+    }
     // A held key repeats: only its first press answers (the next card may already have the focus).
-    if (props.keys === false || event.repeat) return;
+    if (props.keys === false) return;
     const target = event.target;
     if (
       target instanceof HTMLInputElement ||
@@ -124,6 +184,11 @@ export function AskCard(props: AskCardProps): ReactElement {
     )
       return;
     const button = buttons.find((b) => String(b.key) === event.key);
+    if (!arrival.keysReady() || event.repeat) {
+      if (button !== undefined || event.key === "Enter" || event.key === " ")
+        event.preventDefault();
+      return;
+    }
     if (button !== undefined) {
       event.preventDefault();
       choose(button.choice);
@@ -132,6 +197,7 @@ export function AskCard(props: AskCardProps): ReactElement {
   return (
     <div
       ref={frame}
+      hidden={!arrival.visible}
       style={{ maxHeight }}
       tabIndex={-1}
       data-testid="transcript.approval-card-div"
@@ -157,7 +223,7 @@ export function AskCard(props: AskCardProps): ReactElement {
     >
       <div className="ah">
         <span className="px needs" aria-hidden="true" />
-        <b>{props.question}</b>
+        <b id={`${textId}-q`}>{props.question}</b>
         <span className="sub" title={props.whoTitle ?? props.who}>
           {props.who}
         </span>
@@ -165,18 +231,27 @@ export function AskCard(props: AskCardProps): ReactElement {
       <div className="ask-body">
         {props.summary !== undefined || props.reason || props.covers ? (
           <div className="why">
-            {props.summary === undefined ? null : <span className="summary">{props.summary}</span>}
+            {props.summary === undefined ? null : (
+              <span className="summary" id={`${textId}-s`}>
+                {props.summary}
+              </span>
+            )}
             {props.reason ? <span className="reason">{props.reason}</span> : null}
             {props.covers && props.covers.length > 0 ? <CoversLine parts={props.covers} /> : null}
           </div>
         ) : null}
         {props.children}
       </div>
+      {props.footer === undefined || props.footer === null ? null : (
+        <div className="ask-foot">{props.footer}</div>
+      )}
       {buttons.length > 0 || props.actions !== undefined ? (
         <div className="choices">
           {buttons.map((b) => {
-            // The name is exactly what is on the button (its words and its key), so "Click Allow once" works.
-            const name = props.keys === false ? b.label : `${b.label} ${String(b.key)}`;
+            // Named by its words only: voice control ("Click Allow once", macOS Voice Control) needs the whole name,
+            // and a key digit in it stops the spoken words from matching. The key is its keyboard shortcut.
+            const name = b.label;
+            const shortcut = props.keys === false ? undefined : String(b.key);
             const decision = props.decisionOf?.(b.choice);
             const item = b.choice === "always" ? "always" : (decision ?? b.choice);
             const label = (
@@ -193,8 +268,23 @@ export function AskCard(props: AskCardProps): ReactElement {
             // The second click of a double click answers nothing: the first one may have closed the card
             // that was under the pointer, and this one would land on the next card moved into its place.
             const onClick = (event: MouseEvent) => {
+              const pointer = event.detail > 0 || pressed.current === b.choice;
+              pressed.current = null;
               if (event.detail > 1) return;
+              // A keyboard click (Enter or Space on the button) waits for the arrival grace like the answer keys.
+              if (!pointer && !arrival.keysReady()) return;
               choose(b.choice);
+            };
+            const press = {
+              onPointerDown: (event: PointerEvent) => {
+                pressed.current = event.isPrimary && event.button === 0 ? b.choice : null;
+              },
+              onPointerLeave: () => {
+                pressed.current = null;
+              },
+              onPointerCancel: () => {
+                pressed.current = null;
+              },
             };
             return b.choice === "no" ? (
               <Button
@@ -206,8 +296,11 @@ export function AskCard(props: AskCardProps): ReactElement {
                 data-decision={decision}
                 disabled={disabled}
                 aria-label={name}
+                aria-keyshortcuts={shortcut}
+                aria-describedby={describedBy}
                 title={name}
                 onClick={onClick}
+                {...press}
                 variant="danger"
                 shape="outlined"
               >
@@ -223,8 +316,11 @@ export function AskCard(props: AskCardProps): ReactElement {
                 data-decision={decision}
                 disabled={disabled}
                 aria-label={name}
+                aria-keyshortcuts={shortcut}
+                aria-describedby={describedBy}
                 title={name}
                 onClick={onClick}
+                {...press}
                 appearance="choice"
                 variant={b.choice === "once" ? "primary" : undefined}
               >

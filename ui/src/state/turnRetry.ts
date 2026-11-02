@@ -63,6 +63,6 @@ export function withoutRetry(entry: SessionEntry): SessionEntry {
 /** "Retrying (2) · Server error"; the reason is left out when Vibe gave none. */
 export function retryLabel(retry: TurnRetry): string {
   const reason = REASONS[retry.category];
-  const head = `Retrying (${String(retry.attempt)})`;
+  const head = `Retrying (${String(retry.attempt)})…`;
   return reason === undefined ? head : `${head} · ${reason}`;
 }

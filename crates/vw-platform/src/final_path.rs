@@ -6,12 +6,71 @@
 //! `GetFinalPathNameByHandleW` with DOS volume names, the form `std::fs::canonicalize` returns (`\\?\C:\...`).
 //! Each form matches the platform's `std::fs::canonicalize` of the same file.
 //!
-//! Depends on: rustix (macOS), windows (Win32 `Storage_FileSystem`). Called by: vw-core-api `edit_preview` (the
-//! read of a previewed file).
+//! Also exposes handle identity and link count for protected-file alias checks (Unix device/inode, Windows
+//! volume/file index). Depends on: rustix (macOS), windows (Win32 `Storage_FileSystem`). Called by vw-core-api's
+//! previewed-file reads and shared search/document/upload exclusions; neither helper reads file contents.
 
 use std::fs::File;
 use std::io;
 use std::path::PathBuf;
+
+/// Identity shared by all hard links to one file on a volume.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FileIdentity {
+    volume: u64,
+    index: u64,
+}
+
+/// Returns the opened file's volume/object identity and hard-link count, without reading its bytes.
+///
+/// # Errors
+/// The handle metadata could not be read or the platform cannot establish file identity.
+#[cfg(unix)]
+pub fn identity(file: &File) -> io::Result<(FileIdentity, u64)> {
+    use std::os::unix::fs::MetadataExt;
+    let meta = file.metadata()?;
+    Ok((
+        FileIdentity {
+            volume: meta.dev(),
+            index: meta.ino(),
+        },
+        meta.nlink(),
+    ))
+}
+
+/// Returns the opened file's volume/object identity and hard-link count, without reading its bytes.
+///
+/// # Errors
+/// Windows could not read the handle's file information.
+#[cfg(windows)]
+#[allow(unsafe_code)]
+pub fn identity(file: &File) -> io::Result<(FileIdentity, u64)> {
+    use std::os::windows::io::AsRawHandle;
+    use windows::Win32::Foundation::HANDLE;
+    use windows::Win32::Storage::FileSystem::{
+        BY_HANDLE_FILE_INFORMATION, GetFileInformationByHandle,
+    };
+    let mut info = BY_HANDLE_FILE_INFORMATION::default();
+    // SAFETY: file owns the live handle; info is writable and has the API's required type and size.
+    unsafe { GetFileInformationByHandle(HANDLE(file.as_raw_handle()), &raw mut info) }
+        .map_err(|error| io::Error::from_raw_os_error(error.code().0 & 0xffff))?;
+    Ok((
+        FileIdentity {
+            volume: u64::from(info.dwVolumeSerialNumber),
+            index: (u64::from(info.nFileIndexHigh) << 32) | u64::from(info.nFileIndexLow),
+        },
+        u64::from(info.nNumberOfLinks),
+    ))
+}
+
+/// Returns an unsupported error when the platform cannot establish file identity.
+///
+/// # Errors
+/// Always returns `Unsupported`.
+#[cfg(not(any(unix, windows)))]
+pub fn identity(_file: &File) -> io::Result<(FileIdentity, u64)> {
+    Err(io::ErrorKind::Unsupported.into())
+}
 
 /// The final path of the file `file` is open on.
 ///

@@ -21,6 +21,7 @@
 compile_error!("the consent fixture alias is available only in private debug e2e builds");
 
 mod act;
+mod act_notes;
 mod action_loop;
 pub mod annotate;
 mod answers;
@@ -30,7 +31,11 @@ mod consent_driver;
 pub mod delegation;
 mod delegation_driver;
 mod driver;
+pub mod frames;
 pub mod guard;
+mod image_read;
+mod keys;
+mod labels;
 mod login_fill;
 pub mod model;
 mod native_focus;
@@ -38,16 +43,24 @@ mod navigation_receipt;
 pub mod observe;
 pub mod output;
 mod page;
+mod point;
+mod point_receipt;
 mod postconditions;
+mod read;
 pub mod receipt;
 mod refs;
 pub mod scripts;
+mod scroll_shown;
 mod secret_capture;
 mod sessions;
+mod upload;
+mod visual;
 
 pub use act::{
-    Action, Covering, DEFAULT_WAIT_MS, KEYS, MAX_TEXT, MAX_WAIT_MS, PageAnswer, Target, parse,
+    Action, Covering, DEFAULT_WAIT_MS, KEYS, MAX_TEXT, MAX_UPLOAD_BYTES, MAX_UPLOAD_FILES,
+    MAX_WAIT_MS, PageAnswer, Target, UploadFile, parse,
 };
+pub use action_loop::POST_INPUT_FAILED;
 pub use driver::{
     ActError, Browser, HEADLINE_KEY, LOCAL_NETWORK, NOTHING_OPEN, NavFuture, Navigate, ReadOptions,
     STOPPED,

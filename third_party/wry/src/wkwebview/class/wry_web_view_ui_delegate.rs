@@ -105,6 +105,11 @@ define_class!(
       _frame: &WKFrameInfo,
       handler: &block2::Block<dyn Fn(*const NSArray<NSURL>)>,
     ) {
+      // VIBE WORK PATCH: the embedding app may refuse the panel (`file_panel`); no file, as Cancel.
+      if crate::file_panel::refused(std::ptr::from_ref(_webview) as usize) {
+        (*handler).call((null_mut(),));
+        return;
+      }
       unsafe {
         if let Some(mtm) = MainThreadMarker::new() {
           let open_panel = NSOpenPanel::openPanel(mtm);
@@ -177,13 +182,16 @@ define_class!(
       action: &objc2_web_kit::WKNavigationAction,
       window_features: &objc2_web_kit::WKWindowFeatures,
     ) -> Option<Retained<objc2_web_kit::WKWebView>> {
-      if let Some(new_window_req_handler) = &self.ivars().new_window_req_handler {
+      // vibe-work patch: no window for a moment while element full screen moves the web view; no popup then.
+      if let (Some(new_window_req_handler), Some(current_window)) =
+        (&self.ivars().new_window_req_handler, webview.window())
+      {
         let request = action.request();
         let url = request.URL().unwrap().absoluteString().unwrap();
 
-        let current_window = webview.window().unwrap();
-        let screen = current_window.screen().unwrap();
-        let screen_frame = screen.frame();
+        let screen_frame = current_window
+          .screen()
+          .map_or_else(|| current_window.frame(), |screen| screen.frame());
 
         match new_window_req_handler(
           url.to_string(),

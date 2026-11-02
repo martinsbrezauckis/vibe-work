@@ -180,7 +180,7 @@ where
 {
     answer_while_connected(reader, async {
         tokio::time::timeout(deadline, answer).await.unwrap_or_else(|_| {
-            Answer::Error("Outcome unknown: the browser request timed out and was canceled. Do not repeat an act; inspect the Browser tab. An unanswered native confirmation can no longer send input.".to_owned())
+            Answer::Error("Outcome unknown: the browser request timed out and was canceled. An act may have run on the page before that, so a repeat could do it twice. Do not repeat an act; inspect the Browser tab. An unanswered native confirmation can no longer send input.".to_owned())
         })
     }).await
 }
@@ -214,21 +214,17 @@ async fn answer(shared: &Weak<Shared>, request: Request) -> Answer {
         }
         // The Chrome tool list is the MCP server's own tools/list step, not a tool call: it carries no pre-tool hook
         // receipt (tools::call requires one and refused it, so sessions got no Chrome tools) and grants nothing;
-        // every Chrome call still passes the hook and the mode check.
-        Some(Holder::Session(session_id)) if tool == names::CHROME_TOOL_LIST => {
-            Ok(crate::chrome_control::gateway::list(&shared, &session_id))
+        // every Chrome call still passes the hook and the mode check. Vibe lists a session's MCP tools once, inside
+        // session/start, while its credential is still pending (the session id is not known yet), so a pending
+        // credential gets it too. The list is the same for every chat (`gateway::list`).
+        Some(Holder::Session(_) | Holder::Pending) if tool == names::CHROME_TOOL_LIST => {
+            Ok(crate::chrome_control::gateway::list(&shared))
         }
         Some(Holder::Session(session_id)) if names::SESSION_TOOLS.contains(&tool) => {
             let outcome =
                 super::tools::call(&shared, &tools, &session_id, tool, request.args).await;
             log(tool, Some(&session_id), &outcome);
             outcome
-        }
-        // Vibe lists a session's MCP tools once, inside session/start, while its credential is still pending (the
-        // session id is not known yet): the Chrome tool list grants nothing (each call needs the session's
-        // credential and passes the mode check), so it is answered here; without it no session got Chrome tools.
-        Some(Holder::Pending) if tool == names::CHROME_TOOL_LIST => {
-            Ok(crate::chrome_control::gateway::list(&shared, ""))
         }
         Some(Holder::Hook) if tool == names::GUARD_REFUSED => {
             crate::guard_refusals::hook(&shared, request.args)
@@ -362,7 +358,7 @@ mod tests {
         assert_eq!(
             result,
             Some(Answer::Error(
-                "Outcome unknown: the browser request timed out and was canceled. Do not repeat an act; inspect the Browser tab. An unanswered native confirmation can no longer send input.".to_owned()
+                "Outcome unknown: the browser request timed out and was canceled. An act may have run on the page before that, so a repeat could do it twice. Do not repeat an act; inspect the Browser tab. An unanswered native confirmation can no longer send input.".to_owned()
             ))
         );
         assert!(cancelled.load(Ordering::SeqCst));

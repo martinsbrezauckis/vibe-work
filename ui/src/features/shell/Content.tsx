@@ -214,7 +214,14 @@ export function Content() {
   // Ctrl F finds in the open conversation or the File tab (pages over the work view have their own).
   useFindKeys(page !== null || covered);
   return (
-    <main className={`content${page === null ? "" : " has-page"}`} id="content">
+    <main
+      className={`content${page === null ? "" : " has-page"}`}
+      id="content"
+      aria-label="Work area"
+      data-focus-region="content"
+      data-testid="shell.work-area"
+      tabIndex={-1}
+    >
       <CoveredByPage.Provider value={page !== null}>
         <div className="content-base" inert={page !== null}>
           {covered ? (

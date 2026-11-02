@@ -294,4 +294,26 @@ mod package_tests {
         let answer: Value = serde_json::from_slice(&out).unwrap();
         assert_eq!(answer["result"]["content"][0]["text"], "src/a.rs:2: needle");
     }
+
+    #[test]
+    fn session_facts_and_connector_suggestions_are_discoverable_without_install_tools() {
+        let listing = tool_list();
+        for name in ["session_status", "connectors_list", "connector_suggest"] {
+            assert!(
+                listing
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|tool| tool["name"] == name),
+                "missing {name}"
+            );
+        }
+        assert!(
+            !listing
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|tool| tool["name"] == "connector_install")
+        );
+    }
 }

@@ -330,6 +330,7 @@ impl From<KeyStatus> for KeyStatusView {
             .map(|path| path.to_string_lossy().into_owned());
         let (vault_state, vault_kind, remembered_device) = match status.vault {
             VaultStatus::NoVault => ("noVault", None, false),
+            VaultStatus::SelectedVaultMissing => ("selectedVaultMissing", None, false),
             VaultStatus::Locked {
                 kind,
                 remembered_device,

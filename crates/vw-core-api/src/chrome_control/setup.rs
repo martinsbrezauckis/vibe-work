@@ -270,7 +270,7 @@ pub(crate) fn view(
         store_review: false,
         pairing: package
             .err()
-            .unwrap_or_else(|| "Chrome Control is not connected".to_owned()),
+            .unwrap_or_else(|| vw_vocabulary::texts::CHROME_NOT_CONNECTED.to_owned()),
         fingerprint: None,
     }
 }
@@ -289,7 +289,7 @@ pub(super) fn packaged_helper(config: &ChromeControlConfig) -> Result<(PathBuf, 
 }
 
 fn missing_helper() -> String {
-    "This Vibe Work installation has no Chrome Control helper. Reinstall Vibe Work.".to_owned()
+    vw_vocabulary::texts::CHROME_PACKAGE_MISSING.to_owned()
 }
 
 pub(super) fn open_helper(
@@ -307,7 +307,9 @@ pub(super) fn check_helper_pin(config: &ChromeControlConfig, bytes: &[u8]) -> Re
     match config.helper_sha256.as_deref() {
         Some(pin) if format!("{:x}", Sha256::digest(bytes)) == pin => {}
         None if cfg!(debug_assertions) => {}
-        _ => return Err("The Chrome helper in this installation is not the one that shipped with Vibe Work. Reinstall Vibe Work.".to_owned()),
+        _ => {
+            return Err(vw_vocabulary::texts::CHROME_PACKAGE_CHANGED.to_owned());
+        }
     }
     Ok(())
 }

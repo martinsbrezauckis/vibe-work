@@ -412,9 +412,10 @@ fn the_chrome_control_state_folder_is_refused_for_every_use() -> std::io::Result
         ] {
             let refusal = layout.check(&data.join(name), &data, access, &|_, _| Ok(()));
             assert!(
-                refusal
-                    .as_deref()
-                    .is_some_and(|r| r.contains("Settings › Browser › Your Chrome")),
+                refusal.as_deref().is_some_and(|r| r.contains(&format!(
+                    "Settings › Browser › {}",
+                    vw_vocabulary::label("workNames", "yourChrome")
+                ))),
                 "{name} with {access:?}: {refusal:?}"
             );
         }

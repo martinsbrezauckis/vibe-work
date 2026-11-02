@@ -32,6 +32,7 @@ export function MicButton({
   const error = useDictation((s) => s.error);
   const queued = useDictation((s) => s.queued);
   const press = useRef<{ at: number; started: boolean } | null>(null);
+  const pointerClick = useRef(false);
   // voice chat and dictation share the microphone; while voice chat is on, dictation waits.
   const voiceChatOn = useVoiceChat((s) => s.on);
   if (voice === null) return null;
@@ -69,26 +70,39 @@ export function MicButton({
       data-queued={finishing && queued ? "true" : undefined}
       data-testid="voice.mic-button"
       onPointerDown={(e) => {
-        if (e.button !== 0) return;
+        pointerClick.current = e.button === 0;
+        if (!pointerClick.current) return;
         if (phase === "transcribing") {
           press.current = null;
           dictation.queueStart(sessionId);
         } else if (phase === "idle" || phase === "error") {
-          press.current = { at: Date.now(), started: true };
+          press.current = { at: performance.now(), started: true };
           void dictation.start(sessionId);
         } else {
-          press.current = { at: Date.now(), started: false };
+          press.current = { at: performance.now(), started: false };
         }
       }}
       onPointerUp={() => {
         const p = press.current;
         press.current = null;
         if (p === null) return;
-        if (!p.started || Date.now() - p.at >= HOLD_MS) void dictation.stop();
+        if (!p.started || performance.now() - p.at >= HOLD_MS) void dictation.stop();
+      }}
+      onPointerCancel={() => {
+        press.current = null;
+        pointerClick.current = false;
+      }}
+      onPointerLeave={() => {
+        pointerClick.current = false;
+      }}
+      onKeyDown={() => {
+        pointerClick.current = false;
       }}
       onClick={(e) => {
-        // Pointer clicks were handled on down/up; this is the keyboard (detail 0).
-        if (e.detail !== 0) return;
+        // ui/click ends a primary pointer press with click() (detail 0), already handled on down/up.
+        const pointer = pointerClick.current;
+        pointerClick.current = false;
+        if (e.detail !== 0 || pointer) return;
         if (phase === "transcribing") dictation.queueStart(sessionId);
         else if (phase === "idle" || phase === "error") void dictation.start(sessionId);
         else if (active) void dictation.stop();

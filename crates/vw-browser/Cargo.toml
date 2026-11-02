@@ -45,7 +45,7 @@ ts-rs = { version = "12.0.1", optional = true, features = ["serde-json-impl", "n
 tokio = { version = "1.53", features = ["rt-multi-thread", "test-util"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-# WebKitGTK prints no PDF link annotations (upstream 302265). The native print result needs text geometry
-# and an object writer to restore links without changing its pagination or rasterizing its content.
+# Older system WebKitGTK printers omit PDF annotations (upstream 302265). Keep a text-only fallback for those
+# installations; native link-bearing output passes through unchanged.
 pdf-extract = "=0.12.1"
 lopdf = { version = "0.42", default-features = false }

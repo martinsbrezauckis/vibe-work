@@ -82,9 +82,41 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         writeln!(output, "        {id:?} => Some({text:?}),")?;
     }
     output.push_str("        _ => None,\n    }\n}\n");
+    text_constants(&mut output, texts)?;
     let path = PathBuf::from(
         std::env::var_os("OUT_DIR").ok_or_else(|| invalid("Cargo must set OUT_DIR"))?,
     );
     fs::write(path.join("vocabulary.rs"), output)?;
+    Ok(())
+}
+
+fn text_constants(
+    output: &mut String,
+    texts: &serde_json::Map<String, Value>,
+) -> Result<(), std::fmt::Error> {
+    // Constants let callers share copy in fixed protocol tables and static error messages too.
+    output.push_str(
+        "/// Shared sentences and headings for static Rust call sites.\npub mod texts {\n",
+    );
+    for (id, value) in texts {
+        let name: String = id
+            .chars()
+            .flat_map(|ch| {
+                if ch.is_ascii_uppercase() {
+                    vec!['_', ch]
+                } else {
+                    vec![ch.to_ascii_uppercase()]
+                }
+            })
+            .collect();
+        let Some(text) = value.as_str() else {
+            continue;
+        };
+        writeln!(
+            output,
+            "    /// Shared vocabulary text `{id}`.\n    pub const {name}: &str = {text:?};"
+        )?;
+    }
+    output.push_str("}\n");
     Ok(())
 }

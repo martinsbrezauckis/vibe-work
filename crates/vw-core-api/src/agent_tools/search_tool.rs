@@ -1,38 +1,14 @@
 //! Session-credential search adapter. Uses the Files search engine and the read folder guard;
 //! app state and the vault are excluded even when a chat's folder contains them.
 use crate::core::Shared;
+use crate::read_exclusions::{ReadExclusions, under};
 use crate::search_agent::{Request, run};
 use crate::search_files::Folder;
 use serde_json::Value;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use vw_agent_tools::folders::{Access, Layout, resolve};
-
-fn under(path: &Path, root: &Path) -> bool {
-    vw_procmon::normalize(path).starts_with(vw_procmon::normalize(root))
-}
-fn excluded(path: &Path, data: Option<&Path>, vault: Option<&Path>, copy: Option<&Path>) -> bool {
-    if vault.is_some_and(|v| under(path, v)) {
-        return true;
-    }
-    data.is_some_and(|d| under(path, d)) && !copy.is_some_and(|c| under(path, c))
-}
-
-fn vault_folders(data: Option<&Path>, selected: Option<PathBuf>) -> Result<Vec<PathBuf>, String> {
-    let mut paths = Vec::new();
-    paths.extend(selected);
-    if let Some(data) = data {
-        paths.push(vw_vault::private_location::private_vault_dir(data).map_err(|e| e.to_string())?);
-    }
-    if let Ok(shared) = vw_vault::location::resolve(&vw_vault::location::ProfileInput::from_env()) {
-        paths.extend([shared.canonical, shared.legacy]);
-    }
-    paths
-        .iter()
-        .map(|p| resolve(p).map_err(|e| e.to_string()))
-        .collect()
-}
 
 pub(super) async fn call(
     shared: &Arc<Shared>,
@@ -50,21 +26,8 @@ pub(super) async fn call(
         let deadline = Instant::now() + Duration::from_secs(4);
         let layout =
             Layout::new(&shared.instructions.own_home, &roots[0]).map_err(|e| e.to_string())?;
-        let data = shared
-            .instructions
-            .own_home
-            .parent()
-            .map(resolve)
-            .transpose()
-            .map_err(|e| e.to_string())?;
-        let vaults = vault_folders(
-            data.as_deref(),
-            shared.config.keys.as_ref().map(|k| k.vault_profile_dir()),
-        )?;
-        let forbidden = |path: &Path| {
-            excluded(path, data.as_deref(), None, layout.own.as_deref())
-                || vaults.iter().any(|vault| under(path, vault))
-        };
+        let exclusions = ReadExclusions::for_chat(&shared, &roots[0])?;
+        let forbidden = |path: &Path| exclusions.excludes(path);
         // A protected folder is never inspected for project configuration either.
         if forbidden(&roots[0]) {
             return Ok(Value::String("No hits.".into()));
@@ -107,6 +70,7 @@ pub(super) async fn call(
             &folders,
             &request,
             &allowed,
+            &|file, path| exclusions.check_opened(file, path, Some(deadline)).is_ok(),
             deadline.saturating_duration_since(Instant::now()),
         )
         .map(Value::String)
@@ -118,48 +82,25 @@ pub(super) async fn call(
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[test]
-    fn vault_and_app_data_stay_excluded_even_below_a_chat_root() {
-        let root = PathBuf::from(if cfg!(windows) { r"C:\chat" } else { "/chat" });
-        let data = root.join("app-data");
-        let vault = root.join("vault");
-        let copy = data.join("vibe/worktrees/repo/own");
-        assert!(excluded(
-            &data.join("state"),
-            Some(&data),
-            Some(&vault),
-            Some(&copy)
-        ));
-        assert!(excluded(
-            &vault.join("key"),
-            Some(&data),
-            Some(&vault),
-            Some(&copy)
-        ));
-        assert!(excluded(
-            &data.join("vibe/worktrees/repo/other/a"),
-            Some(&data),
-            Some(&vault),
-            Some(&copy)
-        ));
-        assert!(!excluded(
-            &copy.join("src/a"),
-            Some(&data),
-            Some(&vault),
-            Some(&copy)
-        ));
-        assert!(!excluded(
-            &root.join("ok"),
-            Some(&data),
-            Some(&vault),
-            Some(&copy)
-        ));
-        assert!(excluded(
-            &copy.join("vault/key"),
-            Some(&data),
-            Some(&copy.join("vault")),
-            Some(&copy)
-        ));
+
+    #[tokio::test]
+    async fn search_refuses_vault_hard_link_names_and_text() {
+        let f = crate::feature_test_core::Fixture::new().await;
+        f.load("chat", &f.root, &[], false);
+        let private =
+            vw_vault::private_location::private_vault_dir(&f.root.join("app-data")).unwrap();
+        std::fs::create_dir_all(&private).unwrap();
+        let profile = private.join("profile.json");
+        std::fs::write(&profile, "synthetic-profile").unwrap();
+        std::fs::hard_link(profile, f.root.join("notes.json")).unwrap();
+        for args in [
+            serde_json::json!({"glob":"*.json"}),
+            serde_json::json!({"query":"synthetic-profile"}),
+        ] {
+            let answer = call(&f.core.shared, "chat", args).await.unwrap();
+            assert_eq!(answer, "No hits.", "hard-linked vault profile was searched");
+        }
+        f.finish().await;
     }
     #[tokio::test]
     async fn credential_search_uses_only_its_cwd_and_workspace_roots() {

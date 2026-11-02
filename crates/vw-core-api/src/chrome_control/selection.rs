@@ -57,7 +57,9 @@ impl Selections {
             return false;
         };
         if self.pending.len() >= 32 {
-            self.error = Some("Chrome selection queue full".into());
+            self.error = Some(
+                "Too many selections are waiting. Send or remove some, then select again.".into(),
+            );
             return true;
         }
         let mut marked = json!({"structuredContent":{"url":url,"title":title,"selection":text}});
@@ -121,7 +123,10 @@ mod tests {
             assert!(queue.receive(&selection(&i.to_string()), |_| true));
         }
         assert_eq!(queue.ids().len(), 32);
-        assert_eq!(queue.error.as_deref(), Some("Chrome selection queue full"));
+        assert_eq!(
+            queue.error.as_deref(),
+            Some("Too many selections are waiting. Send or remove some, then select again.")
+        );
         queue.take("0");
         queue.receive(&selection("next"), |_| true);
         assert!(queue.error.is_none());

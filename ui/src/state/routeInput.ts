@@ -50,9 +50,9 @@ export function isStateRead(body: unknown): boolean {
 
 /** Polls `done` every 50 ms until it is true or `ms` passed; answers whether it became true. */
 export async function settleWithin(done: () => boolean, ms: number): Promise<boolean> {
-  const end = Date.now() + ms;
+  const end = performance.now() + ms;
   while (!done()) {
-    if (Date.now() > end) return false;
+    if (performance.now() > end) return false;
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
   return true;

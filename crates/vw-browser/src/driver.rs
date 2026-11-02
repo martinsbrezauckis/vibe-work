@@ -26,7 +26,7 @@ use crate::act::{Action, PageAnswer};
 use crate::consent::ConsentConfirmer;
 use crate::delegation::DelegationAuthorizer;
 use crate::model::PageModel;
-use crate::observe::{self, PAGE_CHARS};
+use crate::observe;
 use crate::refs::PAGE_CLOSED;
 use crate::sessions::{Actor, Outcome, Sessions};
 use crate::{guard, receipt, scripts};
@@ -88,9 +88,6 @@ impl Default for ReadOptions {
     }
 }
 
-/// Text read for a focused read (all of it is searched; only matching lines are answered).
-const FIND_TEXT: usize = 20_000;
-
 /// Why an action did not run or failed (the text the agent reads).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ActError {
@@ -145,11 +142,16 @@ pub struct Browser {
     pub(crate) service: PreviewService,
     pub(crate) sessions: Arc<Sessions>,
     captures: crate::capture::Captures,
+    pub(crate) read_mount: Option<vw_preview::MountId>,
+    #[cfg(feature = "e2e-script")]
+    pub(crate) image_gate: crate::image_read::ImageGate,
     pub(crate) secret_choices: Arc<crate::secret_capture::SecretChoices>,
     pub(crate) consent_confirmer: Arc<RwLock<Option<Arc<dyn ConsentConfirmer>>>>,
     pub(crate) delegation_authorizer: Arc<RwLock<Option<Arc<dyn DelegationAuthorizer>>>>,
     #[cfg(feature = "e2e-script")]
     pub(crate) test_consent_origin: Arc<RwLock<Option<String>>>,
+    /// Per session: the engine's refusal counts already reported on a receipt (`act_notes`).
+    pub(crate) act_reported: Arc<std::sync::Mutex<std::collections::HashMap<String, [u64; 2]>>>,
 }
 
 impl Browser {
@@ -160,11 +162,15 @@ impl Browser {
             service,
             sessions,
             captures: crate::capture::Captures::default(),
+            read_mount: None,
+            #[cfg(feature = "e2e-script")]
+            image_gate: Arc::default(),
             secret_choices: Arc::new(crate::secret_capture::SecretChoices::default()),
             consent_confirmer: Arc::new(RwLock::new(None)),
             delegation_authorizer: Arc::new(RwLock::new(None)),
             #[cfg(feature = "e2e-script")]
             test_consent_origin: Arc::new(RwLock::new(None)),
+            act_reported: Arc::default(),
         }
     }
 
@@ -184,75 +190,6 @@ impl Browser {
     #[must_use]
     pub(crate) fn service(&self) -> &PreviewService {
         &self.service
-    }
-
-    /// The page accessor for a capture's page scripts.
-    pub(crate) async fn page_of(&self, session_id: &str) -> Result<String, String> {
-        self.page(session_id).await
-    }
-
-    /// Runs a capture's page script (same retries as the agent's reads).
-    pub(crate) async fn run_script<T: serde::de::DeserializeOwned>(
-        &self,
-        session_id: &str,
-        script: String,
-    ) -> Result<T, String> {
-        self.run(session_id, script).await
-    }
-
-    /// The answer of a script built for `page` that reports `url` may be used (the document-bound authorization rule).
-    pub(crate) fn check_answer(
-        &self,
-        session_id: &str,
-        page: &str,
-        url: &str,
-    ) -> Result<(), String> {
-        self.service.reading_allowed(session_id, page, url)
-    }
-
-    /// Observes the page and records its refs as the session's latest.
-    ///
-    /// # Errors
-    /// A plain-text reason (nothing open, the page did not answer).
-    pub async fn observe(
-        &self,
-        session_id: &str,
-        options: ReadOptions,
-    ) -> Result<(PageModel, guard::Verdict, String), String> {
-        let page = self.page(session_id).await?;
-        let mount = self
-            .service
-            .page_mount(session_id)
-            .ok_or_else(|| PAGE_CLOSED.to_owned())?;
-        let (max_refs, max_text, offset) = if options.find.is_some() {
-            (crate::model::MAX_REFS, FIND_TEXT, 0)
-        } else {
-            (
-                options.max_refs.clamp(1, crate::model::MAX_REFS),
-                PAGE_CHARS,
-                options.text_page.unwrap_or(0) * PAGE_CHARS,
-            )
-        };
-        let script =
-            scripts::observe_focused(&page, max_refs, max_text, offset, options.find.as_deref());
-        let loads_before = self.service.load_state(session_id).map(|l| l.loads);
-        let mut model: PageModel = self.run_in_mount(session_id, script, Some(&mount)).await?;
-        // Authorization binds to the document that answered: the same mount, a page it may show.
-        self.service
-            .reading_allowed(session_id, &page, &model.url)?;
-        if self.service.page_mount(session_id).as_ref() != Some(&mount) {
-            return Err(PAGE_CLOSED.to_owned());
-        }
-        model.bound(max_text);
-        let verdict = observe::verdict(&model);
-        let mut seen = observe::seen(&model, mount);
-        // which document this observation saw (its load count), for the fill's "current observation". A
-        // load that finished while the script ran leaves it unknown (a fill then asks for a fresh read).
-        let loads_after = self.service.load_state(session_id).map(|l| l.loads);
-        seen.loads = loads_before.filter(|_| loads_before == loads_after);
-        let snapshot = seen.snapshot.clone();
-        self.sessions.set_seen(session_id, seen);
-        Ok((model, verdict, snapshot))
     }
 
     /// Host facts every answer starts with.
@@ -301,7 +238,18 @@ impl Browser {
                 .max_bytes
                 .clamp(observe::MIN_BUDGET, observe::MAX_BUDGET),
         );
-        let (model, verdict, snapshot) = self.observe(session_id, options).await?;
+        // A page loading again (a front page refreshing itself, a released tab reloaded here) is read once loaded.
+        self.page(session_id).await?;
+        self.wait_loaded(session_id).await;
+        // The wait can outlast the page: the user may have opened a local-network page in this tab meanwhile.
+        if by == Actor::Agent && self.on_local_network(session_id) {
+            return Err(LOCAL_NETWORK.to_owned());
+        }
+        let bound = self.bind_read(session_id, by).await?;
+        let (mut model, verdict, snapshot) = bound.observe(session_id, options).await?;
+        if screenshot {
+            Self::label_refs(&mut model);
+        }
         let answer = match find.as_deref() {
             Some(query) => observe::found(
                 &model,
@@ -320,6 +268,8 @@ impl Browser {
                 budget,
             ),
         };
+        #[cfg(feature = "e2e-script")]
+        self.before_image().await;
         let shot = if screenshot {
             Some(
                 self.service
@@ -330,6 +280,19 @@ impl Browser {
         } else {
             None
         };
+        // The image must show the observed page: the same mount and page class (the read binding), and the same
+        // document the refs came from (a navigation inside the mount during the shot), local-network rule again.
+        bound.check_read_mount()?;
+        if screenshot {
+            self.ref_mount(session_id).map_err(|error| error.text)?;
+            if by == Actor::Agent && self.on_local_network(session_id) {
+                return Err(LOCAL_NETWORK.to_owned());
+            }
+        }
+        // Labels go on the agent's copy only, after the image is known to show the observed page.
+        let shot = shot
+            .map(|shot| crate::labels::annotate(shot, &model, &answer))
+            .transpose()?;
         Ok((answer, shot))
     }
 
@@ -380,6 +343,7 @@ impl Browser {
         let load0 = self.service.load_state(session_id);
         let console0 = self.service.console_mark(session_id).await.ok();
         let refused0 = self.service.refusal_mark(session_id);
+        let marks = self.act_marks(session_id);
         let mut result = json!({"action": action.name()});
         let mut page_target = Value::Null;
         match action {
@@ -425,10 +389,16 @@ impl Browser {
                     result["note"] = json!(format!("not met within {timeout_ms} ms"));
                 }
             }
+            Action::Upload { .. } => {
+                let answer = self.upload(session_id, action, consent, by).await?;
+                page_target = json!(answer.target);
+                result["files"] = answer.uploaded.unwrap_or(Value::Null);
+            }
             _ => {
                 let answer = self
                     .page_act(session_id, action, consent, by, native_sent.clone())
                     .await?;
+                self.scroll_shown(session_id, action, &answer, by).await?;
                 page_target = json!(answer.target);
                 if let Some(value) = answer.value {
                     page_target["valueNow"] = json!(value);
@@ -455,8 +425,12 @@ impl Browser {
             console: console0,
             refused: refused0,
         };
-        self.receipt(session_id, action, base, result, page_target)
-            .await
+        let mut receipt = self
+            .receipt(session_id, action, base, result, page_target)
+            .await?;
+        // After the settle wait: what the page asked for during this act has been refused by now.
+        self.act_notes(session_id, action.reference(), &marks, &mut receipt);
+        Ok(receipt)
     }
 
     /// Settles, observes again and builds the receipt of an action against `base` (the page before it).
@@ -583,6 +557,11 @@ impl Browser {
         native_sent: Arc<std::sync::atomic::AtomicBool>,
     ) -> Result<PageAnswer, ActError> {
         let mount = self.check_ref(session_id, action)?;
+        if let Action::ClickAt { reference, x, y } = action {
+            return self
+                .coordinate_click(session_id, reference, (*x, *y), by, native_sent, consent)
+                .await;
+        }
         let page = if mount.is_some() {
             self.service
                 .page_accessor(session_id)
@@ -620,7 +599,14 @@ impl Browser {
         let start = tokio::time::Instant::now();
         loop {
             let answer: PageAnswer = self
-                .run_admitted_in_mount(session_id, script.clone(), mount.as_ref(), allowed.clone())
+                .run_act(
+                    session_id,
+                    script.clone(),
+                    mount.as_ref(),
+                    allowed.clone(),
+                    // A native click brings its own real input; other input acts run as the person's gesture.
+                    request["nativeClick"] != true && action.is_input(),
+                )
                 .await
                 .map_err(|text| {
                     if text == PAGE_CLOSED || text.starts_with("Not run:") {
@@ -649,17 +635,15 @@ impl Browser {
             };
             if request["nativeClick"] == true {
                 if let Some(point) = answer.native_point {
-                    let mount = mount.as_ref().ok_or_else(|| refused(PAGE_CLOSED))?;
-                    self.service
-                        .native_click_on_mount(mount, point, scripts::native_validation(&request, point), native_sent.clone(), allowed.clone())
-                        .await
-                        .map_err(|error| {
-                            if native_sent.load(std::sync::atomic::Ordering::Acquire) {
-                                failed(format!("Native mouse input was sent but completion failed: {}. Do not repeat the act; check the page.", preview_text(&error)))
-                            } else if matches!(error, PreviewError::Engine(vw_preview::EngineError::FocusRequired)) {
-                                refused(crate::native_focus::FOCUS_REQUEST)
-                            } else { refused(preview_text(&error)) }
-                        })?;
+                    self.native_ref_click(
+                        session_id,
+                        action,
+                        &request,
+                        point,
+                        by,
+                        native_sent.clone(),
+                    )
+                    .await?;
                     // The ensuing receipt proves a native check's post-input state after settling.
                     answer.checked = None;
                 } else if !matches!(action, Action::Check { .. }) {

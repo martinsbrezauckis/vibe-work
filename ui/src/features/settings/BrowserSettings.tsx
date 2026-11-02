@@ -1,5 +1,6 @@
 /** Browser Settings category: presents one page-level error above capacity, Your Chrome (Chrome Control) and delegation sections. Uses the sections' confirmed state and errors; called by SettingsPage. */
 import { useState } from "react";
+import { BrowserShieldsSettings } from "./BrowserShieldsSettings";
 import { BrowserPoolSettings } from "./BrowserPoolSettings";
 import { BrowserDelegationSettings } from "./BrowserDelegationSettings";
 import { YourChromeSettings } from "./chrome/YourChromeSettings";
@@ -7,7 +8,8 @@ import { YourChromeSettings } from "./chrome/YourChromeSettings";
 /** Errors belong to the Browser page rather than to both section cards. */
 export function BrowserSettings() {
   const [poolError, setPoolError] = useState<string | null>(null);
-  const error = poolError;
+  const [shieldsError, setShieldsError] = useState<string | null>(null);
+  const error = poolError ?? shieldsError;
   return (
     <>
       {error !== null && (
@@ -16,6 +18,7 @@ export function BrowserSettings() {
         </p>
       )}
       <BrowserPoolSettings onError={setPoolError} />
+      <BrowserShieldsSettings onError={setShieldsError} />
       <YourChromeSettings />
       <BrowserDelegationSettings />
     </>

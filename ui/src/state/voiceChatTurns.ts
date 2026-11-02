@@ -6,8 +6,9 @@
  * Called by: state/voiceChat, tests.
  * Invariants: pure; reads the core model only; a session without state reads as idle with nothing finished.
  */
-import type { JsonValue } from "../protocol/core";
-import { questionsOf } from "../features/transcript/model/callbacks";
+import type { Ask, JsonValue } from "../protocol/core";
+import { term } from "../vocabulary";
+import { offeredDecisions, questionsOf } from "../features/transcript/model/callbacks";
 import {
   type Obj,
   arr,
@@ -110,7 +111,10 @@ export interface OpenPrompt {
 }
 
 /** The open callbacks of a session as spoken prompts, in history order. */
-export function openPrompts(entry: SessionEntry | undefined): OpenPrompt[] {
+export function openPrompts(
+  entry: SessionEntry | undefined,
+  asks: readonly Ask[] = [],
+): OpenPrompt[] {
   if (entry === undefined) return [];
   const open = new Set(entry.openCallbackIds);
   return arr(entry.state?.["history"]).flatMap((raw: JsonValue) => {
@@ -118,11 +122,29 @@ export function openPrompts(entry: SessionEntry | undefined): OpenPrompt[] {
     if (e === null || entryType(e) !== "callback") return [];
     const id = str(e["callbackId"] ?? null) ?? str(e["id"] ?? null);
     if (id === null || (!open.has(id) && statusOf(e) !== "open")) return [];
-    const question = questionsOf(e).questions[0]?.question ?? "";
+    const questions = questionsOf(e).questions;
+    const offers = asks.find((ask) => ask.id === `callback:${id}`)?.offers;
+    const labels = {
+      approve: "Allow once",
+      approve_for_session: "Allow for this session",
+      approve_permanently: term("vaultPermissions", "allowed").name,
+      deny: "No",
+      cancel_turn: "Stop",
+    };
     const isQuestion = obj(e["detail"])?.["kind"] === "user_input";
     const text = isQuestion
-      ? questionPrompt(question)
-      : approvalPrompt(str(e["title"] ?? null) ?? "");
+      ? questions
+          .map((q) =>
+            questionPrompt(
+              q.question,
+              q.options.map((o) => o.label),
+            ),
+          )
+          .join(" ")
+      : approvalPrompt(
+          str(e["title"] ?? null) ?? "",
+          offeredDecisions(e, offers).map((d) => labels[d]),
+        );
     return [{ callbackId: id, text }];
   });
 }

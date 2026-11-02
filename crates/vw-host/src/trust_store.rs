@@ -104,7 +104,12 @@ pub fn ensure(vibe_home: &Path) -> Result<TrustStore, String> {
     };
     let updated = match with_default_on(&existing) {
         Ok(text) => text,
-        Err(outcome) => return Ok(outcome),
+        Err(outcome) => {
+            if matches!(outcome, TrustStore::Kept(true)) {
+                crate::config_comments::restore(&path, &existing, &NOTE)?;
+            }
+            return Ok(outcome);
+        }
     };
     std::fs::create_dir_all(vibe_home).map_err(|e| format!("{}: {e}", vibe_home.display()))?;
     let tmp = vibe_home.join("config.toml.vw-tmp");

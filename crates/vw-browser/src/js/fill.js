@@ -12,7 +12,7 @@
   const result = (status, extra) => JSON.stringify({ status, url: String(location.href).slice(0, 2000), ...extra });
   if (!ENV) return result("stale");
   try {
-    if (String(location.origin) !== REQ.origin) return result("originChanged");
+    if (String(window.origin) !== REQ.origin) return result("originChanged");
     const found = findRef(REQ.ref);
     if (found.length === 0) return result("stale");
     if (found.length > 1) return result("ambiguous");
@@ -20,7 +20,7 @@
     const target = { role: roleOf(el), name: hideKeys(labelOf(el)) };
     let docOrigin = "";
     try {
-      docOrigin = String(el.ownerDocument.location.origin);
+      docOrigin = String(el.ownerDocument.defaultView.origin);
     } catch {
       docOrigin = "";
     }
@@ -44,6 +44,11 @@
     if (!el.dispatchEvent(new (View.InputEvent || View.Event)("beforeinput", { bubbles: true, cancelable: true, inputType: "insertReplacementText" }))) {
       return result("cancelled", { target });
     }
+    // beforeinput is page code. Recheck before releasing a value: it may swap the field, its type or its form.
+    if (!el.isConnected || findRef(REQ.ref).length !== 1 || findRef(REQ.ref)[0] !== el) return result("stale");
+    if (loginRole(el) !== REQ.role) return result("notCredential", { target });
+    if (submitOrigins(el).some(o => o !== REQ.origin)) return result("formOrigin", { target });
+    if (submitMethods(el).some(m => m !== "post")) return result("formMethod", { target });
     const setter = Object.getOwnPropertyDescriptor(View.HTMLInputElement.prototype, "value");
     if (setter && setter.set) setter.set.call(el, text);
     else el.value = text;

@@ -22,6 +22,7 @@ export function VaultLockControls({
   display?: VaultLockDisplay;
 }) {
   const access = useVaultAccess();
+  const missing = useKeyUi((s) => s.status?.vaultState === "selectedVaultMissing");
   const locked = mode === "vault" ? access.vaultLocked : access.agentPaused !== false;
   const unavailable = mode === "agent" && access.agentPaused === null;
   const recovery = mode === "agent" && access.vaultLocked;
@@ -34,9 +35,12 @@ export function VaultLockControls({
       : locked
         ? "agentResume"
         : "agentPause";
-  const { name: label, tooltip: tip } = term("locks", action);
-  const status =
-    unavailable && !recovery
+  const lockTerm = term("locks", action);
+  const label = missing ? "Choose a vault" : lockTerm.name;
+  const tip = missing ? "Choose a vault" : lockTerm.tooltip;
+  const status = missing
+    ? "Vault not found"
+    : unavailable && !recovery
       ? TEXT.agentUnavailableStatus
       : recovery
         ? TEXT.vaultLockedStatus

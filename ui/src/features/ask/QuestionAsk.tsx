@@ -1,4 +1,7 @@
-/** Renders Vibe question fields and Submit/Skip through the shared AskCard and transcript client. */
+/**
+ * Renders Vibe question fields and Submit/Skip through the shared AskCard and transcript client. Keys inside the card:
+ * 1-9 pick that option (after the card's arrival grace), Enter on an option submits once every question has an answer.
+ */
 import { type ReactElement, useState } from "react";
 import { Button } from "../../components/Controls";
 import { TEXT } from "../../vocabulary";
@@ -13,6 +16,7 @@ import {
   questionsOf,
 } from "../transcript/model/callbacks";
 import { type Obj, entryId, str } from "../transcript/model/entries";
+import { optionKey } from "./AnswerOptions";
 import { AskCard } from "./AskCard";
 import { QuestionField } from "./QuestionField";
 import { useCardClose } from "./useCardClose";
@@ -60,6 +64,21 @@ export function QuestionAsk({
       buttons={[]}
       disabled={disabled}
       keys={false}
+      onKeys={(event, ready) => {
+        const onOption =
+          event.target instanceof HTMLInputElement && event.target.closest(".q-opts") !== null;
+        if (event.key === "Enter" && onOption) {
+          event.preventDefault();
+          if (ready) send(output);
+          return;
+        }
+        if (!/^[1-9]$/.test(event.key)) return;
+        event.preventDefault();
+        if (!ready || disabled) return;
+        optionKey(event.currentTarget, event.key, event.target, questions, picks, (i, next) => {
+          setPicks((all) => all.map((p, j) => (j === i ? next : p)));
+        });
+      }}
       onFocusInside={focusInside}
       state={
         sending
@@ -78,7 +97,7 @@ export function QuestionAsk({
             type="button"
             appearance="choice"
             variant="primary"
-            aria-label="Submit answers"
+            // Named by its visible word ("Click Submit" for voice control); the tooltip says more.
             title="Submit answers"
             disabled={disabled || output === null}
             onClick={() => {
@@ -91,7 +110,6 @@ export function QuestionAsk({
             data-testid="transcript.question-card-send-2"
             type="button"
             appearance="choice"
-            aria-label="Skip questions"
             title="Skip questions"
             disabled={disabled}
             onClick={() => {

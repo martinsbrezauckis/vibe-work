@@ -20,6 +20,39 @@ use serde::{Deserialize, Serialize};
     deny_unknown_fields
 )]
 pub enum SpeechRequest {
+    /// Enable voice answers for the window's own voice-chat session; null ends ownership.
+    PromptSession {
+        /// Active voice-chat session, only while voice answering is opted in.
+        session_id: Option<String>,
+    },
+    /// Prepare a fresh code for one currently open card in the owned session.
+    PromptPrepare {
+        /// The owned session.
+        session_id: String,
+        /// Exact card callback.
+        callback_id: String,
+    },
+    /// Start answer capture after the prompt and code finished playing.
+    PromptStart {
+        /// Core-issued, single-prompt ticket.
+        ticket: String,
+        /// Capture sample rate.
+        sample_rate: u32,
+        /// Recognition language; null is automatic.
+        language: Option<String>,
+    },
+    /// Transcribe the ticket's own audio and match it in the core; never accepts caller-supplied text.
+    PromptAnswer {
+        /// Core-issued ticket.
+        ticket: String,
+        /// Stream returned by promptStart.
+        stream_id: String,
+    },
+    /// Abandon voice capture without answering the card.
+    PromptCancel {
+        /// Core-issued ticket.
+        ticket: String,
+    },
     /// Window receipt after preparing the first speech call, before accepting audio into its queue.
     ReadingReady {
         /// The pending reading event's id.
@@ -76,6 +109,8 @@ pub enum SpeechRequest {
     Voices {},
     /// Whether sound can leave the app now (asked before each sound is played; `audio_output`).
     AudioOutput {},
+    /// The system screen-reader flag, for automatic prompt sounds.
+    ScreenReader {},
 }
 
 /// How a dictation turns speech into text.
@@ -98,6 +133,23 @@ pub enum DictationMode {
     rename_all_fields = "camelCase"
 )]
 pub enum SpeechResult {
+    /// A prepared voice answer, or no ticket when this card requires its controls.
+    Prompt {
+        /// Opaque lifetime bound to one card and voice-chat owner.
+        ticket: Option<String>,
+        /// The allow-once number; null means only No is available.
+        number: Option<u8>,
+    },
+    /// Outcome of matching a prompt's own audio.
+    PromptAnswer {
+        /// allowed, refused, retry, repeat or card. Only the first two answered the card.
+        status: String,
+    },
+    /// The system screen-reader flag; null means this desktop could not report it.
+    ScreenReader {
+        /// True while a screen reader is enabled.
+        active: Option<bool>,
+    },
     /// Whether a one-time reading started, with a plain sentence for the caller.
     Reading {
         /// started, nobodyListening, keyMissing, voiceUnavailable or noReply (accepted/expired for a window receipt).

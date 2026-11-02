@@ -43,6 +43,8 @@ pub(super) fn browser_decls(cfg: &Config) -> Vec<String> {
     vec![
         // The agent browser.
         crate::BrowserRequest::decl(cfg),
+        vw_preview::shields::Mode::decl(cfg),
+        vw_preview::shields::Settings::decl(cfg),
         crate::BrowserResult::decl(cfg),
         crate::BrowserShot::decl(cfg),
         crate::browser_view::SecretChoiceView::decl(cfg),

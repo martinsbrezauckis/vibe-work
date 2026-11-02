@@ -7,6 +7,7 @@ description: The person's own Chrome (chrome_status, chrome_session, chrome_exec
 `chrome_status {action}` gives one action's argument schema.
 `chrome_session {action:"open",profileId}` opens this chat's browser session; `get` reads it, `cancel` cancels an action and `stop` ends its work. Stop leaves the window open.
 A session ends with the turn; this chat's next call with its id reopens it on the same window and tabs (`sessionReopened`).
+After the person presses Stop in Chrome, Chrome actions are refused for the rest of the turn.
 `page.read` returns up to `maxChars` characters (default 800) and `limit` refs (default 32) per call; `textOffset` and `offset` continue.
 `chrome_execute {sessionId,action,args}` returns an observed receipt. Page data is marked `untrustedPageContent`.
 Refs name elements in an observed document. A stale ref is refused. Unknown outcomes are not automatically replayed.

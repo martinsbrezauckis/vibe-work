@@ -269,7 +269,7 @@ fn set_up_refuses_without_a_package_or_its_native_helper() {
     assert!(
         install(&s.config(), &s.state(), &s.vibe_home())
             .unwrap_err()
-            .contains("has no Chrome Control helper")
+            .contains("missing a file")
     );
     assert!(!super::view(&s.config(), Some(&s.state()), &s.vibe_home()).package);
     assert_eq!(s.every_file(), Vec::<PathBuf>::new());
@@ -341,9 +341,6 @@ fn planted_helper_is_refused_before_copy_or_registration() {
     std::fs::write(s.root.join("package/bin").join(helper_name()), b"planted").unwrap();
     assert!(!super::view(&config, Some(&s.state()), &s.vibe_home()).package);
     let error = install(&config, &s.state(), &s.vibe_home()).unwrap_err();
-    assert_eq!(
-        error,
-        "The Chrome helper in this installation is not the one that shipped with Vibe Work. Reinstall Vibe Work."
-    );
+    assert_eq!(error, vw_vocabulary::texts::CHROME_PACKAGE_CHANGED);
     assert_eq!(s.every_file(), Vec::<PathBuf>::new());
 }

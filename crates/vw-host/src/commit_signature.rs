@@ -101,7 +101,12 @@ pub fn ensure(vibe_home: &Path) -> Result<CommitSignature, String> {
     };
     let updated = match with_default_off(&existing) {
         Ok(text) => text,
-        Err(outcome) => return Ok(outcome),
+        Err(outcome) => {
+            if matches!(outcome, CommitSignature::Kept(false)) {
+                crate::config_comments::restore(&path, &existing, &NOTE)?;
+            }
+            return Ok(outcome);
+        }
     };
     std::fs::create_dir_all(vibe_home).map_err(|e| format!("{}: {e}", vibe_home.display()))?;
     let tmp = vibe_home.join("config.toml.vw-tmp");

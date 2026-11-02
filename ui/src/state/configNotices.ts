@@ -56,6 +56,24 @@ function oneLine(text: string): string {
   return text.replace(/\s*\n\s*/g, " ").trim();
 }
 
+/** A warning already owned by the config bell, including a file-prefixed issue. */
+export function isConfigProblem(runtime: JsonValue | undefined, message: string): boolean {
+  const root = obj(runtime);
+  const line = oneLine(message);
+  return (
+    list(obj(root?.["config"])?.["validationWarnings"]).some(
+      (warning) => typeof warning === "string" && oneLine(warning) === line,
+    ) ||
+    list(root?.["issues"]).some((value) => {
+      const issue = obj(value);
+      const text = issue?.["message"];
+      if (typeof text !== "string") return false;
+      const file = typeof issue?.["file"] === "string" ? issue["file"] : "";
+      return oneLine(text) === line || oneLine(`${file}: ${text}`) === line;
+    })
+  );
+}
+
 function problem(kind: string, file: string, message: string, text: string): ConfigProblem {
   return { id: JSON.stringify([kind, file, message]), text: oneLine(text) };
 }

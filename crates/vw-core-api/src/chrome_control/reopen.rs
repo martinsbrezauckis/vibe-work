@@ -239,7 +239,7 @@ mod tests {
     /// PREDICT (before the change): the open after the Stop runs and the agent goes on.
     #[tokio::test]
     async fn the_persons_stop_holds_for_the_rest_of_the_turn() {
-        const STOPPED: &str = "Not run: you stopped Chrome for this turn.";
+        const STOPPED: &str = "Not run: the person stopped Chrome for this turn. Continue without Chrome in this turn; Chrome works again in the next one.";
         let core = chat_with_session().await;
         let shared = &core.shared;
         let _seen = shared.chrome_control.owner.answering(helper("t2"));

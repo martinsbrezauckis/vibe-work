@@ -31,6 +31,9 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
+mod lookup;
+use lookup::{NameCheck, name_to_check, pending_text};
+
 use url::Url;
 
 use crate::downloads::{self, DownloadState, DownloadView};
@@ -46,7 +49,11 @@ const DUPLICATE_WINDOW: Duration = Duration::from_secs(2);
 /// Shared registry + policy.
 pub(crate) type RefusalListener = Arc<dyn Fn(&str, &str) + Send + Sync>;
 
+pub(crate) type PopupListener = Arc<dyn Fn(crate::MountId, Url) -> bool + Send + Sync>;
+
 pub(crate) struct Inner {
+    pub(crate) popup: Mutex<Option<PopupListener>>,
+    pub(crate) shields: Mutex<crate::shields::Saved>,
     pub(crate) engine: std::sync::Weak<dyn crate::engine::PreviewEngine>,
     pub(crate) guard_refused: Mutex<Option<RefusalListener>>,
     pub(crate) state: Mutex<State>,
@@ -98,27 +105,6 @@ impl Inner {
     }
 }
 
-/// A host name a navigation or sub-request must be looked up for. `lan`: it is the host of the Lan page the user
-/// opened, so a local-network answer is accepted for it ([`crate::names::NameVerdict::refusal_on`]).
-struct NameCheck {
-    host: String,
-    lan: bool,
-}
-
-/// The host name a navigation must be looked up for: a `Host::Domain` other than `localhost` and the canary suffix
-/// (`None`: nothing to look up). The Lan mount's own host IS looked up (to limit DNS rebinding):
-/// only its local-network answer is accepted, never loopback, link-local or special ones.
-fn name_to_check(url: &Url, lan_host: Option<&str>) -> Option<NameCheck> {
-    let url::Host::Domain(name) = url.host()? else {
-        return None;
-    };
-    let lower = name.to_ascii_lowercase();
-    (lower != "localhost" && !lower.ends_with(vw_netguard::CANARY_SUFFIX)).then(|| NameCheck {
-        lan: lan_host.is_some_and(|h| h.eq_ignore_ascii_case(&lower)),
-        host: lower,
-    })
-}
-
 /// What a navigation needs after the policy: nothing more, a refusal, or a name lookup.
 pub(crate) enum Pre {
     /// Decided: allowed, or refused (`None`: an unknown label, nothing to record).
@@ -131,11 +117,6 @@ pub(crate) enum Pre {
         later: bool,
         lan: bool,
     },
-}
-
-/// The refusal text while a name's lookup is still running and nothing later checks it.
-fn pending_text(host: &str) -> String {
-    format!("checking where {host} points; open it again in a moment")
 }
 
 impl Hooks {
@@ -169,8 +150,14 @@ impl Hooks {
                 .guard_refused(&session, "This request is not allowed from this page");
         }
     }
-    /// The policy part of a navigation decision (under the registry lock, never waiting).
+    /// The policy part of a top-level navigation decision (under the registry lock, never waiting).
     pub(crate) fn pre(&self, label: &str, url: &Url) -> Pre {
+        self.pre_in(label, url, false)
+    }
+
+    /// The policy part of a navigation decision of the page (`frame` false) or one of its frames, which may also load
+    /// the page's own inline document ([`crate::policy::UrlPolicy::frame_navigation`]).
+    fn pre_in(&self, label: &str, url: &Url, frame: bool) -> Pre {
         let mut state = self.0.lock();
         let Some(session) = state.session_of(label).map(str::to_owned) else {
             return Pre::Done(Err(None));
@@ -197,11 +184,16 @@ impl Hooks {
             ))));
         }
         let (class, lan_host) = (entry.mount_class(), entry.mount_lan_host());
-        if let Err(reason) = self
-            .0
-            .policy
-            .navigation(url, &entry.allowed, class, lan_host)
-        {
+        let decision = if frame {
+            self.0
+                .policy
+                .frame_navigation(url, &entry.allowed, class, lan_host)
+        } else {
+            self.0
+                .policy
+                .navigation(url, &entry.allowed, class, lan_host)
+        };
+        if let Err(reason) = decision {
             return Pre::Done(Err(Some((session, reason.to_string()))));
         }
         let later = entry
@@ -223,7 +215,17 @@ impl Hooks {
     /// a known verdict decides; a lookup still running lets the navigation go on when the engine checks names again
     /// at request time (`later`), else refuses it (fail closed; the lookup goes on and fills the cache).
     pub(crate) fn decide(&self, label: &str, url: &Url) -> Result<(), Option<(String, String)>> {
-        let (session, host, later, lan) = match self.pre(label, url) {
+        self.decide_in(label, url, false)
+    }
+
+    /// [`Self::decide`] for the page (`frame` false) or one of its frames.
+    fn decide_in(
+        &self,
+        label: &str,
+        url: &Url,
+        frame: bool,
+    ) -> Result<(), Option<(String, String)>> {
+        let (session, host, later, lan) = match self.pre_in(label, url, frame) {
             Pre::Done(result) => return result,
             Pre::Name {
                 session,
@@ -357,8 +359,19 @@ fn add_layer(entry: &mut crate::state::Entry, layer: GuardLayer) {
 pub(crate) struct Hooks(pub(crate) Arc<Inner>);
 
 impl PreviewHooks for Hooks {
+    fn content_filter(&self) -> Option<String> {
+        Some(
+            self.0
+                .shields
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .rules
+                .clone(),
+        )
+    }
+
     fn allow_frame_navigation(&self, label: &str, url: &Url) -> bool {
-        match self.decide(label, url) {
+        match self.decide_in(label, url, true) {
             Ok(()) => true,
             Err(None) => false,
             Err(Some((session, reason))) => {
@@ -657,6 +670,13 @@ impl PreviewHooks for Hooks {
         }
         self.0.changed(&session);
         keep
+    }
+
+    fn new_window_requested(&self, label: &str, url: &Url) {
+        self.route_popup(label, url);
+    }
+    fn act_refused(&self, label: &str, kind: crate::ActRefusal) {
+        self.note_act_refusal(label, kind);
     }
 
     fn new_window_refused(&self, label: &str, url: &Url) {

@@ -7,7 +7,9 @@
 //! - `gh-broker <real gh>`: trusted app-only mode, token over stdin and endpoint over stdout.
 //! - `mcp`: the per-session stdio MCP server (`agentConfig.mcpServers`, name `vw`). Reads the core endpoint and
 //!   the session credential from `VW_AGENT_ENDPOINT` / `VW_AGENT_CREDENTIAL` (set by the core, never in argv).
-//!   `--chrome-catalog` advertises Chrome tools for a chat that enabled them. Exits when stdin closes.
+//!   `--chrome-catalog` advertises the Chrome tools (the core decides it per chat), `--without-chrome` marks a build
+//!   without the Chrome package; with neither flag no Chrome tool is listed; `--app-version <version>` is accepted and
+//!   ignored (it only changes the launch line per version). Exits when stdin closes.
 //! - `guard <safety|process|git|folder|connector|chrome|receipt|allowed> --endpoint-file <path>`: one `pre_tool` hook of
 //!   `$VIBE_HOME/hooks.toml`. Reads Vibe's hook payload on stdin, prints a deny decision or nothing, exits 0.
 //! - `kill-guard --endpoint-file <path>`: every guard in one call (the earlier form, kept for tests).

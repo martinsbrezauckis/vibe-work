@@ -18,6 +18,8 @@ mod store;
 mod tabs;
 pub use tabs::ChromeTab;
 #[cfg(test)]
+mod switch_order_tests;
+#[cfg(test)]
 mod tab_pick_tests;
 mod work;
 pub use commands::{ChromeControlRequest, ChromeControlView};
@@ -31,10 +33,19 @@ use std::sync::{
 };
 pub use work::ChromeWorkView;
 
+/// The local-network switch with the number of the change that set it. The number grows with every change in this
+/// run of the app; it goes with each delivery (`generation`), so the app records an acknowledgement only for the
+/// current change and a helper that knows it refuses a change older than the one it holds.
+#[derive(Clone, Copy)]
+struct LocalNetwork {
+    on: bool,
+    generation: u64,
+}
 pub(crate) struct ChromeControl {
     dir: Option<PathBuf>,
     enabled: AtomicBool,
-    local_network: AtomicBool,
+    /// The person's local-network switch and its change number (see [`LocalNetwork`]).
+    local_network: Mutex<LocalNetwork>,
     pub(crate) config: ChromeControlConfig,
     owner: owner::Owner,
     lifecycle: tokio::sync::Mutex<()>,
@@ -45,13 +56,24 @@ pub(crate) struct ChromeControl {
     chat_profiles: Mutex<std::collections::HashMap<String, String>>,
     /// Per chat, its session ids that ended because a turn ended (`reopen`): that chat may use them again.
     turn_ended: Mutex<std::collections::HashMap<String, std::collections::VecDeque<String>>>,
-    /// The switch value the running helper acknowledged (`None`: not yet, or a new helper connection). A
-    /// change stays pending, and is sent again, until the helper acknowledges that value.
-    local_network_acked: Mutex<Option<bool>>,
+    /// The switch change the running helper acknowledged (`None`: not yet, or a new helper connection). A
+    /// change stays pending, and is sent again, until the helper acknowledges that very change.
+    local_network_acked: Mutex<Option<u64>>,
+    /// One switch delivery at a time, from reading the switch to the helper's answer: a later delivery reads the
+    /// switch only after an earlier one was answered, so an older value can never reach the helper after a newer one.
+    local_network_delivery: tokio::sync::Mutex<()>,
     /// A delivery retry is running (one at a time).
     local_network_retry: AtomicBool,
     /// Chats whose person pressed Stop in Chrome during the current turn: their Chrome calls are refused until it ends.
     stopped_by_person: Mutex<std::collections::HashSet<String>>,
+    /// Tests: holds the next switch delivery right after it read the switch (signals, then waits to be released).
+    #[cfg(test)]
+    pub(super) hold_after_sampling: Mutex<
+        Option<(
+            tokio::sync::oneshot::Sender<()>,
+            tokio::sync::oneshot::Receiver<()>,
+        )>,
+    >,
 }
 impl ChromeControl {
     pub(crate) fn new(_vibe_home: &Path, config: ChromeControlConfig) -> Self {
@@ -61,7 +83,10 @@ impl ChromeControl {
         Self {
             dir,
             enabled: AtomicBool::new(enabled),
-            local_network: AtomicBool::new(local_network),
+            local_network: Mutex::new(LocalNetwork {
+                on: local_network,
+                generation: 0,
+            }),
             config,
             owner: owner::Owner::default(),
             lifecycle: tokio::sync::Mutex::new(()),
@@ -73,7 +98,23 @@ impl ChromeControl {
             turn_ended: Mutex::new(std::collections::HashMap::new()),
             stopped_by_person: Mutex::new(std::collections::HashSet::new()),
             local_network_acked: Mutex::new(None),
+            local_network_delivery: tokio::sync::Mutex::new(()),
             local_network_retry: AtomicBool::new(false),
+            #[cfg(test)]
+            hold_after_sampling: Mutex::new(None),
+        }
+    }
+    /// Tests: waits here when a test asked to hold the delivery that just read the switch.
+    #[cfg(test)]
+    async fn held_after_sampling(&self) {
+        let hold = self
+            .hold_after_sampling
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take();
+        if let Some((sampled, release)) = hold {
+            let _ = sampled.send(());
+            let _ = release.await;
         }
     }
     pub(crate) fn enabled(&self) -> bool {
@@ -91,15 +132,21 @@ impl ChromeControl {
     }
     /// Settings > Developer > Local network pages for the agent (off by default; Chrome Control only).
     pub(crate) fn local_network(&self) -> bool {
-        self.local_network.load(Ordering::SeqCst)
+        self.local_network_state().on
     }
-    /// Whether the running helper acknowledged the switch's current value.
+    fn local_network_state(&self) -> LocalNetwork {
+        *self
+            .local_network
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+    }
+    /// Whether the running helper acknowledged the switch's current change.
     pub(crate) fn local_network_applied(&self) -> bool {
         *self
             .local_network_acked
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
-            == Some(self.local_network())
+            == Some(self.local_network_state().generation)
     }
     /// A new helper connection has acknowledged nothing yet.
     pub(super) fn forget_local_network_ack(&self) {
@@ -108,11 +155,20 @@ impl ChromeControl {
             .lock()
             .unwrap_or_else(PoisonError::into_inner) = None;
     }
+    /// Saves and sets the switch as a new change (also when the value is the same: it is delivered again).
     pub(crate) fn set_local_network(&self, on: bool) -> Result<(), String> {
+        // Saved and set under one lock, so the saved value and the live one end on the same change.
+        let mut state = self
+            .local_network
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
         if let Some(dir) = self.dir() {
             store::save_local_network(dir, on)?;
         }
-        self.local_network.store(on, Ordering::SeqCst);
+        *state = LocalNetwork {
+            on,
+            generation: state.generation + 1,
+        };
         Ok(())
     }
     pub(crate) fn reset(&self) {
@@ -311,28 +367,42 @@ pub(crate) async fn send_local_network(shared: &std::sync::Arc<crate::core::Shar
     });
 }
 
-/// Sends the switch's current value once; true when the helper acknowledged that value.
-async fn deliver_local_network(shared: &crate::core::Shared) -> bool {
-    let chrome = &shared.chrome_control;
-    let enabled = chrome.local_network();
-    let answer = chrome
-        .owner
-        .call(
-            "chrome_status",
-            serde_json::json!({"_netPolicyChange":{"localNetwork":enabled}}),
-        )
-        .await;
-    let taken = matches!(&answer, owner::Answer::Helper(result)
-        if result["structuredContent"]["revision"].is_u64());
-    if taken && chrome.local_network() == enabled {
-        *chrome
+/// Sends the switch's current change once; true when the helper acknowledged that change while it is still the
+/// current one. Deliveries run one at a time from reading the switch to the helper's answer
+/// (`local_network_delivery`), in a task of their own: a caller that stops waiting does not end a delivery early,
+/// so the next one is never sent while an older one may still reach the helper.
+async fn deliver_local_network(shared: &std::sync::Arc<crate::core::Shared>) -> bool {
+    let shared = shared.clone();
+    tokio::spawn(async move {
+        let chrome = &shared.chrome_control;
+        let _one_at_a_time = chrome.local_network_delivery.lock().await;
+        let change = chrome.local_network_state();
+        #[cfg(test)]
+        chrome.held_after_sampling().await;
+        let answer = chrome
+            .owner
+            .call(
+                "chrome_status",
+                serde_json::json!({"_netPolicyChange":{
+                    "localNetwork":change.on,"generation":change.generation}}),
+            )
+            .await;
+        let taken = matches!(&answer, owner::Answer::Helper(result)
+            if result["structuredContent"]["revision"].is_u64());
+        let mut acked = chrome
             .local_network_acked
             .lock()
-            .unwrap_or_else(PoisonError::into_inner) = Some(enabled);
-        return true;
-    }
-    tracing::debug!("Chrome Control did not take the local-network switch now");
-    false
+            .unwrap_or_else(PoisonError::into_inner);
+        if taken && chrome.local_network_state().generation == change.generation {
+            *acked = Some(change.generation);
+            return true;
+        }
+        drop(acked);
+        tracing::debug!("Chrome Control did not take the local-network switch now");
+        false
+    })
+    .await
+    .unwrap_or(false)
 }
 
 pub(crate) async fn stop_owner(shared: &std::sync::Arc<crate::core::Shared>) {
@@ -364,3 +434,6 @@ mod lifecycle_tests {
         assert!(!chrome.chat_profiles.lock().unwrap().contains_key("a"));
     }
 }
+
+#[cfg(test)]
+mod pairing_tests;

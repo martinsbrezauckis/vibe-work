@@ -23,13 +23,13 @@ export function requestCardFocus(id: string): void {
     focus();
     return;
   }
-  pending = { id, at: Date.now() };
+  pending = { id, at: performance.now() };
   for (const listener of [...listeners]) listener(id);
 }
 
 /** The card a request waits for, if any (and not lapsed). */
 export function pendingCardFocus(): string | null {
-  if (pending === null || Date.now() - pending.at > PENDING_MS) return null;
+  if (pending === null || performance.now() - pending.at > PENDING_MS) return null;
   return pending.id;
 }
 

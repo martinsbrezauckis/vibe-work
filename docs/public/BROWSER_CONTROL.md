@@ -6,6 +6,8 @@ Chrome Control connects Chrome to Vibe Work through a paired local helper. It is
 
 Open Settings > Browser > Your Chrome, choose Set up, review the install offer, then add the Vibe Work extension from the opened listing. While the extension is in Google's review, the setup says so. Open the extension and choose Pair Vibe Work. The connection identity binds that Chrome profile to this app installation. Settings keeps **Use my Chrome** and connection/setup states. Chrome's installation grants are separate from chat permissions.
 
+On macOS, you are asked once for permission when the helper reads a home folder or Chrome profile on an external drive.
+
 ## Access modes
 
 | Chat mode | Browser actions |
@@ -21,7 +23,7 @@ Each call and batch step checks the current mode. Above-tier actions return a pl
 ## Windows and work state
 
 The vault prompt waits until you answer; saying No answers only that call and the turn goes on, and the agent is
-told not to do it another way and to wait for your reply.
+told you declined and to explain why it is needed for your task.
 
 Each chat opens an unfocused Chrome window with a named tab group. New tabs go there; your own tabs can also be used. While a chat's agent works in one of your windows, that window is the chat's until its session ends: another chat's agent is refused there. Stop ends work and leaves the window open. Deleting a chat closes its window. Quitting the app leaves windows open and ends sessions. After Stop, the chat's Chrome calls are refused for the rest of that turn. A chat's session ends with its turn; the same chat can continue it in the next turn, in the same window. After a Chrome restart or extension reload, the next call opens a fresh session.
 

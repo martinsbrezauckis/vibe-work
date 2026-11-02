@@ -14,13 +14,19 @@ pub(crate) async fn prepare(
     args: &mut Value,
 ) -> Result<Option<Execution>, String> {
     let tools = shared.agent_tools.as_ref().ok_or("Tools unavailable.")?;
+    // Without the Chrome package the check below refuses every Chrome tool with "not in this version" first.
+    if tool == "chrome_execute" && shared.chrome_control.config.available() {
+        crate::chrome_control::gateway::validate_execute_args(args)?;
+    }
     if tool == names::SECRET_RUN {
         return super::secret_run::prepare(shared, tools, owner, args)
             .await
             .map(Some);
     }
     if tool == names::DOCUMENT_READ && !super::document_consent::registered(shared, owner, args) {
-        super::document_consent::attach(shared, owner, source, call, args).await?;
+        return super::document_consent::prepare(shared, owner, source, call, args)
+            .await
+            .map(Some);
     }
     if names::CHROME_TOOLS.contains(&tool) {
         let decision = crate::chrome_control::check::check(

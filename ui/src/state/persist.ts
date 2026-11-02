@@ -94,11 +94,11 @@ export function savePersisted(
     | "markVibeLines"
     | "saveBeforeSend"
     | "openHtmlMarkdownAs"
-  >,
+  > & { themePreference?: Theme | "system" },
 ): void {
   try {
     localStorage.setItem(FILES_KEY, state.openFilesIn);
-    localStorage.setItem(THEME_KEY, state.theme);
+    localStorage.setItem(THEME_KEY, state.themePreference ?? state.theme);
     localStorage.setItem(WIDTHS_KEY, JSON.stringify(state.widths));
     localStorage.setItem(USAGE_KEY, state.showUsage ? "on" : "off");
     localStorage.setItem(THINKING_KEY, state.showThinkingExpanded ? "on" : "off");
@@ -110,7 +110,13 @@ export function savePersisted(
   }
 }
 
-/** The theme to start with: the stored choice, else dark (the product default, tokens.css). */
+/** The stored theme, or the system preference when no override is saved. */
 export function startingTheme(stored: Theme | null): Theme {
-  return stored ?? "dark";
+  return (
+    stored ??
+    (typeof window.matchMedia === "function" &&
+    window.matchMedia("(prefers-color-scheme: light)").matches
+      ? "light"
+      : "dark")
+  );
 }

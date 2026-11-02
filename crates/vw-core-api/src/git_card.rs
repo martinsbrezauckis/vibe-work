@@ -68,7 +68,7 @@ impl Core {
             );
             return Ok(view(&card));
         };
-        let now = vw_changes::now_ms();
+        let now = crate::clock::ClockReading::now();
         let built_in = if cached.source == Some(PrSource::PublicApi) {
             API_FLOOR_MS
         } else {
@@ -77,7 +77,7 @@ impl Core {
         let floor = self.shared.config.pr_card_floor.map_or(built_in, |d| {
             u64::try_from(d.as_millis()).unwrap_or(u64::MAX)
         });
-        if !refresh || head.is_empty() || now.saturating_sub(cached.fetched_at_ms) < floor {
+        if !refresh || head.is_empty() || cached.within_floor(now, floor) {
             return Ok(view(&cached));
         }
         let fresh = match self.gh() {
@@ -96,12 +96,14 @@ impl Core {
                     Ok(card) => CardCache {
                         card,
                         source: Some(PrSource::Gh),
-                        fetched_at_ms: now,
+                        fetched_at_ms: now.wall_ms,
+                        fetched_clock: Some(now),
                         note: None,
                     },
                     Err(e) => CardCache {
                         note: Some(format!("gh could not read the pull request: {e}")),
-                        fetched_at_ms: now,
+                        fetched_at_ms: now.wall_ms,
+                        fetched_clock: Some(now),
                         ..cached.clone()
                     },
                 }

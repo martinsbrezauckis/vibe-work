@@ -62,6 +62,8 @@ Models use Vibe's reported display name, falling back to the configured alias. D
 | `page` | page | One document in a project's handbook. | Open handbook page |
 | `session` | Session | Existing work with its messages, history and settings, saved in the session list. | Open session |
 | `chat` | chat | Starting an interaction with Vibe, as in New chat or voice chat. | Start a chat |
+| `yourChrome` | Your Chrome | Use your Google Chrome from Vibe Work. | Set up Your Chrome |
+| `chromeExtension` | the Vibe Work extension | The extension added to Google Chrome for Your Chrome. | Add the Vibe Work extension |
 
 ## Built-in plugins
 

@@ -142,7 +142,6 @@ export function ComposerTools(p: ToolsProps): ReactElement {
           if (files.length > 0) p.onFiles(files);
         }}
       />
-      {p.chromeTab ?? null}
       <AccessMenu
         {...(p.defaultAccessLabel === undefined ? {} : { defaultLabel: p.defaultAccessLabel })}
         modes={p.modes}
@@ -176,6 +175,7 @@ export function ComposerTools(p: ToolsProps): ReactElement {
           p.onMenu(null);
         }}
       />
+      {p.chromeTab ?? null}
       {/* The right corner: the mic, then the action slot (tab order = visual order). */}
       <span className="ccorner push-right">
         {p.mic ?? null}

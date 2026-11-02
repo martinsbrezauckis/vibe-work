@@ -82,11 +82,12 @@ export function ToastItem({
   }, [leaving]);
   useEffect(() => {
     if (left.current === null || paused || leaving) return;
-    const started = Date.now();
+    const started = performance.now();
     const timer = window.setTimeout(leave, left.current);
     return () => {
       window.clearTimeout(timer);
-      if (left.current !== null) left.current = Math.max(0, left.current - (Date.now() - started));
+      if (left.current !== null)
+        left.current = Math.max(0, left.current - (performance.now() - started));
     };
   }, [paused, leaving, leave]);
   return (

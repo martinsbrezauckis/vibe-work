@@ -197,7 +197,10 @@ pub fn repair(project: &Path, folder: &str) -> Result<&'static str, String> {
         file.sync_all().map_err(|e| e.to_string())?;
         drop(file);
         if read_in(&dir)? != before {
-            return Err("handbook.css changed during repair; run the check again".into());
+            return Err(
+                "handbook.css changed during repair, so it was not replaced; run the check again"
+                    .into(),
+            );
         }
         install(&dir, &temp, before.as_deref())?;
         Ok(if before.is_some() {
@@ -223,7 +226,10 @@ fn install(dir: &Dir, temp: &str, before: Option<&str>) -> Result<(), String> {
         .map_err(|e| e.to_string())?;
     let result = (|| {
         if read_named(dir, &backup)?.as_deref() != before {
-            return Err("handbook.css changed during repair; run the check again".to_owned());
+            return Err(
+                "handbook.css changed during repair, so it was not replaced; run the check again"
+                    .to_owned(),
+            );
         }
         // Unlike rename-over, hard_link fails if a writer created a new handbook.css after the move.
         dir.hard_link(temp, dir, STYLESHEET)

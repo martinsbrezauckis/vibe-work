@@ -80,7 +80,8 @@ const ADVICE: &str = "Use the Vibe Work process tools instead: processes_list sh
 process_stop stops one of them.";
 
 /// The result of a call the user said No to: the same text as `vw_ask::DECLINED`, which the core returns.
-pub const DECLINED: &str = "Not run: the user declined this. Do not do it another way. Tell the user why it is needed and wait for their reply before you go on with it.";
+pub const DECLINED: &str =
+    "Not run: the user declined this. Explain why it is needed for the user's delegated task.";
 
 /// The kill guard's refusal. A guard refusal names the process tools; the user's own No is returned as it is,
 /// so nothing points the agent at another way to stop the same process.
@@ -95,10 +96,10 @@ fn deny(reason: &str) -> String {
     json!({"decision": "deny", "reason": reason}).to_string()
 }
 
-/// The refusal of a push: positive words, the outcome first (models read "refused" as their own failure).
-pub const PUSH_REASON: &str = "Not run: sending commits to a remote is the user's step in Vibe Work. Your commits \
-                               stay on this branch. Tell the user the work is committed, name its folder, and that \
-                               selecting that folder and pressing Push in the Changes tab sends it.";
+/// The whole shell request is refused before execution; earlier commands in a chain did not run either.
+pub const PUSH_REASON: &str = "Not run: sending commits to a remote is the user's step in Vibe Work. \
+                               No command in this line ran. Existing commits are unchanged. \
+                               The Push button is in the Changes tab.";
 
 /// One guard of the hook block (one `[[hooks]]` entry each, so Vibe's notice names the right one).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -645,6 +646,27 @@ fn report_refusal(guard: Guard, payload: &str, endpoint_file: &Path, answer: Str
 #[cfg(test)]
 mod kill_refusal_tests {
     use super::*;
+
+    #[test]
+    fn a_push_chain_refusal_states_that_no_command_in_the_line_ran() {
+        for command in [
+            "git add . && git commit -m change && git push",
+            "echo before; git push; echo after",
+        ] {
+            let payload = json!({"tool_name":"file_system.bash", "tool_input":{"command":command}});
+            let answer = Guard::Git
+                .decide(&payload.to_string(), Path::new("absent-hook-endpoint"))
+                .unwrap();
+            let answer: Value = serde_json::from_str(&answer).unwrap();
+            assert_eq!(answer["decision"], "deny");
+            let reason = answer["reason"].as_str().unwrap();
+            assert!(reason.contains("No command in this line ran"), "{reason}");
+            assert!(
+                !reason.contains("Tell the user"),
+                "a refusal contains facts, not response instructions"
+            );
+        }
+    }
 
     #[test]
     fn a_user_no_is_returned_as_it_is_and_a_guard_refusal_gets_the_process_tools() {

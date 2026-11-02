@@ -5,7 +5,8 @@
 //! - the tools binary is copied to `<data>/shell/bash.exe` (Vibe accepts a configured Git Bash only by that name; the
 //!   copy is refreshed when it differs, written beside and renamed over);
 //! - Vibe Work's own `VIBE_HOME/config.toml` gets `[tools.git_bash] shell = "<that copy>"`;
-//! - the Vibe server's environment gets [`vw_agent_tools::git_bash::ENV_REAL`] = the real Git Bash.
+//! - the Vibe server's environment gets [`vw_agent_tools::git_bash::ENV_REAL`] = the real Git Bash, and
+//!   [`ARG_CONV_EXCL`] so `taskkill /F /PID n` reaches Windows as written ([`arg_conv_excl`]).
 //!
 //! A `shell` the user set to something else is kept (that shell then runs without the job, as before). Without Git
 //! Bash, without the tools binary or when the copy fails, our `shell` line is removed again: Vibe then finds its own
@@ -214,6 +215,10 @@ pub fn prepare(
                 vw_agent_tools::git_bash::ENV_REAL.to_owned(),
                 real.clone().into_os_string(),
             ));
+            let excl = arg_conv_excl(std::env::var(ARG_CONV_EXCL).ok().as_deref());
+            supervisor
+                .extra_env
+                .push((ARG_CONV_EXCL.to_owned(), excl.into()));
             format!(
                 "Git Bash in a job: {} runs {} ({config})",
                 copy.display(),
@@ -227,9 +232,43 @@ pub fn prepare(
     }
 }
 
+/// Git Bash variable: arguments starting with one of these `;`-separated prefixes reach Windows programs unconverted.
+pub const ARG_CONV_EXCL: &str = "MSYS2_ARG_CONV_EXCL";
+
+/// `taskkill`'s flags as an agent writes them: Git Bash otherwise turns `/F` into `F:/` and `/PID` into
+/// `C:/Program Files/Git/PID`, so a Windows kill the user allowed then fails. Lower-case `/f` and `/t` are not listed:
+/// they would also match the drive path `/f/...` and `/tmp/...`.
+const TASKKILL_FLAGS: &str = "/F;/T;/PID;/IM;/pid;/im";
+
+/// The `MSYS2_ARG_CONV_EXCL` value for the agent's Git Bash: the user's own list (if any) plus `taskkill`'s flags;
+/// a user's `*` (convert nothing) stays as it is.
+#[must_use]
+pub fn arg_conv_excl(existing: Option<&str>) -> String {
+    match existing.map(str::trim) {
+        None | Some("") => TASKKILL_FLAGS.to_owned(),
+        Some("*") => "*".to_owned(),
+        Some(own) => format!("{own};{TASKKILL_FLAGS}"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn taskkill_flags_reach_windows_programs_unconverted_and_the_users_own_list_stays() {
+        // Git Bash turns `taskkill /F /PID 5 /T /IM x.exe` into `F:/ "C:/Program Files/Git/PID" 5 T:/ ...` (checked
+        // on a Windows test machine); listed prefixes are passed as written. Lower-case /f and /t stay converted
+        // (drive f:, /tmp).
+        assert_eq!(arg_conv_excl(None), "/F;/T;/PID;/IM;/pid;/im");
+        assert_eq!(arg_conv_excl(Some("")), "/F;/T;/PID;/IM;/pid;/im");
+        assert_eq!(arg_conv_excl(Some("/X")), "/X;/F;/T;/PID;/IM;/pid;/im");
+        assert_eq!(
+            arg_conv_excl(Some("*")),
+            "*",
+            "a user's 'convert nothing' stays as it is"
+        );
+    }
 
     const OURS: &str = r"C:\Users\u\AppData\Roaming\app.vibework.desktop\shell\bash.exe";
 

@@ -55,6 +55,7 @@ export function useFollow(
 
   const onScroll = useCallback(
     (offset: number) => {
+      if (paused) return;
       const handle = list.current;
       if (handle === null) return;
       const distance = handle.scrollSize - offset - handle.viewportSize;
@@ -65,7 +66,7 @@ export function useFollow(
         setPinned(false);
       }
     },
-    [list],
+    [list, paused],
   );
 
   const pause = useCallback(() => {

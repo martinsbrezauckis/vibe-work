@@ -141,6 +141,9 @@ pub fn ensure(vibe_home: &Path) -> Result<ExperimentPins, String> {
     };
     let (updated, outcome) = with_pins_off(&existing);
     let Some(updated) = updated else {
+        if outcome.skipped.is_none() {
+            crate::config_comments::restore(&path, &existing, &[NOTE])?;
+        }
         return Ok(outcome);
     };
     std::fs::create_dir_all(vibe_home).map_err(|e| format!("{}: {e}", vibe_home.display()))?;

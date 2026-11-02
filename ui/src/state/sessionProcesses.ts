@@ -141,10 +141,10 @@ export function createSessionProcesses(deps: {
      */
     start(isOpen: () => boolean): () => void {
       void refresh();
-      let last = 0;
+      let last = -Infinity;
       const timer = setInterval(() => {
         const open = isOpen();
-        const now = Date.now();
+        const now = performance.now();
         if (open) void readOutputs();
         if (now - last >= (open ? LIST_POLL_MS : IDLE_POLL_MS)) {
           last = now;

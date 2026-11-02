@@ -172,12 +172,14 @@ function MarkedName({
  * and its keys. No match gives "No command matches".
  */
 export function SlashMenu({
+  menuId,
   items,
   index,
   query,
   onPick,
   onHover,
 }: {
+  menuId?: string;
   items: readonly MenuItem[];
   index: number;
   query: string;
@@ -231,6 +233,7 @@ export function SlashMenu({
         data-testid="composer.composer-menus-slash"
         className="slash"
         role="listbox"
+        id={menuId}
         aria-label="Commands and skills"
       >
         <div className="slash-empty" role="status">
@@ -243,6 +246,7 @@ export function SlashMenu({
         data-testid="composer.composer-menus-slash-2"
         className="slash"
         role="listbox"
+        id={menuId}
         aria-label="Commands and skills"
       >
         {current === undefined ? null : (
@@ -263,6 +267,7 @@ export function SlashMenu({
                   data-testid="composer.composer-menus-it"
                   className="it"
                   role="option"
+                  id={menuId === undefined ? undefined : `${menuId}-option-${String(i)}`}
                   aria-selected={i === index}
                   aria-description={itemRuns(item)}
                   aria-label={itemRuns(item)}

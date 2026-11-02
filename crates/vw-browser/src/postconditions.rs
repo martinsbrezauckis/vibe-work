@@ -74,11 +74,12 @@ impl Browser {
         press["key"] = json!("Enter");
         press["expectedText"] = request["text"].clone();
         let answer: PageAnswer = self
-            .run_admitted_in_mount(
+            .run_act(
                 session,
                 scripts::act(&press),
                 Some(&mount),
                 self.dispatch_permission_check(session, by),
+                true,
             )
             .await
             .map_err(failed)?;

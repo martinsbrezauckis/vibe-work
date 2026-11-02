@@ -199,6 +199,11 @@ export function createConnectors(deps: {
         patch({ open: true });
         await load();
       },
+      /** Reviews one catalog suggestion without starting sign-in or connecting it. */
+      async review(alias: string): Promise<void> {
+        patch({ open: true, filter: "all", search: "", selected: `c:${alias}` });
+        await load();
+      },
       close(): void {
         patch({ open: false, addOpen: false, addPrefill: null, removing: null });
       },

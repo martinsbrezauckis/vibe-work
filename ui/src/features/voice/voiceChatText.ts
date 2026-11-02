@@ -84,19 +84,23 @@ export function spokenReply(answer: string, max = MAX_SPOKEN_CHARS): string {
 }
 
 /** Short text the voice says when an approval opens (the card in the chat is still how the user answers). */
-export function approvalPrompt(title: string): string {
-  const what = title.replace(/\s+/g, " ").trim().slice(0, 120);
-  return what === ""
-    ? "Vibe asks for your approval. Answer on the card in the chat."
-    : `Vibe asks for your approval: ${what}. Answer on the card in the chat.`;
+export function approvalPrompt(
+  title: string,
+  choices: readonly string[] = ["Allow once", "No"],
+): string {
+  const what = title.replace(/\s+/g, " ").trim().slice(0, 90);
+  const question =
+    what === "" ? "Vibe asks for your approval." : `Vibe asks for your approval: ${what}.`;
+  return `${question} ${choices.join(", ")}. Answer on the card in the chat.`;
 }
 
 /** Short text the voice says when the agent asks a question. */
-export function questionPrompt(question: string): string {
+export function questionPrompt(question: string, choices: readonly string[] = []): string {
   const what = question.replace(/\s+/g, " ").trim().slice(0, 240);
+  const offered = choices.length === 0 ? "" : `${choices.join(", ")}. `;
   return what === ""
-    ? "Vibe has a question for you. Answer on the card in the chat."
-    : `Vibe asks: ${what} Answer on the card in the chat.`;
+    ? `Vibe has a question for you. ${offered}Answer on the card in the chat.`
+    : `Vibe asks: ${what} ${offered}Answer on the card in the chat.`;
 }
 
 /** What the voice says when a voice turn failed (the details stay in the chat). */

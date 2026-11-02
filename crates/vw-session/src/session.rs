@@ -323,6 +323,11 @@ fn runtime_patch(session: &Value, runtime: &Value) -> Vec<Value> {
 
 /// Keeps observations that native read pages omit, without replacing their authoritative entries.
 fn retain_observations(previous: &Value, next: &mut Value) {
+    if next["session"].get("stats").is_none()
+        && let Some(stats) = previous["session"].get("stats")
+    {
+        next["session"]["stats"] = stats.clone();
+    }
     if next["session"].get("contextFill").is_none()
         && let Some(fill) = previous["session"].get("contextFill")
     {

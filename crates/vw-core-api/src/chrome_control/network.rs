@@ -218,7 +218,7 @@ mod tests {
     }
 
     /// PREDICT: without the rule wired into `escalation`, the call reaches the (absent) helper and answers
-    /// "Chrome Control is not running"; with it, the gateway refuses the address first.
+    /// "Your Chrome is not running"; with it, the gateway refuses the address first.
     #[tokio::test]
     async fn the_gateway_refuses_a_local_network_open_before_the_helper_is_asked() {
         let core = crate::offline_core::start("chrome-network-gateway").await;
@@ -338,7 +338,7 @@ mod switch_delivery_tests {
         }
         let seen = deliveries.lock().unwrap().clone();
         assert_eq!(seen.len(), 3, "the refused 'off' is sent again: {seen:?}");
-        assert_eq!(seen[2], json!({"localNetwork":false}));
+        assert_eq!(seen[2], json!({"localNetwork":false,"generation":2}));
         let applied = async { super::super::commands::view(shared).local_network_applied };
         let mut ok = applied.await;
         for _ in 0..20 {

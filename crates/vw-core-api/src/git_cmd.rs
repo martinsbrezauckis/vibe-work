@@ -49,7 +49,43 @@ pub(crate) struct CardCache {
     pub(crate) card: Option<PrCard>,
     pub(crate) source: Option<crate::git_view::PrSource>,
     pub(crate) fetched_at_ms: u64,
+    pub(crate) fetched_clock: Option<crate::clock::ClockReading>,
     pub(crate) note: Option<String>,
+}
+
+impl CardCache {
+    pub(crate) fn within_floor(&self, now: crate::clock::ClockReading, floor: u64) -> bool {
+        self.fetched_clock.is_some_and(|at| {
+            now.instant.saturating_duration_since(at.instant)
+                < std::time::Duration::from_millis(floor)
+        })
+    }
+}
+
+#[derive(Default)]
+pub(crate) struct ApiPause {
+    started: Option<crate::clock::ClockReading>,
+    wait_ms: u64,
+}
+impl ApiPause {
+    pub(crate) fn set(&mut self, now: crate::clock::ClockReading, reset_s: Option<u64>) {
+        self.started = Some(now);
+        self.wait_ms = reset_s.map_or(3_600_000, |s| {
+            s.saturating_mul(1000).saturating_sub(now.wall_ms)
+        });
+    }
+    pub(crate) fn left(&self, now: crate::clock::ClockReading) -> u64 {
+        self.started.map_or(0, |at| {
+            self.wait_ms.saturating_sub(
+                u64::try_from(
+                    now.instant
+                        .saturating_duration_since(at.instant)
+                        .as_millis(),
+                )
+                .unwrap_or(u64::MAX),
+            )
+        })
+    }
 }
 
 /// The git feature's state in the core.
@@ -62,8 +98,8 @@ pub(crate) struct GitHub {
     pub(crate) cards: Mutex<HashMap<String, CardCache>>,
     /// Nested roots discovered from this loaded session's file effects; every use revalidates them.
     pub(crate) repos: Mutex<HashMap<String, (PathBuf, BTreeSet<String>)>>,
-    /// GitHub's public API: no request before this time (ms) after a low rate budget.
-    pub(crate) api_resume_ms: Mutex<u64>,
+    /// GitHub's public API: the monotonic pause after a low rate budget.
+    pub(crate) api_pause: Mutex<ApiPause>,
 }
 
 impl GitHub {
@@ -73,7 +109,7 @@ impl GitHub {
             lock: tokio::sync::Mutex::new(()),
             cards: Mutex::new(HashMap::new()),
             repos: Mutex::new(HashMap::new()),
-            api_resume_ms: Mutex::new(0),
+            api_pause: Mutex::new(ApiPause::default()),
         }
     }
 

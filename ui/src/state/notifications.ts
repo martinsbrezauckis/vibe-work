@@ -57,7 +57,7 @@ type CoreRefusal = Extract<CoreEvent, { type: "guardRefused" }>;
 /** The core's guards plus the window's own "Never setting" line for an ask a Never refused. */
 export type GuardKind = CoreRefusal["guard"] | "never";
 /** One Security group line: the core's guard refusal, or an ask outcome worded the same way. */
-type GuardRefusal = Omit<CoreRefusal, "guard"> & { guard: GuardKind };
+type GuardRefusal = Omit<CoreRefusal, "guard"> & { guard: GuardKind; fullText?: string };
 export const GUARD_NAMES: Record<GuardKind, string> = {
   ask: "Permission prompts",
   // Not "Ask": that is the canonical name of an access mode (vocabulary check).
@@ -101,7 +101,8 @@ export function notificationFor(event: CoreEvent, core?: CoreState): ToastSpec |
           sessionId: ask.session ?? "",
           title: words.session,
           guard: securityGuard(record),
-          what: `“${words.session}”: ${what}.`,
+          what: `${what}.`,
+          fullText: `“${words.session}”: ${what}.`,
           stepId: ask.id,
           at: record.closedAt,
           refusalId: `ask:${ask.id}`,
@@ -115,14 +116,18 @@ export function notificationFor(event: CoreEvent, core?: CoreState): ToastSpec |
           ? sessionTitle(core?.sessions[event.sessionId]?.session)
           : event.title;
       // The declined result is written for the agent; the person only needs to know their No was kept.
-      const text = USER_DECLINED.test(event.what)
+      const declined = USER_DECLINED.test(event.what);
+      const reason = declined
+        ? "No was recorded."
+        : `${event.what.charAt(0).toUpperCase()}${event.what.slice(1).replace(/[.]+$/, "")}${event.what.endsWith("…") ? "" : "."}`;
+      const text = declined
         ? `No was recorded in “${title}”.`
-        : `${GUARD_NAMES[event.guard]} in “${title}”: ${event.what.charAt(0).toUpperCase()}${event.what.slice(1).replace(/[.]+$/, "")}${event.what.endsWith("…") ? "" : "."}`;
+        : `${GUARD_NAMES[event.guard]} in “${title}”: ${reason}`;
       return {
         kind: "warn",
         bellKind: "security",
         sessionId: event.sessionId,
-        guardRefusal: { ...event, title, what: text },
+        guardRefusal: { ...event, title, what: reason, fullText: text },
         preserveSecurityText: USER_DECLINED.test(event.what),
         text,
       };

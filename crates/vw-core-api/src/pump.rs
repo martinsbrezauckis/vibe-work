@@ -35,7 +35,7 @@ use tokio::task::JoinSet;
 use tracing::{debug, warn};
 use vw_protocol::ProtocolErrorCode;
 use vw_rpc::{HandlerError, Inbound, ServerRequest, Subscription};
-use vw_session::{Action, Applied, Change, LoadKind, Notification};
+use vw_session::{Action, Applied, Change, LoadKind};
 use vw_supervisor::SupervisorState;
 
 use crate::channels::{ChannelKey, Feed};
@@ -44,6 +44,9 @@ use crate::event::{AlertKind, CoreEvent};
 use crate::recovery;
 use crate::resync_budget::{Budget, ResyncBudget};
 use crate::view::ServerStatus;
+
+#[path = "pump_warnings.rs"]
+mod warnings;
 
 /// The `callback/call` handler: registers the callback with the gate, tells subscribers, and acks
 /// `{callbackId, accepted: true}` (the answer itself comes later as
@@ -247,6 +250,11 @@ async fn carry_answer(
         .await
     {
         Ok(_) => {
+            shared.emit(CoreEvent::CallbackAnswered {
+                session_id: session_id.clone(),
+                callback_id: callback_id.clone(),
+                origin: crate::command::Origin::Ui,
+            });
             delivery.confirmed(carried.outcome());
             tracing::info!(
                 session = %session_id,
@@ -260,11 +268,6 @@ async fn carry_answer(
             {
                 shared.emit(crate::ask::grants::event(&shared));
             }
-            shared.emit(CoreEvent::CallbackAnswered {
-                session_id,
-                callback_id,
-                origin: crate::command::Origin::Ui,
-            });
         }
         Err(problem) => {
             warn!(reason = %problem, callback = %callback_id, "automatic approval answer not confirmed");
@@ -457,7 +460,8 @@ impl Pump {
                 crate::edit_preview::project(&shared, &mut n.params);
                 // A title or preview change (an auto-title, a rename) holds no vault value from here on.
                 crate::title_guard::withhold_in(&shared, &mut n.params);
-                let applied = shared.store.apply(Notification::new(n.method, n.params));
+                let session = item.key.and_then(|key| shared.channels.session_of(key));
+                let applied = warnings::apply(&shared.store, n, session);
                 self.after_apply(&shared, &applied);
             }
             Some(Inbound::Gap(reason)) => {

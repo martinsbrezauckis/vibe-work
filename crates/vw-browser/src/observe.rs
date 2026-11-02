@@ -131,23 +131,42 @@ fn chars(text: &str, max: usize) -> String {
     text.chars().take(max).collect()
 }
 
-/// The refs as JSON with every page string capped at [`ITEM_CHARS`].
-fn capped_refs(refs: &[crate::model::RefItem]) -> Vec<Value> {
-    refs.iter()
-        .map(|r| {
-            let mut v = json!(r);
-            if let Value::Object(map) = &mut v {
-                for value in map.values_mut() {
-                    if let Value::String(text) = value
-                        && text.chars().count() > ITEM_CHARS
-                    {
-                        *text = chars(text, ITEM_CHARS);
-                    }
-                }
+/// One ref as the agent reads it, every page string capped at [`ITEM_CHARS`]. The host's observation keeps each
+/// ref's frame identity (native handle, document nonce, origin) and geometry for its own checks (actions, vault
+/// fills, coordinate clicks, screenshot labels); the agent acts by ref, so its text carries only what it can use: a
+/// ref inside a frame names that frame's origin (`frameOrigin`), a visual region (`coordinateKind`) its box as
+/// `[x, y, width, height]` in top-level CSS pixels, and `label` only on a read with a screenshot. Main-frame
+/// controls stay as compact as 0.1.4's, so the default budget lists as many of them.
+#[must_use]
+pub(crate) fn agent_ref(r: &crate::model::RefItem) -> Value {
+    let mut v = json!(r);
+    if let Value::Object(map) = &mut v {
+        map.remove("frameId");
+        map.remove("box");
+        for value in map.values_mut() {
+            if let Value::String(text) = value
+                && text.chars().count() > ITEM_CHARS
+            {
+                *text = chars(text, ITEM_CHARS);
             }
-            v
-        })
-        .collect()
+        }
+        if r.frame == Some(true)
+            && let Some(frame) = &r.frame_id
+        {
+            map.insert("frameOrigin".into(), json!(chars(&frame.origin, 300)));
+        }
+        if r.coordinate_kind.is_some()
+            && let Some(b) = r.bounds
+        {
+            map.insert("box".into(), json!([b.x, b.y, b.width, b.height]));
+        }
+    }
+    v
+}
+
+/// The refs as the agent reads them ([`agent_ref`]).
+fn capped_refs(refs: &[crate::model::RefItem]) -> Vec<Value> {
+    refs.iter().map(agent_ref).collect()
 }
 
 /// The page content part of an answer (`untrustedPageContent`). `preview`: the text is the first [`PREVIEW_CHARS`]
@@ -177,7 +196,23 @@ pub fn content(model: &PageModel, preview: bool) -> Value {
     if model.cross_origin_frames > 0 {
         out["crossOriginFrames"] = json!(model.cross_origin_frames);
     }
+    if !model.unread_frames.is_empty() {
+        out["unreadFrames"] = json!(model.unread_frames);
+    }
+    if let Some(viewport) = viewport_for(model, &model.refs) {
+        out["viewport"] = viewport;
+    }
     out
+}
+
+/// The viewport scales coordinates: with a screenshot (its refs are labelled) or a listed visual region's box, for
+/// a whole read and a focused one alike.
+fn viewport_for(model: &PageModel, shown: &[crate::model::RefItem]) -> Option<Value> {
+    let (width, height) = model.viewport?;
+    shown
+        .iter()
+        .any(|r| r.label.is_some() || (r.coordinate_kind.is_some() && r.bounds.is_some()))
+        .then(|| json!({"width": width, "height": height, "unit": "CSS pixels"}))
 }
 
 /// Bytes of `value` as compact JSON.
@@ -269,12 +304,27 @@ pub fn fit(out: &mut Value, budget: usize) {
         }
     }
     if refs_cut + text_cut + other_cut > 0 {
+        // A second fit (the agent tool's, after it adds the tab) adds to what an earlier fit left out.
+        let earlier = |key: &str| {
+            out["trimmed"][key]
+                .as_u64()
+                .and_then(|n| usize::try_from(n).ok())
+                .unwrap_or(0)
+        };
         out["trimmed"] = json!({
-            "refs": refs_cut,
-            "textChars": text_cut,
-            "otherItems": other_cut,
+            "refs": refs_cut + earlier("refs"),
+            "textChars": text_cut + earlier("textChars"),
+            "otherItems": other_cut + earlier("otherItems"),
             "how": "ask for more with maxBytes (up to 64000), textPage, or a focused read with find",
         });
+    }
+    // `refsShown` counts the refs the answer still lists after trimming.
+    if out.get("refsShown").is_some() {
+        out["refsShown"] = json!(
+            out["untrustedPageContent"]["refs"]
+                .as_array()
+                .map_or(0, Vec::len)
+        );
     }
     let bytes = size(out);
     out["size"] = json!({"bytes": bytes, "approxTokens": bytes.div_ceil(4)});
@@ -317,6 +367,13 @@ pub fn found(
         "refs": capped_refs(&shown),
         "text": lines.into_iter().take(FIND_LINES).collect::<Vec<_>>(),
     });
+    if let Some(viewport) = viewport_for(model, &shown) {
+        out["untrustedPageContent"]["viewport"] = viewport;
+    }
+    // A control the find did not match may be in a frame this read left out.
+    if !model.unread_frames.is_empty() {
+        out["untrustedPageContent"]["unreadFrames"] = json!(model.unread_frames);
+    }
     out["promptGuard"] = guard_json(verdict);
     out["note"] = json!(UNTRUSTED_NOTE);
     fit(&mut out, budget);
@@ -338,7 +395,7 @@ pub fn found(
             "No matching control ref was returned; text alone cannot be clicked."
         };
         out["nextStep"] = json!(format!(
-            "{reason} Read without find for visible labels, or use browser_capture to inspect the screen. Do not repeat this find unchanged."
+            "{reason} Read without find for visible labels, or use browser_capture to inspect the screen. Do not repeat this find unchanged: on an unchanged page it returns this same answer."
         ));
         fit(&mut out, budget);
     }
@@ -357,6 +414,7 @@ pub fn answer(
 ) -> Value {
     let mut out = host;
     out["snapshot"] = json!(snapshot);
+    // Recounted by `fit` once trimming is done.
     out["refsShown"] = json!(model.refs.len());
     out["refsTotal"] = json!(model.ref_count);
     if model.truncated {

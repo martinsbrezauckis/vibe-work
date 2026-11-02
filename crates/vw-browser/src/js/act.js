@@ -7,8 +7,9 @@
 // Adapted from ShellX control script (native value setter, beforeinput/input/
 // change, contenteditable insertText) and actionability checks; changed: Enter submits the form the way a
 // browser does for a real key press, select uses the native setter.
-/* global ENV, MAX_FRAME_DEPTH, MAX_SHADOW_DEPTH, REQ, actionRef, candidates, clip, composedParent, consentSnapshot, describe, editable, enabled, globalRect, inFrame, labelOf, nativeClickPoint, refOf, roleOf, secretKind, viewOf, visibilityState, visible -- Supplied by the Rust script assembler and its shared prelude. */
+/* global authorizationPage, ENV, MAX_FRAME_DEPTH, MAX_SHADOW_DEPTH, REQ, actionRef, candidates, clip, composedParent, consentSnapshot, describe, editable, enabled, globalRect, labelOf, nativeClickPoint, refOf, roleOf, secretKind, viewOf, visibilityState, visible -- Supplied by the Rust script assembler and its shared prelude. */
 (() => {
+  /* global dragTo -- Inserted by the script assembler. */
   __VW_COMMON__;
   __VW_NATIVE_CLICK__;
   const result = (status, extra) =>
@@ -20,36 +21,14 @@
   // Bound to the mount the action was authorized for: another mount's document has no environment
   // under this accessor, so nothing is done there ("stale": read again).
   if (!ENV) return result("stale");
-  const authPage = (() => {
-    const u = new URL(location.href);
-    if (
-      u.protocol === "http:" &&
-      REQ.testConsentOrigin &&
-      u.origin === REQ.testConsentOrigin &&
-      u.pathname.startsWith("/o/oauth2/")
-    )
-      return true;
-    if (u.protocol !== "https:" || u.port || u.username || u.password)
-      return false;
-    return (
-      (u.hostname === "accounts.google.com" &&
-        (u.pathname.startsWith("/o/oauth2/") ||
-          u.pathname === "/signin/oauth/consent")) ||
-      (u.hostname === "github.com" &&
-        u.pathname === "/login/oauth/authorize") ||
-      (u.hostname === "appleid.apple.com" &&
-        u.pathname === "/auth/authorize") ||
-      (u.hostname === "login.microsoftonline.com" &&
-        /^\/[^/]+\/oauth2\/v2\.0\/authorize$/.test(u.pathname))
-    );
-  })();
+  const authPage = authorizationPage();
   // The host approved one document and one ref. Every mutating route, including Enter and form submit, passes
   // through here before any event reaches the page. A changed document must be observed and classified again.
   if (
     (authPage || REQ.consent) &&
     !REQ.postconditionOnly &&
     !REQ.nativeUser &&
-    !["hover", "scroll"].includes(REQ.action)
+    !["hover", "scroll", "uploadChunk"].includes(REQ.action)
   ) {
     if (
       !REQ.consent ||
@@ -67,12 +46,43 @@
   }
   const NEEDS = {
     click: ["visible", "stable", "enabled", "receivesEvents"],
+    drag: ["visible", "stable", "enabled", "receivesEvents"],
     check: ["visible", "stable", "enabled", "receivesEvents"],
     type: ["visible", "stable", "enabled", "editable"],
     select: ["visible", "stable", "enabled"],
     hover: ["visible", "stable", "receivesEvents"],
     press: ["visible", "enabled"],
     scroll: [],
+    upload: ["enabled"],
+  };
+  // The file field a ref stands for: the field itself, the field of its label, or the single file field inside it,
+  // inside its form, or on its page (a "Choose file" button that opens a hidden field).
+  const fileField = (el) => {
+    const isFile = (c) => c && c.localName === "input" && String(c.type).toLowerCase() === "file";
+    if (isFile(el)) return el;
+    if (el.localName === "label" && isFile(el.control)) return el.control;
+    const label = el.closest && el.closest("label");
+    if (label && isFile(label.control)) return label.control;
+    for (const scope of [el, el.form || el.closest?.("form"), el.ownerDocument]) {
+      const inside = scope ? Array.from(scope.querySelectorAll("input[type=file]")) : [];
+      if (inside.length === 1) return inside[0];
+      if (inside.length > 1) return null;
+    }
+    return null;
+  };
+  // Files staged by `uploadChunk` (base64 parts per file), set on the field by `upload`.
+  const uploadFiles = (field) => {
+    const staged = ENV.uploads?.get(REQ.token);
+    if (!staged) return null;
+    const View = viewOf(field);
+    const transfer = new View.DataTransfer();
+    for (const [i, file] of REQ.files.entries()) {
+      const parts = (staged[i] || []).map((data) => Uint8Array.from(atob(data), (c) => c.charCodeAt(0)));
+      if (parts.length !== file.parts) return null;
+      transfer.items.add(new View.File(parts, file.name, { type: file.mime, lastModified: Date.now() }));
+    }
+    ENV.uploads.delete(REQ.token);
+    return transfer.files;
   };
   const deepHit = (doc, x, y) => {
     let hit = doc.elementFromPoint(x, y);
@@ -168,6 +178,8 @@
     const Ctor = View[Kind] || View.Event;
     return el.dispatchEvent(new Ctor(type, init));
   };
+  // eslint-disable-next-line no-undef -- Expanded by the Rust script assembler.
+  __VW_DRAG__;
   const clickLike = (el, hitPoint) => {
     const p = point(el, hitPoint);
     fire(el, "pointerover", "PointerEvent", p);
@@ -256,24 +268,37 @@
   const press = (el, key) => {
     const init = {
       key,
-      code: key.length === 1 ? `Key${key.toUpperCase()}` : key,
+      code: /^[a-z]$/i.test(key) ? `Key${key.toUpperCase()}` : /^[0-9]$/.test(key) ? `Digit${key}` : key === " " ? "Space" : key,
+      ...REQ.modifiers,
       bubbles: true,
       cancelable: true,
       composed: true,
     };
     const go = fire(el, "keydown", "KeyboardEvent", init);
     let effect = "none";
-    if (go) {
+    const command = init.ctrlKey || init.metaKey || init.altKey;
+    if (go && command && !init.altKey && !init.shiftKey && key.toLowerCase() === "a" && editable(el)) {
+      if (typeof el.select === "function") el.select();
+      else if (el.isContentEditable) {
+        const range = el.ownerDocument.createRange();
+        range.selectNodeContents(el);
+        const selection = viewOf(el).getSelection();
+        selection.removeAllRanges();
+        selection.addRange(range);
+      }
+      effect = "selected the field";
+    }
+    if (go && !command) {
       const tag = el.localName;
       const type = String(
         (el.getAttribute && el.getAttribute("type")) || "",
       ).toLowerCase();
-      if (key === "Enter" && el.form && (tag === "input" || tag === "select")) {
+      if (key === "Enter" && !init.shiftKey && el.form && (tag === "input" || tag === "select")) {
         if (el.form.requestSubmit) el.form.requestSubmit();
         else el.form.submit();
         effect = "submitted the form";
       } else if (
-        key === "Enter" &&
+        key === "Enter" && !init.shiftKey &&
         (tag === "a" ||
           tag === "button" ||
           roleOf(el) === "button" ||
@@ -290,19 +315,19 @@
       } else if (key === "Tab") {
         const all = candidates().elements.filter(
           (c) =>
-            !inFrame(c) &&
+            c.ownerDocument === el.ownerDocument &&
             visible(c) &&
             enabled(c) &&
             c.focus &&
             roleOf(c) !== "iframe",
         );
-        const next = all[(all.indexOf(el) + 1) % Math.max(all.length, 1)];
+        const next = all[(all.indexOf(el) + (init.shiftKey ? -1 : 1) + all.length) % Math.max(all.length, 1)];
         if (next) {
           next.focus();
           effect = "moved focus";
         }
       }
-    } else effect = "the page cancelled the key";
+    } else if (!go) effect = "the page cancelled the key";
     fire(el, "keyup", "KeyboardEvent", init);
     return effect;
   };
@@ -317,9 +342,21 @@
       window.scrollBy(0, REQ.direction === "up" ? -step : step);
       return result("done", { scrollY: Math.round(window.scrollY) });
     }
+    if (action === "uploadChunk") {
+      // At most 48 MB of staged text per page document (two full uploads); a new token replaces older ones.
+      ENV.uploads ||= new Map();
+      if (!ENV.uploads.has(REQ.token)) ENV.uploads.clear();
+      const staged = ENV.uploads.get(REQ.token) || [];
+      const size = staged.flat().reduce((n, part) => n + part.length, 0) + String(REQ.data).length;
+      if (size > 48 * 1024 * 1024) return result("error", { message: "the upload is too large" });
+      (staged[REQ.file] ||= [])[REQ.part] = String(REQ.data);
+      ENV.uploads.set(REQ.token, staged);
+      return result("done");
+    }
     let el = null;
     if (REQ.ref) {
-      const { found, target } = actionRef(REQ.ref);
+      // A scroll also brings a canvas or image region of the read into view (it sends no input to it).
+      const { found, target } = actionRef(REQ.ref, action === "scroll");
       if (found.length === 0) return result("stale");
       if (!target) return result("ambiguous", { count: found.length });
       el = target;
@@ -333,7 +370,7 @@
     }
     // A second host call reads the settled state. It sends no input, focus or scroll events.
     if (REQ.postconditionOnly) return postcondition(el, target);
-    if (el.scrollIntoView && action !== "press" && !REQ.nativeValidateOnly)
+    if (el.scrollIntoView && !["press", "upload"].includes(action) && !REQ.nativeValidateOnly)
       el.scrollIntoView({
         block: "center",
         inline: "center",
@@ -357,6 +394,25 @@
         return result("notActionable", { ...prepared, target });
       return result("done", { ...prepared, target });
     }
+    if (action === "drag") return dragTo(el, target, hitPoint);
+    if (action === "upload") {
+      const field = fileField(el);
+      if (!field) return result("notFileField", { target });
+      const fieldTarget = { role: roleOf(field), name: labelOf(field) || target.name };
+      if (!enabled(field)) return result("notActionable", { failed: ["enabled"], target: fieldTarget });
+      if (REQ.files.length > 1 && !field.multiple) return result("notMultiple", { target: fieldTarget });
+      const files = uploadFiles(field);
+      if (!files) return result("error", { message: "the files did not all reach the page; try the upload again" });
+      // As a person's file picker does: the field holds the files, then input and change.
+      field.files = files;
+      fire(field, "input", "Event", { bubbles: true, composed: true });
+      fire(field, "change", "Event", { bubbles: true });
+      const held = Array.from(field.files || []);
+      return result(held.length === REQ.files.length ? "done" : "unmet", {
+        target: fieldTarget,
+        uploaded: held.map((f) => ({ name: clip(f.name, 200), size: f.size })),
+      });
+    }
     if (action === "click") {
       clickLike(el, hitPoint);
       return result("done", { target });
@@ -368,8 +424,14 @@
       }
       return result("done", { target });
     }
-    if (action === "scroll")
-      return result("done", { target, scrollY: Math.round(window.scrollY) });
+    if (action === "scroll") {
+      // Where the element ended up in this document's viewport: the host moves the documents around another
+      // site's frame, and never answers done for an element that stayed off screen.
+      const r = el.getBoundingClientRect();
+      return result("done", { target, scrollY: Math.round(window.scrollY),
+        box: { x: Math.round(r.x), y: Math.round(r.y), width: Math.round(r.width), height: Math.round(r.height) },
+        viewport: [innerWidth, innerHeight] });
+    }
     if (action === "type") {
       typeInto(el, String(REQ.text || ""));
       const answer = JSON.parse(postcondition(el, target));

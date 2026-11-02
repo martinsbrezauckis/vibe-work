@@ -33,6 +33,9 @@ fn asks_inside(tool: &str, args: &Value) -> bool {
     matches!(
         tool,
         names::SECRET_RUN
+            | names::SESSION_STATUS
+            | names::CONNECTORS_LIST
+            | names::CONNECTOR_SUGGEST
             | names::SECRET_RUN_STATUS
             | names::PROPOSE_PROTECTED_CHANGE
             | names::PROTECTED_CHANGE_STATUS
@@ -170,12 +173,13 @@ pub(crate) fn dispatch_transport(shared: &Arc<Shared>, entry: &Value, owner: &st
 }
 
 /// The existing card answer route, scoped to the app-owned card and its actual session.
-pub(crate) fn answer(
+pub(crate) fn answer_by(
     shared: &Arc<Shared>,
     origin: Origin,
     session: &str,
     id: &str,
     output: &Value,
+    by: AnsweredBy,
 ) -> Result<CommandResult, CoreError> {
     let refused = || {
         CoreError::new(
@@ -193,11 +197,6 @@ pub(crate) fn answer(
         return Err(refused());
     }
     let ask_id = format!("callback:{id}");
-    let by = if crate::command_origin::debug_api_acts(shared, origin) {
-        AnsweredBy::DebugApi
-    } else {
-        AnsweredBy::Person
-    };
     let scope = match output["decision"]["type"].as_str() {
         Some("approve") => Some(Scope::Once),
         Some("approve_for_session")
@@ -233,6 +232,12 @@ pub(crate) fn answer(
     };
     let delivery = shared.asks.reserve(&ask_id, by).ok_or_else(refused)?;
     // A No releases the held hook with the declined result (`approve`); the turn goes on.
+    // Publish attribution before the receipt can make an audit row visible.
+    shared.emit(CoreEvent::CallbackAnswered {
+        session_id: session.into(),
+        callback_id: id.into(),
+        origin,
+    });
     delivery.confirmed(outcome);
     if scope == Some(Scope::Session)
         && let Some(pending) = shared.ask_grants.claim(id)
@@ -245,11 +250,6 @@ pub(crate) fn answer(
     }
     shared.ask_grants.forget_callback(id);
     changed(shared, session);
-    shared.emit(CoreEvent::CallbackAnswered {
-        session_id: session.into(),
-        callback_id: id.into(),
-        origin,
-    });
     Ok(CommandResult::Reply {
         result: Value::Null,
         client_user_message_id: None,

@@ -377,15 +377,32 @@ mod tests {
         );
     }
 
-    /// Orca's way: the probe finds the window in the accessibility tree, prints what it reads (role, text in order,
-    /// buttons with their states) and presses one button; the press answers that button.
+    /// Orca's and a voice tool's way: the probe finds the window in the accessibility tree, prints what it reads
+    /// (role, text in order, buttons with their states) and presses one button; the press answers that button.
+    /// Every button of every layout the app shows (the vault's consent, an MCP server's key, a plain
+    /// confirmation, the new-chat restore) is pressed once, and the names in the tree are the buttons' labels.
     fn screen_reader_presses(app: &tauri::App<tauri::test::MockRuntime>, text: &str, probe: &str) {
-        let three = labels(&["Allow once", "Always", "Deny"]);
-        for label in ["Deny", "Allow once"] {
+        let layouts = [
+            labels(&["Allow once", "Always", "Deny"]),
+            labels(&[
+                "Always allow",
+                "Allow until Vibe Work closes",
+                "Don't allow",
+            ]),
+            labels(&["Continue", "Cancel"]),
+            labels(&["Keep", "Pick again"]),
+        ];
+        for (names, label) in layouts
+            .iter()
+            .flat_map(|names| names.iter().map(move |label| (names, label.as_str())))
+        {
+            let declining = names.last().expect("a layout has buttons");
             let asked = format!("{text}\n\n{}", vw_host::AGENT_LINE);
-            let mut waiting = Box::pin(show_dialog(app.handle(), asked, &three, true, None));
+            let mut waiting = Box::pin(show_dialog(app.handle(), asked, names, true, None));
             assert_eq!(poll_once(&mut waiting), Poll::Pending);
             pump_for(300);
+            // What the buttons show, read from the widgets themselves.
+            let mut shown = button_labels(&only_window());
             // A desktop gives the new window the keyboard focus (Xvfb has no window manager to do it).
             let found = std::process::Command::new("xdotool")
                 .args(["search", "--name", vw_host::DIALOG_TITLE])
@@ -428,7 +445,18 @@ mod tests {
                 format!("TEXT {text}"),
                 "the question is read first"
             );
-            assert!(said.contains("BUTTON Deny | focused default"), "{said}");
+            assert!(
+                said.contains(&format!("BUTTON {declining} | focused default")),
+                "{said}"
+            );
+            let mut read: Vec<String> = said
+                .lines()
+                .filter_map(|l| l.strip_prefix("BUTTON "))
+                .map(|l| l.split(" | ").next().unwrap_or_default().to_owned())
+                .collect();
+            shown.sort_unstable();
+            read.sort_unstable();
+            assert_eq!(read, shown, "the tree names each button by its label");
             pump_for(600);
             assert_eq!(
                 poll_once(&mut waiting),

@@ -10,6 +10,7 @@
  * Invariant: every line is one of this file's fixed lines. An answer's words (an error's message or details, a page's
  * text) never reach it; from the untrusted page envelope only the error code is read, as a key into a closed list.
  */
+import { TEXT } from "../../../vocabulary";
 import { type Obj, detailOf, effectView, obj, outputOf, outputText, str } from "./entries";
 
 const CHROME_TOOL = /^mcp_vw\.chrome_(status|session|execute)$/i;
@@ -77,23 +78,22 @@ function field(answer: Obj | null, name: string): string | null {
   return null;
 }
 
-const REFUSED = "Not done: Chrome Control refused it.";
+const REFUSED = "Not done: Chrome refused it.";
 const NO_CHROME = "Not done: no Chrome is connected to Vibe Work right now.";
 const DISCONNECTED = "Not done: Chrome was disconnected.";
 const PAUSED = "Paused in Chrome. Vibe waits until you press Resume.";
-const LOST = "Not known: Chrome Control lost the connection. Check the page in Chrome.";
-const LATE = "Not known: Chrome Control did not finish in time. Check the page in Chrome.";
-const UNKNOWN =
-  "Not known: Chrome Control cannot tell whether this happened. Check the page in Chrome.";
+const LOST = TEXT.chromeLost;
+const LATE = TEXT.chromeLate;
+const UNKNOWN = TEXT.chromeUnknown;
 const PAIR = "Waiting for you to pair in Chrome.";
-const OTHER_APP = "Chrome shows a different Vibe Work — pair again.";
+const OTHER_APP = "Chrome is paired with another Vibe Work. Pair again in Chrome.";
 const STOPPED = "Not done: the task was stopped in Chrome.";
 const EXPIRED = "Not done: the request ran out in Chrome.";
 const TAB_CLOSED = "Not done: the tab was closed.";
 const CHANGED = "Not done: the page changed.";
 const BUSY = "Not done: Chrome is busy.";
 /** The line for a failure whose code is not in {@link BY_CODE}, or whose reason did not reach Vibe Work. */
-const ANY_PROBLEM = "Not done: Chrome Control reported a problem.";
+const ANY_PROBLEM = TEXT.chromeProblem;
 
 /** Each line and the codes that give it. */
 const LINES: readonly (readonly [string, readonly string[]])[] = [
@@ -173,9 +173,9 @@ function failureLine(answer: Obj | null, status: string | null): string | null {
 }
 
 const BY_STATUS: Readonly<Record<string, string>> = {
-  queued: "Sent to Chrome. Chrome Control has not reported yet whether it finished.",
-  pending: "Sent to Chrome. Chrome Control has not reported yet whether it finished.",
-  dispatched: "Sent to Chrome. Chrome Control has not reported yet whether it finished.",
+  queued: TEXT.chromeQueued,
+  pending: TEXT.chromeQueued,
+  dispatched: TEXT.chromeQueued,
   approval_required: "Waiting for you in Chrome.",
   awaiting_user: "Waiting for you in Chrome.",
   completed: "Done in Chrome.",
@@ -183,7 +183,7 @@ const BY_STATUS: Readonly<Record<string, string>> = {
   cancelled: "Stopped in Chrome.",
   stopped: "Stopped in Chrome.",
   paused: "Paused in Chrome. Vibe waits until you press Resume.",
-  denied: "Not done: Chrome Control refused it.",
+  denied: "Not done: Chrome refused it.",
   expired: "Not done: the request ran out in Chrome.",
 };
 

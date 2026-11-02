@@ -8,7 +8,11 @@
 import type { JsonValue } from "./index";
 
 import type { PickTarget, PageTab, EnginePoolSnapshot, Rect } from "./preview";
-export type BrowserRequest = { "op": "tabs",
+export type BrowserRequest = { "op": "shields", } | { "op": "setShields",
+/**
+ * Selected mode.
+ */
+mode: Mode, } | { "op": "tabs",
 /**
  * The loaded session.
  */
@@ -246,7 +250,23 @@ items: Array<RecheckItem>,
  */
 reload: boolean, };
 
-export type BrowserResult = { "type": "tabs",
+export type Mode = "off" | "balanced" | "strict";
+
+export type Settings = {
+/**
+ * Confirmed mode.
+ */
+mode: Mode,
+/**
+ * Whether native content filtering is available.
+ */
+supported: boolean, };
+
+export type BrowserResult = { "type": "shields",
+/**
+ * Confirmed mode and platform availability.
+ */
+settings: Settings, } | { "type": "tabs",
 /**
  * Pinned app preview followed by the ordered web tabs.
  */

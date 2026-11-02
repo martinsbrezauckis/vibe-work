@@ -39,11 +39,17 @@ pub(crate) fn root(folder: &Path) -> io::Result<Dir> {
 fn directory(root: &Dir, relative: &Path) -> io::Result<Dir> {
     let mut dir = root.try_clone()?;
     for part in relative.components() {
+        if part == Component::CurDir {
+            continue;
+        }
         if let Component::Normal(name) = part {
             if linked(&dir.symlink_metadata(name)?) {
-                return Err(io::ErrorKind::PermissionDenied.into());
+                return Err(io::Error::other("path contains a link or reparse point"));
             }
             dir = dir.open_dir_nofollow(name)?;
+            if linked(&dir.dir_metadata()?) {
+                return Err(io::Error::other("path contains a link or reparse point"));
+            }
         } else {
             return Err(io::ErrorKind::PermissionDenied.into());
         }
@@ -60,8 +66,11 @@ pub(crate) fn open(folder: &Path, rel: &str) -> io::Result<File> {
     let parent = directory(&root, path.parent().unwrap_or(Path::new("")))?;
     let name = path.file_name().ok_or(io::ErrorKind::InvalidInput)?;
     let meta = parent.symlink_metadata(name)?;
-    if linked(&meta) || !meta.is_file() {
-        return Err(io::ErrorKind::PermissionDenied.into());
+    if linked(&meta) {
+        return Err(io::Error::other("path contains a link or reparse point"));
+    }
+    if !meta.is_file() {
+        return Err(io::Error::other("not a file"));
     }
     let mut options = OpenOptions::new();
     options.read(true).follow(FollowSymlinks::No);
@@ -74,7 +83,10 @@ pub(crate) fn open(folder: &Path, rel: &str) -> io::Result<File> {
 }
 /// Size is checked on the opened handle and again after the capped read (a file may grow).
 pub(crate) fn read(folder: &Path, rel: &str) -> Option<Vec<u8>> {
-    let file = open(folder, rel).ok()?;
+    read_opened(open(folder, rel).ok()?.into_std())
+}
+/// Reads the same handle whose identity the caller checked.
+pub(crate) fn read_opened(file: std::fs::File) -> Option<Vec<u8>> {
     if file.metadata().ok()?.len() > MAX_FILE {
         return None;
     }

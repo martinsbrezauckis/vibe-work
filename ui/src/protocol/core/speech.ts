@@ -5,7 +5,43 @@
  * scripts/public/check.sh fails when this file and the Rust types disagree.
  */
 
-export type SpeechRequest = { "op": "readingReady", 
+export type SpeechRequest = { "op": "promptSession", 
+/**
+ * Active voice-chat session, only while voice answering is opted in.
+ */
+sessionId: string | null, } | { "op": "promptPrepare", 
+/**
+ * The owned session.
+ */
+sessionId: string, 
+/**
+ * Exact card callback.
+ */
+callbackId: string, } | { "op": "promptStart", 
+/**
+ * Core-issued, single-prompt ticket.
+ */
+ticket: string, 
+/**
+ * Capture sample rate.
+ */
+sampleRate: number, 
+/**
+ * Recognition language; null is automatic.
+ */
+language: string | null, } | { "op": "promptAnswer", 
+/**
+ * Core-issued ticket.
+ */
+ticket: string, 
+/**
+ * Stream returned by promptStart.
+ */
+streamId: string, } | { "op": "promptCancel", 
+/**
+ * Core-issued ticket.
+ */
+ticket: string, } | { "op": "readingReady", 
 /**
  * The pending reading event's id.
  */
@@ -58,9 +94,25 @@ text: string,
 /**
  * A voice from `voices` (`null`: the default, `gb_jane_neutral`).
  */
-voice: string | null, } | { "op": "voices", } | { "op": "audioOutput", };
+voice: string | null, } | { "op": "voices", } | { "op": "audioOutput", } | { "op": "screenReader", };
 
-export type SpeechResult = { "kind": "reading", 
+export type SpeechResult = { "kind": "prompt", 
+/**
+ * Opaque lifetime bound to one card and voice-chat owner.
+ */
+ticket: string | null, 
+/**
+ * The allow-once number; null means only No is available.
+ */
+number: number | null, } | { "kind": "promptAnswer", 
+/**
+ * allowed, refused, retry, repeat or card. Only the first two answered the card.
+ */
+status: string, } | { "kind": "screenReader", 
+/**
+ * True while a screen reader is enabled.
+ */
+active: boolean | null, } | { "kind": "reading", 
 /**
  * started, nobodyListening, keyMissing, voiceUnavailable or noReply (accepted/expired for a window receipt).
  */

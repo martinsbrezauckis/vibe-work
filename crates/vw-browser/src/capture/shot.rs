@@ -156,11 +156,7 @@ pub async fn full_page(
         let ((css_w, css_h), cut) = clip_size(m.width, m.height);
         let mut fallback = None;
         if prefer != Some(Method::Stitch) && !plain {
-            match browser
-                .service()
-                .screenshot_full_png(session_id, (css_w, css_h))
-                .await
-            {
+            match page.full_png((css_w, css_h)).await {
                 Ok(Some(png)) => {
                     let limit = usize::try_from(MAX_PIXELS * 4 * 2).unwrap_or(usize::MAX);
                     let image = shot::decode_limited(&png, limit)?;

@@ -32,8 +32,10 @@ async fn fixture(outcome: &str) -> (Rig, Action) {
     let hooks = engine.hooks();
     let outcome = outcome.to_owned();
     *rig.engine.on_click.lock().unwrap() = Some(Box::new(move || {
+        // Measure the simulated navigation delay from the click, even if ready work delays this task's first poll.
+        let navigation = tokio::time::sleep(Duration::from_millis(600));
         tokio::spawn(async move {
-            tokio::time::sleep(Duration::from_millis(600)).await;
+            navigation.await;
             if outcome == "refused" {
                 assert!(!hooks.allow_navigation(&mount.label, &"file:///refused".parse().unwrap()));
                 return;
@@ -69,7 +71,10 @@ async fn click_waits_for_delayed_navigation_and_reports_the_new_page() {
         .act(SESSION, action, Actor::Agent, &NoNavigation)
         .await
         .unwrap();
-    assert_eq!(receipt["untrustedPageContent"]["title"], "Destination");
+    assert_eq!(
+        receipt["untrustedPageContent"]["title"], "Destination",
+        "the click receipt must wait for the delayed navigation's completed destination: {receipt}"
+    );
     assert_eq!(receipt["loading"], false);
 }
 
@@ -81,7 +86,10 @@ async fn loaded_click_keeps_a_blocked_frame_in_diagnostics_without_failing_the_p
         .act(SESSION, action, Actor::Agent, &NoNavigation)
         .await
         .unwrap();
-    assert_eq!(receipt["untrustedPageContent"]["title"], "Destination");
+    assert_eq!(
+        receipt["untrustedPageContent"]["title"], "Destination",
+        "the completed top-level destination must survive a blocked child-frame navigation: {receipt}"
+    );
     assert_eq!(receipt["loading"], false);
     assert_eq!(
         receipt["untrustedPageContent"]["refusedNavigations"][0]["url"],

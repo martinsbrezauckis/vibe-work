@@ -24,6 +24,7 @@ impl Browser {
         by: Actor,
         nav: &dyn Navigate,
     ) -> Result<Value, ActError> {
+        let action = self.bind_point(session_id, action)?;
         let target = self.target_text(session_id, &action);
         if by == Actor::Agent && self.sessions.stopped(session_id) {
             let error = refused(STOPPED);
@@ -113,13 +114,26 @@ impl Browser {
                     if error.outcome == Outcome::Refused {
                         error.outcome = Outcome::Failed;
                     }
-                    error.text = format!(
-                        "{} Stopped or failed after native mouse input was sent. Do not repeat the act; check the Browser tab.",
-                        error.text
-                    );
+                    // The fixed sentence comes first: the MCP layer passes a failure through unchanged only when it
+                    // starts with it, so the act's own reason (which can quote the page) never decides that label.
+                    // A reason written as a refusal ("Not run: ...") is not true any more once input was sent.
+                    let reason = error.text.trim();
+                    let reason = reason.strip_prefix("Not run: ").unwrap_or(reason);
+                    error.text = if reason.is_empty() {
+                        format!("{POST_INPUT_FAILED} {POST_INPUT_ADVICE}")
+                    } else {
+                        format!("{POST_INPUT_FAILED} {reason} {POST_INPUT_ADVICE}")
+                    };
                 }
             }
         }
         result
     }
 }
+
+/// First sentence of every act that failed or stopped after native mouse input was sent. `vw-agent-tools`' MCP layer
+/// matches it as an exact prefix to keep such a failure from being reported as "Not run:".
+pub const POST_INPUT_FAILED: &str = "Stopped or failed after native mouse input was sent.";
+
+/// Why a repeat is risky after input was sent, and what to do instead.
+const POST_INPUT_ADVICE: &str = "The page may have acted on it, so repeating the act could do it twice. Do not repeat the act; check the Browser tab.";

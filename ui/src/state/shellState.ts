@@ -87,6 +87,7 @@ export type Theme = "dark" | "light";
 /** Everything the shell remembers about its own screen. */
 export interface ShellState {
   theme: Theme;
+  themePreference: Theme | "system";
   /** Each session keeps its editor split and shared slot. */
   editorLayouts: Readonly<Record<string, EditorLayout>>;
   /** Selected session id; `null` is the new-session (welcome) view. */
@@ -166,6 +167,7 @@ export function initialShell(
 ): ShellState {
   return {
     theme,
+    themePreference: theme,
     editorLayouts: {},
     selected: null,
     list: "auto",
@@ -271,7 +273,7 @@ export function toggleMaximized(state: ShellState): ShellState {
 
 /** Sets the theme. */
 export function setTheme(state: ShellState, theme: Theme): ShellState {
-  return { ...state, theme };
+  return { ...state, theme, themePreference: theme };
 }
 
 /** Shows or hides the status bar's usage readout. */

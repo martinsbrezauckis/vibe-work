@@ -11,6 +11,8 @@
  * so no caller stays "playing". `stop()` is safe at any time.
  */
 
+import { playbackOutput } from "./playbackGate";
+
 /** What a finished playback reports. */
 export interface Played {
   /** Decoded length in seconds. */
@@ -100,11 +102,12 @@ export function createWebAudioPlayer(limits: PlayerLimits = LIMITS): Player {
       if (buffer === undefined) throw new PlaybackError("the sound could not be decoded");
       const source = ctx.createBufferSource();
       source.buffer = buffer;
-      source.connect(ctx.destination);
+      const output = playbackOutput(ctx);
+      source.connect(output.node);
       return new Promise<Played>((resolve, reject) => {
         let done = false;
         const begin = ctx.currentTime;
-        const startedAt = Date.now();
+        const startedAt = performance.now();
         // The clock is the only sign that sound is leaving: no move = no output, past the end = over.
         // (The callbacks below run only after `start()`, when `settle` and `finish` exist.)
         const watch = setInterval(
@@ -114,7 +117,7 @@ export function createWebAudioPlayer(limits: PlayerLimits = LIMITS): Player {
             if (typeof now !== "number" || typeof begin !== "number") return;
             if (now >= begin + buffer.duration + END_SLACK_S) {
               finish(false);
-            } else if (now <= begin && Date.now() - startedAt >= limits.startMs) {
+            } else if (now <= begin && performance.now() - startedAt >= limits.startMs) {
               settle();
               try {
                 source.stop();
@@ -129,6 +132,7 @@ export function createWebAudioPlayer(limits: PlayerLimits = LIMITS): Player {
         const settle = () => {
           done = true;
           clearInterval(watch);
+          output.release();
           if (current?.source === source) current = null;
         };
         const finish = (stopped: boolean) => {

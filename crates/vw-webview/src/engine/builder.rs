@@ -27,6 +27,10 @@ impl TauriEngine {
             (hooks.clone(), label.clone()),
         );
         let mut builder = WebviewBuilder::new(label, WebviewUrl::External(blank));
+        #[cfg(target_os = "linux")]
+        {
+            builder = builder.extensions_path(crate::linux_agent::extension_directory()?);
+        }
         // The page viewer and checker get WebRTC removed in EVERY frame before page scripts run (WebView2:
         // AddScriptToExecuteOnDocumentCreated, which reaches child frames; WKWebView: a user script with
         // forMainFrameOnly NO; WebKitGTK: all frames, though WebRTC is off there anyway).
@@ -47,10 +51,17 @@ impl TauriEngine {
                 if !wry::navigation_context::is_main_frame() {
                     return nav.0.allow_frame_navigation(&nav.1, url);
                 }
+                // WebKitGTK asks this one callback for the page and every frame and does not say which. The documents
+                // a page makes itself (`about:srcdoc`, `data:`, `blob:`) are a frame's here; a page that navigates
+                // itself to one is unloaded when it reports that address as its own (`page_event`).
+                #[cfg(target_os = "linux")]
+                if url.as_str() == "about:srcdoc" || matches!(url.scheme(), "data" | "blob") {
+                    return nav.0.allow_frame_navigation(&nav.1, url);
+                }
                 nav.0.allow_navigation(&nav.1, url)
             })
             .on_new_window(move |url, _features| {
-                popup.0.new_window_refused(&popup.1, &url);
+                popup.0.new_window_requested(&popup.1, &url);
                 NewWindowResponse::Deny
             })
             .on_permission_request(|_webview, _kind| PermissionResponse::Deny)

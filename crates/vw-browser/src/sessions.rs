@@ -13,6 +13,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 use tokio::sync::{broadcast, watch};
+use tokio::time::{Duration, Instant};
 
 /// Log entries kept per session.
 pub const LOG_CAP: usize = 40;
@@ -119,6 +120,7 @@ struct Session {
     authorizing: u32,
     pending_native_click: bool,
     last_agent_at: Option<u64>,
+    last_agent_clock: Option<Instant>,
     log: VecDeque<LogEntry>,
     receipts: Vec<crate::delegation::DelegationReceipt>,
     seq: u32,
@@ -129,6 +131,7 @@ pub struct Sessions {
     inner: Mutex<HashMap<String, Session>>,
     cancel: Mutex<HashMap<String, watch::Sender<u64>>>,
     changes: broadcast::Sender<String>,
+    wall_now: fn() -> u64,
 }
 
 impl Default for Sessions {
@@ -137,6 +140,7 @@ impl Default for Sessions {
             inner: Mutex::new(HashMap::new()),
             cancel: Mutex::new(HashMap::new()),
             changes: broadcast::channel(64).0,
+            wall_now: now_ms,
         }
     }
 }
@@ -172,14 +176,15 @@ impl Sessions {
     /// The Browser tab's view of a session.
     #[must_use]
     pub fn state(&self, session_id: &str) -> BrowserState {
-        let now = now_ms();
         let sessions = self.lock();
         let s = sessions.get(session_id).filter(|session| !session.ended);
         let last = s.and_then(|s| s.last_agent_at);
         let in_flight = s.is_some_and(|s| s.in_flight > 0);
         BrowserState {
             session_id: session_id.to_owned(),
-            agent_active: in_flight || last.is_some_and(|t| now.saturating_sub(t) < ACTIVE_FOR_MS),
+            agent_active: in_flight
+                || s.and_then(|s| s.last_agent_clock)
+                    .is_some_and(|at| at.elapsed() < Duration::from_millis(ACTIVE_FOR_MS)),
             in_flight,
             pending_native_click: s
                 .filter(|s| s.pending_native_click)
@@ -248,7 +253,8 @@ impl Sessions {
                 };
             }
             s.in_flight += 1;
-            s.last_agent_at = Some(now_ms());
+            s.last_agent_at = Some((self.wall_now)());
+            s.last_agent_clock = Some(Instant::now());
             drop(sessions);
             self.changed(session_id);
         }
@@ -275,12 +281,13 @@ impl Sessions {
             return;
         }
         if by == Actor::Agent {
-            s.last_agent_at = Some(now_ms());
+            s.last_agent_at = Some((self.wall_now)());
+            s.last_agent_clock = Some(Instant::now());
         }
         s.seq += 1;
         let entry = LogEntry {
             seq: s.seq,
-            at_ms: now_ms(),
+            at_ms: (self.wall_now)(),
             by,
             action: clip(action, 20),
             target: clip(target, 80),
@@ -459,6 +466,10 @@ impl Drop for AuthorizationWait<'_> {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "session_clock_tests.rs"]
+mod clock_tests;
 
 #[cfg(test)]
 mod close_wait_tests {

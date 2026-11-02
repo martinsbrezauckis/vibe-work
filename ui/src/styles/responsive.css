@@ -2,10 +2,10 @@
  * Narrow-window rules: the side panel and the session list become overlay drawers (<= 899 px), the
  * rail and long title-bar labels drop away (<= 640 px). The toast fallback lives in the
  * existing status bar, so drawers keep the same bounds while feedback appears.
- * Loaded after shell.css so these override it.
+ * Container width follows remembered text zoom as well as window resizing.
  */
 /* Narrow windows: the panel is an overlay drawer and the list hides; phones also lose the rail. */
-@media (max-width: 899px) {
+@container window (max-width: 899px) {
   .body,
   .body.has-panel,
   .body.no-col.has-panel {
@@ -29,7 +29,7 @@
     visibility: hidden;
   }
 }
-@media (max-width: 640px) {
+@container window (max-width: 640px) {
   .rail {
     visibility: hidden;
   }
@@ -54,7 +54,7 @@
 
 /* Narrow windows: the list opens as an overlay drawer from the rail's button (at phone width from
    the title bar's menu button). Closed it stays hidden, as before. */
-@media (max-width: 899px) {
+@container window (max-width: 899px) {
   .column.drawer-open {
     position: absolute;
     inset: 0;
@@ -81,7 +81,7 @@
     height: auto;
   }
 }
-@media (max-width: 640px) {
+@container window (max-width: 640px) {
   .column.drawer-open .column-inner {
     left: 0;
   }

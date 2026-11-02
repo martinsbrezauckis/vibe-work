@@ -8,12 +8,13 @@ pub(super) fn enabled(dir: &Path) -> bool {
     }
 }
 pub(super) fn save_enabled(dir: &Path, enabled: bool) -> Result<(), String> {
-    std::fs::create_dir_all(dir).map_err(|_| "Could not save Chrome setting.")?;
+    std::fs::create_dir_all(dir)
+        .map_err(|_| "Could not save the setting. Nothing changed; try again.")?;
     std::fs::write(
         dir.join("enabled.json"),
         if enabled { "true" } else { "false" },
     )
-    .map_err(|_| "Could not save Chrome setting.".to_owned())
+    .map_err(|_| "Could not save the setting. Nothing changed; try again.".to_owned())
 }
 
 /// Settings > Developer > Local network pages for the agent (Chrome Control only). Missing or corrupt = off.
@@ -24,12 +25,13 @@ pub(super) fn local_network(dir: &Path) -> bool {
         .unwrap_or(false)
 }
 pub(super) fn save_local_network(dir: &Path, on: bool) -> Result<(), String> {
-    std::fs::create_dir_all(dir).map_err(|_| "Could not save the setting.")?;
+    std::fs::create_dir_all(dir)
+        .map_err(|_| "Could not save the setting. Nothing changed; try again.")?;
     std::fs::write(
         dir.join("local-network.json"),
         if on { "true" } else { "false" },
     )
-    .map_err(|_| "Could not save the setting.".to_owned())
+    .map_err(|_| "Could not save the setting. Nothing changed; try again.".to_owned())
 }
 
 #[cfg(test)]

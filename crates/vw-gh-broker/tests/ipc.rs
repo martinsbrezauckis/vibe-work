@@ -150,3 +150,41 @@ fn name(endpoint: &str) -> interprocess::local_socket::Name<'_> {
             .unwrap()
     }
 }
+
+/// A long TMPDIR (a deep build or test folder) must not stop the broker: a Unix socket path is limited to about 104
+/// bytes (`sun_path`), so the broker keeps its private directory where the endpoint fits.
+#[cfg(unix)]
+#[test]
+fn a_long_temp_folder_still_gives_a_usable_endpoint() {
+    use std::process::{Command, Stdio};
+    let base = tempfile::tempdir().unwrap();
+    let mut long = base.path().to_owned();
+    while long.as_os_str().len() < 120 {
+        long.push("deep-temporary-folder");
+    }
+    std::fs::create_dir_all(&long).unwrap();
+    let mut child = Command::new(env!("CARGO_BIN_EXE_vw-gh-broker"))
+        .arg("--gh")
+        .arg(support::fake_gh())
+        .env("TMPDIR", &long)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    writeln!(child.stdin.as_mut().unwrap(), "{}", support::TOKEN).unwrap();
+    let mut endpoint = String::new();
+    BufReader::new(child.stdout.take().unwrap())
+        .read_line(&mut endpoint)
+        .unwrap();
+    let endpoint = endpoint.trim().to_owned();
+    let alive = child.try_wait().unwrap().is_none();
+    // The broker serves until its caller stops it.
+    let _ = child.kill();
+    let output = child.wait_with_output().unwrap();
+    assert!(
+        alive && !endpoint.is_empty() && endpoint.len() <= 104,
+        "endpoint {endpoint:?}; stderr {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}

@@ -68,12 +68,25 @@ pub(crate) fn read(path: &Path) -> io::Result<Vec<String>> {
     }
 }
 pub(crate) fn append(path: &Path, text: &str, safe: &dyn Fn(&str) -> bool) -> io::Result<()> {
+    append_with_open(text, safe, &mut || open(path, true))
+}
+
+fn append_with_open(
+    text: &str,
+    safe: &dyn Fn(&str) -> bool,
+    opener: &mut dyn FnMut() -> io::Result<File>,
+) -> io::Result<()> {
     let submitted = text;
     let text = text.trim_end();
     if text.is_empty() || !safe(submitted) {
         return Ok(());
     }
-    let mut file = open(path, true)?;
+    // A concurrent first creation through a directory handle can report NotFound on macOS.
+    // Reopen through the same no-follow checks once; other failures retain their original meaning.
+    let mut file = match opener() {
+        Err(error) if error.kind() == io::ErrorKind::NotFound => opener()?,
+        result => result?,
+    };
     // OS lock serializes Vibe Work writers across windows/processes. Vibe CLI does not take this lock.
     file.lock()?;
     if entries(&mut file)?.last().is_some_and(|last| last == text) {

@@ -288,11 +288,22 @@ pub(crate) async fn call(
                     .await
                     .map_err(|e| text(&core_error(&e)))?;
             }
-            let shot = hub
+            let (shot, mount) = hub
                 .service
-                .screenshot(session_id)
+                .screenshot_of_mount(session_id)
                 .await
                 .map_err(|e| text(&core_error(&e)))?;
+            // The image binds to the mount it shows: still the current one (a mount's page class never changes),
+            // and that page may be shown to the agent (the local-network rule).
+            if hub.service.page_mount(session_id).as_ref() != Some(&mount) {
+                return Err(
+                    "the page changed during screenshot, so no image was returned; read it again"
+                        .into(),
+                );
+            }
+            if hub.browser.on_local_network(session_id) {
+                return Err(vw_browser::LOCAL_NETWORK.into());
+            }
             let view = hub.service.view(session_id);
             Ok(json!({
                 "tab": app_tab(session_id),

@@ -2,6 +2,41 @@
 
 All notable changes to Vibe Work. Versions follow [Semantic Versioning](https://semver.org/); dates are UTC.
 
+## 0.1.5 (2026-11-02)
+
+Built for Vibe 3.0.4 on Python 3.14.8. This release adds accessibility settings, session costs and a browser that sees more of the page.
+
+- Settings > Accessibility: text size from 100 to 200% (also Ctrl or Cmd with + and −), the system theme, contrast and
+  motion. Contrast is better in both themes, and Windows contrast themes are followed.
+- Screen readers find the chat's regions, speakers and messages, and hear when an answer is complete.
+- Prompt sounds: a short sound when Vibe asks, and Vibe Work can read the question and its answers aloud. Prompts wait
+  until you answer; Stop or closing the chat counts as No.
+- Answer prompts by voice (off by default, inside your own voice chat): Vibe Work reads a new number for each prompt and
+  you say "allow" with that number, or "no". Voice can allow local file actions only; a command can be declined by
+  voice but not allowed.
+- A prompt can no longer be answered by accident: a new one waits until you stop typing, and a held key does not
+  answer it.
+- Questions and plans show every answer and its description at once, in a compact list: pick one with a click or its
+  number key, and select the words to copy them without answering.
+- Every button on prompt, question and plan cards and in confirmation windows works with screen readers (VoiceOver
+  on macOS, Narrator on Windows, Orca on Linux) and with Voice Control on macOS: say "Click" and an answer's number.
+- Usage and plan shows the chat's cost, steps, cached tokens and tool calls, also for each subagent.
+- When a task needs a connector you have not set up, the agent can point you to it; you connect it yourself.
+- The Browser: the agent reads and uses controls inside embedded frames, such as sign-in boxes, like the rest of the
+  page, and can click canvas and image controls it found on the page and controls that only accept a real mouse
+  click, on Windows, macOS and Linux. On macOS a short ring shows
+  where it clicked, and heavy news pages read correctly.
+- In the Browser the agent can drag and drop, and press key combinations such as Ctrl+A or Shift+Tab.
+- When a page asks for a file, the agent can attach files from the chat's folders. A page never opens a file picker
+  or goes full screen from the agent's clicks; your own clicks work as before.
+- Linux: an ad and tracker blocker in the Browser (Off, Balanced, Strict), and links work in pages saved as PDF.
+- Vibe's warnings during a turn appear in the chat, and Settings say why Vibe refused a change.
+- Restarting a server waits for its port, and a restart after an update is quick when the vault is locked.
+- The chat keeps its place after Settings, and a subagent's notification opens its parent chat.
+- If the vault you used last is gone, Vibe Work shows the vault chooser.
+- Works with Mistral Vibe 3.0.4.
+- Many smaller fixes.
+
 ## 0.1.4 (2026-10-31)
 
 Built for Vibe 3.0.4 on Python 3.14.8. This release adds Your Chrome, a search tool for the agent and a current web engine on Linux.

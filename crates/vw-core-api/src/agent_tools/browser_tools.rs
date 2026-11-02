@@ -205,7 +205,8 @@ pub(crate) async fn call(
                 map.remove("target");
                 map.remove("tab");
             }
-            let action = vw_browser::parse(&args)?;
+            let action =
+                crate::browser_upload::load(shared, session_id, vw_browser::parse(&args)?).await?;
             let nav = CoreNav {
                 shared: shared.clone(),
                 strict: true,

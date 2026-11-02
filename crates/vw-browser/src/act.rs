@@ -55,6 +55,22 @@ pub enum Action {
         /// Its ref.
         reference: String,
     },
+    /// Click a viewport point bound to an observed node.
+    ClickAt {
+        /// Expected ref; empty resolves against the latest observation.
+        reference: String,
+        /// CSS x coordinate.
+        x: u32,
+        /// CSS y coordinate.
+        y: u32,
+    },
+    /// Drag one observed element to another.
+    Drag {
+        /// Source ref.
+        reference: String,
+        /// Destination ref.
+        to: String,
+    },
     /// Replace a field's text (optionally press Enter after).
     Type {
         /// The field's ref.
@@ -99,6 +115,16 @@ pub enum Action {
         /// Its ref.
         reference: String,
     },
+    /// Attach files to a file field: `paths` as the caller named them, `files` as the host loaded them from the
+    /// chat's folders (the driver refuses an upload whose files were not loaded).
+    Upload {
+        /// The file field (or a label or control a single file field belongs to).
+        reference: String,
+        /// The files as named in the request (chat-folder relative).
+        paths: Vec<String>,
+        /// The loaded files.
+        files: Vec<UploadFile>,
+    },
     /// Wait until text shows, a ref shows, or the page finished loading (bounded).
     Wait {
         /// Text to wait for.
@@ -112,7 +138,45 @@ pub enum Action {
     },
 }
 
+/// Most files one upload attaches.
+pub const MAX_UPLOAD_FILES: usize = 16;
+/// Most bytes one upload attaches, all files together.
+pub const MAX_UPLOAD_BYTES: usize = 32 * 1024 * 1024;
+
+/// One file for an upload, read by the host from the chat's folders.
+#[derive(Clone, PartialEq, Eq)]
+pub struct UploadFile {
+    /// The file name the page sees.
+    pub name: String,
+    /// Its media type.
+    pub mime: String,
+    /// Its bytes.
+    pub data: Vec<u8>,
+}
+
+impl std::fmt::Debug for UploadFile {
+    // Never the bytes: actions are logged.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "UploadFile({}, {} bytes)", self.name, self.data.len())
+    }
+}
+
 impl Action {
+    /// Whether this act sends the page input a person's gesture would (a click, a key, typing, a choice, a drag):
+    /// the engine then runs it as that gesture, so a popup or `target=_blank` link it opens is not blocked.
+    #[must_use]
+    pub fn is_input(&self) -> bool {
+        matches!(
+            self,
+            Self::Click { .. }
+                | Self::Check { .. }
+                | Self::Press { .. }
+                | Self::Type { .. }
+                | Self::Select { .. }
+                | Self::Drag { .. }
+        )
+    }
+
     /// The action's name as the tool spells it.
     #[must_use]
     pub fn name(&self) -> &'static str {
@@ -121,14 +185,16 @@ impl Action {
             Self::Back => "back",
             Self::Forward => "forward",
             Self::Reload => "reload",
-            Self::Click { .. } => "click",
+            Self::Click { .. } | Self::ClickAt { .. } => "click",
             Self::Type { .. } => "type",
+            Self::Drag { .. } => "drag",
             Self::Select { .. } => "select",
             Self::Check { .. } => "check",
             Self::Press { .. } => "press",
             Self::Scroll { .. } => "scroll",
             Self::Hover { .. } => "hover",
             Self::Wait { .. } => "wait",
+            Self::Upload { .. } => "upload",
         }
     }
 
@@ -137,10 +203,13 @@ impl Action {
     pub fn reference(&self) -> Option<&str> {
         match self {
             Self::Click { reference }
+            | Self::ClickAt { reference, .. }
+            | Self::Drag { reference, .. }
             | Self::Type { reference, .. }
             | Self::Select { reference, .. }
             | Self::Check { reference, .. }
-            | Self::Hover { reference } => Some(reference),
+            | Self::Hover { reference }
+            | Self::Upload { reference, .. } => Some(reference),
             Self::Press { reference, .. }
             | Self::Scroll { reference, .. }
             | Self::Wait { reference, .. } => reference.as_deref(),
@@ -159,7 +228,10 @@ impl Action {
             Some(v)
         };
         match self {
-            Self::Click { reference } => r("click", json!({"ref": reference})),
+            Self::Drag { reference, to } => r("drag", json!({"ref": reference, "to": to})),
+            Self::Click { reference } | Self::ClickAt { reference, .. } => {
+                r("click", json!({"ref": reference}))
+            }
             Self::Hover { reference } => r("hover", json!({"ref": reference})),
             Self::Type {
                 reference,
@@ -176,9 +248,19 @@ impl Action {
                 r("check", json!({"ref": reference, "checked": checked}))
             }
             Self::Press { key, reference } => {
-                let key = if key == "Space" { " " } else { key.as_str() };
-                r("press", json!({"ref": reference, "key": key}))
+                let mut request = crate::keys::request(key)?;
+                request["ref"] = json!(reference);
+                r("press", request)
             }
+            Self::Upload {
+                reference, files, ..
+            } => r(
+                "upload",
+                json!({"ref": reference, "files": files.iter().map(|f| json!({
+                    "name": f.name, "mime": f.mime, "size": f.data.len(),
+                    "parts": f.data.len().div_ceil(crate::upload::CHUNK),
+                })).collect::<Vec<_>>()}),
+            ),
             Self::Scroll {
                 reference,
                 up,
@@ -199,6 +281,7 @@ struct Args {
     #[serde(rename = "ref")]
     reference: Option<String>,
     url: Option<String>,
+    to: Option<String>,
     text: Option<String>,
     value: Option<String>,
     checked: Option<bool>,
@@ -208,6 +291,8 @@ struct Args {
     submit: Option<bool>,
     load: Option<bool>,
     timeout_ms: Option<u64>,
+    paths: Option<Vec<String>>,
+    file_ids: Option<Value>,
 }
 
 fn reference(value: Option<String>, action: &str) -> Result<String, String> {
@@ -228,6 +313,38 @@ fn optional_ref(value: Option<String>, action: &str) -> Result<Option<String>, S
     value.map(|v| reference(Some(v), action)).transpose()
 }
 
+/// `upload {ref, paths}`: 1 to [`MAX_UPLOAD_FILES`] chat-folder paths; the host loads the files.
+fn upload(
+    reference_arg: Option<String>,
+    paths: Option<Vec<String>>,
+    file_ids: bool,
+) -> Result<Action, String> {
+    if file_ids {
+        return Err(
+            "upload takes only \"paths\": files in this chat's folders (its attachments included)"
+                .to_owned(),
+        );
+    }
+    let paths = paths.unwrap_or_default();
+    if paths.is_empty() || paths.len() > MAX_UPLOAD_FILES {
+        return Err(format!(
+            "upload needs \"paths\": 1 to {MAX_UPLOAD_FILES} files in this chat's folders, relative to its folder \
+             (for example [\"report.pdf\"])"
+        ));
+    }
+    if paths.iter().any(|p| p.trim().is_empty() || p.len() > 4096) {
+        return Err("each upload path must be a nonempty path of at most 4096 bytes".to_owned());
+    }
+    Ok(Action::Upload {
+        reference: reference(reference_arg, "upload")?,
+        paths,
+        files: Vec::new(),
+    })
+}
+
+/// The actions `parse` knows, for its refusal of another name.
+const ACTIONS: &str = "navigate, back, forward, reload, click, type, select, check, press, scroll, hover, drag, wait, upload";
+
 /// Parses `browser_act` arguments.
 ///
 /// # Errors
@@ -246,8 +363,21 @@ pub fn parse(args: &Value) -> Result<Action, String> {
         "back" => Action::Back,
         "forward" => Action::Forward,
         "reload" => Action::Reload,
+        "click" if args.get("x").is_some() || args.get("y").is_some() => Action::ClickAt {
+            reference: a
+                .reference
+                .map(|r| reference(Some(r), "click"))
+                .transpose()?
+                .unwrap_or_default(),
+            x: coordinate(args, "x")?,
+            y: coordinate(args, "y")?,
+        },
         "click" => Action::Click {
             reference: reference(a.reference, "click")?,
+        },
+        "drag" => Action::Drag {
+            reference: reference(a.reference, "drag")?,
+            to: reference(a.to, "drag destination")?,
         },
         "hover" => Action::Hover {
             reference: reference(a.reference, "hover")?,
@@ -282,14 +412,8 @@ pub fn parse(args: &Value) -> Result<Action, String> {
                 .key
                 .or(a.text)
                 .ok_or("press needs a key (\"key\": \"Enter\")")?;
-            if !(KEYS.contains(&key.as_str())
-                || (key.chars().count() == 1 && !key.chars().any(char::is_control)))
-            {
-                return Err(format!(
-                    "'{}' is not a key: use one character or one of {}",
-                    key.chars().take(20).collect::<String>(),
-                    KEYS[..14].join(", ")
-                ));
+            if crate::keys::request(&key).is_none() {
+                return Err("not a key: press needs a key, optionally preceded by Control, Shift, Alt or Meta (for example Control+a or Shift+Tab)".to_owned());
             }
             Action::Press {
                 key,
@@ -301,6 +425,7 @@ pub fn parse(args: &Value) -> Result<Action, String> {
             up: a.direction.as_deref() == Some("up"),
             amount: a.amount.map(|n| n.min(20_000)),
         },
+        "upload" => upload(a.reference, a.paths, a.file_ids.is_some())?,
         "wait" | "waitFor" => {
             let reference = optional_ref(a.reference, "wait")?;
             let load = a.load.unwrap_or(false);
@@ -320,8 +445,7 @@ pub fn parse(args: &Value) -> Result<Action, String> {
         "" => return Err("browser_act needs an \"action\"".to_owned()),
         other => {
             return Err(format!(
-                "unknown action '{}': navigate, back, forward, reload, click, type, select, check, press, scroll, \
-                 hover, wait",
+                "unknown action '{}': {ACTIONS}",
                 other.chars().take(30).collect::<String>()
             ));
         }
@@ -371,6 +495,15 @@ pub struct PageAnswer {
     /// Scroll position after a scroll.
     #[serde(default)]
     pub scroll_y: Option<i64>,
+    /// After `upload`: the files the field now holds (name and size: what the page sees).
+    #[serde(default)]
+    pub uploaded: Option<Value>,
+    /// After `scroll {ref}`: the element's box in its own document's viewport.
+    #[serde(default, rename = "box")]
+    pub bounds: Option<crate::frames::RefBox>,
+    /// After `scroll {ref}`: that document's viewport (CSS pixels).
+    #[serde(default)]
+    pub viewport: Option<(u32, u32)>,
     /// Live geometry prepared without events; only a host-authorized native action consumes it.
     #[serde(default)]
     pub native_point: Option<vw_preview::NativeClickPoint>,
@@ -402,4 +535,12 @@ pub struct Covering {
     /// Tag.
     #[serde(default)]
     pub tag: String,
+}
+
+fn coordinate(args: &Value, key: &str) -> Result<u32, String> {
+    args[key]
+        .as_u64()
+        .and_then(|n| u32::try_from(n).ok())
+        .filter(|n| *n <= 100_000)
+        .ok_or_else(|| format!("click {key} must be a nonnegative CSS pixel coordinate"))
 }

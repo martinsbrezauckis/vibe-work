@@ -59,6 +59,7 @@ import "./styles/search.css";
 // the shared motion and responses load last so they win over older per-feature rules.
 import "./styles/feel.css";
 import "./styles/editor-workspace.css";
+import "./styles/accessibility.css";
 
 const container = document.getElementById("root");
 if (container === null) {

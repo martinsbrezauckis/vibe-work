@@ -6,8 +6,8 @@
 //! Usage: confirm_window_probe [--close-after <seconds>] <question> <text below> <button>...   (buttons in the shown
 //! order, the first = the declining default; 1 to 3). Prints `SHOWN` once the window is up, then
 //! `ANSWER <index>` or `ANSWER none` (declined without a button, or closed by --close-after), and exits.
-//! Windows: the task dialog needs common controls v6, which the app gets from its manifest; build this example with
-//! an application manifest that selects Microsoft.Windows.Common-Controls 6.0 embedded, or it does not start.
+//! Windows: the task dialog needs common controls v6, which the app gets from its manifest; this package's build
+//! script embeds the same dependency into this example (and the test programs), so a plain `cargo build` starts.
 #![allow(
     unsafe_code,
     reason = "the probe's own app window on macOS (AppKit window creation); the module under test keeps its own"

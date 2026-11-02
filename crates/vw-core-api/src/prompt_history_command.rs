@@ -26,6 +26,16 @@ pub(crate) async fn execute(
         Ok(CommandResult::PromptHistory { entries })
     })
     .await
-    .map_err(|_| CoreError::new(ErrorCode::Internal, "Prompt history unavailable"))?
-    .map_err(|_: std::io::Error| CoreError::new(ErrorCode::Internal, "Prompt history unavailable"))
+    .map_err(|_| {
+        CoreError::new(
+            ErrorCode::Internal,
+            "Prompt history could not be read or saved. Try again.",
+        )
+    })?
+    .map_err(|_: std::io::Error| {
+        CoreError::new(
+            ErrorCode::Internal,
+            "Prompt history could not be read or saved. Try again.",
+        )
+    })
 }

@@ -323,7 +323,7 @@
   font-size: var(--text-11-5);
 }
 
-@media (max-width: 640px) {
+@container window (max-width: 640px) {
   .set-body {
     padding: 20px 16px 40px;
   }
@@ -508,7 +508,7 @@
 }
 /* Narrow windows: the long tails give way ("Rate limit: 12%", "● Debug API", the server's version); the full text
    stays in the accessible text and the tooltips, so the readouts fit 390 px side by side. */
-@media (max-width: 600px) {
+@container window (max-width: 600px) {
   .statusbar {
     gap: 10px;
   }

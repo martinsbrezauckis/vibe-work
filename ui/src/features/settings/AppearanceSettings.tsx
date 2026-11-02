@@ -7,14 +7,13 @@ import { Switch } from "../../components/Controls";
 import type { ReactElement } from "react";
 
 import { Selector } from "../../components/Selector";
-import { switchTheme } from "../../state/themeSwitch";
 import { useApp } from "../shell/AppContext";
 import { useShellState } from "../shell/hooks";
 
 /** The Appearance section. */
 export function AppearanceSettings(): ReactElement {
   const { shell } = useApp();
-  const theme = useShellState((s) => s.theme);
+  const theme = useShellState((s) => s.themePreference);
   const openFilesIn = useShellState((s) => s.openFilesIn);
   const markVibeLines = useShellState((s) => s.markVibeLines);
   const openAs = useShellState((s) => s.openHtmlMarkdownAs);
@@ -24,22 +23,18 @@ export function AppearanceSettings(): ReactElement {
     <section aria-labelledby="appearance-title">
       <h3 id="appearance-title">Appearance</h3>
       <div className="check" data-setting="theme">
-        <span>
-          Theme
-          <span className="d">
-            Both themes are complete; the title bar switch flips between them.
-          </span>
-        </span>
+        <span>Theme</span>
         <Selector
           testId="settings.appearance-settings-switch-theme"
           label="Theme"
           value={theme}
           options={[
+            { value: "system", label: "Follow the system" },
             { value: "dark", label: "Dark", icon: "moon" },
             { value: "light", label: "Light", icon: "sun" },
           ]}
           onChange={(t) => {
-            switchTheme(t, shell.actions.setTheme);
+            shell.actions.setThemePreference(t);
           }}
         />
       </div>

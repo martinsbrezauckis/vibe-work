@@ -81,15 +81,18 @@ export function useSessionWiring(): void {
         else if (event.type === "openUpdates") shell.actions.openSettings("updates");
         else {
           void (async () => {
-            await sessions?.open(event.sessionId);
+            // The notification may have been shown before its child's card reached the parent.
+            // Resolve its destination from today's retained entry and hosting card at activation time.
             const retained = toasts.history
               .get()
-              .some(
-                (notice) =>
-                  notice.id === event.notificationId && notice.sessionId === event.sessionId,
-              );
-            if (retained) toasts.open(event.notificationId);
-            else toasts.openSession(event.sessionId);
+              .find((notice) => notice.id === event.notificationId);
+            const card = Object.values(core.store.get().subagentCards).find(
+              (card) => card.sessionId === event.sessionId,
+            );
+            const sessionId = card?.parentSessionId ?? retained?.sessionId ?? event.sessionId;
+            await sessions?.open(sessionId);
+            if (retained !== undefined) toasts.open(retained.id);
+            else toasts.openSession(sessionId);
           })();
         }
       })

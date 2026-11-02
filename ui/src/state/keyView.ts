@@ -36,6 +36,8 @@ export function stepOf(status: KeyStatusView | null): SetupStep {
     return { kind: "pickVault" };
   }
   switch (status.vaultState) {
+    case "selectedVaultMissing":
+      return { kind: "pickVault" };
     case "noVault":
       return { kind: "create" };
     case "twoVaults":

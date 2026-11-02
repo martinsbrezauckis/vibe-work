@@ -16,6 +16,7 @@ import { type ReactElement } from "react";
 import type { JsonValue } from "../../protocol/core";
 import { TEXT, wording } from "../../vocabulary";
 import { Button } from "../../components/Controls";
+import { useVoicePrompt } from "../voice/hooks";
 import { useApp } from "../shell/AppContext";
 import { useCoreState } from "../shell/hooks";
 import { useHeldBy } from "../sessions/SessionHeldNote";
@@ -176,6 +177,7 @@ export function ApprovalAsk({
         : null;
     },
   );
+  const voicePhrase = useVoicePrompt((s) => (s?.callbackId === callbackId ? s.phrase : null));
   if (closed) return <AuditRow record={record} summary={summary} callbackId={callbackId} />;
 
   const always = alwaysControl(ask?.alwaysSetting);
@@ -209,6 +211,7 @@ export function ApprovalAsk({
       data={{ "data-callback-id": callbackId, "data-entry-id": entryId(entry) }}
     >
       <Payload entry={entry} />
+      {voicePhrase === null ? null : <div className="why">{voicePhrase}.</div>}
     </AskCard>
   );
 }

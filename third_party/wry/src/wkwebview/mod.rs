@@ -904,8 +904,11 @@ impl InnerWebView {
         // Allow the modal to detach from the current thread and be non-blocker
         print_operation.setCanSpawnSeparateThread(true);
 
-        // Launch the modal
-        let window = self.webview.window().unwrap();
+        // Launch the modal (vibe-work patch: never panics while element full screen moves the web view between
+        // windows; the container's window stays the app's).
+        let Some(window) = self.host_window() else {
+          return Ok(());
+        };
         print_operation.runOperationModalForWindow_delegate_didRunSelector_contextInfo(
           &window,
           None,
@@ -1028,10 +1031,22 @@ impl InnerWebView {
     }
   }
 
+  /// vibe-work patch: the web view's window, or its container's while element full screen moves the web view
+  /// between windows (the container stays in the app's window).
+  #[cfg(target_os = "macos")]
+  pub(crate) fn host_window(&self) -> Option<Retained<NSWindow>> {
+    self.webview.window().or_else(|| self.ns_view.window())
+  }
+
   pub fn set_bounds(&self, #[allow(unused)] bounds: Rect) -> crate::Result<()> {
     #[cfg(target_os = "macos")]
     if self.is_child {
-      let window = self.webview.window().unwrap();
+      // vibe-work patch: while element full screen moves the web view between windows it has no window or
+      // superview for a moment; the layout is applied again at the next change.
+      // SAFETY: a main-thread read of the web view's superview.
+      let (Some(window), Some(_)) = (self.host_window(), unsafe { self.webview.superview() }) else {
+        return Ok(());
+      };
       let scale_factor = window.backingScaleFactor();
       let (x, y) = bounds.position.to_logical::<f64>(scale_factor).into();
       let (width, height) = bounds.size.to_logical::<i32>(scale_factor).into();
@@ -1056,8 +1071,8 @@ impl InnerWebView {
 
   pub fn focus(&self) -> Result<()> {
     #[cfg(target_os = "macos")]
-    {
-      let window = self.webview.window().unwrap();
+    if let Some(window) = self.webview.window() {
+      // vibe-work patch: no window for a moment while element full screen moves the web view.
       window.makeFirstResponder(Some(&self.webview));
     }
     Ok(())
@@ -1300,7 +1315,9 @@ impl InnerWebView {
   #[cfg(target_os = "macos")]
   pub(crate) fn set_traffic_light_inset(&self, position: dpi::Position) -> crate::Result<()> {
     if let Some(parent_view) = &self.parent_view {
-      parent_view.set_traffic_light_inset(&self.webview.window().unwrap(), position);
+      if let Some(window) = self.host_window() {
+        parent_view.set_traffic_light_inset(&window, position);
+      }
     }
 
     Ok(())

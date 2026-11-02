@@ -41,7 +41,7 @@ export function LoopsStrip({
   const active = rows.length > 0;
   const now = useNowSeconds(active);
   const [deleting, setDeleting] = useState<ReadonlySet<string>>(new Set());
-  const readAt = useRef(0);
+  const readAt = useRef(-Infinity);
   const wasRunning = useRef(running);
 
   // The list is read once when the session's composer opens.
@@ -52,7 +52,7 @@ export function LoopsStrip({
   // moved the next time of a loop that fired.
   useEffect(() => {
     if (wasRunning.current && !running) {
-      readAt.current = Date.now();
+      readAt.current = performance.now();
       void actions?.loadLoops(sessionId, true);
     }
     wasRunning.current = running;
@@ -63,8 +63,8 @@ export function LoopsStrip({
   const first = soonest(rows);
   useEffect(() => {
     if (first === null || running) return;
-    const clock = Date.now();
-    if (clock / 1000 < first.nextFireAt + OVERDUE_GRACE || clock - readAt.current < REREAD_MS)
+    const clock = performance.now();
+    if (Date.now() / 1000 < first.nextFireAt + OVERDUE_GRACE || clock - readAt.current < REREAD_MS)
       return;
     readAt.current = clock;
     void actions?.loadLoops(sessionId, true);

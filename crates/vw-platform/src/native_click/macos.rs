@@ -1,19 +1,22 @@
-//! `AppKit` mouse delivery into the current `WKWebView`'s hit-tested native view.
+//! `AppKit` mouse delivery into the current `WKWebView`'s hit-tested native view, and a short main-thread delay.
 //! Depends on: `WKWebView` and `AppKit`. Called by: `native_click` on Tauri's main thread.
 
 use std::cell::RefCell;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 
 use super::ClickReply;
 use block2::RcBlock;
 use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
-use objc2::{AnyThread, MainThreadMarker};
-use objc2_app_kit::{NSApplication, NSEvent, NSEventModifierFlags, NSEventType, NSView};
+use objc2::{AnyThread, MainThreadMarker, msg_send, sel};
+use objc2_app_kit::{
+    NSApplication, NSEvent, NSEventModifierFlags, NSEventType, NSTrackingAreaOptions, NSView,
+};
 use objc2_foundation::{
-    NSError, NSJSONSerialization, NSJSONWritingOptions, NSPoint, NSProcessInfo, NSString,
-    NSUTF8StringEncoding,
+    NSError, NSJSONSerialization, NSJSONWritingOptions, NSPoint, NSPointInRect, NSProcessInfo,
+    NSString, NSTimer, NSUTF8StringEncoding,
 };
 use objc2_web_kit::WKWebView;
 
@@ -113,11 +116,61 @@ fn click_view(view: &WKWebView, point: (f64, f64), sent: &AtomicBool) -> Result<
         0.0,
     )
     .ok_or("AppKit could not create mouse release")?;
-    hit.mouseMoved(&moved);
+    move_pointer(base, local, &moved);
     sent.store(true, Ordering::Release);
     hit.mouseDown(&down);
     hit.mouseUp(&up);
     Ok(())
+}
+
+/// Hands the motion to the owners of the view's mouse-moved tracking areas at `local`, as `AppKit` does for a real
+/// pointer move. `WKWebView` takes motion only from its own tracking area; `mouseMoved:` sent to the view itself is
+/// dropped, so the page would never see the pointer arrive.
+fn move_pointer(view: &NSView, local: NSPoint, moved: &NSEvent) {
+    for area in view.trackingAreas() {
+        let options = area.options();
+        if !options.contains(NSTrackingAreaOptions::MouseMoved) {
+            continue;
+        }
+        let rect = if options.contains(NSTrackingAreaOptions::InVisibleRect) {
+            view.visibleRect()
+        } else {
+            area.rect()
+        };
+        if !NSPointInRect(local, rect) {
+            continue;
+        }
+        let Some(owner) = area.owner() else {
+            continue;
+        };
+        // SAFETY: `owner` is retained for this call; `mouseMoved:` is NSResponder's one-argument method, sent only to
+        // an owner that answers it, as AppKit itself sends it to tracking-area owners on the main thread.
+        unsafe {
+            let answers: bool = msg_send![&*owner, respondsToSelector: sel!(mouseMoved:)];
+            if answers {
+                let _: () = msg_send![&*owner, mouseMoved: moved];
+            }
+        }
+    }
+}
+
+/// Runs `work` once on the main run loop after `delay` (never earlier). Must be called on the main thread.
+pub fn after(delay: Duration, work: impl FnOnce() + 'static) {
+    let work = RefCell::new(Some(work));
+    let block = RcBlock::new(move |_timer: std::ptr::NonNull<NSTimer>| {
+        if let Some(work) = work.borrow_mut().take() {
+            work();
+        }
+    });
+    // SAFETY: called on the main thread (the callers' WebKit completions); the timer retains the block until it has
+    // fired once, and the main run loop retains the timer.
+    unsafe {
+        let _ = NSTimer::scheduledTimerWithTimeInterval_repeats_block(
+            delay.as_secs_f64(),
+            false,
+            &block,
+        );
+    }
 }
 
 /// Evaluates the final page guard, then sends native input in `WebKit`'s main-thread completion.

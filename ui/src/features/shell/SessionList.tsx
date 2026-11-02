@@ -98,7 +98,35 @@ export function SessionList() {
       id="column"
       aria-label={settings ? "Settings" : "Sessions"}
       ref={root}
-      tabIndex={drawerOpen ? -1 : undefined}
+      onKeyDown={(event) => {
+        if (
+          !["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key) ||
+          event.altKey ||
+          event.ctrlKey ||
+          event.metaKey
+        )
+          return;
+        const target = event.target;
+        if (!(target instanceof HTMLElement) || !target.matches(".srow-main")) return;
+        const names = [...event.currentTarget.querySelectorAll<HTMLElement>(".srow-main")].filter(
+          (el) => !el.closest("[hidden], [inert]"),
+        );
+        const index = names.indexOf(target);
+        if (index < 0) return;
+        const next =
+          event.key === "Home"
+            ? 0
+            : event.key === "End"
+              ? names.length - 1
+              : Math.max(
+                  0,
+                  Math.min(names.length - 1, index + (event.key === "ArrowDown" ? 1 : -1)),
+                );
+        event.preventDefault();
+        names[next]?.focus();
+      }}
+      data-focus-region="sessions"
+      tabIndex={-1}
       {...(drawerOpen ? { role: "dialog", "aria-modal": true } : {})}
     >
       <div

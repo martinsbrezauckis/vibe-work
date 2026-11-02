@@ -13,7 +13,8 @@
 //!
 //! Depends on: the gate (`config/read`), `default_model` (bounded config read), `model_facts`, `model_choices`, the
 //! private atomic writer. Called by: `dispatch` (`checkDefaultModel`).
-//! Invariants: no `[[models]]` entry but Vibe Work's own marked facts entry is ever removed or rewritten; nothing
+//! Invariants: no `[[models]]` entry but Vibe Work's own facts entry (explicitly marked) is ever removed
+//! or rewritten, and none is added for an alias the person has an entry of their own for; nothing
 //! changes while Vibe is still loading Mistral's lists (`awaitingExperimentModel`); a file that changed while it was
 //! read is left alone (the next launch tries again).
 
@@ -76,22 +77,44 @@ async fn lobby(shared: &Shared) -> Result<Value, CoreError> {
 }
 
 /// Reads the lobby as Mistral sends it: Vibe Work's facts entry is taken out for the read and put back after, so
-/// Mistral's own values can win. Returns the read and the file text without the facts entry.
-async fn bare_lobby(shared: &Shared, path: &Path) -> Result<(Value, String), CoreError> {
+/// Mistral's own values can win. Returns the read and the file text without the facts entry. The record of our entry
+/// (`model_facts::record`) is cleared before the entry leaves the file and restored only if the entry is put back.
+async fn bare_lobby(
+    shared: &Shared,
+    home: &Path,
+    path: &Path,
+) -> Result<(Value, String), CoreError> {
     let original = crate::default_model::read(path)?;
-    let Some(bare) = crate::model_facts::without(&original) else {
+    let written = crate::model_facts::recorded(home);
+    let Some(bare) = crate::model_facts::without(&original, written.as_ref()) else {
+        if written.is_some() {
+            // An absent or unmarked entry has no provable ownership: discard the stale record.
+            crate::model_facts::record(home, None)?;
+        }
         return Ok((lobby(shared).await?, original));
     };
+    crate::model_facts::record(home, None)?;
     if !replace(path, &original, &bare)? {
+        crate::model_facts::record(home, written.as_ref())?;
         return Ok((lobby(shared).await?, original));
     }
     let read = lobby(shared).await;
-    if read.is_err()
+    let no_account_models = read.as_ref().is_ok_and(|reply| {
+        reply["config"]["models"].as_array().is_none_or(|rows| {
+            !rows
+                .iter()
+                .any(|row| matches!(row["source"].as_str(), Some("growthbook" | "catalog")))
+        })
+    });
+    if no_account_models
+        || read.is_err()
         || read
             .as_ref()
             .is_ok_and(|r| r["config"]["awaitingExperimentModel"] == true)
     {
-        replace(path, &bare, &original)?;
+        if replace(path, &bare, &original)? {
+            crate::model_facts::record(home, written.as_ref())?;
+        }
         return read.map(|r| (r, original));
     }
     Ok((read?, bare))
@@ -102,19 +125,26 @@ async fn bare_lobby(shared: &Shared, path: &Path) -> Result<(Value, String), Cor
 /// # Errors
 /// A lobby read the gate or Vibe refuses, or a config file that cannot be safely read or replaced.
 pub(crate) async fn check(shared: &Arc<Shared>) -> Result<Value, CoreError> {
-    let path = shared.instructions.own_home.join("config.toml");
-    let (mut reply, current) = bare_lobby(shared, &path).await?;
+    let home = &shared.instructions.own_home;
+    let path = home.join("config.toml");
+    let (mut reply, current) = bare_lobby(shared, home, &path).await?;
     if reply["config"]["awaitingExperimentModel"] == true {
         return Ok(json!({"gone": null}));
     }
-    // Nothing moves away from Vibe Work's own `large-4` (module header): Mistral's entry only gets its facts.
+    // Nothing moves away from Vibe Work's own `large-4` (module header): Mistral's entry only gets its facts, and
+    // only when the person has no entry of their own for its alias (theirs wins as it is).
     let mut next = current.clone();
+    let mut written = None;
     if let Some(row) = mistral_large_4(&reply["config"]) {
-        let target = row["alias"].as_str().unwrap_or_default().to_owned();
-        next = crate::model_facts::with(&next, &target, row);
+        let target = row["alias"].as_str().unwrap_or_default();
+        if !crate::model_facts::has_entry_for(&current, target) {
+            (next, written) = crate::model_facts::with(&next, target, row);
+        }
     }
     if next != current {
-        replace(&path, &current, &next)?;
+        if replace(&path, &current, &next)? {
+            crate::model_facts::record(home, written.as_ref())?;
+        }
         reply = lobby(shared).await?;
     }
     let gone = crate::model_choices::unavailable_default_alias(&reply["config"]);

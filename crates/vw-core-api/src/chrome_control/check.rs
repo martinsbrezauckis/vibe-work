@@ -71,6 +71,8 @@ pub(super) fn annotate_modes(shared: &Shared, session: &str, tool: &str, result:
     let tier = mode(shared, session).as_deref().and_then(Tier::from_mode);
     // The person's Local network switch, and whether Chrome has it yet.
     if result["structuredContent"].is_object() {
+        result["structuredContent"]["chromeExtensionStore"] =
+            json!(super::commands::extension_store(shared));
         result["structuredContent"]["localNetwork"] = json!({
             "on": shared.chrome_control.local_network(),
             "applied": shared.chrome_control.local_network_applied(),
@@ -132,6 +134,17 @@ pub(crate) fn check(shared: &Arc<Shared>, args: &Value) -> Value {
 mod tests {
     use super::*;
     #[tokio::test]
+    async fn chrome_status_does_not_invent_an_unknown_store_state() {
+        let fixture = crate::feature_test_core::Fixture::new().await;
+        let mut reply = json!({"structuredContent":{"profiles":[]}});
+        annotate_modes(&fixture.core.shared, "s", "chrome_status", &mut reply);
+        fixture.finish().await;
+        assert_eq!(
+            reply["structuredContent"].get("chromeExtensionStore"),
+            Some(&Value::Null)
+        );
+    }
+    #[tokio::test]
     async fn current_mode_controls_every_call_without_cards() {
         let core = crate::offline_core::start("chrome-current-mode").await;
         let shared = &core.shared;
@@ -173,7 +186,8 @@ mod tests {
                 .access
                 .observe_request("session/agent/update", "s", &json!({"agentName":mode}));
             assert!(!available(shared, "s"));
-            assert_eq!(super::super::gateway::list(shared, "s"), json!([]));
+            // The tool list does not follow the chat (`gateway` tests); the call is refused.
+            assert!(authorize(shared, "s", "chrome_status", &json!({})).is_err());
         }
         core.shutdown().await;
     }

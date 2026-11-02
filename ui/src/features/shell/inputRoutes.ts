@@ -83,9 +83,35 @@ export function registerInputRoutes(app: App): () => void {
       const { selector, index } = asObject(body);
       const el = target(selector, index);
       app.uiControl.clickTrigger(triggerId(el));
-      el.focus();
       // Commit click effects before uiControl drains their commands and releases the request's capability.
       flushSync(() => {
+        // Pointer handlers (including the window-activation guard) must see a new click sequence.
+        const init = {
+          bubbles: true,
+          cancelable: true,
+          button: 0,
+        };
+        el.dispatchEvent(
+          new PointerEvent("pointerdown", {
+            ...init,
+            buttons: 1,
+            pointerId: 1,
+            pointerType: "mouse",
+            isPrimary: true,
+          }),
+        );
+        el.dispatchEvent(new MouseEvent("mousedown", { ...init, buttons: 1 }));
+        el.focus();
+        el.dispatchEvent(
+          new PointerEvent("pointerup", {
+            ...init,
+            buttons: 0,
+            pointerId: 1,
+            pointerType: "mouse",
+            isPrimary: true,
+          }),
+        );
+        el.dispatchEvent(new MouseEvent("mouseup", { ...init, buttons: 0 }));
         el.click();
       });
       // Only the label or the tag: never the element's text, which could be a secret field's neighbourhood.

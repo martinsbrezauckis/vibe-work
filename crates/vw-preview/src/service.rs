@@ -22,7 +22,7 @@ use crate::hooks::{Hooks, Inner};
 use crate::layout::{self, DeviceWidth, Rect};
 use crate::policy::UrlPolicy;
 pub use crate::preview_error::PreviewError;
-use crate::shot::{self, Shot};
+use crate::shot::Shot;
 use crate::state::{BrowserMountState, PreviewView, Shown, State};
 use crate::visibility::VisibilityReport;
 
@@ -46,6 +46,8 @@ mod service_overlay;
 mod service_pool;
 #[path = "service_server.rs"]
 mod service_server;
+#[path = "service_shields.rs"]
+mod service_shields;
 #[path = "service_visibility.rs"]
 mod service_visibility;
 
@@ -184,6 +186,8 @@ impl PreviewService {
     #[must_use]
     pub fn new(engine: Arc<dyn PreviewEngine>, config: PreviewConfig) -> Self {
         let inner = Arc::new(Inner {
+            popup: std::sync::Mutex::new(None),
+            shields: std::sync::Mutex::new(crate::shields::Saved::load(&config.storage_root)),
             engine: Arc::downgrade(&engine),
             guard_refused: std::sync::Mutex::new(None),
             state: std::sync::Mutex::new(State::default()),
@@ -225,7 +229,7 @@ impl PreviewService {
             .await
             .unwrap_or_else(|_| {
                 crate::names::NameVerdict::Refused(format!(
-                    "could not check where {host} points; try again"
+                    "could not check where {host} points (the lookup failed), so it was not opened; try again"
                 ))
             })
     }
@@ -654,23 +658,9 @@ impl PreviewService {
     /// # Errors
     /// [`PreviewError::NothingOpen`], engine failures and timeouts, or [`PreviewError::Image`].
     pub async fn screenshot(&self, session_id: &str) -> Result<Shot, PreviewError> {
-        let _activity = self.session_lock(session_id).await;
-        if self.shots_blocked(session_id) {
-            return Err(PreviewError::Image(crate::browse::SHOTS_BLOCKED.to_owned()));
-        }
-        self.require_visible_screenshot(session_id)?;
-        let id = self.ensure_mounted(session_id).await?;
-        let png = bounded(
-            self.config.shot_timeout,
-            "screenshot",
-            self.engine.screenshot(&id),
-        )
-        .await?;
-        match self.css_viewport_width(session_id) {
-            Some(width) => shot::shape_css(&png, width),
-            None => shot::shape(&png),
-        }
-        .map_err(PreviewError::Image)
+        self.screenshot_of_mount(session_id)
+            .await
+            .map(|(shot, _)| shot)
     }
 
     /// The engine's own PNG of what the session's preview shows, at full size for stitching and comparing.

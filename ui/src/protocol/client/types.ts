@@ -127,6 +127,12 @@ export interface OsNotification {
   notificationId?: number;
   title: string;
   body: string;
+  /**
+   * Set when the webview has no focus, and for every request shown in the app's own confirmation window: the host
+   * shows nothing if one of the app's own windows, such as that confirmation window, is in front (the person is
+   * looking at the app); behind another app the toast shows.
+   */
+  skipWhenAppInFront?: boolean;
 }
 
 /** Per-call options of `CoreClient.execute`. */

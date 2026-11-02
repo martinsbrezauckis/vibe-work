@@ -7,8 +7,18 @@ use crate::changes_view::{ChangesMode, ChangesSubagent};
 
 #[test]
 fn git_changes_labels_each_subagent_even_with_colliding_turn_ids() {
+    check_child_authors(false);
+}
+
+#[cfg(unix)]
+#[test]
+fn git_changes_labels_subagent_files_opened_through_a_link() {
+    check_child_authors(true);
+}
+
+fn check_child_authors(linked: bool) {
     let base = std::env::temp_dir().join(format!(
-        "vw-subagent-authors-{}-{}",
+        "vw-subagent-authors-{}-{linked}-{}",
         std::process::id(),
         vw_changes::now_ms()
     ));
@@ -24,6 +34,12 @@ fn git_changes_labels_each_subagent_even_with_colliding_turn_ids() {
             .unwrap()
             .success()
     );
+    let written = base.join("linked");
+    #[cfg(unix)]
+    if linked {
+        std::os::unix::fs::symlink(&root, &written).unwrap();
+    }
+    let written = if linked { &written } else { &root };
     let hub = Hub::new(Some(base.join("data")), None);
     let baseline = vw_changes::Baseline::take(
         vw_changes::discover(&root).unwrap().unwrap(),
@@ -35,14 +51,14 @@ fn git_changes_labels_each_subagent_even_with_colliding_turn_ids() {
         baseline: Box::new(baseline),
         watcher: None,
     });
-    let mut parent = facts(&json!({"session": {"cwd": root}, "turns": []}));
+    let mut parent = facts(&json!({"session": {"cwd": written}, "turns": []}));
     for (id, name, file) in [
         ("child-1", "File helper", "one.txt"),
         ("child-2", "Second helper", "two.txt"),
     ] {
         std::fs::write(root.join(file), format!("{name}\n")).unwrap();
         let child = facts(
-            &json!({"session": {"cwd": root}, "turns": [{"id": "t1", "startedAt": 1}], "history": [{"id": "edit", "type": "effect", "turnId": "t1", "detail": {"kind": "file_write"}, "state": {"status": "completed", "output": {"filePath": root.join(file), "fileExisted": false}}}]}),
+            &json!({"session": {"cwd": written}, "turns": [{"id": "t1", "startedAt": 1}], "history": [{"id": "edit", "type": "effect", "turnId": "t1", "detail": {"kind": "file_write"}, "state": {"status": "completed", "output": {"filePath": written.join(file), "fileExisted": false}}}]}),
         );
         parent.subagents.push((
             ChangesSubagent {

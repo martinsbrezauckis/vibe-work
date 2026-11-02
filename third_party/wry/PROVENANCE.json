@@ -4,15 +4,17 @@
   "upstreamVersion": "0.57.0",
   "upstreamCrateSha256": "a819957a01b3119af85e638a38d242af76dbc87d130dca67bfd0441072e21ff0",
   "license": "Apache-2.0 OR MIT",
-  "note": "Published crate without .cargo-ok. NAV exposes the native frame context during the synchronous WK navigation callback, so a held iframe URL cannot replace the top-level page. Remove when Wry/Tauri expose frame metadata in their navigation callback. Documentation host examples in MOBILE.md and src/proxy.rs use placeholders for the public-export rules. SECURITY.md has one trailing space removed.",
+  "note": "Published crate without .cargo-ok. NAV exposes the native frame context during the synchronous WK navigation callback, so a held iframe URL cannot replace the top-level page. Remove when Wry/Tauri expose frame metadata in their navigation callback. Documentation host examples in MOBILE.md and src/proxy.rs use placeholders for the public-export rules. SECURITY.md has one trailing space removed. FILE PANEL: a gate before the macOS open panel, so a panel a page opens during the app's own automated act never appears (src/file_panel.rs). Remove when Wry/Tauri expose a file-chooser callback.",
   "modified": [
     "MOBILE.md",
     "src/lib.rs",
     "src/proxy.rs",
+    "src/wkwebview/class/wry_web_view_ui_delegate.rs",
     "src/wkwebview/navigation.rs",
     "SECURITY.md"
   ],
   "added": [
+    "src/file_panel.rs",
     "src/navigation_context.rs"
   ],
   "upstreamFiles": {

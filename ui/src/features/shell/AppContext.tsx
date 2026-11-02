@@ -39,8 +39,11 @@ import type { Changes } from "../changes/store";
 import type { Find } from "../../state/findStore";
 import type { SessionProcesses } from "../../state/sessionProcesses";
 
+import type { Accessibility } from "../../state/accessibility";
+
 /** Everything one app instance holds. */
 export interface App {
+  accessibility: Accessibility;
   core: CoreController | null;
   /** Session-log scan settings and retained finding actions. */
   secretScan: SecretScan | null;

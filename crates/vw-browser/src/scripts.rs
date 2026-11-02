@@ -29,13 +29,30 @@ fn assemble(body: &str, request: &Value) -> String {
     body.replace("__VW_COMMON__", &prelude)
 }
 
+/// Adds isolated-frame state and a document guard to an existing browser script.
+#[must_use]
+pub fn in_frame(script: &str, request: &Value) -> String {
+    // Single-frame traversal prevents the same-origin descendants being returned twice.
+    let script = script.replace("const ENV =", "REQ.singleFrame = true;\nconst ENV =");
+    include_str!("js/frame.js")
+        .replace(
+            "const req = FRAME_REQUEST;",
+            &format!("const req = {request};"),
+        )
+        .replace(
+            "JSON.parse(FRAME_SOURCE)",
+            &format!("JSON.parse({})", script.trim().trim_end_matches(';')),
+        )
+}
+
 /// The observe script for the page environment `page`.
 #[must_use]
 pub fn observe(page: &str, max_refs: usize, max_text: usize, text_offset: usize) -> String {
-    observe_focused(page, max_refs, max_text, text_offset, None)
+    observe_focused(page, max_refs, max_text, text_offset, None, None)
 }
 
-/// Observes matching controls before the ref cap, using only their redacted display fields.
+/// Observes matching controls before the ref cap, using only their redacted display fields; with `node`, only the
+/// element of that observed node identity (in each frame), whatever the ref cap.
 #[must_use]
 pub fn observe_focused(
     page: &str,
@@ -43,17 +60,20 @@ pub fn observe_focused(
     max_text: usize,
     text_offset: usize,
     find: Option<&str>,
+    node: Option<u64>,
 ) -> String {
     assemble(
         OBSERVE,
-        &json!({"page": page, "maxRefs": max_refs, "maxText": max_text, "textOffset": text_offset, "find": find}),
+        &json!({"page": page, "maxRefs": max_refs, "maxText": max_text, "textOffset": text_offset, "find": find, "node": node}),
     )
 }
 
 /// The act script for one page action (`request` = the act request with `page` set).
 #[must_use]
 pub fn act(request: &Value) -> String {
-    assemble(ACT, request).replace("__VW_NATIVE_CLICK__", NATIVE_CLICK)
+    assemble(ACT, request)
+        .replace("__VW_NATIVE_CLICK__", NATIVE_CLICK)
+        .replace("__VW_DRAG__", include_str!("js/drag.js"))
 }
 
 /// Final boolean validation, evaluated in the OS engine's UI callback. Repeats authority, hit test and geometry;
@@ -162,4 +182,35 @@ pub fn fill(request: &Value) -> String {
 pub fn pdf_links(page: &str) -> String {
     let request = json!({"page": page});
     assemble(include_str!("js/pdf_links.js"), &request)
+}
+
+/// Scrolls an ancestor document so an element in its child frame shows: `request` = `{page, node, box}`.
+#[must_use]
+pub fn frame_scroll(request: &Value) -> String {
+    assemble(include_str!("js/frame_scroll.js"), request)
+}
+
+/// Final node/frame identity guard, consumed in the native dispatch callback.
+#[must_use]
+pub fn point_validation(request: &Value) -> String {
+    assemble(include_str!("js/point.js"), request)
+        .replace("__VW_POINT_RECEIPT__", include_str!("js/point_receipt.js"))
+}
+
+/// Marks the isolated receipt immediately before native submission; a mark cannot be reused.
+#[must_use]
+pub fn point_dispatch(page: &str, token: &str) -> String {
+    format!(
+        "(() => {{ const req = {}; const state = window[req.page + '_pointReceipt']; if (!state || state.token !== req.token || state.result.dispatchedAt !== null) return null; state.result.dispatchedAt = performance.now(); return JSON.stringify({{ok:true, document:state.result.document, armed:state.token}}); }})()",
+        json!({"page":page,"token":token})
+    )
+}
+
+/// Polls or atomically collects and clears the isolated event receipt for one checked click.
+#[must_use]
+pub fn point_receipt(page: &str, token: &str, clear: bool) -> String {
+    format!(
+        "(() => {{ const req = {}; const state = window[req.page + '_pointReceipt']; if (!state || state.token !== req.token) return null; const result = JSON.stringify(state.result); if (req.clear) state.clear(); return result; }})()",
+        json!({"page":page,"token":token,"clear":clear})
+    )
 }

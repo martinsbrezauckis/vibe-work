@@ -77,7 +77,7 @@ pub fn click(
         if let Err(error) = PostMessageW(Some(target), WM_LBUTTONUP, WPARAM(0), packed) {
             let recovery = PostMessageW(Some(target), WM_LBUTTONUP, WPARAM(0), packed);
             return Err(format!(
-                "Native input may have been sent; Do not repeat: mouse release: {error}; recovery release {}",
+                "Native input may have been sent, so a repeat could click twice; Do not repeat: mouse release: {error}; recovery release {}",
                 if recovery.is_ok() { "queued" } else { "failed" }
             ));
         }

@@ -15,7 +15,7 @@ export interface LevelRow {
 }
 
 /** The Chrome Control rows' words while it is not set up. */
-const CHROME_NOT_SET_UP = "Chrome Control is not set up.";
+const CHROME_NOT_SET_UP = TEXT.chromeNotSetUp;
 
 /** "Ask: asks before tool use." for an access mode id; `null` = Vibe's own default. */
 function accessLine(mode: string | null): string {
@@ -54,7 +54,14 @@ export function levelRows(
       link: "Change in Models and agent",
     },
     ...(chromeAvailable
-      ? [{ id: "chrome" as const, label: "Your Chrome", value: chrome ?? CHROME_NOT_SET_UP, link }]
+      ? [
+          {
+            id: "chrome" as const,
+            label: TEXT.chromeName,
+            value: chrome ?? CHROME_NOT_SET_UP,
+            link,
+          },
+        ]
       : []),
   ];
 }

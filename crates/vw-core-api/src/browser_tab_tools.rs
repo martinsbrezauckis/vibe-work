@@ -216,7 +216,7 @@ fn close_receipt(
             driver.record_user_tab_close(owner, &site(tab).unwrap_or_default(), authority)
         {
             receipt["warning"] = json!(format!(
-                "tab closed, but its permission receipt could not be saved: {error}; do not repeat the close"
+                "tab closed, but its permission receipt could not be saved: {error}; the tab is already closed, so do not repeat the close"
             ));
         }
     }

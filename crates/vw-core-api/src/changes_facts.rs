@@ -204,26 +204,31 @@ pub(crate) fn last_turn_by_path(
     facts: &Facts,
     real_cwd: Option<&Path>,
 ) -> HashMap<PathBuf, String> {
+    let mut map = HashMap::new();
+    for touch in &facts.touches {
+        if let Some(turn) = &touch.turn_id {
+            let key = mapped_path(facts, &touch.path, real_cwd);
+            map.insert(key, turn.clone());
+        }
+    }
+    map
+}
+
+/// Maps the session's folder spelling to its real folder without requiring an effect's file to still exist.
+pub(crate) fn mapped_path(facts: &Facts, path: &Path, real_cwd: Option<&Path>) -> PathBuf {
     let alias = facts
         .cwd
         .as_deref()
         .zip(real_cwd)
         .map(|(written, real)| (path_key(written), path_key(real)))
         .filter(|(written, real)| written != real);
-    let mut map = HashMap::new();
-    for touch in &facts.touches {
-        if let Some(turn) = &touch.turn_id {
-            let key = path_key(&touch.path);
-            let key = match &alias {
-                Some((written, real)) => key
-                    .strip_prefix(written)
-                    .map_or_else(|_| key.clone(), |rest| real.join(rest)),
-                None => key,
-            };
-            map.insert(key, turn.clone());
-        }
+    let key = path_key(path);
+    match alias {
+        Some((written, real)) => key
+            .strip_prefix(written)
+            .map_or_else(|_| key.clone(), |rest| real.join(rest)),
+        None => key,
     }
-    map
 }
 
 /// `path` relative to `base` when inside it (with `/`), else the full path. Inside is decided on

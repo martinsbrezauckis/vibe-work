@@ -10,7 +10,7 @@ use crate::sessions::Actor;
 use vw_preview::{EngineError, MountId, PreviewError};
 
 /// Longest wait for a page that is between documents to answer a script.
-const PAGE_SWAP_WAIT: Duration = Duration::from_secs(8);
+pub(crate) const PAGE_SWAP_WAIT: Duration = Duration::from_secs(8);
 
 impl Browser {
     /// An agent retries only a pending name refusal, once, through the same policy and tab.
@@ -73,6 +73,21 @@ impl Browser {
             })
     }
 
+    /// Waits while the page loads, at most `PAGE_SWAP_WAIT`. A page that is loading again has no text yet (a news
+    /// front page that refreshes itself, or a tab released for memory and reloaded for a read); a load that never
+    /// ends is still read afterwards and says `loading`.
+    pub(crate) async fn wait_loaded(&self, session_id: &str) {
+        let start = tokio::time::Instant::now();
+        while start.elapsed() < PAGE_SWAP_WAIT
+            && self
+                .service
+                .load_state(session_id)
+                .is_some_and(|s| s.loading)
+        {
+            tokio::time::sleep(Duration::from_millis(60)).await;
+        }
+    }
+
     /// Evaluates and parses a script, remounting only when it has no observed-mount requirement.
     pub(crate) async fn run<T: serde::de::DeserializeOwned>(
         &self,
@@ -115,10 +130,25 @@ impl Browser {
         mount: Option<&MountId>,
         allowed: Option<Arc<dyn Fn() -> bool + Send + Sync>>,
     ) -> Result<T, String> {
+        self.run_act(session_id, script, mount, allowed, false)
+            .await
+    }
+
+    /// [`Self::run_admitted_in_mount`] for an act's own input (`input`): a frame-bound script runs as the person's
+    /// gesture, so a window the page opens from that click or key opens as it would for a person.
+    pub(crate) async fn run_act<T: serde::de::DeserializeOwned>(
+        &self,
+        session_id: &str,
+        script: String,
+        mount: Option<&MountId>,
+        allowed: Option<Arc<dyn Fn() -> bool + Send + Sync>>,
+        input: bool,
+    ) -> Result<T, String> {
         // A page between documents answers nothing ("the page changed while it was read"): WebKitGTK reports a load
         // that a newer navigation cancelled as finished with the NEW URL, so a
         // receipt can start while the page is still on its way. Such an answer is retried until the page is there,
         // at most `PAGE_SWAP_WAIT`; any other unreadable answer once more.
+        let mount = mount.or(self.read_mount.as_ref());
         let start = tokio::time::Instant::now();
         let mut last = String::new();
         for attempt in 0.. {
@@ -136,13 +166,26 @@ impl Browser {
             if allowed.is_some() && admitted_mount.is_none() {
                 return Err(PAGE_CLOSED.to_owned());
             }
-            let result = match admitted_mount.as_ref() {
-                Some(id) => {
-                    self.service
-                        .evaluate_on_mount_checked(id, script.clone(), allowed.clone())
-                        .await
+            let result = if let Some(frame) = self.frame_for_script(session_id, &script) {
+                let id = admitted_mount
+                    .as_ref()
+                    .or(mount)
+                    .cloned()
+                    .or_else(|| self.service.page_mount(session_id))
+                    .ok_or(PAGE_CLOSED)?;
+                let raw = self
+                    .run_frame_as(session_id, &id, &frame, &script, allowed.clone(), input)
+                    .await?;
+                Ok(raw)
+            } else {
+                match admitted_mount.as_ref() {
+                    Some(id) => {
+                        self.service
+                            .evaluate_on_mount_checked(id, script.clone(), allowed.clone())
+                            .await
+                    }
+                    None => self.service.evaluate(session_id, script.clone()).await,
                 }
-                None => self.service.evaluate(session_id, script.clone()).await,
             };
             let raw = result.map_err(|error| {
                 if let Some((url, reason)) = self.navigation_refusal(session_id, None) {

@@ -508,7 +508,7 @@ impl Core {
         self.shared.install_offers.take(
             offer,
             &crate::install_offers::OfferKey::new("vw/marketplace/install", id, ""),
-            self.shared.asks.now_ms(),
+            self.shared.asks.now_ms().into(),
         )?;
         Ok(origin == Origin::Ui)
     }
@@ -542,7 +542,7 @@ impl Core {
         self.shared.install_offers.make(
             crate::install_offers::OfferKey::new("vw/marketplace/install", id, ""),
             offer,
-            self.shared.asks.now_ms(),
+            self.shared.asks.now_ms().into(),
         )
     }
 

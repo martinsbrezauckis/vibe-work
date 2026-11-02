@@ -293,11 +293,17 @@ impl PreviewService {
                 "the page gave no address with its answer: call browser_read again".to_owned(),
             );
         }
-        if url == "about:blank" {
+        // Documents the page made itself: read under the page's own rule (the frame reader checks the parent first).
+        if matches!(url, "about:blank" | "about:srcdoc") || url.starts_with("data:") {
             return Ok(());
         }
-        let parsed = url::Url::parse(url)
+        let mut parsed = url::Url::parse(url)
             .map_err(|_| "the page reported an unreadable address".to_owned())?;
+        // A `blob:` document belongs to the origin that made it: that origin's rule applies.
+        if parsed.scheme() == "blob" {
+            parsed = url::Url::parse(&format!("{}/", parsed.origin().ascii_serialization()))
+                .map_err(|_| "the page reported an unreadable address".to_owned())?;
+        }
         if self.inner.policy.is_canary(&parsed) {
             return Err("the page is still loading: call browser_read again".to_owned());
         }

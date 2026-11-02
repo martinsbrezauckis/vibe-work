@@ -1,0 +1,234 @@
+//! Synthetic vault locations for the shared read policy and both byte loaders. No real profile is inspected.
+use super::*;
+
+#[test]
+fn an_expired_identity_deadline_refuses_hard_links_but_allows_single_links() {
+    let (root, policy, _) = fixture("deadline");
+    let ordinary = root.join("ordinary.txt");
+    std::fs::write(&ordinary, "ordinary").unwrap();
+    let deadline = Some(Instant::now());
+    policy
+        .check_opened(&File::open(&ordinary).unwrap(), &ordinary, deadline)
+        .unwrap();
+    let alias = root.join("alias.txt");
+    std::fs::hard_link(&ordinary, &alias).unwrap();
+    assert_eq!(
+        policy.check_opened(&File::open(&alias).unwrap(), &alias, deadline),
+        Err(PROTECTED.into()),
+        "an expired budget cleared a multiply linked identity"
+    );
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn a_large_protected_tree_refuses_uncleared_hard_links_but_allows_single_links() {
+    let (root, policy, _) = fixture("bounded");
+    large_protected_tree(&root);
+    let ordinary = root.join("ordinary.txt");
+    std::fs::write(&ordinary, "ordinary").unwrap();
+    policy
+        .check_opened(&File::open(&ordinary).unwrap(), &ordinary, None)
+        .unwrap();
+    let alias = root.join("alias.txt");
+    std::fs::hard_link(&ordinary, &alias).unwrap();
+    assert_eq!(
+        policy.check_opened(&File::open(&alias).unwrap(), &alias, None),
+        Err(PROTECTED.into()),
+        "unbounded walk cleared a hard link beyond the entry cap"
+    );
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+pub(crate) fn large_protected_tree(root: &Path) {
+    let cache = root.join("app-data/cache");
+    std::fs::create_dir_all(&cache).unwrap();
+    // Empty directories count as work too, even though none supplies a file identity.
+    for index in 0..4096 {
+        std::fs::create_dir(cache.join(index.to_string())).unwrap();
+    }
+}
+
+#[cfg(any(unix, windows))]
+#[test]
+fn protected_symlinks_do_not_own_outside_hard_links_but_direct_files_do() {
+    let (root, policy, _) = fixture("symlinks");
+    let outside = root.join("outside");
+    std::fs::create_dir(&outside).unwrap();
+    let original = outside.join("ordinary.txt");
+    let alias = root.join("alias.txt");
+    std::fs::write(&original, "ordinary").unwrap();
+    std::fs::hard_link(&original, &alias).unwrap();
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(&original, root.join("app-data/linked-file")).unwrap();
+        std::os::unix::fs::symlink(&outside, root.join("app-data/linked-directory")).unwrap();
+    }
+    #[cfg(windows)]
+    {
+        std::os::windows::fs::symlink_file(&original, root.join("app-data/linked-file")).unwrap();
+        std::os::windows::fs::symlink_dir(&outside, root.join("app-data/linked-directory"))
+            .unwrap();
+    }
+    policy
+        .check_opened(&File::open(&alias).unwrap(), &alias, None)
+        .expect("a protected symlink made an outside file protected");
+    std::fs::hard_link(&original, root.join("app-data/direct.txt")).unwrap();
+    assert_eq!(
+        policy.check_opened(&File::open(&alias).unwrap(), &alias, None),
+        Err(PROTECTED.into())
+    );
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn hard_links_to_every_protected_location_are_refused_but_ordinary_links_are_allowed() {
+    let (root, policy, paths) = fixture("hard-links");
+    for (i, path) in paths.iter().enumerate() {
+        let alias = root.join(format!("notes-{i}.json"));
+        std::fs::hard_link(path, &alias).unwrap();
+        let error = policy
+            .check_opened(&File::open(&alias).unwrap(), &alias, None)
+            .expect_err("hard-linked protected file was allowed");
+        assert!(
+            error.contains("vault or app state") && error.contains("Choose a file"),
+            "{error}"
+        );
+    }
+    let original = root.join("ordinary.json");
+    let alias = root.join("copy.json");
+    std::fs::write(&original, "ordinary").unwrap();
+    policy
+        .check_opened(&File::open(&original).unwrap(), &original, None)
+        .unwrap();
+    std::fs::hard_link(&original, &alias).unwrap();
+    policy
+        .check_opened(&File::open(&alias).unwrap(), &alias, None)
+        .unwrap();
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn an_unavailable_protected_identity_refuses_hard_links_but_does_not_scan_single_links() {
+    let (root, policy, paths) = fixture("unavailable");
+    let ordinary = root.join("ordinary.txt");
+    std::fs::write(&ordinary, "ordinary").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&paths[0], std::fs::Permissions::from_mode(0o000)).unwrap();
+    }
+    #[cfg(windows)]
+    let locked = {
+        use std::os::windows::fs::OpenOptionsExt;
+        std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(0)
+            .open(&paths[0])
+            .unwrap()
+    };
+    policy
+        .check_opened(&File::open(&ordinary).unwrap(), &ordinary, None)
+        .unwrap();
+    let alias = root.join("alias.txt");
+    std::fs::hard_link(&ordinary, &alias).unwrap();
+    let error = policy
+        .check_opened(&File::open(&alias).unwrap(), &alias, None)
+        .unwrap_err();
+    assert!(
+        error.contains("vault or app state") && error.contains("Choose a file"),
+        "{error}"
+    );
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&paths[0], std::fs::Permissions::from_mode(0o600)).unwrap();
+    }
+    #[cfg(windows)]
+    drop(locked);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+pub(crate) fn fixture(name: &str) -> (PathBuf, ReadExclusions, Vec<PathBuf>) {
+    let root = std::env::temp_dir().join(format!("read-policy-{}-{name}", std::process::id()));
+    std::fs::create_dir_all(&root).unwrap();
+    let root = vw_platform::canonical_plain(&root).unwrap();
+    let data = root.join("app-data");
+    let home = data.join("vibe");
+    let selected = root.join("selected");
+    let input = vw_vault::location::ProfileInput {
+        platform: vw_vault::location::Platform::Linux,
+        home: Some(root.clone()),
+        xdg_config_home: Some(root.join("config")),
+        appdata: None,
+        override_dir: None,
+    };
+    let shared = vw_vault::location::resolve(&input).unwrap();
+    let paths: Vec<_> = [
+        vw_vault::private_location::private_vault_dir(&data).unwrap(),
+        selected.clone(),
+        shared.canonical,
+        shared.legacy,
+        data.join("vault"),
+        data.join("state"),
+    ]
+    .into_iter()
+    .map(|dir| {
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("profile.json");
+        std::fs::write(&path, br#"{"token":"synthetic-profile"}"#).unwrap();
+        path
+    })
+    .collect();
+    let policy = ReadExclusions::new(&home, &root, Some(selected), &input).unwrap();
+    (root, policy, paths)
+}
+
+#[test]
+fn every_vault_location_and_app_state_are_excluded() {
+    let (root, policy, paths) = fixture("paths");
+    for path in paths {
+        assert!(policy.excludes(&path), "{}", path.display());
+        let error = policy
+            .check_opened(&File::open(&path).unwrap(), &path, None)
+            .unwrap_err();
+        assert!(error.contains("vault or app state") && error.contains("Choose a file"));
+    }
+    assert!(!policy.excludes(&root.join("ordinary.json")));
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn the_opened_identity_is_checked_even_when_the_original_name_was_allowed() {
+    let (root, policy, paths) = fixture("opened");
+    let named = root.join("ordinary.json");
+    std::fs::write(&named, "{}").unwrap();
+    let opened = File::open(&paths[0]).unwrap();
+    let error = policy.check_opened(&opened, &named, None).unwrap_err();
+    assert!(error.contains("vault or app state"), "{error}");
+    let original = File::open(&named).unwrap();
+    std::fs::rename(&named, root.join("old.json")).unwrap();
+    std::fs::write(&named, "replacement").unwrap();
+    assert!(policy.check_opened(&original, &named, None).is_err());
+    drop(original);
+    drop(opened);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn only_the_own_copy_is_exempt_and_a_vault_inside_it_is_still_excluded() {
+    let (root, _, _) = fixture("copy");
+    let home = root.join("app-data/vibe");
+    let own = home.join("worktrees/repo/own");
+    let vault = own.join("vault");
+    let policy = ReadExclusions::new(
+        &home,
+        &own,
+        Some(vault.clone()),
+        &vw_vault::location::ProfileInput::from_env(),
+    )
+    .unwrap();
+    assert!(!policy.excludes(&own.join("src/a")));
+    assert!(policy.excludes(&vault.join("profile.json")));
+    assert!(policy.excludes(&own.with_file_name("other").join("src/a")));
+    std::fs::remove_dir_all(root).unwrap();
+}

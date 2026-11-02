@@ -32,6 +32,7 @@ export function createShell(options: { persist?: boolean; theme?: r.Theme } = {}
       stored.showUsage,
       stored.showThinkingExpanded,
     ),
+    themePreference: options.theme ?? stored.theme ?? "system",
     openFilesIn: stored.openFilesIn,
     markVibeLines: stored.markVibeLines,
     saveBeforeSend: stored.saveBeforeSend,
@@ -44,6 +45,7 @@ export function createShell(options: { persist?: boolean; theme?: r.Theme } = {}
       if (
         now.openFilesIn !== last.openFilesIn ||
         now.theme !== last.theme ||
+        now.themePreference !== last.themePreference ||
         now.widths !== last.widths ||
         now.showUsage !== last.showUsage ||
         now.showThinkingExpanded !== last.showThinkingExpanded ||
@@ -81,6 +83,14 @@ export function createShell(options: { persist?: boolean; theme?: r.Theme } = {}
       handOverNewChat: act(r.handOverNewChat),
       toggleMaximized: act(r.toggleMaximized),
       setTheme: act(r.setTheme),
+      setThemePreference: act((s, themePreference: r.Theme | "system") => ({
+        ...s,
+        themePreference,
+        theme: startingTheme(themePreference === "system" ? null : themePreference),
+      })),
+      followSystemTheme: act((s, theme: r.Theme) =>
+        s.themePreference === "system" && s.theme !== theme ? { ...s, theme } : s,
+      ),
       toggleTheme: act((s: r.ShellState) => r.setTheme(s, s.theme === "dark" ? "light" : "dark")),
       setFilter: act(r.setFilter),
       setShowUsage: act(r.setShowUsage),

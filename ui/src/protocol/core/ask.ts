@@ -97,7 +97,7 @@ reason: string, } | { "type": "never" };
 
 export type Choice = "once" | "session" | "no";
 
-export type AnsweredBy = "person" | "debugApi" | "core" | "vibe" | "grant";
+export type AnsweredBy = "person" | "voice" | "debugApi" | "core" | "vibe" | "grant";
 
 export type Scope = "once" | "session" | "level";
 

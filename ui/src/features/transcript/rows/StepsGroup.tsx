@@ -32,6 +32,7 @@ import {
   str,
 } from "../model/entries";
 import { StepItem } from "./StepItem";
+import { ConnectorSuggestion } from "../../connectors/ConnectorSuggestion";
 
 type StepsRow = Extract<Row, { kind: "steps" }>;
 
@@ -94,18 +95,26 @@ const Narration = memo(function Narration({ entry }: { entry: Obj }): ReactEleme
  * A resolved callback's audit row: the core's record when it is still held (this run, newest 500), else
  * the words Vibe's own entry allows (an older session).
  */
-function Audit({ entry, related }: { entry: Obj; related: Obj | null }): ReactElement {
+function Audit({ entry, related }: { entry: Obj; related: Obj | null }): ReactElement | null {
   const callbackId = str(entry["callbackId"]) ?? "";
   const via = useTranscriptUi((s) => s.answered[callbackId]);
   const always = useTranscriptUi((s) => s.always[callbackId]);
   const origin = useCoreState((s) => s.answeredBy[callbackId]);
   const record = useCoreState((s) => s.askRecords[`callback:${callbackId}`]);
+  const open = useCoreState((s) => s.asks[`callback:${callbackId}`] !== undefined);
+  const sending = useTranscriptUi((s) => s.sending[callbackId] === true);
+  // Vibe can publish the answered entry before acknowledging the command. Until the receipt arrives,
+  // neither this window's attempt nor the absence of an origin proves who answered.
+  if (sending || (open && record === undefined && via === undefined && origin === undefined))
+    return null;
   const summary = approvalSummary(entry);
   const question = obj(entry["detail"])?.["kind"] === "user_input";
   // Question answers come from Vibe’s entry.
   const fromRecord =
     record === undefined || question ? null : auditLine(record, summary, via, always);
-  const text = auditText(entry, related, via, origin);
+  const by = record !== undefined && "by" in record.outcome ? record.outcome.by : undefined;
+  const receiptOrigin = by === "debugApi" ? "debug-api" : by === "person" ? "ui" : undefined;
+  const text = auditText(entry, related, via, receiptOrigin ?? origin);
   const line = fromRecord ?? {
     square: /^(Said No|Closed|No answer|Stopped|Question skipped)/.test(text) ? "warn" : "ok",
     text,
@@ -216,6 +225,11 @@ export function StepsGroup({ row }: { row: StepsRow }): ReactElement {
           ))}
         </div>
       ) : null}
+      {row.items
+        .filter((item) => item.kind === "effect")
+        .map((item) => (
+          <ConnectorSuggestion key={entryId(item.entry)} entry={item.entry} />
+        ))}
     </div>
   );
 }

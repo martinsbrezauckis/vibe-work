@@ -1,0 +1,116 @@
+/* Accessibility display overrides from the shell store; system preferences remain the default. */
+.app {
+  height: var(--window-height, 100vh);
+  container-type: inline-size;
+  container-name: window;
+}
+/* Decorative separators stay quiet; these edges identify editable fields and outlined controls. */
+input:not([type="range"]),
+textarea,
+select,
+.ui-selector-trigger,
+.tb-btn[data-shape="outlined"],
+.switch {
+  border-color: var(--control-line);
+}
+.switch {
+  box-shadow: 0 0 0 1px var(--control-line);
+}
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+:root[data-contrast="more"] :focus-visible {
+  outline-width: 3px;
+}
+:root[data-motion="reduce"] *,
+:root[data-motion="reduce"] *::before,
+:root[data-motion="reduce"] *::after,
+:root[data-motion="reduce"]::view-transition-group(*),
+:root[data-motion="reduce"]::view-transition-old(*),
+:root[data-motion="reduce"]::view-transition-new(*) {
+  animation: none !important;
+  transition: none !important;
+  scroll-behavior: auto !important;
+}
+
+/* Windows contrast themes supply their own colours. Outlines survive the removal of box shadows. */
+@media (forced-colors: active) {
+  :focus-visible {
+    outline: 3px solid Highlight !important;
+    outline-offset: 3px;
+  }
+  .composer-input:focus-visible {
+    outline: none !important;
+  }
+  .composer:has(.composer-input:focus-visible) {
+    outline: 3px solid Highlight;
+    outline-offset: 3px;
+  }
+  button,
+  input,
+  textarea,
+  select,
+  .ask-card,
+  .card,
+  .px {
+    border: 1px solid;
+    border-color: ButtonText;
+  }
+  select,
+  input[type="checkbox"] {
+    appearance: auto;
+    background-image: none;
+  }
+  input[type="checkbox"]::before {
+    content: none;
+  }
+  [aria-selected="true"],
+  [aria-pressed="true"],
+  [aria-checked="true"],
+  [aria-current="page"],
+  [aria-current="true"] {
+    outline: 2px solid Highlight;
+    outline-offset: -2px;
+  }
+  /* Icons stroke with a theme colour a contrast theme does not map; draw them in the system text colour. */
+  svg.i {
+    stroke: CanvasText;
+  }
+  /* The track is a background and a shadow, both dropped here: draw it as an edge and fill it when on, so the
+     state reads from the shape. The 1px edge moves the knob in by 1px to keep it centred. */
+  .switch {
+    forced-color-adjust: none;
+    background: Canvas;
+    border: 1px solid ButtonText;
+  }
+  .switch::after {
+    background: ButtonText;
+    top: 2px;
+    left: 2px;
+  }
+  .switch[aria-checked="true"] {
+    background: Highlight;
+    border-color: Highlight;
+  }
+  .switch[aria-checked="true"]::after {
+    background: HighlightText;
+    left: 16px;
+  }
+  .switch:disabled {
+    border-color: GrayText;
+  }
+  .switch:disabled::after {
+    background: GrayText;
+  }
+  .switch[aria-checked="true"]:disabled {
+    background: GrayText;
+  }
+  .switch[aria-checked="true"]:disabled::after {
+    background: Canvas;
+  }
+  a {
+    color: LinkText;
+    text-decoration: underline;
+  }
+}

@@ -168,7 +168,7 @@ export function registerGitBrowser(app: App): () => void {
   let watched: string | null = null;
   let version = 0;
   let eventTimer: ReturnType<typeof setTimeout> | null = null;
-  let lastRead = 0;
+  let lastRead = -Infinity;
   let inFlight: {
     projectId: string;
     op: "read" | "watch";
@@ -207,7 +207,7 @@ export function registerGitBrowser(app: App): () => void {
             error: toCallError(error).error.message,
           }));
       } finally {
-        lastRead = Date.now();
+        lastRead = performance.now();
         if (inFlight?.call === call) inFlight = null;
       }
     })();
@@ -240,7 +240,7 @@ export function registerGitBrowser(app: App): () => void {
     if (event.type !== "gitBrowserChanged" || event.projectId !== watched || eventTimer !== null)
       return;
     const projectId = event.projectId;
-    const delay = Math.max(400, lastRead + 1_000 - Date.now());
+    const delay = Math.max(400, lastRead + 1_000 - performance.now());
     eventTimer = setTimeout(() => {
       eventTimer = null;
       if (watched === projectId) void read(projectId, "read");

@@ -1,6 +1,7 @@
 /** Plain labels for Vibe's built-in actions; keeps custom tool identities and command contents intact.
  * Depends on no UI state. Called by permission, transcript and saved-rule wording.
  */
+import { term } from "../../../vocabulary";
 interface ToolWords {
   name: string;
   permission: string;
@@ -106,6 +107,9 @@ export function toolText(tool: string, text: string, literal: string | null = nu
 }
 
 const APP_ACTIONS: Readonly<Record<string, string>> = {
+  session_status: "Read this session's access mode",
+  connectors_list: "List available connectors",
+  connector_suggest: "Offer a connector",
   document_read: "Read an attached document",
   propose_protected_change: "Propose a change to Vibe's folder",
   protected_change_status: "Read the change outcome",
@@ -137,6 +141,6 @@ const APP_ACTIONS: Readonly<Record<string, string>> = {
   chrome_tool_list: "List Chrome actions",
   browser_capture: "Capture a browser page",
   chrome_status: "Read Chrome status",
-  chrome_session: "Use your Chrome",
-  chrome_execute: "Use your Chrome",
+  chrome_session: term("builtinSkills", "vw:chrome").name,
+  chrome_execute: term("builtinSkills", "vw:chrome").name,
 };

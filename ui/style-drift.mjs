@@ -13,6 +13,7 @@ import {
   bareControls,
   passiveClasses,
   nativeSelectors,
+  optionLists,
 } from "./style-exceptions.js";
 
 const uiRoot = dirname(fileURLToPath(import.meta.url));
@@ -136,7 +137,11 @@ function scanTsx(file, source, scopeName) {
       )
         report(node, "raw <select> needs the shared Selector component");
       const typeAttribute = node.attributes.properties.find((a) => a.name?.text === "type");
-      if (tag === "Segmented" || (tag === "input" && classValues(typeAttribute)?.includes("radio")))
+      const optionList = classValues(hook)?.every((id) => optionLists.get(scopeName)?.has(id));
+      if (
+        tag === "Segmented" ||
+        (tag === "input" && classValues(typeAttribute)?.includes("radio") && !optionList)
+      )
         report(node, "pick-one controls need the shared Selector component");
       if ((tag === "button" || tag === "a") && !bare && !exactExpression) {
         if (

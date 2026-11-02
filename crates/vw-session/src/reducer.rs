@@ -283,6 +283,8 @@ impl SessionEntry {
             .get_mut("session")
             .ok_or_else(|| missing("state.session"))?;
         session["tokenUsage"] = usage.clone();
+        // Prices and counters are observations missing from session/read. Keep the exact server snapshot.
+        session["stats"] = stats.clone();
         // Context fill: kept apart from `tokenUsage` and from Vibe's own `session.contextUsage`
         // (a token usage of the current context), which mirror Vibe's fields.
         let context_usage = match (
@@ -296,11 +298,17 @@ impl SessionEntry {
             }
             _ => None,
         };
-        Ok(vec![Change::TokenUsageSet {
-            session_id: sid,
-            token_usage: usage,
-            context_usage,
-        }])
+        Ok(vec![
+            Change::TokenUsageSet {
+                session_id: sid.clone(),
+                token_usage: usage,
+                context_usage,
+            },
+            Change::SessionPatched {
+                session_id: sid,
+                patch: vec![json!({"op":"add","path":"/stats","value":stats})],
+            },
+        ])
     }
 
     fn on_child(&mut self, p: &Value, sid: String) -> Handled {

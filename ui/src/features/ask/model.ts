@@ -210,6 +210,7 @@ export function whoAnswered(
   if (via === "uiControl") return "by the Debug API (UI control)";
   const outcome = record?.outcome;
   const by = outcome !== undefined && "by" in outcome ? outcome.by : undefined;
+  if (by === "voice") return "by voice";
   if (by === "debugApi") return "via the Debug API";
   if (via === "window" || by === "person") return "by you";
   return "answered outside this window";

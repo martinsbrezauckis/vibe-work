@@ -13,14 +13,17 @@ export async function openChromeTabs(app: App, sessionId: string, origin: Source
       origin === "window" ? { origin } : undefined,
     );
     if (app.composer.store.get().chromePicker !== pending) return;
-    if (result?.type !== "chromeTabs") throw new Error("Chrome tabs unavailable");
+    if (result?.type !== "chromeTabs")
+      throw new Error(
+        "Chrome did not answer. Check that Chrome is open and paired, then try again.",
+      );
     app.composer.setChromePicker({ ...pending, loading: false, rows: result.tabs });
   } catch {
     if (app.composer.store.get().chromePicker === pending)
       app.composer.setChromePicker({
         ...pending,
         loading: false,
-        error: "Chrome tabs unavailable",
+        error: "Chrome did not answer. Check that Chrome is open and paired, then try again.",
       });
   }
 }
@@ -41,7 +44,9 @@ export async function pickChromeTab(
     );
     if (app.composer.store.get().chromePicker !== pending) return;
     if (result?.type !== "chromeSelection" || result.selection === null)
-      throw new Error("Chrome tab unavailable");
+      throw new Error(
+        "Chrome did not answer. Check that Chrome is open and paired, then try again.",
+      );
     const picked = result.selection;
     const actions = origin === "window" ? app.composer.actions : app.composer.debugApi;
     actions?.insertContext(sessionId, {
@@ -53,6 +58,10 @@ export async function pickChromeTab(
     app.composer.setChromePicker(null);
   } catch {
     if (app.composer.store.get().chromePicker === pending)
-      app.composer.setChromePicker({ ...pending, loading: false, error: "Chrome tab unavailable" });
+      app.composer.setChromePicker({
+        ...pending,
+        loading: false,
+        error: "Chrome did not answer. Check that Chrome is open and paired, then try again.",
+      });
   }
 }

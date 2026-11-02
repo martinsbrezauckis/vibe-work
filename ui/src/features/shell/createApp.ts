@@ -7,6 +7,7 @@
  * mounting happen in `main.tsx` / `useShellWiring`); a missing client gives an app without a core
  * and without session actions, which renders the "no connection" state.
  */
+import { createAccessibility } from "../../state/accessibility";
 import { createNewChatDraft } from "../../state/newChatDraft";
 import { createChanges } from "../changes/store";
 import { createSecretScan } from "../../state/secretScan";
@@ -97,6 +98,7 @@ function pagesExclusive(
 /** Creates the app. */
 export function createApp(options: CreateAppOptions): App {
   const toasts = createToasts();
+  const accessibility = createAccessibility(options.persist ?? true);
   const uiControl = createUiControl();
   const shell = options.shell ?? createShell({ persist: options.persist ?? true });
   const core =
@@ -158,7 +160,12 @@ export function createApp(options: CreateAppOptions): App {
       void connectors?.actions.open();
     },
   });
-  const transcript = createTranscript({ core, toasts, persist: options.persist ?? true });
+  const transcript = createTranscript({
+    core,
+    toasts,
+    persist: options.persist ?? true,
+    servingAction: () => uiControl.servingAction(),
+  });
   // a prepared message ("Send failing checks to Vibe") becomes a context chip, never a send.
   const git =
     core === null
@@ -207,6 +214,7 @@ export function createApp(options: CreateAppOptions): App {
         });
   composer.setNewChatHandOver(newChat);
   return {
+    accessibility,
     core,
     secretScan: core === null ? null : createSecretScan(core, toasts),
     configNotices:
@@ -249,6 +257,7 @@ export function createApp(options: CreateAppOptions): App {
         ? null
         : createVoice({
             core,
+            accessibility,
             composer,
             shell,
             toasts,

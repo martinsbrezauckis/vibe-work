@@ -10,6 +10,7 @@
 import { type RefObject, useEffect } from "react";
 
 import { createStore, useStore } from "../../state/createStore";
+import type { VoicePromptState } from "../../state/voicePrompt";
 import { type CaretPlacement, DICTATION_IDLE, type DictationState } from "../../state/dictation";
 import { NARRATION_IDLE, type NarrationState } from "../../state/narration";
 import { VOICE_CHAT_OFF, type VoiceChatState } from "../../state/voiceChat";
@@ -29,6 +30,7 @@ const NO_DICTATION = createStore<DictationState>(DICTATION_IDLE);
 const NO_NARRATION = createStore<NarrationState>(NARRATION_IDLE);
 const NO_SETTINGS = createStore<VoiceSettings>(VOICE_DEFAULTS);
 const NO_PLACED = createStore<CaretPlacement>(null);
+const NO_PROMPT = createStore<VoicePromptState | null>(null);
 const NO_VOICE_CHAT = createStore<VoiceChatState>(VOICE_CHAT_OFF);
 
 /** Selects from the dictation state (idle without voice). */
@@ -44,6 +46,11 @@ export function useNarration<S>(select: (s: NarrationState) => S): S {
 /** Selects from the voice chat state (off without voice). */
 export function useVoiceChat<S>(select: (s: VoiceChatState) => S): S {
   return useStore(useApp().voice?.voiceChat.store ?? NO_VOICE_CHAT, select);
+}
+
+/** The single card currently being read or answered by voice. */
+export function useVoicePrompt<S>(select: (s: VoicePromptState | null) => S): S {
+  return useStore(useApp().voice?.voiceChat.prompt.store ?? NO_PROMPT, select);
 }
 
 /** Selects from the voice settings (the defaults without voice). */
@@ -99,21 +106,21 @@ export function registerVoiceKeys(app: App): () => void {
       const phase = dictation.store.get().phase;
       const session = app.shell.store.get().selected;
       if ((phase === "idle" || phase === "error") && session !== null) {
-        down = { at: Date.now(), started: true };
+        down = { at: performance.now(), started: true };
         void dictation.start(session);
       } else if (phase === "transcribing") {
         // The previous text is still being made: this press is queued (a second one cancels it),.
-        down = { at: Date.now(), started: false };
+        down = { at: performance.now(), started: false };
         if (session !== null) dictation.queueStart(session);
       } else {
-        down = { at: Date.now(), started: false };
+        down = { at: performance.now(), started: false };
         if (phase === "recording" || phase === "starting") void dictation.stop();
       }
     },
   });
   const onKeyUp = (e: KeyboardEvent) => {
     if (e.code !== "Space" || down === null) return;
-    const held = Date.now() - down.at;
+    const held = performance.now() - down.at;
     const started = down.started;
     down = null;
     if (started && held >= HOLD_MS) void dictation.stop();

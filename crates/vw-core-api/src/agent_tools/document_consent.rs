@@ -1,4 +1,4 @@
-//! Project documents use the chat's access mode and the existing attachment save/read path.
+//! Project documents use the chat's access mode and read the original without saving a copy.
 //! Confined file handles keep reads in the chat's folders; Ask binds Allow to the bytes named on its card.
 use std::io::Read as _;
 use std::path::{Path, PathBuf};
@@ -7,9 +7,10 @@ use std::sync::Arc;
 use cap_std::fs::Dir;
 use serde_json::{Value, json};
 
+use crate::ask::tool_calls::receipts::Execution;
 use crate::core::Shared;
+use crate::read_exclusions::ReadExclusions;
 use crate::saved_documents::{self, Digest};
-use crate::{CommandResult, DocumentsRequest, DocumentsResult};
 
 struct File {
     path: PathBuf,
@@ -19,7 +20,7 @@ struct File {
     kind: vw_documents::DocKind,
 }
 
-fn read_file(folders: &[PathBuf], path: &str) -> Result<File, String> {
+fn read_file(folders: &[PathBuf], path: &str, exclusions: &ReadExclusions) -> Result<File, String> {
     let first = folders.first().ok_or("This chat has no folders.")?;
     let path = Path::new(path);
     let joined = if path.is_absolute() {
@@ -48,7 +49,9 @@ fn read_file(folders: &[PathBuf], path: &str) -> Result<File, String> {
     // The handle enforces confinement if a parent changes after canonicalization.
     let mut file = dir
         .open(relative)
-        .map_err(|e| format!("Cannot read {}: {e}", path.display()))?;
+        .map_err(|e| format!("Cannot read {}: {e}", path.display()))?
+        .into_std();
+    exclusions.check_opened(&file, &path, None)?;
     let meta = file.metadata().map_err(|e| e.to_string())?;
     if !meta.is_file() {
         return Err(format!("{} is not a file.", path.display()));
@@ -105,28 +108,26 @@ pub(super) fn registered(shared: &Shared, session: &str, args: &Value) -> bool {
     })
 }
 
-pub(super) async fn attach(
+pub(super) async fn prepare(
     shared: &Arc<Shared>,
     session: &str,
     source: &str,
     call: &str,
-    args: &mut Value,
-) -> Result<(), String> {
+    args: &Value,
+) -> Result<Execution, String> {
     let path = args["path"]
         .as_str()
         .ok_or("path must name a document")?
         .to_owned();
     let folders = super::session::folders(shared, session)?;
-    let cwd = folders[0].clone();
-    let file = tokio::task::spawn_blocking(move || read_file(&folders, &path))
+    let exclusions = ReadExclusions::for_chat(shared, &folders[0])?;
+    let file = tokio::task::spawn_blocking(move || read_file(&folders, &path, &exclusions))
         .await
         .map_err(|e| e.to_string())??;
-    if let Ok(chat) = shared.saved_documents.chat(session)
-        && let Some(saved) = chat.source(&file.path, file.digest)
-    {
-        args["path"] = json!(cwd.join(saved));
-        return Ok(());
-    }
+    let allowed = shared
+        .saved_documents
+        .chat(session)
+        .is_ok_and(|chat| chat.authorize(&file.path, file.digest).is_ok());
     let pages = vw_documents::page_count(file.kind, &file.data).map_or_else(String::new, |count| {
         if count == 1 {
             " (1 page)".to_owned()
@@ -146,47 +147,164 @@ pub(super) async fn attach(
             "display":{"summary":summary, "content":if ocr {
                 format!("{}\nIts pages go to Mistral OCR.", file.path.display())
             } else { file.path.display().to_string() }}}});
-    if !matches!(
-        shared.access.remembered(session).as_deref(),
-        Some("auto-approve" | "accept-edits")
-    ) {
+    if !allowed
+        && !matches!(
+            shared.access.remembered(session).as_deref(),
+            Some("auto-approve" | "accept-edits")
+        )
+    {
         crate::ask::tool_calls::approve(shared, session, source, call, detail).await?;
     }
-    // Use the same store validation, saving, grant and extraction as an attachment.
-    let info = shared
-        .documents
-        .add_bytes(&file.name, file.data)
-        .map_err(|e| e.to_string())?;
-    let saved = crate::documents::execute(
-        shared,
-        DocumentsRequest::Save {
-            id: info.id.clone(),
-            session_id: session.into(),
-        },
-    )
-    .await;
-    shared.documents.remove(&info.id);
-    let CommandResult::Documents {
-        result: DocumentsResult::Saved { path },
-    } = saved.map_err(|e| e.message)?
-    else {
-        return Err("The document could not be attached.".into());
-    };
-    let relative = Path::new(&path)
-        .strip_prefix(&cwd)
-        .map_err(|_| format!("Saved attachment {path} is outside this chat's folder."))?
-        .to_path_buf();
-    shared
-        .saved_documents
-        .chat(session)?
-        .link_source(file.path, relative, file.digest)?;
-    args["path"] = json!(path);
-    Ok(())
+    let chat =
+        shared
+            .saved_documents
+            .allow_source(shared, session, file.path.clone(), file.digest)?;
+    let shared = shared.clone();
+    let mut args = args.clone();
+    args["path"] = json!(file.path);
+    // The receipt holds the checked bytes privately until execution. No path is reopened after consent.
+    Ok(Box::pin(async move {
+        super::document_tools::read_bytes(
+            &shared,
+            chat,
+            file.path,
+            file.name,
+            file.data,
+            file.digest,
+            &args,
+        )
+        .await
+    }))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn document_refuses_an_uncleared_hard_link_in_a_large_protected_tree() {
+        let (root, policy, _) = crate::read_exclusions::tests::fixture("document-bounded");
+        crate::read_exclusions::tests::large_protected_tree(&root);
+        let original = root.join("ordinary.pdf");
+        let alias = root.join("alias.pdf");
+        std::fs::write(&original, b"%PDF-1.7\n").unwrap();
+        assert!(
+            super::read_file(
+                std::slice::from_ref(&root),
+                original.to_str().unwrap(),
+                &policy
+            )
+            .is_ok()
+        );
+        std::fs::hard_link(&original, &alias).unwrap();
+        let error = super::read_file(
+            std::slice::from_ref(&root),
+            alias.to_str().unwrap(),
+            &policy,
+        )
+        .err()
+        .expect("unbounded protected walk allowed the document");
+        assert!(
+            error.contains("vault or app state") && error.contains("Choose a file"),
+            "{error}"
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn document_refuses_a_vault_hard_link_in_a_full_access_chat() {
+        let f = crate::feature_test_core::Fixture::new().await;
+        f.load("chat", &f.root, &[], false);
+        f.core
+            .shared
+            .access
+            .observe_runtime("chat", &json!({"activeAgent":{"name":"auto-approve"}}));
+        let private =
+            vw_vault::private_location::private_vault_dir(&f.root.join("app-data")).unwrap();
+        std::fs::create_dir_all(&private).unwrap();
+        let profile = private.join("profile.json");
+        std::fs::write(&profile, br#"{"token":"synthetic-profile"}"#).unwrap();
+        let alias = f.root.join("notes.json");
+        std::fs::hard_link(profile, &alias).unwrap();
+        let error = prepare(
+            &f.core.shared,
+            "chat",
+            "test",
+            "read",
+            &json!({"path": alias}),
+        )
+        .await
+        .err()
+        .expect("hard-linked vault profile was read");
+        assert!(
+            error.contains("vault or app state") && error.contains("Choose a file"),
+            "{error}"
+        );
+        f.finish().await;
+    }
+
+    #[test]
+    fn document_refuses_every_known_vault_location() {
+        let (root, policy, paths) = crate::read_exclusions::tests::fixture("document");
+        for path in paths {
+            let error =
+                super::read_file(std::slice::from_ref(&root), path.to_str().unwrap(), &policy)
+                    .err()
+                    .unwrap();
+            assert!(
+                error.contains("vault or app state") && error.contains("Choose a file"),
+                "{error}"
+            );
+        }
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn document_refuses_vault_and_app_state_in_a_broad_chat() {
+        let f = crate::feature_test_core::Fixture::new().await;
+        f.load("broad", &f.root, &[], false);
+        f.core
+            .shared
+            .access
+            .observe_runtime("broad", &json!({"activeAgent":{"name":"auto-approve"}}));
+        let private =
+            vw_vault::private_location::private_vault_dir(&f.root.join("app-data")).unwrap();
+        for folder in [
+            private,
+            f.root.join("app-data/vault"),
+            f.root.join("app-data/state"),
+        ] {
+            std::fs::create_dir_all(&folder).unwrap();
+            let path = folder.join("profile.json");
+            std::fs::write(&path, br#"{"token":"synthetic-profile"}"#).unwrap();
+            let result = prepare(
+                &f.core.shared,
+                "broad",
+                "test",
+                "read",
+                &json!({"path":path}),
+            )
+            .await;
+            let error = result.err().unwrap();
+            assert!(
+                error.contains("vault or app state") && error.contains("Choose a file"),
+                "{error}"
+            );
+        }
+        f.finish().await;
+    }
+
+    fn read_file(folders: &[PathBuf], path: &str) -> Result<File, String> {
+        let root = folders.first().cloned().unwrap_or_else(std::env::temp_dir);
+        let exclusions = ReadExclusions::new(
+            &root.join("app/vibe"),
+            &root,
+            None,
+            &vw_vault::location::ProfileInput::from_env(),
+        )
+        .unwrap();
+        super::read_file(folders, path, &exclusions)
+    }
 
     #[test]
     fn document_refusals_describe_the_file_problem() {

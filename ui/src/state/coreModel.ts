@@ -3,7 +3,7 @@
  * reducer that folds `CoreEvent`s and command results into it (Rust owns the session,
  * the UI owns the screen, components read this model only).
  * Depends on: protocol/core types, sessionChanges, sessionSummary. Called by: coreStore.
- * Invariants: reducers are pure; a `snapshot` replaces an entry whole; a change for an unknown
+ * Invariants: reducers are pure; a `snapshot` replaces Vibe state, retaining local warning notices; a change for an unknown
  * session is ignored (and reported by `needsRefresh`); `lagged` keeps the model and waits for the
  * fresh snapshots that follow it by the subscription's rule.
  */
@@ -29,6 +29,7 @@ import { applyChange } from "./sessionChanges";
 import { type IndexState, initialIndex, mergeRows } from "./sessionIndex";
 import type { SessionEntry, StuckMap } from "./sessionSummary";
 import { retryOfState, withRetryNotice, withoutRetry } from "./turnRetry";
+import { keepRuntimeWarnings, withRuntimeWarning, withoutConfigWarnings } from "./runtimeWarnings";
 
 /** What the status bar and header say about the Vibe server. */
 type ServerView =
@@ -155,7 +156,7 @@ function entryFromSnapshot(
     id: snapshot.sessionId,
     session:
       typeof session === "object" && session !== null && !Array.isArray(session) ? session : {},
-    state: object,
+    state: keepRuntimeWarnings(object, previous),
     localOnly: snapshot.localOnly,
     ...(previous?.ownedByParent === undefined ? {} : { ownedByParent: previous.ownedByParent }),
     ...(accessMode === undefined ? {} : { accessMode }),
@@ -269,15 +270,19 @@ export function applyEvent(state: CoreState, event: CoreEvent): CoreState {
       const change = event.change;
       if (change.kind === "notice") {
         const target = change.sessionId === null ? undefined : state.sessions[change.sessionId];
-        return change.method === "turn/retrying" && target !== undefined
-          ? withSession(state, withRetryNotice(target, change.params))
-          : state;
+        if (target === undefined) return state;
+        if (change.method === "turn/retrying")
+          return withSession(state, withRetryNotice(target, change.params));
+        if (change.method !== "warning") return state;
+        const next = withRuntimeWarning(target, change.params);
+        return next === target ? state : withSession(state, next);
       }
       if (change.kind === "removed")
         return { ...state, sessions: without(state.sessions, change.sessionId) };
       const entry = state.sessions[change.sessionId];
       if (entry === undefined) return state;
       const applied = applyChange(entry, change);
+      if (change.kind === "runtimeUpdated") applied.entry = withoutConfigWarnings(applied.entry);
       // The turn moved on: its retry, if any, is over.
       const moved =
         change.kind === "entryUpserted" ||

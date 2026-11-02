@@ -640,10 +640,10 @@ impl Core {
             target,
             &canonical(folder).to_string_lossy(),
         );
-        let version = self
-            .shared
-            .install_offers
-            .take(offer, &key, self.shared.asks.now_ms())?;
+        let version =
+            self.shared
+                .install_offers
+                .take(offer, &key, self.shared.asks.now_ms().into())?;
         Ok((origin == Origin::Ui, version))
     }
 
@@ -707,7 +707,7 @@ impl Core {
         );
         self.shared
             .install_offers
-            .make(key, offer, self.shared.asks.now_ms())
+            .make(key, offer, self.shared.asks.now_ms().into())
     }
 }
 

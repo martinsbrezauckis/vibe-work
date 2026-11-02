@@ -1,7 +1,7 @@
 /** Browser connection labels and search entries. Used by Settings and its Debug API route. */
 import type { ChromeControlView } from "../../../protocol/core";
 import type { SettingEntry } from "../catalog";
-import { term } from "../../../vocabulary";
+import { term, TEXT } from "../../../vocabulary";
 export function chromeAvailable(view: ChromeControlView | null | undefined): boolean {
   return view != null && view.setup.state !== "absent";
 }
@@ -21,7 +21,7 @@ export function chromeUsable(view: ChromeControlView | null | undefined): boolea
 }
 export function setupLine(view: ChromeControlView | null): string {
   if (view === null) return "Reading…";
-  if (!view.setup.package) return "Setup unavailable";
+  if (!view.setup.package) return view.setup.pairing;
   if (view.setup.state === "notSetUp") return "Not set up";
   return view.setup.pairing;
 }
@@ -34,7 +34,7 @@ export function chromeCatalog(): SettingEntry[] {
     {
       id: "chrome-control",
       category: "browser",
-      label: "Your Chrome",
+      label: TEXT.chromeName,
       description: "",
       keywords: "chrome extension browser setup connection",
     },

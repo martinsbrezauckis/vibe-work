@@ -48,9 +48,12 @@ mod browser_delegation;
 mod browser_delegation_receipts;
 mod browser_fill;
 mod browser_guard;
+mod browser_popups;
 mod browser_secret;
+mod browser_shields;
 mod browser_tab_tools;
 mod browser_tabs;
+mod browser_upload;
 mod browser_view;
 mod changes;
 mod changes_children;
@@ -62,7 +65,9 @@ mod changes_slots;
 mod changes_view;
 mod channels;
 mod chrome_control;
+mod clock;
 mod command;
+mod read_exclusions;
 pub use chrome_control::{
     ChromeControlConfig, ChromeControlRequest, ChromeControlView, ChromeSelection, ChromeSetupView,
     ChromeTab, ChromeWorkView,
@@ -288,6 +293,7 @@ mod transport;
 mod vault_scope;
 mod vibe_install;
 mod view;
+mod voice_prompts;
 mod work;
 mod work_view;
 pub mod working_note;

@@ -35,6 +35,10 @@ pub struct NotifyRequest {
     pub title: String,
     /// Body text.
     pub body: String,
+    /// Show nothing when one of the app's own windows is in front: only the webview's lost focus called for this
+    /// notification (its session is the one open), and the app's confirmation window may be what has the focus.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub skip_when_app_in_front: bool,
 }
 
 /// Why a request was not shown.

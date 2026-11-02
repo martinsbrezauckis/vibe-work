@@ -5,6 +5,30 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 static NEXT: AtomicUsize = AtomicUsize::new(0);
+
+#[test]
+fn an_opened_check_crossing_the_deadline_cannot_return_a_last_name_hit() {
+    let t = Tree::new();
+    t.put("last.txt", "needle");
+    for cleared in [true, false] {
+        let answer = run(
+            &[Folder {
+                path: t.0.clone(),
+                session_id: None,
+            }],
+            &serde_json::from_value(json!({"glob":"*.txt"})).unwrap(),
+            &|_| true,
+            &|_, _| {
+                std::thread::sleep(Duration::from_millis(100));
+                cleared
+            },
+            Duration::from_millis(50),
+        )
+        .unwrap();
+        assert_eq!(answer, "Search limit reached.");
+    }
+}
+
 struct Tree(PathBuf);
 impl Tree {
     fn new() -> Self {
@@ -29,6 +53,7 @@ impl Tree {
             }],
             &serde_json::from_value(args).unwrap(),
             allowed,
+            &|_, _| true,
             Duration::from_secs(4),
         )
         .unwrap()
@@ -62,11 +87,21 @@ fn literal_regex_glob_and_relative_source_lines() {
             &[],
             &serde_json::from_value(json!({"query":"[", "regex":true})).unwrap(),
             &|_| true,
+            &|_, _| true,
             Duration::from_secs(1)
         )
         .is_err()
     );
-    assert!(run(&[], &Request::default(), &|_| true, Duration::from_secs(1)).is_err());
+    assert!(
+        run(
+            &[],
+            &Request::default(),
+            &|_| true,
+            &|_, _| true,
+            Duration::from_secs(1)
+        )
+        .is_err()
+    );
 }
 
 #[test]
@@ -116,6 +151,7 @@ fn denied_files_and_folders_never_return_names_or_content() {
             &[],
             &serde_json::from_value(json!({"glob":"**/*"})).unwrap(),
             &|_| true,
+            &|_, _| true,
             Duration::from_secs(1)
         )
         .unwrap(),
@@ -168,6 +204,7 @@ fn result_line_file_size_and_time_limits_are_observable() {
         &folders,
         &serde_json::from_value(json!({"query":"needle"})).unwrap(),
         &|_| true,
+        &|_, _| true,
         Duration::ZERO,
     )
     .unwrap();

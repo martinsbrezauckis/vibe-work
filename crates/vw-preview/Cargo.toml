@@ -39,3 +39,5 @@ moxcms = "0.9"
 # Address classes of literal hosts and the canary suffix.
 vw-netguard = { path = "../vw-netguard" }
 sysinfo = { version = "=0.38.4", default-features = false, features = ["system"] }
+# ABP parsing and ordered WebKit content-rule conversion; filter data is downloaded only for Strict.
+adblock = { version = "=0.13.5", default-features = false, features = ["content-blocking"] }

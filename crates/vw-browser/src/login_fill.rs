@@ -181,7 +181,12 @@ impl Browser {
                     ),
                 )
             })?;
-        let (origin, host) = self.same_document(session_id, &seen)?;
+        let (mut origin, mut host) = self.same_document(session_id, &seen)?;
+        // An inline or blank frame's own address is `about:`; its verified origin is the parent's (or none).
+        if let Some(frame) = &item.frame_id {
+            (origin, host) = origin_of(&frame.origin)
+                .ok_or_else(|| refusal("frameOrigin", "the frame has no verified web origin"))?;
+        }
         let role = match item.login.as_deref() {
             Some("password") => LoginRole::Password,
             Some("username") => LoginRole::Username,
@@ -195,7 +200,7 @@ impl Browser {
                 ));
             }
         };
-        if !secure(&seen.model.url) {
+        if !secure(&origin) {
             return Err(refusal(
                 "securePage",
                 "this page is not secure (http): a login is filled only on https pages (or on this computer)",
@@ -311,6 +316,10 @@ impl Browser {
         target: &FillTarget,
         value: Option<&str>,
     ) -> Result<(), FillRefusal> {
+        let seen = self
+            .current_seen(session_id)
+            .ok_or_else(|| refusal("currentObservation", "the observed page closed"))?;
+        self.same_document(session_id, &seen)?;
         let page = self
             .page(session_id)
             .await
@@ -330,11 +339,19 @@ impl Browser {
             // The request's copy of the value goes now; the script's copy when `script` drops.
             *v = json!("");
         }
-        let raw = self
-            .service
-            .evaluate(session_id, script.to_string())
-            .await
-            .map_err(|_| refusal("page", "the page did not answer the fill"))?;
+        let raw = if let Some(frame) = self.frame_for_script(session_id, &script) {
+            let seen = self
+                .current_seen(session_id)
+                .ok_or_else(|| refusal("currentObservation", "the frame's page closed"))?;
+            self.run_frame(session_id, &seen.mount, &frame, &script, None)
+                .await
+                .map_err(|e| refusal("currentObservation", e))?
+        } else {
+            self.service
+                .evaluate(session_id, script.to_string())
+                .await
+                .map_err(|_| refusal("page", "the page did not answer the fill"))?
+        };
         drop(script);
         let answer: Answer = parse_answer(&raw).map_err(|e| refusal("page", e))?;
         self.service

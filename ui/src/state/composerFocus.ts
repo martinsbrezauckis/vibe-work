@@ -20,7 +20,7 @@ const pending = new Map<string, number>();
 export function requestComposerFocus(key: string): void {
   const focus = focusers.get(key);
   if (focus === undefined) {
-    pending.set(key, Date.now());
+    pending.set(key, performance.now());
     return;
   }
   pending.delete(key);
@@ -32,7 +32,7 @@ export function registerComposerFocus(key: string, focus: () => void): () => voi
   focusers.set(key, focus);
   const asked = pending.get(key);
   pending.delete(key);
-  if (asked !== undefined && Date.now() - asked <= PENDING_MS) focus();
+  if (asked !== undefined && performance.now() - asked <= PENDING_MS) focus();
   return () => {
     if (focusers.get(key) === focus) focusers.delete(key);
   };

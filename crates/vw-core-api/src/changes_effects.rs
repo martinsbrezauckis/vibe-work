@@ -5,7 +5,7 @@
 use std::path::Path;
 
 use crate::changes::{Hub, Tracker};
-use crate::changes_facts::{Facts, shown};
+use crate::changes_facts::{Facts, mapped_path, shown};
 use crate::changes_view::{ChangesMode, ChangesSubagent, ChangesView, TurnChanges, TurnFile};
 
 fn turns_of(
@@ -13,6 +13,12 @@ fn turns_of(
     base: Option<&Path>,
     subagent: Option<&ChangesSubagent>,
 ) -> Vec<TurnChanges> {
+    let real_cwd = session
+        .cwd
+        .as_deref()
+        .and_then(|cwd| cwd.canonicalize().ok());
+    let real_base = base.and_then(|base| base.canonicalize().ok());
+    let base = real_base.as_deref().or(base);
     let mut turns: Vec<TurnChanges> = Vec::new();
     for touch in &session.touches {
         let Some(turn) = touch.turn_id.as_deref().and_then(|id| session.turn(id)) else {
@@ -35,7 +41,10 @@ fn turns_of(
             turns.len() - 1
         };
         let current = &mut turns[index];
-        let path = shown(&touch.path, base);
+        let path = shown(
+            &mapped_path(session, &touch.path, real_cwd.as_deref()),
+            base,
+        );
         match current.files.iter_mut().find(|file| file.path == path) {
             Some(file) => file.entry_ids.push(touch.entry_id.clone()),
             None => current.files.push(TurnFile {

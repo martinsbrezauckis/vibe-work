@@ -49,7 +49,7 @@ function show(region: Region): void {
 export function announce(text: string, options: { assertive?: boolean } = {}): void {
   const words = text.trim();
   if (words === "") return;
-  const now = Date.now();
+  const now = performance.now();
   const before = lastSaid.get(words);
   if (before !== undefined && now - before < REPEAT_MS) return;
   lastSaid.set(words, now);

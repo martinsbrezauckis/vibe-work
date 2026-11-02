@@ -22,6 +22,7 @@ function rowText(row: MentionRow): { id: string; name: string; muted: string } {
  * soon as they match; file rows follow the core's answer.
  */
 export function FileMentionMenu({
+  menuId,
   rows,
   index,
   query,
@@ -31,6 +32,7 @@ export function FileMentionMenu({
   onPick,
   onHover,
 }: {
+  menuId?: string;
   rows: readonly MentionRow[];
   index: number;
   query: string;
@@ -59,6 +61,7 @@ export function FileMentionMenu({
       data-testid="composer.file-mention-menu"
       className="slash"
       role="listbox"
+      id={menuId}
       aria-label={TEXT.mentionMenu}
     >
       {error !== null ? (
@@ -84,6 +87,7 @@ export function FileMentionMenu({
                 data-item-id={id}
                 className="it"
                 role="option"
+                id={menuId === undefined ? undefined : `${menuId}-option-${String(i)}`}
                 aria-selected={i === index}
                 aria-label={`${name} ${muted}`.trim()}
                 ref={i === index ? selected : undefined}

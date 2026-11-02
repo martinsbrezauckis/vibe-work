@@ -45,7 +45,14 @@ export function Rail() {
   // On the new-chat view New chat is the current item; on a session, Home is.
   const onNewChat = useShellState((s) => s.selected === null);
   return (
-    <nav className="rail" aria-label="Sections" data-toast-avoid="rail">
+    <nav
+      className="rail"
+      aria-label="Sections"
+      data-toast-avoid="rail"
+      data-focus-region="sections"
+      data-testid="shell.sections"
+      tabIndex={-1}
+    >
       {/* Home first: back to the work exactly as it was; the list column is its "chats". */}
       <button
         data-testid="shell.rail-away-from-home"

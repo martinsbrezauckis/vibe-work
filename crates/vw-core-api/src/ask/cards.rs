@@ -193,18 +193,35 @@ pub(crate) async fn answer(
     callback_id: String,
     output: Value,
 ) -> Result<crate::CommandResult, crate::CoreError> {
+    let by = if crate::command_origin::debug_api_acts(shared, origin) {
+        AnsweredBy::DebugApi
+    } else {
+        AnsweredBy::Person
+    };
+    answer_by(shared, origin, session_id, callback_id, output, by).await
+}
+
+pub(crate) async fn answer_by(
+    shared: &Arc<Shared>,
+    origin: crate::Origin,
+    session_id: String,
+    callback_id: String,
+    output: Value,
+    by: AnsweredBy,
+) -> Result<crate::CommandResult, crate::CoreError> {
     use crate::{CommandResult, CoreError, CoreEvent, ErrorCode};
     if super::tool_calls::local(&callback_id) {
-        return super::tool_calls::answer(shared, origin, &session_id, &callback_id, &output);
+        return super::tool_calls::answer_by(
+            shared,
+            origin,
+            &session_id,
+            &callback_id,
+            &output,
+            by,
+        );
     }
     let ask_id = format!("callback:{callback_id}");
     ensure_unanswered(shared, &callback_id)?;
-    // Attribute a card clicked while the Debug API drives the window to that client.
-    let by = if crate::command_origin::debug_api_acts(shared, origin) {
-        vw_ask::AnsweredBy::DebugApi
-    } else {
-        vw_ask::AnsweredBy::Person
-    };
     let (output, wants_session) = for_vibe(shared, &ask_id, output)?;
     // No channel step: a callback lives only on its session's open channel (a closed or
     // crashed channel ends it), so an answer for a session without one is refused by the
@@ -275,6 +292,12 @@ pub(crate) async fn answer(
         }
         shared.gate.callback_closed(&callback_id);
     })?;
+    // Publish attribution before the receipt can make an audit row visible.
+    shared.emit(CoreEvent::CallbackAnswered {
+        session_id,
+        callback_id,
+        origin,
+    });
     delivery.confirmed(outcome);
     // Vibe took the once-only approve: keep the session grant (nothing is kept when the send failed).
     if let Some(pending) = claimed
@@ -283,11 +306,6 @@ pub(crate) async fn answer(
         tracing::info!(session = %grant.session, tool = %grant.tool, grant = %grant.id, "session grant kept");
         shared.emit(super::grants::event(shared));
     }
-    shared.emit(CoreEvent::CallbackAnswered {
-        session_id,
-        callback_id,
-        origin,
-    });
     Ok(CommandResult::Reply {
         result,
         client_user_message_id: None,

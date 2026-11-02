@@ -5,6 +5,9 @@
  */
 
 /* Approval and question cards */
+.approval[hidden] {
+  display: none;
+}
 .approval {
   display: flex;
   flex-direction: column;
@@ -99,6 +102,10 @@
   border: 1px solid var(--line);
   border-radius: var(--radius-md);
 }
+/* Controls kept on screen while the payload scrolls (a protected change's "Show all N files"). */
+.approval .ask-foot {
+  padding: 6px 14px 0;
+}
 .choices {
   display: flex;
   flex-wrap: wrap;
@@ -148,14 +155,17 @@
 .q {
   border: 0;
   margin: 0;
-  padding: 12px 14px 4px;
-  display: grid;
+  padding: 10px 14px 4px;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
   gap: 6px;
 }
 .q legend {
   font-weight: var(--weight-semibold);
   padding: 0;
-  margin-bottom: 6px;
+  margin-bottom: 4px;
 }
 .q-tag {
   font-size: var(--text-11);
@@ -166,21 +176,91 @@
   padding: 0 6px;
   margin-right: 8px;
 }
+/* A question's answer options, all shown: a long list scrolls inside itself while the question above it and Other,
+   Submit and Skip below it stay on screen. It keeps about three rows before the card body itself scrolls. */
+.q-opts {
+  display: grid;
+  gap: 1px;
+  min-height: 84px;
+  margin: 0 -8px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.q-opts:has(> .q-opt:only-child),
+.q-opts:has(> .q-opt:nth-child(2):last-child) {
+  min-height: 0;
+}
 .q-opt {
   display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 2px 8px;
+  grid-template-columns: 14px minmax(0, 1fr) auto;
+  column-gap: 8px;
   align-items: baseline;
-  font-size: var(--text-13-5);
+  padding: 5px 8px;
+  border-radius: var(--radius-md);
+  font-size: var(--text-13);
+  line-height: var(--leading-ui);
   cursor: pointer;
 }
+.q-opt:hover {
+  background: var(--hover);
+}
+.q-opt[data-checked] {
+  background: color-mix(in srgb, var(--orange) 12%, transparent);
+}
+.q-opt input {
+  align-self: start;
+  margin-top: 3px;
+}
+.q-opt input[type="radio"] {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  border: 1px solid var(--control-line);
+  border-radius: var(--radius-round);
+  background: var(--bg);
+  display: inline-grid;
+  place-content: center;
+}
+.q-opt input[type="radio"]:checked {
+  border-color: var(--orange);
+}
+.q-opt input[type="radio"]:checked::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-round);
+  background: var(--orange);
+}
+.q-opt:has(input:disabled) {
+  cursor: default;
+  opacity: 0.6;
+}
+.q-label {
+  grid-column: 2;
+  min-width: 0;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+.q-key {
+  grid-column: 3;
+  grid-row: 1;
+}
+/* At most two lines; the whole text stays the option's accessible description. */
 .q-desc {
   grid-column: 2;
+  min-width: 0;
   font-size: var(--text-12);
   color: var(--text-3);
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  overflow-wrap: anywhere;
 }
 .q-other {
-  padding: 4px 0 0;
+  padding: 2px 0 0;
 }
 .q-footer {
   margin: 0;

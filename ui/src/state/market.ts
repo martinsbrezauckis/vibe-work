@@ -340,7 +340,7 @@ export function createMarket(deps: {
           return;
         }
         busy = true;
-        lastRead = Date.now();
+        lastRead = performance.now();
         try {
           await reload("ui");
         } finally {
@@ -354,7 +354,7 @@ export function createMarket(deps: {
       // Each read starts Vibe's plugin resolver (a Python process), so a working chat's stream of session
       // changes may trigger at most one read every few seconds; navigation and Vibe restarts stay prompt.
       const schedule = (delay = 300) => {
-        const deadline = Date.now() + delay;
+        const deadline = performance.now() + delay;
         if (queued !== null) {
           if (deadline >= queuedDeadline) return;
           clearTimeout(queued);
@@ -372,7 +372,7 @@ export function createMarket(deps: {
       const stopCore = core.listen((event) => {
         if (event.type === "server") schedule();
         else if (event.type === "change")
-          schedule(Math.max(300, CHANGE_READ_GAP_MS - (Date.now() - lastRead)));
+          schedule(Math.max(300, CHANGE_READ_GAP_MS - (performance.now() - lastRead)));
       });
       const interval = setInterval(() => void read(), 15_000);
       void read();

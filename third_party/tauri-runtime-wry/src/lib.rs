@@ -381,6 +381,8 @@ impl<T: UserEvent> Context<T> {
       Box::new(move |window, _options| {
         create_webview(
           WebviewKind::WindowChild,
+          #[cfg(target_os = "linux")]
+          false,
           window,
           window_id_wrapper_,
           webview_id,
@@ -2925,6 +2927,8 @@ impl<T: UserEvent> Runtime<T> for Wry<T> {
 
       let webview = create_webview(
         WebviewKind::WindowChild,
+        #[cfg(target_os = "linux")]
+        false,
         &window,
         window_id_wrapper.clone(),
         webview_id,
@@ -4604,6 +4608,8 @@ fn create_window<T: UserEvent, F: Fn(RawWindow) + Send + 'static>(
       WebviewKind::WindowChild,
       #[cfg(not(feature = "unstable"))]
       WebviewKind::WindowContent,
+      #[cfg(target_os = "linux")]
+      true,
       &window,
       Arc::new(Mutex::new(window_id)),
       webview_id,
@@ -4668,6 +4674,8 @@ struct WebviewBounds {
 
 fn create_webview<T: UserEvent>(
   kind: WebviewKind,
+  // With `unstable`, even the initial window content is a WindowChild. Only later children start hidden.
+  #[cfg(target_os = "linux")] initial: bool,
   window: &Window,
   window_id: Arc<Mutex<WindowId>>,
   id: WebviewId,
@@ -5183,6 +5191,11 @@ You may have it installed on another user account, but it is not available for t
     WebviewKind::WindowChild => {
       // only way to account for menu bar height, and also works for multiwebviews :)
       let vbox = window.default_vbox().unwrap();
+      // VIBE WORK PATCH: Linux children stay hidden until the preview engine has moved and
+      // allocated them in its overlay. Showing one in this expanding box first gives both
+      // it and the main view half the window, and paints about:blank before parking runs.
+      #[cfg(target_os = "linux")]
+      let webview_builder = webview_builder.with_visible(initial);
       webview_builder.build_gtk(vbox)
     }
     #[cfg(any(

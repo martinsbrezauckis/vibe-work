@@ -118,18 +118,21 @@ mod linux {
             .and_then(|seat| seat.pointer())
             .ok_or("native pointer device is unavailable")?;
         let (rx, ry) = (f64::from(root_x) + x, f64::from(root_y) + y);
-        move_pointer(&window, &device, x, y, rx, ry);
-        sent.store(true, Ordering::Release);
-        dispatch(&window, &device, gdk::EventType::ButtonPress, x, y, rx, ry);
-        dispatch(
-            &window,
-            &device,
-            gdk::EventType::ButtonRelease,
-            x,
-            y,
-            rx,
-            ry,
-        );
+        // Marked as our own so the person's pointer watch leaves it out.
+        super::person::own_input(|| {
+            move_pointer(&window, &device, x, y, rx, ry);
+            sent.store(true, Ordering::Release);
+            dispatch(&window, &device, gdk::EventType::ButtonPress, x, y, rx, ry);
+            dispatch(
+                &window,
+                &device,
+                gdk::EventType::ButtonRelease,
+                x,
+                y,
+                rx,
+                ry,
+            );
+        });
         Ok(())
     }
 
@@ -230,6 +233,9 @@ mod linux {
     }
 }
 
+/// The person's own pointer activity on a preview webview (see `person`).
+pub mod person;
+
 #[cfg(target_os = "linux")]
 pub use linux::click as linux_click;
 #[cfg(target_os = "linux")]
@@ -244,6 +250,8 @@ pub use windows_click::click_checked as windows_click_checked;
 
 #[cfg(target_os = "macos")]
 mod macos;
+#[cfg(target_os = "macos")]
+pub use macos::after as macos_after;
 #[cfg(target_os = "macos")]
 pub use macos::click as macos_click;
 #[cfg(target_os = "macos")]

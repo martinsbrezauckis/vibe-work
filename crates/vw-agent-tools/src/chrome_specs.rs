@@ -4,7 +4,8 @@
 use serde_json::{Value, json};
 
 pub(crate) fn tool_list() -> Vec<Value> {
-    let mut tools = vec![
+    // Native discovery cannot render a root oneOf; the gateway validates action/args versus steps.
+    vec![
         json!({
             "name": "chrome_status",
             "description": "Connected Chrome profiles, chat sessions and action IDs. An action argument returns its input schema.",
@@ -93,9 +94,7 @@ pub(crate) fn tool_list() -> Vec<Value> {
                 "steps": {"type":"array","minItems":1,"maxItems":16,"items":schema(&json!({"action":{"type":"string"},"args":{"type":"object"}}), &["action","args"])},
             }), &["sessionId"]),
         }),
-    ];
-    tools[2]["inputSchema"]["oneOf"] = json!([{"required":["action","args"],"not":{"required":["steps"]}},{"required":["steps"],"not":{"anyOf":[{"required":["action"]},{"required":["args"]}]}}]);
-    tools
+    ]
 }
 
 fn schema(properties: &Value, required: &[&str]) -> Value {

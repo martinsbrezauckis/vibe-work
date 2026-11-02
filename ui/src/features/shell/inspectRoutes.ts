@@ -262,15 +262,22 @@ export function registerInspectRoutes(app: App): () => void {
         } catch {
           throw new UiControlError("invalidParams", "that is not a valid CSS selector");
         }
-        return el === null || !elementVisible(el) ? null : el.getBoundingClientRect();
+        if (el === null || !elementVisible(el)) return null;
+        return {
+          rect: el.getBoundingClientRect(),
+          scrollTop: el.scrollTop,
+          scrollHeight: el.scrollHeight,
+        };
       });
       if (found === null) return { found: false, ...base };
       return {
         found: true,
-        x: found.left,
-        y: found.top,
-        width: found.width,
-        height: found.height,
+        x: found.rect.left,
+        y: found.rect.top,
+        width: found.rect.width,
+        height: found.rect.height,
+        scrollTop: found.scrollTop,
+        scrollHeight: found.scrollHeight,
         ...base,
       };
     }),

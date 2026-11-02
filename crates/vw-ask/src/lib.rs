@@ -4,6 +4,7 @@ pub mod chrome;
 mod grant;
 mod policy;
 mod text;
+pub mod voice;
 pub use grant::{CoversPart, GrantOffer, GrantPermission, SessionGrant};
 pub use policy::{Policy, always_settings, policies, policy};
 pub use text::{DECLINED, agent_text, is_hidden_char, plain_note};
@@ -15,6 +16,8 @@ pub use text::{DECLINED, agent_text, is_hidden_char, plain_note};
 pub enum AnsweredBy {
     /// Person using the native dialog or window.
     Person,
+    /// The person answered a fresh prompt challenge in their own voice chat.
+    Voice,
     /// Debug API acting as the user outside the vault.
     DebugApi,
     /// Core finishing an earlier user choice, or refusing a yes on its own (a removed connector's tool).
@@ -118,7 +121,7 @@ pub enum Requester {
 impl From<AnsweredBy> for Requester {
     fn from(by: AnsweredBy) -> Self {
         match by {
-            AnsweredBy::Person => Self::Window,
+            AnsweredBy::Person | AnsweredBy::Voice => Self::Window,
             AnsweredBy::DebugApi => Self::DebugApi,
             AnsweredBy::Core | AnsweredBy::Vibe | AnsweredBy::Grant => Self::Core,
         }

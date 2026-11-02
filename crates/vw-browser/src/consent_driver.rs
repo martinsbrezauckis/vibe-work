@@ -101,7 +101,9 @@ impl Browser {
             .reading_allowed(session_id, &page, &probe.url)
             .map_err(refused)?;
         if probe.stale {
-            return Err(refused("the authorization page changed: read it again"));
+            return Err(refused(
+                "the authorization page changed since it was read, so nothing was done on it; read it again",
+            ));
         }
         let page_info = ConsentPage {
             url: probe.url.clone(),
@@ -109,7 +111,10 @@ impl Browser {
             client: probe.client.clone(),
             scopes: probe.scopes.clone(),
             account_chooser: probe.account_chooser
-                && matches!(action, Action::Click { .. } | Action::Press { .. }),
+                && matches!(
+                    action,
+                    Action::Click { .. } | Action::ClickAt { .. } | Action::Press { .. }
+                ),
         };
         #[allow(unused_mut)]
         let mut decision = consent::classify(&page_info);

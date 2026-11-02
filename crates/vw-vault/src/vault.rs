@@ -76,6 +76,8 @@ pub enum VaultStatus {
     },
     /// Multiple local vaults exist without a selection: `unlock` needs an exact choice.
     TwoVaults,
+    /// The saved selection is retained, but its folder is not currently present.
+    SelectedVaultMissing,
     /// A server vault (not supported in v0.1).
     RemoteNotSupported,
     /// Only ShellX's old profile folder exists.
@@ -288,6 +290,9 @@ impl Vault {
             });
         }
         if let Some(managed) = &self.managed {
+            if managed.selected_missing(&self.config.location)? {
+                return Ok(VaultStatus::SelectedVaultMissing);
+            }
             let available = managed.available(&self.config.location)?;
             let selected = managed.selected(&self.config.location)?;
             if let Some(kind) = selected {
@@ -333,7 +338,7 @@ impl Vault {
     /// [`VaultError::SelectionMismatch`] when already selected, or profile I/O errors.
     pub fn create(&self, passphrase: &SecretString, remember: bool) -> Result<(), VaultError> {
         if let Some(managed) = &self.managed {
-            if managed.selected(&self.config.location)?.is_some() {
+            if managed.present_selection(&self.config.location)?.is_some() {
                 return Err(VaultError::SelectionMismatch);
             }
             if managed
@@ -348,7 +353,7 @@ impl Vault {
                 return Err(VaultError::AlreadyExists);
             };
             self.create_at(private, VaultKind::VibeWork, passphrase, remember)?;
-            if let Err(error) = managed.save(&self.config.location, VaultKind::VibeWork) {
+            if let Err(error) = managed.save_choice(&self.config.location, VaultKind::VibeWork) {
                 self.lock();
                 return Err(error);
             }
@@ -457,7 +462,17 @@ impl Vault {
 
     fn pick(&self, choice: Option<VaultKind>) -> Result<LocalVault, VaultError> {
         if let Some(managed) = &self.managed {
-            let selected = managed.selected(&self.config.location)?;
+            let selected = if choice.is_some() {
+                managed.present_selection(&self.config.location)?
+            } else {
+                // An absent selection is never resolved by its kind alone: the folder that kind names now (for
+                // example a private vault created later) is not the vault the user chose. Only an explicit choice
+                // may open another vault.
+                if managed.selected_missing(&self.config.location)? {
+                    return Err(VaultError::SelectedVaultMissing);
+                }
+                managed.selected(&self.config.location)?
+            };
             if let (Some(selected), Some(choice)) = (selected, choice)
                 && selected != choice
             {
@@ -519,7 +534,7 @@ impl Vault {
         let selected_kind = self
             .managed
             .as_ref()
-            .map(|managed| managed.selected(&self.config.location))
+            .map(|managed| managed.present_selection(&self.config.location))
             .transpose()?
             .flatten();
         let chosen_kind = selected_kind.or(choice);
@@ -582,7 +597,7 @@ impl Vault {
         if let (Some(managed), Some(kind)) = (&self.managed, chosen_kind)
             && selected_kind.is_none()
         {
-            managed.save(&self.config.location, kind)?;
+            managed.save_choice(&self.config.location, kind)?;
         }
         self.manual_lock.store(false, Ordering::SeqCst);
         *self.session() = Some(session);
@@ -615,18 +630,21 @@ impl Vault {
             return Ok(false);
         }
         let (profile, repo_dir, kind, profile_dir) = if let Some(managed) = &self.managed {
-            let Some(kind) = managed.selected(&self.config.location)? else {
+            if managed.selected_missing(&self.config.location)? {
+                return Err(VaultError::SelectedVaultMissing);
+            }
+            let Some(record) = managed.read_record(&self.config.location)? else {
                 return Ok(false);
             };
             let entry = managed
                 .available(&self.config.location)?
                 .into_iter()
-                .find(|entry| entry.kind == kind)
+                .find(|entry| entry.kind == record.kind && entry.path == record.path)
                 .ok_or(VaultError::SelectedVaultMissing)?;
             let LocalVault::Shellx { profile, repo_dir } = entry.vault else {
                 return Ok(false);
             };
-            (profile, repo_dir, kind, entry.path)
+            (profile, repo_dir, record.kind, entry.path)
         } else {
             let Detected::One(LocalVault::Shellx { profile, repo_dir }) =
                 detect(&self.config.location)?

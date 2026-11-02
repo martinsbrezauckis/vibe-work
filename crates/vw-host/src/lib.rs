@@ -46,6 +46,7 @@ pub mod agent_tools;
 mod bridge;
 pub mod cli_sharing;
 pub mod commit_signature;
+mod config_comments;
 mod confirm;
 pub mod default_model;
 mod documents;
@@ -110,3 +111,6 @@ pub const CRATE_ROLE: &str =
 pub fn version() -> &'static str {
     env!("CARGO_PKG_VERSION")
 }
+
+#[cfg(test)]
+mod config_comments_tests;

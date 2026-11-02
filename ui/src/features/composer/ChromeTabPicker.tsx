@@ -53,7 +53,7 @@ export function ChromeTabPicker({ sessionId }: { sessionId: string }): ReactElem
         </div>
       ) : picker.rows.length === 0 ? (
         <div className="slash-empty" role="status">
-          No Chrome tabs
+          No tabs are open in Chrome.
         </div>
       ) : null}
       <div className="slash-list">

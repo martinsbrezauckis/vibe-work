@@ -22,6 +22,7 @@ pub(crate) fn run(
     folders: &[Folder],
     request: &Request,
     allowed: &dyn Fn(&Path) -> bool,
+    check_opened: &dyn Fn(&std::fs::File, &Path) -> bool,
     budget: Duration,
 ) -> Result<String, String> {
     let deadline = Instant::now() + budget;
@@ -52,17 +53,20 @@ pub(crate) fn run(
             {
                 continue;
             }
-            // Opening also validates name-only results: links and junctions never become hits.
+            // Check the opened object's path too, before either a name-only hit or a byte read.
+            let Some(file) = open_allowed(&folder.path, &rel, allowed, check_opened)
+                .filter(|_| Instant::now() < deadline)
+            else {
+                continue;
+            };
             if pattern.is_none() {
-                if search_walk::open(&folder.path, &rel).is_ok() {
-                    total += 1;
-                    if hits.len() < limit {
-                        hits.push((folder_index, rel));
-                    }
+                total += 1;
+                if hits.len() < limit {
+                    hits.push((folder_index, rel));
                 }
                 continue;
             }
-            let Some(content) = search_walk::read(&folder.path, &rel) else {
+            let Some(content) = search_walk::read_opened(file) else {
                 continue;
             };
             scanned += 1;
@@ -115,13 +119,25 @@ pub(crate) fn run(
     if total > kept {
         output.push(format!("{} more hits not shown", total - kept));
     }
-    if truncated {
+    if truncated || Instant::now() >= deadline {
         output.push("Search limit reached.".into());
     }
     if output.is_empty() {
         output.push("No hits.".into());
     }
     Ok(output.join("\n"))
+}
+
+// The same handle supplies the bytes after its final path passes the caller's policy.
+fn open_allowed(
+    folder: &Path,
+    relative: &str,
+    allowed: &dyn Fn(&Path) -> bool,
+    check_opened: &dyn Fn(&std::fs::File, &Path) -> bool,
+) -> Option<std::fs::File> {
+    let file = search_walk::open(folder, relative).ok()?.into_std();
+    let opened = vw_platform::final_path::final_path(&file).ok()?;
+    (allowed(&opened) && check_opened(&file, &folder.join(relative))).then_some(file)
 }
 
 #[cfg(test)]

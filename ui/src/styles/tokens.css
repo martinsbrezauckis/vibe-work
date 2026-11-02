@@ -19,10 +19,11 @@
   --line: #ffffff10;
   --line-2: #ffffff1f;
   --line-3: #ffffff36;
+  --control-line: #777780;
   --text: #f4f4f5;
   --text-2: #b4b4bc;
   --text-3: #92929b;
-  --orange: #fa500f;
+  --orange: #ff651f;
   --orange-2: #ff8205;
   --orange-3: #ffaf00;
   --red: #f66c60;
@@ -35,7 +36,7 @@
   --primary-fg: #131317;
   --shadow: 0 18px 50px -12px #000000aa, 0 0 0 1px var(--line-2);
   /* Colours that are not theme-dependent: fixed ink on accent fills, the brand mark, overlays. */
-  --on-accent: #ffffff;
+  --on-accent: #131317;
   --accent-ink: #1a1300;
   --brand-1: #ff8205;
   --brand-2: #fa500f;
@@ -148,7 +149,7 @@
   --term-fg: #e4e4e7;
   --term-cursor: #fa500f;
   --term-selection: #55b3fb40;
-  --term-black: #1e1e23;
+  --term-black: #92929b;
   --term-red: #f66c60;
   --term-green: #44ba82;
   --term-yellow: #ffaf00;
@@ -179,10 +180,14 @@
   --text: #201f1c;
   --text-2: #615f57;
   --text-3: #66635a;
+  --orange: #ac3500;
+  --orange-2: #b13b00;
   --orange-3: #8f5300;
+  --on-accent: #ffffff;
+  --control-line: #77756c;
   --accent-ink: #ffffff;
-  --red: #e51300;
-  --green: #3aa475;
+  --red: #ba210f;
+  --green: #247149;
   --blue: #0068b8;
   --orange-soft: #fa500f12;
   --green-soft: #3aa47514;
@@ -196,24 +201,24 @@
   --term-selection: #0082e630;
   --term-black: #201f1c;
   --term-red: #c4210f;
-  --term-green: #2f855a;
+  --term-green: #2a7951;
   --term-yellow: #a86400;
   --term-blue: #0068b8;
   --term-magenta: #8a3fb8;
   --term-cyan: #0f7c75;
-  --term-white: #928f86;
+  --term-white: #706d64;
   --term-bright-black: #615f57;
   --term-bright-red: #e51300;
-  --term-bright-green: #3aa475;
-  --term-bright-yellow: #c27c00;
-  --term-bright-blue: #0082e6;
-  --term-bright-magenta: #a050d0;
-  --term-bright-cyan: #16958c;
-  --term-bright-white: #b9b6ad;
+  --term-bright-green: #247149;
+  --term-bright-yellow: #996000;
+  --term-bright-blue: #0068b8;
+  --term-bright-magenta: #9846c6;
+  --term-bright-cyan: #11776f;
+  --term-bright-white: #747168;
   /* Darker code colours on the light page (contrast against --panel). */
   --syn-keyword: #b83c00;
   --syn-constant: #8f5300;
-  --syn-string: #2a7650;
+  --syn-string: #276e49;
   --syn-function: #0064b0;
   --mark: #ffaf0040;
   --mark-on: #fa500f38;
@@ -306,4 +311,14 @@ input[type="checkbox"]:checked::before {
   ::view-transition-new(*) {
     animation: none !important;
   }
+}
+
+/* More contrast uses the same surfaces with stronger text, separators and focus. */
+:root[data-contrast="more"] {
+  --text-2: var(--text);
+  --text-3: var(--text);
+  --line: var(--control-line);
+  --line-2: var(--control-line);
+  --line-3: var(--control-line);
+  --focus-ring: 0 0 0 2px var(--bg), 0 0 0 5px var(--focus);
 }

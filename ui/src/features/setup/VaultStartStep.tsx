@@ -20,6 +20,7 @@ const EMPTY: readonly VaultChoice[] = [];
 export function VaultStartStep() {
   const { keys } = useApp();
   const available = useKeyUi((s) => s.status?.availableVaults ?? EMPTY);
+  const missing = useKeyUi((s) => s.status?.vaultState === "selectedVaultMissing");
   const [choice, setChoice] = useState<Choice | null>(null);
   const choose = (next: Choice | null) => {
     keys?.clearProblem();
@@ -45,6 +46,11 @@ export function VaultStartStep() {
 
   return (
     <div className="setup-step">
+      {missing && (
+        <p className="key-problem" role="status">
+          Selected vault not found
+        </p>
+      )}
       <p>
         Vibe Work keeps your Mistral key and project secrets encrypted in a vault. Their values are
         never stored as plain text or shown to agents. The app needs your Mistral key to work, so

@@ -62,9 +62,36 @@ function protectedAudit(
   }
 }
 
-/** The review's files with their badges and literal diffs (three, then "Show all {n} files"). */
-function ProtectedFiles({ p, full }: { p: ProtectedChangeView; full: boolean }): ReactElement {
+/** "Show all {n} files": opens every file of a review that shows only its first three. */
+function ShowAllFiles({ p }: { p: ProtectedChangeView }): ReactElement {
   const { transcript } = useApp();
+  return (
+    <Button
+      data-testid="transcript.protected-change-show-all"
+      type="button"
+      appearance="expander"
+      onClick={() => {
+        transcript.toggle(`protected:${p.id}`, true);
+      }}
+    >
+      Show all {p.files.length} files
+    </Button>
+  );
+}
+
+/**
+ * The review's files with their badges and literal diffs (three, then "Show all {n} files"). `inlineShowAll: false`
+ * leaves the button to the caller (the open card shows it outside its scrolling body).
+ */
+function ProtectedFiles({
+  p,
+  full,
+  inlineShowAll = true,
+}: {
+  p: ProtectedChangeView;
+  full: boolean;
+  inlineShowAll?: boolean;
+}): ReactElement {
   const key = `protected:${p.id}`;
   return (
     <>
@@ -81,18 +108,7 @@ function ProtectedFiles({ p, full }: { p: ProtectedChangeView; full: boolean }):
           {file.diffTruncated ? <p className="card-state">Saved diff truncated.</p> : null}
         </div>
       ))}
-      {!full && p.files.length > 3 ? (
-        <Button
-          data-testid="transcript.protected-change-show-all"
-          type="button"
-          appearance="expander"
-          onClick={() => {
-            transcript.toggle(key, true);
-          }}
-        >
-          Show all {p.files.length} files
-        </Button>
-      ) : null}
+      {inlineShowAll && !full && p.files.length > 3 ? <ShowAllFiles p={p} /> : null}
     </>
   );
 }
@@ -170,11 +186,12 @@ export function ProtectedAsk({
       state={applying ? "Applying…" : (problem?.message ?? "")}
       stateRole={problem === undefined ? "status" : "alert"}
       decisionOf={(choice) => (choice === "once" ? "apply" : "decline")}
+      footer={!full && p.files.length > 3 ? <ShowAllFiles p={p} /> : null}
       onFocusInside={focusInside}
       data={{ "data-entry-id": key }}
     >
       {p.note ? <p className="reason protected-note">{p.note}</p> : null}
-      <ProtectedFiles p={p} full={full} />
+      <ProtectedFiles p={p} full={full} inlineShowAll={false} />
       {pending ? <span className="sr">Vibe proposes a change to its folder.</span> : null}
     </AskCard>
   );

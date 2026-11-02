@@ -211,11 +211,38 @@
     "compactionDefault": "Default ({count})",
     "setByProjectSettings": "this project's Vibe settings",
     "skillChanged": "Changed {date}",
-    "chromeWorkActive": "Chrome active",
-    "chromeWorkConnecting": "Chrome connecting",
-    "chromeWorkStopping": "Chrome stopping",
-    "chromeWorkStopped": "Chrome stopped",
-    "chromeWorkDisconnected": "Chrome disconnected"
+    "chromeWorkActive": "Your Chrome active",
+    "chromeWorkConnecting": "Your Chrome connecting",
+    "chromeWorkStopping": "Your Chrome stopping",
+    "chromeWorkStopped": "Your Chrome stopped",
+    "chromeWorkDisconnected": "Your Chrome disconnected",
+    "chromeName": "Your Chrome",
+    "chromeUnavailable": "Your Chrome is not in this version of Vibe Work.",
+    "chromeAlreadySetUp": "Your Chrome is already set up.",
+    "chromeNeedsKeyring": "Your Chrome needs the system keyring (Keychain, Credential Manager or Secret Service). Nothing was changed.",
+    "chromeNotConnected": "Your Chrome is not connected.",
+    "chromeNotRunning": "Not run: Your Chrome is not running.",
+    "chromeRestarting": "Not run: Your Chrome is restarting. Ask the user to check Chrome.",
+    "chromeConnectionEnded": "Outcome unknown: Your Chrome's connection ended before it answered, so the action may have run in Chrome. Check Chrome before trying again.",
+    "chromeNoAppFolder": "Could not set up Your Chrome: Vibe Work has no app folder.",
+    "chromeOwnerStoreFailed": "Could not store Your Chrome's owner identity. Nothing was changed.",
+    "chromeOwnerDeleteFailed": "Could not delete Your Chrome's owner identity.",
+    "chromeOwnerReadFailed": "Could not read Your Chrome's owner identity.",
+    "chromeOwnerMissing": "Your Chrome needs Set up again to create its owner identity.",
+    "chromeRemovalFailed": "Could not remove Your Chrome completely. Close Chrome and try again.",
+    "chromePackageMissing": "This installation is missing a file Your Chrome needs. Reinstall Vibe Work.",
+    "chromePackageChanged": "A file Your Chrome needs differs from the one shipped with Vibe Work. Reinstall Vibe Work.",
+    "chromeNotSetUp": "Your Chrome is not set up.",
+    "chromeRemoveEffect": "Removes Your Chrome from Vibe Work and Chrome's settings and deletes its connection. Chrome and its tabs stay. Remove the Vibe Work extension in Chrome too.",
+    "chromeSetupQuestion": "Set up Your Chrome?",
+    "chromeRemoveQuestion": "Remove Your Chrome?",
+    "chromeAddExtension": "Add the Vibe Work extension in Chrome",
+    "chromeRemoved": "Removed. Remove the Vibe Work extension in Chrome too.",
+    "chromeLost": "Not known: Your Chrome lost the connection. Check the page in Chrome.",
+    "chromeLate": "Not known: Your Chrome did not finish in time. Check the page in Chrome.",
+    "chromeUnknown": "Not known: Your Chrome cannot tell whether this happened. Check the page in Chrome.",
+    "chromeProblem": "Not done: Your Chrome reported a problem.",
+    "chromeQueued": "Sent to Chrome. Your Chrome has not reported yet whether it finished."
   },
   "workNames": {
     "projectTab": {
@@ -242,6 +269,16 @@
       "name": "chat",
       "description": "Starting an interaction with Vibe, as in New chat or voice chat.",
       "tooltip": "Start a chat"
+    },
+    "yourChrome": {
+      "name": "Your Chrome",
+      "description": "Use your Google Chrome from Vibe Work.",
+      "tooltip": "Set up Your Chrome"
+    },
+    "chromeExtension": {
+      "name": "the Vibe Work extension",
+      "description": "The extension added to Google Chrome for Your Chrome.",
+      "tooltip": "Add the Vibe Work extension"
     }
   },
   "builtinPlugins": {

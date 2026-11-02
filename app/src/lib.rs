@@ -33,6 +33,7 @@ compile_error!(
 
 mod commands;
 mod dialogs;
+mod in_front;
 mod instance;
 mod live_profile;
 #[cfg(target_os = "macos")]
@@ -323,6 +324,7 @@ pub fn run() -> tauri::Result<()> {
                 .on_new_window(|_url, _features| NewWindowResponse::Deny)
                 .on_permission_request(|_webview, kind| main_permission(&kind.to_string()))
                 .build()?;
+            vw_webview::prepare_child_views(&window)?;
             vw_webview::enable_media_capture(&window)?;
             if let Some(native) = app.handle().get_window("main") {
                 report_native_window_visibility(&native);
@@ -336,6 +338,16 @@ pub fn run() -> tauri::Result<()> {
                 .and_then(|h| vw_platform::ignore_bare_alt(h.0 as isize))
             {
                 tracing::warn!(%error, "the main window keeps the OS's Alt menu mode");
+            }
+            // Windows: a polite close (taskkill without /F, MainWindowHandle) of the minimized app hit tao's
+            // event-target window and cut the event loop's route; it is now passed on to this window.
+            #[cfg(windows)]
+            if let Err(error) = window
+                .hwnd()
+                .map_err(|e| e.to_string())
+                .and_then(|h| vw_platform::keep_event_target_on_close(h.0 as isize))
+            {
+                tracing::warn!(%error, "the event-target window keeps the OS's WM_CLOSE");
             }
             Ok(())
         })

@@ -116,6 +116,7 @@ pub(crate) struct Shared {
     pub(crate) saved_documents: crate::saved_documents::SavedDocuments,
     /// Running dictations (`dictation.rs`).
     pub(crate) dictations: Arc<crate::dictation::Dictations>,
+    pub(crate) voice_prompts: crate::voice_prompts::Prompts,
     pub(crate) readings: crate::read_aloud::Pending,
     /// `panel_read` requests waiting for the window's answer.
     pub(crate) panel_reads: crate::panel_read::Pending,
@@ -330,6 +331,7 @@ fn spawn_owned_tasks(shared: &Arc<Shared>) {
     crate::mcp_keys::at_start(shared);
     crate::agent_tools::start_server(shared);
     crate::previews::start_events(shared);
+    crate::browser_popups::install(shared);
     crate::pages::start_events(shared);
     crate::files::start_events(shared);
     crate::plan_profile::start(shared);
@@ -499,6 +501,7 @@ impl Core {
             gate,
             // Built before `events` and `config` move into the struct (fields evaluate in this order).
             dictations: crate::dictation::Dictations::new(events.clone(), config.speech.clone()),
+            voice_prompts: crate::voice_prompts::Prompts::default(),
             readings: crate::read_aloud::Pending::default(),
             panel_reads: crate::panel_read::Pending::default(),
             changes: crate::changes::Hub::from_config(&config),

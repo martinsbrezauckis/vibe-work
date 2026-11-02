@@ -19,6 +19,8 @@ mod lifecycle;
 mod patch;
 mod reducer;
 mod session;
+#[cfg(test)]
+mod stats_tests;
 mod store;
 
 pub use anomaly::{Anomalies, AnomalyCounts, AnomalyKind, AnomalyRecord};

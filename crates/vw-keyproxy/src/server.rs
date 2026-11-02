@@ -5,7 +5,7 @@
 //! 2. method + path must be on the allowlist → else 403 (`vibe_work_proxy_path`);
 //! 3. a key must be available, waiting up to `ProxyConfig::key_wait` (the owner is told once per
 //!    waiting request) → else 503 (`vibe_work_key_unavailable`) with a sentence saying what to do; the connector
-//!    catalog (`GET /v1/connectors/bootstrap`, fetched when a chat starts) never waits: no key → that 503 at once
+//!    catalog and account/config discovery reads never wait: no key → that 503 at once
 //!    (held, it outlasted Vibe's 30 s chat start);
 //! 4. the request goes upstream with hop-by-hop headers, `Host`, `Cookie` and `Authorization`
 //!    removed, `Authorization: Bearer <key>` (marked sensitive) added, the body streamed;
@@ -378,7 +378,7 @@ fn key_unavailable(need: KeyNeed) -> &'static str {
 
 /// Step 3: the key as a sensitive `Authorization` value, waiting for it when needed.
 ///
-/// `wait` false (the connector catalog): one snapshot of the key decides, never a wait and never the owner's
+/// `wait` false (startup discovery): one snapshot of the key decides, never a wait and never the owner's
 /// hook. Vibe fetches the catalog when a chat starts and gives it 30 s; held for a key, it outlasted the chat start (a
 /// new chat with the vault locked or no key timed out and stuck). The 503 instead makes Vibe start the chat without
 /// connectors, and it caches only a successful catalog, so the next chat after an unlock loads them. One snapshot, not
@@ -538,6 +538,17 @@ fn upstream_base<'a>(shared: &'a Shared, route: &RouteSpec) -> &'a str {
     }
 }
 
+/// Discovery falls back to local config without a key; an unlock wait only strands startup and cleanup.
+fn startup_discovery(route: &RouteSpec) -> bool {
+    matches!(
+        route.template,
+        crate::connectors::BOOTSTRAP_TEMPLATE
+            | "/v1/users/me"
+            | "/console/api/vibe/whoami"
+            | "/chat/api/v1/code/managed-config"
+    )
+}
+
 async fn handle(State(shared): State<Arc<Shared>>, request: Request) -> Response {
     let arrived = tokio::time::Instant::now();
     let (parts, body) = request.into_parts();
@@ -552,8 +563,7 @@ async fn handle(State(shared): State<Arc<Shared>>, request: Request) -> Response
         Ok(route) => route,
         Err(r) => return error(r.status, r.kind, r.message),
     };
-    // The connector catalog never waits for a key (`authorization`).
-    let wait = route.template != crate::connectors::BOOTSTRAP_TEMPLATE;
+    let wait = !startup_discovery(route);
     // connector calls are checked before the key is used.
     let PreparedBody {
         body,

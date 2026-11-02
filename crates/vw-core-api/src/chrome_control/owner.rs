@@ -13,8 +13,7 @@ use crate::core::Shared;
 use super::{mapping, setup};
 
 pub(super) const TOOLS: [&str; 3] = ["chrome_status", "chrome_session", "chrome_execute"];
-const UNKNOWN: &str =
-    "Outcome unknown: Chrome Control's connection ended. Check Chrome before trying again.";
+const UNKNOWN: &str = vw_vocabulary::texts::CHROME_CONNECTION_ENDED;
 
 struct Call {
     name: String,
@@ -67,6 +66,7 @@ pub(super) struct Owner {
     running: Mutex<Option<Running>>,
     pub(super) tools: Mutex<Vec<Value>>,
     pub(super) pairing: Mutex<(String, Option<String>)>,
+    observed_setup: Mutex<Option<setup::ChromeSetupView>>,
 }
 
 impl Owner {
@@ -149,7 +149,7 @@ impl Owner {
             .unwrap_or_else(PoisonError::into_inner)
             .clear();
         *self.pairing.lock().unwrap_or_else(PoisonError::into_inner) =
-            ("Chrome Control is not connected".to_owned(), None);
+            (vw_vocabulary::texts::CHROME_NOT_CONNECTED.to_owned(), None);
     }
 
     pub(super) async fn call(&self, name: &str, args: Value) -> Answer {
@@ -160,7 +160,7 @@ impl Owner {
             .as_ref()
             .map(|run| run.send.clone());
         let Some(send) = send else {
-            return own("Not run: Chrome Control is not running.", "OWNER_REQUIRED");
+            return own(vw_vocabulary::texts::CHROME_NOT_RUNNING, "OWNER_REQUIRED");
         };
         let (reply, answer) = oneshot::channel();
         if send
@@ -247,12 +247,12 @@ pub(crate) async fn start(shared: &Arc<Shared>) -> Result<(), String> {
         .config
         .keys
         .as_ref()
-        .ok_or("Chrome Control needs the OS credential store.")?;
+        .ok_or(vw_vocabulary::texts::CHROME_NEEDS_KEYRING)?;
     let secret = keys
         .chrome_owner()
         .await
-        .map_err(|_| "Could not read Chrome Control's owner identity.")?
-        .ok_or("Chrome Control needs Set up again to create its owner identity.")?;
+        .map_err(|_| vw_vocabulary::texts::CHROME_OWNER_READ_FAILED)?
+        .ok_or(vw_vocabulary::texts::CHROME_OWNER_MISSING)?;
 
     let (_, bytes) = setup::packaged_helper(&chrome.config)?;
     let expected = blake3::hash(&bytes);
@@ -338,7 +338,7 @@ pub(super) fn update_pairing(shared: &Weak<Shared>, result: &Value) {
     }
     let state = match code {
         "OWNER_IDENTITY_MISMATCH" | "OWNER_CONFLICT" => {
-            "Chrome shows a different Vibe Work — pair again"
+            "Chrome is paired with another Vibe Work. Pair again in Chrome."
         }
         "OWNER_APPROVAL_REQUIRED" => "Waiting for you to pair in Chrome",
         _ if connected => "Paired",
@@ -355,10 +355,21 @@ pub(super) fn update_pairing(shared: &Weak<Shared>, result: &Value) {
         .map(|fingerprint| fingerprint.chars().take(16).collect())
         .or_else(|| current.1.clone());
     let next = (state.to_owned(), fingerprint);
-    if *current != next {
-        *current = next;
-        drop(current);
-        publish(&shared);
+    let changed = *current != next;
+    *current = next;
+    drop(current);
+    // A regular status poll also discovers Chrome's extension directory appearing after pairing.
+    let view = super::commands::view(&shared);
+    let mut previous = shared
+        .chrome_control
+        .owner
+        .observed_setup
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner);
+    if changed || previous.as_ref() != Some(&view.setup) {
+        *previous = Some(view.setup.clone());
+        drop(previous);
+        shared.emit(crate::CoreEvent::ChromeControl { view });
     }
 }
 
@@ -510,7 +521,7 @@ async fn supervise(
                 _ = stop.changed() => return,
                 () = tokio::time::sleep_until(until) => break,
                 call = requests.recv() => {
-                    if let Some(call) = call { let _ = call.reply.send(own("Not run: Chrome Control is restarting. Ask the user to check Chrome.", "OWNER_CLOSED")); }
+                    if let Some(call) = call { let _ = call.reply.send(own(vw_vocabulary::texts::CHROME_RESTARTING, "OWNER_CLOSED")); }
                     else { return; }
                 }
             }
@@ -598,7 +609,7 @@ mod disconnect_tests {
         owner.stop().await;
         assert_eq!(
             *owner.pairing.lock().unwrap(),
-            ("Chrome Control is not connected".to_owned(), None)
+            (vw_vocabulary::texts::CHROME_NOT_CONNECTED.to_owned(), None)
         );
     }
 }

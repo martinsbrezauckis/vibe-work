@@ -15,7 +15,7 @@
 //! its ask. Turning a plugin on (`vw/plugins/turnOn`) and deletes keep their confirmations: no offer exists
 //! for them.
 //!
-//! Depends on: `getrandom` (ids), the ask clock (expiry). Called by: `skills` (import, setLatest), `market`
+//! Depends on: `getrandom` (ids), the ask clock (display dates) and monotonic time (expiry). Called by: `skills` (import, setLatest), `market`
 //! (marketplace install and update).
 use std::collections::BTreeMap;
 use std::sync::{Mutex, MutexGuard, PoisonError};
@@ -75,7 +75,7 @@ impl OfferKey {
 
 struct Kept {
     key: OfferKey,
-    expires_at: u64,
+    made_at: crate::clock::ClockReading,
     /// The version the offer showed: an install pins it, an update is refused when the source moved on.
     version: Option<i64>,
 }
@@ -121,7 +121,7 @@ impl Offers {
         &self,
         key: OfferKey,
         mut offer: ToolsInstallOffer,
-        now: u64,
+        now: crate::clock::ClockReading,
     ) -> Result<ToolsInstallOffer, CoreError> {
         let id = random_id().ok_or_else(|| {
             CoreError::new(ErrorCode::Internal, "No install offer could be prepared.")
@@ -132,7 +132,7 @@ impl Offers {
         while state.len() >= MAX_OFFERS {
             let oldest = state
                 .iter()
-                .min_by_key(|(_, k)| k.expires_at)
+                .min_by_key(|(_, k)| k.made_at.instant)
                 .map(|(id, _)| id.clone());
             match oldest {
                 Some(id) => state.remove(&id),
@@ -140,12 +140,12 @@ impl Offers {
             };
         }
         offer.offer_id.clone_from(&id);
-        offer.expires_at = now.saturating_add(OFFER_TTL_MS);
+        offer.expires_at = now.wall_ms.saturating_add(OFFER_TTL_MS);
         state.insert(
             id,
             Kept {
                 key,
-                expires_at: offer.expires_at,
+                made_at: now,
                 version: offer.version,
             },
         );
@@ -162,12 +162,14 @@ impl Offers {
         &self,
         id: &str,
         key: &OfferKey,
-        now: u64,
+        now: crate::clock::ClockReading,
     ) -> Result<Option<i64>, CoreError> {
         let kept = self.lock().remove(id).ok_or_else(|| {
             stale("This install offer was already used or is unknown. Look at the offer again.")
         })?;
-        if kept.expires_at <= now {
+        if now.instant.saturating_duration_since(kept.made_at.instant)
+            >= std::time::Duration::from_millis(OFFER_TTL_MS)
+        {
             return Err(refused(
                 OFFER_EXPIRED,
                 "This install offer has expired. Look at the offer again.",

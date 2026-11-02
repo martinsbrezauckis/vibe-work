@@ -16,6 +16,8 @@ import { createNarration } from "./narration";
 import type { Shell } from "./shellStore";
 import type { Toasts } from "./toastStore";
 import { createVoiceChat } from "./voiceChat";
+import { createAccessibility, type Accessibility } from "./accessibility";
+import { createPromptAudio } from "./promptAudio";
 import { createVoiceSettings } from "./voiceSettings";
 
 /** Creates the voice controllers. */
@@ -25,21 +27,25 @@ export function createVoice(deps: {
   shell: Shell;
   toasts: Toasts;
   persist: boolean;
+  accessibility?: Accessibility;
   prepare?: PrepareCapture;
   player?: Player;
   /** Live key readiness; omitted for development without a key service. */
   canUseKey?: () => boolean;
 }) {
   const settings = createVoiceSettings(deps.persist);
+  const accessibility = deps.accessibility ?? createAccessibility(deps.persist);
+  let prompts: ReturnType<typeof createPromptAudio> | null = null;
   // Every sound first asks the host whether it can be heard (the AppImage without a sound server cannot).
-  const player = withOutputCheck(deps.player ?? createWebAudioPlayer(), async () => {
+  const outputAvailable = async () => {
     const answer = await deps.core.run({ type: "speech", request: { op: "audioOutput" } });
     return !(
       answer.type === "speech" &&
       answer.result.kind === "audioOutput" &&
       !answer.result.available
     );
-  });
+  };
+  const player = withOutputCheck(deps.player ?? createWebAudioPlayer(), outputAvailable);
   const prepare = deps.prepare ?? prepareCapture;
   let narration: ReturnType<typeof createNarration> | null = null;
   let voiceChat: ReturnType<typeof createVoiceChat> | null = null;
@@ -51,6 +57,7 @@ export function createVoice(deps: {
     canUseKey: deps.canUseKey,
     onStart: () => {
       narration?.stopAll();
+      prompts?.stop();
     },
     blocked: () =>
       voiceChat?.active() === true
@@ -58,6 +65,14 @@ export function createVoice(deps: {
         : null,
   });
   voiceChat = createVoiceChat({
+    accessibility,
+    promptBlocked: () =>
+      deps.shell.store.get().settings.open ||
+      deps.shell.store.get().selected !== voiceChat?.store.get().owner ||
+      Object.values(deps.core.store.get().asks).some(
+        (a) => a.surface === "native" || a.personOnly,
+      ) ||
+      document.querySelector('[role="dialog"][aria-modal="true"], [role="alertdialog"]') !== null,
     core: deps.core,
     composer: deps.composer,
     settings,
@@ -68,6 +83,7 @@ export function createVoice(deps: {
     dictating: () => dictation.busy(),
     onStart: () => {
       narration?.stopAll();
+      prompts?.stop();
     },
     titleOf: (id) => {
       const title = deps.core.store.get().sessions[id]?.session["title"];
@@ -85,7 +101,19 @@ export function createVoice(deps: {
   });
   // A session in voice chat sends voice turns, also when the user types and presses Enter.
   deps.composer.setVoiceTurns((id) => voiceChat.owns(id));
-  return { settings, dictation, narration, voiceChat };
+  prompts = createPromptAudio({
+    core: deps.core,
+    accessibility,
+    settings,
+    player,
+    signal: withOutputCheck(deps.player ?? createWebAudioPlayer(), outputAvailable),
+    busy: () => dictation.busy() || voiceChat.active() || narration.store.get().phase !== "idle",
+    owns: (id) => id !== null && voiceChat.owns(id),
+  });
+  deps.shell.store.subscribe(() => {
+    voiceChat.prompt.reconcile();
+  });
+  return { settings, dictation, narration, voiceChat, prompts };
 }
 
 /** The voice controllers. */

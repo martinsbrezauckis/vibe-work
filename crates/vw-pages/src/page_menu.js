@@ -30,7 +30,7 @@
         x: Math.round(event.clientX),
         y: Math.round(event.clientY),
         selected,
-        at: Date.now(),
+        at: performance.now(),
       };
     },
     true,
@@ -41,7 +41,7 @@
       take: () => {
         const p = pending;
         pending = null;
-        if (!p || Date.now() - p.at > 5000) return "";
+        if (!p || performance.now() - p.at > 5000) return "";
         return JSON.stringify({ x: p.x, y: p.y, selected: p.selected });
       },
       // What the last right click was on, for the menu's items (kept until the next right click).

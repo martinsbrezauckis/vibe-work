@@ -400,6 +400,11 @@ Function PageLeaveReinstall
     ; Same-version second choice is removal, not removal followed by reinstall.
     ${If} $R0 = 0
     ${AndIf} $ReinstallPageCheck = 2
+      ; The uninstaller ran in place (_?=) and cannot delete itself: remove it and the then-empty folder.
+      ${If} $4 != ""
+        Delete "$4\uninstall.exe"
+        RMDir "$4"
+      ${EndIf}
       Quit
     ${EndIf}
   reinst_done:

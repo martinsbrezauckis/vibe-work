@@ -22,6 +22,13 @@ use vw_browser::annotate::{Annotation, RecheckItem};
     deny_unknown_fields
 )]
 pub enum BrowserRequest {
+    /// Current native ad-filter settings.
+    Shields {},
+    /// Change native ad filtering; Strict downloads its lists on first use.
+    SetShields {
+        /// Selected mode.
+        mode: vw_preview::shields::Mode,
+    },
     /// The pinned app preview and this session's web tabs.
     Tabs {
         /// The loaded session.
@@ -308,6 +315,11 @@ pub struct SecretChoiceView {
     rename_all_fields = "camelCase"
 )]
 pub enum BrowserResult {
+    /// Confirmed native ad filtering.
+    Shields {
+        /// Confirmed mode and platform availability.
+        settings: vw_preview::shields::Settings,
+    },
     /// The pinned app preview and web tabs after a tab command.
     Tabs {
         /// Pinned app preview followed by the ordered web tabs.

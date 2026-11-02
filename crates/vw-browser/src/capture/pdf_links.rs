@@ -1,4 +1,4 @@
-//! Restores text-link annotations omitted by `WebKitGTK`'s native PDF printer. Reads glyph positions from the
+//! Preserves native link annotations, or restores text links on older `WebKitGTK` printers. Reads glyph positions from the
 //! completed native PDF, matches the page's link labels in reading order and adds only URI annotations.
 //! Depends on pdf-extract and lopdf; called only for native Linux print output, never for arbitrary input files.
 use lopdf::{Document, Object, dictionary};
@@ -104,6 +104,25 @@ pub(super) fn annotate(bytes: &[u8], links: &[Link]) -> Result<Vec<u8>, String> 
 #[allow(clippy::cast_possible_truncation)] // PDF real coordinates use f32; finite engine glyph coordinates fit page points.
 fn annotate_inner(bytes: &[u8], links: &[Link]) -> Result<Vec<u8>, String> {
     let mut doc = Document::load_mem(bytes).map_err(|e| e.to_string())?;
+    // A native printer with link support owns all geometry (including image links and internal destinations).
+    // The old text-only fallback must never rewrite that output or create overlapping annotations.
+    if doc.get_pages().values().any(|page| {
+        doc.get_dictionary(*page)
+            .and_then(|page| page.get(b"Annots"))
+            .and_then(|annotations| doc.dereference(annotations).map(|(_, value)| value))
+            .and_then(Object::as_array)
+            .is_ok_and(|annotations| {
+                annotations.iter().any(|annotation| {
+                    doc.dereference(annotation)
+                        .and_then(|(_, value)| value.as_dict())
+                        .and_then(|annotation| annotation.get(b"Subtype"))
+                        .and_then(Object::as_name)
+                        .is_ok_and(|kind| kind == b"Link")
+                })
+            })
+    }) {
+        return Ok(bytes.to_vec());
+    }
     let mut geometry = Geometry::default();
     pdf_extract::output_doc(&doc, &mut geometry).map_err(|e| e.to_string())?;
     let pages = doc.get_pages();
@@ -207,6 +226,18 @@ mod tests {
         )
         .unwrap();
         assert!(bytes.starts_with(b"%PDF-"));
+        assert_eq!(
+            annotate(
+                &bytes,
+                &[Link {
+                    url: "https://example.test/docs".into(),
+                    text: "Read the docs".into(),
+                }]
+            )
+            .unwrap(),
+            bytes,
+            "native link annotations must be preserved byte-for-byte"
+        );
         let doc = Document::load_mem(&bytes).unwrap();
         assert_eq!(doc.get_pages().len(), 1);
         let annotations = doc

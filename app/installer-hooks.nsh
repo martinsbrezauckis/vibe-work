@@ -11,6 +11,12 @@
 
 Var DeleteSessionsVaultIncomplete
 
+; The app data folder's name (the Tauri identifier). Tauri's template includes this file before it defines
+; BUNDLEID: a macro is expanded where it is inserted (after that define), but a Function body is compiled here, where
+; ${BUNDLEID} would stay literal text and the cleanup would look in a folder that does not exist
+; A release check keeps this equal to the identifier and keeps ${BUNDLEID} out of Function bodies.
+!define VIBE_DATA_ID "app.vibework.desktop"
+
 ; Files an earlier release installed under $INSTDIR that this version no longer ships. An update installs over the
 ; old version without uninstalling it (/UPDATE) and the uninstaller deletes only its own version's files, so these
 ; would stay forever and keep $INSTDIR after an uninstall. The list is exactly the files earlier releases installed
@@ -175,11 +181,11 @@ Function un.DeleteBrowserProfiles
     IntCmp $2 2 browser_enumerate
     IntCmp $2 1 browser_preview
     StrCpy $2 1
-    StrCpy $3 "$APPDATA\${BUNDLEID}"
+    StrCpy $3 "$APPDATA\${VIBE_DATA_ID}"
     Goto browser_root_check
   browser_preview:
     StrCpy $2 2
-    StrCpy $3 "$APPDATA\${BUNDLEID}\preview"
+    StrCpy $3 "$APPDATA\${VIBE_DATA_ID}\preview"
     Goto browser_root_check
   browser_enumerate:
     ; WIN32_FIND_DATAW, as in NSIS FileFunc.nsh; explicit Unicode filename fields.
@@ -220,7 +226,7 @@ Function un.DeleteBrowserProfiles
   browser_hex:
     Goto browser_name_next
   browser_delete:
-    !insertmacro VIBE_DELETE_SENSITIVE_PATH "$APPDATA" "${BUNDLEID}\preview\$2"
+    !insertmacro VIBE_DELETE_SENSITIVE_PATH "$APPDATA" "${VIBE_DATA_ID}\preview\$2"
   browser_advance:
     ; Capture the native error at the call: only ERROR_NO_MORE_FILES ends a scan.
     System::Call 'kernel32::FindNextFileW(p r1, p r0) i .r4 ?e'
@@ -281,6 +287,9 @@ Function un.DeleteSettingsAndCaches
   !insertmacro VIBE_DELETE_DATA_PATH "$0" "$6\updates.json"
   !insertmacro VIBE_DELETE_DATA_PATH "$0" "$6\updates"
   !insertmacro VIBE_DELETE_DATA_PATH "$0" "$6\vibe\probe"
+  ; Display preferences (theme, panel widths, accessibility and notification choices) are the main window's
+  ; WebView2 localStorage; only that store goes, the profile's cookies and sign-ins are tier 3.
+  !insertmacro VIBE_DELETE_DATA_PATH "$0" "$6\EBWebView\Default\Local Storage"
   ; Managed runtime version caches only; never remove the runtime/home wholesale.
   StrCpy $3 "$0"
   System::Call 'kernel32::GetFileAttributesW(w r3) i .r4'

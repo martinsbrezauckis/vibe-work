@@ -189,7 +189,14 @@ export async function writeConfig(
     });
     if (result.type === "reply") {
       const body = asObject(result.result);
-      if (body?.["rejected"] === true) throw new Error("Vibe did not accept the change.");
+      if (body?.["rejected"] === true) {
+        const reason = body["reason"];
+        throw new Error(
+          typeof reason === "string" && reason.trim() !== ""
+            ? reason
+            : "Vibe did not accept the change.",
+        );
+      }
       const failures = body?.["failures"];
       if (Array.isArray(failures) && failures.length > 0)
         throw new Error("Vibe could not save the change.");

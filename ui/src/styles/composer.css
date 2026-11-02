@@ -71,13 +71,19 @@
   border-color: var(--line-3);
 }
 /* the text box never draws the global keyboard ring inside the composer (a text field always counts as
-   :focus-visible, so the ring showed as a box inside the box on every focus). The composer's own border carries
-   the focus instead, tinted with the focus colour. */
+   :focus-visible, so the ring showed as a square box across the rounded frame on every focus). The composer's
+   rounded frame carries the ring instead, tinted border included. */
 .composer-input:focus-visible {
   box-shadow: none;
+  outline: none;
 }
 .composer:has(.composer-input:focus-visible) {
   border-color: color-mix(in srgb, var(--focus) 55%, var(--line-3));
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+:root[data-contrast="more"] .composer:has(.composer-input:focus-visible) {
+  outline-width: 3px;
 }
 .ctools {
   display: flex;

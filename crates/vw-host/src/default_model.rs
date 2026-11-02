@@ -47,7 +47,7 @@ const FIRST_CONFIG: &str = "active_model = \"large-4\"\n\n\
 name = \"mistral-large-4\"\n\
 provider = \"mistral\"\n\
 alias = \"large-4\"\n\
-display_name = \"Large 4\"\n\
+display_name = \"Mistral Large 4\"\n\
 supports_images = true\n\
 max_context_length = 1048576\n\
 max_output_tokens = 262144\n\
@@ -116,6 +116,20 @@ fn with_missing_defaults(original: &str) -> Option<String> {
             || model.get("alias").and_then(|item| item.as_str()) != Some("large-4")
         {
             continue;
+        }
+        if model
+            .get("display_name")
+            .is_none_or(|name| matches!(name.as_str(), Some("Large 4" | "large-4")))
+        {
+            let decor = model
+                .get("display_name")
+                .and_then(|item| item.as_value())
+                .map(|v| v.decor().clone());
+            model["display_name"] = value("Mistral Large 4");
+            if let Some(decor) = decor {
+                *model["display_name"].as_value_mut()?.decor_mut() = decor;
+            }
+            changed = true;
         }
         for (key, price) in [
             ("input_price", INPUT_PRICE),
@@ -186,4 +200,35 @@ fn with_missing_defaults(original: &str) -> Option<String> {
         }
     }
     changed.then(|| config.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn own_entry_has_a_display_name_and_keeps_a_persons_label() {
+        assert!(FIRST_CONFIG.contains("display_name = \"Mistral Large 4\""));
+        for display in [None, Some("Large 4"), Some("large-4"), Some("My model")] {
+            let old = format!(
+                "[[models]]\nname = 'mistral-large-4'\nprovider = 'mistral'\nalias = 'large-4'\n{}",
+                display
+                    .map(|d| format!("display_name = '{d}' # my note\n"))
+                    .unwrap_or_default()
+            );
+            let updated = with_missing_defaults(&old).unwrap();
+            let config: toml::Table = updated.parse().unwrap();
+            assert_eq!(
+                config["models"][0]["display_name"].as_str(),
+                Some(if display == Some("My model") {
+                    "My model"
+                } else {
+                    "Mistral Large 4"
+                })
+            );
+            if display.is_some() {
+                assert!(updated.contains("# my note"));
+            }
+        }
+    }
 }

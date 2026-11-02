@@ -1,5 +1,5 @@
 /**
- * Voice turn timings, in epoch milliseconds on the UI clock. Read by the Debug API latency harness.
+ * Voice turn timings, in epoch milliseconds anchored to the page's monotonic clock. Read by the Debug API latency harness.
  * Depends on: nothing. Called by: voiceChat. No text, audio or credentials are recorded here.
  */
 export interface VoiceLatency {

@@ -20,12 +20,12 @@ export function attachSecretScanActivity(core: Pick<CoreController, "run" | "lis
   };
   const send = () => {
     if (!live || !enabled) return;
-    lastSent = Date.now();
+    lastSent = performance.now();
     void core.run({ type: "secretScan", request: { op: "activity" } }).catch(() => {});
   };
   const activity = () => {
     if (!enabled) return;
-    if (Date.now() - lastSent >= INTERVAL_MS) send();
+    if (performance.now() - lastSent >= INTERVAL_MS) send();
     clear();
     // The trailing signal makes the full idle wait begin after the final input, too.
     trailing = setTimeout(send, INTERVAL_MS);

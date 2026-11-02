@@ -1,4 +1,5 @@
 /** Confirmed Chrome connection state and settings commands. Used by the Browser section and dialogs. */
+import { TEXT } from "../../../vocabulary";
 import { useCallback, useEffect, useState } from "react";
 
 import type {
@@ -53,7 +54,11 @@ export function useChromeControl(): ChromeControlState {
       setStatus(null);
       try {
         const result = await core.run({ type: "chromeControl", request });
-        if (request.op === "remove") setStatus({ text: "Removed", alert: false });
+        if (request.op === "remove")
+          setStatus({
+            text: TEXT.chromeRemoved,
+            alert: false,
+          });
         return result;
       } catch (thrown) {
         const error = toCallError(thrown).error;

@@ -4,7 +4,7 @@ import { Button, SettingsRow, Switch } from "../../../components/Controls";
 import { ChromeRemoveDialog, ChromeSetupDialog } from "./ChromeDialogs";
 import { chromeAvailable, setupLine } from "./chromeRows";
 import { useChromeControl } from "./useChromeControl";
-import { term } from "../../../vocabulary";
+import { term, TEXT } from "../../../vocabulary";
 /** The section. */
 export function YourChromeSettings(): ReactElement | null {
   const chrome = useChromeControl();
@@ -18,7 +18,7 @@ export function YourChromeSettings(): ReactElement | null {
   if (!chromeAvailable(view)) return null;
   return (
     <section aria-labelledby="chrome-title" data-setting="chrome-control">
-      <h3 id="chrome-title">Your Chrome</h3>
+      <h3 id="chrome-title">{TEXT.chromeName}</h3>
       {view === null && chrome.readError === null ? (
         <p className="key-line" role="status">
           Reading…
@@ -26,7 +26,7 @@ export function YourChromeSettings(): ReactElement | null {
       ) : null}
       <SettingsRow data-setting="chrome-control-status">
         <span>
-          Chrome Control
+          Connection
           <span className="d" role="status">
             {chrome.readError !== null && view === null ? "State unavailable" : setupLine(view)}
           </span>
@@ -79,7 +79,7 @@ export function YourChromeSettings(): ReactElement | null {
       </p>
       {setUp ? (
         <SettingsRow data-setting="chrome-control-remove">
-          <span>Remove Chrome Control</span>
+          <span>Remove from Vibe Work</span>
           <Button
             data-testid="settings.chrome-remove-open"
             shape="outlined"

@@ -14,8 +14,8 @@ An independent open-source project, part of the ShellX family of apps
   <img src="docs/public/images/vibe-work-dark.webp" alt="Vibe Work with three projects, a pending one-line edit to approve, and the Changes panel." width="1920">
 </picture>
 
-Version 0.1.4 lets the agent work in your own Chrome, search the chat's folders and ask you once for your Git name
-and email; Up and Down recall earlier prompts, and the Linux packages bring their own web engine. Something specific
+Version 0.1.5 adds accessibility settings, prompt sounds and answers by voice, a chat's cost and usage, and a browser
+the agent can use inside embedded frames such as sign-in boxes. Something specific
 you want Vibe Work to do? Post it in
 [Discussions](https://github.com/martinsbrezauckis/vibe-work/discussions). Changes per version: `CHANGELOG.md`.
 Questions and reports: `CONTRIBUTING.md`.
@@ -34,8 +34,9 @@ Questions and reports: `CONTRIBUTING.md`.
   [docs/public/VOCABULARY.md](docs/public/VOCABULARY.md#access-modes). A card says what Allow once or Allow for this
   session covers. Saying No on a card for Vibe's own tools (commands, file edits) stops the turn. A No in Vibe Work's
   own prompts (Git guard, processes, vault, documents, protected folders, cards for Vibe Work's tools) answers only
-  that call and the turn goes on; the agent is told not to do it another way and to wait for your reply.
-  Unanswered cards wait until you answer.
+  that call and the turn goes on; the agent is told you declined and to explain why it is needed for your task.
+  Unanswered cards wait until you answer; Stop or closing the chat counts as No. A new card waits until you stop
+  typing, and a held key does not answer it.
   Review and revoke permissions in Settings > Allowed without asking.
 - **Changes and line comments.** Everything a session changed, hunk by hunk, with keep and revert. A line comment
   goes back to the agent.
@@ -56,7 +57,10 @@ Questions and reports: `CONTRIBUTING.md`.
 - **App preview.** The agent's dev server in the side panel. Point at an element to send the agent a note with a
   picture.
 - **Agent browser.** Web tabs the agent opens, reads, fills in and clicks through while you watch, with Stop. Logins
-  come from the vault for sites you allow; the agent never sees the password.
+  come from the vault for sites you allow; the agent never sees the password. It also works inside embedded frames
+  such as sign-in boxes. It clicks canvas and image controls, and controls that only accept a real mouse click, only
+  while the page still shows what it checked. On Linux, Settings > Browser blocks ads and trackers (Off, Balanced,
+  Strict).
 - **Your Chrome.** With the Chrome extension set up (Settings > Browser > Your Chrome), the agent works in your own
   Chrome: each chat in its own window, as far as the chat's access mode allows, with Stop in the extension and on the
   page. Local-network pages stay off for it until you turn on Settings > Developer > Local network pages for the agent
@@ -82,10 +86,16 @@ Questions and reports: `CONTRIBUTING.md`.
   The menu also offers the relevant open, history, compare, copy and revert actions.
 - **Voice.** Dictation and voice chat through Mistral's Voxtral. Ask Vibe to read its last reply aloud once, with
   Skip and Stop, without turning on automatic narration. When the computer has no audio output, the reading bar says
-  so.
+  so. A short sound when Vibe asks, and Vibe Work can read the question aloud; in your own voice chat you can answer a
+  local file prompt with "allow" and the number Vibe Work reads, or "no".
+- **Accessibility.** Settings > Accessibility: text size from 100 to 200%, the system theme, contrast and motion.
+  Windows contrast themes are followed, and screen readers find the chat's regions, speakers and messages.
+- **Usage.** Settings > Usage and plan shows a chat's cost, steps, cached tokens and tool calls, also for
+  each subagent.
 - **Tools.** A marketplace of reviewed skill packs, MCP servers and plugins, each pinned to a checksum, and
   connectors you sign in to or, when they need no sign-in, connect with one click. Tools > Skills browses,
-  installs, turns on, turns off and removes skills, and shows when each skill you added last changed.
+  installs, turns on, turns off and removes skills, and shows when each skill you added last changed. When a task
+  needs a connector you have not set up, the agent can point you to it; you connect it yourself.
   Install offers show the source, licence and what runs before you confirm. A plugin you put in Vibe Work's plugins
   folder yourself stays off until you turn it on.
   For the Headless browser’s Chromium download, allow it in your antivirus or retry after its scan finishes.
@@ -150,7 +160,7 @@ store while unlocked. After updating from 0.1.1 or 0.1.0 with Remember on this c
 
 Permission cards show the action and wait until you answer. Saying No on a card for Vibe's own tools stops the
 turn; write what to do instead in the chat. A No in Vibe Work's own prompts answers only that call and the turn
-goes on; the agent is told not to do it another way and to wait for your reply. Ctrl/Cmd+Shift+A goes to a waiting prompt. The session header lists its permissions; Settings > Allowed without asking lists permissions
+goes on; the agent is told you declined and to explain why it is needed for your task. Ctrl/Cmd+Shift+A goes to a waiting prompt. The session header lists its permissions; Settings > Allowed without asking lists permissions
 you can revoke and links to the controls for lasting choices.
 
 ## What leaves your computer

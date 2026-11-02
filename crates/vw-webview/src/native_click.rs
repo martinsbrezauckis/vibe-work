@@ -4,11 +4,10 @@
 //! Depends on: Tauri `with_webview`, vw-platform native click. Called by: `engine`.
 
 use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 
 use tauri::{Webview, Wry};
-use vw_preview::EngineError;
+use vw_preview::{EngineError, NativeClickGuard, PersonPointer};
 
 /// Sends a native press and release at `point` in a live page viewport measured in CSS pixels.
 ///
@@ -19,10 +18,15 @@ pub(crate) async fn native_click(
     webview: &Webview<Wry>,
     point: (f64, f64),
     viewport: (f64, f64),
-    validation: Option<String>,
-    sent: Arc<AtomicBool>,
-    allowed: Option<Arc<dyn Fn() -> bool + Send + Sync>>,
+    guard: NativeClickGuard,
+    person: Arc<PersonPointer>,
 ) -> Result<(), EngineError> {
+    let NativeClickGuard {
+        validation,
+        sent,
+        allowed,
+        person: interval,
+    } = guard;
     let normalized =
         vw_platform::native_click::normalized(point, viewport).map_err(EngineError::Platform)?;
     crate::platform::with_native(
@@ -35,33 +39,28 @@ pub(crate) async fn native_click(
                 return;
             }
             if let Some(script) = validation {
-                #[cfg(target_os = "linux")]
-                vw_platform::native_click::linux_click_checked(
-                    &native.inner(),
-                    normalized,
+                match vw_preview::checked_frame_request(
                     &script,
-                    sent,
-                    allowed,
-                    reply,
-                );
-                #[cfg(windows)]
-                vw_platform::native_click::windows_click_checked(
-                    &native.controller(),
-                    normalized,
-                    &script,
-                    sent,
-                    allowed,
-                    reply,
-                );
-                #[cfg(target_os = "macos")]
-                vw_platform::native_click::macos_click_checked(
-                    native.inner(),
-                    normalized,
-                    &script,
-                    sent,
-                    allowed,
-                    reply,
-                );
+                    cfg!(any(target_os = "linux", target_os = "macos", windows)),
+                ) {
+                    Ok(request) => {
+                        crate::frame_click::click(
+                            native,
+                            normalized,
+                            request,
+                            crate::frame_click::Input {
+                                sent,
+                                allowed,
+                                person,
+                                interval,
+                            },
+                            reply,
+                        );
+                    }
+                    Err(reason) => {
+                        let _ = reply.send(Err(reason));
+                    }
+                }
             } else {
                 if allowed.as_ref().is_some_and(|allowed| !allowed()) {
                     let _ = reply.send(Err(
@@ -86,6 +85,17 @@ pub(crate) async fn native_click(
         },
     )
     .await
+    // macOS: the person sees where the agent clicked (a ring in the view, never in the page). A marker that cannot be
+    // drawn never fails the click.
+    .inspect(|()| {
+        #[cfg(target_os = "macos")]
+        {
+            let webview = webview.clone();
+            tauri::async_runtime::spawn(async move {
+                let _ = crate::mac_agent::show_click_marker(&webview, normalized).await;
+            });
+        }
+    })
     .map_err(|error| match error {
         EngineError::Platform(ref text)
             if matches!(

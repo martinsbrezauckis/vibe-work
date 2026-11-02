@@ -33,11 +33,14 @@ mod secret_exec;
 mod secret_run;
 pub(crate) use secret_run::{permission_project_of, visible_logins};
 mod document_consent;
+#[cfg(test)]
+mod document_read_tests;
 mod document_tools;
 mod prepare;
 mod search_tool;
 mod server;
 pub(crate) mod session;
+mod session_facts;
 pub(crate) mod shell_commands;
 mod start;
 mod tools;
@@ -51,7 +54,7 @@ use std::collections::HashMap;
 use std::ffi::OsString;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex, OnceLock, PoisonError, Weak};
 use std::time::Duration;
 
 use serde_json::{Value, json};
@@ -186,6 +189,9 @@ pub(crate) struct AgentTools {
     /// The tool sets that load only when needed and which sessions turned them on (`on_demand`).
     pub(crate) on_demand: crate::on_demand::OnDemand,
     chrome_package: bool,
+    /// The core this server belongs to (set by [`start_server`]): each chat's launch reads Chrome Control and the
+    /// chat's mode from it (`chrome_launch`).
+    shared: OnceLock<Weak<crate::core::Shared>>,
     listener: Mutex<Option<std::net::TcpListener>>,
     pub(crate) task: Mutex<Option<JoinHandle<()>>>,
 }
@@ -208,6 +214,7 @@ impl AgentTools {
         let launches = launches::Launches::load(&config.data_dir.join("launches.json"));
         Ok(Self {
             chrome_package,
+            shared: OnceLock::new(),
             config,
             table,
             endpoint,
@@ -265,24 +272,47 @@ impl AgentTools {
     /// `args`, `env` and `cwd` here and refuses the whole session-opening request for any other field; it applies its
     /// default tool-call time to this server, so every tool answers within it (a long user decision answers Waiting
     /// and is collected with a status tool).
-    fn server_entry(&self, credential: &str, _session: Option<&str>) -> Value {
-        // Pass this chat's discovery state at launch. The distinct arguments also make Vibe refresh its
-        // persisted descriptors on first enable; each actual Chrome call still goes through the core's checks.
-        let args = if self.chrome_package {
-            vec!["mcp", wire::CHROME_CATALOG_ARG]
-        } else {
-            vec!["mcp", wire::WITHOUT_CHROME_ARG]
-        };
+    fn server_entry(&self, credential: &str, chrome: ChromeLaunch) -> Value {
         json!({
             "transport": "stdio",
             "name": wire::SERVER_NAME,
             "command": self.config.binary.to_string_lossy(),
-            "args": args,
+            "args": server_args(chrome, crate::version()),
             "env": {
                 wire::ENV_ENDPOINT: self.endpoint.to_string(),
                 wire::ENV_CREDENTIAL: credential,
             },
         })
+    }
+
+    /// Whether this launch of a chat's tool server advertises the Chrome tools, decided now from the package,
+    /// Chrome Control and the mode the request names (`agentConfig.agent`), else the mode the core knows for the
+    /// session it opens or continues. Vibe keeps a server's tool list under a hash of its launch line, so the
+    /// decision is in the launch line and the list itself never depends on the chat (`gateway::list`).
+    fn chrome_launch(&self, params: &Value) -> ChromeLaunch {
+        let Some(shared) = self.shared.get().and_then(Weak::upgrade) else {
+            // Not attached to a core yet (no session can open before `start_server`): the package decides.
+            return if self.chrome_package {
+                ChromeLaunch::Catalog
+            } else {
+                ChromeLaunch::NoPackage
+            };
+        };
+        let mode = params
+            .pointer("/agentConfig/agent")
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+            .or_else(|| {
+                params
+                    .get("sessionId")
+                    .and_then(Value::as_str)
+                    .and_then(|id| crate::chrome_control::check::mode(&shared, id))
+            });
+        chrome_launch(
+            shared.chrome_control.config.available(),
+            shared.chrome_control.enabled(),
+            mode.as_deref(),
+        )
     }
 
     /// Adds our MCP server to the `agentConfig` of a session-opening request (after the gate), and the tool filter
@@ -305,6 +335,7 @@ impl AgentTools {
             }
             _ => return None,
         };
+        let chrome = self.chrome_launch(params);
         let object = params.as_object_mut()?;
         let config = object
             .entry("agentConfig")
@@ -315,7 +346,7 @@ impl AgentTools {
         if let Some(config) = config.as_object_mut() {
             config.insert(
                 "mcpServers".to_owned(),
-                Value::Array(vec![self.server_entry(&credential, opened.as_deref())]),
+                Value::Array(vec![self.server_entry(&credential, chrome)]),
             );
             let patterns = self.on_demand.disabled_patterns(opened.as_deref());
             crate::on_demand::add_patterns(config, &patterns);
@@ -386,6 +417,46 @@ impl Drop for AgentTools {
     }
 }
 
+/// What a chat's tool server is launched to advertise for Chrome: one launch line each (`server_args`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ChromeLaunch {
+    /// The Chrome tools (`--chrome-catalog`).
+    Catalog,
+    /// The package is there but this chat gets no Chrome tools (Chrome Control off, or a mode without a browser).
+    Hidden,
+    /// This build has no Chrome package (`--without-chrome`).
+    NoPackage,
+}
+
+/// The Chrome tools are offered to a chat only with the package, with Chrome Control on and when its mode is not
+/// known to be one without a browser (Plan, Explore, a custom profile). A mode not known yet (a new chat on the
+/// default profile) gets them. Every Chrome call is still authorized against the current mode (`check::authorize`).
+fn chrome_launch(package: bool, enabled: bool, mode: Option<&str>) -> ChromeLaunch {
+    if !package {
+        ChromeLaunch::NoPackage
+    } else if enabled && mode.is_none_or(|mode| vw_ask::chrome::Tier::from_mode(mode).is_some()) {
+        ChromeLaunch::Catalog
+    } else {
+        ChromeLaunch::Hidden
+    }
+}
+
+/// The tool server's launch arguments. Vibe keeps a stdio server's tool list for up to a day, shared by every chat,
+/// under a hash of its entry without the environment values: every argument set must therefore have one tool list.
+/// The Chrome choice is an argument (the server's list follows it), and so is the app version: after an update the
+/// agent gets this build's tools, not the previous build's. Two builds with the same version share the key.
+fn server_args(chrome: ChromeLaunch, app_version: &str) -> Vec<String> {
+    let mut args = vec!["mcp".to_owned()];
+    match chrome {
+        ChromeLaunch::Catalog => args.push(wire::CHROME_CATALOG_ARG.to_owned()),
+        // The server forwards a Chrome call, which the core refuses with this chat's reason.
+        ChromeLaunch::Hidden => {}
+        ChromeLaunch::NoPackage => args.push(wire::WITHOUT_CHROME_ARG.to_owned()),
+    }
+    args.extend([wire::APP_VERSION_ARG.to_owned(), app_version.to_owned()]);
+    args
+}
+
 /// Opens the agent tools for a core start (`None` when not configured, or when opening failed: logged, the
 /// core then runs without them). Launch records of processes that are gone are dropped.
 pub(crate) fn open(
@@ -408,6 +479,9 @@ pub(crate) fn open(
 
 /// Starts the listener task (owned by the tools; aborted by `AgentTools::shutdown`).
 pub(crate) fn start_server(shared: &Arc<crate::core::Shared>) {
+    if let Some(tools) = &shared.agent_tools {
+        let _ = tools.shared.set(Arc::downgrade(shared));
+    }
     if let Some(tools) = &shared.agent_tools
         && let Some(task) = server::spawn_server(shared)
     {
@@ -425,4 +499,64 @@ fn write_endpoint_file(path: &Path, endpoint: &SocketAddr, credential: &str) -> 
     let _ = std::fs::remove_file(&temp);
     vw_platform::write_private_new(&temp, &text).map_err(|e| e.to_string())?;
     std::fs::rename(&temp, path).map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod server_args_tests {
+    use super::{ChromeLaunch, chrome_launch, server_args};
+
+    /// Vibe keeps a stdio server's tool list for a day under a fingerprint of its entry without the environment
+    /// values, so an update must change the arguments or the agent keeps the previous build's tools.
+    #[test]
+    fn each_app_version_launches_the_tool_server_with_its_own_arguments() {
+        for chrome in [
+            ChromeLaunch::Catalog,
+            ChromeLaunch::Hidden,
+            ChromeLaunch::NoPackage,
+        ] {
+            assert_ne!(server_args(chrome, "0.1.4"), server_args(chrome, "0.1.5"));
+            assert_eq!(server_args(chrome, "0.1.5"), server_args(chrome, "0.1.5"));
+        }
+    }
+
+    /// Before: the arguments were the same for every chat of a build while the Chrome list differed per chat, so a
+    /// chat with Chrome Control off seeded an empty Chrome list that later chats got from Vibe's cache. The Chrome
+    /// choice is now made per chat in the arguments; each choice has its own launch line.
+    #[test]
+    fn the_chrome_choice_is_in_the_launch_line() {
+        for (package, enabled, mode, expected) in [
+            (true, false, Some("ask"), ChromeLaunch::Hidden),
+            (true, true, Some("ask"), ChromeLaunch::Catalog),
+            (true, true, Some("accept-edits"), ChromeLaunch::Catalog),
+            (true, true, Some("auto-approve"), ChromeLaunch::Catalog),
+            (true, true, Some("vw-plan"), ChromeLaunch::Hidden),
+            (true, true, Some("plan"), ChromeLaunch::Hidden),
+            (true, true, Some("explore"), ChromeLaunch::Hidden),
+            (true, true, None, ChromeLaunch::Catalog),
+            (true, false, None, ChromeLaunch::Hidden),
+            (false, true, Some("ask"), ChromeLaunch::NoPackage),
+            (false, true, None, ChromeLaunch::NoPackage),
+            (false, false, Some("vw-plan"), ChromeLaunch::NoPackage),
+        ] {
+            assert_eq!(
+                chrome_launch(package, enabled, mode),
+                expected,
+                "{package} {enabled} {mode:?}"
+            );
+        }
+        let lines = [
+            server_args(ChromeLaunch::Catalog, "0.1.5"),
+            server_args(ChromeLaunch::Hidden, "0.1.5"),
+            server_args(ChromeLaunch::NoPackage, "0.1.5"),
+        ];
+        assert_eq!(
+            lines[0],
+            ["mcp", "--chrome-catalog", "--app-version", "0.1.5"]
+        );
+        assert_eq!(lines[1], ["mcp", "--app-version", "0.1.5"]);
+        assert_eq!(
+            lines[2],
+            ["mcp", "--without-chrome", "--app-version", "0.1.5"]
+        );
+    }
 }

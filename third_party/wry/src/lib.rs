@@ -347,6 +347,7 @@ mod custom_protocol_workaround;
 mod error;
 // VIBE WORK PATCH: frame context survives Tauri's URL-only navigation callback.
 pub mod navigation_context;
+pub mod file_panel;
 #[cfg(any(target_os = "android", test))]
 mod inject_initialization_scripts;
 mod permissions;
@@ -2519,7 +2520,16 @@ impl WebViewExtMacOS for WebView {
   }
 
   fn ns_window(&self) -> Retained<NSWindow> {
-    self.webview.webview.window().unwrap()
+    // vibe-work patch: while element full screen moves the web view between windows it has none for a moment;
+    // its container's window (the app's) answers then, so a platform call made at that moment never panics.
+    self
+      .webview
+      .host_window()
+      .or_else(|| {
+        let mtm = objc2::MainThreadMarker::new()?;
+        objc2_app_kit::NSApplication::sharedApplication(mtm).mainWindow()
+      })
+      .expect("the web view has a window")
   }
 
   fn reparent(&self, window: *mut NSWindow) -> Result<()> {

@@ -13,6 +13,8 @@
  *   deleted session disappears once the listing is complete. There is no polling timer: refreshes
  *   happen at start, after a server (re)start, after `lagged`, when the window regains focus
  *   (`refreshIfStale`, at most every `FOCUS_REFRESH_MIN_MS`), and after the app's own actions.
+ * - A listing waits for the window's own `session/delete` calls still on their way (Windows: a delete fails while
+ *   Vibe reads the chat's files for a listing).
  */
 import type { TraceOutcome } from "./commandTrace";
 import type { Command, CommandResult, CoreEvent, JsonValue } from "../protocol/core";
@@ -196,7 +198,9 @@ export function createCore(
       fail(thrown);
     }
   };
-  let refreshedAt = 0;
+  let refreshedAt = -Infinity;
+  /** The window's own `session/delete` calls still on their way (a listing waits for them, see `read`). */
+  const deletes = new Set<Promise<unknown>>();
   const read = async (): Promise<void> => {
     try {
       fold(await client.execute({ type: "readStatus" }));
@@ -211,8 +215,12 @@ export function createCore(
     } catch {
       // No grants to show: the chip stays hidden.
     }
+    // Vibe removes a deleted chat's folder while it answers a listing that reads the same files; on Windows the
+    // delete then fails, because the listing holds one of them open. So the window lists once its own deletes have
+    // answered (their stated completion: ordering, not a retry).
+    while (deletes.size > 0) await Promise.allSettled([...deletes]);
     await list(Math.max(1, store.get().index.pages));
-    refreshedAt = Date.now();
+    refreshedAt = performance.now();
   };
   const refresh = (): Promise<void> => {
     reading ??= read().finally(() => {
@@ -263,7 +271,7 @@ export function createCore(
     },
     refresh,
     refreshIfStale() {
-      return Date.now() - refreshedAt < FOCUS_REFRESH_MIN_MS ? Promise.resolve() : refresh();
+      return performance.now() - refreshedAt < FOCUS_REFRESH_MIN_MS ? Promise.resolve() : refresh();
     },
     async loadMore() {
       const { nextCursor, loading } = store.get().index;
@@ -313,6 +321,14 @@ export function createCore(
           throw thrown instanceof CoreCallError ? thrown : toCallError(thrown);
         }
       })();
+      if (command.type === "call" && command.method === "session/delete") {
+        deletes.add(result);
+        void result
+          .catch(() => undefined)
+          .finally(() => {
+            deletes.delete(result);
+          });
+      }
       if (key !== null) {
         runtimeReads.set(key, result);
         void result

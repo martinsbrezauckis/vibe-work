@@ -20,6 +20,7 @@ impl TauriEngine {
                 "injected native close failure".to_owned(),
             ));
         }
+        crate::agent_frames::forget(webview)?;
         webview
             .close()
             .map_err(|e| EngineError::Platform(e.to_string()))
@@ -42,7 +43,14 @@ impl TauriEngine {
             .unwrap_or_else(PoisonError::into_inner)
             .remove(&id.label);
         self.context_pollers.stop(&id.label);
+        crate::act_window::forget(&id.label);
+        #[cfg(target_os = "linux")]
+        self.filter_generations.forget(&id.label);
         self.shown
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(&id.label);
+        self.persons
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .remove(&id.label);

@@ -20,7 +20,9 @@
 //!   (`*.vw-guard.invalid`, RFC 6761 `.invalid`) is allowed only as the one the engine announced for the mount's
 //!   pending guard check (the hooks decide that); any other is refused.
 //! - `file:`, `data:`, `blob:`, `javascript:`, `about:` other than `about:blank`, every custom scheme and any URL with
-//!   user info are refused.
+//!   user info are refused. The exception, inside a frame only ([`UrlPolicy::frame_navigation`]): the documents a page
+//!   makes itself, `about:srcdoc` (its `<iframe srcdoc>`), `data:` and `blob:`; they load nothing from the network
+//!   and are never a page of their own (an open and a top-level navigation refuse them).
 
 use url::{Host, Url};
 use vw_netguard::CANARY_SUFFIX;
@@ -299,6 +301,25 @@ impl UrlPolicy {
         } else {
             Err(UrlRefusal::OtherClass(short(url.as_str())))
         }
+    }
+
+    /// The navigation decision for a frame of a page (never the page itself): [`Self::navigation`], plus the documents
+    /// a page makes itself: the inline document `about:srcdoc` (exactly that address), `data:` and `blob:`. Returns the
+    /// refusal.
+    ///
+    /// # Errors
+    /// The reason, as a [`UrlRefusal`].
+    pub fn frame_navigation(
+        &self,
+        url: &Url,
+        allowed: &[u16],
+        class: PageClass,
+        lan_host: Option<&str>,
+    ) -> Result<(), UrlRefusal> {
+        if url.as_str() == "about:srcdoc" || matches!(url.scheme(), "data" | "blob") {
+            return Ok(());
+        }
+        self.navigation(url, allowed, class, lan_host)
     }
 
     /// [`Self::navigation`] as a yes/no.

@@ -11,12 +11,11 @@
 //! - Blocking work (scans, stops, the start wait) runs on `spawn_blocking`.
 
 use std::sync::Arc;
-use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
 use vw_agent_tools::output;
 use vw_agent_tools::wire::tools as names;
-use vw_procmon::{Attribution, ProcessClass, ProcessRef, StopError, bind_refused};
+use vw_procmon::{Attribution, ProcessClass, ProcessRef, StopError};
 
 use super::launches::Launch;
 use super::session::{alive, refusal_text, tree_listeners, url};
@@ -143,7 +142,7 @@ async fn small_tool(
         return Some(Err(crate::chrome_control::setup::ABSENT.to_owned()));
     }
     if tool == names::CHROME_TOOL_LIST {
-        return Some(Ok(crate::chrome_control::gateway::list(shared, session_id)));
+        return Some(Ok(crate::chrome_control::gateway::list(shared)));
     }
     if names::CHROME_TOOLS.contains(&tool) {
         return Some(
@@ -152,6 +151,9 @@ async fn small_tool(
     }
 
     Some(match tool {
+        names::SESSION_STATUS | names::CONNECTORS_LIST | names::CONNECTOR_SUGGEST => {
+            super::session_facts::call(shared, session_id, tool, args).await
+        }
         names::SEARCH => super::search_tool::call(shared, session_id, args.clone()).await,
         names::READ_ALOUD => crate::read_aloud::tool(shared, session_id, args).await,
         names::PANEL_READ => crate::panel_read::tool(shared, session_id, args).await,
@@ -626,12 +628,6 @@ fn process_restart(
             stopped["stillRunning"]
         ));
     }
-    if let Some(port) = launch.port {
-        let deadline = Instant::now() + Duration::from_secs(5);
-        while bind_refused(port) && Instant::now() < deadline {
-            std::thread::sleep(Duration::from_millis(100));
-        }
-    }
     let cwd = launch.cwd.to_string_lossy().into_owned();
     let mut started = process_start(
         shared,
@@ -655,6 +651,37 @@ mod finished_tests {
     use super::{FinishedHere, forget_finished, handoff_finished, remember_finished};
     use std::collections::VecDeque;
     use vw_procmon::{ProcessRef, StartToken};
+
+    #[tokio::test]
+    async fn an_unowned_live_process_is_refused_without_claiming_it_is_dead() {
+        let fixture = crate::feature_test_core::Fixture::new().await;
+        let mut command = if cfg!(windows) {
+            let mut command = std::process::Command::new("ping");
+            command.args(["-n", "30", "127.0.0.1"]);
+            command
+        } else {
+            let mut command = std::process::Command::new("sleep");
+            command.arg("30");
+            command
+        };
+        let mut child = command.stdout(std::process::Stdio::null()).spawn().unwrap();
+        let shared = &fixture.core.shared;
+        let result = super::process_stop(
+            shared,
+            shared.agent_tools.as_ref().unwrap(),
+            "unowned",
+            &serde_json::json!({"pid":child.id()}),
+        );
+        let still_running = child.try_wait().unwrap().is_none();
+        let _ = child.kill();
+        child.wait().unwrap();
+        fixture.finish().await;
+        let reason = result.unwrap_err();
+        eprintln!("unowned live pid refusal: {reason}");
+        assert!(still_running, "an unowned child must not be stopped");
+        assert!(!reason.contains("not running"), "{reason}");
+        assert!(reason.contains("not stopped"), "{reason}");
+    }
 
     #[test]
     fn a_stale_scan_does_not_finish_a_new_live_launch() {

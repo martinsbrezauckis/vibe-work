@@ -97,11 +97,11 @@ async fn turning_local_network_pages_off_reaches_chrome() {
         vec![
             (
                 "chrome_status".to_owned(),
-                json!({"_netPolicyChange":{"localNetwork":true}})
+                json!({"_netPolicyChange":{"localNetwork":true,"generation":1}})
             ),
             (
                 "chrome_status".to_owned(),
-                json!({"_netPolicyChange":{"localNetwork":false}})
+                json!({"_netPolicyChange":{"localNetwork":false,"generation":2}})
             ),
         ]
     );

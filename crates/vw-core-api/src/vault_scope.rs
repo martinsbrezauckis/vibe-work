@@ -235,6 +235,8 @@ fn browser_act(request: &BrowserRequest) -> Option<&'static str> {
         | BrowserRequest::ReviewHandoff { .. }
         | BrowserRequest::HandoffTab { .. }
         | BrowserRequest::TakeBackTab { .. }
+        | BrowserRequest::Shields {}
+        | BrowserRequest::SetShields { .. }
         | BrowserRequest::EnginePool {}
         | BrowserRequest::SetEnginePool { .. }
         | BrowserRequest::Permissions {}

@@ -322,6 +322,9 @@ impl Core {
                 .await
                 .map_err(|join| CoreError::new(ErrorCode::Internal, join.to_string()))??
             }
+            BrowserRequest::Shields {} | BrowserRequest::SetShields { .. } => {
+                crate::browser_shields::run(shared, &request).await?
+            }
             BrowserRequest::EnginePool {} | BrowserRequest::SetEnginePool { .. } => {
                 pool_result(shared, &request).await?
             }
@@ -508,6 +511,14 @@ async fn act_receipt(
 ) -> Result<BrowserResult, CoreError> {
     let action =
         vw_browser::parse(args).map_err(|error| CoreError::new(ErrorCode::InvalidParams, error))?;
+    // An upload reads its files from the chat that owns this page.
+    let owner = crate::previews::hub(shared)
+        .ok()
+        .and_then(|hub| hub.service.owner_session_id(session_id))
+        .unwrap_or_else(|| session_id.to_owned());
+    let action = crate::browser_upload::load(shared, &owner, action)
+        .await
+        .map_err(|error| CoreError::new(ErrorCode::InvalidParams, error))?;
     let nav = CoreNav {
         shared: shared.clone(),
         strict: false,

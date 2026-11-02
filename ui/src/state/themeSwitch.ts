@@ -14,8 +14,9 @@ import type { Theme } from "./shellState";
 export function switchTheme(next: Theme, set: (theme: Theme) => void): void {
   const doc = document as Document & { startViewTransition?: (cb: () => void) => unknown };
   const reduced =
-    typeof window.matchMedia === "function" &&
-    window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    document.documentElement.dataset["motion"] === "reduce" ||
+    (typeof window.matchMedia === "function" &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches);
   if (typeof doc.startViewTransition !== "function" || reduced) {
     set(next);
     return;

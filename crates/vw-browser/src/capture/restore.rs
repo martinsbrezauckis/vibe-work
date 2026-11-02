@@ -60,13 +60,40 @@ impl CapturePage {
             .css_viewport_width(&self.mount.session_id)
     }
 
+    pub(super) fn check_mount(&self) -> Result<(), String> {
+        self.browser.check_read_mount()?;
+        if self
+            .browser
+            .service()
+            .page_mount(&self.mount.session_id)
+            .as_ref()
+            != Some(&self.mount)
+        {
+            return Err(crate::refs::PAGE_CLOSED.into());
+        }
+        Ok(())
+    }
+
+    pub(super) async fn full_png(&self, size: (u32, u32)) -> Result<Option<Vec<u8>>, String> {
+        self.check_mount()?;
+        let png = self
+            .browser
+            .service()
+            .screenshot_full_png(&self.mount.session_id, size)
+            .await;
+        self.check_mount()?;
+        png.map_err(|e| e.to_string())
+    }
+
     pub(super) async fn screenshot(&self, scaled: bool) -> Result<Vec<u8>, String> {
+        self.check_mount()?;
         let service = self.browser.service();
         let png = if scaled {
             service.screenshot_slice_png(&self.mount.session_id).await
         } else {
             service.screenshot_png(&self.mount.session_id).await
         };
+        self.check_mount()?;
         png.map_err(|e| e.to_string())
     }
 }

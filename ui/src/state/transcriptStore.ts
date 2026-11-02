@@ -153,6 +153,8 @@ export function createTranscript(deps: {
   core: CoreController | null;
   toasts: Toasts;
   persist?: boolean;
+  /** Whether a Debug API UI action is driving the current gesture. Captured before dispatch. */
+  servingAction?: () => string | null;
 }) {
   const { core, toasts } = deps;
   const persist = deps.persist ?? true;
@@ -231,6 +233,7 @@ export function createTranscript(deps: {
     ): Promise<boolean> {
       if (core === null) return false;
       if (store.get().sending[callbackId] === true) return false;
+      const source = deps.servingAction?.() != null ? "uiControl" : via;
       store.set((s) => ({
         ...s,
         sending: { ...s.sending, [callbackId]: true },
@@ -239,7 +242,7 @@ export function createTranscript(deps: {
       try {
         // An answer through the `ui/transcript` route is the Debug API's: lowered explicitly.
         await core.run({ type: "answerCallback", sessionId, callbackId, output });
-        store.set((s) => ({ ...s, answered: { ...s.answered, [callbackId]: via } }));
+        store.set((s) => ({ ...s, answered: { ...s.answered, [callbackId]: source } }));
         saveAnswered(persist, store.get().answered);
         return true;
       } catch (thrown) {

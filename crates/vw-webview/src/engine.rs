@@ -64,6 +64,7 @@ use crate::platform;
 mod close;
 mod native_input;
 mod overlay;
+mod shields;
 
 /// How long a native evaluation (console drain, pick poll) may take.
 const DRAIN_WAIT: Duration = Duration::from_secs(4);
@@ -99,12 +100,15 @@ pub struct TauriEngine {
     context_sink: Option<context_menu::Sink>,
     /// Visibility per mount label.
     shown: Mutex<HashMap<String, Shown>>,
+    /// The person's own pointer activity per mount label, watched on the native view since mount.
+    persons: Mutex<HashMap<String, Arc<vw_preview::PersonPointer>>>,
     /// Held by `place` and by a hidden preview's capture (it shows the webview for a moment).
     visibility: Arc<tokio::sync::Mutex<()>>,
     /// Lazy blank webview that owns the shared native cookie manager before any page is mounted.
     account_anchor: tokio::sync::Mutex<Option<Webview<Wry>>>,
     /// Orders native account reads and sign-outs so the UI never reports a stale read across its own deletion.
     account_operations: tokio::sync::Mutex<()>,
+    audio_lock: Arc<tokio::sync::Mutex<()>>,
     /// Windows: a session's `WebView2` profile folder (by storage key hex) when it lies outside the session's own
     /// folder (an overridden user data folder), for the wipe.
     foreign_profiles: Mutex<HashMap<String, PathBuf>>,
@@ -112,6 +116,8 @@ pub struct TauriEngine {
     guard: Option<vw_netguard::NetGuard>,
     /// This instance requires the build's protection layers: content rules on default macOS, proxy proof elsewhere.
     needs_guard: bool,
+    #[cfg(target_os = "linux")]
+    filter_generations: Arc<vw_netguard::rules::RuleGenerations>,
     /// Windows: a preview with the guard's browser arguments could not be created once (an environment
     /// with other arguments shares its browser process): later previews use the default arguments.
     #[cfg(windows)]
@@ -122,6 +128,7 @@ pub struct TauriEngine {
 }
 
 mod accounts_engine;
+mod audio;
 mod builder;
 mod mac_guard;
 #[cfg(target_os = "macos")]
@@ -146,12 +153,16 @@ impl TauriEngine {
             context_pollers: context_menu::Pollers::default(),
             context_sink: None,
             shown: Mutex::new(HashMap::new()),
+            persons: Mutex::new(HashMap::new()),
             visibility: Arc::new(tokio::sync::Mutex::new(())),
             account_anchor: tokio::sync::Mutex::new(None),
             account_operations: tokio::sync::Mutex::new(()),
+            audio_lock: Arc::new(tokio::sync::Mutex::new(())),
             foreign_profiles: Mutex::new(HashMap::new()),
             guard: None,
             needs_guard: false,
+            #[cfg(target_os = "linux")]
+            filter_generations: Arc::default(),
             #[cfg(windows)]
             proxy_args_refused: std::sync::atomic::AtomicBool::new(false),
             #[cfg(target_os = "macos")]
@@ -294,26 +305,21 @@ impl TauriEngine {
         let parked = platform::parked_or_smallest(spec.parked);
         // a hidden mount is created at its parked size, outside the window (Windows/macOS: the renderer
         // starts at the viewport the page will lay out at; no frame of it can land on the UI before it is hidden).
-        // Linux: Tauri packs it into the window's box whatever is asked, so it keeps the smallest size there (as before
-        // no frame of it was seen in the box); `park` then moves it, unmapped, into the preview layer at its size.
-        let created = if cfg!(target_os = "linux") {
-            platform::parked_or_smallest(None)
-        } else {
-            parked
-        };
-        let shape = spec.placement.unwrap_or(created);
-        let (width, height) = (shape.bounds.width, shape.bounds.height);
+        // Linux: our runtime creates children hidden in Tauri's box. Their first allocation is in the preview
+        // layer, at the final viewport, so creation cannot divide the main UI's allocation or paint a blank child.
+        let shape = spec.placement.unwrap_or(parked);
+
         // The UI's rectangles are the app page's CSS pixels; the child is positioned in the content view's.
-        let in_window = crate::page_origin::in_window(
-            shape.bounds,
-            crate::page_origin::css_origin(&window).await?,
-        );
+        let in_window = page_origin_for_mount(&window, shape.bounds).await?;
         let (x, y) = if spec.placement.is_some() {
             (in_window.x, in_window.y)
         } else {
             platform::outside_at(in_window)
         };
-        let (position, size) = (LogicalPosition::new(x, y), LogicalSize::new(width, height));
+        let (position, size) = (
+            LogicalPosition::new(x, y),
+            LogicalSize::new(shape.bounds.width, shape.bounds.height),
+        );
         let webview = match self
             .create(&window, &spec, &hooks, proxy.as_deref(), position, size)
             .await
@@ -341,6 +347,11 @@ impl TauriEngine {
             Err(error) => return Err(error),
         };
         let setup = async {
+            self.native_watches(&webview, &spec.id.label).await?;
+            #[cfg(target_os = "linux")]
+            if let Some(rules) = hooks.content_filter() {
+                self.apply_filter(&webview, &spec.id.label, rules).await?;
+            }
             #[cfg(windows)]
             self.secure(&webview, &spec, &hooks).await?;
             match spec.placement {
@@ -350,8 +361,6 @@ impl TauriEngine {
             #[cfg(target_os = "macos")]
             self.macos_layers(&webview, &spec, &hooks, proxy.is_some())
                 .await?;
-            // macOS: reaching here with a proxy means WebTransport is off (else the mount was refused above).
-            let bypass_closed = true;
             // Every guarded web mount (a browser/preview mount: URL rules, or the guard's proxy) starts without the
             // service workers earlier pages registered in its storage, on every platform.
             platform::clear_service_workers_at_mount(
@@ -365,7 +374,8 @@ impl TauriEngine {
                 hooks.names_checked_later(&spec.id.label);
             }
             let proven = self
-                .check_guard(&webview, &spec.id, proxy.as_deref(), bypass_closed, &hooks)
+                // macOS: reaching here with a proxy means WebTransport is off (otherwise setup refused).
+                .check_guard(&webview, &spec.id, proxy.as_deref(), true, &hooks)
                 .await;
             if (self.proxy_required() || cfg!(target_os = "macos") && proxy.is_some()) && !proven {
                 return Err(not_checked("its network check could not be confirmed"));
@@ -376,10 +386,7 @@ impl TauriEngine {
         }
         .await;
         if let Err(error) = setup {
-            let _ = Self::close_webview(&webview);
-            if let Some(guard) = &self.guard {
-                guard.forget_session(&spec.id.label);
-            }
+            let _ = self.close_inner(&spec.id);
             return Err(error);
         }
         match spec.placement {
@@ -417,13 +424,79 @@ impl TauriEngine {
 }
 
 impl PreviewEngine for TauriEngine {
+    fn quiet_audio(&self) -> EngineFuture<'_, vw_preview::AudioQuiet> {
+        Box::pin(self.quiet_audio_inner())
+    }
+
+    fn evaluate_frames(
+        &self,
+        id: &MountId,
+        frame: Option<String>,
+        script: String,
+    ) -> EngineFuture<'_, Option<Vec<vw_preview::FrameAnswer>>> {
+        let webview = self.webview(id);
+        Box::pin(async move {
+            crate::agent_frames::evaluate(&webview?, frame, script)
+                .await
+                .map(Some)
+        })
+    }
+    fn evaluate_frames_as_input(
+        &self,
+        id: &MountId,
+        frame: Option<String>,
+        script: String,
+    ) -> EngineFuture<'_, Option<Vec<vw_preview::FrameAnswer>>> {
+        let webview = self.webview(id);
+        let label = id.label.clone();
+        Box::pin(async move {
+            let webview = webview?;
+            let input = crate::agent_frames::evaluate_as_input(&webview, frame, script);
+            crate::act_window::during(&webview, &label, self.hooks()?, input)
+                .await
+                .map(Some)
+        })
+    }
+    fn isolated_frame_input(&self) -> bool {
+        // Windows: private worlds through the DevTools protocol; a runtime without it answers without a
+        // generation, which the checked click refuses.
+        cfg!(any(target_os = "linux", target_os = "macos", windows))
+    }
+    fn supports_content_filter(&self) -> bool {
+        cfg!(target_os = "linux")
+    }
+    fn update_content_filter(&self, id: &MountId, rules: String) -> EngineFuture<'_, ()> {
+        let id = id.clone();
+        Box::pin(async move {
+            #[cfg(target_os = "linux")]
+            {
+                self.apply_filter(&self.webview(&id)?, &id.label, rules)
+                    .await
+            }
+            #[cfg(not(target_os = "linux"))]
+            {
+                let _ = (id, rules);
+                Err(EngineError::Unsupported(
+                    "Ad blocking is unavailable on this system".into(),
+                ))
+            }
+        })
+    }
+
     fn native_click(
         &self,
         id: &MountId,
         point: vw_preview::NativeClickPoint,
         guard: vw_preview::NativeClickGuard,
     ) -> EngineFuture<'_, ()> {
-        Box::pin(self.native_click_inner(id.clone(), point, guard))
+        let id = id.clone();
+        Box::pin(async move {
+            // A native click gives the page a real user activation: the same act window as a gesture evaluation.
+            let webview = self.webview(&id)?;
+            let label = id.label.clone();
+            let input = self.native_click_inner(id, point, guard);
+            crate::act_window::during(&webview, &label, self.hooks()?, input).await
+        })
     }
 
     fn attach(&self, hooks: Arc<dyn PreviewHooks>) {
@@ -433,6 +506,9 @@ impl PreviewEngine for TauriEngine {
     fn mount(&self, spec: MountSpec) -> EngineFuture<'_, ()> {
         let label = spec.id.label.clone();
         Box::pin(async move {
+            let _audio = self.audio_lock.try_lock().map_err(|_| {
+                EngineError::Platform("Browser audio is paused for a voice answer".into())
+            })?;
             let mounted = self.mount_inner(spec).await;
             // A failed setup cannot keep authority through its guard listener or store membership.
             if mounted.is_err()
@@ -671,4 +747,14 @@ impl PreviewEngine for TauriEngine {
             Ok(Some((size.width, size.height)))
         })
     }
+}
+
+async fn page_origin_for_mount(
+    window: &tauri::Window<Wry>,
+    bounds: vw_preview::Rect,
+) -> Result<vw_preview::Rect, EngineError> {
+    Ok(crate::page_origin::in_window(
+        bounds,
+        crate::page_origin::css_origin(window).await?,
+    ))
 }

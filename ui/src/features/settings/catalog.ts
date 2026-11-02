@@ -11,6 +11,7 @@
 import type { IconName } from "../../components/Icon";
 import { TEXT } from "../../vocabulary";
 import { MISTRAL_LINKS } from "./mistralLinks";
+import { accessibilityCatalog } from "./accessibilityCatalog";
 import { chromeCatalog } from "./chrome/chromeRows";
 
 /** A category of the Settings page. */
@@ -24,6 +25,7 @@ export interface SettingsCategory {
 export const SETTINGS_CATEGORIES: readonly SettingsCategory[] = [
   { id: "general", label: "General", icon: "sliders-horizontal" },
   { id: "appearance", label: "Appearance", icon: "sun-moon" },
+  { id: "accessibility", label: "Accessibility", icon: "person-standing" },
   { id: "account", label: "Account", icon: "key-round" },
   { id: "secrets", label: "Project secrets", icon: "lock" },
   { id: "usage", label: "Usage and plan", icon: "gauge" },
@@ -57,6 +59,7 @@ export interface SettingEntry {
 
 /** Every setting, in page order. */
 export const SETTINGS_INDEX: readonly SettingEntry[] = [
+  ...accessibilityCatalog,
   {
     id: "ask-allowed",
     category: "safety",
@@ -154,7 +157,7 @@ export const SETTINGS_INDEX: readonly SettingEntry[] = [
     id: "theme",
     category: "appearance",
     label: "Theme",
-    description: "Dark or light.",
+    description: "Follow the system, dark or light.",
     keywords: "dark light mode colour color appearance",
   },
   {
@@ -331,6 +334,13 @@ export const SETTINGS_INDEX: readonly SettingEntry[] = [
     description:
       "How many page tabs can keep a browser engine open; background tabs pause at the limit. Auto adjusts to available memory.",
     keywords: "browser tabs pool parallel memory capacity auto",
+  },
+  {
+    id: "browser-ad-blocking",
+    category: "browser",
+    label: "Ad blocking",
+    description: "Off, Balanced, Strict",
+    keywords: "browser ads trackers shields easylist easyprivacy",
   },
   ...chromeCatalog(),
   {

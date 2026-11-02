@@ -147,6 +147,9 @@
     let x = a.currentNode, y = b.currentNode;
     for (let steps = 0; x && y && steps < 200000; steps += 1) {
       if (oneFile) y.setAttribute("data-vw-pack-index", String(steps));
+      // Native content-filter styles are absent from document.styleSheets. Preserve their visible effect
+      // in the passive copy so reopening a save cannot reveal an advert that the live page hid.
+      if (isHidden(x)) y.style.setProperty("display", "none", "important");
       const tag = x.localName;
       if (tag === "input" || tag === "textarea") {
         if (secretKind(x) || vaultFilled(x)) {

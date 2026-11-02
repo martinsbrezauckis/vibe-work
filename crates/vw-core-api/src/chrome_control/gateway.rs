@@ -1,4 +1,4 @@
-//! Session-authenticated Chrome tools. Discovery and each call use the current chat mode.
+//! Session-authenticated Chrome tools. Each call uses the current chat mode.
 use super::owner;
 use crate::core::Shared;
 use serde_json::{Value, json};
@@ -8,17 +8,15 @@ pub(crate) fn is_tool(name: &str) -> bool {
     owner::TOOLS.contains(&name)
 }
 
-/// The Chrome tools for the session's MCP server. Vibe asks once, when the session starts (`listChanged` is false),
-/// often before the core has the session's view or mode, so a session whose mode is not known yet gets the tools;
-/// only a known mode without a browser (Plan, Explore) gets none. Every call is still authorized against the
-/// current mode (`check::authorize`), which refuses an unknown one.
-pub(crate) fn list(shared: &Shared, session: &str) -> Value {
-    let browserless = super::check::mode(shared, session)
-        .is_some_and(|mode| vw_ask::chrome::Tier::from_mode(&mode).is_none());
+/// The Chrome tools for a tool server launched with the Chrome catalog. Vibe asks once, when the session starts
+/// (`listChanged` is false), and keeps the answer for up to a day for every chat whose server has the same launch
+/// line, so the list is the same for every chat: whether a chat gets the Chrome tools is decided in its launch line
+/// (`agent_tools::chrome_launch`: Chrome Control on, a mode with a browser). Every call is still authorized against
+/// the current mode and switch (`check::authorize`).
+pub(crate) fn list(shared: &Shared) -> Value {
     // Without the package there are no Chrome tools at all (the core answers this list directly, before
     // `tools::call`'s package check).
-    if !shared.chrome_control.config.available() || !shared.chrome_control.enabled() || browserless
-    {
+    if !shared.chrome_control.config.available() {
         return json!([]);
     }
     json!(vw_agent_tools::chrome_tool_list())
@@ -36,6 +34,37 @@ pub(super) fn validate_public_args(args: &Value) -> Result<(), String> {
         })
     }) {
         return Err("Not run: invalid Chrome tool arguments.".to_owned());
+    }
+    Ok(())
+}
+
+/// Keeps the single-action/batch contract explicit while native discovery receives a flat object schema.
+pub(crate) fn validate_execute_args(args: &Value) -> Result<(), String> {
+    validate_public_args(args)?;
+    if args.get("steps").is_some() {
+        return super::batch::steps(args).map(|_| ());
+    }
+    if !args["action"].is_string() || !args["args"].is_object() {
+        return Err("Not run: an action takes action and args, or use a batch of steps.".into());
+    }
+    Ok(())
+}
+
+fn validate_session_args(args: &Value) -> Result<(), String> {
+    validate_public_args(args)?;
+    let field = match args["action"].as_str() {
+        Some("open") => "profileId",
+        Some("get" | "cancel" | "stop") => "sessionId",
+        _ => {
+            return Err(
+                "Not run: chrome_session requires action: open, get, cancel or stop.".into(),
+            );
+        }
+    };
+    if args[field].as_str().is_none_or(|id| id.trim().is_empty()) {
+        return Err(format!(
+            "Not run: chrome_session requires {field} for this action."
+        ));
     }
     Ok(())
 }
@@ -105,13 +134,21 @@ pub(crate) async fn call(
     tool: &str,
     args: Value,
 ) -> Result<Value, String> {
+    if tool == "chrome_execute" {
+        validate_execute_args(&args)?;
+    } else if tool == "chrome_session" {
+        validate_session_args(&args)?;
+    }
     // After the person's Stop in Chrome, the chat's Chrome work stays stopped for the rest of the turn
     // (as the built-in browser's Stop); reading the status or the session, and ending it, stay possible.
     let reads_only = tool == "chrome_status"
         || (tool == "chrome_session"
             && matches!(args["action"].as_str(), Some("get" | "cancel" | "stop")));
     if !reads_only && shared.chrome_control.stopped_by_person(session) {
-        return Err("Not run: you stopped Chrome for this turn.".to_owned());
+        return Err(
+            "Not run: the person stopped Chrome for this turn. Continue without Chrome in this turn; Chrome works again in the next one."
+                .to_owned(),
+        );
     }
     let (args, reopened) = super::reopen::resolve(shared, session, tool, args).await?;
     let mut answer = run(shared, session, tool, args).await?;
@@ -241,13 +278,68 @@ fn scope_result(shared: &Shared, session: &str, tool: &str, request: bool, resul
 mod listing_tests {
     use serde_json::json;
 
-    /// PREDICT (before the change): Vibe lists a session's MCP tools once, at session start, often before the core
-    /// has the session's view or mode; the list was empty then, so a real session never got the Chrome tools.
     #[tokio::test]
-    async fn the_tools_are_listed_at_session_start_and_absent_only_in_modes_without_a_browser() {
+    async fn missing_chrome_session_fields_are_named_before_any_helper_call() {
+        let fixture = crate::feature_test_core::Fixture::new().await;
+        for (args, field) in [
+            (json!({}), "action"),
+            (json!({"action":"open"}), "profileId"),
+            (json!({"action":"open","profileId":""}), "profileId"),
+            (json!({"action":"get"}), "sessionId"),
+            (json!({"action":"cancel"}), "sessionId"),
+            (json!({"action":"stop","sessionId":""}), "sessionId"),
+        ] {
+            let reason = super::call(&fixture.core.shared, "s", "chrome_session", args)
+                .await
+                .unwrap_err();
+            assert!(reason.contains(field), "missing {field}: {reason}");
+        }
+        fixture.finish().await;
+    }
+
+    #[tokio::test]
+    async fn malformed_execute_input_is_refused_before_reopening_a_chrome_session() {
+        assert!(
+            super::validate_execute_args(&json!({"sessionId":"t","action":"page.read","args":{}}))
+                .is_ok()
+        );
+        assert!(
+            super::validate_execute_args(
+                &json!({"sessionId":"t","steps":[{"action":"page.read","args":{}}]})
+            )
+            .is_ok()
+        );
+        let core = crate::offline_core::start_with("chrome-input-shape", |config, dir| {
+            config.chrome_control.package = Some(dir.join("package"));
+            config.chrome_control.user_home = Some(dir.join("chrome-home"));
+        })
+        .await;
+        for args in [
+            json!({"sessionId":"unopened","action":"page.read"}),
+            json!({"sessionId":"unopened","action":"page.read","args":null}),
+            json!({"sessionId":"unopened","action":"page.read","args":{},"steps":[]}),
+        ] {
+            let reason = super::call(&core.shared, "s", "chrome_execute", args)
+                .await
+                .unwrap_err();
+            assert!(
+                reason.contains("action and args") || reason.contains("batch"),
+                "{reason}"
+            );
+        }
+        core.shutdown().await;
+    }
+
+    /// Vibe lists a session's MCP tools once, at session start, often before the core has the session's view or
+    /// mode, and keeps the answer for up to a day for every chat whose tool server has the same launch line.
+    /// Before the change the list was empty for a known Plan/Explore chat or with the Chrome
+    /// switch off, so such a chat seeded an empty Chrome list that later chats got from Vibe's cache. After it the
+    /// list depends only on the package; the launch line carries the chat's choice (`agent_tools::chrome_launch`).
+    #[tokio::test]
+    async fn the_tool_list_is_the_same_for_every_chat_and_switch_state() {
         let absent = crate::offline_core::start("chrome-listing-absent").await;
         assert_eq!(
-            super::list(&absent.shared, "starting"),
+            super::list(&absent.shared),
             json!([]),
             "no package: no Chrome tools"
         );
@@ -259,11 +351,9 @@ mod listing_tests {
         })
         .await;
         let shared = &core.shared;
-        assert_ne!(
-            super::list(shared, "starting"),
-            json!([]),
-            "a session still starting gets the tools"
-        );
+        let full = json!(vw_agent_tools::chrome_tool_list());
+        assert_ne!(full, json!([]));
+        assert_eq!(super::list(shared), full, "a session still starting");
         let _ = shared
             .store
             .load(
@@ -271,24 +361,24 @@ mod listing_tests {
                 vw_session::LoadKind::New,
             )
             .unwrap();
-        for (mode, listed) in [
-            ("ask", true),
-            ("auto-approve", true),
-            ("vw-plan", false),
-            ("explore", false),
-            ("unknown", false),
-        ] {
-            shared
-                .access
-                .observe_request("session/agent/update", "s", &json!({"agentName":mode}));
-            assert_eq!(super::list(shared, "s") != json!([]), listed, "{mode}");
+        for enabled in [true, false] {
+            shared.chrome_control.set_enabled(enabled).unwrap();
+            for mode in ["ask", "auto-approve", "vw-plan", "explore", "unknown"] {
+                shared.access.observe_request(
+                    "session/agent/update",
+                    "s",
+                    &json!({"agentName":mode}),
+                );
+                assert_eq!(super::list(shared), full, "{mode} {enabled}");
+                let refused =
+                    super::super::check::authorize(shared, "s", "chrome_status", &json!({}));
+                assert_eq!(
+                    refused.is_err(),
+                    !enabled || matches!(mode, "vw-plan" | "explore" | "unknown"),
+                    "{mode} {enabled}: {refused:?}"
+                );
+            }
         }
-        shared.chrome_control.set_enabled(false).unwrap();
-        assert_eq!(
-            super::list(shared, "starting"),
-            json!([]),
-            "the Chrome switch off"
-        );
         core.shutdown().await;
     }
 }
@@ -327,7 +417,7 @@ mod own_failure_tests {
                 "chrome_status",
                 json!({}),
                 "OWNER_REQUIRED",
-                "Not run: Chrome Control is not running.",
+                vw_vocabulary::texts::CHROME_NOT_RUNNING,
             ),
             (
                 "chrome_execute",

@@ -511,7 +511,11 @@ impl Core {
 
     /// The view: the lobby catalog (loaded once when Vibe has not), Vibe Work's configured servers, and
     /// the live state of `session_id` when that session has an open channel.
-    async fn connectors_view(&self, origin: Origin, session_id: Option<String>) -> ConnectorsView {
+    pub(crate) async fn connectors_view(
+        &self,
+        origin: Origin,
+        session_id: Option<String>,
+    ) -> ConnectorsView {
         let mut catalog_error = None;
         let mut read = self.lobby_read(origin).await;
         let not_loaded = read

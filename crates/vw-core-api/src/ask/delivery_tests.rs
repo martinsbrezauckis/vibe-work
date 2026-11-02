@@ -7,6 +7,55 @@ use vw_gate::{CallbackFault, Confirmation, ConfirmationRequest, Confirmer, GateE
 use vw_supervisor::{Discovery, NoSecret, SupervisorConfig};
 use vw_vibe_install::{InstallerConfig, Limits, Sources, VibeInstaller};
 
+#[tokio::test]
+async fn callback_origin_precedes_the_closed_card_receipt() {
+    let fixture = crate::feature_test_core::Fixture::new().await;
+    let shared = fixture.core.shared.clone();
+    let mut events = shared.events.subscribe();
+    let task = tokio::spawn({
+        let shared = shared.clone();
+        async move {
+            crate::ask::tool_calls::approve(&shared, "session", "session", "call", json!({
+                "kind":"approval", "effect":{"toolName":"mcp_vw.process_start"}, "requiredPermissions":[]
+            })).await
+        }
+    });
+    let callback = loop {
+        if let CoreEvent::CallbackOpened { callback_id, .. } = events.recv().await.unwrap() {
+            break callback_id;
+        }
+    };
+    crate::ask::tool_calls::answer_by(
+        &shared,
+        Origin::DebugApi,
+        "session",
+        &callback,
+        &crate::one_ask::approve_once(),
+        AnsweredBy::DebugApi,
+    )
+    .unwrap();
+    let mut origin_seen = false;
+    loop {
+        match events.recv().await.unwrap() {
+            CoreEvent::CallbackAnswered {
+                origin: Origin::DebugApi,
+                ..
+            } => origin_seen = true,
+            CoreEvent::AskClosed { .. } => {
+                assert!(
+                    origin_seen,
+                    "a closed card must already have its callback origin"
+                );
+                break;
+            }
+            _ => {}
+        }
+    }
+    task.await.unwrap().unwrap();
+    drop(shared);
+    fixture.finish().await;
+}
+
 struct Decline;
 impl Confirmer for Decline {
     fn confirm(

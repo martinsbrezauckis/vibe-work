@@ -22,6 +22,22 @@ pub struct Broker {
     directory: TempDir,
 }
 
+/// Where the broker keeps its private directory. A Unix socket path holds about 104 bytes (`sun_path`; 108 on Linux),
+/// so a long `TMPDIR` (a deep test or build folder) would make the endpoint unbindable: then `/tmp` is used. The
+/// directory stays 0700 and the socket 0600 either way.
+fn socket_base() -> std::path::PathBuf {
+    let temp = std::env::temp_dir();
+    #[cfg(unix)]
+    {
+        // The separator, "vw-gh-" and six random characters, then "/broker.sock".
+        const SUFFIX: usize = "/vw-gh-XXXXXX/broker.sock".len();
+        if temp.as_os_str().len() + SUFFIX > 100 {
+            return std::path::PathBuf::from("/tmp");
+        }
+    }
+    temp
+}
+
 impl Broker {
     /// Bind a user-only local endpoint and retain a token supplied directly by the app.
     /// The executable must be the absolute path of the real gh, outside the shim directory.
@@ -44,7 +60,7 @@ impl Broker {
             use std::os::unix::fs::PermissionsExt;
             builder.permissions(std::fs::Permissions::from_mode(0o700));
         }
-        let directory = builder.tempdir()?;
+        let directory = builder.tempdir_in(socket_base())?;
         std::fs::create_dir(directory.path().join("config"))?;
         let (listener, endpoint) = local::bind(directory.path())?;
         Ok(Self {

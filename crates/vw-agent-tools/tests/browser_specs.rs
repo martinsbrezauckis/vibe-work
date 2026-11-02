@@ -25,5 +25,9 @@ fn browser_targets_offer_only_builtin() {
             json!(["builtin"]),
             "{name}"
         );
+        if name == "browser_act" {
+            assert_eq!(tool["inputSchema"]["properties"]["x"]["type"], "integer");
+            assert_eq!(tool["inputSchema"]["properties"]["y"]["type"], "integer");
+        }
     }
 }

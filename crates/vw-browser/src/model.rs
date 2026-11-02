@@ -42,6 +42,27 @@ pub fn is_ref(text: &str) -> bool {
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RefItem {
+    /// Short label drawn on the agent screenshot.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    /// Screenshot-derived region kind: region, text, button or checkbox.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub coordinate_kind: Option<String>,
+    /// Actual observed DOM node identity, held for coordinate validation.
+    #[serde(default, skip_serializing)]
+    pub node: u64,
+    /// Frame-local rectangle retained for point validation.
+    #[serde(skip)]
+    pub local_bounds: Option<crate::frames::RefBox>,
+    /// Frame-local viewport retained for point validation.
+    #[serde(skip)]
+    pub local_viewport: (u32, u32),
+    /// Document-scoped frame identity and address.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub frame_id: Option<crate::frames::FrameRef>,
+    /// On-screen rectangle in top-level CSS pixels.
+    #[serde(default, rename = "box", skip_serializing_if = "Option::is_none")]
+    pub bounds: Option<crate::frames::RefBox>,
     /// The ref.
     #[serde(rename = "ref")]
     pub id: String,
@@ -147,6 +168,9 @@ pub struct Scroll {
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PageModel {
+    /// Main viewport size in CSS pixels.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub viewport: Option<(u32, u32)>,
     /// The original page URL, used for navigation authorization and document comparisons.
     #[serde(default)]
     pub url: String,
@@ -174,6 +198,9 @@ pub struct PageModel {
     /// Cross-origin frames (content not readable).
     #[serde(default)]
     pub cross_origin_frames: u32,
+    /// Why child frames were left out of this observation (fixed texts set on our side, never page data).
+    #[serde(skip)]
+    pub unread_frames: Vec<String>,
     /// The traversal stopped at its caps.
     #[serde(default)]
     pub truncated: bool,

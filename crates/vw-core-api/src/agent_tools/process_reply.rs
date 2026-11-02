@@ -57,7 +57,7 @@ async fn finish_with_budget(
 
 fn joined(result: Result<Result<Value, String>, JoinError>) -> Result<Value, String> {
     result.map_err(|error| format!(
-        "{} the process request failed before its result was confirmed: {error}; call processes_list before repeating it",
+        "{} the process request failed before its result was confirmed: {error}; the process may have started, so call processes_list before repeating it",
         wire::UNKNOWN_OUTCOME,
     ))?
 }

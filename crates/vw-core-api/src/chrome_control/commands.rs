@@ -84,13 +84,18 @@ const OFFER_KIND: &str = "chromeControl";
 /// The store listing is in Google's review: the last manifest the Vibe installer accepted says `"review"`.
 /// No installer, no manifest, `"available"` or an unknown value: the normal store link.
 pub(crate) fn store_review(shared: &crate::core::Shared) -> bool {
+    extension_store(shared) == Some(vw_vibe_install::ExtensionStore::Review)
+}
+
+/// Last accepted signed release state; absence is unknown, not evidence that the listing is available.
+pub(crate) fn extension_store(
+    shared: &crate::core::Shared,
+) -> Option<vw_vibe_install::ExtensionStore> {
     shared
         .config
         .vibe_install
         .as_ref()
-        .is_some_and(|installer| {
-            installer.extension_store() == Some(vw_vibe_install::ExtensionStore::Review)
-        })
+        .and_then(vw_vibe_install::VibeInstaller::extension_store)
 }
 
 pub(crate) fn view(shared: &crate::core::Shared) -> ChromeControlView {
@@ -104,6 +109,9 @@ pub(crate) fn view(shared: &crate::core::Shared) -> ChromeControlView {
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     if setup.package && !pairing.0.is_empty() {
         setup.pairing.clone_from(&pairing.0);
+    }
+    if setup.state == setup::SetupState::WaitingForExtension && setup.pairing == "Paired" {
+        setup.state = setup::SetupState::ExtensionAdded;
     }
     if setup.package {
         setup.fingerprint.clone_from(&pairing.1);
@@ -170,19 +178,19 @@ impl Core {
             ToolsInstallOffer {
                 offer_id: String::new(),
                 kind: OFFER_KIND.to_owned(),
-                name: "Chrome Control".to_owned(),
+                name: vw_vocabulary::texts::CHROME_NAME.to_owned(),
                 publisher: Some("Vibe Work".to_owned()),
                 source: "Shipped with Vibe Work".to_owned(),
                 licence: None,
-                // The store and Chrome show the extension under its listing name, not "Chrome Control".
+                // The store and Chrome show the extension under its listing name, not "Your Chrome".
                 runs: format!(
-                    "Installs the Chrome Control helper in Vibe Work's own folder, for your user only (no \
-                     administrator), tells Google Chrome where it is, and connects Chrome Control to Vibe Work.{store}"
+                    "Adds a small program to Vibe Work's folder, for your user only (no \
+                     administrator), and tells Google Chrome where it is.{store}"
                 ),
                 version: None,
                 expires_at: 0,
             },
-            self.shared.asks.now_ms(),
+            self.shared.asks.now_ms().into(),
         )
     }
 
@@ -194,33 +202,33 @@ impl Core {
             .dir()
             .is_some_and(|dir| dir.join("setup.json").is_file())
         {
-            return Err(invalid("Chrome Control is already set up."));
+            return Err(invalid(vw_vocabulary::texts::CHROME_ALREADY_SET_UP));
         }
         self.shared.install_offers.take(
             &offer_id,
             &OfferKey::new(OFFER_KIND, setup::PLUGIN, ""),
-            self.shared.asks.now_ms(),
+            self.shared.asks.now_ms().into(),
         )?;
-        let state = chrome.dir().ok_or_else(|| {
-            invalid("Could not set up Chrome Control: Vibe Work has no app folder.")
-        })?;
+        let state = chrome
+            .dir()
+            .ok_or_else(|| invalid(vw_vocabulary::texts::CHROME_NO_APP_FOLDER))?;
         let keys = self
             .shared
             .config
             .keys
             .as_ref()
-            .ok_or_else(|| invalid("Chrome Control needs the OS credential store."))?;
-        keys.create_chrome_owner().await.map_err(|_| {
-            invalid("Could not store Chrome Control's owner identity. Nothing was changed.")
-        })?;
+            .ok_or_else(|| invalid(vw_vocabulary::texts::CHROME_NEEDS_KEYRING))?;
+        keys.create_chrome_owner()
+            .await
+            .map_err(|_| invalid(vw_vocabulary::texts::CHROME_OWNER_STORE_FAILED))?;
         if let Err(reason) =
             setup::install(&chrome.config, state, &self.shared.instructions.own_home)
         {
             let _ = keys.delete_chrome_owner().await;
-            return Err(CoreError::new(
-                ErrorCode::Internal,
-                format!("Could not set up Chrome Control: {reason}. Nothing was changed."),
-            ));
+            return Err(CoreError::new(ErrorCode::Internal, {
+                tracing::warn!(%reason, "Chrome Control setup failed");
+                "Could not write to Vibe Work’s folder. Nothing was changed. Check free disk space and try again."
+            }));
         }
         super::start_owner(&self.shared).await;
         tracing::info!("Chrome Control set up");
@@ -245,15 +253,15 @@ impl Core {
         if let Some(keys) = &self.shared.config.keys {
             keys.delete_chrome_owner()
                 .await
-                .map_err(|_| invalid("Could not delete Chrome Control's owner identity."))?;
+                .map_err(|_| invalid(vw_vocabulary::texts::CHROME_OWNER_DELETE_FAILED))?;
         }
         let removed = setup::remove(state);
         chrome.reset();
         removed.map_err(|reason| {
-            CoreError::new(
-                ErrorCode::Internal,
-                format!("Could not remove everything of Chrome Control: {reason}"),
-            )
+            CoreError::new(ErrorCode::Internal, {
+                tracing::warn!(%reason, "Chrome Control removal failed");
+                vw_vocabulary::texts::CHROME_REMOVAL_FAILED
+            })
         })?;
         self.shared.emit(crate::CoreEvent::ChromeControl {
             view: self.chrome_view(),

@@ -44,10 +44,12 @@ export function useSessionSummaries(): readonly SessionSummary[] {
 
 /** The window's inner width, kept current. */
 export function useViewportWidth(): number {
-  const [width, setWidth] = useState(() => window.innerWidth);
+  const [width, setWidth] = useState(
+    () => window.innerWidth / (Number(document.documentElement.style.zoom) || 1),
+  );
   useEffect(() => {
     const onResize = () => {
-      setWidth(window.innerWidth);
+      setWidth(window.innerWidth / (Number(document.documentElement.style.zoom) || 1));
     };
     window.addEventListener("resize", onResize);
     return () => {

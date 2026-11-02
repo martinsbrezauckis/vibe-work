@@ -155,23 +155,7 @@ pub fn delta(before: Option<&PageModel>, after: &PageModel) -> Value {
         .filter(|r| !old.contains(r.id.as_str()))
         .collect();
     let same = new.is_empty() && before.is_some_and(|b| b.refs.len() == after.refs.len());
-    let shown: Vec<Value> = new
-        .iter()
-        .take(16)
-        .map(|r| {
-            let mut v = json!(r);
-            if let Value::Object(map) = &mut v {
-                for value in map.values_mut() {
-                    if let Value::String(text) = value
-                        && text.chars().count() > crate::observe::ITEM_CHARS
-                    {
-                        *text = text.chars().take(crate::observe::ITEM_CHARS).collect();
-                    }
-                }
-            }
-            v
-        })
-        .collect();
+    let shown: Vec<Value> = new.iter().take(16).map(|r| observe::agent_ref(r)).collect();
     json!({
         "url": after.displayed_url().chars().take(300).collect::<String>(),
         "title": after.title.chars().take(crate::observe::ITEM_CHARS).collect::<String>(),

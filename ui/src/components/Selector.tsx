@@ -3,6 +3,8 @@
  * viewport-bound menu. A containing popover owns its menu so both share the top layer.
  * Depends on React, ReactDOM and Icon; callers own values and side effects.
  * Keyboard arrows/Home/End move, Enter/Space pick, Escape closes and restores trigger focus.
+ * An option's accessible name is its visible label alone; its description line is its accessible description,
+ * so "Click <label>" in voice control and screen readers find the option by what it shows.
  */
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -296,6 +298,10 @@ export function Selector<T extends string>({
                     : `${itemId}:${option.value || "default"}`
                 }
                 className="ui-selector-option"
+                aria-labelledby={`${id}-option-${String(i)}`}
+                aria-describedby={
+                  option.description ? `${id}-option-${String(i)}-description` : undefined
+                }
                 onClick={(event) => {
                   onChange(option.value, event.nativeEvent.isTrusted);
                   close();
@@ -306,9 +312,16 @@ export function Selector<T extends string>({
                   <span className="ui-selector-dot" data-tone={option.tone} aria-hidden="true" />
                 )}
                 <span>
-                  <span className="ui-selector-text">{option.label}</span>
+                  <span id={`${id}-option-${String(i)}`} className="ui-selector-text">
+                    {option.label}
+                  </span>
                   {option.description && (
-                    <span className="ui-selector-description">{option.description}</span>
+                    <span
+                      id={`${id}-option-${String(i)}-description`}
+                      className="ui-selector-description"
+                    >
+                      {option.description}
+                    </span>
                   )}
                 </span>
                 {option.value === value && <Icon name="check" size={14} />}

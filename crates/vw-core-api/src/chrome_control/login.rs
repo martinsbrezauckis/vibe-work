@@ -52,7 +52,7 @@ impl LoginWriter for ChromeLoginWriter {
             .await
         else {
             return Err(
-                "Login fill did not complete. Check Chrome before trying again.".to_owned(),
+                "Login fill did not complete: Chrome did not confirm a filled field. Check Chrome before trying again.".to_owned(),
             );
         };
         if result["structuredContent"]["status"] != "completed"
@@ -72,7 +72,7 @@ impl LoginWriter for ChromeLoginWriter {
                 "Chrome login fill did not complete"
             );
             return Err(
-                "Login fill did not complete. Check Chrome before trying again.".to_owned(),
+                "Login fill did not complete: Chrome did not confirm a filled field. Check Chrome before trying again.".to_owned(),
             );
         }
         Ok(result)

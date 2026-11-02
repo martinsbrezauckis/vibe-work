@@ -189,7 +189,7 @@ pub(crate) fn place(engine: &webkit2gtk::WebView, geometry: Geometry) -> Result<
         let vbox = parent
             .downcast::<gtk::Box>()
             .map_err(|_| "the preview's GTK parent is not Tauri's box".to_owned())?;
-        let layer = layer_in(&vbox, engine)?;
+        let layer = layer_in(&vbox, Some(engine))?;
         vbox.remove(engine);
         layer.put(engine, x, y);
         layer
@@ -258,7 +258,7 @@ pub(crate) fn park_browser_overlay(
 }
 
 /// The preview layer of Tauri's box: the existing one, or a new overlay around the main webview.
-fn layer_in(vbox: &gtk::Box, engine: &webkit2gtk::WebView) -> Result<gtk::Fixed, String> {
+fn layer_in(vbox: &gtk::Box, engine: Option<&webkit2gtk::WebView>) -> Result<gtk::Fixed, String> {
     let children = vbox.children();
     let overlays: Vec<gtk::Widget> = children
         .iter()
@@ -290,7 +290,7 @@ fn layer_in(vbox: &gtk::Box, engine: &webkit2gtk::WebView) -> Result<gtk::Fixed,
                 .enumerate()
                 .filter(|(_, child)| {
                     child.is::<webkit2gtk::WebView>()
-                        && *child != engine.upcast_ref::<gtk::Widget>()
+                        && engine.is_none_or(|engine| *child != engine.upcast_ref::<gtk::Widget>())
                 })
                 .collect();
             let [(position, main)] = main.as_slice() else {
@@ -334,4 +334,13 @@ fn layer_in(vbox: &gtk::Box, engine: &webkit2gtk::WebView) -> Result<gtk::Fixed,
         }
         _ => Err("Tauri's box has several preview overlays".to_owned()),
     }
+}
+
+/// Installs the overlay before the main page's first paint, avoiding a later unrealize/reparent flash.
+pub(crate) fn prepare(main: &webkit2gtk::WebView) -> Result<(), String> {
+    let vbox = main
+        .parent()
+        .and_then(|parent| parent.downcast::<gtk::Box>().ok())
+        .ok_or_else(|| "the main webview's GTK parent is not Tauri's box".to_owned())?;
+    layer_in(&vbox, None).map(|_| ())
 }

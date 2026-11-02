@@ -75,7 +75,10 @@ impl Core {
     /// Pending permissions, containing metadata only.
     #[must_use]
     pub fn asks(&self) -> Vec<vw_ask::Ask> {
-        self.shared.asks.list()
+        let mut open = self.shared.asks.list();
+        open.extend(crate::git_identity_ask::question(&self.shared));
+        open.sort_by_key(|ask| ask.opened_at);
+        open
     }
     /// Newest retained permission outcomes, at most 500; never written to disk.
     #[must_use]

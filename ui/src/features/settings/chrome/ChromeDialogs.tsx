@@ -1,7 +1,7 @@
 /**
  * The Set up and Remove dialogs of Settings › Browser › Your Chrome.
  * - Set up, step 1: what Set up installs (the core's single-use offer: name, publisher, from, what it runs) and one
- *   Set up button that confirms exactly that offer; Cancel first. Step 2: "Add the extension in Chrome" with the
+ *   Set up button that confirms exactly that offer; Cancel first. Step 2: "Add the Vibe Work extension in Chrome" with the
  *   live status line (re-read every few seconds while open), Open the store page again, and Turn on its tools (the
  *   existing Turn on with its own confirmation: giving the agent new tools keeps its question). While the store
  *   listing is in Google's review (`setup.storeReview`, from the signed release manifest), one line stands in place
@@ -11,6 +11,7 @@
  * Depends on: Controls, useModalFocus, useChromeControl, chromeRows, the typed core client.
  * Called by: YourChromeSettings.
  */
+import { TEXT } from "../../../vocabulary";
 import { type ReactElement, useEffect, useRef, useState } from "react";
 
 import { Button } from "../../../components/Controls";
@@ -79,7 +80,7 @@ export function ChromeSetupDialog({
         {!setUp ? (
           <>
             <header>
-              <h2 id="chrome-setup-title">Set up Chrome Control?</h2>
+              <h2 id="chrome-setup-title">{TEXT.chromeSetupQuestion}</h2>
             </header>
             <section>
               {offer === null ? (
@@ -101,7 +102,7 @@ export function ChromeSetupDialog({
                 </p>
               ) : null}
             </section>
-            <section className="skills-actions">
+            <footer className="modal-actions">
               <Button
                 data-testid="settings.chrome-setup-cancel"
                 data-dialog-initial-focus="true"
@@ -119,12 +120,12 @@ export function ChromeSetupDialog({
               >
                 {chrome.busy === "setup" ? "Setting up…" : "Set up"}
               </Button>
-            </section>
+            </footer>
           </>
         ) : (
           <>
             <header>
-              <h2 id="chrome-setup-title">Add the extension in Chrome</h2>
+              <h2 id="chrome-setup-title">{TEXT.chromeAddExtension}</h2>
             </header>
             <section>
               {view.setup.storeReview ? null : (
@@ -136,6 +137,11 @@ export function ChromeSetupDialog({
               <p className="key-line" role="status" aria-live="polite" data-chrome-setup-status="">
                 {setupLine(view)}
               </p>
+              {view.setup.storeReview ? (
+                <p className="key-line" role="status" data-chrome-store-review="">
+                  Waiting for Google’s review of the extension.
+                </p>
+              ) : null}
               {view.setup.fingerprint !== null ? (
                 <p className="key-line" data-chrome-fingerprint="">
                   <code>{view.setup.fingerprint}</code>
@@ -147,12 +153,8 @@ export function ChromeSetupDialog({
                 </p>
               ) : null}
             </section>
-            <section className="skills-actions">
-              {view.setup.storeReview ? (
-                <p className="key-line" data-chrome-store-review="">
-                  Waiting for Google's review
-                </p>
-              ) : (
+            <footer className="modal-actions">
+              {view.setup.storeReview ? null : (
                 <Button
                   data-testid="settings.chrome-setup-store"
                   data-dialog-initial-focus="true"
@@ -169,7 +171,7 @@ export function ChromeSetupDialog({
               >
                 Close
               </Button>
-            </section>
+            </footer>
           </>
         )}
       </div>
@@ -203,16 +205,12 @@ export function ChromeRemoveDialog({
         tabIndex={-1}
       >
         <header>
-          <h2 id="chrome-remove-title">Remove Chrome Control?</h2>
+          <h2 id="chrome-remove-title">{TEXT.chromeRemoveQuestion}</h2>
         </header>
         <section>
-          <p>
-            Removes the helper from Vibe Work's folder and from Chrome's settings, turns its tools
-            off and deletes its connection. Your Chrome, its tabs and the extension stay: remove the
-            extension in Chrome.
-          </p>
+          <p>{TEXT.chromeRemoveEffect}</p>
         </section>
-        <section className="skills-actions">
+        <footer className="modal-actions">
           <Button
             data-testid="settings.chrome-remove-cancel"
             data-dialog-initial-focus="true"
@@ -232,7 +230,7 @@ export function ChromeRemoveDialog({
           >
             Remove
           </Button>
-        </section>
+        </footer>
       </div>
     </>
   );

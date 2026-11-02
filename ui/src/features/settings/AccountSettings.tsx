@@ -26,6 +26,7 @@ import { useApp } from "../shell/AppContext";
 import { useKeyUi } from "../setup/useKeys";
 import { KeyNotice, useKeyReadiness } from "../shell/KeyNotice";
 import { useCoreState, useShellState } from "../shell/hooks";
+import { SessionUsageFacts } from "./SessionUsageFacts";
 
 const STATUS_TEXT: Record<string, string> = {
   ready: "Connected",
@@ -151,6 +152,15 @@ export function AccountSettings({ part }: { part: "account" | "usage" }) {
           </div>
         </dl>
       )}
+      {readout !== null && (
+        <progress
+          className="usage-bar"
+          max={100}
+          value={readout.percent}
+          aria-label={`Context ${String(readout.percent)} percent full`}
+        />
+      )}
+      {selected !== null && <SessionUsageFacts sessionId={selected} />}
       {/* the per-minute headroom Mistral's last answer reported (not per conversation). */}
       {rateLimitsText(limits, now) !== null && (
         <dl className="set-facts" data-testid="rate-limits">
@@ -159,14 +169,6 @@ export function AccountSettings({ part }: { part: "account" | "usage" }) {
             <dd className="mono">{rateLimitsText(limits, now)}</dd>
           </div>
         </dl>
-      )}
-      {readout !== null && (
-        <progress
-          className="usage-bar"
-          max={100}
-          value={readout.percent}
-          aria-label={`Context ${String(readout.percent)} percent full`}
-        />
       )}
       <p className="key-field-hint ui-help">
         Mistral shows how much of your plan is left on its website, not to apps (see the links

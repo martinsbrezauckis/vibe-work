@@ -120,7 +120,7 @@ impl Browser {
         Ok(
             json!({"Outcome": FOCUS_REQUEST, "ok": false, "pending": true,
             "expiresInSeconds": FOCUS_WAIT.as_secs(),
-            "note": "No input has been sent. This authorized act will try once when the window is key. Do not repeat it; press Stop to cancel. Its result will appear in Browser actions."}),
+            "note": "No input has been sent. This authorized act will try once when the window is key. Do not repeat it: it is already queued, and a repeat is refused while it waits; press Stop to cancel. Its result will appear in Browser actions."}),
         )
     }
 }

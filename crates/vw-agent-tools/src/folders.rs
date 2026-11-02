@@ -421,9 +421,10 @@ impl Layout {
             && data_entry_named(&real, data, CHROME_CONTROL_STATE)
         {
             return Some(format!(
-                "Not run: Vibe Work's Chrome Control setup and permissions ({}); only the user changes them, in \
-                 Settings › Browser › Your Chrome. {own}",
-                shown::shown(&joined)
+                "Not run: Vibe Work's browser setup and permissions ({}); only the user changes them, in \
+                 Settings › Browser › {}. {own}",
+                shown::shown(&joined),
+                vw_vocabulary::label("workNames", "yourChrome")
             ));
         }
         if access != Access::Read

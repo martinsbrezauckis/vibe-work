@@ -128,6 +128,16 @@ export default function Composer({ sessionId }: { sessionId: string }): ReactEle
     () => (isNew ? null : menuItems(draft, skills ?? NONE)),
     [isNew, draft, skills],
   );
+  const menuId = `composer-suggestions-${sessionId}`;
+  const activeOption =
+    mention.mention !== null
+      ? mention.rows.length > 0
+        ? mention.index
+        : -1
+      : items !== null && items.length > 0
+        ? Math.min(slashIndex, items.length - 1)
+        : -1;
+  const suggestions = mention.mention !== null || items !== null;
   const runtime = entry?.runtime;
   const models = useMemo(
     () => modelChoices(isNew ? (config ?? undefined) : runtime),
@@ -200,7 +210,15 @@ export default function Composer({ sessionId }: { sessionId: string }): ReactEle
   };
 
   return (
-    <div className="composer-wrap" data-session-id={sessionId}>
+    <div
+      className="composer-wrap"
+      data-session-id={sessionId}
+      role="region"
+      aria-label="Message composer"
+      data-focus-region="composer"
+      data-testid="composer.region"
+      tabIndex={-1}
+    >
       <NarrationBar />
       <QueueList
         items={queued}
@@ -247,6 +265,7 @@ export default function Composer({ sessionId }: { sessionId: string }): ReactEle
       >
         {mention.mention !== null ? (
           <FileMentionMenu
+            menuId={menuId}
             rows={mention.rows}
             index={mention.index}
             query={mention.mention.query}
@@ -258,6 +277,7 @@ export default function Composer({ sessionId }: { sessionId: string }): ReactEle
           />
         ) : items === null ? null : (
           <SlashMenu
+            menuId={menuId}
             items={items}
             index={Math.min(slashIndex, items.length - 1)}
             query={draft.slice(1)}
@@ -316,6 +336,13 @@ export default function Composer({ sessionId }: { sessionId: string }): ReactEle
           id={`composer-input-${sessionId}`}
           title="Message"
           aria-label="Message"
+          aria-autocomplete="list"
+          aria-controls={suggestions ? menuId : undefined}
+          aria-activedescendant={
+            suggestions && activeOption >= 0
+              ? `${menuId}-option-${String(activeOption)}`
+              : undefined
+          }
           className="composer-input"
           rows={1}
           readOnly={readOnly}
@@ -405,7 +432,7 @@ export default function Composer({ sessionId }: { sessionId: string }): ReactEle
                 data-testid="composer.chrome-tabs-open"
                 onClick={() => void openChromeTabs(app, sessionId, "window")}
               >
-                Chrome tab
+                Add a Chrome tab…
               </Button>
             ) : null
           }

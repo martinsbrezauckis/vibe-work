@@ -290,8 +290,8 @@ A permission card waits until it is answered; it has no expiry. A No on Vibe's o
 `cancel_turn` and stops the turn (for a subagent's card, the whole tree); a No on the parent's card also stops the
 subagents its turn started. Vibe Work's own prompts (Git guard, vault, documents, processes, protected
 changes, and the cards for Vibe Work's tools) hold the tool call until they are answered: Allow runs that call once
-in the same turn, a No returns `Not run: the user declined this. Do not do it another way. Tell the user why it is
-needed and wait for their reply before you go on with it.` as the tool's result and the turn goes on (a call held
+in the same turn, a No returns `Not run: the user declined this. Explain why it is needed for the user's delegated
+task.` as the tool's result and the turn goes on (a call held
 this way inside `run_typescript`, such as a card for Vibe Work's tools, reaches the program as Vibe's own
 `Tool execution was skipped by Runtime policy.`), and Stop closes the prompt without running it. `secret_run` returns the command's result in the same call,
 or its request id when it runs longer; read `secret_run_status` in a new call. Ctrl/Cmd+Shift+A goes to a waiting

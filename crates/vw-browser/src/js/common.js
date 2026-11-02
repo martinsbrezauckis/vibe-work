@@ -1,12 +1,12 @@
 // Shared helpers of the agent browser's page scripts. Prepended to observe.js, act.js and probe.js after
-// `const REQ = {...};`. Everything here runs synchronously in the page's own JavaScript world: the page can
-// interfere with it (that only affects its own observation); every string is clipped here and again in Rust.
+// `const REQ = {...};`. Runs synchronously in the engine-selected world; Windows observations are page-owned.
+// Checked native input requires an isolated world. Every string is clipped here and again in Rust.
 // Adapted from ShellX: element identity (role, identity segment, DOM path, FNV-1a
 // fingerprint), DOM traversal (bounded traversal of documents, same-origin frames and open shadow
 // roots, global rects across frames), actionability (attached, visible, stable, enabled, receives
 // events, the covering element).
 /* global REQ -- Supplied by the Rust script assembler and its shared prelude. */
-/* exported actionRef, actionableCandidate, collect, consentSnapshot, describe, domPath, editable, findRef, globalRect, hideKeys, inFrame, keyHolder, loginRole, refOf, rememberLabelledKeys, secretKind, submitMethods, submitOrigins, vaultFilled */
+/* exported authorizationPage, nodeIdentity, actionRef, actionableCandidate, visualCandidate, collect, consentSnapshot, describe, domPath, editable, findRef, globalRect, hideKeys, inFrame, keyHolder, loginRole, refOf, rememberLabelledKeys, secretKind, submitMethods, submitOrigins, vaultFilled */
 const ENV = (() => {
   try {
     return window[REQ.page] || null;
@@ -109,6 +109,15 @@ const fnv = (s) => {
 };
 // A ref = a hash of the element's identity: tag, role, type, stable attributes (or its text when it has none) and
 // its DOM path. The same element re-rendered keeps its ref; a changed one gets a new ref (the old one is "stale").
+const frameScope = (() => {
+  if (!REQ.singleFrame) return "";
+  try {
+    for (let view = window; view !== view.top; view = view.parent) {
+      if (!view.parent.document) return ENV?.frameDocument || "";
+    }
+    return "";
+  } catch { return ENV?.frameDocument || ""; }
+})();
 const refOf = (el) => {
   const attr = (n) => clip(el.getAttribute && el.getAttribute(n), 120);
   const stable = ["data-testid", "data-test-id", "id", "name", "aria-label", "placeholder", "href"]
@@ -117,7 +126,7 @@ const refOf = (el) => {
     .map(([n, v]) => `${n}=${v}`)
     .join("~");
   const text = stable ? "" : clip(el.innerText || el.textContent, 160);
-  return "e" + fnv([el.localName, roleOf(el), attr("type"), stable, text, domPath(el)].join("|"));
+  return "e" + fnv([...(frameScope ? [frameScope] : []), el.localName, roleOf(el), attr("type"), stable, text, domPath(el)].join("|"));
 };
 // The ref describes markup and can be shared by duplicate controls. Bind a held native answer to the actual node
 // selected at preflight, even if another identical copy becomes visible before the action or final native check.
@@ -233,8 +242,8 @@ const collect = () => {
       if (tag === "iframe" || tag === "frame") {
         const inner = frameDoc(el);
         if (!inner) crossOriginFrames += 1;
-        else if (ctx.frame < MAX_FRAME_DEPTH) queue.push({ root: inner, frame: ctx.frame + 1, shadow: ctx.shadow });
-        else truncated = true;
+        else if (!REQ.singleFrame && ctx.frame < MAX_FRAME_DEPTH) queue.push({ root: inner, frame: ctx.frame + 1, shadow: ctx.shadow });
+        else if (!REQ.singleFrame) truncated = true;
       }
     }
   }
@@ -274,7 +283,7 @@ const globalRect = (el) => {
     } catch {
       frame = null;
     }
-    if (!frame) break;
+    if (!frame || REQ.singleFrame) break;
     const fr = frame.getBoundingClientRect();
     const scaleX = fr.width / frame.offsetWidth, scaleY = fr.height / frame.offsetHeight;
     left = fr.left + (frame.clientLeft + left) * scaleX;
@@ -351,11 +360,43 @@ const secretKind = (el) => {
     .map((n) => String(el.getAttribute(n) || ""))
     .join(" ")
     .toLowerCase();
-  if (OTP_META.test(meta)) return "otp";
-  if (CARD_META.test(meta)) return "card";
+  // The visible label counts too: many payment forms name their card fields only there ("Card number").
+  const words = `${meta} ${fieldLabelText(el)}`;
+  if (OTP_META.test(words)) return "otp";
+  if (CARD_META.test(words)) return "card";
   if (/\bpass(word|wd)?\b|\bpin\b/.test(meta)) return "password";
+  // A bare "Code" (or CVC-like) field in a form that also holds a card number is that card's security code.
+  if (CARD_CODE.test(fieldLabelText(el).trim()) || CARD_CODE.test(String(el.getAttribute("name") || "").toLowerCase())) {
+    if (holdsCardNumber(el.form)) return "card";
+  }
   return null;
 };
+// The text of a field's own <label> elements and aria-labelledby targets, lower case and bounded (no layout read).
+function fieldLabelText(el) {
+  const parts = [];
+  try {
+    for (const label of Array.from(el.labels || []).slice(0, 4)) parts.push(label.textContent || "");
+    const root = el.getRootNode ? el.getRootNode() : document;
+    for (const id of String(el.getAttribute("aria-labelledby") || "").split(/\s+/).filter(Boolean).slice(0, 4)) {
+      const target = root.getElementById ? root.getElementById(id) : null;
+      parts.push((target && target.textContent) || "");
+    }
+  } catch {
+    // A detached or foreign element: judged by its attributes only.
+  }
+  return parts.join(" ").slice(0, 300).toLowerCase();
+}
+const CARD_CODE = /^(code|cvc2?|cvv2?|csc|cid)$/;
+const CARD_NUMBER = /(card[-_ ]?(number|no|num)|cc[-_ ]?(num|number)|ccnum)/;
+// Whether a form has a card-number field (by autocomplete, attributes or label); at most 60 fields are looked at.
+function holdsCardNumber(form) {
+  if (!form || !form.elements) return false;
+  return Array.from(form.elements).slice(0, 60).some((f) => {
+    const auto = String((f.getAttribute && f.getAttribute("autocomplete")) || "").toLowerCase();
+    const attrs = ["name", "id", "aria-label", "placeholder"].map((n) => String((f.getAttribute && f.getAttribute(n)) || "")).join(" ").toLowerCase();
+    return /\bcc-number\b/.test(auto) || CARD_NUMBER.test(`${attrs} ${fieldLabelText(f)}`);
+  });
+}
 // The role a field plays in a sign-in form, from its LIVE state:
 // "password" (an input whose current type is password and that is not a one-time-code or card field), "username" (a
 // text or email input with autocomplete "username", or the email / user-name field of a form that has a password
@@ -388,15 +429,20 @@ const loginRole = (el) => {
 // Every origin the field's form can submit to: its action (an empty action is the document's own
 // address), and each submit button's formaction, resolved against the document's base address as the browser does.
 // Attributes are read with getAttribute (a field named "action" would shadow form.action). A field outside any form
-// submits nowhere by itself: []. An address that does not resolve: "invalid".
+// submits nowhere by itself: []. An address that does not resolve: "invalid". A form without an action in an inline or
+// blank frame document submits to that document itself (its `about:` address), so its target is the document's origin.
 const submitOrigins = (el) => {
   const form = el.form;
   if (!form) return [];
   const doc = el.ownerDocument;
+  const own = () => {
+    const url = new URL(doc.URL);
+    return url.href === "about:srcdoc" || url.href === "about:blank" ? String(doc.defaultView.origin) : url.origin;
+  };
   const resolve = (raw) => {
     const text = String(raw === null || raw === undefined ? "" : raw).trim();
     try {
-      return text === "" ? new URL(doc.URL).origin : new URL(text, doc.baseURI).origin;
+      return text === "" ? own() : new URL(text, doc.baseURI).origin;
     } catch {
       return "invalid";
     }
@@ -458,15 +504,19 @@ const labelOf = (el) => {
   const img = el.querySelector && el.querySelector("img[alt]");
   return clip(attr("title") || (img && img.getAttribute("alt")) || "", 160);
 };
-// Finds the element of a ref among the interactive elements (the same traversal as the observation).
-const findRef = (ref) => {
-  const found = candidates().elements.filter((el) => refOf(el) === ref);
-  return found;
+// A canvas or image the read lists as a coordinate region (one inside a link or button belongs to that control).
+const visualCandidate = (el) => ["canvas", "img"].includes(el.localName) && visible(el)
+  && !el.parentElement?.closest("a,button,[role=button]");
+// Finds the element of a ref among the interactive elements (the same traversal as the observation); `regions`
+// also accepts the canvas and image regions the read listed (for actions that only move the page to them).
+const findRef = (ref, regions = false) => {
+  if (!regions) return candidates().elements.filter((el) => refOf(el) === ref);
+  return collect().elements.filter((el) => (actionableCandidate(el) || visualCandidate(el)) && refOf(el) === ref);
 };
 // A duplicated ref can denote repeated copies of the same control. It is usable only when exactly one copy is
 // rendered; the requested ref is never substituted with a different ref or an arbitrary first match.
-const actionRef = (ref) => {
-  const found = findRef(ref);
+const actionRef = (ref, regions = false) => {
+  const found = findRef(ref, regions);
   if (found.length <= 1) return { found, target: found[0] || null };
   const identity = (el) => [domPath(el), roleOf(el), labelOf(el), el.localName,
     el.getAttribute("type"), el.getAttribute("name"), el.getAttribute("href")].join("|");
@@ -481,7 +531,6 @@ const actionRef = (ref) => {
     : shown.length === 1 ? shown[0] : entering.length === 1 ? entering[0] : null };
 };
 const describe = (el) => (el ? { role: roleOf(el), name: labelOf(el) } : null);
-
 // Text that looks like an API key or token: hidden from every read the agent gets. Known prefixes,
 // JWTs and any 32+ character run of letters, digits, `_` and `-` that mixes upper case, lower case and digits are
 // hidden; unlabelled hex strings and UUIDs stay visible. Nearby credential labels also hide shorter high-entropy
@@ -620,4 +669,28 @@ const consentSnapshot = (reference = "") => {
     targetMarkupLength: targetMarkup.length, targetMarkupHash: fnv(targetMarkup), targetText, targetLabel,
     targetActionLength: targetAction.length, targetActionHash: fnv(targetAction) });
   return { url, title, client, scopes, accountChooser: chooser && accountOption, oversized, snapshot };
+};
+
+const authorizationPage = () => {
+    const u = new URL(location.href);
+    if (
+      u.protocol === "http:" &&
+      REQ.testConsentOrigin &&
+      u.origin === REQ.testConsentOrigin &&
+      u.pathname.startsWith("/o/oauth2/")
+    )
+      return true;
+    if (u.protocol !== "https:" || u.port || u.username || u.password)
+      return false;
+    return (
+      (u.hostname === "accounts.google.com" &&
+        (u.pathname.startsWith("/o/oauth2/") ||
+          u.pathname === "/signin/oauth/consent")) ||
+      (u.hostname === "github.com" &&
+        u.pathname === "/login/oauth/authorize") ||
+      (u.hostname === "appleid.apple.com" &&
+        u.pathname === "/auth/authorize") ||
+      (u.hostname === "login.microsoftonline.com" &&
+        /^\/[^/]+\/oauth2\/v2\.0\/authorize$/.test(u.pathname))
+    );
 };

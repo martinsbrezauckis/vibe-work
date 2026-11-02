@@ -39,7 +39,7 @@ use crate::mcp_keys_config::{ConfigEditError, add_entry, forwarder_url};
 pub const METHOD: &str = "vibe-work/mcpServerKey";
 /// The dialog's "always" answer: its first button (the recommended choice; the default is the declining
 /// "Don't allow", `vw_host::dialog_buttons`).
-pub(crate) const ALWAYS_LABEL: &str = "Always (until revoked)";
+pub(crate) const ALWAYS_LABEL: &str = "Always allow";
 
 /// Header names a key may not use: hop-by-hop, framing, and the ones MCP or the forwarder own.
 const RESERVED_HEADERS: &[&str] = &[

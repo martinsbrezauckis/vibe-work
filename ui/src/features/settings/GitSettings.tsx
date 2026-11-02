@@ -19,7 +19,7 @@ function IdentitySettings({ identity }: { identity: ReturnType<typeof gitIdentit
       <div data-setting="git-identity">
         {state.view?.source === "global" && (
           <p className="key-line">
-            {`Git identity: ${state.view.identity.name} ${state.view.identity.email} (saved in Git’s settings)`}
+            {`From Git’s settings: ${state.view.identity.name} · ${state.view.identity.email}`}
           </p>
         )}
         <GitIdentityFields
@@ -27,10 +27,7 @@ function IdentitySettings({ identity }: { identity: ReturnType<typeof gitIdentit
           onChange={identity.edit}
           disabled={state.busy || state.view === null}
         />
-        <p className="key-line">
-          Existing repository identities are kept. New repositories save these details locally.
-          Leave both fields empty to ask when initializing a repository.
-        </p>
+
         <Button
           type="button"
           data-testid="settings.git-identity-save"
@@ -43,7 +40,7 @@ function IdentitySettings({ identity }: { identity: ReturnType<typeof gitIdentit
         </Button>
         {state.saved && (
           <p className="key-line" role="status">
-            Saved in Vibe Work.
+            Saved in Vibe Work for new repositories.
           </p>
         )}
         {state.error !== null && (

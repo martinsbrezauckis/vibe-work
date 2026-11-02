@@ -171,10 +171,9 @@ function answeredBy(
   via: AnsweredVia | undefined,
   origin?: AnswerOrigin,
 ): string {
-  if (via === "window") return "by you";
   if (via === "uiControl") return "by the Debug API (UI control)";
   if (origin === "debug-api") return "via the Debug API";
-  if (origin === "ui") return "by you";
+  if (via === "window" || origin === "ui") return "by you";
   const source = str(stateOf(related ?? {})["approvalSource"]);
   if (source !== null && source !== "user") return `by ${SOURCE[source] ?? source}`;
   return "answered outside this window";

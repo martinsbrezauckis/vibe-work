@@ -200,9 +200,15 @@ impl std::fmt::Debug for RequestCheck {
 /// Callbacks from the engine into the model. Called on the engine's thread (the UI thread for Tauri): every
 /// method must return quickly and never block on the async runtime.
 pub trait PreviewHooks: Send + Sync {
+    /// Optional native ad-filter JSON, independent of navigation and network policy.
+    fn content_filter(&self) -> Option<String> {
+        None
+    }
+
     /// May the mount `label` navigate to `url`? Refused navigations never happen. Records a refusal.
     fn allow_navigation(&self, label: &str, url: &Url) -> bool;
-    /// A frame navigation: apply the same policy, but never replace or cancel a held top-level URL.
+    /// A frame navigation: apply the same policy, plus the page's own inline (`about:srcdoc`) document, but never
+    /// replace or cancel a held top-level URL.
     fn allow_frame_navigation(&self, label: &str, url: &Url) -> bool {
         self.allow_navigation(label, url)
     }
@@ -246,8 +252,17 @@ pub trait PreviewHooks: Send + Sync {
     /// outside the allowed set without a navigation the engine asked about (a redirect path an engine does not
     /// report). The engine then loads `about:blank`.
     fn page_event(&self, label: &str, event: PageEvent) -> bool;
-    /// A page asked for a new window (always refused by the engine); for the record.
+    /// Routes a new-window request to the host's managed tabs. The native window is always denied.
+    fn new_window_requested(&self, label: &str, url: &Url) {
+        self.new_window_refused(label, url);
+    }
+    /// A page asked for a new window and the host refused it; for the record.
     fn new_window_refused(&self, label: &str, url: &Url);
+    /// The engine refused something the page asked for during an agent act on mount `label` (a file picker, full
+    /// screen); for the act's receipt.
+    fn act_refused(&self, label: &str, kind: crate::ActRefusal) {
+        let _ = (label, kind);
+    }
     /// A download starts: the destination (always a new file in the app's private staging folder, never the
     /// session folder), or `None` to cancel it.
     fn download_destination(&self, label: &str, url: &Url, suggested: &Path) -> Option<PathBuf>;
@@ -257,6 +272,56 @@ pub trait PreviewHooks: Send + Sync {
 
 /// The native engine.
 pub trait PreviewEngine: Send + Sync {
+    /// Silence every current tab and prevent new audible mounts until the returned lease is dropped.
+    fn quiet_audio(&self) -> EngineFuture<'_, crate::AudioQuiet> {
+        Box::pin(async {
+            Err(EngineError::Unsupported(
+                "Browser audio cannot be silenced".into(),
+            ))
+        })
+    }
+
+    /// Runs a script in all frames (`None`) or one native handle. Unsupported engines return `None`.
+    /// A missing named frame is an error; it must never fall back to the main document.
+    fn evaluate_frames(
+        &self,
+        id: &MountId,
+        frame: Option<String>,
+        script: String,
+    ) -> EngineFuture<'_, Option<Vec<crate::FrameAnswer>>> {
+        let _ = (id, frame, script);
+        Box::pin(async { Ok(None) })
+    }
+    /// [`Self::evaluate_frames`] for an act's own input (a click, a key, typing): the engine runs it as the person's
+    /// gesture, so a window the page opens from that input opens as it would for a person. Engines whose evaluation
+    /// already counts as a gesture keep this default.
+    fn evaluate_frames_as_input(
+        &self,
+        id: &MountId,
+        frame: Option<String>,
+        script: String,
+    ) -> EngineFuture<'_, Option<Vec<crate::FrameAnswer>>> {
+        self.evaluate_frames(id, frame, script)
+    }
+    /// Whether frame evaluation and node identities live outside page-owned JavaScript.
+    /// Checked native input requires this guarantee; observations alone do not provide it.
+    fn isolated_frame_input(&self) -> bool {
+        false
+    }
+    /// Whether this build enforces native ad filters.
+    fn supports_content_filter(&self) -> bool {
+        false
+    }
+    /// Replaces a mount's ad filter after compiling it, preserving other native content rules.
+    fn update_content_filter(&self, id: &MountId, rules: String) -> EngineFuture<'_, ()> {
+        let _ = (id, rules);
+        Box::pin(async {
+            Err(EngineError::Unsupported(
+                "Ad blocking is unavailable on this system".into(),
+            ))
+        })
+    }
+
     /// Host-authorized native mouse input. Must target only this visible webview in the app's active window.
     /// Default refusal: permission never silently falls back to a synthetic click.
     fn native_click(

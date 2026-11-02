@@ -167,6 +167,10 @@ pub const FORWARDED_WITHOUT_UNIFIED_EVIDENCE: &[(&str, &str)] = &[
         "not covered by the bench; interrupts owned children through their parent runtime; real unified-harness child and sibling isolation is exercised by vw_l13m_tree_loops",
     ),
     (
+        "session/subagents/read",
+        "native per-subagent usage ledger for the Usage screen; read only, scoped to its parent session",
+    ),
+    (
         "session/turn/queue/steer",
         "not covered by the bench; sibling of the queue ops that pass on unified; params are three ids",
     ),
@@ -197,9 +201,9 @@ static TABLE: &[Row] = &[
     deny!("session/turn/queue/edit/save", NoUserInterface),
     deny!("session/turn/queue/edit/cancel", NoUserInterface),
     deny!("session/turn/queue/edit/abandon", NoUserInterface),
-    // New in Vibe 3.0.1/3.0.2 (experimental upstream); no Vibe Work screen uses the subagent reads.
+    // Native subagent lifecycle and the Usage screen's per-subagent ledger.
     fwd!("session/subagents/interrupt", SessionSubagentsInterrupt),
-    deny!("session/subagents/read", NoUserInterface),
+    fwd!("session/subagents/read", SessionSubagentsRead),
     deny!("session/subagents/wait", NoUserInterface),
     // New in Vibe 3.0.3 (session artifacts: pull and merge requests linked to the session's branch,
     // experimental upstream); no Vibe Work screen uses them in 0.1.2. `artifacts/sync` asks the
@@ -411,6 +415,11 @@ pub fn forwarded_without_unified_evidence() -> &'static [(&'static str, &'static
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn subagent_usage_is_available_to_the_session_usage_screen() {
+        assert_eq!(classify("session/subagents/read"), Some(Class::Forwarded));
+    }
 
     #[test]
     fn every_generated_request_is_classified_once() {

@@ -28,6 +28,9 @@ pub const WITHOUT_CHROME_ARG: &str = "--without-chrome";
 
 /// Advertise the consented Chrome tool catalog.
 pub const CHROME_CATALOG_ARG: &str = "--chrome-catalog";
+/// Core-supplied launch argument followed by the app version. The tool server ignores it; Vibe keeps a stdio server's
+/// tool list under a fingerprint of its launch arguments, so a new version makes Vibe ask for the new list.
+pub const APP_VERSION_ARG: &str = "--app-version";
 /// Name of the per-session MCP server in `agentConfig.mcpServers` (the agent sees `mcp_vw.<tool>`).
 pub const SERVER_NAME: &str = "vw";
 /// Longest request line in bytes (and longest answer of every tool except a screenshot).
@@ -47,7 +50,7 @@ pub const CALL_TIMEOUT: Duration = Duration::from_secs(50);
 pub const UNKNOWN_OUTCOME: &str = "Outcome unknown:";
 
 /// Plain refusal for a tool absent from this build.
-pub const CHROME_UNAVAILABLE: &str = "Chrome Control is not in this version of Vibe Work.";
+pub const CHROME_UNAVAILABLE: &str = vw_vocabulary::texts::CHROME_UNAVAILABLE;
 
 /// The session-scoped tools (MCP names).
 pub mod tools {
@@ -128,7 +131,7 @@ pub mod tools {
     pub const LIBRARY_SEARCH: &str = "library_search";
     /// Make or edit an image with Mistral, saved in the session folder.
     pub const IMAGE_GENERATE: &str = "image_generate";
-    /// Read a saved attachment using Vibe Work's document reader.
+    /// Read an attachment or an original chat-folder document using Vibe Work's document reader.
     pub const DOCUMENT_READ: &str = "document_read";
     /// The work tools (the core runs them with the user's Mistral key).
     pub const WORK_TOOLS: [&str; 3] = [LIBRARIES_LIST, LIBRARY_SEARCH, IMAGE_GENERATE];
@@ -145,6 +148,12 @@ pub mod tools {
     pub const PANEL_READ: &str = "panel_read";
     /// Find text and file names in this chat's folders, read only.
     pub const SEARCH: &str = "search";
+    /// This session's current access mode, read from the core.
+    pub const SESSION_STATUS: &str = "session_status";
+    /// Mistral's available connector catalog, without connecting anything.
+    pub const CONNECTORS_LIST: &str = "connectors_list";
+    /// Show one catalog connector for the person to review; never installs or authenticates.
+    pub const CONNECTOR_SUGGEST: &str = "connector_suggest";
     /// Capture protected-folder changes and wait (bounded) for the owner review.
     pub const PROPOSE_PROTECTED_CHANGE: &str = "propose_protected_change";
     /// The outcome of a proposal whose review was still open when `propose_protected_change` answered.
@@ -165,7 +174,10 @@ pub mod tools {
     }
 
     /// Every tool a session credential may call.
-    pub const SESSION_TOOLS: [&str; 32] = [
+    pub const SESSION_TOOLS: [&str; 35] = [
+        SESSION_STATUS,
+        CONNECTORS_LIST,
+        CONNECTOR_SUGGEST,
         PROCESSES_LIST,
         PORT_LEASE,
         PROCESS_START,
@@ -354,7 +366,7 @@ fn unconfirmed_process(tool: &str, reason: String) -> String {
         )
     } else if tools::CHROME_TOOLS.contains(&tool) {
         format!(
-            "{UNKNOWN_OUTCOME} Chrome Control did not return a confirmed reply. Check Chrome before trying again. ({reason})"
+            "{UNKNOWN_OUTCOME} Chrome Control did not return a confirmed reply, so the action may have run in Chrome. Check Chrome before trying again. ({reason})"
         )
     } else {
         reason

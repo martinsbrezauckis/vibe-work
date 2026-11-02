@@ -29,6 +29,7 @@ import { AboutSettings } from "./AboutSettings";
 import { BrowserSettings } from "./BrowserSettings";
 import { AgentDefaultsSettings } from "./AgentDefaultsSettings";
 import { AccountSettings } from "./AccountSettings";
+import { AccessibilitySettings } from "./AccessibilitySettings";
 import { AppearanceSettings } from "./AppearanceSettings";
 import { CliSharingSettings } from "./CliSharingSettings";
 import { KeepAwakeSettings } from "./KeepAwakeSettings";
@@ -71,6 +72,8 @@ function sections(category: string): ReactElement {
           <CopiesSettings />
         </>
       );
+    case "accessibility":
+      return <AccessibilitySettings />;
     case "appearance":
       return <AppearanceSettings />;
     case "account":

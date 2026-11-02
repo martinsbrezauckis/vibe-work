@@ -15,7 +15,7 @@
 //! Invariant: the only crate allowed to relax the `unsafe_code` ban, and only behind a safe API with a SAFETY comment.
 //! Only `process` (macOS `proc_pidinfo`, Windows process handles) and `webview` (feature `webview`: `WebView2` and
 //! `WKWebView` screenshots), `native_click` (scoped webview input), `private_file` (Windows DACLs and
-//! owners), `background` (per-thread scheduling), `window_keys` (the main window's bare Alt tap), `final_path` (Windows: `GetFinalPathNameByHandleW`),
+//! owners), `background` (per-thread scheduling), `window_keys` (the main window's bare Alt tap), `event_target` (tao's event-target window on a polite close), `final_path` (Windows: `GetFinalPathNameByHandleW`),
 //! `a11y_bus` (Linux: `NO_AT_BRIDGE` for one run, set only while the process has one thread),
 //! `content_rules` (macOS `WKContentRuleList` per preview webview, with URL rules), `web_transport` (macOS: the
 //! WebTransport preference of one preview webview), `exec_inherit` (Linux: close-on-exec for inherited
@@ -33,6 +33,7 @@ mod background;
 pub mod checked_executable;
 pub mod child_env;
 pub mod clipboard;
+pub mod screen_reader;
 pub use background::lower_thread_priority;
 #[cfg(target_os = "macos")]
 #[allow(unsafe_code)]
@@ -43,11 +44,13 @@ pub mod confirm_window;
 #[cfg(all(feature = "webview", target_os = "macos"))]
 #[allow(unsafe_code)]
 pub mod content_rules;
+mod event_target;
 #[cfg(target_os = "linux")]
 #[allow(unsafe_code)]
 mod exec_inherit;
 pub mod final_path;
 mod harden;
+mod in_front;
 pub mod keep_awake;
 #[cfg(windows)]
 #[allow(unsafe_code)]
@@ -79,9 +82,11 @@ pub mod webview2_env;
 pub mod window_capture;
 mod window_keys;
 
+pub use event_target::keep_event_target_on_close;
 #[cfg(target_os = "linux")]
 pub use exec_inherit::stop_descriptor_inheritance;
 pub use harden::{Hardening, harden_process, is_not_dumpable};
+pub use in_front::own_app_in_front;
 pub use notify::{DesktopNotifier, NotificationRequest, Notifier, NotifyError};
 pub use open_file::{
     OpenClass, OpenFileError, file_open_class, looks_like_program, open_class, open_file,
@@ -114,3 +119,8 @@ pub const CRATE_ROLE: &str = "OS integration: keychain, paths, PTY, notification
 pub fn version() -> &'static str {
     env!("CARGO_PKG_VERSION")
 }
+
+/// Native output controls for voice permission capture.
+#[cfg(all(feature = "webview", any(windows, target_os = "macos")))]
+#[allow(unsafe_code)]
+pub mod webview_audio;

@@ -21,12 +21,18 @@
 compile_error!("the e2e-script browser-origin seam is unavailable in release builds");
 
 pub mod accounts;
+mod audio;
+pub use audio::AudioQuiet;
+mod act_refusals;
 mod browse;
+mod cdp_frames;
 mod compose;
 mod console;
 mod downloads;
 mod engine;
 mod engine_pool;
+pub use act_refusals::ActRefusal;
+mod frames;
 mod hooks;
 mod ids;
 mod layout;
@@ -34,11 +40,14 @@ mod names;
 mod native_click;
 mod navigation;
 mod page_init;
+mod person_pointer;
 mod placement_gate;
 mod policy;
+mod popups;
 mod preview_error;
 mod service;
 mod service_evaluate;
+pub mod shields;
 mod shot;
 mod state;
 mod tabs;
@@ -46,6 +55,7 @@ mod url_rules;
 mod visibility;
 
 pub use browse::{LoadState, LoopbackGate, SHOTS_BLOCKED, shots_protected};
+pub use cdp_frames::{CDP_EVENTS, CdpDone, CdpFrames, CdpTransport, FramesDone};
 pub use compose::{PixelRect, canvas, crop, fit, paste};
 pub use console::{
     ConsoleEntry, ConsoleLevel, HOST_RING, MAX_RETURNED, MAX_TEXT, PAGE_RING, accessor_name,
@@ -59,14 +69,19 @@ pub use engine::{
     MountSpec, PageEvent, PreviewEngine, PreviewHooks, RequestCheck, Storage,
 };
 pub use engine_pool::{BrowserSaveGuard, EnginePoolSnapshot, MemoryProbe, effective_browser_cap};
+pub use frames::{
+    DETACHED_FRAME, FrameAnswer, UNREADABLE_FRAME, UNREPORTING_FRAME_REFUSAL,
+    checked_frame_request, detached_aware, validate_frame_point,
+};
 pub use ids::{LABEL_PREFIX, StorageKey, is_preview_label};
 pub use layout::{DeviceWidth, MIN_SIDE, PARKED_AREA, Placement, Rect, parked, place};
 pub use names::{
     CACHE_CAP, LOOKUP_LIMIT, MAX_LOOKUPS, MAX_QUEUED, MAX_WAITERS, NameResolver, NameStats,
     NameVerdict, RETRY_AFTER, TTL, UI_WAIT, system_resolver,
 };
-pub use native_click::{NativeClickGuard, NativeClickPoint};
+pub use native_click::{NativeClickGuard, NativeClickLease, NativeClickPoint};
 pub use page_init::{MENU_TOKENS, page_accessor, page_init_script, page_init_script_themed};
+pub use person_pointer::{PERSON_BUSY, PERSON_CLICKED, PersonInterval, PersonPointer};
 pub use placement_gate::{PlacementGate, for_window_generation};
 
 /// The all-frames document-start script that removes WebRTC (`js/no_peer_connections.js`). The engine adds it

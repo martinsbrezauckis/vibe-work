@@ -1,5 +1,5 @@
-//! Chat-owned saved attachment grants and successful document text, held only in core memory.
-//! Used by documents/save, removal, session deletion and `document_read`; paths require the saved SHA-256.
+//! Chat-owned attachment and original-file grants and successful text, held only in core memory.
+//! Used by documents/save, removal, session deletion and `document_read`; paths require their allowed SHA-256.
 //! A per-chat read lock shares concurrent extraction; full caches refuse new work without evicting results.
 
 use std::collections::BTreeMap;
@@ -43,13 +43,13 @@ struct Attachment {
 struct State {
     revoked: bool,
     paths: BTreeMap<PathBuf, Attachment>,
-    sources: BTreeMap<PathBuf, PathBuf>,
+    sources: BTreeMap<PathBuf, Digest>,
     text: BTreeMap<Digest, Text>,
     bytes: usize,
     reserved: bool,
 }
 
-pub(crate) type ReadReceiver = tokio::sync::watch::Receiver<Option<Result<Text, String>>>;
+pub(crate) type ReadReceiver = tokio::sync::watch::Receiver<Option<Result<(Text, bool), String>>>;
 
 #[derive(Default)]
 pub(crate) struct Chat {
@@ -62,6 +62,15 @@ impl State {
     fn authorizes(&self, path: &Path, digest: Digest) -> Result<(), String> {
         if self.revoked {
             return Err(CHAT_GONE.to_owned());
+        }
+        if path.is_absolute() {
+            return match self.sources.get(path) {
+                Some(allowed) if *allowed == digest => Ok(()),
+                _ => Err(format!(
+                    "{} has no permission for these document bytes.",
+                    path.display()
+                )),
+            };
         }
         match self.paths.get(path) {
             Some(attachment) if attachment.digest == digest => Ok(()),
@@ -96,24 +105,9 @@ impl Drop for Reservation<'_> {
 }
 
 impl Chat {
-    /// An explicitly allowed project file is now an attachment; repeated reads reuse that exact saved copy.
-    pub(crate) fn source(&self, path: &Path, digest: Digest) -> Option<PathBuf> {
-        let state = locked(&self.state);
-        let saved = state.sources.get(path)?;
-        state.authorizes(saved, digest).ok()?;
-        Some(saved.clone())
-    }
-
-    pub(crate) fn link_source(
-        &self,
-        source: PathBuf,
-        saved: PathBuf,
-        digest: Digest,
-    ) -> Result<(), String> {
-        let mut state = locked(&self.state);
-        state.authorizes(&saved, digest)?;
-        state.sources.insert(source, saved);
-        Ok(())
+    /// Source grants use canonical absolute paths; saved attachments use chat-relative paths.
+    pub(crate) fn authorize(&self, path: &Path, digest: Digest) -> Result<(), String> {
+        locked(&self.state).authorizes(path, digest)
     }
     /// Keeps space for the result while the composer may finish another explicit read.
     pub(crate) fn reserve(&self) -> Result<Reservation<'_>, String> {
@@ -172,6 +166,23 @@ impl Chat {
 pub(crate) struct SavedDocuments(Mutex<BTreeMap<String, Arc<Chat>>>);
 
 impl SavedDocuments {
+    /// Records permission for original bytes without saving a file. Ordered with session deletion.
+    pub(crate) fn allow_source(
+        &self,
+        shared: &Shared,
+        session: &str,
+        path: PathBuf,
+        digest: Digest,
+    ) -> Result<Arc<Chat>, String> {
+        let mut chats = locked(&self.0);
+        if shared.store.view(session).is_none() {
+            return Err(CHAT_GONE.to_owned());
+        }
+        let chat = chats.entry(session.to_owned()).or_default();
+        locked(&chat.state).sources.insert(path, digest);
+        Ok(chat.clone())
+    }
+
     /// Registers only bytes saved from the pending store. Session presence and registration are ordered
     /// with `forget`, which deletion calls immediately after removing the session from the store.
     pub(crate) fn register(

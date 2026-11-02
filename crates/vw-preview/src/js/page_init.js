@@ -60,7 +60,7 @@
   // The page can read the intent accessor, but only a trusted page-menu click can set it.
   Object.defineProperty(window, "__vw_context_menu_intent", {
     value: Object.freeze({ take: () => {
-      const ready = contextIntent && Date.now() < contextExpires;
+      const ready = contextIntent && performance.now() < contextExpires;
       contextIntent = false;
       return ready;
     } }),
@@ -72,7 +72,7 @@
   // reads it there.
   Object.defineProperty(window, "__vw_point_intent", {
     value: Object.freeze({ take: () => {
-      const ready = pointIntent && Date.now() < pointExpires;
+      const ready = pointIntent && performance.now() < pointExpires;
       pointIntent = false;
       return ready;
     } }),
@@ -169,7 +169,7 @@
           again?.removeAllRanges();
           again?.addRange(range);
           pointIntent = true;
-          pointExpires = Date.now() + 10000;
+          pointExpires = performance.now() + 10000;
         }
         contextChoice = "";
         contextTarget = null;
@@ -204,7 +204,7 @@
       if (click.isTrusted && contextMenu === menu) {
         contextReady = true;
         contextIntent = true;
-        contextExpires = Date.now() + 60000;
+        contextExpires = performance.now() + 60000;
         const expiry = contextExpires;
         window.setTimeout(() => {
           if (contextExpires === expiry) {
@@ -248,7 +248,7 @@
     const original = window[kind];
     if (typeof original !== "function") continue;
     window[kind] = function (message) {
-      if (Date.now() < agentUntil) {
+      if (performance.now() < agentUntil) {
         dialogs.push({ kind, message: String(message === undefined ? "" : message).slice(0, 300) });
         if (dialogs.length > 20) dialogs.shift();
         return answers[kind];
@@ -276,10 +276,10 @@
     stability,
     mutations: () => mutations,
     agentActing: (ms) => {
-      agentUntil = Date.now() + Math.max(0, Math.min(Number(ms) || 0, 10000));
+      agentUntil = performance.now() + Math.max(0, Math.min(Number(ms) || 0, 10000));
     },
     takeContextChoice: () => {
-      const value = contextReady && Date.now() < contextExpires ? contextChoice : "";
+      const value = contextReady && performance.now() < contextExpires ? contextChoice : "";
       const element = contextElement;
       const target = contextTarget;
       const tokenize = contextTokenize;

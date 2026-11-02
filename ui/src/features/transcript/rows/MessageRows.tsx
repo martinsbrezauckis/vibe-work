@@ -113,6 +113,7 @@ export const UserRow = memo(function UserRow({
       data-entry-id={entryId(entry)}
       data-item-id={entryId(entry)}
     >
+      <h2 className="sr">You said</h2>
       <div className="acts2">
         <MessageActions entry={entry} sessionId={sessionId} text={messageText(entry)} />
         <CopyButton testId="transcript.message-rows-copybutton" text={text} label="Copy message" />
@@ -224,6 +225,7 @@ export const AssistantRow = memo(function AssistantRow({
   const big = text.length > MESSAGE_CHARS;
   return (
     <div className={`a-msg${streaming ? " streaming" : ""}`} data-entry-id={id} data-item-id={id}>
+      <h2 className="sr">Vibe said</h2>
       {big && full ? (
         <pre className="out plain">{text}</pre>
       ) : (

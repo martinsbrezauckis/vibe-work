@@ -4,8 +4,8 @@
 // values and links that look like an API key are hidden (`keyLike`). Text is the page's visible text (layout-aware innerText), one window of it per
 // call (`REQ.textOffset`, `REQ.maxText`).
 // Hidden text is returned separately (bounded) for the prompt guard only.
-// REQ: { page, maxRefs, maxText, textOffset, find? }. Synchronous; the answer is untrusted page data.
-/* global ENV, KEY_TEXT, REQ, actionableCandidate, clip, collect, enabled, frameDoc, globalRect, hideKeys, inFrame, keyHolder, keyLike, labelOf, loginRole, refOf, rememberLabelledKeys, roleOf, secretKind, submitOrigins, vaultFilled, visible -- Supplied by the Rust script assembler and its shared prelude. */
+// REQ: { page, maxRefs, maxText, textOffset, find?, node? }. Synchronous; the answer is untrusted page data.
+/* global nodeIdentity, ENV, KEY_TEXT, REQ, actionableCandidate, clip, collect, enabled, frameDoc, globalRect, hideKeys, inFrame, keyHolder, keyLike, labelOf, loginRole, refOf, rememberLabelledKeys, roleOf, secretKind, submitOrigins, vaultFilled, visible, visualCandidate -- Supplied by the Rust script assembler and its shared prelude. */
 (() => {
   __VW_COMMON__
   const everything = collect();
@@ -14,8 +14,9 @@
   const out = { url: String(location.href).slice(0, 2000), displayUrl: hideKeys(String(location.href)).slice(0, 2000), title: clip(hideKeys(document.title), 300), readyState: document.readyState };
   const { truncated, crossOriginFrames } = everything;
   const needle = typeof REQ.find === "string" ? REQ.find.toLowerCase() : null;
-  // Search only redacted display fields, never the original value of a secret field.
-  const focusedMatch = item => needle === null ||
+  // Search only redacted display fields, never the original value of a secret field. A checked click's fresh
+  // observation (`REQ.node`) looks only for the node it clicks, so the ref cap never hides it.
+  const focusedMatch = item => typeof REQ.node === "number" ? item.node === REQ.node : needle === null ||
     [item.name, item.role, item.value].some(value => String(value || "").toLowerCase().includes(needle));
   const priority = el => {
     if (!visible(el)) return -1;
@@ -29,7 +30,7 @@
     return 1;
   };
   // Visible overlays precede body links, then offscreen and hidden controls.
-  const elements = everything.elements.filter(actionableCandidate)
+  const elements = everything.elements.filter(el => actionableCandidate(el) || visualCandidate(el))
     .map((el) => ({ el, rank: priority(el) }))
     .sort((a, b) => b.rank - a.rank).map(({ el }) => el);
   const refs = [];
@@ -52,7 +53,12 @@
     seen.add(ref);
     const role = roleOf(el);
     const label = labelOf(el);
-    const item = { ref, role, name: hideKeys(label, el), tag: el.localName };
+    const item = { ref, role, name: hideKeys(label, el), tag: el.localName, node: nodeIdentity(el),
+      box: Object.fromEntries(Object.entries(globalRect(el)).map(([key, value]) => [key, Math.round(value)])) };
+    if (visualCandidate(el)) {
+      item.coordinateKind = "region";
+      item.name ||= `${el.localName} region`;
+    }
     if (keyLike(label, el)) item.keyLike = true;
     if (role === "iframe") {
       let src;

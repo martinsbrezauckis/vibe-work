@@ -22,7 +22,7 @@ const KIND_TEXT: Record<string, string> = {
 /** The short kind words of a row. */
 const KIND_WORDS: Record<string, string> = {
   started: "started for the agent",
-  terminal: "started in the Terminal",
+  terminal: "started in the Terminal tab",
   vibe: "Vibe background process",
 };
 

@@ -291,7 +291,9 @@ async fn image_generate(
     };
     let made = tokio::time::timeout(config.image_deadline, keys.image_make(&job))
         .await
-        .map_err(|_| "Mistral did not finish the image in time; try again".to_owned())?
+        .map_err(|_| {
+            "Mistral did not finish the image in time, so no image was saved; try again".to_owned()
+        })?
         .map_err(|e| work::failure(&e).message)?;
     let stem = stem(args.get("name").and_then(Value::as_str), &prompt);
     let (folder, bytes, ext) = (folders[0].clone(), made.bytes.clone(), made.kind.ext());

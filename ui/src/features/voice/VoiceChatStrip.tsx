@@ -11,7 +11,7 @@ import { type ReactElement, useEffect } from "react";
 import { announce } from "../../state/announcer";
 
 import { useApp } from "../shell/AppContext";
-import { useVoiceChat, useVoiceSettings } from "./hooks";
+import { useVoiceChat, useVoicePrompt, useVoiceSettings } from "./hooks";
 
 /** The strip for `sessionId`, or nothing. */
 export function VoiceChatStrip({ sessionId }: { sessionId: string }): ReactElement | null {
@@ -22,6 +22,7 @@ export function VoiceChatStrip({ sessionId }: { sessionId: string }): ReactEleme
   const micPending = useVoiceChat((s) => s.micPending);
   const note = useVoiceChat((s) => s.note);
   const error = useVoiceChat((s) => s.error);
+  const phrase = useVoicePrompt((s) => s?.phrase);
   const auto = useVoiceSettings((s) => s.voiceChatAutoEnd);
   // Said once: an error. Not the loop's phases or the live words (Vibe Work's own voice is talking with the person,
   // and the microphone would hear the screen reader).
@@ -34,11 +35,13 @@ export function VoiceChatStrip({ sessionId }: { sessionId: string }): ReactEleme
     phase === "listening"
       ? micPending
         ? "Opening the microphone…"
-        : partial !== ""
-          ? partial
-          : auto
-            ? "Listening. Speak, then pause or press the voice button."
-            : "Listening. Speak, then press the voice button."
+        : phrase !== undefined
+          ? `Listening for your answer: ${phrase}.`
+          : partial !== ""
+            ? partial
+            : auto
+              ? "Listening. Speak, then pause or press the voice button."
+              : "Listening. Speak, then press the voice button."
       : phase === "sending"
         ? partial !== ""
           ? partial

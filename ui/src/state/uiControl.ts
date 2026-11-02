@@ -73,11 +73,11 @@ export function createUiControl() {
   const failures = new Map<string, CoreError>();
   // `over` turns true once the action let go (its slot ended): the wait stops, so no timer runs on for it.
   const drain = async (action: string, bounded: boolean, over: () => boolean): Promise<void> => {
-    const deadline = Date.now() + DRAIN_MS;
+    const deadline = performance.now() + DRAIN_MS;
     for (;;) {
       const pending = inflight.get(action);
       const actionPending = (actions.get(action)?.size ?? 0) > 0;
-      const left = bounded && !actionPending ? deadline - Date.now() : DRAIN_MS;
+      const left = bounded && !actionPending ? deadline - performance.now() : DRAIN_MS;
       if (over() || pending === undefined || pending.size === 0 || left <= 0) return;
       let timer: ReturnType<typeof setTimeout> | undefined;
       await Promise.race([

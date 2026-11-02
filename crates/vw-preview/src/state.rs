@@ -201,6 +201,8 @@ pub(crate) struct Entry {
     pub(crate) refused_why: VecDeque<(String, String)>,
     /// Lifetime refusal count; action receipts must also see repeated refusals of the same URL.
     pub(crate) refusals_seen: u64,
+    /// What the engine refused during agent acts, per `ActRefusal` (lifetime counts, for the act's receipt).
+    pub(crate) act_refusals: [u64; crate::act_refusals::ActRefusal::COUNT],
     /// The last recorded refusal, until the other hook reports the same navigation (one record per refusal).
     pub(crate) refusal_mark: Option<RefusalMark>,
     /// The network guard is proven active for the current mount: public hosts may load.
@@ -254,6 +256,7 @@ impl Entry {
             refused: VecDeque::new(),
             refused_why: VecDeque::new(),
             refusals_seen: 0,
+            act_refusals: [0; crate::act_refusals::ActRefusal::COUNT],
             refusal_mark: None,
             guarded: false,
             layers: Vec::new(),

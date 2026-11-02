@@ -49,19 +49,21 @@ members = [
 # code too: excluded from the workspace so our lints never apply to it.
 exclude = ["third_party/shellx-vault", "third_party/tauri-runtime-wry", "third_party/wry"]
 
-# tauri-runtime-wry 2.12.1 with one patch: on Windows it applies
+# tauri-runtime-wry 2.12.1 with native child-view patches: on Windows it applies
 # `data_store_identifier` as a WebView2 profile name (tauri-apps/tauri PR #16054), so each session's preview
 # keeps its own cookies even when WEBVIEW2_USER_DATA_FOLDER or the UserDataFolder policy overrides the
 # per-session data folder. Same version as the registry crate, so tauri 2.12.1 resolves to it. Byte-identical
 # to the published crate except src/lib.rs (third_party/tauri-runtime-wry/PROVENANCE.json). Exit: remove when
-# a release contains the change; vw-webview's mount check refuses a Windows preview without its own profile.
+# a release contains the changes; vw-webview's mount check refuses a Windows preview without its own profile.
+# Linux children start hidden until vw-webview places or parks them, so GtkBox never divides the main UI's
+# allocation with a newly created blank child. The main window's content still starts visible.
 [patch.crates-io]
 tauri-runtime-wry = { path = "third_party/tauri-runtime-wry" }
 # NAV: retain WK frame context through Tauri's URL-only callback (see the copy's PROVENANCE.json).
 wry = { path = "third_party/wry" }
 
 [workspace.package]
-version = "0.1.4"
+version = "0.1.5"
 edition = "2024"
 license = "MIT"
 authors = ["Martins Brezauckis"]

@@ -54,3 +54,5 @@ the local key proxy and vault handling, the installers and the update flow.
 - Browser web tabs are separate from the pinned App preview. The agent lists only its session's web tabs; closing a
   tab you opened asks you to Close or Keep unless you enable Close tabs you opened in Settings > Browser. The agent
   cannot change that permission or close App preview or another session's tab.
+- On Linux, the built-in Browser's reads leave out a frame that cannot run scripts inside a closed shadow root without
+  reporting it as unreadable; a click still checks its own target.

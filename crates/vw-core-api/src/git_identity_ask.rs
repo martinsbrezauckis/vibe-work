@@ -41,10 +41,33 @@ enum Answer {
 
 struct Pending {
     id: String,
+    opened_at: u64,
     /// The chat whose call opened it.
     session: String,
     answer: watch::Sender<Answer>,
     waiters: usize,
+}
+
+/// Value-free metadata for /asks; the existing typed Git answer supplies the name and email.
+pub(crate) fn question(shared: &Shared) -> Option<vw_ask::Ask> {
+    shared
+        .identity_asks
+        .lock()
+        .as_ref()
+        .filter(|pending| *pending.answer.borrow() == Answer::Open)
+        .map(|pending| vw_ask::Ask {
+            id: pending.id.clone(),
+            kind: "git_identity".into(),
+            session: Some(pending.session.clone()),
+            requester: vw_ask::Requester::Agent,
+            surface: vw_ask::Surface::Card,
+            title: "your Git name and email".into(),
+            opened_at: pending.opened_at,
+            offers: vec![],
+            person_only: false,
+            every_call: false,
+            always_setting: None,
+        })
 }
 
 /// The open question, and where the person's global Git settings are.
@@ -144,6 +167,7 @@ pub(crate) async fn ensure(shared: &Arc<Shared>, session: &str, cwd: &Path) -> R
             let (send, receive) = watch::channel(Answer::Open);
             *pending = Some(Pending {
                 id: id.clone(),
+                opened_at: shared.asks.now_ms(),
                 session: session.to_owned(),
                 answer: send,
                 waiters: 1,

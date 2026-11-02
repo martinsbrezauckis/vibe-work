@@ -23,6 +23,10 @@ use super::session::{folders, inside, tree_listeners, url};
 use super::{AgentTools, StartedHere};
 use crate::core::Shared;
 
+#[cfg(test)]
+#[path = "start_tests.rs"]
+mod tests;
+
 /// The label of processes started through `process_start` (registry, Debug API views). Never the command.
 pub(crate) const LABEL: &str = "process_start";
 /// What to start.
@@ -87,13 +91,22 @@ fn pick_port(
 ) -> Result<PortReservation, String> {
     if let Some(reservation) = reservation {
         let port = reservation.port();
-        let snapshot = shared.procmon.scan().map_err(|e| e.to_string())?;
-        if snapshot.listeners.iter().any(|l| l.port == port) || vw_procmon::bind_refused(port) {
-            return Err(format!(
-                "restart port {port} is not available to bind yet; the old process was stopped; call processes_list and start again on an available leased port"
-            ));
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            let snapshot = shared.procmon.scan().map_err(|e| e.to_string())?;
+            if !snapshot.listeners.iter().any(|l| l.port == port) && !vw_procmon::bind_refused(port)
+            {
+                return Ok(reservation);
+            }
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                return Err(format!(
+                    "restart port {port} is not available to bind yet; the old process was stopped; call processes_list and start again on an available leased port"
+                ));
+            }
+            // A stopped server's sockets can outlive it briefly. Keep its reservation while waiting.
+            std::thread::sleep(remaining.min(Duration::from_millis(50)));
         }
-        return Ok(reservation);
     }
     // A partial pool can still start a process; no available slot is reported by reserve below.
     if let Err(error) = shared.procmon.lease(session_id)

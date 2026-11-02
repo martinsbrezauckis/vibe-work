@@ -179,7 +179,20 @@ pub(crate) fn spawn(launch: &Launch, ids: &LiveIds) -> std::io::Result<(ServerCh
     }
     // Last resort for the leader; with JobObject it also makes the job kill-on-close.
     command.wrap(KillOnDrop);
-    let mut child = command.spawn()?;
+    // "Text file busy": a program written just before (a launch script) can still be open for writing in a child
+    // that another thread forked at that moment, until that child execs. It clears within milliseconds.
+    let mut busy_tries = 0;
+    let mut child = loop {
+        match command.spawn() {
+            Err(error)
+                if error.kind() == std::io::ErrorKind::ExecutableFileBusy && busy_tries < 5 =>
+            {
+                busy_tries += 1;
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
+            other => break other?,
+        }
+    };
     let missing = || std::io::Error::other("child pipe missing after spawn");
     let pipes = Pipes {
         stdin: child.stdin().take().ok_or_else(missing)?,

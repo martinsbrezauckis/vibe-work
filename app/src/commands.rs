@@ -314,9 +314,16 @@ pub async fn open_mail_link(host: State<'_, HostHandle>, url: String) -> Result<
 /// `invalidParams`, `denied` (rate cap) or `internal` (no notification service).
 #[tauri::command]
 pub async fn notify_session(
+    app: tauri::AppHandle,
     host: State<'_, HostHandle>,
     request: NotifyRequest,
 ) -> Result<(), CoreError> {
+    // The person is looking at the app (its own confirmation window has the focus, which the webview cannot see):
+    // nothing to announce, and a toast would take the foreground from that window.
+    if request.skip_when_app_in_front && crate::in_front::app_in_front(&app) {
+        tracing::debug!(session = %request.session_id, "OS notification skipped: the app is in front");
+        return Ok(());
+    }
     host.get().await.notify(&request)
 }
 

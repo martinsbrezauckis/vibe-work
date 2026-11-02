@@ -213,11 +213,12 @@ impl Browser {
             self.log_capture(session_id, by, what, &Err(error.clone()));
             return Err(error);
         }
+        let bound = self.bind_read(session_id, by).await.map_err(refused)?;
         let _flight = self.sessions().begin(session_id, by);
         let mut cancel = self.sessions().cancel_signal(session_id);
         cancel.borrow_and_update();
         let work = async {
-            tokio::time::timeout(CAPTURE_LIMIT, self.capture_inner(session_id, &request, &target))
+            tokio::time::timeout(CAPTURE_LIMIT, bound.capture_inner(session_id, &request, &target))
                 .await
                 .unwrap_or_else(|_| {
                     Err(failed(
@@ -283,6 +284,8 @@ impl Browser {
         request: &Request,
         target: &Target<'_>,
     ) -> Result<Value, ActError> {
+        #[cfg(feature = "e2e-script")]
+        self.before_image().await;
         let head = shot::step(self, session_id, "metrics", 0.0)
             .await
             .map_err(refused)?;

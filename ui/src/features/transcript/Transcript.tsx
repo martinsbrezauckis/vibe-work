@@ -85,7 +85,7 @@ export function Transcript({ sessionId }: { sessionId: string }): ReactElement {
   const todos = useMemo(() => latestTodos(history), [history]);
   const listRef = useRef<VListHandle>(null);
   const attention = rows.reduce((last, row, index) => (waiting(row) ? index : last), -1);
-  const follow = useFollow(listRef, rows.length, rows, { paused: finding, attention });
+  const follow = useFollow(listRef, rows.length, rows, { paused: finding || covered, attention });
   useStepTarget(sessionId, rows, listRef, follow.pause);
   // "Go to the waiting prompt": a card the list has not drawn is scrolled into view (it then takes the focus).
   useEffect(() => {
@@ -136,12 +136,18 @@ export function Transcript({ sessionId }: { sessionId: string }): ReactElement {
             data={rows}
             className="tx-list"
             aria-label={term("workNames", "session").name}
-            role="log"
+            role="list"
+            aria-live="off"
+            data-focus-region="transcript"
             tabIndex={0}
             onScroll={follow.onScroll}
             onResize={follow.onResize}
           >
-            {(row: Row) => <RowView key={row.key} row={row} sessionId={sessionId} />}
+            {(row: Row, index: number) => (
+              <div role="listitem" aria-posinset={index + 1} aria-setsize={rows.length}>
+                <RowView key={row.key} row={row} sessionId={sessionId} />
+              </div>
+            )}
           </VList>
         )}
         {follow.pinned ? null : (

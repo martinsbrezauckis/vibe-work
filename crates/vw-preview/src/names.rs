@@ -112,7 +112,9 @@ fn judge(host: &str, answers: Result<Vec<IpAddr>, String>) -> NameVerdict {
         }
         Ok(addrs) => addrs,
         Err(_) => {
-            return NameVerdict::Refused(format!("could not check where {host} points; try again"));
+            return NameVerdict::Refused(format!(
+                "could not check where {host} points (the lookup failed), so it was not opened; try again"
+            ));
         }
     };
     let mut verdict = NameVerdict::Public;
@@ -291,7 +293,7 @@ impl NameCheck {
     pub(crate) fn resolve(&self, host: &str) -> NameVerdict {
         self.quick(host, LOOKUP_LIMIT + Duration::from_millis(500))
             .unwrap_or_else(|| {
-                NameVerdict::Refused(format!("could not check where {host} points; try again"))
+                NameVerdict::Refused(format!("could not check where {host} points (the lookup failed), so it was not opened; try again"))
             })
     }
 
@@ -327,7 +329,7 @@ impl NameCheck {
                 let verdict = match rx.recv_timeout(LOOKUP_LIMIT) {
                     Ok(answers) => judge(&waited, answers),
                     Err(_) => NameVerdict::Refused(format!(
-                        "could not check where {waited} points; try again"
+                        "could not check where {waited} points (the lookup failed), so it was not opened; try again"
                     )),
                 };
                 this.finish(&waited, &verdict, true);

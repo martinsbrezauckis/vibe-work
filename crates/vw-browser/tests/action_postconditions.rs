@@ -317,9 +317,13 @@ async fn native_checkbox_postcondition_is_proved_and_failure_reason_is_preserved
     assert!(
         error
             .text
-            .starts_with("The box is still unchecked; the page did not accept the change."),
+            .contains("The box is still unchecked; the page did not accept the change."),
         "{error:?}"
     );
     assert!(error.text.contains("Do not repeat the act"), "{error:?}");
+    assert!(
+        error.text.starts_with(vw_browser::POST_INPUT_FAILED),
+        "the fixed sentence comes first: {error:?}"
+    );
     assert_eq!(rig.engine.native_clicks.load(Ordering::Relaxed), 2);
 }

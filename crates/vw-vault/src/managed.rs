@@ -72,9 +72,9 @@ pub(crate) struct AvailableVault {
 
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct SelectionRecord {
-    kind: VaultKind,
-    path: PathBuf,
+pub(crate) struct SelectionRecord {
+    pub(crate) kind: VaultKind,
+    pub(crate) path: PathBuf,
 }
 
 impl ManagedVault {
@@ -137,7 +137,8 @@ impl ManagedVault {
                 .is_some_and(|r| r.kind == VaultKind::VibeWork && r.path == self.legacy_dir)
             {
                 if !migration.relocated() {
-                    return Err(VaultError::SelectedVaultMissing);
+                    // Keep an absent legacy selection, just like an absent current one, until a choice succeeds.
+                    return Ok(());
                 }
                 self.relocate_record()
             } else if record.is_none()
@@ -187,7 +188,38 @@ impl ManagedVault {
         Ok(self.read_record(shared)?.map(|record| record.kind))
     }
 
-    fn read_record(&self, shared: &VaultLocation) -> Result<Option<SelectionRecord>, VaultError> {
+    /// A saved choice remains on disk while its folder is absent (including an unplugged drive).
+    pub(crate) fn selected_missing(&self, shared: &VaultLocation) -> Result<bool, VaultError> {
+        let Some(record) = self.read_record(shared)? else {
+            return Ok(false);
+        };
+        match std::fs::symlink_metadata(&record.path) {
+            Ok(_) => Ok(false),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(true),
+            Err(error) => Err(VaultError::io(
+                "find selected vault folder",
+                &record.path,
+                error,
+            )),
+        }
+    }
+
+    /// Only a present choice binds an explicit create/unlock action; this never changes the record.
+    pub(crate) fn present_selection(
+        &self,
+        shared: &VaultLocation,
+    ) -> Result<Option<VaultKind>, VaultError> {
+        if self.selected_missing(shared)? {
+            Ok(None)
+        } else {
+            self.selected(shared)
+        }
+    }
+
+    pub(crate) fn read_record(
+        &self,
+        shared: &VaultLocation,
+    ) -> Result<Option<SelectionRecord>, VaultError> {
         let raw = match std::fs::read(&self.selection_path) {
             Ok(raw) => raw,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
@@ -212,6 +244,24 @@ impl ManagedVault {
     }
 
     pub(crate) fn save(&self, shared: &VaultLocation, kind: VaultKind) -> Result<(), VaultError> {
+        self.save_inner(shared, kind, false)
+    }
+
+    /// Commits an explicit successful choice, replacing an absent selection only at this point.
+    pub(crate) fn save_choice(
+        &self,
+        shared: &VaultLocation,
+        kind: VaultKind,
+    ) -> Result<(), VaultError> {
+        self.save_inner(shared, kind, true)
+    }
+
+    fn save_inner(
+        &self,
+        shared: &VaultLocation,
+        kind: VaultKind,
+        replace_missing: bool,
+    ) -> Result<(), VaultError> {
         let path = self.path_for(shared, kind);
         let body = serde_json::to_vec_pretty(&SelectionRecord { kind, path })
             .map_err(|error| VaultError::Corrupt(error.to_string()))?;
@@ -219,11 +269,28 @@ impl ManagedVault {
             VaultError::Corrupt("vault selection has no parent folder".to_owned())
         })?;
         create_private_dir_all(dir)?;
+        let lock_path = dir.join(".vault-selection.lock");
+        check_path(&lock_path)?;
+        let lock = std::fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .read(true)
+            .write(true)
+            .open(&lock_path)
+            .map_err(|e| VaultError::io("open selection lock", &lock_path, e))?;
+        lock.lock()
+            .map_err(|e| VaultError::io("lock vault selection", &lock_path, e))?;
         let tmp = dir.join(format!(
             ".vault-selection-{}.tmp",
             hex::encode(vault_core::random_bytes::<8>())
         ));
         write_synced(&tmp, &body)?;
+        if replace_missing && self.selected_missing(shared)? {
+            let result = std::fs::rename(&tmp, &self.selection_path)
+                .map_err(|e| VaultError::io("save vault selection", &self.selection_path, e));
+            let _ = std::fs::remove_file(&tmp);
+            return result;
+        }
         // Create once: two app processes choosing different vaults cannot replace each other's
         // record. A concurrent identical choice is harmless; a different choice is refused.
         let publish = std::fs::hard_link(&tmp, &self.selection_path);

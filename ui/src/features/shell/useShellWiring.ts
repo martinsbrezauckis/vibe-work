@@ -7,7 +7,11 @@
  * the UI-control loop only polls while the Debug API is on, or always in browser dev mode where
  * the Debug API is the transport itself.
  */
+import { startRegionNavigation } from "./regionNavigation";
+import { startReplyAnnouncements } from "../transcript/replyAnnouncements";
+import { startAccessibility } from "./accessibilityWiring";
 import { guardActivationClick } from "./activationClick";
+import { startPromptActivity } from "../ask/permissionArrival";
 import { editorLayoutOf } from "../../state/editorLayout";
 import { startChromeSelections } from "../composer/chromeSelections";
 import { useEffect } from "react";
@@ -49,7 +53,36 @@ import { keyReadiness, vaultReadiness } from "../../state/keyReadiness";
 /** Installs the shell's wiring for the lifetime of the component. */
 export function useShellWiring(): void {
   const app = useApp();
+  useEffect(() => startAccessibility(app), [app]);
+  useEffect(startRegionNavigation, []);
+  useEffect(() => {
+    const voice = app.voice;
+    if (voice === null) return;
+    const dialogs = new MutationObserver(() => {
+      voice.voiceChat.prompt.reconcile();
+    });
+    dialogs.observe(document.body, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ["aria-modal", "role"],
+    });
+    const stops = [
+      () => {
+        dialogs.disconnect();
+      },
+      voice.prompts.watch(),
+      voice.voiceChat.store.subscribe(voice.prompts.resume),
+      voice.dictation.store.subscribe(voice.prompts.resume),
+      voice.narration.store.subscribe(voice.prompts.resume),
+    ];
+    return () => {
+      for (const stop of stops) stop();
+    };
+  }, [app]);
+  useEffect(() => startReplyAnnouncements(app), [app]);
   useEffect(guardActivationClick, []);
+  useEffect(startPromptActivity, []);
   useEffect(
     () =>
       app.core === null ? undefined : registerClipboard(app.core, () => app.uiControl.serving()),

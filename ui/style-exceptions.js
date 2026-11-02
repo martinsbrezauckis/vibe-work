@@ -81,3 +81,9 @@ export const nativeSelectors = new Map([
   ["git/BranchBar.tsx", new Set(["git.branch-bar-select-repo"])],
   ["git-browser/register.tsx", new Set(["git-browser.project-select"])],
 ]);
+
+// An ask card's answer options are a visible list, never a picker: every option and its description must be readable
+// before choosing. One radio list, by its hook; any other radio still requires Selector.
+export const optionLists = new Map([
+  ["ask/AnswerOptions.tsx", new Set(["transcript.question-card-option"])],
+]);
