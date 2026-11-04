@@ -94,20 +94,50 @@ pub(super) async fn prepare(
         .preview
         .as_ref()
         .map_or(&default_policy, |hub| hub.service.policy());
-    let preview = shared.preview.clone();
-    check_url(
-        url_policy,
-        args,
-        local_network,
-        |port| crate::preview_ports::port_owner(shared, &ports, session, port, true),
-        |name| async move {
-            match preview {
-                Some(hub) => hub.service.check_name(&name).await,
-                None => NameVerdict::Refused(format!("could not check where {name} points")),
+    let mut destinations = vec![args.clone()];
+    if args["action"] == "network.intercept" {
+        for rule in args["args"]["rules"].as_array().into_iter().flatten() {
+            let direct = rule["url"].as_str();
+            let headers = rule["headers"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter(|header| {
+                    header["name"]
+                        .as_str()
+                        .is_some_and(|name| name.eq_ignore_ascii_case("location"))
+                })
+                .filter_map(|header| header["value"].as_str());
+            for destination in direct.into_iter().chain(headers) {
+                // Relative redirects are judged against the paused request URL in Chrome. Absolute and
+                // scheme-relative destinations are already knowable here, so refuse them before dispatch.
+                let url = if destination.starts_with("//") {
+                    format!("https:{destination}")
+                } else {
+                    destination.to_owned()
+                };
+                if url::Url::parse(&url).is_ok() {
+                    destinations.push(json!({"action":"page.navigate","args":{"url":url}}));
+                }
             }
-        },
-    )
-    .await?;
+        }
+    }
+    for destination in destinations {
+        let preview = shared.preview.clone();
+        check_url(
+            url_policy,
+            &destination,
+            local_network,
+            |port| crate::preview_ports::port_owner(shared, &ports, session, port, true),
+            |name| async move {
+                match preview {
+                    Some(hub) => hub.service.check_name(&name).await,
+                    None => NameVerdict::Refused(format!("could not check where {name} points")),
+                }
+            },
+        )
+        .await?;
+    }
     args["_netPolicy"] = policy(local_network, &ports.allowed(true));
     Ok(())
 }
@@ -312,7 +342,7 @@ mod switch_delivery_tests {
         let shared = &core.shared;
         let deliveries: Arc<Mutex<Vec<Value>>> = Arc::default();
         let log = deliveries.clone();
-        let _seen = shared.chrome_control.owner.answering(move |_, args| {
+        let _seen = super::super::test_support::answering(shared, move |_, args| {
             let Some(change) = args.get("_netPolicyChange") else {
                 return json!({"isError":false,"content":[],"structuredContent":{}});
             };

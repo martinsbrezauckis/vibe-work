@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The one command every change must pass: formatting, lints, tests, size and public-paths guards.
+# The one command every change must pass: formatting, lints, tests, size, macOS minimum and public-paths guards.
 #
 # Role: single entry point for local runs and CI. Depends on: cargo, pnpm (node_modules installed),
 # node 20+, git. Called by: developers, agents, CI. Run from anywhere: it changes to the repo root.
@@ -113,11 +113,14 @@ step "ui: format" pnpm --filter vibe-work-ui format:check
 step "ui: test" capped pnpm --filter vibe-work-ui test
 step "size check" node scripts/public/check_size.mjs
 step "colour check (tokens only)" node scripts/public/check_colors.mjs
+step "macOS minimum and preview network guard" node scripts/public/check_macos_minimum.mjs
 step "public-paths scan" node scripts/public/check_public_paths.mjs
 step "generated-code check" generated_code_check tools/public/codegen/generate.py
 step "skills generated-code check" generated_code_check crates/vw-skills/tools/generate.py
 step "vocabulary reference drift" node tools/public/codegen/vocabulary.mjs --check
 # ui/src/protocol/core/ is generated from the Rust core API types (crates/vw-core-api, ts-rs).
+step "release features" node scripts/public/check_release_features.mjs
+step "Linux TLS dependencies" node scripts/public/check_linux_tls.mjs
 step "core API TypeScript drift" capped cargo run -q -p vw-core-api --features ts --bin gen-core-ts -- --check
 
 if [ "${#failed_steps[@]}" -gt 0 ]; then

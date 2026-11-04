@@ -8,6 +8,7 @@
  */
 import { summarize } from "../../state/sessionSummary";
 import type { App } from "./AppContext";
+import { coveringPage } from "./coveringPage";
 
 /** What Home would show now (for the Debug API and tests). */
 export function homeTarget(app: App): { sessionId: string | null; title: string | null } {
@@ -19,12 +20,7 @@ export function homeTarget(app: App): { sessionId: string | null; title: string 
 
 /** Whether a page lies over the work view (Home has something to do). */
 export function awayFromHome(app: App): boolean {
-  return (
-    app.shell.store.get().settings.open ||
-    (app.projects?.store.get().open ?? false) ||
-    (app.connectors?.store.get().open ?? false) ||
-    (app.libraries?.store.get().open ?? false)
-  );
+  return coveringPage(app) !== null;
 }
 
 /** Leaves Settings, the Projects overview and the Tools page; the work view underneath shows again unchanged. */

@@ -39,7 +39,7 @@ impl TauriEngine {
                 .initialization_script_for_all_frames(vw_preview::NO_PEER_CONNECTIONS_SCRIPT);
         }
         let builder = builder
-            .initialization_script(spec.console_script.clone())
+            .initialization_script_for_all_frames(spec.console_script.clone())
             .disable_drag_drop_handler()
             .zoom_hotkeys_enabled(false)
             .general_autofill_enabled(false)

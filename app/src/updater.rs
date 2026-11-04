@@ -76,8 +76,8 @@ pub fn plugin_if_configured<R: Runtime>(
     }
 }
 
-/// Creates the manager for this run, stores it in `handle` and, in a user build, schedules the one check after
-/// start. Called from `setup` when [`plugin_if_configured`] returned a plugin.
+/// Creates the manager for this run, stores it in `handle` and, in a user build, schedules the check after
+/// start and every 24 hours. Called from `setup` when [`plugin_if_configured`] returned a plugin.
 pub fn start<R: Runtime>(
     app: &AppHandle<R>,
     handle: &UpdatesHandle,
@@ -257,10 +257,24 @@ fn entry_minimum<'a>(
     Ok(entry.get(field))
 }
 
+/// Development builds only: `VW_DEV_SYSTEM_VERSION=<version>` (`13.6.1`) is what the update check takes as this
+/// computer's macOS or Windows version, so a test on a current Mac shows what an app on an older macOS does with
+/// an announcement that needs a newer one (no Mac on macOS 11-13 exists for the tests). Release builds never read it.
+fn dev_system_version() -> Option<String> {
+    crate::startup::DEV_BUILD
+        .then(|| std::env::var("VW_DEV_SYSTEM_VERSION").ok())
+        .flatten()
+        .filter(|version| !version.is_empty())
+}
+
 /// This computer's system as the update check compares it: its name, the manifest field it reads, and its value
 /// (`None` when it cannot be read: a valid minimum then imposes no restriction). Linux: running glibc; macOS and
-/// Windows: the system version (`minimumSystemVersion`).
+/// Windows: the system version (`minimumSystemVersion`), or [`dev_system_version`] in a development build.
 fn this_system() -> (&'static str, &'static str, Option<String>) {
+    this_system_with(dev_system_version())
+}
+
+fn this_system_with(dev_version: Option<String>) -> (&'static str, &'static str, Option<String>) {
     if cfg!(target_os = "linux") {
         return (
             "Linux",
@@ -269,7 +283,11 @@ fn this_system() -> (&'static str, &'static str, Option<String>) {
         );
     }
     match vw_platform::system_version() {
-        Some((os, version)) => (os, vw_host::update_os::minimum_field(os), Some(version)),
+        Some((os, version)) => (
+            os,
+            vw_host::update_os::minimum_field(os),
+            Some(dev_version.unwrap_or(version)),
+        ),
         None => (
             "this system",
             vw_host::update_os::MINIMUM_SYSTEM_VERSION,
@@ -413,10 +431,7 @@ impl<R: Runtime> UpdateHooks for AppHooks<R> {
         if let Err(error) = notifier.show(
             NotificationRequest { title, body },
             Box::new(move || {
-                if let Some(window) = crate::main_window(&app) {
-                    let _ = window.unminimize();
-                    let _ = window.set_focus();
-                }
+                let _ = crate::tray::reveal_main_window(&app);
                 if let Some(host) = app
                     .try_state::<HostHandle>()
                     .and_then(|handle| handle.try_get())
@@ -562,6 +577,16 @@ mod manifest_format {
             assert_eq!((os, field), ("macOS", system));
             assert!(current.is_some());
         }
+        // A development build's stand-in version replaces the system version on macOS and Windows only; Linux
+        // keeps reading its glibc.
+        let (os, field, stand_in) = super::this_system_with(Some("13.6.1".to_owned()));
+        if cfg!(target_os = "linux") {
+            assert_eq!((os, field), ("Linux", glibc));
+            assert_ne!(stand_in.as_deref(), Some("13.6.1"));
+        } else if cfg!(any(target_os = "macos", target_os = "windows")) {
+            assert_eq!(field, system);
+            assert_eq!(stand_in.as_deref(), Some("13.6.1"));
+        }
         // The running build's own target is one of them (x86_64 Windows/Linux, Apple-silicon macOS).
         if let Some(target) = tauri_plugin_updater::target() {
             let shipped = make_latest_json::PLATFORMS
@@ -575,4 +600,12 @@ mod manifest_format {
             assert_eq!(shipped, expected, "target {target}");
         }
     }
+}
+
+/// Test builds: use the actual ready-notification hook, including its native click callback.
+#[cfg(feature = "e2e-script")]
+pub(crate) fn test_notice(app: &AppHandle) {
+    AppHooks { app: app.clone() }.notify(UpdateNotice::Ready {
+        version: "0.1.6".to_owned(),
+    });
 }

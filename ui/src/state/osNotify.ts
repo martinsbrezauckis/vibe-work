@@ -253,7 +253,7 @@ export function textFor(t: Transition): { title: string; body: string } {
   return { title: "Vibe Work", body: `${prefix}${bounded}` };
 }
 
-/** Full text retained in the app and shown after notification activation. */
+/** Full text retained in the bell; activation opens its chat when available. */
 export function fullTextFor(t: Transition): string {
   if (t.kind === "permission" && t.subject !== undefined)
     return `Vibe needs your answer about ${t.subject} in “${t.title}”.`;

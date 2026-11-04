@@ -131,10 +131,10 @@ export function hookLine(entry: Obj, steps: ReadonlyMap<string, Obj>): HookLine 
   }
   // A successful transport binding/rewrite is diagnostic bookkeeping, not conversation text.
   if (
-    name === "vibe-work tool receipt" &&
     reason === null &&
-    (status === "ok" ||
-      (detail["scope"] === "pre_tool" &&
+    ((name === "vibe-work tool receipt" && status === "ok") ||
+      ((name === "vibe-work tool receipt" || name === "vibe-work folder guard") &&
+        detail["scope"] === "pre_tool" &&
         status === "warning" &&
         /^Rewrote tool_input for '[a-z][a-z0-9_]*'$/.test(content)))
   )

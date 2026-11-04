@@ -9,7 +9,9 @@
  * source link and the project page open in the system browser through the core's `openLink` (the same path as every
  * external link), never inside a webview; nothing here fetches either page.
  */
-import { LinkButton } from "../../components/Controls";
+import { feedbackFor } from "../../state/feedback";
+import { FEEDBACK_ENABLED } from "../../state/feedbackEnabled";
+import { Button, LinkButton } from "../../components/Controls";
 import { type ReactElement, useState } from "react";
 
 import { BrandMark } from "../../components/BrandMark";
@@ -110,6 +112,28 @@ export function AboutSettings(): ReactElement {
           description="Vibe Work's page in the ShellX family of apps"
         />
       </p>
+      {FEEDBACK_ENABLED && (
+        <div className="key-line">
+          <Button
+            data-testid="settings.report-bug"
+            shape="outlined"
+            onClick={() => {
+              if (core) void feedbackFor(core).open("bug");
+            }}
+          >
+            Report a bug…
+          </Button>
+          <Button
+            data-testid="settings.request-feature"
+            shape="outlined"
+            onClick={() => {
+              if (core) void feedbackFor(core).open("feature");
+            }}
+          >
+            Ask for a feature…
+          </Button>
+        </div>
+      )}
       <div className="about-data" data-setting="data-retention">
         <h4>Data retention</h4>
         <div className="check">

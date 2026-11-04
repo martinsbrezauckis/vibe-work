@@ -12,7 +12,7 @@
 //!   mount and refuses a preview without it.
 //! - macOS 14+: `data_store_identifier(<key>)` (`WKWebsiteDataStore(forIdentifier:)`). Below 14, public browser
 //!   pages use the persistent default store (also used by the trusted main window); local/LAN pages are incognito.
-//!   With the feature `macos-proxy` (0.1.3, minimum macOS 14) always the identified store, never the default one:
+//!   With the feature `macos-proxy` (the app's default since 0.1.7, minimum macOS 14) always the identified store:
 //!   the store carries the network guard's proxy (`engine` `proxy_for`, one listener per store).
 //!
 //! Depends on: tauri, vw-platform (user-only folders), vw-preview (`Storage`). Called by: `engine`.

@@ -8,7 +8,8 @@
 //! Vibe's own traffic) **and to a file of its own** in the app's data folder ([`settings_file`]), and reads only that
 //! file at its start.
 //!
-//! **Trust boundary:** the core never reads Vibe's `.env`. The agent can write that file, and the core's clients carry
+//! **Trust boundary:** core clients never take routing or CA authority from Vibe's `.env`. The key service reads it
+//! only to migrate and forward Vibe's own traffic. The agent can write that file, and the core's clients carry
 //! the real Mistral key (the model proxy adds it), so a proxy and certificate authority planted there would let
 //! an agent read the key at the next launch. Vibe holds only the placeholder key, so its own use of the `.env` is
 //! harmless. The app-data file is agent-writable too: custom values are authenticated with a random key in the
@@ -31,6 +32,11 @@
 //! - A value that cannot be applied (an unreadable certificate, an address that no longer parses) is logged
 //!   without its content and skipped; it never stops a client from being built.
 //! - Nothing here logs a proxy address unmasked.
+
+#[cfg(feature = "proxy-transports")]
+mod guard;
+#[cfg(feature = "proxy-transports")]
+pub use guard::{guard_current, guard_settings};
 
 mod check;
 mod prepare;
@@ -68,6 +74,10 @@ const MAX_DIR_FILES: usize = 1000;
 /// One set of proxy and certificate values. Empty means "not set".
 #[derive(Clone, Default, PartialEq, Eq)]
 pub struct NetworkSettings {
+    /// Per-proxy TLS roots recovered from its vault item, never from a mutable Vibe certificate path.
+    pub proxy_certificates: std::collections::BTreeMap<String, Vec<Vec<u8>>>,
+    /// Opaque vault item ids for proxy sign-ins. The MAC covers these along with the public endpoints.
+    pub proxy_credentials: std::collections::BTreeMap<String, String>,
     /// `HTTP_PROXY`: the proxy for http requests.
     pub http_proxy: Option<String>,
     /// `HTTPS_PROXY`: the proxy for https requests.
@@ -176,6 +186,28 @@ impl NetworkSettings {
     #[must_use]
     pub fn effective(saved: &Self, environment: &Self) -> Self {
         Self {
+            proxy_certificates: environment
+                .proxy_certificates
+                .iter()
+                .chain(
+                    saved
+                        .proxy_certificates
+                        .iter()
+                        .filter(|(key, _)| environment.get(key).is_none()),
+                )
+                .map(|(key, roots)| (key.clone(), roots.clone()))
+                .collect(),
+            proxy_credentials: environment
+                .proxy_credentials
+                .iter()
+                .chain(
+                    saved
+                        .proxy_credentials
+                        .iter()
+                        .filter(|(key, _)| environment.get(key).is_none()),
+                )
+                .map(|(key, id)| (key.clone(), id.clone()))
+                .collect(),
             http_proxy: environment
                 .http_proxy
                 .clone()
@@ -258,6 +290,8 @@ impl NetworkSettings {
         if self.get(key) == value {
             return self;
         }
+        self.proxy_credentials.remove(key);
+        self.proxy_certificates.remove(key);
         match key {
             "HTTP_PROXY" => self.http_proxy = value,
             "HTTPS_PROXY" => self.https_proxy = value,
@@ -393,14 +427,21 @@ pub fn settings_file(app_data: &Path) -> PathBuf {
 
 /// Verifies the core's settings record before applying it, lets the trusted process environment win per key,
 /// and makes the result current before any key-bearing client is constructed.
+#[must_use]
 pub fn load_for_launch(file: &Path, key: Option<&NetworkMacKey>) -> LoadedSettings {
     let mut loaded = read_settings(file, key);
-    let effective =
-        NetworkSettings::effective(&loaded.settings, &NetworkSettings::from_environment());
+    install_for_launch(&loaded.settings, &NetworkSettings::from_environment());
+    loaded.settings = (*current()).clone();
+    loaded
+}
+
+/// Installs verified settings after the key service replaced vault references with local forwarder addresses.
+pub fn install_for_launch(saved: &NetworkSettings, environment: &NetworkSettings) {
+    #[cfg(feature = "proxy-transports")]
+    guard::set(saved, environment);
+    let effective = NetworkSettings::effective(saved, environment);
     tracing::info!(settings = ?effective, "network settings loaded");
     set_current(effective.clone());
-    loaded.settings = effective;
-    loaded
 }
 
 #[cfg(test)]

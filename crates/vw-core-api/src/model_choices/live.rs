@@ -22,7 +22,9 @@ pub(crate) fn admission(method: &str, params: &Value) -> Value {
 }
 
 pub(crate) async fn publish(shared: &Arc<Shared>, id: &str, runtime: Value) {
+    let previous_mode = crate::chrome_control::check::mode(shared, id);
     shared.access.observe_runtime(id, &runtime);
+    crate::chrome_control::check::mode_changed(shared, id, previous_mode.as_deref());
     shared.model_choices.learn(&runtime);
     let applied = shared.store.apply(vw_session::Notification::new(
         "runtime/updated",

@@ -1,6 +1,6 @@
 /** Confirmed Chrome connection state and settings commands. Used by the Browser section and dialogs. */
 import { TEXT } from "../../../vocabulary";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type {
   ChromeControlRequest,
@@ -25,13 +25,30 @@ export interface ChromeControlState {
   status: ChromeStatus | null;
   readError: string | null;
   /** Runs one request; resolves to its result, or null when it did not go through (the status says why). */
+  connect: () => Promise<void>;
   run: (request: ChromeControlRequest, key: string) => Promise<CommandResult | null>;
 }
 
 /** Reads the view once (if the store has none yet) and runs changes. */
-export function useChromeControl(): ChromeControlState {
+export function useChromeControl(
+  browser: "Chrome" | "Edge" | "Firefox" = "Chrome",
+): ChromeControlState {
   const { core } = useApp();
-  const view = useCoreState((s) => s.chromeControl);
+  const stored = useCoreState((s) => s.chromeControl);
+  const view = useMemo(
+    () =>
+      browser === "Firefox"
+        ? stored?.firefox === undefined
+          ? null
+          : { ...stored, setup: stored.firefox }
+        : browser === "Edge"
+          ? stored?.edge === undefined
+            ? null
+            : { ...stored, setup: stored.edge }
+          : stored,
+    [browser, stored],
+  );
+  const connecting = useRef(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [status, setStatus] = useState<ChromeStatus | null>(null);
   const [readError, setReadError] = useState<string | null>(null);
@@ -53,10 +70,33 @@ export function useChromeControl(): ChromeControlState {
       setBusy(key);
       setStatus(null);
       try {
-        const result = await core.run({ type: "chromeControl", request });
+        const selected: ChromeControlRequest =
+          browser === "Firefox"
+            ? request.op === "offerSetup"
+              ? { op: "offerFirefoxSetup" }
+              : request.op === "setup"
+                ? { op: "setupFirefox", offerId: request.offerId }
+                : request.op === "openStore"
+                  ? { op: "openFirefoxStore" }
+                  : request
+            : browser === "Edge"
+              ? request.op === "offerSetup"
+                ? { op: "offerEdgeSetup" }
+                : request.op === "setup"
+                  ? { op: "setupEdge", offerId: request.offerId }
+                  : request.op === "openStore"
+                    ? { op: "openEdgeStore" }
+                    : request
+              : request;
+        const result = await core.run({ type: "chromeControl", request: selected });
         if (request.op === "remove")
           setStatus({
-            text: TEXT.chromeRemoved,
+            text:
+              result.type === "chromeControl" && result.view.setup.extensionRestart === true
+                ? "Removed. Restart Chrome to finish."
+                : result.type === "chromeControl" && result.view.setup.extensionLeft === true
+                  ? TEXT.chromeRemoved
+                  : "Removed.",
             alert: false,
           });
         return result;
@@ -72,8 +112,57 @@ export function useChromeControl(): ChromeControlState {
         setBusy(null);
       }
     },
-    [core],
+    [core, browser],
   );
 
-  return { view, busy, status, readError, run };
+  const connect = useCallback(async () => {
+    if (core === null || connecting.current) return;
+    connecting.current = true;
+    setBusy("connect");
+    setStatus(null);
+    try {
+      const current = core.store.get().chromeControl;
+      if (current?.setup.state === "notSetUp") {
+        const offer = await core.run({ type: "chromeControl", request: { op: "offerSetup" } });
+        if (offer.type !== "chromeControl" || offer.offer === null)
+          throw new Error("Chrome setup unavailable");
+        await core.run({
+          type: "chromeControl",
+          request: { op: "setup", offerId: offer.offer.offerId },
+        });
+      } else if (
+        current?.setup.addon?.action === "turnOn" ||
+        (current?.setup.addon === undefined && current?.setup.pairing === "Paired")
+      ) {
+        await core.run({ type: "chromeControl", request: { op: "setEnabled", enabled: true } });
+      } else {
+        await core.run({ type: "chromeControl", request: { op: "connect" } });
+      }
+    } catch (thrown) {
+      setStatus({ text: toCallError(thrown).error.message, alert: true });
+    } finally {
+      connecting.current = false;
+      setBusy(null);
+    }
+  }, [core]);
+
+  const setupState = view?.setup.state;
+  // Core owner notifications supply pairing; reads also discover extension installation and restart completion.
+  useEffect(() => {
+    if (
+      core === null ||
+      setupState === undefined ||
+      setupState === "absent" ||
+      setupState === "notSetUp"
+    )
+      return;
+    const timer = setInterval(() => {
+      void core.run({ type: "chromeControl", request: { op: "read" } }).catch(() => undefined);
+    }, 3000);
+    return () => {
+      clearInterval(timer);
+    };
+  }, [core, setupState]);
+
+  return { view, busy, status, readError, run, connect };
 }

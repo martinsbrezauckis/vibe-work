@@ -255,7 +255,15 @@ enabled: boolean, } | { "op": "offerSetup", } | { "op": "setup",
 /**
  * The offer's id.
  */
-offerId: string, } | { "op": "openStore", } | { "op": "remove", };
+offerId: string, } | { "op": "openStore", } | { "op": "connect", } | { "op": "offerEdgeSetup", } | { "op": "setupEdge",
+/**
+ * The offer shown to the person.
+ */
+offerId: string, } | { "op": "openEdgeStore", } | { "op": "offerFirefoxSetup", } | { "op": "setupFirefox",
+/**
+ * The offer shown to the person.
+ */
+offerId: string, } | { "op": "openFirefoxStore", } | { "op": "openFirefox", } | { "op": "closeFirefox", } | { "op": "remove", };
 
 export type ChromeControlView = {
 /**
@@ -285,7 +293,15 @@ selectionError: string | null,
 /**
  * Where the setup stands.
  */
-setup: ChromeSetupView, };
+setup: ChromeSetupView,
+/**
+ * Edge's own setup and pairing state, absent while the optional module is off.
+ */
+edge?: ChromeSetupView,
+/**
+ * Firefox setup, omitted while the optional module is off.
+ */
+firefox?: ChromeSetupView, };
 
 export type ChromeWorkView = {
 /**
@@ -295,7 +311,11 @@ sessionId: string,
 /**
  * Active, connecting, stopping, stopped or disconnected.
  */
-state: string, };
+state: string,
+/**
+ * Browser of this chat's selected or last browser session, when known.
+ */
+browser?: string, };
 
 export type ChromeSelection = {
 /**
@@ -378,6 +398,65 @@ pairing: string,
 /**
  * Short public identity to compare with Chrome (never the owner secret).
  */
-fingerprint: string | null, };
+fingerprint: string | null,
+/**
+ * A detected unsupported or missing browser; absent in older saved views.
+ */
+browserIssue?: ChromeBrowserIssue,
+/**
+ * External installation is waiting for Chrome, or a macOS restart.
+ */
+installState?: string,
+/**
+ * Browser-reported permission states, absent for existing browser views.
+ */
+states?: Array<string>,
+/**
+ * The one Your Chrome state the card and the agent share (label, action, instruction).
+ * Always set by the core; absent only in older saved views.
+ */
+addon?: ChromeAddonView,
+/**
+ * After Remove: the extension is still in a Chrome profile (Chrome did not remove it by itself), so the person
+ * removes it in Chrome too. Absent: nothing is known to be left.
+ */
+extensionLeft?: boolean,
+/**
+ * After Remove, Chrome must restart to finish removing its externally installed extension.
+ */
+extensionRestart?: boolean, };
 
-export type ChromeSetupState = "absent" | "notSetUp" | "waitingForExtension" | "extensionAdded";
+export type ChromeSetupState = "absent" | "notSetUp" | "repairRequired" | "waitingForExtension" | "extensionAdded";
+
+export type ChromeBrowserIssue = "missing" | "sandboxed" | "differentBrowser";
+
+export type ChromeAddonView = {
+/**
+ * Where it stands.
+ */
+state: ChromeAddonState,
+/**
+ * This browser's installed extension version, including while off; null when not installed.
+ * Older saved views may omit it; current core views always serialize it.
+ */
+extensionVersion?: string | null,
+/**
+ * The card's short label.
+ */
+label: string,
+/**
+ * The card's one action; `None`: the next step is in Chrome or needs nothing.
+ */
+action: ChromeAddonAction | null,
+/**
+ * One line for the person: why, and what to do.
+ */
+instruction: string,
+/**
+ * A short instruction for a step in Chrome; absent when no such step is needed.
+ */
+step?: string, };
+
+export type ChromeAddonState = "unavailable" | "notSetUp" | "chromeMissing" | "chromeSandboxed" | "otherBrowser" | "switchedOff" | "inReview" | "otherOwner" | "connecting" | "notPaired" | "helperNotRunning" | "helperSetupRequired" | "turnedOffInChrome" | "restartChrome" | "updateNeeded" | "chromeClosed" | "enableInChrome" | "extensionNotInstalled" | "notConnected" | "connected";
+
+export type ChromeAddonAction = "connect" | "setupAgain" | "openPairingPage" | "turnOn";

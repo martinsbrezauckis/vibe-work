@@ -1,6 +1,7 @@
 /** Shared tab-list, tab and close controls; features retain their existing selection, drag and keyboard behavior. Uses native semantics and presentation classes. */
 import { createContext, useContext, type ComponentProps } from "react";
 const PRESENTATIONS = {
+  segmented: ["ui-segments", "ui-segment", ""],
   underline: ["ttabs", "ttab", ""],
   pill: ["ptabs", "ptab", "ptab-x"],
   strip: ["vw-term-tabs", "vw-term-tab", ""],
@@ -14,11 +15,45 @@ type TabProps = Omit<ComponentProps<"button">, "className" | "role"> & { "data-t
 export function Tabs({
   variant = "underline",
   children,
+  onKeyDown,
   ...props
-}: Omit<ComponentProps<"div">, "className" | "role"> & { variant?: Variant }) {
+}: Omit<ComponentProps<"div">, "className" | "role"> & {
+  variant?: Variant;
+  "data-testid"?: string;
+}) {
   return (
     <Presentation value={variant}>
-      <div {...props} className={PRESENTATIONS[variant][0]} role="tablist">
+      <div
+        {...props}
+        data-testid={props["data-testid"]}
+        className={PRESENTATIONS[variant][0]}
+        role="tablist"
+        onKeyDown={(event) => {
+          onKeyDown?.(event);
+          if (variant !== "segmented" || event.defaultPrevented) return;
+          const tabs = [
+            ...event.currentTarget.querySelectorAll<HTMLButtonElement>(
+              '[role="tab"]:not(:disabled)',
+            ),
+          ];
+          const index = tabs.indexOf(event.target as HTMLButtonElement);
+          if (index < 0) return;
+          const next =
+            event.key === "Home"
+              ? 0
+              : event.key === "End"
+                ? tabs.length - 1
+                : event.key === "ArrowRight"
+                  ? (index + 1) % tabs.length
+                  : event.key === "ArrowLeft"
+                    ? (index + tabs.length - 1) % tabs.length
+                    : null;
+          if (next === null) return;
+          event.preventDefault();
+          tabs[next]?.focus();
+          tabs[next]?.click();
+        }}
+      >
         {children}
       </div>
     </Presentation>
@@ -31,6 +66,13 @@ export function Tab(props: TabProps) {
     <button
       type="button"
       {...props}
+      tabIndex={
+        variant === "segmented"
+          ? props["aria-selected"] === true || props["aria-selected"] === "true"
+            ? 0
+            : -1
+          : props.tabIndex
+      }
       data-testid={props["data-testid"]}
       className={PRESENTATIONS[variant][1]}
       role="tab"

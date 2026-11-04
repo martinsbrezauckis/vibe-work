@@ -56,11 +56,10 @@ export function pastesIn(draft: string, pastes: readonly PasteItem[]): PasteItem
     .map(({ item }) => item);
 }
 
-/** `draft` with every known marker replaced by its paste's full text. */
+/** Replace known spans in the original draft once; marker text inside a paste stays literal. */
 export function expandPastes(draft: string, pastes: readonly PasteItem[]): string {
-  let text = draft;
-  for (const item of pastes) text = text.split(pasteMarker(item)).join(item.text);
-  return text;
+  const held = new Map(pastes.map((item) => [pasteMarker(item), item.text]));
+  return draft.replace(/\[Pasted text #\d+ \+\d+ lines\]/g, (marker) => held.get(marker) ?? marker);
 }
 
 /** The next marker number for a message holding `pastes`. */

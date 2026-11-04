@@ -31,6 +31,8 @@ pub const CHROME_CATALOG_ARG: &str = "--chrome-catalog";
 /// Core-supplied launch argument followed by the app version. The tool server ignores it; Vibe keeps a stdio server's
 /// tool list under a fingerprint of its launch arguments, so a new version makes Vibe ask for the new list.
 pub const APP_VERSION_ARG: &str = "--app-version";
+/// Compile-time build identity in the launch line; accepted and ignored by the tool server.
+pub const BUILD_ID_ARG: &str = "--build-id";
 /// Name of the per-session MCP server in `agentConfig.mcpServers` (the agent sees `mcp_vw.<tool>`).
 pub const SERVER_NAME: &str = "vw";
 /// Longest request line in bytes (and longest answer of every tool except a screenshot).
@@ -142,7 +144,9 @@ pub mod tools {
         PREVIEW_SCREENSHOT,
         PREVIEW_CONSOLE,
     ];
-    /// Read this session's previous reply aloud once in the app window.
+    /// Offer an editable feedback draft; the person alone can send it.
+    pub const FEEDBACK_DRAFT: &str = "feedback_draft";
+    /// Read one reply through the window speaker.
     pub const READ_ALOUD: &str = "read_aloud";
     /// What the user has open beside the chat (editor tabs, unsaved text, selection, the Files tab). Reads only.
     pub const PANEL_READ: &str = "panel_read";
@@ -154,6 +158,9 @@ pub mod tools {
     pub const CONNECTORS_LIST: &str = "connectors_list";
     /// Show one catalog connector for the person to review; never installs or authenticates.
     pub const CONNECTOR_SUGGEST: &str = "connector_suggest";
+    /// Show one Vibe Work add-on's own setup control (Your Chrome: Connect Chrome) in the chat for the person;
+    /// never installs, pairs or turns anything on.
+    pub const ADDON_SUGGEST: &str = "addon_suggest";
     /// Capture protected-folder changes and wait (bounded) for the owner review.
     pub const PROPOSE_PROTECTED_CHANGE: &str = "propose_protected_change";
     /// The outcome of a proposal whose review was still open when `propose_protected_change` answered.
@@ -174,10 +181,14 @@ pub mod tools {
     }
 
     /// Every tool a session credential may call.
-    pub const SESSION_TOOLS: [&str; 35] = [
+    pub const SESSION_TOOLS: [&str;
+        36 + cfg!(feature = "video") as usize + cfg!(feature = "feedback") as usize] = [
+        #[cfg(feature = "video")]
+        "video_frames",
         SESSION_STATUS,
         CONNECTORS_LIST,
         CONNECTOR_SUGGEST,
+        ADDON_SUGGEST,
         PROCESSES_LIST,
         PORT_LEASE,
         PROCESS_START,
@@ -202,6 +213,8 @@ pub mod tools {
         IMAGE_GENERATE,
         DOCUMENT_READ,
         READ_ALOUD,
+        #[cfg(feature = "feedback")]
+        FEEDBACK_DRAFT,
         PANEL_READ,
         SEARCH,
         PROPOSE_PROTECTED_CHANGE,

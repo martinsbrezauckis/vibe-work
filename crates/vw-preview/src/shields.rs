@@ -113,3 +113,12 @@ impl Saved {
         }
     }
 }
+
+/// Cross-platform evaluator for the compiled rules used by every Browser engine.
+pub mod matcher;
+
+/// Native protocol cosmetics for WebView2, testable without Windows.
+pub mod cosmetic;
+#[cfg(test)]
+#[path = "shields/cosmetic_tests.rs"]
+mod cosmetic_tests;

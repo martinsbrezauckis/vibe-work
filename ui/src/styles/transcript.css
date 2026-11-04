@@ -554,3 +554,35 @@ pre.out.plain {
 .step.fail .step-outcome {
   color: var(--red);
 }
+
+/* Optional video rows reuse file-reference controls and the image viewer. */
+.video-frames {
+  display: flex;
+  gap: var(--space-control-gap);
+  overflow-x: auto;
+  list-style: none;
+  padding: var(--space-control-gap) 0;
+  margin: 0;
+}
+.video-frames li {
+  flex: 0 0 100px;
+}
+.video-frames .fref {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  gap: var(--space-toolbar-block);
+}
+.video-frames img,
+.video-frame-placeholder {
+  width: 100%;
+  height: 68px;
+  object-fit: contain;
+}
+.video-frame-placeholder {
+  display: grid;
+  place-items: center;
+  font-size: var(--text-12);
+  color: var(--text-3);
+  background: var(--panel);
+}

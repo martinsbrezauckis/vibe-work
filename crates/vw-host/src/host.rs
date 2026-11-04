@@ -15,6 +15,9 @@
 //! - The Debug API is on in development builds and off in user builds unless the persisted
 //!   setting says otherwise; turning it off removes the socket and the descriptor.
 
+#[path = "startup_keys.rs"]
+mod startup_keys;
+
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -311,47 +314,6 @@ pub struct Host {
     app_window: Option<vw_debug_api::SharedAppWindow>,
 }
 
-/// Starts the key service when configured and adapts the launch to it (placeholder, overrides).
-async fn start_keys(
-    keys: Option<vw_keys::KeyServiceConfig>,
-    launch: &mut Result<SupervisorConfig, String>,
-    secrets: &mut Arc<dyn SecretProvider>,
-    core: &mut CoreConfig,
-) -> Option<Arc<vw_keys::KeyService>> {
-    // An unavailable key store never authorizes a custom network record.
-    vw_mistral::network::set_current(vw_mistral::network::NetworkSettings::from_environment());
-    let Some(config) = keys else {
-        core.network_settings_rejected = core
-            .network_file
-            .as_deref()
-            .is_some_and(|file| vw_mistral::network::load_for_launch(file, None).rejected);
-        return None;
-    };
-    let supervisor = launch.as_mut().ok()?;
-    match vw_keys::KeyService::start_with_network(config, core.network_file.clone()).await {
-        Ok(service) => {
-            core.network_settings_rejected = service.network_settings_rejected();
-            if let Some(list) = vw_mistral::network::current()
-                .child_no_proxy(&vw_mistral::network::NetworkSettings::from_environment())
-            {
-                supervisor
-                    .extra_env
-                    .push(("NO_PROXY".to_owned(), list.into()));
-            }
-            supervisor.extra_env.extend(service.vibe_env());
-            *secrets = service.secret_provider();
-            core.keys = Some(Arc::clone(&service));
-            info!("key service started; Vibe gets a placeholder key");
-            Some(service)
-        }
-        Err(error) => {
-            warn!(%error, "the key service did not start");
-            *launch = Err(format!("the key service did not start: {error}"));
-            None
-        }
-    }
-}
-
 impl Host {
     /// Starts the core (when Vibe can be started) and the Debug API (when enabled).
     ///
@@ -389,7 +351,9 @@ impl Host {
         if let Some(cap) = HostSettings::load(&config.settings_path).terminal_cap() {
             core_config.terminals.max_per_session = cap;
         }
-        let keys = start_keys(config.keys, &mut launch, &mut secrets, &mut core_config).await;
+        let keys =
+            startup_keys::start_keys(config.keys, &mut launch, &mut secrets, &mut core_config)
+                .await;
         let (core, startup) = match launch {
             Err(reason) => {
                 info!(%reason, "Vibe is not started in this run");
@@ -664,17 +628,23 @@ impl Host {
         let publisher = self.events.publisher();
         let session_id = request.session_id.clone();
         let notification_id = request.notification_id;
-        self.notifier
-            .show(
-                shown,
-                Box::new(move || {
-                    let _ = publisher.send(HostEvent::OpenSession {
-                        session_id,
-                        notification_id,
-                    });
-                }),
-            )
-            .map_err(|error| CoreError::new(ErrorCode::Internal, error.to_string()))
+        let on_click: Box<dyn FnOnce() + Send> = Box::new(move || {
+            let _ = publisher.send(HostEvent::OpenSession {
+                session_id,
+                notification_id,
+            });
+        });
+        let result = if let Some(id) = notification_id {
+            self.notifier.show_tracked(id, shown, on_click)
+        } else {
+            self.notifier.show(shown, on_click)
+        };
+        result.map_err(|error| CoreError::new(ErrorCode::Internal, error.to_string()))
+    }
+
+    /// Withdraws this app's OS notification after its ask is answered or stops waiting.
+    pub fn dismiss_notification(&self, id: u32) {
+        self.notifier.dismiss(id);
     }
 
     /// Starts forwarding [`HostEvent`]s to `sink`, replacing an earlier forwarder.

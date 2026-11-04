@@ -23,7 +23,7 @@ impl Browser {
             .ok_or_else(|| refused("page closed"))?;
         let item = action
             .reference()
-            .and_then(|id| seen.model.refs.iter().find(|r| r.id == id));
+            .and_then(|id| seen.items.iter().find(|r| r.id == id));
         if let Some(item) = item.filter(|r| r.frame_id.is_some()) {
             // Ordinary ref actions may scroll during preflight; coordinates retain their original geometry.
             let model = self.observe_dom(session).await.map_err(refused)?;
@@ -233,7 +233,7 @@ impl Browser {
             .page_accessor(session)
             .ok_or_else(|| refused("the page closed"))?;
         self.service
-            .reading_allowed(session, &page, &frame.url)
+            .frame_reading_allowed(session, &page, &frame.url)
             .map_err(refused)?;
         let receipt = crate::point_receipt::next_token();
         let documents: Vec<_> = checks

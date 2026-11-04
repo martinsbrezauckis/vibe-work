@@ -25,6 +25,9 @@
 //! kill-on-close job, for the Git Bash wrapper) and
 //! `webview2_env` (Windows: the `WebView2` loader's variables removed from this process at startup) use it.
 
+#[cfg(all(feature = "click-marker", not(debug_assertions)))]
+compile_error!("click markers are not available in release builds");
+
 #[cfg(target_os = "linux")]
 #[allow(unsafe_code)]
 pub mod a11y_bus;
@@ -70,6 +73,7 @@ mod remove_tree;
 mod reveal;
 pub mod send_to;
 mod system_version;
+pub mod tray;
 #[cfg(all(feature = "webview", target_os = "macos"))]
 #[allow(unsafe_code)]
 pub mod web_transport;
@@ -99,7 +103,7 @@ pub use open_url::{
 pub use paths::{FolderFold, canonical_plain, folder_key, folder_key_for, plain_path, windows_key};
 pub use private_file::{
     PrivateFileError, create_private_new, ensure_private_dir, is_user_only, replace_private,
-    set_aside, write_private_new,
+    replace_private_durable, set_aside, write_private_new,
 };
 pub use process::{
     ProcessFacts, TerminateError, group_has_live_member, parse_procargs, process_argv,
@@ -124,3 +128,11 @@ pub fn version() -> &'static str {
 #[cfg(all(feature = "webview", any(windows, target_os = "macos")))]
 #[allow(unsafe_code)]
 pub mod webview_audio;
+
+#[cfg(feature = "video")]
+#[allow(unsafe_code)]
+pub mod video;
+
+#[cfg(feature = "proxy-resolver")]
+#[allow(unsafe_code)]
+pub mod proxy;

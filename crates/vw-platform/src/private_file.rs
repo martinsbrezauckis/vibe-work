@@ -133,16 +133,43 @@ pub fn write_private_new(path: &Path, bytes: &[u8]) -> Result<(), PrivateFileErr
 /// # Errors
 /// [`PrivateFileError`] when the new file cannot be written or renamed; the temporary file is removed.
 pub fn replace_private(path: &Path, bytes: &[u8]) -> Result<(), PrivateFileError> {
+    replace(path, bytes, false)
+}
+
+/// Atomically replace a private file and make the rename durable: parent sync on Unix, write-through on Windows.
+/// # Errors
+/// As [`replace_private`], or the parent directory cannot be synced.
+pub fn replace_private_durable(path: &Path, bytes: &[u8]) -> Result<(), PrivateFileError> {
+    replace(path, bytes, true)
+}
+
+fn replace(path: &Path, bytes: &[u8], durable: bool) -> Result<(), PrivateFileError> {
     static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let nonce = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let mut name = path.file_name().unwrap_or_default().to_os_string();
     name.push(format!(".new-{}-{nonce}", std::process::id()));
     let temp = path.with_file_name(name);
     write_private_new(&temp, bytes)?;
-    fs::rename(&temp, path).map_err(|e| {
+    #[cfg(windows)]
+    let renamed = if durable {
+        os::rename_durable(&temp, path)
+    } else {
+        fs::rename(&temp, path)
+    };
+    #[cfg(not(windows))]
+    let renamed = fs::rename(&temp, path);
+    renamed.map_err(|e| {
         let _ = fs::remove_file(&temp);
         io("replace file", path, e)
-    })
+    })?;
+    #[cfg(unix)]
+    if durable {
+        let parent = path.parent().unwrap_or_else(|| Path::new("."));
+        fs::File::open(parent)
+            .and_then(|file| file.sync_all())
+            .map_err(|e| io("sync directory", parent, e))?;
+    }
+    Ok(())
 }
 
 /// Moves a file that could not be read aside (to `<name>.bad-<stamp>`) so a store can start empty without ever
@@ -214,6 +241,37 @@ mod os {
     use std::process::Command;
 
     use super::PrivateFileError;
+
+    #[allow(
+        unsafe_code,
+        reason = "Win32 write-through rename with owned UTF-16 buffers"
+    )]
+    pub(super) fn rename_durable(from: &Path, to: &Path) -> std::io::Result<()> {
+        use std::os::windows::ffi::OsStrExt as _;
+        use windows::Win32::Storage::FileSystem::{
+            MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW,
+        };
+        use windows::core::PCWSTR;
+        let from: Vec<u16> = long_path(from)
+            .as_os_str()
+            .encode_wide()
+            .chain(Some(0))
+            .collect();
+        let to: Vec<u16> = long_path(to)
+            .as_os_str()
+            .encode_wide()
+            .chain(Some(0))
+            .collect();
+        // SAFETY: both terminated UTF-16 buffers outlive the synchronous call, and no pointer is retained.
+        unsafe {
+            MoveFileExW(
+                PCWSTR(from.as_ptr()),
+                PCWSTR(to.as_ptr()),
+                MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+            )
+        }
+        .map_err(|_| std::io::Error::last_os_error())
+    }
 
     /// `CREATE_NO_WINDOW`: no console window flashes when a GUI app runs the tool.
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;

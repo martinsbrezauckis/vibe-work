@@ -322,6 +322,9 @@ export function fakeClient(kind: CoreClient["kind"] = "fake"): FakeClient {
       client.notifications.push(notification);
       return Promise.resolve();
     },
+    dismissOs: vi.fn<(notificationId: number) => Promise<void>>(() =>
+      Promise.resolve(),
+    ),
     onHostEvent(onEvent) {
       hostHandler = onEvent;
       return Promise.resolve(() => {

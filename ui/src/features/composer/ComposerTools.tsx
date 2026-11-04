@@ -41,7 +41,7 @@ export interface ToolsProps {
   /** The microphone button; absent: none. */
   mic?: ReactNode;
   /** The open-tab context picker. */
-  chromeTab?: ReactNode;
+  browserTab?: ReactNode;
   onSend: () => void;
   /** Voice chat: the slot's face while the box is empty; absent: the slot stays empty. */
   voiceChat?: ReactNode;
@@ -175,7 +175,7 @@ export function ComposerTools(p: ToolsProps): ReactElement {
           p.onMenu(null);
         }}
       />
-      {p.chromeTab ?? null}
+      {p.browserTab ?? null}
       {/* The right corner: the mic, then the action slot (tab order = visual order). */}
       <span className="ccorner push-right">
         {p.mic ?? null}

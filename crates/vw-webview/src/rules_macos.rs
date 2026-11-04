@@ -23,7 +23,7 @@ use crate::platform;
 /// Longest wait for a rule list to compile and apply (`WebKit` compiles a few dozen rules in milliseconds).
 pub(crate) const RULES_WAIT: Duration = Duration::from_secs(10);
 
-/// Compiles `page`'s rules for the webview `label` and installs them as its only rule list.
+/// Compiles `page`'s rules for the webview `label` and replaces only the network-policy list, preserving Browser shields.
 ///
 /// # Errors
 /// The compile error, or a timeout.

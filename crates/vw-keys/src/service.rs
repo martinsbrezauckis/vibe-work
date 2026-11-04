@@ -30,6 +30,9 @@ use vw_vault::mistral_key::{self, Candidate};
 use vw_vault::{SecretString, Vault, VaultConfig, VaultKind, VaultStatus};
 use zeroize::Zeroizing;
 
+#[path = "service_start.rs"]
+mod service_start;
+
 #[path = "last_state.rs"]
 mod last_state;
 #[path = "mistral_keys.rs"]
@@ -190,7 +193,12 @@ pub struct KeyService {
     pub(crate) mcp: vw_keyproxy::McpResolverSlot,
     /// how often the logins were looked up and a password was handed out (diagnostics; never values).
     pub(crate) login_counters: crate::logins::Counters,
-    pub(crate) network: std::sync::Mutex<crate::network::Network>,
+    pub(crate) network: Arc<std::sync::Mutex<crate::network::Network>>,
+    pub(crate) network_probes: Arc<std::sync::Mutex<Vec<vw_netguard::NetGuard>>>,
+    pub(crate) network_use: Arc<std::sync::Mutex<()>>,
+    pub(crate) network_forwarder: vw_netguard::NetGuard,
+    pub(crate) vibe_forwarder: vw_netguard::NetGuard,
+    pub(crate) browser_guards: std::sync::Mutex<Vec<vw_netguard::NetGuard>>,
 }
 
 struct KeyTest {
@@ -229,82 +237,6 @@ impl KeyService {
     /// cannot start.
     pub async fn start(config: KeyServiceConfig) -> Result<Arc<Self>, KeyError> {
         Self::start_with_network(config, None).await
-    }
-
-    /// Starts after verifying saved network settings with the existing vault, before any key-bearing client exists.
-    ///
-    /// # Errors
-    /// As [`Self::start`]. An unavailable vault leaves custom network settings unapplied.
-    pub async fn start_with_network(
-        config: KeyServiceConfig,
-        network_file: Option<PathBuf>,
-    ) -> Result<Arc<Self>, KeyError> {
-        let vault = Arc::new(match config.managed_vault {
-            Some(data_dir) => Vault::new_managed(config.vault, data_dir)?,
-            None => Vault::new(config.vault)?,
-        });
-        if config.settings_path.is_file() {
-            vault.select_legacy_if_used()?;
-        }
-        let vault_settings = VaultSettings::next_to(&config.settings_path);
-        let (network_vault, unlock_vault) = (Arc::clone(&vault), Arc::clone(&vault));
-        let (at_start, vault_settings) = blocking(move || {
-            let at_start = last_state::restore(&unlock_vault, &vault_settings);
-            (at_start, vault_settings)
-        })
-        .await?;
-        let lock_on_quit = at_start.lock_on_quit;
-        let network =
-            blocking(move || crate::network::launch(&network_vault, network_file, lock_on_quit))
-                .await?;
-        let (events, _) = broadcast::channel(64);
-        let tokens = Arc::new(TokenSlot::default());
-        let key = KeyCell::new(KeyState::Missing(KeyNeed::Unlock));
-        let hook_events = events.clone();
-        let mut proxy_config = config.proxy;
-        let mcp = proxy_config.mcp.clone();
-        proxy_config.on_wait = Arc::new(move |need| {
-            let _ = hook_events.send(KeyEvent::KeyNeeded(need));
-        });
-        let limits: Arc<std::sync::Mutex<Option<RateLimits>>> = Arc::default();
-        let (limits_cell, limits_events) = (Arc::clone(&limits), events.clone());
-        proxy_config.on_rate_limits = Arc::new(move |snapshot| {
-            *limits_cell.lock().unwrap_or_else(PoisonError::into_inner) = Some(snapshot);
-            let _ = limits_events.send(KeyEvent::RateLimits(Some(snapshot)));
-        });
-        let proxy = ProxyHandle::start(proxy_config, Arc::clone(&tokens), key.clone())
-            .await
-            .map_err(|e| KeyError::Settings(e.to_string()))?;
-        // No redirects: the key goes only to the host we chose (test call and OCR send it directly).
-        let client =
-            vw_mistral::ClientSlot::new().map_err(|e| KeyError::Settings(e.to_string()))?;
-        let service = Arc::new(Self {
-            vault,
-            proxy_base: proxy.base_url(),
-            proxy: tokio::sync::Mutex::new(Some(proxy)),
-            key,
-            tokens,
-            client,
-            test_api_base: config.test_api_base,
-            last_key_test: std::sync::Mutex::default(),
-            chrome_owner_account: crate::chrome::account(&config.settings_path),
-            settings: KeySettings::new(config.settings_path),
-            vault_settings,
-            lock_on_quit: std::sync::atomic::AtomicBool::new(at_start.lock_on_quit),
-            locked_until_password: std::sync::atomic::AtomicBool::new(
-                at_start.locked_until_password,
-            ),
-            selection: tokio::sync::Mutex::new(()),
-            existing: config.existing,
-            events,
-            cleanup_notices: Arc::default(),
-            limits,
-            mcp,
-            login_counters: crate::logins::Counters::default(),
-            network: std::sync::Mutex::new(network),
-        });
-        service.refresh_key().await;
-        Ok(service)
     }
 
     /// The selected vault profile folder (a path, no secret); before selection, the configured
@@ -540,7 +472,13 @@ impl KeyService {
     /// Locks the vault and deletes its kept key; model requests wait for the next unlock, also
     /// after a restart.
     pub fn lock(&self) {
+        let _transition = self
+            .network_use
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        self.stop_authenticated_network();
         self.vault.lock();
+        self.network_locked();
         self.key.clear(KeyNeed::Unlock);
         self.changed();
     }
@@ -775,6 +713,22 @@ impl KeyService {
     /// "Lock the vault when Vibe Work quits" on it locks (deleting the kept key), otherwise the
     /// kept key stays for the next start.
     pub async fn shutdown(&self) {
+        {
+            let _transition = self
+                .network_use
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner);
+            self.stop_authenticated_network();
+            self.network_locked();
+        }
+        self.network_forwarder.set_enabled(false);
+        self.vibe_forwarder.set_enabled(false);
+        self.vibe_forwarder
+            .set_upstream(vw_netguard::Upstream::none());
+        self.network_forwarder
+            .set_upstream(vw_netguard::Upstream::none());
+        self.network_forwarder.shutdown();
+        self.vibe_forwarder.shutdown();
         if let Some(proxy) = self.proxy.lock().await.take() {
             proxy.shutdown().await;
         }

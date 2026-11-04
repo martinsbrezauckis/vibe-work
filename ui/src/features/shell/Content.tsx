@@ -36,22 +36,20 @@ import { SkillsPage } from "../skills/SkillsPage";
 import { MarketplacePage } from "../marketplace/MarketplacePage";
 import { useMarket } from "../marketplace/hooks";
 import { LibrariesPage } from "../libraries/LibrariesPage";
-import { useLibraries } from "../libraries/hooks";
 import { OrphanList } from "../worktrees/OrphanList";
 import { IncludeNote } from "../worktrees/IncludeNote";
 import { WorktreeChip } from "../worktrees/WorktreeChip";
 import { GrantsChip } from "../ask/GrantsChip";
 import { PrChip } from "../git/PrChip";
 import { useSessionGit } from "../git/useSessionGit";
-import { useConnectors } from "../connectors/hooks";
 import { ProjectsPage } from "../projects/ProjectsPage";
 import { SettingsPage } from "../settings/SettingsPage";
-import { useProjects } from "../projects/hooks";
 import { useApp } from "./AppContext";
 import { KeyNotice } from "./KeyNotice";
 import { SendToOffer } from "./SendToOffer";
 import { formatKeys } from "../../state/shortcuts";
 import { CoveredByPage } from "./coverContext";
+import { useCoveringPage } from "./coveringPage";
 import { TAB_ICON } from "./tabIcons";
 import { useCoreState, useLayout, useSessionSummaries, useShellState } from "./hooks";
 
@@ -185,32 +183,30 @@ export function Content() {
   const covered = keyCovers || vibeCovering;
   // Settings, Projects and Tools cover the work view while it stays mounted (inert and hidden). Home, Esc or any rail item
   // returns to it exactly as it was: the same session, scroll, draft and panel tab.
-  const settings = useShellState((s) => s.settings.open);
-  const tools = useConnectors((s) => s.open);
+  const page = useCoveringPage();
   const toolsTab = useMarket((s) => s.tab);
-  const overview = useProjects((s) => s.open);
-  const libraries = useLibraries((s) => s.open);
-  const page = settings ? (
-    <SettingsPage />
-  ) : overview ? (
-    <div className="view">
-      <ProjectsPage />
-    </div>
-  ) : tools ? (
-    <div className="view">
-      {toolsTab === "skills" ? (
-        <SkillsPage />
-      ) : toolsTab === "marketplace" ? (
-        <MarketplacePage />
-      ) : (
-        <ConnectorsPage />
-      )}
-    </div>
-  ) : libraries ? (
-    <div className="view">
-      <LibrariesPage />
-    </div>
-  ) : null;
+  const pageView =
+    page === "settings" ? (
+      <SettingsPage />
+    ) : page === "projects" ? (
+      <div className="view">
+        <ProjectsPage />
+      </div>
+    ) : page === "tools" ? (
+      <div className="view">
+        {toolsTab === "skills" ? (
+          <SkillsPage />
+        ) : toolsTab === "marketplace" ? (
+          <MarketplacePage />
+        ) : (
+          <ConnectorsPage />
+        )}
+      </div>
+    ) : page === "libraries" ? (
+      <div className="view">
+        <LibrariesPage />
+      </div>
+    ) : null;
   // Ctrl F finds in the open conversation or the File tab (pages over the work view have their own).
   useFindKeys(page !== null || covered);
   return (
@@ -278,7 +274,7 @@ export function Content() {
           )}
         </div>
       </CoveredByPage.Provider>
-      {page !== null && <div className="content-page">{page}</div>}
+      {page !== null && <div className="content-page">{pageView}</div>}
     </main>
   );
 }

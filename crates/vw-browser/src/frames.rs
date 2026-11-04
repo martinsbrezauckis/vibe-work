@@ -322,9 +322,9 @@ impl Browser {
                 // A top-level blank page, and every `data:` document, has no origin a vault fill could match.
                 observation.origin = "null".into();
             }
-            if let Err(reason) = self
-                .service
-                .reading_allowed(session, page, &observation.model.url)
+            if let Err(reason) =
+                self.service
+                    .frame_reading_allowed(session, page, &observation.model.url)
             {
                 child!(NOT_READ_HERE, reason, observation.path);
             }
@@ -338,6 +338,7 @@ impl Browser {
             } else {
                 Kind::Addressed
             };
+            observation.model.display_url = Some(native.to_string());
             let reported_origin = opened.then(|| reported.origin().ascii_serialization());
             frames.push((answer.id, main, observation, kind, reported_origin));
         }
@@ -362,8 +363,7 @@ impl Browser {
         let request: serde_json::Value = serde_json::from_str(request).ok()?;
         let reference = request["ref"].as_str()?;
         self.current_seen(session)?
-            .model
-            .refs
+            .items
             .iter()
             .find(|r| r.id == reference)?
             .frame_id
@@ -397,7 +397,8 @@ impl Browser {
             .service
             .page_accessor(session)
             .ok_or("the frame's page is closed")?;
-        self.service.reading_allowed(session, &page, &frame.url)?;
+        self.service
+            .frame_reading_allowed(session, &page, &frame.url)?;
         let guarded = scripts::in_frame(
             script,
             &json!({"page":page,"document":frame.document,"url":frame.url}),
@@ -552,11 +553,14 @@ fn merge(
         .position(|(_, main, o)| *main && o.path.is_empty())
         .ok_or("the main frame changed while it was read")?;
     let mut model = frames[top].2.model.clone();
+    model.document.clone_from(&frames[top].2.document);
     model.viewport = Some((
         frames[top].2.width.round() as u32,
         frames[top].2.height.round() as u32,
     ));
     model.refs.clear();
+    model.choice_refs.clear();
+    model.covering_frames.clear();
     model.all_refs.clear();
     model.ref_count = 0;
     model.cross_origin_frames = 0;
@@ -582,6 +586,7 @@ fn merge(
             origin: observation.origin.clone(),
             url: observation.model.url.clone(),
         };
+        model.documents.push(frame.clone());
         let visible = observation.path.iter().enumerate().all(|(depth, index)| {
             frames
                 .iter()
@@ -589,7 +594,16 @@ fn merge(
                 .and_then(|(_, _, o)| o.children.iter().find(|c| c.index == pos(*index)))
                 .is_some_and(|c| c.visible)
         });
-        for item in &observation.model.refs {
+        let prominent = *main || (visible && covers_viewport(frames, &observation.path));
+        let mut choices = Vec::new();
+        for (item, choice) in observation.model.refs.iter().map(|r| (r, false)).chain(
+            observation
+                .model
+                .choice_refs
+                .iter()
+                .filter(|_| !main && prominent)
+                .map(|r| (r, true)),
+        ) {
             let mut item = item.clone();
             item.local_bounds = item.bounds;
             item.local_viewport = (observation.width as u32, observation.height as u32);
@@ -599,6 +613,9 @@ fn merge(
             }
             if !visible {
                 item.visible = Some(false);
+                item.priority = -1;
+            } else if !prominent {
+                item.priority = item.priority.min(3);
             }
             if let Some(rect) = &mut item.bounds {
                 rect.x = (x + f64::from(rect.x) * sx).round() as i32;
@@ -606,35 +623,86 @@ fn merge(
                 rect.width = (f64::from(rect.width) * sx).round() as i32;
                 rect.height = (f64::from(rect.height) * sy).round() as i32;
             }
-            model.refs.push(item);
-        }
-        model
-            .all_refs
-            .extend(observation.model.refs.iter().map(|r| r.id.clone()));
-        model.ref_count = model.ref_count.saturating_add(observation.model.ref_count);
-        if !main {
-            if visible {
-                model.text.push('\n');
-                model.text.push_str(&observation.model.text);
+            if choice {
+                choices.push(item);
             } else {
-                model.hidden_text.push('\n');
-                model.hidden_text.push_str(&observation.model.text);
+                model.refs.push(item);
             }
-            model.hidden_text.push('\n');
-            model.hidden_text.push_str(&observation.model.hidden_text);
-            model.text_length = model
-                .text_length
-                .saturating_add(observation.model.text_length);
         }
-        model.truncated |= observation.model.truncated;
+        if !main && prominent {
+            model.covering_frames.push(crate::model::FrameChoices {
+                origin: observation.origin.clone(),
+                complete: !observation.model.truncated
+                    && choices.len() == observation.model.choice_count as usize,
+                total: observation.model.choice_count,
+                choices,
+            });
+        }
+        append_frame_content(&mut model, &observation.model, *main, visible);
     }
-    let mut unique = std::collections::HashSet::new();
-    if model.refs.iter().any(|r| !unique.insert(&r.id)) {
+    if !crate::choices::unique(&model) {
         return Err(
             "frame refs collided, so this read's refs cannot be used; read the page again".into(),
         );
     }
     Ok(model)
+}
+
+fn append_frame_content(model: &mut PageModel, child: &PageModel, main: bool, visible: bool) {
+    model
+        .all_refs
+        .extend(child.refs.iter().map(|r| r.id.clone()));
+    model.ref_count = model.ref_count.saturating_add(child.ref_count);
+    if !main {
+        let text = if visible {
+            &mut model.text
+        } else {
+            &mut model.hidden_text
+        };
+        text.push('\n');
+        text.push_str(&child.text);
+        model.hidden_text.push('\n');
+        model.hidden_text.push_str(&child.hidden_text);
+        model.text_length = model.text_length.saturating_add(child.text_length);
+    }
+    model.truncated |= child.truncated;
+}
+
+/// Only a frame covering at least 40% of the top viewport can promote its overlays above main
+/// form controls. This admits consent walls while excluding ordinary ads and banners. All boxes
+/// come from parents, clipped through every ancestor: a child cannot enlarge its own allocation.
+fn covers_viewport(frames: &[(String, bool, Observation)], path: &[usize]) -> bool {
+    let Some((_, _, top)) = frames
+        .iter()
+        .find(|(_, main, o)| *main && o.path.is_empty())
+    else {
+        return false;
+    };
+    let area = top.width * top.height;
+    if !area.is_finite() || area <= 0.0 {
+        return false;
+    }
+    let (mut left, mut upper, mut right, mut bottom) = (0.0_f64, 0.0_f64, top.width, top.height);
+    for (depth, index) in path.iter().enumerate() {
+        let Some((x, y, sx, sy)) = transform(frames, &path[..depth]) else {
+            return false;
+        };
+        let Some(child) = frames
+            .iter()
+            .find(|(_, _, o)| o.path == path[..depth])
+            .and_then(|(_, _, o)| o.children.iter().find(|c| c.index == pos(*index)))
+        else {
+            return false;
+        };
+        let rect = child.content;
+        let x = x + f64::from(rect.x) * sx;
+        let y = y + f64::from(rect.y) * sy;
+        left = left.max(x);
+        upper = upper.max(y);
+        right = right.min(x + f64::from(rect.width) * sx);
+        bottom = bottom.min(y + f64::from(rect.height) * sy);
+    }
+    (right - left).max(0.0) * (bottom - upper).max(0.0) >= area * 0.4
 }
 
 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]

@@ -272,6 +272,19 @@ pub trait PreviewHooks: Send + Sync {
 
 /// The native engine.
 pub trait PreviewEngine: Send + Sync {
+    /// Evaluates only the main document in an isolated world. Missing isolation fails closed.
+    fn evaluate_isolated(&self, id: &MountId, script: String) -> EngineFuture<'_, String> {
+        let id = id.clone();
+        Box::pin(async move {
+            let answers = self
+                .evaluate_frames(&id, None, crate::frames::main_script(&script))
+                .await?
+                .ok_or_else(|| {
+                    EngineError::Unsupported("isolated page reads are unavailable".into())
+                })?;
+            crate::frames::main_answer(answers).map(|answer| answer.value)
+        })
+    }
     /// Silence every current tab and prevent new audible mounts until the returned lease is dropped.
     fn quiet_audio(&self) -> EngineFuture<'_, crate::AudioQuiet> {
         Box::pin(async {
@@ -320,6 +333,18 @@ pub trait PreviewEngine: Send + Sync {
                 "Ad blocking is unavailable on this system".into(),
             ))
         })
+    }
+
+    /// Draws short input feedback in the person's native view, never in the document or its captures.
+    /// Optional for headless engines; failure must not turn an already completed input into a failed action.
+    #[cfg(feature = "click-marker")]
+    fn show_input_marker(
+        &self,
+        id: &MountId,
+        point: crate::NativeClickPoint,
+    ) -> EngineFuture<'_, ()> {
+        let _ = (id, point);
+        Box::pin(async { Ok(()) })
     }
 
     /// Host-authorized native mouse input. Must target only this visible webview in the app's active window.

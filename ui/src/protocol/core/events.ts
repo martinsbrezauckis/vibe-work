@@ -19,8 +19,13 @@ import type { InstallView } from "./vibe";
 import type { GithubReadsView } from "./github_reads";
 import type { Ask, AskRecord, SessionGrant, GrantOffer, ChromeControlView } from "./ask";
 import type { KeepAwakeView } from "./keep_awake";
+import type { FeedbackView } from "./feedback";
 import type { SecretScanView } from "./secret_scan";
-export type CoreEvent = { "type": "askOpened",
+export type CoreEvent = { "type": "feedback",
+/**
+ * Current panel state.
+ */
+view: FeedbackView, } | { "type": "askOpened",
 /**
  * Value-free pending metadata.
  */

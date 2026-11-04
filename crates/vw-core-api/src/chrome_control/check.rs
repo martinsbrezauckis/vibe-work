@@ -15,6 +15,14 @@ pub(crate) fn mode(shared: &Shared, session: &str) -> Option<String> {
         })
     })
 }
+/// A mode reduction revokes the helper lease, including already-installed request rules and emulation.
+pub(crate) fn mode_changed(shared: &Shared, session: &str, before: Option<&str>) {
+    let old = before.and_then(Tier::from_mode);
+    let now = mode(shared, session).as_deref().and_then(Tier::from_mode);
+    if old.is_some() && now < old {
+        super::end_chat(shared, session, false);
+    }
+}
 /// Whether the session's current mode has a browser tier (tests; the tool list itself is `gateway::list`).
 #[cfg(test)]
 pub(crate) fn available(shared: &Shared, session: &str) -> bool {
@@ -30,19 +38,41 @@ pub(super) fn authorize(
     tool: &str,
     args: &Value,
 ) -> Result<Tier, String> {
-    if shared.store.view(session).is_none() {
+    let browser = super::agent_browser::selected(shared, session, tool, args);
+    authorize_mode(shared, session, tool, args).map_err(|reason| browser.text(&reason))
+}
+fn authorize_mode(
+    shared: &Shared,
+    session: &str,
+    tool: &str,
+    args: &Value,
+) -> Result<Tier, String> {
+    let Some(view) = shared.store.view(session) else {
         return Err("Not run: this chat is not open.".into());
+    };
+    if view.state["session"]["parentSessionId"]
+        .as_str()
+        .is_some_and(|id| !id.is_empty())
+    {
+        return Err(subagent_reason(super::agent_browser::selected(
+            shared, session, tool, args,
+        )));
     }
     if !shared.chrome_control.enabled() {
-        return Err(format!(
-            "Not run: {} is off.",
-            vw_vocabulary::label("builtinSkills", "vw:chrome")
-        ));
+        let browser = super::agent_browser::selected(shared, session, tool, args);
+        return Err(super::availability::reason(&browser.addon(shared), browser));
     }
-    let mode = mode(shared, session).ok_or("Not run: this chat's access mode is unavailable.")?;
+    let mode = mode(shared, session)
+        .ok_or_else(|| "Not run: this chat's access mode is unavailable.".to_owned())?;
     let tier =
         Tier::from_mode(&mode).ok_or("Not run: Chrome is unavailable in this access mode.")?;
-    let required = super::mapping::required(tool, args).ok_or("Not run: unknown Chrome action.")?;
+    let required = super::mapping::required(tool, args).ok_or_else(|| {
+        match super::mapping::action(tool, args).as_str() {
+            "client.selection" => "Not run: selection is sent by the person from Chrome. Use Ask Vibe Work in Chrome's context menu.",
+            "page.dragdrop" => "Not run: page.dragdrop is a permission name. Use page.drag; ask chrome_status for its schema.",
+            _ => "Not run: unknown Chrome action. Use chrome_status to find supported actions.",
+        }
+    })?;
     if required > tier {
         let label = if mode == "smart-approve" {
             vw_vocabulary::label("accessModes", "smart-approve")
@@ -56,11 +86,22 @@ pub(super) fn authorize(
             action.as_str()
         };
         return Err(format!(
-            "Not run: {action} needs {}; this chat is in {label}.",
+            "Not run: {action} needs {}; this chat is in {label}. Use an allowed action or ask the person to change the chat mode.",
             required.required_label()
         ));
     }
     Ok(tier)
+}
+
+fn subagent_reason(browser: super::agent_browser::Browser) -> String {
+    use vw_agent_tools::wire::tools;
+    format!(
+        "Not run: subagents cannot use {}. Use Vibe Work's built-in browser ({} / {}) instead, or ask the main chat for steps in {}.",
+        browser.name(),
+        tools::BROWSER_READ,
+        tools::BROWSER_ACT,
+        browser.name()
+    )
 }
 /// `chrome_status`'s action list: each action says whether this chat's current mode allows it, and if not, the modes
 /// that would. Read at each call, so a mode change shows at once; the call-time [`authorize`] stays the authority.
@@ -68,9 +109,37 @@ pub(super) fn annotate_modes(shared: &Shared, session: &str, tool: &str, result:
     if tool != "chrome_status" {
         return;
     }
+    let selected_profile = shared
+        .chrome_control
+        .chat_profiles
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .get(session)
+        .cloned();
+    super::capabilities::filter(result, selected_profile.as_deref());
     let tier = mode(shared, session).as_deref().and_then(Tier::from_mode);
+    // Older helpers can return delivery events or permission names among executable features.
+    let known = |action: &Value| {
+        super::mapping::required("chrome_execute", &json!({"action":action})).is_some()
+    };
+    if let Some(profiles) = result["structuredContent"]["profiles"].as_array_mut() {
+        for profile in profiles {
+            if let Some(features) = profile["features"].as_array_mut() {
+                features.retain(known);
+            }
+        }
+    }
+
     // The person's Local network switch, and whether Chrome has it yet.
     if result["structuredContent"].is_object() {
+        if shared.chrome_control.config.available() {
+            let browser = super::agent_browser::selected(shared, session, tool, &json!({}));
+            let addon = browser.addon(shared);
+            result["structuredContent"]["addon"] = json!({
+                "state":addon.label, "stateCode":addon.state, "instruction":addon.instruction,
+                "extensionVersion":addon.extension_version,
+            });
+        }
         result["structuredContent"]["chromeExtensionStore"] =
             json!(super::commands::extension_store(shared));
         result["structuredContent"]["localNetwork"] = json!({
@@ -81,6 +150,7 @@ pub(super) fn annotate_modes(shared: &Shared, session: &str, tool: &str, result:
     let Some(rows) = result["structuredContent"]["capabilities"]["actions"].as_array_mut() else {
         return;
     };
+    rows.retain(|row| known(&row["action"]));
     for row in rows {
         let action = row["action"].as_str().unwrap_or_default().to_owned();
         // page.key's tier depends on the key: navigation keys (Tab, Escape, arrows…) are marked; typing keys are noted.
@@ -105,6 +175,7 @@ pub(super) fn annotate_modes(shared: &Shared, session: &str, tool: &str, result:
     }
 }
 pub(crate) fn check(shared: &Arc<Shared>, args: &Value) -> Value {
+    let source = args["sessionId"].as_str().unwrap_or_default();
     let session = args["sessionId"].as_str().unwrap_or_default();
     let session = if shared.store.view(session).is_some() {
         session
@@ -118,7 +189,20 @@ pub(crate) fn check(shared: &Arc<Shared>, args: &Value) -> Value {
         .unwrap_or(args["toolName"].as_str().unwrap_or_default());
     // Without the package every Chrome tool is refused here too, with the same sentence as the tool itself.
     if !shared.chrome_control.config.available() {
-        return json!({"decision":"deny","reason":super::setup::ABSENT});
+        let browser = super::agent_browser::selected(shared, session, tool, &args["toolInput"]);
+        return json!({"decision":"deny","reason":browser.text(super::setup::ABSENT)});
+    }
+    let child = args["parentSessionId"]
+        .as_str()
+        .is_some_and(|parent| !parent.is_empty() && parent != source)
+        || shared.store.view(source).is_some_and(|view| {
+            view.state["session"]["parentSessionId"]
+                .as_str()
+                .is_some_and(|id| !id.is_empty())
+        });
+    if child {
+        let browser = super::agent_browser::selected(shared, session, tool, &args["toolInput"]);
+        return json!({"decision":"deny","reason":subagent_reason(browser)});
     }
     // Execute performs the tier check itself so the refusal reaches the model as a tool receipt.
     if tool == "chrome_execute" {
@@ -208,7 +292,7 @@ mod tests {
                 vw_session::LoadKind::New,
             )
             .unwrap();
-        let _seen = shared.chrome_control.owner.answering(|_, _| {
+        let _seen = super::super::test_support::answering(shared, |_, _| {
             json!({"isError":false,"content":[{"type":"text","text":"status"}],"structuredContent":{"capabilities":{
                 "actions":[{"action":"page.read"},{"action":"page.type"},{"action":"raw.execute"},{"action":"page.key"}]}}})
         });
@@ -263,3 +347,64 @@ mod tests {
         core.shutdown().await;
     }
 }
+
+#[cfg(test)]
+mod unsupported_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn older_helpers_cannot_advertise_unmapped_actions() {
+        let fixture = crate::feature_test_core::Fixture::new().await;
+        let mut reply = json!({"structuredContent":{
+            "profiles":[{"features":["client.selection","page.dragdrop","page.drag","page.read"]}],
+            "capabilities":{"actions":[{"action":"client.selection"},{"action":"page.dragdrop"},{"action":"page.drag"}]}
+        }});
+        annotate_modes(&fixture.core.shared, "s", "chrome_status", &mut reply);
+        assert_eq!(
+            reply["structuredContent"]["profiles"][0]["features"],
+            json!(["page.drag", "page.read"])
+        );
+        assert_eq!(
+            reply["structuredContent"]["capabilities"]["actions"]
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
+        fixture.finish().await;
+    }
+
+    #[tokio::test]
+    async fn delivery_events_and_permission_names_explain_the_supported_route() {
+        let fixture = crate::feature_test_core::Fixture::new().await;
+        let shared = &fixture.core.shared;
+        let _ = shared
+            .store
+            .load(
+                json!({"session":{"id":"s"},"history":[],"turns":[]}),
+                vw_session::LoadKind::New,
+            )
+            .unwrap();
+        shared.access.observe_request(
+            "session/agent/update",
+            "s",
+            &json!({"agentName":"auto-approve"}),
+        );
+        for (action, reason, instruction) in [
+            ("client.selection", "person", "Ask Vibe Work"),
+            ("page.dragdrop", "permission", "page.drag"),
+        ] {
+            let error =
+                authorize(shared, "s", "chrome_execute", &json!({"action":action})).unwrap_err();
+            assert!(
+                error.contains(reason) && error.contains(instruction),
+                "{error}"
+            );
+        }
+        fixture.finish().await;
+    }
+}
+
+#[cfg(test)]
+#[path = "check_subagent_tests.rs"]
+mod subagent_tests;

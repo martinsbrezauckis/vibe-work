@@ -1,16 +1,16 @@
 //! [`Browser`]: the agent browser's observe → act → receipt loop on a session's preview. `read` runs the
-//! observe script and keeps the refs; `act` checks the ref against the latest observation and the prompt guard,
+//! observe script and keeps document-scoped refs; `act` checks their identity and the prompt guard,
 //! runs the action (page script with actionability retries, or a navigation / history step), waits for the page to
 //! settle, observes again and answers what changed. Stop cancels an agent action at its next await.
 //!
 //! Depends on: vw-preview (`PreviewService`), `scripts`, `model`, `observe`, `receipt`, `act`, `sessions`, `guard`.
 //! Called by: vw-core-api (agent tools, the `browser` command), tests.
 //! Invariants:
-//! - An action on a ref runs only when the ref is in the latest observation of that session, and only on the one
-//!   element that has it now (gone or doubled: "observe again").
+//! - A ref action needs a retained observation in this document and the same node, fingerprint and label;
+//!   gone, replaced or ambiguous targets require another read. Receipt and coordinate baselines stay latest-only.
 //! - The agent never types into a password, one-time-code or payment-card field (refused, nothing typed).
-//! - On a local-network page the user opened (`PageClass::Lan`) the agent neither reads nor acts; it may only
-//!   navigate away (which opens a fresh mount). The user and the Debug API (acting as the user) may.
+//! - Local-network reads and actions require the person's current switch in addition to ordinary page ownership
+//!   and action permissions. With that switch off, the agent may navigate away to an allowed page.
 //! - Every wait is bounded (actionability 2 s, settling 1.5 s, loads 8 s, `wait` at most 15 s): an action answers
 //!   well within Vibe's 60 s tool timeout.
 
@@ -67,11 +67,11 @@ const RECEIPT_REFS: usize = 25;
 /// How a read is shaped (token budget: `observe` module docs).
 #[derive(Clone, Debug)]
 pub struct ReadOptions {
-    /// Refs listed (1..=200, default 32).
+    /// Observation refs (1..=200, default 32); full reads clamp this to 32.
     pub max_refs: usize,
-    /// A whole text page (0-based, 2,500 characters each); `None`: the default 800-character preview.
+    /// A text page (0-based, 2,500 UTF-16 units each); `None`: the default 800-character preview.
     pub text_page: Option<usize>,
-    /// The answer's size budget in bytes (1,500..=64,000, default 3,000).
+    /// The answer's size budget in bytes (1,500..=4,000, default 3,000).
     pub max_bytes: usize,
     /// A focused read: only the refs and text lines containing this.
     pub find: Option<String>,
@@ -143,6 +143,7 @@ pub struct Browser {
     pub(crate) sessions: Arc<Sessions>,
     captures: crate::capture::Captures,
     pub(crate) read_mount: Option<vw_preview::MountId>,
+    pub(crate) read_actor: Option<Actor>,
     #[cfg(feature = "e2e-script")]
     pub(crate) image_gate: crate::image_read::ImageGate,
     pub(crate) secret_choices: Arc<crate::secret_capture::SecretChoices>,
@@ -163,6 +164,7 @@ impl Browser {
             sessions,
             captures: crate::capture::Captures::default(),
             read_mount: None,
+            read_actor: None,
             #[cfg(feature = "e2e-script")]
             image_gate: Arc::default(),
             secret_choices: Arc::new(crate::secret_capture::SecretChoices::default()),
@@ -209,28 +211,40 @@ impl Browser {
         })
     }
 
-    /// True when the session shows a local-network page the user opened: the agent
-    /// neither reads nor acts on it (it may only navigate away).
+    /// True when the session shows a local-network page, independently of the current agent grant.
     #[must_use]
     pub fn on_local_network(&self, session_id: &str) -> bool {
         self.service.page_class(session_id) == Some(vw_preview::PageClass::Lan)
     }
 
+    /// True when the agent lacks the person's current local-network permission for this page.
+    #[must_use]
+    pub fn local_network_blocked(&self, session_id: &str) -> bool {
+        self.on_local_network(session_id)
+            && !self.delegation_authorizer.read().is_ok_and(|slot| {
+                slot.as_ref()
+                    .is_some_and(|authority| authority.local_network_allowed())
+            })
+    }
+
     /// `browser_read`: the observation, and a screenshot when asked. The agent is refused on a local-network page
-    /// ([`LOCAL_NETWORK`]); the user and the Debug API (acting as the user) are not.
+    /// without the local-network grant ([`LOCAL_NETWORK`]); user reads retain their usual admission.
     ///
     /// # Errors
     /// A plain-text reason.
     pub async fn read(
         &self,
         session_id: &str,
-        options: ReadOptions,
+        mut options: ReadOptions,
         screenshot: bool,
         by: Actor,
     ) -> Result<(Value, Option<Shot>), String> {
-        if by == Actor::Agent && self.on_local_network(session_id) {
+        if by == Actor::Agent && self.local_network_blocked(session_id) {
             return Err(LOCAL_NETWORK.to_owned());
         }
+        let clamped =
+            options.max_bytes > observe::MAX_BUDGET || options.max_refs > observe::MAX_OUTPUT_REFS;
+        options.max_refs = options.max_refs.clamp(1, observe::MAX_OUTPUT_REFS);
         let find = options.find.clone();
         let (preview, budget) = (
             options.text_page.is_none(),
@@ -242,31 +256,22 @@ impl Browser {
         self.page(session_id).await?;
         self.wait_loaded(session_id).await;
         // The wait can outlast the page: the user may have opened a local-network page in this tab meanwhile.
-        if by == Actor::Agent && self.on_local_network(session_id) {
+        if by == Actor::Agent && self.local_network_blocked(session_id) {
             return Err(LOCAL_NETWORK.to_owned());
         }
         let bound = self.bind_read(session_id, by).await?;
         let (mut model, verdict, snapshot) = bound.observe(session_id, options).await?;
+        let mut host = self.host(session_id);
+        if clamped {
+            host["outputLimit"] =
+                json!("Requested maxBytes/maxRefs clamped to inline limits: 4000 bytes, 32 refs.");
+        }
         if screenshot {
             Self::label_refs(&mut model);
         }
         let answer = match find.as_deref() {
-            Some(query) => observe::found(
-                &model,
-                query,
-                &verdict,
-                &snapshot,
-                self.host(session_id),
-                budget,
-            ),
-            None => observe::answer(
-                &model,
-                &verdict,
-                &snapshot,
-                self.host(session_id),
-                preview,
-                budget,
-            ),
+            Some(query) => observe::found(&model, query, &verdict, &snapshot, host, budget),
+            None => observe::answer(&model, &verdict, &snapshot, host, preview, budget),
         };
         #[cfg(feature = "e2e-script")]
         self.before_image().await;
@@ -285,7 +290,7 @@ impl Browser {
         bound.check_read_mount()?;
         if screenshot {
             self.ref_mount(session_id).map_err(|error| error.text)?;
-            if by == Actor::Agent && self.on_local_network(session_id) {
+            if by == Actor::Agent && self.local_network_blocked(session_id) {
                 return Err(LOCAL_NETWORK.to_owned());
             }
         }
@@ -430,6 +435,7 @@ impl Browser {
             .await?;
         // After the settle wait: what the page asked for during this act has been refused by now.
         self.act_notes(session_id, action.reference(), &marks, &mut receipt);
+        observe::fit(&mut receipt, observe::ACT_BUDGET);
         Ok(receipt)
     }
 
@@ -572,6 +578,7 @@ impl Browser {
         let mut request = action
             .page_request(&page)
             .ok_or_else(|| failed("this action does not run in the page"))?;
+        self.bind_ref_request(session_id, &mut request);
         // Submission is a separate authorized Enter after the settled field proves the requested text.
         request["submit"] = json!(false);
         request["nativeUser"] = json!(by == Actor::User);
@@ -616,8 +623,7 @@ impl Browser {
                     }
                 })?;
             // Bound to the authorized document.
-            self.service
-                .reading_allowed(session_id, &page, &answer.url)
+            self.reading_ref_allowed(session_id, &page, &answer.url, action.reference())
                 .map_err(refused)?;
             if crate::answers::transient(&answer) && start.elapsed() < ACT_RETRY {
                 tokio::time::sleep(POLL).await;
@@ -631,7 +637,7 @@ impl Browser {
                 ) {
                 answer
             } else {
-                crate::answers::interpret(answer, action)?
+                self.interpret_ref_answer(session_id, answer, action)?
             };
             if request["nativeClick"] == true {
                 if let Some(point) = answer.native_point {
@@ -652,12 +658,9 @@ impl Browser {
                     ));
                 }
             }
-            if matches!(action, Action::Type { submit: true, .. }) {
-                answer = self
-                    .submit_checked_text(session_id, action, &request, by)
-                    .await?;
-            }
-            return Ok(answer);
+            return self
+                .finish_input(session_id, action, &request, by, answer)
+                .await;
         }
     }
 
@@ -726,9 +729,13 @@ impl Browser {
             .await
             .ok()?;
         // Only the authorized document's answer counts.
-        self.service
-            .reading_allowed(session_id, &page, answer["url"].as_str().unwrap_or(""))
-            .ok()?;
+        self.reading_ref_allowed(
+            session_id,
+            &page,
+            answer["url"].as_str().unwrap_or(""),
+            reference,
+        )
+        .ok()?;
         Some(answer)
     }
 

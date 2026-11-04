@@ -16,6 +16,12 @@ mod content_filter_linux;
 #[cfg(target_os = "linux")]
 pub use content_filter_linux::set_content_filter;
 
+#[cfg(windows)]
+#[allow(unsafe_code)]
+mod requests_win;
+#[cfg(windows)]
+pub use requests_win::{BlockRequest, guard_requests};
+
 /// Native `WebView2` frame registry and script evaluation.
 #[cfg(windows)]
 #[allow(unsafe_code)]
@@ -45,10 +51,17 @@ pub use sharp_mac::snapshot_png_sharp;
 #[cfg(target_os = "macos")]
 #[allow(unsafe_code)]
 pub mod agent_world_mac;
+/// Input-transparent click feedback drawn outside the page on GTK.
+#[cfg(all(target_os = "linux", feature = "click-marker"))]
+pub mod click_marker_linux;
 /// The agent's click marker: a short ring in the person's view, never in the page.
-#[cfg(target_os = "macos")]
+#[cfg(all(target_os = "macos", feature = "click-marker"))]
 #[allow(unsafe_code)]
 pub mod click_marker_mac;
+/// Input-transparent click feedback in a native layered child window.
+#[cfg(all(windows, feature = "click-marker"))]
+#[allow(unsafe_code)]
+pub mod click_marker_win;
 /// Element full screen off while an agent act runs.
 #[cfg(target_os = "macos")]
 #[allow(unsafe_code)]
@@ -100,9 +113,9 @@ pub use barrier::{DecideRequest, LaterVerdict, PostToUi, Verdict, VerdictDone};
 
 #[cfg(windows)]
 pub use windows_impl::{
-    arguments_change_proxy_at, capture_png, guard_requests, policy_arguments_change_proxy,
-    policy_names_folder_at, provider_accounts, shared_user_data_folder, sign_out_provider,
-    storage_facts, user_data_folder_override,
+    arguments_change_proxy_at, capture_png, policy_arguments_change_proxy, policy_names_folder_at,
+    provider_accounts, shared_user_data_folder, sign_out_provider, storage_facts,
+    user_data_folder_override,
 };
 
 /// What puts every `WebView2` environment of the app into one user data folder (Windows,
@@ -133,21 +146,17 @@ mod windows_impl {
 
     use base64::Engine as _;
     use webview2_com::Microsoft::Web::WebView2::Win32::{
-        COREWEBVIEW2_WEB_RESOURCE_CONTEXT, COREWEBVIEW2_WEB_RESOURCE_CONTEXT_ALL,
-        COREWEBVIEW2_WEB_RESOURCE_CONTEXT_DOCUMENT,
-        COREWEBVIEW2_WEB_RESOURCE_REQUEST_SOURCE_KINDS_ALL, ICoreWebView2_2, ICoreWebView2_13,
-        ICoreWebView2_22, ICoreWebView2Controller, ICoreWebView2Cookie, ICoreWebView2CookieList,
-        ICoreWebView2CookieManager, ICoreWebView2Deferral, ICoreWebView2Environment,
-        ICoreWebView2Environment7, ICoreWebView2WebResourceRequestedEventArgs,
+        ICoreWebView2_2, ICoreWebView2_13, ICoreWebView2Controller, ICoreWebView2Cookie,
+        ICoreWebView2CookieList, ICoreWebView2CookieManager, ICoreWebView2Environment,
+        ICoreWebView2Environment7,
     };
     use webview2_com::{
-        CallDevToolsProtocolMethodCompletedHandler, GetCookiesCompletedHandler,
-        WebResourceRequestedEventHandler, take_pwstr,
+        CallDevToolsProtocolMethodCompletedHandler, GetCookiesCompletedHandler, take_pwstr,
     };
     use windows::core::{HSTRING, Interface, PWSTR, w};
 
     use super::CookieIdentity;
-    use super::{DecideRequest, PngDone, PostToUi, StorageFacts, Verdict, full_clip};
+    use super::{PngDone, StorageFacts, full_clip};
 
     /// Reads only cookie names and domains from a `WebView2` cookie list.
     fn cookie_identities(list: &ICoreWebView2CookieList) -> Result<Vec<CookieIdentity>, String> {
@@ -437,120 +446,6 @@ mod windows_impl {
                 profile_path,
             })
         }
-    }
-
-    /// `WebView2` objects of one held request, moved to a helper thread and back. Only ever dereferenced on the UI
-    /// thread: built in the handler there, used again only inside a closure [`PostToUi`] runs there.
-    struct Held {
-        args: ICoreWebView2WebResourceRequestedEventArgs,
-        deferral: ICoreWebView2Deferral,
-        env: ICoreWebView2Environment,
-    }
-    // SAFETY: see `Held`: the COM pointers cross threads only as opaque values and are touched on the UI thread.
-    unsafe impl Send for Held {}
-
-    /// Answers `args` with `403` (on the UI thread).
-    ///
-    /// # Safety
-    /// Call on the UI thread with live event args and the webview's environment.
-    unsafe fn refuse(
-        env: &ICoreWebView2Environment,
-        args: &ICoreWebView2WebResourceRequestedEventArgs,
-    ) -> windows::core::Result<()> {
-        // SAFETY: the caller's contract (UI thread, live objects).
-        unsafe {
-            let refused = env.CreateWebResourceResponse(
-                None,
-                403,
-                &HSTRING::from("Forbidden"),
-                &HSTRING::new(),
-            )?;
-            args.SetResponse(&refused)
-        }
-    }
-
-    /// Answers every request the webview sends with `403` before it is sent when the rule refuses it: document
-    /// requests (main frame and frames) and every other request (scripts, images, `fetch`, media, ...) ask `decide`
-    /// (call on the UI thread, once per webview, before its first navigation). A [`Verdict::Later`] holds the request
-    /// with a deferral and completes it on the UI thread through `post` when the verdict arrives, so a slow name
-    /// lookup never freezes the window.
-    ///
-    /// # Errors
-    /// A text reason when the filter or the handler cannot be registered: the caller must not show the webview.
-    pub fn guard_requests(
-        controller: &ICoreWebView2Controller,
-        environment: &ICoreWebView2Environment,
-        decide: DecideRequest,
-        post: PostToUi,
-    ) -> Result<(), String> {
-        let fail =
-            |what: &str, e: windows::core::Error| format!("WebView2 request guard ({what}): {e}");
-        let env = environment.clone();
-        let handler = WebResourceRequestedEventHandler::create(Box::new(move |_, args| {
-            let Some(args) = args else {
-                return Ok(());
-            };
-            // SAFETY: WebView2 hands over live event args for the duration of this call on the UI thread; the
-            // URI string is freed by `take_pwstr`; the response is created by the webview's own environment; a
-            // deferral keeps the args alive until it is completed (on the UI thread, through `post`).
-            unsafe {
-                // Every handler sees every request that matches ANY filter of the webview (wry's custom-protocol
-                // filters too: `ipc.localhost`, `tauri.localhost`); the rules refuse those for a preview page (it has
-                // no IPC rights anyway).
-                let mut context = COREWEBVIEW2_WEB_RESOURCE_CONTEXT::default();
-                args.ResourceContext(&raw mut context)?;
-                let mut uri = PWSTR::null();
-                args.Request()?.Uri(&raw mut uri)?;
-                let uri = take_pwstr(uri);
-                match decide(&uri, context == COREWEBVIEW2_WEB_RESOURCE_CONTEXT_DOCUMENT) {
-                    Verdict::Allow => {}
-                    Verdict::Deny => refuse(&env, &args)?,
-                    Verdict::Later(register) => {
-                        let held = Held {
-                            deferral: args.GetDeferral()?,
-                            args: args.clone(),
-                            env: env.clone(),
-                        };
-                        let post = post.clone();
-                        register(Box::new(move |allowed| {
-                            // This closure runs on the UI thread (`post`), where `held` was made (the SAFETY note
-                            // of the enclosing block covers its calls).
-                            post(Box::new(move || {
-                                let held = held;
-                                if !allowed {
-                                    let _ = refuse(&held.env, &held.args);
-                                }
-                                let _ = held.deferral.Complete();
-                            }));
-                        }));
-                    }
-                }
-            }
-            Ok(())
-        }));
-        // SAFETY: the controller is Tauri's live WebView2 controller on the UI thread; the filter and the
-        // handler registration only take owned or borrowed COM objects; every HRESULT is checked.
-        unsafe {
-            let core = controller.CoreWebView2().map_err(|e| fail("webview", e))?;
-            let filter = HSTRING::from("*");
-            // Since runtime 1.0.2592 frames need the request-source-kinds variant to be seen at all.
-            match core.cast::<ICoreWebView2_22>() {
-                Ok(core22) => core22
-                    .AddWebResourceRequestedFilterWithRequestSourceKinds(
-                        &filter,
-                        COREWEBVIEW2_WEB_RESOURCE_CONTEXT_ALL,
-                        COREWEBVIEW2_WEB_RESOURCE_REQUEST_SOURCE_KINDS_ALL,
-                    )
-                    .map_err(|e| fail("filter", e))?,
-                Err(_) => core
-                    .AddWebResourceRequestedFilter(&filter, COREWEBVIEW2_WEB_RESOURCE_CONTEXT_ALL)
-                    .map_err(|e| fail("filter", e))?,
-            }
-            let mut token = Default::default();
-            core.add_WebResourceRequested(&handler, &raw mut token)
-                .map_err(|e| fail("handler", e))?;
-        }
-        Ok(())
     }
 
     /// Answers `done` once.

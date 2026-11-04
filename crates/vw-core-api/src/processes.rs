@@ -165,6 +165,7 @@ pub(crate) fn spawn_tick(shared: &Arc<Shared>) -> JoinHandle<()> {
             let Some(shared) = weak.upgrade() else {
                 return;
             };
+            let _ = shared.vibe_processes.live("");
             reader.pass(&shared).await;
         }
     })
@@ -210,6 +211,14 @@ pub(crate) async fn end_session(
 }
 
 impl Core {
+    /// The last resort when [`Core::shutdown`] could not finish at quit: SIGKILL to the Vibe server's process group
+    /// and its crash watchdog, synchronously ([`vw_supervisor::Supervisor::kill_now`]). Returns whether a server was
+    /// running.
+    #[must_use]
+    pub fn stop_server_now(&self) -> bool {
+        self.shared.supervisor.kill_now()
+    }
+
     /// The process and port monitor (registry for terminals, leases, ledger).
     #[must_use]
     pub fn procmon(&self) -> &ProcMon {

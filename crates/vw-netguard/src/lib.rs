@@ -21,6 +21,11 @@ pub mod ip;
 pub mod resolve;
 pub mod rules;
 mod serve;
+mod stream;
+#[cfg(not(feature = "proxy-transports"))]
+pub mod upstream;
+#[cfg(feature = "proxy-transports")]
+#[path = "proxy/mod.rs"]
 pub mod upstream;
 mod ws_origin;
 

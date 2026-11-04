@@ -48,6 +48,8 @@ the local key proxy and vault handling, the installers and the update flow.
   confirmation. These guardrails do not isolate other same-user credentials or interpret every shell expression: a No
   in a Vibe Work prompt refuses that call, the turn goes on, and the same action written another way (an
   interpreter one-liner, for example) is not held.
+- Automatic Chrome pairing trusts a program running as your user that can both register a Chrome native host and
+  open Chrome; such programs are outside this model.
 - The core process holds the Mistral key in memory. On Linux core dumps are off and other processes of the same user
   cannot attach a debugger to it or read its memory; on macOS only core dumps are turned off, and on Windows other
   processes of the same user can read its memory.

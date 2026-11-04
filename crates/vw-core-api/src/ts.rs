@@ -673,6 +673,17 @@ pub fn typescript_modules(header: &str) -> Vec<(String, String)> {
         (new_chat::decls(&cfg), "new_chat"),
         (
             vec![
+                crate::FeedbackKind::decl(&cfg),
+                crate::FeedbackDraft::decl(&cfg),
+                crate::FeedbackSystem::decl(&cfg),
+                crate::FeedbackReport::decl(&cfg),
+                crate::FeedbackView::decl(&cfg),
+                crate::FeedbackRequest::decl(&cfg),
+            ],
+            "feedback",
+        ),
+        (
+            vec![
                 crate::SecretScanSettings::decl(&cfg),
                 crate::SecretScanRequest::decl(&cfg),
                 crate::SecretScanStatus::decl(&cfg),

@@ -9,7 +9,7 @@
  * stops it).
  */
 import { Button } from "../../components/Controls";
-import { useId, type ReactElement } from "react";
+import { useEffect, useId, useRef, type ReactElement } from "react";
 
 import type { CommitDialog as Dialog, Git } from "../../state/git";
 import { GitModal } from "./GitModal";
@@ -40,6 +40,14 @@ export function CommitDialog({
 }): ReactElement {
   const { plan, message, excluded, runHooks, authorName, authorEmail } = dialog;
   const messageNoteId = useId();
+  const messageField = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    if (
+      (dialog.messageFrom === "model" || dialog.messageFrom === "fallback") &&
+      document.activeElement === messageField.current
+    )
+      messageField.current?.select();
+  }, [message, dialog.messageFrom]);
   const fallback = dialog.messageFrom === "fallback" && dialog.messageNote !== null;
   const chosen = plan.files.filter((f) => !excluded.includes(f.path));
   const blocked = plan.blocker;
@@ -154,6 +162,7 @@ export function CommitDialog({
           </span>
         )}
         <textarea
+          ref={messageField}
           data-testid="git.commit-dialog-edit-commit"
           rows={5}
           aria-label="Message"

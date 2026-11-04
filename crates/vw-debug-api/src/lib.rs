@@ -60,7 +60,8 @@ pub use reply::status_of;
 pub use server::{DebugApi, DebugApiError};
 pub use token::{TOKEN_FILE, rotate_token_file};
 pub use window_routes::{
-    AppWindow, BoxFuture, SharedAppWindow, WindowRequest, WindowState, WindowView, listed_dialog,
+    AppRequest, AppWindow, BoxFuture, SharedAppWindow, WindowRequest, WindowState, WindowView,
+    listed_dialog,
 };
 
 /// Version of the route set (bumped when a route changes incompatibly).

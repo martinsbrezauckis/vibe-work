@@ -6,6 +6,7 @@ impl Command {
     #[must_use]
     pub fn name(&self) -> &'static str {
         match self {
+            Self::Feedback { .. } => "feedback",
             Self::PromptHistory { .. } => "promptHistory",
             Self::CopyText { .. } => "copyText",
             Self::ListSessions { .. } => "listSessions",

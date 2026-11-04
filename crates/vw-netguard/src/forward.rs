@@ -101,19 +101,27 @@ async fn read_head(reader: &mut (impl AsyncRead + Unpin)) -> Option<(Vec<u8>, Ve
 /// Sends the request (head, `rest` up to `body` bytes, then the remaining body from the client) and relays the
 /// answer; returns when the exchange is over (both sockets are dropped by the caller).
 /// An empty proxy refusal gets a plain reason; response bodies from the proxy/origin are otherwise retained.
+#[cfg_attr(feature = "proxy-transports", allow(clippy::too_many_arguments))]
 pub async fn exchange(
     mut client: TcpStream,
-    mut upstream: TcpStream,
+    mut upstream: impl AsyncRead + tokio::io::AsyncWrite + Unpin,
     request_head: &[u8],
     rest: &[u8],
     body: u64,
     upgrade: bool,
     proxied: bool,
+    #[cfg(feature = "proxy-transports")] on_proxy_error: impl Fn(&str),
 ) {
     let early = usize::try_from(body).map_or(rest.len(), |b| b.min(rest.len()));
     if upstream.write_all(request_head).await.is_err()
         || upstream.write_all(&rest[..early]).await.is_err()
     {
+        #[cfg(feature = "proxy-transports")]
+        if proxied {
+            let error = crate::upstream::Error::Unreachable;
+            on_proxy_error(error.outcome());
+            crate::serve::answer(&mut client, "502 Bad Gateway", error.state()).await;
+        }
         return;
     }
     let remaining = body.saturating_sub(early as u64);
@@ -126,7 +134,15 @@ pub async fn exchange(
     }
     let Some((head, after)) = read_head(&mut upstream).await else {
         if proxied {
-            crate::serve::answer(&mut client, "502 Bad Gateway", "The checked address could not be reached through your proxy: it did not answer the request.").await;
+            #[cfg(not(feature = "proxy-transports"))]
+            let text = "The checked address could not be reached through your proxy: it did not answer the request.";
+            #[cfg(feature = "proxy-transports")]
+            let text = {
+                let error = crate::upstream::Error::Protocol;
+                on_proxy_error(error.outcome());
+                error.state()
+            };
+            crate::serve::answer(&mut client, "502 Bad Gateway", text).await;
             return;
         }
         let _ = client
@@ -136,15 +152,34 @@ pub async fn exchange(
             .await;
         return;
     };
-    if proxied && let Some(code) = empty_refusal(&head) {
+    #[cfg(feature = "proxy-transports")]
+    if proxied && status(&head) == Some(407) {
+        let error = crate::upstream::Error::Authentication;
+        on_proxy_error(error.outcome());
         crate::serve::answer(
             &mut client,
-            &format!("{code} Request refused"),
-            &format!(
-                "The request to the checked address was refused through your proxy (status {code})."
-            ),
+            "407 Proxy Authentication Required",
+            error.state(),
         )
         .await;
+        return;
+    }
+    if proxied && let Some(code) = empty_refusal(&head) {
+        #[cfg(not(feature = "proxy-transports"))]
+        let text = format!(
+            "The request to the checked address was refused through your proxy (status {code})."
+        );
+        #[cfg(feature = "proxy-transports")]
+        let text = {
+            let error = if code == 407 {
+                crate::upstream::Error::Authentication
+            } else {
+                crate::upstream::Error::Refused
+            };
+            on_proxy_error(error.outcome());
+            error.state().to_owned()
+        };
+        crate::serve::answer(&mut client, &format!("{code} Request refused"), &text).await;
         return;
     }
     if upgrade && status(&head) == Some(101) {

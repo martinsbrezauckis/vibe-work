@@ -9,6 +9,7 @@
  * column and the side panel's room (they belong to the selected session; the panel's tab body,
  * with any native view in it, is unmounted meanwhile, see SidePanel).
  */
+import { FeedbackDialog } from "../feedback/FeedbackDialog";
 import { PathHome } from "../../components/PathText";
 import { useStore } from "../../state/createStore";
 import { NO_NEW_CHAT } from "../../state/newChatDraft";
@@ -103,6 +104,7 @@ export function Shell() {
       <VibeUpdateDialog />
       <DefaultModelDialog />
       <GitIdentityAskDialog />
+      <FeedbackDialog />
     </PathHome.Provider>
   );
 }

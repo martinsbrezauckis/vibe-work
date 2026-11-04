@@ -36,6 +36,7 @@ pub(crate) struct EventsQuery {
 
 fn event_name(event: &CoreEvent) -> &'static str {
     match event {
+        CoreEvent::Feedback { .. } => "feedback",
         CoreEvent::AskOpened { .. } => "askOpened",
         CoreEvent::AskClosed { .. } => "askClosed",
         CoreEvent::AskGrants { .. } => "askGrants",

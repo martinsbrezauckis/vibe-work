@@ -36,6 +36,9 @@ export async function chromeAction(
       request = { op: "setup", offerId };
       break;
     }
+    case "connect":
+      request = { op: "connect" };
+      break;
     case "store":
       request = { op: "openStore" };
       break;
@@ -45,7 +48,7 @@ export async function chromeAction(
     default:
       throw new UiControlError(
         "invalidParams",
-        "do must be read, enabled, offer, setup, store or remove",
+        "do must be read, enabled, offer, setup, connect, store or remove",
       );
   }
   try {

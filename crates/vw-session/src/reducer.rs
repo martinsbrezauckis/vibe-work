@@ -179,7 +179,9 @@ impl SessionEntry {
                 "state does not match its notification envelope".into(),
             ));
         }
-        self.state = merged_with_prefix(&self.state, state);
+        let state = merged_with_prefix(&self.state, state);
+        self.reset_history(&state);
+        self.state = state;
         self.accepted_turn = None;
         let _ = self.fold_runtime_into_session();
         Ok(vec![Change::Replaced { session_id: sid }])

@@ -23,6 +23,12 @@ const MAX_BYTES: u64 = 4 * 1024;
 /// The recorded state under `root`; `None` for no record or any record that is not a known state.
 #[must_use]
 pub fn load(root: &Path) -> Option<ExtensionStore> {
+    load_record(root).and_then(|c| c.store)
+}
+
+/// The whole recorded `chromeExtension` (store state and minimum version); `None` for no or an unreadable record.
+#[must_use]
+pub fn load_record(root: &Path) -> Option<ChromeExtension> {
     let path = root.join(EXTENSION_FILE);
     let meta = std::fs::symlink_metadata(&path).ok()?;
     if !meta.is_file() || meta.len() > MAX_BYTES {
@@ -31,7 +37,7 @@ pub fn load(root: &Path) -> Option<ExtensionStore> {
     let bytes = std::fs::read(&path).ok()?;
     serde_json::from_slice::<ChromeExtension>(&bytes)
         .ok()
-        .map(|c| c.store)
+        .filter(|c| c.store.is_some() || c.min_version.is_some())
 }
 
 /// Records `store` under `root` (temporary file, then rename); `None` removes the record.
@@ -39,15 +45,29 @@ pub fn load(root: &Path) -> Option<ExtensionStore> {
 /// # Errors
 /// The I/O error (the caller logs it; nothing else depends on the record).
 pub fn save(root: &Path, store: Option<ExtensionStore>) -> std::io::Result<()> {
+    save_record(
+        root,
+        store.map(|store| ChromeExtension {
+            store: Some(store),
+            min_version: None,
+        }),
+    )
+}
+
+/// Records the accepted manifest's whole `chromeExtension`; `None` removes the record.
+///
+/// # Errors
+/// The I/O error (the caller logs it; nothing else depends on the record).
+pub fn save_record(root: &Path, record: Option<ChromeExtension>) -> std::io::Result<()> {
     let path = root.join(EXTENSION_FILE);
-    let Some(store) = store else {
+    let Some(record) = record else {
         return match std::fs::remove_file(&path) {
             Err(error) if error.kind() != std::io::ErrorKind::NotFound => Err(error),
             _ => Ok(()),
         };
     };
     std::fs::create_dir_all(root)?;
-    let text = serde_json::to_vec(&ChromeExtension { store }).map_err(std::io::Error::other)?;
+    let text = serde_json::to_vec(&record).map_err(std::io::Error::other)?;
     let temp = root.join(format!(
         "{EXTENSION_FILE}.{}.tmp",
         crate::seen::temp_suffix()

@@ -15,9 +15,14 @@
 mod anomaly;
 mod change;
 mod fanout;
+mod history;
+#[cfg(test)]
+mod history_tests;
 mod lifecycle;
 mod patch;
 mod reducer;
+#[cfg(test)]
+mod resume_tests;
 mod session;
 #[cfg(test)]
 mod stats_tests;
@@ -26,6 +31,7 @@ mod store;
 pub use anomaly::{Anomalies, AnomalyCounts, AnomalyKind, AnomalyRecord};
 pub use change::{Action, Applied, Change, Notification, SessionView};
 pub use fanout::{Delivery, Subscription, Waker};
+pub use history::{HISTORY_LIMIT, HistoryRequest};
 pub use lifecycle::{LoadError, LoadKind, SessionRow};
 pub use patch::{PatchError, apply_patch};
 pub use store::SessionStore;

@@ -58,6 +58,8 @@ pub(crate) async fn place(
     let Some(placement) = placement else {
         return webview.hide().map_err(platform);
     };
+    #[cfg(windows)]
+    let placement = crate::full_screen::placement(webview, placement)?;
     webview.set_zoom(placement.zoom).map_err(platform)?;
     #[cfg(target_os = "linux")]
     {
@@ -337,9 +339,8 @@ pub(crate) async fn clear_service_workers(
     }
 }
 
-/// [`clear_service_workers`] for a `guarded` web mount (nothing otherwise). Linux refuses the mount when it fails (as
-/// before); Windows and macOS report it and go on: a runtime without the call must not cost the preview (hardening
-/// never cuts the feature).
+/// [`clear_service_workers`] for a `guarded` web mount (nothing otherwise). Every engine refuses the mount when
+/// clearing fails: an old worker must never run under another page's network rights.
 pub(crate) async fn clear_service_workers_at_mount(
     webview: &Webview<Wry>,
     guarded: bool,
@@ -349,14 +350,7 @@ pub(crate) async fn clear_service_workers_at_mount(
     }
     // WebKitGTK takes about 4.6-4.8 s to clear a storage that holds a live registration (about 30 ms without one): 6 s
     // covers it and keeps the whole mount within the preview service's 10 s engine bound.
-    let cleared = clear_service_workers(webview, Duration::from_secs(6)).await;
-    if cfg!(target_os = "linux") {
-        return cleared;
-    }
-    if let Err(error) = cleared {
-        tracing::warn!(%error, "service workers of the preview storage were not cleared");
-    }
-    Ok(())
+    clear_service_workers(webview, Duration::from_secs(6)).await
 }
 
 /// Reads session-cookie presence through `WebKitGTK`, without exposing cookie values.
@@ -733,6 +727,7 @@ pub(crate) async fn secure(
     webview: &Webview<Wry>,
     profile: String,
     decide: vw_platform::webview::DecideRequest,
+    block: vw_platform::webview::BlockRequest,
     post: vw_platform::webview::PostToUi,
 ) -> Result<vw_platform::webview::StorageFacts, EngineError> {
     with_native(
@@ -750,7 +745,7 @@ pub(crate) async fn secure(
                         facts.profile_name
                     ));
                 }
-                vw_platform::webview::guard_requests(&controller, &environment, decide, post)?;
+                vw_platform::webview::guard_requests(&controller, &environment, decide, block, post)?;
                 Ok(facts)
             });
             let _ = reply.send(result);

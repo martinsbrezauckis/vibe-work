@@ -35,7 +35,7 @@ Every page (the template below has all of it):
 
 Plans: steps are `<li data-step="s1" data-status="todo">` in `<ol class="hb-steps">`; `data-status` is `todo`, `doing`, `done`, `blocked` or `skipped`, at most one `doing`. A new step takes the next unused number (never reuse one). A plan whose steps are all done or skipped has status `done`.
 
-Prototypes (`prototypes/<slug>.html`): a clickable mockup for a design review. Its inline script and scripts in `assets/` run in Vibe Work's isolated viewer: no network, no storage, no access to other pages or the app, so its data lives in the page or `assets/`.
+Prototypes (`prototypes/<slug>.html`): a clickable mockup for a design review. Unless the project has turned prototype scripts off, its inline script and scripts in `assets/` run in Project Pages' isolated viewer: no network, no storage, no access to other pages or the app, so its data lives in the page or `assets/`. Files previews do not run scripts, including prototypes.
 
 Inputs: a page can ask the user for a decision, a priority order, a checklist or a short answer. Vibe Work shows controls and keeps the answers; the user sends them with one button.
 

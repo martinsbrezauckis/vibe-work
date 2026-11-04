@@ -5,8 +5,8 @@
 // fingerprint), DOM traversal (bounded traversal of documents, same-origin frames and open shadow
 // roots, global rects across frames), actionability (attached, visible, stable, enabled, receives
 // events, the covering element).
-/* global REQ -- Supplied by the Rust script assembler and its shared prelude. */
-/* exported authorizationPage, nodeIdentity, actionRef, actionableCandidate, visualCandidate, collect, consentSnapshot, describe, domPath, editable, findRef, globalRect, hideKeys, inFrame, keyHolder, loginRole, refOf, rememberLabelledKeys, secretKind, submitMethods, submitOrigins, vaultFilled */
+/* global REQ, formControl, nearbyLabel, labelledToggle -- Supplied by the Rust script assembler and its shared prelude. */
+/* exported authorizationPage, nodeIdentity, observedTarget, actionRef, actionableCandidate, visualCandidate, collect, consentSnapshot, describe, domPath, editable, findRef, globalRect, hideKeys, inFrame, keyHolder, loginRole, refOf, rememberLabelledKeys, secretKind, submitMethods, submitOrigins, vaultFilled */
 const ENV = (() => {
   try {
     return window[REQ.page] || null;
@@ -24,6 +24,7 @@ const INTERACTIVE =
 // Some site footers install a click listener on a plain span/div and expose only a pointer cursor. Give a
 // small, visibly labelled target a ref so normal hit testing can decide whether to act.
 const customClickable = (el) => {
+  if (labelledToggle(el) && !visible(el.control)) return visible(el) && enabled(el.control);
   if (matches(el, INTERACTIVE) || !["a", "span", "div", "p", "li", "label"].includes(el.localName)) return false;
   if (el.closest(INTERACTIVE)) return false;
   if (!visible(el) || !enabled(el)) return false;
@@ -197,6 +198,12 @@ const collect = () => {
     }
   };
   overlays(document);
+  // Forms without semantic main landmarks (including custom selects) must be reached before huge menus.
+  let fieldsScanned = 0;
+  for (const el of document.querySelectorAll('input,textarea,select,[role=combobox],[role=textbox],label')) {
+    if (formControl(el)) priority(el);
+    if (++fieldsScanned >= 2048 || priorityElements.length >= priorityLimit) break;
+  }
   const mainRegions = document.querySelectorAll('main, article, [role="main"]');
   let mainScanned = 0;
   for (const region of mainRegions) {
@@ -361,12 +368,12 @@ const secretKind = (el) => {
     .join(" ")
     .toLowerCase();
   // The visible label counts too: many payment forms name their card fields only there ("Card number").
-  const words = `${meta} ${fieldLabelText(el)}`;
+  const words = `${meta} ${fieldLabelText(el)} ${nearbyLabel(el).toLowerCase()}`;
   if (OTP_META.test(words)) return "otp";
   if (CARD_META.test(words)) return "card";
   if (/\bpass(word|wd)?\b|\bpin\b/.test(meta)) return "password";
   // A bare "Code" (or CVC-like) field in a form that also holds a card number is that card's security code.
-  if (CARD_CODE.test(fieldLabelText(el).trim()) || CARD_CODE.test(String(el.getAttribute("name") || "").toLowerCase())) {
+  if (CARD_CODE.test(fieldLabelText(el).trim()) || CARD_CODE.test(nearbyLabel(el).toLowerCase()) || CARD_CODE.test(String(el.getAttribute("name") || "").toLowerCase())) {
     if (holdsCardNumber(el.form)) return "card";
   }
   return null;
@@ -394,7 +401,7 @@ function holdsCardNumber(form) {
   return Array.from(form.elements).slice(0, 60).some((f) => {
     const auto = String((f.getAttribute && f.getAttribute("autocomplete")) || "").toLowerCase();
     const attrs = ["name", "id", "aria-label", "placeholder"].map((n) => String((f.getAttribute && f.getAttribute(n)) || "")).join(" ").toLowerCase();
-    return /\bcc-number\b/.test(auto) || CARD_NUMBER.test(`${attrs} ${fieldLabelText(f)}`);
+    return /\bcc-number\b/.test(auto) || CARD_NUMBER.test(`${attrs} ${fieldLabelText(f)} ${nearbyLabel(f).toLowerCase()}`);
   });
 }
 // The role a field plays in a sign-in form, from its LIVE state:
@@ -495,7 +502,7 @@ const labelOf = (el) => {
   if (el.labels && el.labels.length) return clip(Array.from(el.labels).map((l) => l.innerText || l.textContent).join(" "), 160);
   const tag = el.localName;
   if (tag === "input" || tag === "textarea" || tag === "select") {
-    return clip(attr("title") || attr("placeholder") || attr("name") || "", 160);
+    return clip(attr("title") || attr("placeholder") || nearbyLabel(el) || attr("name") || "", 160);
   }
   if (tag === "iframe" || tag === "frame") return clip(attr("title") || attr("name") || "", 160);
   if (tag === "img") return clip(attr("alt") || attr("title") || "", 160);
@@ -531,6 +538,16 @@ const actionRef = (ref, regions = false) => {
     : shown.length === 1 ? shown[0] : entering.length === 1 ? entering[0] : null };
 };
 const describe = (el) => (el ? { role: roleOf(el), name: labelOf(el) } : null);
+// The host normalizes hidden format controls and caps names by Unicode characters (model.rs/text.rs).
+// Compare that same displayed label, so an unchanged soft hyphen or zero-width character cannot revoke a ref.
+const observedTarget = (el, node, name) => {
+  if (node && nodeIdentity(el) !== node) return false;
+  if (name === undefined) return true;
+  // eslint-disable-next-line no-control-regex, no-misleading-character-class -- These control/format code points are deliberately removed, matching text.rs.
+  const hidden = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f\u00ad\u034f\u061c\u180e\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff\u{e0000}-\u{e007f}]/gu;
+  const shown = Array.from(hideKeys(labelOf(el), el).replace(hidden, '')).slice(0, 160).join('');
+  return shown === name;
+};
 // Text that looks like an API key or token: hidden from every read the agent gets. Known prefixes,
 // JWTs and any 32+ character run of letters, digits, `_` and `-` that mixes upper case, lower case and digits are
 // hidden; unlabelled hex strings and UUIDs stay visible. Nearby credential labels also hide shorter high-entropy

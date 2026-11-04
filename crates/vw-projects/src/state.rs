@@ -18,7 +18,7 @@ use crate::model::{
     Hint, MAX_MEMBERS, MAX_PROJECTS, NewSession, Project, ProjectsError, Seen, Snapshot,
     SweepOutcome,
 };
-use crate::names::{auto_name, clean_name, normalize_folder, same_folder};
+use crate::names::{auto_name, clean_name, folder_label, normalize_folder, same_folder};
 
 /// Most session ids one `move` may carry.
 pub const MAX_MOVE: usize = 500;
@@ -372,6 +372,33 @@ impl State {
                     .is_some_and(|m| same_folder(m, folder)))
         });
         self.projects.len() != before
+    }
+
+    /// Names the automatic project made for `folder` `name` (`name (2)`, ... when another project has it), for a
+    /// folder Vibe Work made itself whose own name means nothing to the person (a Temporary chat's folder). Only a
+    /// name still made from the folder changes: a name the person gave stays. Returns true when a name changed.
+    pub fn name_auto_project(&mut self, folder: &str, name: &str) -> bool {
+        let label = folder_label(&normalize_folder(folder));
+        let Some(at) = self.projects.iter().position(|p| {
+            p.auto
+                && p.main_folder
+                    .as_deref()
+                    .is_some_and(|m| same_folder(m, folder))
+        }) else {
+            return false;
+        };
+        if label.is_empty() || !self.projects[at].name.contains(&label) {
+            return false;
+        }
+        let taken: BTreeSet<&str> = self.projects.iter().map(|p| p.name.as_str()).collect();
+        let mut next = name.to_owned();
+        let mut n = 2;
+        while taken.contains(next.as_str()) {
+            next = format!("{name} ({n})");
+            n += 1;
+        }
+        self.projects[at].name = next;
+        true
     }
 
     /// Forgets a session Vibe deleted. Returns true when it was a member.

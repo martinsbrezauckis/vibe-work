@@ -51,6 +51,35 @@ fn tab_json(tab: &PageTab) -> Value {
     })
 }
 
+fn list_pages(pages: Vec<PageTab>, cursor: Option<&str>) -> Result<Value, String> {
+    let mut pages: Vec<_> = pages
+        .into_iter()
+        .filter(|page| page.kind == PageTabKind::Web)
+        .collect();
+    if let Some(cursor) = cursor {
+        let position = pages
+            .iter()
+            .position(|page| page.page_key == cursor)
+            .ok_or("tab-list cursor is no longer available: call list_tabs without tab")?;
+        pages.drain(..=position);
+    }
+    let tabs: Vec<_> = pages.iter().map(tab_json).collect();
+    let content: Vec<_> = pages
+        .iter()
+        .map(|tab| {
+            json!({
+                "id": tab.page_key,
+                "title": bounded(tab.preview.as_ref().and_then(|view| view.title.as_deref()), 120),
+                "url": bounded(tab.preview.as_ref().and_then(|view| view.url.as_deref()), 2_000),
+            })
+        })
+        .collect();
+    let mut out = json!({"action":"list_tabs", "ok":true, "tabs":tabs,
+        "untrustedPageContent":{"tabs":content},"note":vw_browser::observe::UNTRUSTED_NOTE});
+    vw_browser::observe::fit(&mut out, vw_browser::observe::ACT_BUDGET);
+    Ok(out)
+}
+
 fn current_tab(service: &PreviewService, owner: &str, key: &str) -> Result<PageTab, String> {
     if key == owner {
         return Err("the pinned App preview cannot be closed".to_owned());
@@ -227,6 +256,7 @@ fn close_receipt(
             None => warning,
         });
     }
+    vw_browser::observe::fit(&mut receipt, vw_browser::observe::ACT_BUDGET);
     receipt
 }
 
@@ -244,19 +274,7 @@ pub(crate) async fn call(
     match args.get("action").and_then(Value::as_str) {
         Some("list_tabs") => {
             still_running(shared, owner, owner)?;
-            let pages: Vec<_> = service
-                .tabs(owner)
-                .into_iter()
-                .filter(|tab| tab.kind == PageTabKind::Web)
-                .collect();
-            let tabs: Vec<_> = pages.iter().map(tab_json).collect();
-            let content: Vec<_> = pages.iter().map(|tab| json!({
-                "id": tab.page_key,
-                "title": bounded(tab.preview.as_ref().and_then(|view| view.title.as_deref()), 120),
-                "url": bounded(tab.preview.as_ref().and_then(|view| view.url.as_deref()), 2_000),
-            })).collect();
-            Ok(json!({"action":"list_tabs", "ok":true, "tabs":tabs,
-                "untrustedPageContent":{"tabs":content}}))
+            list_pages(service.tabs(owner), tab)
         }
         Some("close_tab") => prepare_close(shared, owner, tab.unwrap_or(""))?.await,
         _ => Err("unknown browser tab action".to_owned()),
@@ -266,6 +284,44 @@ pub(crate) async fn call(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn browser_tab_pages_continue_without_losing_or_repeating_ids() {
+        let pages: Vec<_> = (0..100)
+            .map(|i| PageTab {
+                page_key: format!("web-page-fixture-{i}"),
+                kind: PageTabKind::Web,
+                owner_kind: Some(PageTabOwner::Agent),
+                active: false,
+                agent_current: false,
+                preview: None,
+                snapshot: None,
+                favicon_url: None,
+            })
+            .collect();
+        let mut cursor = None;
+        let mut ids = Vec::new();
+        loop {
+            let out = list_pages(pages.clone(), cursor.as_deref()).unwrap();
+            assert!(out.to_string().len() <= 4000);
+            assert!(serde_json::to_string_pretty(&out).unwrap().len() <= 4500);
+            for tab in out["tabs"].as_array().unwrap() {
+                ids.push(tab["id"].as_str().unwrap().to_owned());
+            }
+            cursor = out["nextTab"].as_str().map(str::to_owned);
+            if cursor.is_none() {
+                break;
+            }
+            assert!(ids.len() < 100);
+        }
+        assert_eq!(
+            ids,
+            pages
+                .iter()
+                .map(|page| page.page_key.clone())
+                .collect::<Vec<_>>()
+        );
+        assert!(list_pages(pages, Some("another-session-tab")).is_err());
+    }
     #[tokio::test]
     async fn current_mode_controls_closing_without_a_saved_permission_or_dialog() {
         let core = crate::offline_core::start("browser-close-mode").await;

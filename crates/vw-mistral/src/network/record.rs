@@ -53,6 +53,8 @@ struct Record {
 #[serde(deny_unknown_fields)]
 struct Payload {
     values: BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    proxy_credentials: BTreeMap<String, String>,
     certificate_file: Option<Vec<u8>>,
     certificate_dir: Option<Vec<Vec<u8>>>,
 }
@@ -91,6 +93,7 @@ pub fn read_settings(path: &Path, key: Option<&NetworkMacKey>) -> LoadedSettings
             .ok()?;
         let payload: Payload = serde_json::from_str(&record.settings).ok()?;
         let mut settings = NetworkSettings::from_lookup(|name| payload.values.get(name).cloned());
+        settings.proxy_credentials = payload.proxy_credentials;
         settings.file_certificates = payload.certificate_file;
         settings.dir_certificates = payload.certificate_dir;
         Some(settings)
@@ -109,6 +112,7 @@ pub fn read_settings(path: &Path, key: Option<&NetworkMacKey>) -> LoadedSettings
 
 pub(super) fn payload_text(settings: &NetworkSettings) -> io::Result<String> {
     let text = serde_json::to_string(&Payload {
+        proxy_credentials: settings.proxy_credentials.clone(),
         values: super::KEYS
             .iter()
             .filter_map(|name| settings.get(name).map(|value| ((*name).to_owned(), value)))

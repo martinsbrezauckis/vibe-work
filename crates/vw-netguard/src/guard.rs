@@ -113,6 +113,8 @@ struct StoreListener {
 }
 
 pub(crate) struct Inner {
+    pub(crate) enabled: tokio::sync::watch::Sender<bool>,
+    pub(crate) canaries: std::sync::atomic::AtomicBool,
     pub(crate) resolver: Arc<dyn Resolve>,
     shared: Mutex<Option<std::net::TcpListener>>,
     shared_addr: SocketAddr,
@@ -185,6 +187,7 @@ impl Inner {
     }
 
     /// The user's proxy hop for a public `host:port` (`tls`: a tunnel), `None` for a direct connection.
+    #[cfg(not(feature = "proxy-transports"))]
     pub(crate) fn upstream_route(
         &self,
         tls: bool,
@@ -310,6 +313,8 @@ impl NetGuard {
         let shared_addr = listener.local_addr()?;
         Ok(Self {
             inner: Arc::new(Inner {
+                enabled: tokio::sync::watch::channel(true).0,
+                canaries: std::sync::atomic::AtomicBool::new(true),
                 resolver,
                 shared: Mutex::new(Some(listener)),
                 shared_addr,
@@ -335,6 +340,17 @@ impl NetGuard {
             .upstream
             .write()
             .unwrap_or_else(PoisonError::into_inner) = Arc::new(upstream);
+    }
+
+    /// Enables forwarding. A change also closes existing connections, including authenticated tunnels.
+    /// Used by the vault's proxy forwarder; disabled connections never reach an upstream.
+    pub fn set_enabled(&self, enabled: bool) {
+        self.inner.enabled.send_replace(enabled);
+    }
+
+    /// Turns browser diagnostic responses off for a general proxy forwarder.
+    pub fn disable_canaries(&self) {
+        self.inner.canaries.store(false, Ordering::SeqCst);
     }
 
     /// The shared proxy URL (`http://127.0.0.1:<port>`): no session, loopback refused.

@@ -8,6 +8,7 @@
  * (table order inside a rank). Skills Vibe marks `userInvocable: false` or disabled are not offered.
  */
 import type { JsonValue } from "../../../protocol/core";
+import { FEEDBACK_ENABLED } from "../../../state/feedbackEnabled";
 import { TEXT } from "../../../vocabulary";
 import { type ClientCommand, CLIENT_COMMANDS } from "./slashNames";
 
@@ -20,7 +21,8 @@ export interface SlashCommandRow {
 }
 
 /** The GUI commands, in menu order. */
-export const SLASH_COMMANDS: readonly SlashCommandRow[] = [
+const ALL_COMMANDS: readonly SlashCommandRow[] = [
+  { name: "feedback", description: "Report a bug or ask for a feature", runs: "in the app" },
   {
     name: "compact",
     description: "Summarize the history now (optional instructions)",
@@ -83,6 +85,10 @@ export const SLASH_COMMANDS: readonly SlashCommandRow[] = [
   },
   { name: "new", description: "Same as /clear", runs: "session/history/clear" },
 ];
+
+export const SLASH_COMMANDS = ALL_COMMANDS.filter(
+  (row) => row.name !== "feedback" || FEEDBACK_ENABLED,
+);
 
 /** A skill as the menu shows it. */
 export interface SkillRow {

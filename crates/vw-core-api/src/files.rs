@@ -258,6 +258,10 @@ impl Core {
                 self.files_resolve(&session_id, paths).await
             }
             FilesRequest::Read { session_id, file } => {
+                #[cfg(feature = "video")]
+                if file.starts_with("video:") {
+                    return self.video_file(&session_id, &file, false).await;
+                }
                 let hit = self.checked(&session_id, &file).await?;
                 let path = hit.canonical.clone();
                 let read = blocking(move || read_file(&path))
@@ -291,6 +295,10 @@ impl Core {
                 ))
             }
             FilesRequest::Stat { session_id, file } => {
+                #[cfg(feature = "video")]
+                if file.starts_with("video:") {
+                    return self.video_file(&session_id, &file, true).await;
+                }
                 let found = self.checked(&session_id, &file).await.ok();
                 // The same fingerprint a read gives (content hash included for files small enough to edit), so the
                 // tab's poll notices a rewrite that kept the size and the modification time.

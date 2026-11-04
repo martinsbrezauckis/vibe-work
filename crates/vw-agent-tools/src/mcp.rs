@@ -136,11 +136,11 @@ fn handle(
                 .as_array()
                 .cloned()
                 .unwrap_or_default();
-            if package
-                && chrome
-                && let Ok(catalog) = forward.call(tools::CHROME_TOOL_LIST, json!({}))
-            {
-                let catalog = crate::specs::with_receipts(catalog);
+            if package && chrome {
+                // The launch line fixes this catalog (and Vibe caches it across chats). It is compiled into
+                // this binary, so discovery must not wait for the core's tool-call queue or its reply budget.
+                // Advertising a schema grants nothing: tools/call still forwards with the session credential.
+                let catalog = crate::specs::with_receipts(json!(crate::chrome_tool_list()));
                 list.extend(catalog.as_array().cloned().unwrap_or_default());
             }
             reply(&id, &json!({"tools":list}))
@@ -155,6 +155,11 @@ fn handle(
             }
             if !tools::SESSION_TOOLS.contains(&name) {
                 return Some(error(&id, -32602, "unknown tool"));
+            }
+            if let Some(args) = params.get("arguments")
+                && let Err(reason) = crate::browser_input::validate(name, args)
+            {
+                return Some(error(&id, -32602, &reason));
             }
             let args = params
                 .get("arguments")
@@ -210,7 +215,15 @@ pub fn serve_with_package(
             continue;
         }
         let answer = match serde_json::from_str::<Value>(&line) {
-            Ok(message) => handle(&message, &mut forward, chrome, package),
+            Ok(message) => {
+                #[cfg(feature = "video")]
+                if let Some(progress) = crate::video::progress(&message) {
+                    serde_json::to_writer(&mut output, &progress)?;
+                    output.write_all(b"\n")?;
+                    output.flush()?;
+                }
+                handle(&message, &mut forward, chrome, package)
+            }
             Err(_) => Some(error(&Value::Null, -32700, "parse error")),
         };
         if let Some(answer) = answer {
@@ -298,7 +311,21 @@ mod package_tests {
     #[test]
     fn session_facts_and_connector_suggestions_are_discoverable_without_install_tools() {
         let listing = tool_list();
-        for name in ["session_status", "connectors_list", "connector_suggest"] {
+        for name in [
+            "session_status",
+            "connectors_list",
+            "connector_suggest",
+            "addon_suggest",
+        ] {
+            // A chat launched without the Chrome package still has the add-on state and the suggestion.
+            assert!(
+                crate::specs::tool_list(false)
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|tool| tool["name"] == name),
+                "missing {name} without the Chrome package"
+            );
             assert!(
                 listing
                     .as_array()

@@ -1,4 +1,4 @@
-// One agent action on a ref of the latest observation: find the element by its ref, check it is
+// One agent action on a retained ref in this document: find the same node and label, check it is
 // actionable, then act like a user would (pointer and key events, the native value setter so frameworks see the
 // change). Synthetic events: the page environment never counts them as the user's typing.
 // REQ: { page, action: click|type|select|check|press|hover|scroll, ref?, text?, value?, checked?, key?, submit?,
@@ -7,7 +7,7 @@
 // Adapted from ShellX control script (native value setter, beforeinput/input/
 // change, contenteditable insertText) and actionability checks; changed: Enter submits the form the way a
 // browser does for a real key press, select uses the native setter.
-/* global authorizationPage, ENV, MAX_FRAME_DEPTH, MAX_SHADOW_DEPTH, REQ, actionRef, candidates, clip, composedParent, consentSnapshot, describe, editable, enabled, globalRect, labelOf, nativeClickPoint, refOf, roleOf, secretKind, viewOf, visibilityState, visible -- Supplied by the Rust script assembler and its shared prelude. */
+/* global authorizationPage, ENV, MAX_FRAME_DEPTH, MAX_SHADOW_DEPTH, REQ, actionRef, candidates, clip, composedParent, consentSnapshot, describe, editable, enabled, globalRect, labelOf, nativeClickPoint, observedTarget, refOf, roleOf, secretKind, viewOf, visibilityState, visible -- Supplied by the Rust script assembler and its shared prelude. */
 (() => {
   /* global dragTo -- Inserted by the script assembler. */
   __VW_COMMON__;
@@ -359,6 +359,9 @@
       const { found, target } = actionRef(REQ.ref, action === "scroll");
       if (found.length === 0) return result("stale");
       if (!target) return result("ambiguous", { count: found.length });
+      // A ref hash describes markup, not a node. Retention must never retarget an identical replacement;
+      // a changed label also needs a read so the host's prompt guard checks the words before input.
+      if (!observedTarget(target, REQ.observedNode, REQ.observedName)) return result("stale");
       el = target;
     } else if (action === "press") {
       el = document.activeElement || document.body;

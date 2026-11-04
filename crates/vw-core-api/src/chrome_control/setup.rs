@@ -8,6 +8,8 @@ use serde::{Deserialize, Serialize};
 /// Chrome Control's native messaging host name (the helper registers under it; the extension connects to it).
 pub const HOST_NAME: &str = "com.vibework.chrome_control";
 /// The extension's id in the Chrome Web Store: the store item's id, derived from its public key.
+pub const FIREFOX_EXTENSION_ID: &str = "browser-control@vibework.app";
+/// The Chrome Web Store extension identity.
 pub const EXTENSION_ID: &str = "gnlamocfdabihichplpepjpehlbafhng";
 /// The extension's name in the Chrome Web Store and in Chrome (the app's own name: say "the Vibe Work extension" where
 /// text could mean the app). Google's trademark rule
@@ -31,6 +33,8 @@ pub struct ChromeControlConfig {
     pub package: Option<PathBuf>,
     #[cfg(test)]
     pub(super) after_helper_check: Option<AfterHelperCheck>,
+    #[cfg(test)]
+    pub(super) edge_policy: Option<serde_json::Value>,
     /// SHA-256 of the final shipped helper, embedded by the release build.
     pub helper_sha256: Option<String>,
     /// Kernel code-directory hash of the signed macOS helper, embedded by the release build.
@@ -42,8 +46,18 @@ pub struct ChromeControlConfig {
     pub user_home: Option<PathBuf>,
     /// Windows native-host registry root. Defaults to Chrome's per-user key; tests use a disposable root.
     pub windows_registry_root: String,
+    /// Edge per-user registration root; used only with the optional browser module.
+    pub edge_registry_root: String,
+    /// Mozilla per-user native host key.
+    pub firefox_registry_root: String,
     /// Opens the store page in Chrome; `None` = start Google Chrome with the address.
     pub launcher: Option<Launcher>,
+    /// Opens the same store listing in Edge; used by the optional browser module.
+    pub edge_launcher: Option<Launcher>,
+    /// Opens the Firefox add-on page.
+    pub firefox_launcher: Option<Launcher>,
+    /// Approved Mozilla listing supplied by the later-release package; none before publication.
+    pub firefox_store_url: Option<String>,
 }
 
 impl Default for ChromeControlConfig {
@@ -52,13 +66,20 @@ impl Default for ChromeControlConfig {
             package: None,
             #[cfg(test)]
             after_helper_check: None,
+            #[cfg(test)]
+            edge_policy: None,
             helper_sha256: option_env!("VW_CHROME_HELPER_SHA256").map(str::to_owned),
             #[cfg(target_os = "macos")]
             helper_cdhash: option_env!("VW_CHROME_HELPER_CDHASH").map(str::to_owned),
             extension_id: EXTENSION_ID.to_owned(),
             user_home: None,
             windows_registry_root: r"HKCU\Software\Google\Chrome\NativeMessagingHosts".to_owned(),
+            edge_registry_root: r"HKCU\Software\Microsoft\Edge\NativeMessagingHosts".to_owned(),
             launcher: None,
+            edge_launcher: None,
+            firefox_launcher: None,
+            firefox_store_url: None,
+            firefox_registry_root: r"HKCU\Software\Mozilla\NativeMessagingHosts".to_owned(),
         }
     }
 }
@@ -81,6 +102,14 @@ impl ChromeControlConfig {
 
 /// Plain refusal shared by unavailable Settings and tool paths.
 pub(crate) const ABSENT: &str = vw_agent_tools::wire::CHROME_UNAVAILABLE;
+
+pub(super) fn absent_for(edge: bool) -> &'static str {
+    if edge {
+        vw_vocabulary::texts::EDGE_UNAVAILABLE
+    } else {
+        ABSENT
+    }
+}
 
 impl std::fmt::Debug for ChromeControlConfig {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -109,6 +138,8 @@ pub enum SetupState {
     Absent,
     /// Nothing is installed.
     NotSetUp,
+    /// A recorded native host could not be restored; retry setup.
+    RepairRequired,
     /// The helper is installed; no Chrome profile has the extension yet.
     WaitingForExtension,
     /// The helper is installed and at least one Chrome profile has the extension.
@@ -137,6 +168,32 @@ pub struct ChromeSetupView {
     pub pairing: String,
     /// Short public identity to compare with Chrome (never the owner secret).
     pub fingerprint: Option<String>,
+    /// A detected unsupported or missing browser; absent in older saved views.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
+    pub browser_issue: Option<super::browser::BrowserIssue>,
+    /// External installation is waiting for Chrome, or a macOS restart.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
+    pub install_state: Option<String>,
+    /// Browser-reported permission states, absent for existing browser views.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
+    pub states: Option<Vec<String>>,
+    /// The one Your Chrome state the card and the agent share (label, action, instruction).
+    /// Always set by the core; absent only in older saved views.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
+    pub addon: Option<super::addon::AddonView>,
+    /// After Remove: the extension is still in a Chrome profile (Chrome did not remove it by itself), so the person
+    /// removes it in Chrome too. Absent: nothing is known to be left.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
+    pub extension_left: Option<bool>,
+    /// After Remove, Chrome must restart to finish removing its externally installed extension.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
+    pub extension_restart: Option<bool>,
 }
 
 /// What a set up made, so Remove deletes exactly that.
@@ -151,7 +208,45 @@ struct Receipt {
     registry_keys: Vec<String>,
 }
 
+impl Receipt {
+    fn data_for(&self, browser: &str) -> Vec<PathBuf> {
+        self.user_data
+            .iter()
+            .enumerate()
+            .filter(|(index, dir)| {
+                self.browsers
+                    .get(*index)
+                    .map(String::as_str)
+                    .or_else(|| places::browser_of(dir))
+                    == Some(browser)
+            })
+            .map(|(_, dir)| dir.clone())
+            .collect()
+    }
+}
+
 const RECEIPT: &str = "setup.json";
+
+#[path = "setup_files.rs"]
+mod files;
+#[path = "setup_registration.rs"]
+mod registration;
+
+static REGISTRATION_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+fn registration_lock() -> std::sync::MutexGuard<'static, ()> {
+    REGISTRATION_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+pub(super) fn repair_registrations(
+    config: &ChromeControlConfig,
+    state: &Path,
+    browser: Option<&str>,
+) -> Result<(), String> {
+    let _held = registration_lock();
+    registration::repair(config, state, browser)
+}
 
 pub(super) fn helper_name() -> &'static str {
     if cfg!(windows) {
@@ -161,48 +256,11 @@ pub(super) fn helper_name() -> &'static str {
     }
 }
 
-/// One Chrome this user may run: its name, its user data folder, its per-user host folder (`None` on Windows,
-/// where the registry names the manifest).
-struct Target<'a> {
-    name: &'static str,
-    user_data: PathBuf,
-    hosts: Option<PathBuf>,
-    registry: Option<&'a str>,
-}
+#[path = "setup_targets.rs"]
+mod places;
+use places::targets;
 
-fn targets<'a>(home: &Path, config: &'a ChromeControlConfig) -> Vec<Target<'a>> {
-    if cfg!(target_os = "macos") {
-        let base = home.join("Library/Application Support/Google/Chrome");
-        vec![Target {
-            name: "Google Chrome",
-            hosts: Some(base.join("NativeMessagingHosts")),
-            user_data: base,
-            registry: None,
-        }]
-    } else if cfg!(windows) {
-        vec![Target {
-            name: "Google Chrome",
-            user_data: home
-                .join("AppData")
-                .join("Local")
-                .join("Google")
-                .join("Chrome")
-                .join("User Data"),
-            hosts: None,
-            registry: Some(&config.windows_registry_root),
-        }]
-    } else {
-        let base = home.join(".config/google-chrome");
-        vec![Target {
-            name: "Google Chrome",
-            hosts: Some(base.join("NativeMessagingHosts")),
-            user_data: base,
-            registry: None,
-        }]
-    }
-}
-
-fn home_of(config: &ChromeControlConfig) -> Result<PathBuf, String> {
+pub(super) fn home_of(config: &ChromeControlConfig) -> Result<PathBuf, String> {
     config
         .user_home
         .clone()
@@ -214,19 +272,20 @@ fn home_of(config: &ChromeControlConfig) -> Result<PathBuf, String> {
 }
 
 fn read_receipt(state: &Path) -> Option<Receipt> {
-    let bytes = std::fs::read(state.join(RECEIPT)).ok()?;
+    let bytes = files::read(&state.join(RECEIPT)).ok()??;
     serde_json::from_slice(&bytes).ok()
+}
+
+/// The files Set up wrote (helper copy and manifests); `None` before Set up.
+pub(super) fn receipt_files(state: &Path) -> Option<Vec<PathBuf>> {
+    read_receipt(state).map(|receipt| receipt.files)
 }
 
 /// The Chrome profiles under `user_data` that have the extension's folder.
 fn profiles_with(user_data: &Path, extension_id: &str) -> Vec<String> {
-    let Ok(entries) = std::fs::read_dir(user_data) else {
-        return Vec::new();
-    };
-    let mut found: Vec<String> = entries
-        .flatten()
-        .filter(|e| e.path().join("Extensions").join(extension_id).is_dir())
-        .filter_map(|e| e.file_name().to_str().map(str::to_owned))
+    let mut found: Vec<String> = super::probe::profiles(user_data, extension_id)
+        .iter()
+        .filter_map(|p| p.file_name()?.to_str().map(str::to_owned))
         .collect();
     found.sort();
     found
@@ -236,7 +295,16 @@ fn profiles_with(user_data: &Path, extension_id: &str) -> Vec<String> {
 pub(crate) fn view(
     config: &ChromeControlConfig,
     state: Option<&Path>,
+    vibe_home: &Path,
+) -> ChromeSetupView {
+    view_for(config, state, vibe_home, "Google Chrome")
+}
+
+pub(super) fn view_for(
+    config: &ChromeControlConfig,
+    state: Option<&Path>,
     _vibe_home: &Path,
+    browser: &str,
 ) -> ChromeSetupView {
     if !config.available() {
         return ChromeSetupView {
@@ -248,31 +316,78 @@ pub(crate) fn view(
             store_review: false,
             pairing: ABSENT.to_owned(),
             fingerprint: None,
+            browser_issue: None,
+            install_state: None,
+            states: None,
+            addon: Some(super::addon::view(
+                super::addon::AddonState::Unavailable,
+                ABSENT,
+            )),
+            extension_left: None,
+            extension_restart: None,
         };
     }
-    let receipt = state.and_then(read_receipt);
-    let profiles: Vec<String> = receipt
+    let receipt = state.and_then(read_receipt).filter(|receipt| {
+        !cfg!(any(feature = "your-edge", feature = "your-firefox"))
+            || receipt.browsers.iter().any(|name| name == browser)
+    });
+    let profiles: Vec<String> = user_data(state, browser)
         .iter()
-        .flat_map(|r| r.user_data.iter())
         .flat_map(|dir| profiles_with(dir, &config.extension_id))
         .collect();
     let package = packaged_helper(config);
+    let repair_failed = package.is_ok()
+        && state.is_some_and(|state| repair_registrations(config, state, Some(browser)).is_err());
     ChromeSetupView {
         state: match (&receipt, profiles.is_empty()) {
+            (Some(_), _) if repair_failed => SetupState::RepairRequired,
             (None, _) => SetupState::NotSetUp,
             (Some(_), true) => SetupState::WaitingForExtension,
             (Some(_), false) => SetupState::ExtensionAdded,
         },
         package: package.is_ok(),
-        browsers: receipt.map(|r| r.browsers).unwrap_or_default(),
+        browsers: receipt
+            .map(|r| {
+                r.browsers
+                    .into_iter()
+                    .filter(|name| {
+                        !cfg!(any(feature = "your-edge", feature = "your-firefox"))
+                            || name == browser
+                    })
+                    .collect()
+            })
+            .unwrap_or_default(),
         profiles,
         store_url: store_url(&config.extension_id),
         store_review: false,
-        pairing: package
-            .err()
-            .unwrap_or_else(|| vw_vocabulary::texts::CHROME_NOT_CONNECTED.to_owned()),
+        pairing: if repair_failed {
+            "Helper setup required".into()
+        } else {
+            package
+                .err()
+                .unwrap_or_else(|| vw_vocabulary::texts::CHROME_NOT_CONNECTED.to_owned())
+        },
         fingerprint: None,
+        browser_issue: (browser == "Google Chrome")
+            .then(|| super::browser::issue(config))
+            .flatten(),
+        install_state: (browser == "Google Chrome")
+            .then(|| state.and_then(super::extension_install::status))
+            .flatten(),
+        states: None,
+        // `commands::view` decides it from the live connection too.
+        addon: None,
+        extension_left: None,
+        extension_restart: None,
     }
+}
+
+/// Only this browser's registered folders. Receipt identities take precedence over known vendor paths.
+pub(super) fn user_data(state: Option<&Path>, browser: &str) -> Vec<PathBuf> {
+    state
+        .and_then(read_receipt)
+        .map(|receipt| receipt.data_for(browser))
+        .unwrap_or_default()
 }
 
 /// Reads the helper once and checks the release pin before copying or starting it.
@@ -318,36 +433,36 @@ pub(super) fn check_helper_pin(config: &ChromeControlConfig, bytes: &[u8]) -> Re
 #[derive(Default)]
 struct Made {
     files: Vec<PathBuf>,
-    keys: Vec<String>,
+    keys: Vec<(String, PathBuf)>,
+    written: Vec<(PathBuf, Vec<u8>)>,
 }
 
 impl Made {
     fn undo(&self) {
-        for key in self.keys.iter().rev() {
-            let _ = registry_delete(key);
+        for (key, file) in self.keys.iter().rev() {
+            let _ = registry_delete(key, file);
         }
-        for file in self.files.iter().rev() {
-            let _ = std::fs::remove_file(file);
+        for (file, bytes) in self.written.iter().rev() {
+            let _ = files::remove(file, bytes);
         }
     }
 }
 
 fn write_file(made: &mut Made, path: &Path, bytes: &[u8]) -> Result<(), String> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| format!("{}: {e}", parent.display()))?;
-    }
-    let temp = path.with_extension("new");
-    std::fs::write(&temp, bytes).map_err(|e| format!("{}: {e}", temp.display()))?;
-    std::fs::rename(&temp, path).map_err(|e| {
-        let _ = std::fs::remove_file(&temp);
-        format!("{}: {e}", path.display())
-    })?;
+    let before = files::read(path).map_err(|e| e.to_string())?;
+    files::write(path, before.as_deref(), bytes).map_err(|e| e.to_string())?;
     made.files.push(path.to_path_buf());
+    made.written.push((path.to_path_buf(), bytes.to_vec()));
     Ok(())
 }
 
 /// The native messaging manifest for the helper at `helper`.
-fn host_manifest(helper: &Path, extension_id: &str) -> Vec<u8> {
+pub(super) fn host_manifest(helper: &Path, extension_id: &str) -> Vec<u8> {
+    let helper = if cfg!(windows) {
+        PathBuf::from(windows_native_path(helper))
+    } else {
+        helper.to_path_buf()
+    };
     let manifest = serde_json::json!({
         "name": HOST_NAME,
         "description": format!("{STORE_LISTING_NAME} extension helper"),
@@ -364,10 +479,16 @@ pub(crate) fn install(
     state: &Path,
     vibe_home: &Path,
 ) -> Result<ChromeSetupView, String> {
+    let held = registration_lock();
     let (_, bytes) = packaged_helper(config)?;
     let home = home_of(config)?;
     let mut made = Made::default();
     let result = (|| -> Result<Receipt, String> {
+        for target in targets(&home, config) {
+            if target.name == "Mozilla Firefox" {
+                firefox::require_unregistered(&target)?;
+            }
+        }
         let helper = state.join("bin").join(helper_name());
         write_file(&mut made, &helper, &bytes)?;
         #[cfg(unix)]
@@ -376,23 +497,26 @@ pub(crate) fn install(
             std::fs::set_permissions(&helper, std::fs::Permissions::from_mode(0o700))
                 .map_err(|e| e.to_string())?;
         }
-        let manifest = host_manifest(&helper, &config.extension_id);
         let mut receipt = Receipt::default();
         for target in targets(&home, config) {
+            let manifest = manifest_for(&helper, config, target.name);
             match (&target.hosts, target.registry) {
                 (Some(hosts), _) => {
-                    write_file(
-                        &mut made,
-                        &hosts.join(format!("{HOST_NAME}.json")),
-                        &manifest,
-                    )?;
+                    let file = hosts.join(format!("{HOST_NAME}.json"));
+                    registration::ensure_manifest(&file, &manifest, false)?;
+                    made.written.push((file.clone(), manifest.clone()));
+                    made.files.push(file);
                 }
                 (None, Some(root)) => {
-                    let file = state.join("host").join(format!("{HOST_NAME}.json"));
-                    write_file(&mut made, &file, &manifest)?;
+                    let file = manifest_path(state, target.name);
+                    if !made.files.contains(&file) {
+                        registration::ensure_manifest(&file, &manifest, false)?;
+                        made.written.push((file.clone(), manifest.clone()));
+                        made.files.push(file.clone());
+                    }
                     let key = format!(r"{root}\{HOST_NAME}");
                     registry_set(&key, &file)?;
-                    made.keys.push(key.clone());
+                    made.keys.push((key.clone(), file.clone()));
                     receipt.registry_keys.push(key);
                 }
                 (None, None) => {}
@@ -406,7 +530,10 @@ pub(crate) fn install(
         Ok(receipt)
     })();
     match result {
-        Ok(_) => Ok(view(config, Some(state), vibe_home)),
+        Ok(_) => {
+            drop(held);
+            Ok(view(config, Some(state), vibe_home))
+        }
         Err(problem) => {
             made.undo();
             Err(problem)
@@ -414,96 +541,132 @@ pub(crate) fn install(
     }
 }
 
-/// Removes what the receipt lists and the whole state folder.
-pub(crate) fn remove(state: &Path) -> Result<(), String> {
-    let receipt = read_receipt(state).unwrap_or_default();
-    let mut problems = Vec::new();
-    for key in &receipt.registry_keys {
-        if let Err(e) = registry_delete(key) {
-            problems.push(e);
-        }
-    }
-    for file in &receipt.files {
-        match std::fs::remove_file(file) {
-            Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
-                problems.push(format!("{}: {e}", file.display()));
-            }
-            _ => {}
-        }
-    }
-    match std::fs::remove_dir_all(state) {
-        Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
-            problems.push(format!("{}: {e}", state.display()));
-        }
-        _ => {}
-    }
-    if problems.is_empty() {
-        Ok(())
-    } else {
-        Err(problems.join("; "))
-    }
-}
+#[path = "setup_remove.rs"]
+mod removal;
+pub(crate) use removal::remove;
 
 /// Opens the store page in Google Chrome.
 pub(crate) fn open_store(config: &ChromeControlConfig) -> Result<(), String> {
+    open_store_for(config, false)
+}
+
+pub(super) fn open_store_for(config: &ChromeControlConfig, edge: bool) -> Result<(), String> {
+    if !edge {
+        return super::browser::open(config, &store_url(&config.extension_id));
+    }
+    if !cfg!(feature = "your-edge") {
+        return Err(absent_for(true).to_owned());
+    }
     let url = store_url(&config.extension_id);
-    if let Some(launcher) = &config.launcher {
+    if let Some(launcher) = if edge {
+        &config.edge_launcher
+    } else {
+        &config.launcher
+    } {
         return launcher(&url);
     }
-    let mut command = if cfg!(target_os = "macos") {
-        let mut c = std::process::Command::new("open");
-        c.args(["-a", "Google Chrome", &url]);
-        c
-    } else if cfg!(windows) {
-        let mut c = std::process::Command::new("cmd");
-        c.args(["/C", "start", "", "chrome", &url]);
-        c
-    } else {
-        let mut c = std::process::Command::new("google-chrome");
-        c.arg(&url);
-        c
-    };
+    let mut command = store_command(edge, &url);
     command
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .spawn()
         .map(drop)
-        .map_err(|e| format!("Google Chrome could not be started: {e}"))
+        .map_err(|e| {
+            format!(
+                "{} could not be started: {e}",
+                if edge {
+                    "Microsoft Edge"
+                } else {
+                    "Google Chrome"
+                }
+            )
+        })
+}
+
+fn store_command(edge: bool, url: &str) -> std::process::Command {
+    if cfg!(target_os = "macos") {
+        let mut c = std::process::Command::new("open");
+        c.args([
+            "-a",
+            if edge {
+                "Microsoft Edge"
+            } else {
+                "Google Chrome"
+            },
+            url,
+        ]);
+        c
+    } else if cfg!(windows) {
+        let mut c = std::process::Command::new("cmd");
+        c.args([
+            "/C",
+            "start",
+            "",
+            if edge { "msedge" } else { "chrome" },
+            url,
+        ]);
+        c
+    } else {
+        let mut c = std::process::Command::new(if edge {
+            "microsoft-edge"
+        } else {
+            "google-chrome"
+        });
+        c.arg(url);
+        c
+    }
 }
 
 fn registry_set(key: &str, file: &Path) -> Result<(), String> {
-    if !cfg!(windows) {
-        return Err("the registry exists on Windows only".to_owned());
-    }
-    let file = file.to_string_lossy();
-    run_reg(&["add", key, "/ve", "/t", "REG_SZ", "/d", &file, "/f"])
+    super::extension_registry::host(
+        key,
+        &windows_native_path(file),
+        false,
+        &super::extension_registry::Native,
+    )
 }
 
-fn registry_delete(key: &str) -> Result<(), String> {
+// Native messaging expects backslashes even when a configured root uses forward slashes.
+fn windows_native_path(file: &Path) -> String {
+    file.to_string_lossy().replace('/', "\\")
+}
+
+fn registry_delete(key: &str, file: &Path) -> Result<(), String> {
     if !cfg!(windows) {
         return Ok(());
     }
-    run_reg(&["delete", key, "/f"])
-}
-
-fn run_reg(args: &[&str]) -> Result<(), String> {
-    let status = std::process::Command::new("reg")
-        .args(args)
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .map_err(|e| format!("reg could not run: {e}"))?;
-    if status.success() {
-        Ok(())
-    } else {
-        Err(format!(
-            "reg {} failed",
-            args.first().copied().unwrap_or("")
-        ))
-    }
+    super::extension_registry::remove_host(
+        key,
+        &windows_native_path(file),
+        &super::extension_registry::Native,
+    )
 }
 
 #[cfg(test)]
 #[path = "setup_tests.rs"]
 mod tests;
+
+#[path = "setup_edge.rs"]
+mod edge;
+pub(super) use edge::register_edge;
+
+#[path = "setup_firefox.rs"]
+pub(super) mod firefox;
+
+fn manifest_for(helper: &Path, config: &ChromeControlConfig, browser: &str) -> Vec<u8> {
+    if browser == "Mozilla Firefox" {
+        firefox::manifest(helper)
+    } else {
+        host_manifest(helper, &config.extension_id)
+    }
+}
+fn manifest_path(state: &Path, browser: &str) -> PathBuf {
+    state
+        .join(if browser == "Mozilla Firefox" {
+            "firefox-host"
+        } else {
+            "host"
+        })
+        .join(format!("{HOST_NAME}.json"))
+}

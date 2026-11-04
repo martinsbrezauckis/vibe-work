@@ -8,24 +8,38 @@ use crate::core::Shared;
 use serde_json::{Value, json};
 use std::sync::{Arc, PoisonError};
 
+/// What [`resolve`] decided.
+pub(super) enum Resolved {
+    /// The call's arguments, and the receipt's note when a turn-ended session was reopened.
+    Ready(Value, Option<Value>),
+    /// The reopen was refused with the card's diagnosis (`availability::refusal`): the call's answer.
+    Refused(Value),
+}
+
 /// The call's arguments with the chat's current session id in place of a turn-ended one, and the note for its receipt.
 pub(super) async fn resolve(
     shared: &Arc<Shared>,
     session: &str,
     tool: &str,
     mut args: Value,
-) -> Result<(Value, Option<Value>), String> {
+) -> Result<Resolved, String> {
     let Some(id) = (tool == "chrome_execute")
         .then(|| args["sessionId"].as_str().map(str::to_owned))
         .flatten()
     else {
-        return Ok((args, None));
+        return Ok(Resolved::Ready(args, None));
     };
     let chrome = &shared.chrome_control;
+    let profile = chrome
+        .work
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .profile_of(&id)
+        .map(str::to_owned);
     let active = {
         let tasks = chrome.tasks.lock().unwrap_or_else(PoisonError::into_inner);
         if tasks.get(&id).map(String::as_str) == Some(session) {
-            return Ok((args, None));
+            return Ok(Resolved::Ready(args, None));
         }
         let ended = chrome
             .turn_ended
@@ -34,24 +48,28 @@ pub(super) async fn resolve(
             .get(session)
             .is_some_and(|ids| ids.contains(&id));
         if !ended {
-            return Ok((args, None));
+            return Ok(Resolved::Ready(args, None));
         }
         tasks
             .iter()
-            .find(|(_, owner)| owner.as_str() == session)
+            .find(|(id, owner)| {
+                owner.as_str() == session
+                    && profile.as_deref().is_some_and(|profile| {
+                        chrome
+                            .work
+                            .lock()
+                            .unwrap_or_else(PoisonError::into_inner)
+                            .profile_of(id)
+                            .is_some_and(|active| super::profile_ids::same(active, profile))
+                    })
+            })
             .map(|(id, _)| id.clone())
     };
     let current = if let Some(active) = active {
         active
     } else {
-        let Some(profile) = chrome
-            .chat_profiles
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .get(session)
-            .cloned()
-        else {
-            return Ok((args, None));
+        let Some(profile) = profile else {
+            return Ok(Resolved::Ready(args, None));
         };
         let opened = super::gateway::call_one(
             shared,
@@ -60,13 +78,23 @@ pub(super) async fn resolve(
             json!({"action":"open","profileId":profile,"purpose":"Reopened for this chat"}),
         )
         .await?;
+        if opened["vwMcpResult"]["structuredContent"]
+            .get("addon")
+            .is_some()
+            || opened["vwMcpResult"]["structuredContent"]["retryable"] == true
+        {
+            return Ok(Resolved::Refused(opened));
+        }
         opened["vwMcpResult"]["structuredContent"]["sessionId"]
             .as_str()
             .map(str::to_owned)
             .ok_or("Not run: this Chrome session ended with an earlier turn and could not be reopened.")?
     };
     args["sessionId"] = json!(current);
-    Ok((args, Some(json!({"from":id,"sessionId":current}))))
+    Ok(Resolved::Ready(
+        args,
+        Some(json!({"from":id,"sessionId":current})),
+    ))
 }
 
 /// The receipt says the session was reopened (structured and in the text the model reads).
@@ -89,13 +117,67 @@ pub(super) fn note(answer: &mut Value, reopened: &Value) {
     }
 }
 
+/// Discard an earlier turn's stopped open result while helper cleanup catches up. Never replay an action,
+/// an unknown outcome, or a newly stopped session: the person's Stop still fences the current turn.
+pub(super) async fn fresh(
+    shared: &Arc<Shared>,
+    session: &str,
+    browser: super::agent_browser::Browser,
+    pending: &super::person_stop::PendingCall,
+    args: &Value,
+    mut answer: super::owner::Answer,
+) -> Result<super::owner::Answer, String> {
+    for attempt in 0..3 {
+        pending.finish(shared, session, browser, &answer)?;
+        let body = &answer.value()["structuredContent"];
+        if body["status"] == "unknown" {
+            return Ok(answer);
+        }
+        let old = body["sessionId"].as_str().is_some_and(|id| {
+            shared
+                .chrome_control
+                .work
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .stopped_before(id, session, pending.turn.as_deref())
+        });
+        let stopped = body["state"].as_str().is_some_and(|state| {
+            state.eq_ignore_ascii_case("stopped") || state.eq_ignore_ascii_case("stopping")
+        });
+        if !old && !stopped {
+            return Ok(answer);
+        }
+        if !stopped {
+            return Err(format!(
+                "{} reused an ended session. Check the browser before opening a fresh session.",
+                browser.name()
+            ));
+        }
+        if !old || attempt == 2 {
+            return Err(format!(
+                "Not run: {} returned a stopped session. Open a fresh session before acting.",
+                browser.name()
+            ));
+        }
+        super::reconnect::stopped(shared, session, browser)?;
+        super::check::authorize(shared, session, "chrome_session", args)?;
+        answer = super::login::send(shared, session, "chrome_session", args.clone()).await?;
+    }
+    unreachable!("the final stopped open returns a refusal")
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::{Value, json};
     use std::sync::Arc;
 
     async fn chat_with_session() -> crate::Core {
-        let core = crate::offline_core::start_with("chrome-reopen", |config, dir| {
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let name = format!(
+            "chrome-reopen-{}",
+            NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        );
+        let core = crate::offline_core::start_with(&name, |config, dir| {
             config.chrome_control.package = Some(dir.join("chrome-package"));
         })
         .await;
@@ -144,7 +226,7 @@ mod tests {
     async fn a_session_ended_with_its_turn_is_reopened_for_the_same_chat() {
         let core = chat_with_session().await;
         let shared = &core.shared;
-        let seen = shared.chrome_control.owner.answering(helper("t2"));
+        let seen = super::super::test_support::answering(shared, helper("t2"));
         let first = super::super::gateway::call(
             shared,
             "s",
@@ -156,7 +238,7 @@ mod tests {
         assert_eq!(first["vwMcpResult"]["structuredContent"]["sessionId"], "t2");
         // The helper's first session for this chat is t2; give the next open another id.
         drop(seen);
-        let seen = shared.chrome_control.owner.answering(helper("t3"));
+        let seen = super::super::test_support::answering(shared, helper("t3"));
         // The turn ends (pump.rs: completed turn).
         super::super::end_turn(shared, "s");
         for _ in 0..2 {
@@ -233,16 +315,12 @@ mod tests {
         core.shutdown().await;
     }
 
-    /// After the person's Stop (the toolbar popup: the helper reports the
-    /// chat's active session stopped without Vibe Work asking), every Chrome call of that chat that would act is
-    /// refused for the rest of the turn, opening a new session included; the next turn starts normally.
-    /// PREDICT (before the change): the open after the Stop runs and the agent goes on.
+    /// A status poll can report the stop before the helper replies to the agent's own request.
     #[tokio::test]
-    async fn the_persons_stop_holds_for_the_rest_of_the_turn() {
-        const STOPPED: &str = "Not run: the person stopped Chrome for this turn. Continue without Chrome in this turn; Chrome works again in the next one.";
+    async fn the_agents_stop_allows_a_new_session_in_the_same_turn() {
         let core = chat_with_session().await;
         let shared = &core.shared;
-        let _seen = shared.chrome_control.owner.answering(helper("t2"));
+        super::super::test_support::answering(shared, helper("t2"));
         super::super::gateway::call(
             shared,
             "s",
@@ -251,17 +329,171 @@ mod tests {
         )
         .await
         .unwrap();
-        // The person presses Stop in Chrome: the helper's status shows the session stopped (no core stop asked).
+        let weak = Arc::downgrade(shared);
+        let seen = shared.chrome_control.owner.answering(move |tool, args| {
+            if tool == "chrome_session" && args["action"] == "stop" {
+                let shared = weak.upgrade().unwrap();
+                for state in ["stopping", "stopped"] {
+                    super::super::owner::update_work_for_test(
+                        &shared,
+                        &json!({"structuredContent":{"sessions":[{"sessionId":"t2","state":state}]}}),
+                    );
+                }
+            }
+            helper("t3")(tool, args)
+        });
+        // Another chat cannot mark this session as an asked stop or reach the helper.
+        assert!(
+            super::super::gateway::call(
+                shared,
+                "o",
+                "chrome_session",
+                json!({"action":"stop","sessionId":"t2"}),
+            )
+            .await
+            .is_err()
+        );
+        assert!(seen.lock().unwrap().is_empty());
+        super::super::gateway::call(
+            shared,
+            "s",
+            "chrome_session",
+            json!({"action":"stop","sessionId":"t2"}),
+        )
+        .await
+        .unwrap();
+        let reopened = super::super::gateway::call(
+            shared,
+            "s",
+            "chrome_session",
+            json!({"action":"open","profileId":"p"}),
+        )
+        .await
+        .unwrap_or_else(|reason| panic!("agent stop blocked the same turn: {reason}"));
+        assert_eq!(
+            reopened["vwMcpResult"]["structuredContent"]["sessionId"],
+            "t3"
+        );
+        assert_eq!(opens(&seen).len(), 1);
+        core.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn a_refused_agent_stop_recovers_on_the_next_poll() {
+        let core = chat_with_session().await;
+        let shared = &core.shared;
+        super::super::test_support::answering(shared, helper("t2"));
+        super::super::gateway::call(
+            shared,
+            "s",
+            "chrome_session",
+            json!({"action":"open","profileId":"p"}),
+        )
+        .await
+        .unwrap();
+        shared.chrome_control.owner.answering(
+            |_, _| json!({"isError":true,"structuredContent":{"error":{"code":"BUSY"}}}),
+        );
+        let refused = super::super::gateway::call(
+            shared,
+            "s",
+            "chrome_session",
+            json!({"action":"stop","sessionId":"t2"}),
+        )
+        .await
+        .unwrap();
+        assert_eq!(refused["vwMcpResult"]["isError"], true);
+        assert_eq!(
+            shared
+                .chrome_control
+                .work
+                .lock()
+                .unwrap()
+                .state_of("t2", "s"),
+            Some("stopping")
+        );
+        super::super::owner::update_work_for_test(
+            shared,
+            &json!({"structuredContent":{"sessions":[{"sessionId":"t2","state":"active"}]}}),
+        );
+        assert_eq!(
+            shared
+                .chrome_control
+                .work
+                .lock()
+                .unwrap()
+                .state_of("t2", "s"),
+            Some("active")
+        );
+        assert_eq!(
+            shared
+                .chrome_control
+                .tasks
+                .lock()
+                .unwrap()
+                .get("t2")
+                .map(String::as_str),
+            Some("s")
+        );
+        assert!(!shared.chrome_control.stopped_by_person(
+            "s",
+            super::super::agent_browser::Browser::Chrome,
+            None
+        ));
+        // Recovery must also restore detection of a later real Stop.
+        super::super::owner::update_work_for_test(
+            shared,
+            &json!({"structuredContent":{"sessions":[{"sessionId":"t2","state":"stopping"}]}}),
+        );
+        assert!(shared.chrome_control.stopped_by_person(
+            "s",
+            super::super::agent_browser::Browser::Chrome,
+            None
+        ));
+        core.shutdown().await;
+    }
+
+    /// After the person's Stop (the toolbar popup: the helper reports the
+    /// chat's active session stopped without Vibe Work asking), every Chrome call of that chat that would act is
+    /// refused for the rest of the turn, opening a new session included; the next turn starts normally.
+    /// PREDICT (before the change): the open after the Stop runs and the agent goes on.
+    #[tokio::test]
+    async fn the_persons_stop_holds_for_the_rest_of_the_turn() {
+        let stopped = format!(
+            "Not run: you pressed Stop in {}. The turn is stopped; do not call browser tools again in this turn.",
+            vw_vocabulary::texts::CHROME_NAME
+        );
+        let core = chat_with_session().await;
+        let shared = &core.shared;
+        let _seen = super::super::test_support::answering(shared, helper("t2"));
+        super::super::gateway::call(
+            shared,
+            "s",
+            "chrome_session",
+            json!({"action":"open","profileId":"p"}),
+        )
+        .await
+        .unwrap();
+        // Stop is acknowledged asynchronously: a poll sees stopping before a later poll sees stopped.
+        // The old code forgot who requested Stop as soon as the first poll changed the displayed state.
+        super::super::owner::update_work_for_test(
+            shared,
+            &json!({"structuredContent":{"sessions":[{"sessionId":"t2","state":"stopping"}]}}),
+        );
+        tokio::time::pause();
+        tokio::time::advance(std::time::Duration::from_secs(40)).await;
+        tokio::time::resume();
         super::super::owner::update_work_for_test(
             shared,
             &json!({"structuredContent":{"sessions":[{"sessionId":"t2","state":"stopped"}]}}),
         );
+        let seen = super::super::test_support::answering(shared, helper("t3"));
         for (tool, args) in [
+            ("chrome_session", json!({"action":"open","profileId":"p"})),
             (
                 "chrome_execute",
                 json!({"sessionId":"t2","action":"page.read","args":{}}),
             ),
-            ("chrome_session", json!({"action":"open","profileId":"p"})),
             (
                 "chrome_execute",
                 json!({"sessionId":"t2","steps":[{"action":"page.read","args":{}}]}),
@@ -271,10 +503,14 @@ mod tests {
                 super::super::gateway::call(shared, "s", tool, args)
                     .await
                     .unwrap_err(),
-                STOPPED,
+                stopped,
                 "{tool}"
             );
         }
+        assert!(
+            opens(&seen).is_empty(),
+            "a new helper session must never be requested"
+        );
         // Reading the session stays possible; another chat is not affected.
         assert!(
             super::super::gateway::call(
@@ -309,7 +545,7 @@ mod tests {
         for app_stop in [false, true] {
             let core = chat_with_session().await;
             let shared = &core.shared;
-            let seen = shared.chrome_control.owner.answering(helper("t2"));
+            let seen = super::super::test_support::answering(shared, helper("t2"));
             super::super::gateway::call(
                 shared,
                 "s",
@@ -320,7 +556,7 @@ mod tests {
             .unwrap();
             super::super::end_turn(shared, "s");
             drop(seen);
-            let seen = shared.chrome_control.owner.answering(helper("t3"));
+            let seen = super::super::test_support::answering(shared, helper("t3"));
             let reopened = super::super::gateway::call(
                 shared,
                 "s",
@@ -371,7 +607,7 @@ mod tests {
     async fn a_session_the_person_stopped_is_not_reopened() {
         let core = chat_with_session().await;
         let shared = &core.shared;
-        let seen = shared.chrome_control.owner.answering(helper("t2"));
+        let seen = super::super::test_support::answering(shared, helper("t2"));
         super::super::gateway::call(
             shared,
             "s",

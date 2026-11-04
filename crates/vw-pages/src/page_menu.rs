@@ -102,9 +102,24 @@ pub fn copy_script() -> String {
 /// a wait for a click (a web page in the Browser tab, after its own menu's Point Vibe at this).
 #[must_use]
 pub fn selection_script() -> String {
+    selection_script_from(None)
+}
+
+/// Reads the isolated browser menu's saved selection when present, otherwise the current engine selection.
+#[must_use]
+pub fn selection_script_from(page: Option<&str>) -> String {
+    let page = serde_json::json!(page);
     format!(
         r#"(() => {{
 {DESCRIBE_JS}
+  const saved = window[{page}]?.takePointChoice?.();
+  if (saved) {{
+    let node = saved.node;
+    if (node?.nodeType !== 1) node = node?.parentElement;
+    if (!node?.isConnected) return JSON.stringify({{ state: "cancelled" }});
+    return JSON.stringify(describe(node, saved.quote));
+  }}
+  if ({page} !== null) return JSON.stringify({{ state: "cancelled" }});
   const sel = window.getSelection && window.getSelection();
   if (!sel || sel.isCollapsed || !String(sel).trim()) return JSON.stringify({{ state: "cancelled" }});
   let node = sel.getRangeAt(0).commonAncestorContainer;

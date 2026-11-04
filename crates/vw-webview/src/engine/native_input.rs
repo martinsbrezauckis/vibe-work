@@ -6,6 +6,26 @@ use std::sync::{Arc, Mutex, PoisonError};
 use vw_preview::{EngineError, MountId, NativeClickGuard, NativeClickPoint};
 
 impl TauriEngine {
+    pub(super) fn remember_initializer(&self, spec: &vw_preview::MountSpec) -> String {
+        let trusted = spec
+            .console_script
+            .replace("const TRUSTED = false;", "const TRUSTED = true;");
+        self.initializers
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(spec.id.label.clone(), trusted.clone());
+        trusted
+    }
+    pub(super) fn isolated_script(&self, id: &MountId, script: &str) -> String {
+        let init = self
+            .initializers
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(&id.label)
+            .cloned()
+            .unwrap_or_default();
+        format!("{init}\n{script}")
+    }
     pub(super) async fn native_click_inner(
         &self,
         id: MountId,
@@ -115,7 +135,7 @@ impl TauriEngine {
         Ok(person)
     }
 
-    /// Native evaluation with a JSON answer (no IPC): the console drain and the pick. A page that
+    /// Native evaluation with a JSON answer (no IPC): the console drain and trusted viewer operations. A page that
     /// navigates away before answering drops the callback: answered as an empty JSON string value.
     pub(super) async fn evaluate_inner(
         &self,

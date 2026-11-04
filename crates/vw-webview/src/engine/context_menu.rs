@@ -48,26 +48,21 @@ pub(super) struct Pollers {
 
 impl Pollers {
     /// Starts an intent poll for one browser mount, replacing a stale task for its label.
-    pub(super) fn start(&self, webview: Webview<Wry>, id: &MountId, sink: Sink) {
+    pub(super) fn start(&self, webview: Webview<Wry>, id: &MountId, sink: Sink, init: String) {
         let session_id = id.session_id.clone();
         let task = tokio::spawn(async move {
             let mut tick = tokio::time::interval(POLL);
             loop {
                 tick.tick().await;
-                let (tx, rx) = tokio::sync::oneshot::channel();
-                let tx = Mutex::new(Some(tx));
-                if webview
-                    .eval_with_callback(INTENT, move |answer| {
-                        if let Some(tx) = tx.lock().unwrap_or_else(PoisonError::into_inner).take() {
-                            let _ = tx.send(answer);
-                        }
-                    })
-                    .is_err()
+                let script = vw_preview::main_script(&format!("{init}\n{INTENT}"));
+                if let Ok(Ok(answers)) = tokio::time::timeout(
+                    ANSWER_WAIT,
+                    crate::agent_frames::evaluate(&webview, None, script),
+                )
+                .await
+                    && let Ok(answer) = vw_preview::main_answer(answers)
                 {
-                    break;
-                }
-                if let Ok(Ok(answer)) = tokio::time::timeout(ANSWER_WAIT, rx).await {
-                    for choice in choices(&answer) {
+                    for choice in choices(&answer.value) {
                         sink(session_id.clone(), choice);
                     }
                 }

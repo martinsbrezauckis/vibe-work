@@ -146,6 +146,8 @@ pub struct CoreConfig {
     /// The address the Settings > Network test requests once (no key is sent). Default Mistral's model list, which
     /// answers 401 without a key: that answer proves the way through works. Tests point it at a local fake.
     pub network_test_url: String,
+    /// Resolver for isolated proxy connection tests; production uses the system resolver.
+    pub network_test_resolver: Option<Arc<dyn vw_netguard::Resolve>>,
     /// The Tools marketplace: a test catalog and downloader; the default is the built-in catalog over HTTPS.
     pub market: crate::market::MarketConfig,
     /// Chrome Control's package, store extension id and the user's Chrome places (`chrome_control::setup`).
@@ -208,6 +210,7 @@ impl Default for CoreConfig {
             pr_card_floor: None,
             network_file: None,
             network_settings_rejected: false,
+            network_test_resolver: None,
             network_test_url: format!("{}/v1/models", vw_mistral::DEFAULT_API_BASE),
             market: crate::market::MarketConfig::default(),
             chrome_control: crate::ChromeControlConfig::default(),

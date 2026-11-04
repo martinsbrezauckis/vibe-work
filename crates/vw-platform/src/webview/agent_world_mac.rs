@@ -202,7 +202,7 @@ pub fn install_agent_world(webview: *mut c_void) -> Result<WorldFacts, String> {
     }
     let (world, configured) = match configured_world() {
         Some(world) => (world, true),
-        // SAFETY: a class method with a valid string (macOS 11+, the app's minimum).
+        // SAFETY: a class method with a valid string (macOS 11+; the app needs 14).
         None => (
             unsafe { WKContentWorld::worldWithName(&NSString::from_str(WORLD_NAME), mtm) },
             false,

@@ -6,22 +6,19 @@
 //! locked start leaves the record waiting, and the unlock checks and applies it.
 //! Called by host startup and core Settings after native confirmation; no method returns the MAC key.
 
-use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::PoisonError;
 
-use base64::Engine as _;
-use vw_mistral::network::{self, LoadedSettings, NetworkMacKey, NetworkSettings, PreparedSettings};
-use vw_vault::items::{ResourceKind, ResourcePermission, VaultResource};
-use vw_vault::remember::network_key_account;
-use vw_vault::{SecretString, Vault, VaultError, VaultStatus};
-use zeroize::Zeroizing;
+use vw_mistral::network::{self, LoadedSettings, NetworkSettings, PreparedSettings};
+use vw_vault::{Vault, VaultStatus};
 
-use crate::service::{blocking, now_ms};
+use crate::network_key::{check_key, rotate_mac_key, unlocked};
+pub(crate) use crate::network_key::{drop_copy, switch_changed};
+use crate::service::blocking;
 use crate::{KeyError, KeyEvent, KeyService};
-
-const ITEM_ID: &str = "vibe-work-network-mac-key";
-const FIELD: &str = "macKey";
+use crate::{
+    proxy_credentials as credentials, proxy_forwarder as forwarder, proxy_migration as migration,
+};
 
 /// Why saved network settings wait for a vault unlock before they are checked and used.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -30,6 +27,8 @@ pub enum NetworkWait {
     LockAtQuit,
     /// This computer has no copy of the check key yet (an install from before the copy).
     NoCopyYet,
+    /// A proxy sign-in is only available in an unlocked vault.
+    ProxySignIn,
 }
 
 /// What the run did with the saved network record.
@@ -47,175 +46,156 @@ enum State {
 pub(crate) struct Network {
     state: State,
     file: Option<PathBuf>,
-}
-
-/// The vault item's key, base64 (`None`: no Save stored one).
-fn vault_key(vault: &Vault) -> Result<Option<SecretString>, KeyError> {
-    let item = vault.read_item(ITEM_ID)?;
-    let Some(item) = item else { return Ok(None) };
-    let resource = VaultResource::from_item(&item).ok_or(KeyError::Internal)?;
-    if resource.permission != ResourcePermission::UserOnly
-        || resource.kind != ResourceKind::DeveloperCredential
-    {
-        return Err(KeyError::Internal);
-    }
-    let encoded = SecretString::new(
-        resource
-            .secret_fields
-            .get(FIELD)
-            .ok_or(KeyError::Internal)?
-            .clone(),
-    );
-    encoded.register_as(vw_secrets::SecretKind::VaultValue);
-    Ok(Some(encoded))
-}
-
-fn decode(encoded: &SecretString) -> Option<NetworkMacKey> {
-    let mut bytes = Zeroizing::new([0_u8; 32]);
-    let count = base64::prelude::BASE64_STANDARD
-        .decode_slice(encoded.expose(), bytes.as_mut())
-        .ok()?;
-    (count == bytes.len()).then(|| NetworkMacKey::new(bytes))
-}
-
-fn copy_account(vault: &Vault) -> String {
-    network_key_account(&vault.location().profile_dir)
-}
-
-/// Deletes the credential store's copy (the switch is on). A failed delete is logged.
-pub(crate) fn drop_copy(vault: &Vault) {
-    if let Err(error) = vault.device_store().delete(&copy_account(vault)) {
-        tracing::warn!(%error, "network settings: the key copy was not deleted");
-    }
-}
-
-/// The switch was turned on (the copy is deleted) or off (an open vault stores the copy now).
-pub(crate) fn switch_changed(vault: &Vault, lock_on_quit: bool) {
-    if lock_on_quit {
-        drop_copy(vault);
-    } else {
-        unlocked(vault);
-    }
-}
-
-/// Makes the credential store's copy equal to the vault's key. A failed write is logged: the record is then checked
-/// only while the vault is open.
-fn keep_copy(vault: &Vault, encoded: &SecretString) {
-    let (store, account) = (vault.device_store(), copy_account(vault));
-    if matches!(store.get(&account), Ok(Some(copy)) if copy.expose() == encoded.expose()) {
-        return;
-    }
-    if let Err(error) = store.set(&account, encoded) {
-        tracing::warn!(%error, "network settings: the key copy was not stored");
-        // An older copy must not keep accepting an older record.
-        let _ = store.delete(&account);
-    }
-}
-
-/// The key that checks the record: the vault's while it is open (its copy kept equal when `copy`), the copy while it
-/// is locked (only when `copy`). The second value is true when an existing vault was locked and no copy was used.
-fn check_key(vault: &Vault, copy: bool) -> (Option<NetworkMacKey>, bool) {
-    match vault_key(vault) {
-        Ok(encoded) => {
-            if let (true, Some(encoded)) = (copy, &encoded) {
-                keep_copy(vault, encoded);
-            }
-            (encoded.as_ref().and_then(decode), false)
-        }
-        Err(KeyError::Vault(VaultError::Locked)) => {
-            let found = if copy {
-                vault
-                    .device_store()
-                    .get(&copy_account(vault))
-                    .inspect_err(|error| {
-                        tracing::warn!(%error, "network settings: the key copy could not be read");
-                    })
-                    .ok()
-                    .flatten()
-            } else {
-                None
-            };
-            if let Some(found) = found {
-                found.register_as(vw_secrets::SecretKind::VaultValue);
-                return (decode(&found), false);
-            }
-            // Only an existing vault can hold a key a Save stored; without one a record was never saved here.
-            let exists = matches!(vault.status(), Ok(VaultStatus::Locked { .. }));
-            (None, exists)
-        }
-        Err(_) => (None, false),
-    }
-}
-
-/// After an unlock: the copy follows the vault's key (an install from before the copy gets one here).
-pub(crate) fn unlocked(vault: &Vault) {
-    if let Ok(Some(encoded)) = vault_key(vault) {
-        keep_copy(vault, &encoded);
-    }
-}
-
-fn rotate_mac_key(vault: &Vault, copy: bool) -> Result<NetworkMacKey, KeyError> {
-    let mut bytes = Zeroizing::new([0_u8; 32]);
-    getrandom::fill(bytes.as_mut()).map_err(|_| KeyError::Internal)?;
-    let encoded = SecretString::new(base64::prelude::BASE64_STANDARD.encode(bytes.as_ref()));
-    encoded.register_as(vw_secrets::SecretKind::VaultValue);
-    let now = now_ms();
-    let resource = VaultResource {
-        id: ITEM_ID.to_owned(),
-        schema_version: vw_vault::items::RESOURCE_SCHEMA_VERSION.to_owned(),
-        kind: ResourceKind::DeveloperCredential,
-        label: "Network settings authentication (Vibe Work)".to_owned(),
-        permission: ResourcePermission::UserOnly,
-        public_fields: BTreeMap::new(),
-        secret_fields: BTreeMap::from([(FIELD.to_owned(), encoded.expose().to_owned())]),
-        custom_fields: Vec::new(),
-        created_ms: now,
-        updated_ms: now,
-        extra: BTreeMap::new(),
-    };
-    let candidate = resource.to_item()?;
-    // Store the new key before returning any record. Interruption must invalidate the previous record.
-    vault
-        .update_item(ITEM_ID, |_| Some(candidate.clone()))?
-        .ok_or(KeyError::Internal)?;
-    if copy {
-        keep_copy(vault, &encoded);
-    }
-    Ok(NetworkMacKey::new(bytes))
+    pub(crate) dotenv: PathBuf,
+    migration_pending: bool,
+    pub(crate) requires_vault: bool,
+    pub(crate) browser: NetworkSettings,
+    core_locked: NetworkSettings,
+    pub(crate) vibe_locked: NetworkSettings,
 }
 
 /// The start: checks and applies the record before any key-bearing client exists. With the switch on, any copy
 /// is deleted first (a run that did not quit may have left one) and a locked vault leaves the record waiting.
-pub(crate) fn launch(vault: &Vault, file: Option<PathBuf>, lock_on_quit: bool) -> Network {
+pub(crate) fn launch(
+    vault: &Vault,
+    file: Option<PathBuf>,
+    lock_on_quit: bool,
+    dotenv: PathBuf,
+    guard: &vw_netguard::NetGuard,
+    vibe_guard: &vw_netguard::NetGuard,
+) -> Result<Network, KeyError> {
     if lock_on_quit {
         drop_copy(vault);
     }
-    let Some(path) = file.as_deref() else {
-        return Network {
-            state: State::Used,
-            file,
-        };
-    };
     let (key, locked) = check_key(vault, !lock_on_quit);
-    let state = match (
-        network::load_for_launch(path, key.as_ref()).rejected,
-        locked,
-    ) {
-        (false, _) => State::Used,
-        (true, false) => State::Rejected,
-        (true, true) if lock_on_quit => State::Waits(NetworkWait::LockAtQuit),
-        (true, true) => State::Waits(NetworkWait::NoCopyYet),
+    let open = matches!(vault.status(), Ok(VaultStatus::Unlocked { .. }));
+    let environment = NetworkSettings::from_environment();
+    let mut loaded = file
+        .as_deref()
+        .map_or_else(LoadedSettings::default, |path| {
+            network::read_settings(path, key.as_ref())
+        });
+    let legacy = file.as_deref().map_or(Ok(false), migration::legacy)?;
+    let vibe = migration::read(&dotenv)?;
+    let remnants = migration::remnant_sign_ins(file.as_deref(), &dotenv)?;
+    let pending = legacy
+        || !remnants.is_empty()
+        || credentials::PROXIES
+            .iter()
+            .any(|key| vibe.get(key).is_some_and(|v| network::has_sign_in(&v)));
+    if pending && !open {
+        // No agent process may read legacy files or their remnants while migration waits for the vault.
+        let core_locked = forwarder::locked(&environment);
+        forwarder::configure_locked(guard, &core_locked);
+        network::install_for_launch(
+            &NetworkSettings::default(),
+            &forwarder::public(&environment, guard),
+        );
+        return Ok(Network {
+            state: State::Waits(NetworkWait::ProxySignIn),
+            file,
+            dotenv,
+            migration_pending: true,
+            requires_vault: true,
+            browser: NetworkSettings::default(),
+            core_locked,
+            vibe_locked: NetworkSettings::default(),
+        });
+    }
+    for settings in &remnants {
+        credentials::store(vault, settings)?;
+    }
+    if legacy && let Some(path) = &file {
+        migrate_core(vault, path, &mut loaded, !lock_on_quit)?;
+    }
+    let vibe = if open {
+        migration::migrate(vault, &dotenv)?
+    } else {
+        vibe
     };
-    Network { state, file }
+    // Vibe's writable file can supply routing only for Vibe. Core settings keep their MAC authority.
+    let child = child_settings(&vibe, &loaded.settings);
+    migration::write(&dotenv, &child, vibe_guard)?;
+    if let Some(path) = &file {
+        migration::cleanup(path)?;
+    }
+    let needs_unlock = credentials::protected(&child) || credentials::protected(&environment);
+    let core_locked =
+        forwarder::locked(&NetworkSettings::effective(&loaded.settings, &environment));
+    let vibe_locked = forwarder::locked(&NetworkSettings::effective(&child, &environment));
+    let browser = if open || !needs_unlock {
+        let core = credentials::restore(vault, &loaded.settings)?;
+        let vibe = credentials::restore(vault, &child)?;
+        forwarder::configure(guard, &NetworkSettings::effective(&core, &environment));
+        forwarder::configure(vibe_guard, &NetworkSettings::effective(&vibe, &environment));
+        network::guard_settings(&core, &environment)
+    } else {
+        forwarder::configure_locked(guard, &core_locked);
+        forwarder::configure_locked(vibe_guard, &vibe_locked);
+        network::guard_settings(
+            &forwarder::public(&loaded.settings, guard),
+            &forwarder::public(&environment, guard),
+        )
+    };
+    network::install_for_launch(
+        &forwarder::public(&loaded.settings, guard),
+        &forwarder::public(&environment, guard),
+    );
+    let state = if needs_unlock && !open {
+        State::Waits(NetworkWait::ProxySignIn)
+    } else if loaded.rejected && locked {
+        State::Waits(if lock_on_quit {
+            NetworkWait::LockAtQuit
+        } else {
+            NetworkWait::NoCopyYet
+        })
+    } else if loaded.rejected {
+        State::Rejected
+    } else {
+        State::Used
+    };
+    Ok(Network {
+        state,
+        file,
+        dotenv,
+        migration_pending: false,
+        requires_vault: needs_unlock,
+        browser,
+        core_locked,
+        vibe_locked,
+    })
 }
 
 impl KeyService {
+    /// Whether a proxy sign-in may be used now. The MAC key's device-store copy grants no secret access.
+    #[must_use]
+    pub fn proxy_sign_in_ready(&self) -> bool {
+        matches!(self.vault().status(), Ok(VaultStatus::Unlocked { .. }))
+    }
+
+    /// Persist a confirmed network candidate with vault-only sign-ins and a synced atomic replacement.
+    /// # Errors
+    /// The vault or settings file is unavailable.
+    pub async fn persist_network_settings(
+        &self,
+        file: PathBuf,
+        prepared: PreparedSettings,
+    ) -> Result<(), KeyError> {
+        let text = self.seal_network_settings(prepared).await?;
+        blocking(move || migration::replace(&file, text.as_bytes())).await?
+    }
+
     /// Reads the authenticated network record. Without the vault's key or its copy, custom values are rejected.
     pub async fn read_network_settings(&self, file: PathBuf) -> LoadedSettings {
         let (vault, copy) = (self.vault(), !self.lock_on_quit());
         blocking(move || {
             let (key, _) = check_key(&vault, copy);
-            network::read_settings(&file, key.as_ref())
+            let mut loaded = network::read_settings(&file, key.as_ref());
+            if !loaded.rejected {
+                loaded.settings = credentials::restore(&vault, &loaded.settings)
+                    .unwrap_or_else(|_| credentials::masked(&loaded.settings));
+            }
+            loaded
         })
         .await
         .unwrap_or_else(|_| LoadedSettings {
@@ -235,6 +215,8 @@ impl KeyService {
     ) -> Result<String, KeyError> {
         let (vault, copy) = (self.vault(), !self.lock_on_quit());
         blocking(move || {
+            let public = credentials::store(&vault, prepared.settings())?;
+            let prepared = network::prepare_settings(&public).map_err(|_| KeyError::Internal)?;
             let key = rotate_mac_key(&vault, copy)?;
             network::seal_settings(&prepared, Some(&key))
                 .map_err(|e| KeyError::Settings(e.to_string()))
@@ -247,25 +229,32 @@ impl KeyService {
     /// into the proxy (the caller refreshes the key after this).
     pub(crate) async fn network_unlocked(&self) {
         let (vault, copy) = (self.vault(), !self.lock_on_quit());
-        let waiting = {
-            let network = self.network.lock().unwrap_or_else(PoisonError::into_inner);
-            matches!(network.state, State::Waits(_))
-                .then(|| network.file.clone())
-                .flatten()
-        };
+        let state = self.network.clone();
+        let transition = self.network_use.clone();
+        let guard = self.network_forwarder.clone();
+        let vibe_guard = self.vibe_forwarder.clone();
         let checked = blocking(move || {
+            let _transition = transition.lock().unwrap_or_else(PoisonError::into_inner);
+            let mut state = state.lock().unwrap_or_else(PoisonError::into_inner);
             if copy {
                 unlocked(&vault);
             }
-            let file = waiting?;
-            let (key, _) = check_key(&vault, copy);
-            Some(network::load_for_launch(&file, key.as_ref()).rejected)
+            let network = launch(
+                &vault,
+                state.file.clone(),
+                !copy,
+                state.dotenv.clone(),
+                &guard,
+                &vibe_guard,
+            )?;
+            let rejected = network.state != State::Used;
+            *state = network;
+            Ok::<_, KeyError>(rejected)
         })
-        .await
-        .ok()
-        .flatten();
-        let Some(rejected) = checked else { return };
+        .await;
+        let rejected = checked.ok().and_then(Result::ok).unwrap_or(true);
         if !rejected {
+            self.refresh_browser_guards();
             let proxy = self.proxy.lock().await;
             let built = proxy
                 .as_ref()
@@ -274,18 +263,116 @@ impl KeyService {
                 tracing::warn!(%error, "network settings: a client was not built again");
             }
         }
-        // The state first: the core words its notice from it.
-        self.network
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .state = if rejected {
-            State::Rejected
-        } else {
-            State::Used
-        };
         let _ = self
             .events
             .send(KeyEvent::NetworkSettingsChecked(!rejected));
+    }
+
+    pub(crate) fn stop_authenticated_network(&self) {
+        let network = self.network.lock().unwrap_or_else(PoisonError::into_inner);
+        if network.requires_vault {
+            forwarder::configure_locked(&self.network_forwarder, &network.core_locked);
+            forwarder::configure_locked(&self.vibe_forwarder, &network.vibe_locked);
+        }
+        for guard in self
+            .network_probes
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .iter()
+        {
+            guard.set_enabled(false);
+            guard.set_upstream(vw_netguard::Upstream::none());
+        }
+    }
+
+    pub(crate) fn network_locked(&self) {
+        let mut network = self.network.lock().unwrap_or_else(PoisonError::into_inner);
+        if credentials::protected(&network.browser) {
+            for guard in self
+                .browser_guards
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .iter()
+            {
+                forwarder::configure_locked(guard, &forwarder::locked(&network.browser));
+            }
+            network.browser = forwarder::locked(&network.browser);
+        }
+        if network.requires_vault {
+            network.state = State::Waits(NetworkWait::ProxySignIn);
+            let _ = self.events.send(KeyEvent::NetworkSettingsChecked(false));
+        }
+    }
+
+    /// Refuses a Vibe spawn while a legacy file still carries a sign-in. Retrying after unlock is safe.
+    /// # Errors
+    /// Migration awaits an unlocked or newly created vault.
+    pub fn before_vibe_launch(&self) -> Result<(), String> {
+        if self
+            .network
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .migration_pending
+        {
+            Err("Unlock or set up the vault to move the proxy sign-in, then restart Vibe.".into())
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Finish a confirmed Save: keep references in Vibe's file, sync both files and enable its upstream.
+    /// # Errors
+    /// The vault or the files are unavailable.
+    pub async fn network_saved(
+        &self,
+        file: PathBuf,
+        dotenv: PathBuf,
+        changed: Vec<String>,
+    ) -> Result<(), KeyError> {
+        let (vault, copy) = (self.vault(), !self.lock_on_quit());
+        self.network
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .dotenv
+            .clone_from(&dotenv);
+        let guard = self.network_forwarder.clone();
+        let vibe_guard = self.vibe_forwarder.clone();
+        let state = self.network.clone();
+        let transition = self.network_use.clone();
+        blocking(move || {
+            let _transition = transition.lock().unwrap_or_else(PoisonError::into_inner);
+            let (key, _) = check_key(&vault, copy);
+            let loaded = network::read_settings(&file, key.as_ref());
+            if loaded.rejected {
+                return Err(KeyError::Internal);
+            }
+            let mut vibe = migration::read(&dotenv)?;
+            for key in changed {
+                vibe = vibe.with(&key, None);
+            }
+            let child = child_settings(&vibe, &loaded.settings);
+            migration::write(&dotenv, &child, &vibe_guard)?;
+            migration::cleanup(&file)?;
+            let environment = NetworkSettings::from_environment();
+            let mut state = state.lock().unwrap_or_else(PoisonError::into_inner);
+            state.file = Some(file);
+            state.requires_vault =
+                credentials::protected(&child) || credentials::protected(&environment);
+            state.core_locked =
+                forwarder::locked(&NetworkSettings::effective(&loaded.settings, &environment));
+            state.vibe_locked =
+                forwarder::locked(&NetworkSettings::effective(&child, &environment));
+            let vibe = credentials::restore(&vault, &child)?;
+            let core = credentials::restore(&vault, &loaded.settings)?;
+            forwarder::configure(&guard, &NetworkSettings::effective(&core, &environment));
+            forwarder::configure(
+                &vibe_guard,
+                &NetworkSettings::effective(&vibe, &environment),
+            );
+            Ok(())
+        })
+        .await??;
+        Ok(())
     }
 
     /// Whether the saved network record is not in use (rejected, or waiting for the vault); the core replays one
@@ -310,4 +397,32 @@ impl KeyService {
             .unwrap_or_else(PoisonError::into_inner)
             .state
     }
+}
+
+/// A writable Vibe CA path must never authenticate a vault password's upstream TLS peer.
+/// Default roots come from verified core settings; credential-specific roots come from their vault items.
+fn child_settings(vibe: &NetworkSettings, core: &NetworkSettings) -> NetworkSettings {
+    let routing = vibe
+        .clone()
+        .with("SSL_CERT_FILE", None)
+        .with("SSL_CERT_DIR", None);
+    NetworkSettings::effective(&routing, core)
+}
+
+fn migrate_core(
+    vault: &Vault,
+    path: &std::path::Path,
+    loaded: &mut LoadedSettings,
+    copy: bool,
+) -> Result<(), KeyError> {
+    if loaded.rejected {
+        // Quarantine the credential without granting an unverified file routing authority.
+        credentials::store(vault, &migration::untrusted(path)?)?;
+    } else {
+        loaded.settings = credentials::store(vault, &loaded.settings)?;
+    }
+    let key = rotate_mac_key(vault, copy)?;
+    let prepared = network::prepare_settings(&loaded.settings).map_err(|_| KeyError::Internal)?;
+    let text = network::seal_settings(&prepared, Some(&key)).map_err(|_| KeyError::Internal)?;
+    migration::replace(path, text.as_bytes())
 }

@@ -12,6 +12,7 @@ publish = false
 workspace = true
 
 [dependencies]
+vw-vocabulary = { path = "../vw-vocabulary" }
 vw-mistral = { path = "../vw-mistral" }
 vw-core-api = { path = "../vw-core-api" }
 # The guard names and matchers of the hooks.toml block.

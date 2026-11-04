@@ -68,6 +68,13 @@ pub use mcp_url::{MAX_MCP_URL_LENGTH, McpUrlRefusal, check_mcp_server_url};
 pub use profile::full_access_escalation;
 pub use table::{classified_methods, classify, forwarded_without_unified_evidence};
 pub use tool_rules::ToolRuleRemoval;
+
+/// The unchanged native proxy confirmation, for a core-owned forwarder replacing the wire values.
+#[must_use]
+pub fn proxy_confirmation_summary(params: &serde_json::Value) -> String {
+    confirm_text::confirmation_summary("config/proxy/write", params, "")
+}
+
 pub use transport::Transport;
 
 /// One-line statement of what this crate is responsible for, exposed so tests and diagnostics

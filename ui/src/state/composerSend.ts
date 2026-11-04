@@ -186,6 +186,19 @@ export function createSendActions(deps: {
   ): Promise<SendOutcome> => {
     const { text, images } = content;
     let context = content.context;
+    const localIntent = classify(text, context.length, images.length, content.literal);
+    if (
+      localIntent.kind === "command" &&
+      localIntent.name === "feedback" &&
+      !content.literal &&
+      context.length === 0 &&
+      images.length === 0
+    ) {
+      const outcome = await runCommand(sessionId, localIntent.name, localIntent.args);
+      if (!outcome.ok && content.restoreOnFailure !== false)
+        composer.restore(sessionId, text, [], [], false, content.by);
+      return outcome;
+    }
     if (composer.store.get().compacting[sessionId] === true) {
       if (content.restoreOnFailure !== false)
         composer.restore(sessionId, text, context, images, content.literal, content.by);

@@ -55,7 +55,7 @@ export function usePaletteResults(query: string, found: CoreResults): ResultGrou
           });
     const setting: Result[] =
       mode === "text"
-        ? searchSettings(text, chromeAvailable(chrome)).map((e) => ({
+        ? searchSettings(text, chromeAvailable(chrome), chrome?.edge !== undefined).map((e) => ({
             id: `setting:${e.id}`,
             kind: "setting",
             title: e.label,

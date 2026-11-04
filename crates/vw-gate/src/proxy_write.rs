@@ -6,7 +6,7 @@
 //! - Only Vibe's six keys, spelled as Vibe lists them (Vibe upper-cases others, but a dialog line must name the
 //!   key it will really write), and at least one of them.
 //! - A value is `null` or `""` (remove the key) or text in its canonical form: a proxy address is `http://` or
-//!   `https://` with a host and an optional port, a no-proxy list is comma-joined entries without spaces, a
+//!   `https://` (also SOCKS with proxy-transports) with a host and an optional port, a no-proxy list is comma-joined entries without spaces, a
 //!   certificate path is absolute. The gate never rewrites params, so the core sends the canonical form.
 //! - Characters Vibe's `.env` writer would damage are refused (control characters, `${`, a doubled backslash).
 //! - A refusal is a fixed sentence about the setting: it never quotes the value (a proxy address can carry
@@ -97,7 +97,7 @@ mod tests {
             json!({"FOO": "x"}),
             json!({"https_proxy": "http://p:1"}),
             json!({"HTTP_PROXY": "proxy.corp:8080"}),
-            json!({"HTTP_PROXY": "socks5://p:1080"}),
+            json!({"HTTP_PROXY": "ftp://p:1080"}),
             json!({"HTTP_PROXY": " http://p:1"}),
             json!({"HTTP_PROXY": "HTTP://p:1"}),
             json!({"HTTP_PROXY": "http://u:${HOME}@p:1"}),
@@ -112,6 +112,18 @@ mod tests {
             json!({"HTTPS_PROXY": "http://evil.example:3128\\@proxy.corp:8080"}),
         ] {
             assert!(check(&changes).is_err(), "{changes}");
+        }
+    }
+
+    #[test]
+    fn socks_values_follow_the_enabled_network_transports() {
+        for scheme in ["socks4", "socks4a", "socks5", "socks5h"] {
+            let value = format!("{scheme}://p:1080");
+            assert_eq!(
+                check(&json!({"HTTP_PROXY": value})).is_ok(),
+                cfg!(feature = "proxy-transports"),
+                "{scheme} must follow the build feature"
+            );
         }
     }
 

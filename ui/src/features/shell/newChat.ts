@@ -1,6 +1,6 @@
 /**
  * New chat: the rail's second item, Ctrl N and the list's "New chat" button all open the same
- * view: the start view with a real composer, focused, its folder chip preselected (the current session's folder,
+ * view: the start view with a real composer, focused, its folder chip preselected (the current project's main folder,
  * else the folder chosen last, else the newest session's folder, else none). No session exists until the first
  * send (`state/composer.ts`); pressing New chat again on that view only focuses the composer, keeping its draft.
  * Depends on: home (leaving pages), composerFocus, the session summaries. Called by: Rail, shell actions (Ctrl N),
@@ -15,10 +15,14 @@ import { requestComposerFocus } from "../../state/composerFocus";
 import type { App } from "./AppContext";
 import { goHome } from "./home";
 
-/** The working folder of session `id`, when known. */
+/** The project's main folder, falling back to an ordinary session's working folder. */
 function folderOf(app: App, id: string): string | null {
+  const groups = app.projects?.groups.store.get().data;
+  const project = groups?.projects.find((p) => p.id === groups.members[id]);
+  if (project?.mainFolder) return project.mainFolder;
   const entry = app.core?.store.get().sessions[id];
-  return entry === undefined ? null : summarize(entry).cwd;
+  // A copy with no project facts yet must not silently become the next chat's folder.
+  return entry === undefined || entry.session["worktree"] != null ? null : summarize(entry).cwd;
 }
 
 /** The newest session's folder (by last activity), when any session has one. */
@@ -26,7 +30,11 @@ function newestFolder(app: App): string | null {
   const entries = Object.values(app.core?.store.get().sessions ?? {}).map((e) => summarize(e));
   const withFolder = entries.filter((s) => s.cwd !== null && !s.archived);
   withFolder.sort((a, b) => b.bumpedAt - a.bumpedAt);
-  return withFolder[0]?.cwd ?? null;
+  for (const session of withFolder) {
+    const folder = folderOf(app, session.id);
+    if (folder !== null) return folder;
+  }
+  return null;
 }
 
 /** Opens the new-chat view (or focuses its composer when it is already shown). */
@@ -38,7 +46,11 @@ export function openNewChat(app: App): void {
     const cwd = folderOf(app, s.selected);
     shell.actions.selectSession(null);
     // A terminal or a page open there: the screen comes back unchanged, its folder included.
-    if (cwd !== null && app.newChat?.holds() !== true) shell.actions.setNewFolder(cwd, "session");
+    if (
+      app.newChat?.holds() !== true &&
+      (cwd !== null || app.core?.store.get().sessions[s.selected]?.session["worktree"] != null)
+    )
+      shell.actions.setNewFolder(cwd, "session");
   } else if (s.newFolder === null) {
     const cwd = newestFolder(app);
     if (cwd !== null) shell.actions.setNewFolder(cwd, "session");

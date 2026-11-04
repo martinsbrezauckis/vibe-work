@@ -9,7 +9,8 @@
  * action set (`app.composer.debugApi`, origin bound at creation) and everything it writes is marked as
  * Debug API content, so nothing it leaves behind runs later with the window's origin.
  */
-import { openChromeTabs, pickChromeTab } from "./chromeTabs";
+import { pickChromeTab } from "./chromeTabs";
+import { openBrowserTabs, usableBrowsers } from "./browserTabs";
 import { NEW_CHAT } from "../../state/newChatKey";
 import { pasteIntoDraft } from "../../state/composerPaste";
 import { lineCount, pastesIn } from "./model/pastes";
@@ -131,6 +132,7 @@ export async function handleComposer(app: App, body: unknown): Promise<unknown> 
       })),
       sending: s.sending[sessionId] === true,
       compacting: s.compacting[sessionId] === true,
+      browsers: usableBrowsers(app.core?.store.get().chromeControl),
       chromePicker: s.chromePicker?.sessionId === sessionId ? s.chromePicker : null,
       chromeState:
         app.core?.store.get().chromeControl?.work.find((row) => row.sessionId === sessionId)
@@ -159,8 +161,19 @@ export async function handleComposer(app: App, body: unknown): Promise<unknown> 
         await actions.prepareSession(sessionId);
         return read(sessionId);
       case "chromeTabs":
-        await openChromeTabs(app, sessionId, "debug-api");
+      case "browserTabs": {
+        const browser = input["browser"];
+        const browsers = usableBrowsers(app.core?.store.get().chromeControl);
+        if (browser !== undefined && !browsers.some((name) => name === browser))
+          throw new UiControlError("invalidParams", "browser must name a usable browser");
+        await openBrowserTabs(
+          app,
+          sessionId,
+          "debug-api",
+          browsers.find((name) => name === browser),
+        );
         return read(sessionId);
+      }
       case "chromeTab": {
         const tabId = input["tabId"];
         if (typeof tabId !== "number" || !Number.isSafeInteger(tabId) || tabId < 0)

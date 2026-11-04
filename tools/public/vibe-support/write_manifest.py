@@ -15,12 +15,14 @@ requirements file must be uploaded with the manifest, to the same release.
 
 Usage: python3 -I write_manifest.py --out <dir> --entry <pin dir>,min=0.1.0[,max=0.1.9] [--entry ...]
          [--pypi-latest 2.27.0 | --pypi-latest-from-pypi] [--sequence N] [--previous <old vibe-support.json>]
-         [--chrome-store review|available]
+         [--chrome-store review|available] [--chrome-min-version 0.1.4]
   --sequence   default: the current Unix time; must be higher than --previous's (the app refuses a lower one).
   --pypi-latest-from-pypi  reads `info.version` of https://pypi.org/pypi/mistral-vibe/json (network).
   --chrome-store  adds `"chromeExtension": {"store": ...}`: `review` while the Chrome extension's store listing is in
                   Google's review (Your Chrome's setup then says so instead of linking to the store), `available` once
                   it is listed. Default: the field is left out (the app shows the store link).
+  --chrome-min-version  adds `"chromeExtension": {"minVersion": ...}`: the oldest Chrome extension version this
+                  release works with; an older installed extension reads "Update the extension". Default: left out.
 Needs: Python 3.10+, stdlib only. Called by: the release step, maintainers, the tests.
 """
 
@@ -128,7 +130,7 @@ def pypi_latest() -> str:
 
 
 def build(out: Path, entries: list[str], sequence: int | None, previous: Path | None,
-          latest: str | None, chrome_store: str | None = None) -> dict:
+          latest: str | None, chrome_store: str | None = None, chrome_min_version: str | None = None) -> dict:
     """Writes the manifest and the requirements files into `out`; returns the manifest."""
     out.mkdir(parents=True, exist_ok=True)
     floor = 0
@@ -156,6 +158,10 @@ def build(out: Path, entries: list[str], sequence: int | None, previous: Path | 
         if chrome_store not in CHROME_STORE:
             raise ManifestError(f"--chrome-store {chrome_store!r}: one of {', '.join(CHROME_STORE)}")
         manifest["chromeExtension"] = {"store": chrome_store}
+    if chrome_min_version is not None:
+        if not PLAIN.match(chrome_min_version):
+            raise ManifestError(f"--chrome-min-version {chrome_min_version!r} is not a plain version")
+        manifest.setdefault("chromeExtension", {})["minVersion"] = chrome_min_version
     (out / "vibe-support.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8", newline="\n")
     return manifest
 
@@ -170,17 +176,20 @@ def main(argv: list[str]) -> int:
     group.add_argument("--pypi-latest")
     group.add_argument("--pypi-latest-from-pypi", action="store_true")
     parser.add_argument("--chrome-store", choices=CHROME_STORE)
+    parser.add_argument("--chrome-min-version")
     args = parser.parse_args(argv)
     latest = pypi_latest() if args.pypi_latest_from_pypi else args.pypi_latest
     try:
-        manifest = build(args.out, args.entry, args.sequence, args.previous, latest, args.chrome_store)
+        manifest = build(args.out, args.entry, args.sequence, args.previous, latest, args.chrome_store,
+                         args.chrome_min_version)
     except ManifestError as error:
         print(f"refused: {error}", file=sys.stderr)
         return 1
     listed = ", ".join(f"{v['version']} (Vibe Work {v['minVibeWork']}+)" for v in manifest["versions"])
     store = manifest.get("chromeExtension", {}).get("store", "not set")
+    minimum = manifest.get("chromeExtension", {}).get("minVersion", "not set")
     print(f"sequence {manifest['sequence']}; pypiLatest {manifest['pypiLatest']}; chrome store {store}; "
-          f"versions: {listed}")
+          f"chrome extension minimum {minimum}; versions: {listed}")
     for name in sorted(p.name for p in args.out.iterdir()):
         print(f"  {args.out / name}")
     return 0

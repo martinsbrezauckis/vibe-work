@@ -1,5 +1,6 @@
-//! Search cannot bypass file-read denials. Reads bounded persisted Vibe policy layers and conservatively
-//! unions their `read_file` denials, including profile and cached administrator rules; never returns config text.
+//! File-read denials shared by search, panel reads and video. Reads bounded persisted Vibe policy layers and
+//! conservatively unions their `read_file` denials, including profile and cached administrator rules.
+//! Uses the shared no-follow reader and glob matcher; never returns config text to its callers.
 use globset::{GlobBuilder, GlobMatcher};
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -13,16 +14,31 @@ pub(crate) struct ReadRules {
 }
 impl ReadRules {
     pub(crate) fn load(home: &Path, roots: &[PathBuf], deadline: Instant) -> Result<Self, String> {
+        Self::load_layers(home, roots, None, deadline)
+    }
+    /// The same path policy, restricted to the chat's active profile at each folder layer.
+    pub(crate) fn load_for_mode(
+        home: &Path,
+        roots: &[PathBuf],
+        mode: &str,
+        deadline: Instant,
+    ) -> Result<Self, String> {
+        if mode.is_empty() || mode.contains(['/', '\\']) || matches!(mode, "." | "..") {
+            return Err("Cannot check file read rules.".into());
+        }
+        Self::load_layers(home, roots, Some(mode), deadline)
+    }
+    fn load_layers(
+        home: &Path,
+        roots: &[PathBuf],
+        mode: Option<&str>,
+        deadline: Instant,
+    ) -> Result<Self, String> {
         let mut rules = Self::default();
-        rules.config(&home.join("config.toml"))?;
-        rules.profiles(&home.join("agents"), deadline)?;
+        rules.layer(home, mode, deadline)?;
         for root in roots {
             for ancestor in root.ancestors().take(64) {
-                if Instant::now() >= deadline {
-                    return Err("Search limit reached.".into());
-                }
-                rules.config(&ancestor.join(".vibe/config.toml"))?;
-                rules.profiles(&ancestor.join(".vibe/agents"), deadline)?;
+                rules.layer(&ancestor.join(".vibe"), mode, deadline)?;
                 if Some(ancestor) == home.parent() {
                     break;
                 }
@@ -44,6 +60,17 @@ impl ReadRules {
             rules.table(&tools)?;
         }
         Ok(rules)
+    }
+    fn layer(&mut self, dir: &Path, mode: Option<&str>, deadline: Instant) -> Result<(), String> {
+        if Instant::now() >= deadline {
+            return Err("Cannot check file read rules.".into());
+        }
+        self.config(&dir.join("config.toml"))?;
+        if let Some(mode) = mode {
+            self.config(&dir.join("agents").join(format!("{mode}.toml")))
+        } else {
+            self.profiles(&dir.join("agents"), deadline)
+        }
     }
     fn profiles(&mut self, dir: &Path, deadline: Instant) -> Result<(), String> {
         let directory = match crate::search_walk::root(dir) {
@@ -144,7 +171,7 @@ impl ReadRules {
         !self.never && !self.patterns.iter().any(|g| g.is_match(&path))
     }
 }
-fn read(path: &Path) -> Result<Option<String>, String> {
+pub(crate) fn read(path: &Path) -> Result<Option<String>, String> {
     let parent = path.parent().ok_or("Cannot check file read rules.")?;
     let name = path
         .file_name()

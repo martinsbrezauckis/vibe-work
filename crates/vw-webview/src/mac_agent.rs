@@ -187,6 +187,7 @@ pub async fn forget(webview: &Webview<Wry>) -> Result<(), EngineError> {
 ///
 /// # Errors
 /// The webview is gone or the point is outside it.
+#[cfg(feature = "click-marker")]
 pub async fn show_click_marker(
     webview: &Webview<Wry>,
     point: (f64, f64),
@@ -210,6 +211,7 @@ pub async fn show_click_marker(
 ///
 /// # Errors
 /// The webview is gone.
+#[cfg(feature = "click-marker")]
 pub async fn click_marker_state(
     webview: &Webview<Wry>,
 ) -> Result<(Option<(f64, f64, f64, f64)>, bool), EngineError> {

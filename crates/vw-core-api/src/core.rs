@@ -1,18 +1,12 @@
-//! `Core`: the one object both clients talk to. It owns the supervisor, the session store and the
-//! method gate, runs the notification pump, and exposes `execute` (commands), `subscribe`
-//! (events) and the "Debug API on" flag.
-//!
-//! Depends on: vw-supervisor (process), vw-session (store), vw-gate (policy), `pump`, `transport`,
-//! `confirmer`, `subscription`, `view`. Called by: the app (Tauri bridge), vw-debug-api, tests.
+//! `Core`: both clients' shared facade for commands, events, sessions, supervisor and method gate.
+//! Depends on vw-supervisor, vw-session, vw-gate, pump, transport, confirmer, subscription and view.
+//! Called by the app's Tauri bridge, vw-debug-api and tests.
 //! Invariants:
-//! - One gate per core: tokens, open callbacks, picked folders and model aliases survive server
-//!   restarts (the transport routes each request to the session's channel or the lobby of the
-//!   supervisor's current server, `channels`).
-//! - The pump is subscribed to the first connection before `start` returns, so no notification of
-//!   a session started through this core is missed.
-//! - `Core` is a cheap handle (`Arc` inside). When the last handle drops, the supervisor drops and
-//!   kills the server tree, and the terminal manager drops and kills every terminal tree;
-//!   `shutdown` does the same cleanly (terminals first).
+//! - One gate per core: tokens, callbacks, picked folders and model aliases survive server restarts.
+//!   Transport routes requests to the session's channel or the current server's lobby (`channels`).
+//! - The pump subscribes to the first connection before `start` returns, so no session notification is missed.
+//! - `Core` is an Arc handle. Dropping the last handle kills the supervisor and terminal process trees;
+//!   `shutdown` does the same cleanly, terminals first.
 
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -41,6 +35,7 @@ use vw_supervisor::{SecretProvider, Supervisor, SupervisorConfig, SupervisorErro
 use vw_terminal::TerminalManager;
 /// State shared by every handle, the pump and the server-request handler.
 pub(crate) struct Shared {
+    pub(crate) feedback: crate::feedback::Feedback,
     pub(crate) deletes: Arc<crate::session_delete::Deletes>,
     pub(crate) guard_asks: crate::ask::guards::Calls,
     /// The question for the person's Git name and email, when the agent's commit has none.
@@ -72,6 +67,7 @@ pub(crate) struct Shared {
     pub(crate) window_drive: std::sync::OnceLock<crate::command_origin::WindowDrive>,
     pub(crate) supervisor: Arc<Supervisor>,
     pub(crate) store: SessionStore,
+    pub(crate) history_loading: Arc<crate::history_loading::HistoryLoading>,
     /// Vault project authority captured before session opening, never refreshed from agent-writable metadata.
     pub(crate) entry_projects: crate::entry_projects::EntryProjects,
     /// Titles and folders seen in listings (delete dialog text, reveal-folder check).
@@ -97,6 +93,7 @@ pub(crate) struct Shared {
     pub(crate) loads: mpsc::Sender<Applied>,
     /// Process and port monitor (`processes.rs`).
     pub(crate) procmon: vw_procmon::ProcMon,
+    pub(crate) vibe_processes: crate::vibe_processes::VibeProcesses,
     /// What the startup sweep found and did.
     pub(crate) sweep: Mutex<Option<vw_procmon::SweepReport>>,
     /// The Changes tab's trackers and refresh task (`changes.rs`).
@@ -402,6 +399,8 @@ impl Core {
         crate::github_reads::prepare(&github_reads, &mut supervisor, &mut config);
         let procmon = vw_procmon::ProcMon::new(config.procmon.clone())?;
         let sweep = crate::processes::startup_sweep(&procmon).await;
+        let vibe_processes =
+            crate::vibe_processes::VibeProcesses::start(&mut supervisor, &procmon).await?;
         let instructions = crate::instructions::InstructionsPaths {
             own_home: supervisor.vibe_home.clone(),
             cli_home: config.instructions.cli_home.clone(),
@@ -442,6 +441,8 @@ impl Core {
             &procmon,
             config.chrome_control.available(),
         );
+        let store = SessionStore::new();
+        let history_loading = Arc::new(crate::history_loading::HistoryLoading::new(store.clone()));
         let channels = Arc::new(Channels::new(
             supervisor.clone(),
             config.connection_wait,
@@ -449,11 +450,11 @@ impl Core {
             agent_tools.clone(),
             leases.clone(),
             plugin_approvals.clone(),
+            history_loading.clone(),
         ));
         let transport = SupervisedTransport {
             channels: channels.clone(),
         };
-        let store = SessionStore::new();
         let names = Arc::new(Names::default());
         let (events, _) = broadcast::channel(config.event_capacity.max(1));
         let asks = crate::ask::Service::new(config.ask_clock.clone(), events.clone());
@@ -464,6 +465,7 @@ impl Core {
         let (preview, pages, files) = crate::core_viewers::open(&config);
         let plan_profile = crate::plan_profile::PlanProfile::new(instructions.own_home.clone());
         let shared = Arc::new(Shared {
+            vibe_processes,
             deletes,
             app_context,
             asks,
@@ -475,6 +477,7 @@ impl Core {
                 config.git_global_config.clone(),
             ),
             guard_refusals: crate::guard_refusals::Refusals::default(),
+            feedback: crate::feedback::Feedback::new(&config),
             edit_previews: crate::edit_preview::Previews::default(),
             protected_changes: crate::protected_changes::Hub::of(&config),
             github_reads,
@@ -489,6 +492,7 @@ impl Core {
             window_drive: std::sync::OnceLock::new(),
             supervisor,
             store,
+            history_loading,
             entry_projects: crate::entry_projects::EntryProjects::default(),
             names,
             channels,
@@ -590,6 +594,9 @@ impl Core {
         crate::github_reads::watch(&shared);
         crate::keep_awake::publish(&shared);
         crate::secret_scan::start(&shared);
+        // An app update brings a new helper: Chrome's copy follows it in the background (start does not wait).
+        let refreshing = shared.clone();
+        tokio::spawn(async move { crate::chrome_control::refresh_helper(&refreshing).await });
         crate::chrome_control::start_owner(&shared).await;
         info!("core started");
         Ok(Self { shared })
@@ -715,17 +722,10 @@ impl Core {
                 .map(Into::into),
         }
     }
-    /// The last resort when [`Core::shutdown`] could not finish at quit: SIGKILL to the Vibe server's process group
-    /// and its crash watchdog, synchronously ([`vw_supervisor::Supervisor::kill_now`]). Returns whether a server was
-    /// running.
-    #[must_use]
-    pub fn stop_server_now(&self) -> bool {
-        self.shared.supervisor.kill_now()
-    }
-
     /// Stops the pump and owned processes, returns leases, then shuts the server down cleanly.
     /// Agent processes stay in the ledger; stdin closes before the grace period and kill.
     pub async fn shutdown(&self) {
+        self.shared.history_loading.stop_all();
         self.shared.asks.cancel_session(None, "Vibe Work closed");
         self.shared.changes.shutdown().await;
         self.shared.protected_changes.shutdown();
@@ -783,6 +783,7 @@ impl Core {
         // temporary sessions are deleted while Vibe still runs (bounded per session).
         self.delete_temporary_all(false).await;
         let exit = self.shared.supervisor.stop().await;
+        self.shared.vibe_processes.shutdown();
         self.shared.leases.release_all();
         // The stopped server leaves the ledger (agent processes stay recorded for the next start).
         crate::processes::record_server(&self.shared).await;

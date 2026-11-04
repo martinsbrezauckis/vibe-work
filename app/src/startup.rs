@@ -32,6 +32,8 @@
 //! - `VW_DEV_SLOW_NAMES=<suffix>`: host names ending in `<suffix>` take 2 s to resolve and answer a
 //!   reserved address (refused), in the browser's name checks and its network guard, so a real-app test can show
 //!   that slow lookups never freeze the window.
+//! - `VW_DEV_SYSTEM_VERSION=<version>`: the update check takes this as the macOS or Windows version
+//!   (`updater.rs`), so a test shows what an app on an older system does with an update that needs a newer one.
 //! - `VW_DEV_CHECK_PUBLIC_NAMES=<suffix>`: the browser's name CHECKS (navigation hook, request barrier)
 //!   answer a public address (`93.184.215.14`) for host names ending in `<suffix>`, while the engine and the network
 //!   guard resolve them for real: a deterministic DNS rebinding (the check sees public, the connection private).
@@ -498,21 +500,16 @@ pub fn host_config(app: &AppHandle, confirmer: SharedConfirmer) -> HostConfig {
         core.work.image_model = model;
     }
     // Development runs: a Chrome Control package for Set up (debug builds only; user builds ship it in the bundle).
-    // The store page is not opened from a dev run: its address goes to `<data>/chrome-store.log`.
     if let Some(package) = dev_chrome_package(DEV_BUILD, std::env::var_os("VW_DEV_CHROME_PACKAGE"))
     {
         tracing::info!(package = %package.display(), "development Chrome Control package");
         core.chrome_control.package = Some(package);
-        let log = data.join("chrome-store.log");
-        core.chrome_control.launcher = Some(Arc::new(move |url: &str| {
-            use std::io::Write as _;
-            std::fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(&log)
-                .and_then(|mut file| writeln!(file, "{url}"))
-                .map_err(|e| e.to_string())
-        }));
+        dev_store_launchers(&mut core.chrome_control, &data);
+        if cfg!(feature = "e2e-script")
+            && std::env::var("VW_E2E_CHROME_LAUNCH").as_deref() == Ok("1")
+        {
+            core.chrome_control.launcher = None;
+        }
     }
     // The temporary sessions' record (deleted at quit, or at the next start after a crash).
     core.sessions_dir = Some(data.join("sessions"));
@@ -553,6 +550,19 @@ pub fn host_config(app: &AppHandle, confirmer: SharedConfirmer) -> HostConfig {
     }
 }
 
+// The injected development launcher records navigation for fixture assertions.
+fn log_chrome_launch(log: &std::path::Path, url: &str) -> Result<(), String> {
+    use std::io::Write as _;
+    // Pairing tickets and their profile binding are bearer data, even in development runs.
+    let url = url.split('#').next().unwrap_or_default();
+    std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(log)
+        .and_then(|mut file| writeln!(file, "{url}"))
+        .map_err(|e| e.to_string())
+}
+
 /// Development runs only (`VW_DEV_CHROME_PACKAGE=<folder>`): the Chrome Control package Set up copies from.
 /// User builds take it from the bundle's resources (`vw_host::product`); a dev run has no bundle, so without this
 /// Set up says the build does not include the helper. Release builds and an empty value give none.
@@ -562,9 +572,56 @@ fn dev_chrome_package(dev_build: bool, value: Option<std::ffi::OsString>) -> Opt
         .map(PathBuf::from)
 }
 
+/// Development runs with a Chrome Control package: the store page is never opened in the person's own browsers. Set
+/// up's store address goes to `<data>/chrome-store.log` (Chrome) or `<data>/edge-store.log` (Edge, optional module):
+/// without its own launcher Edge's setup would start `msedge` with the person's real profile.
+fn dev_store_launchers(config: &mut vw_core_api::ChromeControlConfig, data: &std::path::Path) {
+    type Launcher = Arc<dyn Fn(&str) -> Result<(), String> + Send + Sync>;
+    let to_file = |name: &str| -> Launcher {
+        let log = data.join(name);
+        Arc::new(move |url: &str| log_chrome_launch(&log, url))
+    };
+    config.launcher = Some(to_file("chrome-store.log"));
+    config.edge_launcher = Some(to_file("edge-store.log"));
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{dev_chrome_package, dev_server_args};
+    use super::{dev_chrome_package, dev_server_args, dev_store_launchers};
+
+    #[test]
+    fn a_dev_run_never_opens_a_store_page_in_the_persons_browsers() {
+        let data = std::env::temp_dir().join(format!("vw-dev-store-{}", std::process::id()));
+        std::fs::create_dir_all(&data).expect("scratch folder");
+        let mut config = vw_core_api::ChromeControlConfig::default();
+        dev_store_launchers(&mut config, &data);
+        let chrome = config
+            .launcher
+            .as_ref()
+            .expect("Chrome's store page goes to a file");
+        chrome("https://chrome.example/store").expect("Chrome's log is written");
+        // Without a launcher Edge's setup starts `msedge` with the person's own profile.
+        let edge = config
+            .edge_launcher
+            .as_ref()
+            .expect("Edge's store page goes to a file");
+        edge("https://edge.example/store").expect("Edge's log is written");
+        let read = |name: &str| std::fs::read_to_string(data.join(name)).unwrap_or_default();
+        assert_eq!(read("chrome-store.log"), "https://chrome.example/store\n");
+        assert_eq!(read("edge-store.log"), "https://edge.example/store\n");
+        std::fs::remove_dir_all(&data).expect("scratch folder removed");
+    }
+
+    #[test]
+    fn development_chrome_log_drops_enrollment_secrets() {
+        let root = tempfile::tempdir().unwrap();
+        let log = root.path().join("chrome-store.log");
+        super::log_chrome_launch(&log, "chrome-extension://extension/pair.html#vw-enroll=secret-ticket&p=private-profile&f=fingerprint").unwrap();
+        assert_eq!(
+            std::fs::read_to_string(log).unwrap(),
+            "chrome-extension://extension/pair.html\n"
+        );
+    }
 
     #[test]
     fn a_dev_chrome_package_only_in_development_builds_and_only_when_named() {

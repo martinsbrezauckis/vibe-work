@@ -26,11 +26,7 @@ pub fn register_services(app: &tauri::AppHandle, inbox: Arc<HandOverInbox>) {
             },
         };
         inbox.push(hand_over.admit());
-        if let Some(window) = crate::main_window(&app) {
-            let _ = window.unminimize();
-            let _ = window.show();
-            let _ = window.set_focus();
-        }
+        let _ = crate::tray::reveal_main_window(&app);
     });
     if !registered {
         tracing::warn!("the Send to Vibe Work services were not registered");

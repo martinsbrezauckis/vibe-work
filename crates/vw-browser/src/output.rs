@@ -253,10 +253,18 @@ fn replace(value: &mut Value, tokens: &[String], path: &mut Vec<String>) {
 
 /// Filters known and generic keys in every browser result, plus every long token on key pages.
 pub fn filter_agent_output(value: &mut Value) {
+    crate::text::clean_value(value);
     let context = has_context(value);
     let mut tokens = Vec::new();
     collect(value, &mut tokens, context, &mut Vec::new());
     tokens.sort_by(|left, right| right.len().cmp(&left.len()).then_with(|| left.cmp(right)));
     tokens.dedup();
     replace(value, &tokens, &mut Vec::new());
+    // Redaction markers can be longer than the original strings. Refit reads and receipts after
+    // the last scrub, including their tab envelope; captures have their own file-summary budget.
+    if value.is_string() {
+        crate::inline_output::fit_error(value);
+    } else if value.get("size").is_some() && value.get("folder").is_none() {
+        crate::observe::fit(value, crate::observe::MAX_BUDGET);
+    }
 }

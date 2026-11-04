@@ -248,6 +248,15 @@ export function createSessionControls(deps: {
       };
       try {
         switch (name) {
+          case "feedback":
+            await core.run({
+              type: "feedback",
+              request: {
+                op: "open",
+                draft: { kind: "bug", title: "", description: args, remarks: "" },
+              },
+            });
+            return done();
           case "compact": {
             if (composer.store.get().compacting[sessionId] === true)
               return fail("Context compaction is already running.");

@@ -32,6 +32,7 @@ members = [
     "crates/vw-git",
     "crates/vw-gh-broker",
     "crates/vw-preview",
+    "crates/vw-video",
     "crates/vw-netguard",
     "crates/vw-browser",
     "crates/vw-pages",
@@ -63,7 +64,7 @@ tauri-runtime-wry = { path = "third_party/tauri-runtime-wry" }
 wry = { path = "third_party/wry" }
 
 [workspace.package]
-version = "0.1.5"
+version = "0.1.6"
 edition = "2024"
 license = "MIT"
 authors = ["Martins Brezauckis"]

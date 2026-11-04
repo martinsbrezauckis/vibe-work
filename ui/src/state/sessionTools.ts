@@ -77,12 +77,16 @@ export function createSessionTools(deps: { core: CoreController; shell: Shell; t
     },
 
     /**
-     * Starts a temporary session in `cwd` and selects it; returns its id (`null` on failure, with a toast).
+     * Starts a temporary session in `cwd` (`null`: a folder of its own) and selects it; returns its id (`null` on
+     * failure, with a toast).
      * `origin` marks a start requested by a Debug API client.
      */
-    async startTemporary(cwd: string): Promise<string | null> {
+    async startTemporary(cwd: string | null): Promise<string | null> {
       try {
-        const result = await run({ op: "startTemporary", agentConfig: { cwd } });
+        // Without a folder the core makes the chat a folder of its own (removed with the chat).
+        const result = await run(
+          cwd === null ? { op: "startTemporary" } : { op: "startTemporary", agentConfig: { cwd } },
+        );
         if (result.kind !== "started") return null;
         store.set((s) => ({
           ...s,

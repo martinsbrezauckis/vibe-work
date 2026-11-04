@@ -16,6 +16,7 @@ use gtk::prelude::*;
 
 const OVERLAY_NAME: &str = "vw-preview-overlay";
 const LAYER_NAME: &str = "vw-preview-layer";
+const FULL_SCREEN: &str = "vw-page-full-screen";
 
 /// Integer pixel geometry for GTK (`x`, `y`, `width`, `height`).
 pub(crate) type Geometry = (i32, i32, i32, i32);
@@ -152,6 +153,10 @@ fn allocate_exact(layer: &gtk::Fixed, child: &gtk::Widget) {
         return;
     }
     let parent = layer.allocation();
+    if child.style_context().has_class(FULL_SCREEN) {
+        child.size_allocate(&parent);
+        return;
+    }
     let x = parent.x().saturating_add(layer.child_x(child));
     let y = parent.y().saturating_add(layer.child_y(child));
     child.size_allocate(&gtk::Allocation::new(x, y, width, height));
@@ -215,6 +220,27 @@ pub(crate) fn show_at(engine: &webkit2gtk::WebView, geometry: Geometry) -> Resul
     trace_layout("after-child-visible", engine.upcast_ref(), Some(geometry));
     Ok(())
 }
+
+/// Lets a person's full-screen page occupy the host layer, retaining its normal slot for exit.
+pub(crate) fn page_full_screen(engine: &webkit2gtk::WebView, entered: bool) {
+    let style = engine.style_context();
+    if entered {
+        style.add_class(FULL_SCREEN);
+    } else {
+        style.remove_class(FULL_SCREEN);
+    }
+    if let Some(layer) = engine
+        .parent()
+        .and_then(|p| p.downcast::<gtk::Fixed>().ok())
+    {
+        allocate_exact(&layer, engine.upcast_ref());
+        layer.queue_resize();
+    }
+}
+
+#[cfg(test)]
+#[path = "linux_full_screen_tests.rs"]
+mod full_screen_tests;
 
 /// Parks `engine` unmapped at `width` x `height`. GTK 3 ignores `size_allocate` on a hidden widget
 /// (`gtk_widget_size_allocate_with_baseline` returns early unless the widget is visible), so a hidden webview would

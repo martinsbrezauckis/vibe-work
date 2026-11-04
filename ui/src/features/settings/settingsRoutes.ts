@@ -119,14 +119,17 @@ function read(app: App, instructions: Instructions | null) {
     category: view.category,
     categories: offeredCategories(app).map((c) => ({ id: c.id, label: c.label })),
     query: view.query,
-    results: searchSettings(view.query, chromeAvailable(app.core?.store.get().chromeControl)).map(
-      (r) => ({
-        id: r.id,
-        category: r.category,
-        label: r.label,
-        path: settingPath(r),
-      }),
-    ),
+    results: searchSettings(
+      view.query,
+      chromeAvailable(app.core?.store.get().chromeControl),
+      app.core?.store.get().chromeControl?.edge !== undefined,
+      app.core?.store.get().chromeControl?.firefox !== undefined,
+    ).map((r) => ({
+      id: r.id,
+      category: r.category,
+      label: r.label,
+      path: settingPath(r),
+    })),
     rows: view.open ? rows() : [],
     about: {
       version: app.core === null ? null : (app.core.store.get().appVersion ?? null),
@@ -219,6 +222,10 @@ export function registerSettingsRoutes(app: App): () => void {
               (e) =>
                 e.id === setting &&
                 e.opens === undefined &&
+                (app.core?.store.get().chromeControl?.firefox !== undefined ||
+                  !e.id.startsWith("firefox-control")) &&
+                (app.core?.store.get().chromeControl?.edge !== undefined ||
+                  !e.id.startsWith("edge-control")) &&
                 (chromeAvailable(app.core?.store.get().chromeControl) ||
                   !e.id.startsWith("chrome-control")),
             ))

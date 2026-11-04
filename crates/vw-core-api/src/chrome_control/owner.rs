@@ -12,6 +12,9 @@ use crate::core::Shared;
 
 use super::{mapping, setup};
 
+#[path = "owner_pairing.rs"]
+mod pairing;
+
 pub(super) const TOOLS: [&str; 3] = ["chrome_status", "chrome_session", "chrome_execute"];
 const UNKNOWN: &str = vw_vocabulary::texts::CHROME_CONNECTION_ENDED;
 
@@ -19,6 +22,9 @@ struct Call {
     name: String,
     args: Value,
     reply: oneshot::Sender<Answer>,
+    /// A plain owner request (`name` is the method, e.g. `owner.enroll.mint`) rather than a `tools/call`; its
+    /// JSON-RPC error answer is an outcome, not a broken connection (`Pipe::begin_tolerant`).
+    rpc: bool,
 }
 
 /// An owner answer and who wrote it. The helper's answers can carry page-derived text (titles, URLs, page text and
@@ -61,16 +67,29 @@ struct Running {
     task: JoinHandle<()>,
 }
 
+type SetupSnapshot = (setup::ChromeSetupView, Option<setup::ChromeSetupView>);
+
 #[derive(Default)]
 pub(super) struct Owner {
     running: Mutex<Option<Running>>,
     pub(super) tools: Mutex<Vec<Value>>,
     pub(super) pairing: Mutex<(String, Option<String>)>,
-    observed_setup: Mutex<Option<setup::ChromeSetupView>>,
+    pub(super) firefox_pairing: Mutex<(String, Option<String>)>,
+    pub(super) firefox_states: Mutex<Vec<String>>,
+    pub(super) edge_pairing: Mutex<(String, Option<String>)>,
+    observed_setup: Mutex<Option<SetupSnapshot>>,
+    pub(super) connected_profiles: super::addon::ConnectedProfiles,
+    pub(super) profile_ids: super::profile_ids::ProfileIds,
+    pub(super) wake: super::reconnect::Wake,
+    /// The automatic-pairing attempt and what the current helper connection reported for it (`enroll`).
+    pub(super) enroll: Mutex<super::enroll::Enroll>,
+    /// Edge's waiting state and attempt never consume Chrome's Connect (or conversely).
+    pub(super) edge_enroll: Mutex<super::enroll::Enroll>,
 }
 
 impl Owner {
-    pub(super) fn control(&self, args: Value) {
+    pub(super) fn control(&self, mut args: Value) {
+        self.profile_ids.normalize(&mut args);
         let send = self
             .running
             .lock()
@@ -83,6 +102,7 @@ impl Owner {
                 name: "chrome_session".into(),
                 args,
                 reply,
+                rpc: false,
             };
             if let Err(tokio::sync::mpsc::error::TrySendError::Full(call)) = send.try_send(call) {
                 tokio::spawn(async move {
@@ -123,6 +143,21 @@ impl Owner {
     }
 
     pub(super) async fn stop(&self) {
+        // Turning Use my Chrome off, removing and quitting drop every ticket: the helper also loses them when it
+        // ends, the revoke makes that explicit while it still runs (bounded; an older helper ignores it).
+        let knows = [&self.enroll, &self.edge_enroll].iter().any(|enroll| {
+            enroll
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .helper_knows_enroll()
+        });
+        if knows {
+            let _ = tokio::time::timeout(
+                Duration::from_millis(500),
+                self.rpc(super::enroll::REVOKE, json!({})),
+            )
+            .await;
+        }
         let running = self
             .running
             .lock()
@@ -144,15 +179,73 @@ impl Owner {
     }
 
     fn clear_connection(&self) {
+        self.wake.clear();
+        self.profile_ids.clear();
+        self.connected_profiles.clear();
         self.tools
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .clear();
         *self.pairing.lock().unwrap_or_else(PoisonError::into_inner) =
             (vw_vocabulary::texts::CHROME_NOT_CONNECTED.to_owned(), None);
+        *self
+            .firefox_pairing
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = (String::new(), None);
+        self.firefox_states
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clear();
+        *self
+            .edge_pairing
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = (String::new(), None);
+        // A helper that ended took its tickets with it; the next connection reports its own waiting state.
+        self.enroll
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .connection_ended(super::enroll_browser::Browser::Chrome);
+        self.edge_enroll
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .connection_ended(super::enroll_browser::Browser::Edge);
     }
 
-    pub(super) async fn call(&self, name: &str, args: Value) -> Answer {
+    /// One owner request on the private pipe (`method` is not a tool). `None` when the helper is not connected,
+    /// the connection ended, or the helper answered a JSON-RPC error (an older helper without the method).
+    pub(super) async fn rpc(&self, method: &str, params: Value) -> Option<Value> {
+        let send = self
+            .running
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .as_ref()
+            .map(|run| run.send.clone())?;
+        let (reply, answer) = oneshot::channel();
+        send.send(Call {
+            name: method.to_owned(),
+            args: params,
+            reply,
+            rpc: true,
+        })
+        .await
+        .ok()?;
+        match answer.await.ok()? {
+            Answer::Helper(value) if value.get("rpcError").is_none() => Some(value),
+            _ => None,
+        }
+    }
+
+    pub(super) async fn call(&self, name: &str, mut args: Value) -> Answer {
+        if self.profile_ids.needs_status(&args) {
+            let status = self.call_raw("chrome_status", json!({})).await;
+            self.profile_ids
+                .observe(&status.value()["structuredContent"]);
+        }
+        self.profile_ids.normalize(&mut args);
+        self.call_raw(name, args).await
+    }
+
+    async fn call_raw(&self, name: &str, args: Value) -> Answer {
         let send = self
             .running
             .lock()
@@ -168,6 +261,7 @@ impl Owner {
                 name: name.to_owned(),
                 args,
                 reply,
+                rpc: false,
             })
             .await
             .is_err()
@@ -231,6 +325,7 @@ pub(crate) async fn start(shared: &Arc<Shared>) -> Result<(), String> {
     };
     if setup::view(&chrome.config, Some(dir), &shared.instructions.own_home).state
         == setup::SetupState::NotSetUp
+        && !(cfg!(feature = "your-firefox") && dir.join("firefox-window").is_file())
     {
         return Ok(());
     }
@@ -301,7 +396,7 @@ pub(super) fn observe(shared: &Weak<Shared>, message: &Value) -> Result<(), ()> 
     if message["method"] == "notifications/owner/pairing"
         && let Some(result) = pairing_result(&message["params"])
     {
-        update_pairing(&Arc::downgrade(&shared), &result);
+        pairing::observe(&shared, &message["params"], result);
     }
     Ok(())
 }
@@ -316,7 +411,7 @@ fn pairing_result(params: &Value) -> Option<Value> {
         "waiting" => Some(json!({"structuredContent":{
             "error":{"code":"OWNER_APPROVAL_REQUIRED"},"ownerFingerprint":fingerprint}})),
         "paired" => Some(json!({"structuredContent":{
-            "profiles":[{"connected":true}],"ownerFingerprint":fingerprint}})),
+            "error":{"code":"OWNER_CONNECTING"},"ownerFingerprint":fingerprint}})),
         "mismatch" => {
             Some(json!({"structuredContent":{"error":{"code":"OWNER_IDENTITY_MISMATCH"}}}))
         }
@@ -328,22 +423,91 @@ pub(super) fn update_pairing(shared: &Weak<Shared>, result: &Value) {
     let Some(shared) = shared.upgrade() else {
         return;
     };
-    let data = &result["structuredContent"];
+    let mut data = result["structuredContent"].clone();
+    shared.chrome_control.owner.wake.observe(&data);
+    shared.chrome_control.owner.profile_ids.observe(&data);
+    // Keep all browsers' versions before the Chrome-only pairing view below filters them.
+    if data["profiles"].is_array() && data.get("profileId").is_none() {
+        shared
+            .chrome_control
+            .owner
+            .connected_profiles
+            .observe(&data);
+    }
+    if cfg!(any(feature = "your-edge", feature = "your-firefox")) {
+        super::edge_state::update(&shared, &data);
+    }
+    if data["profileId"]
+        .as_str()
+        .is_some_and(|id| !super::edge_state::chrome_profile(id))
+    {
+        return;
+    }
+    if let Some(profiles) = data.get_mut("profiles").and_then(Value::as_array_mut) {
+        profiles.retain(|profile| {
+            let id = profile["profileId"].as_str();
+            if cfg!(any(feature = "your-edge", feature = "your-firefox")) {
+                id.is_some_and(super::edge_state::chrome_profile)
+            } else {
+                // Chrome-only helpers historically used unscoped labels; foreign scopes remain foreign.
+                id.is_none_or(|id| !id.contains(':') || id.starts_with("chrome:"))
+            }
+        });
+    }
+    let data = &data;
     let code = data["error"]["code"].as_str().unwrap_or_default();
     let connected = data["profiles"]
         .as_array()
         .is_some_and(|p| p.iter().any(|p| p["connected"] == true));
-    if data.get("profiles").is_none() && code.is_empty() {
+    // Only a status answer (its profiles) or the helper's own pairing/owner report says what is connected. An
+    // action's failure (a closed tab, an unknown profile, an older extension) says nothing about the connection:
+    // taking it as "Not connected" flipped the card for two seconds and replaced the action's own error.
+    if data.get("profiles").is_none() && !code.starts_with("OWNER_") {
         return;
     }
+    // Every helper status answer names our own fingerprint, with or without a waiting extension: only the helper's
+    // waiting report is the pairing step (`addon`), else nothing is connected.
+    let waiting = shared
+        .chrome_control
+        .owner
+        .enroll
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .waiting_reported();
     let state = match code {
         "OWNER_IDENTITY_MISMATCH" | "OWNER_CONFLICT" => {
             "Chrome is paired with another Vibe Work. Pair again in Chrome."
         }
-        "OWNER_APPROVAL_REQUIRED" => "Waiting for you to pair in Chrome",
+        "OWNER_CONNECTING" => "Connecting",
         _ if connected => "Paired",
-        _ => "Waiting for you to pair in Chrome",
+        _ if waiting => "Waiting for you to pair in Chrome",
+        _ => vw_vocabulary::texts::CHROME_NOT_CONNECTED,
     };
+    // A status poll has no registered profile while an enabled extension holds another identity.
+    // Keep its signed mismatch until a pairing report, live connection or helper reset replaces it.
+    if !connected
+        && code.is_empty()
+        && shared
+            .chrome_control
+            .owner
+            .pairing
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .0
+            .contains("another Vibe Work")
+    {
+        return;
+    }
+    if connected {
+        shared.chrome_control.mark_paired();
+        shared
+            .chrome_control
+            .owner
+            .enroll
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .connected();
+    }
     let mut current = shared
         .chrome_control
         .owner
@@ -358,16 +522,21 @@ pub(super) fn update_pairing(shared: &Weak<Shared>, result: &Value) {
     let changed = *current != next;
     *current = next;
     drop(current);
-    // A regular status poll also discovers Chrome's extension directory appearing after pairing.
-    let view = super::commands::view(&shared);
+    publish_setup_if_changed(&shared, changed);
+}
+
+/// A regular status poll also discovers either browser's extension directory appearing after pairing.
+pub(super) fn publish_setup_if_changed(shared: &Shared, changed: bool) {
+    let view = super::commands::view(shared);
+    let next = (view.setup.clone(), view.edge.as_deref().cloned());
     let mut previous = shared
         .chrome_control
         .owner
         .observed_setup
         .lock()
         .unwrap_or_else(PoisonError::into_inner);
-    if changed || previous.as_ref() != Some(&view.setup) {
-        *previous = Some(view.setup.clone());
+    if changed || previous.as_ref() != Some(&next) {
+        *previous = Some(next);
         drop(previous);
         shared.emit(crate::CoreEvent::ChromeControl { view });
     }
@@ -378,7 +547,7 @@ pub(super) fn update_work_for_test(shared: &Arc<Shared>, result: &Value) {
     update_work(&Arc::downgrade(shared), result, tokio::time::Instant::now());
 }
 
-fn update_work(shared: &Weak<Shared>, result: &Value, started: tokio::time::Instant) {
+pub(super) fn update_work(shared: &Weak<Shared>, result: &Value, started: tokio::time::Instant) {
     let Some(shared) = shared.upgrade() else {
         return;
     };
@@ -400,7 +569,7 @@ fn update_work(shared: &Weak<Shared>, result: &Value, started: tokio::time::Inst
     let changed = work.observe(rows, &mut tasks, started);
     drop(work);
     drop(tasks);
-    shared.chrome_control.person_stopped(&stopped);
+    super::person_stop::received(&shared, &stopped);
     if changed {
         publish(&shared);
     }
@@ -477,7 +646,12 @@ async fn supervise(
                             let _ = call.reply.send(own("Not run: Chrome is busy.", "BUSY"));
                             continue;
                         }
-                        if let Ok(id) = pipe.begin("tools/call", json!({"name":call.name,"arguments":call.args})).await {
+                        let begun = if call.rpc {
+                            pipe.begin_tolerant(&call.name, call.args).await
+                        } else {
+                            pipe.begin("tools/call", json!({"name":call.name,"arguments":call.args})).await
+                        };
+                        if let Ok(id) = begun {
                             pending.insert(id, (Some(call.reply), tokio::time::Instant::now()));
                         } else { let _ = call.reply.send(own(UNKNOWN, "TRANSPORT_LOST")); ended = "send failed"; break; }
                     }
@@ -569,8 +743,8 @@ mod pairing_tests {
         let paired =
             pairing_result(&json!({"profileId":"p","state":"paired","fingerprint":OURS})).unwrap();
         assert_eq!(
-            paired["structuredContent"]["profiles"][0]["connected"],
-            true
+            paired["structuredContent"]["error"]["code"],
+            "OWNER_CONNECTING"
         );
         assert_eq!(paired["structuredContent"]["ownerFingerprint"], OURS);
     }

@@ -242,13 +242,16 @@ impl UpdateManager {
             .unwrap_or_else(PoisonError::into_inner) = Some(check);
     }
 
-    /// Runs one check after `delay` in the background.
+    /// Checks after `delay`, then every 24 hours while the application keeps running.
     pub fn spawn_check(&self, runtime: &Handle, delay: Duration) {
         let this = self.clone();
         runtime.spawn(async move {
             tokio::time::sleep(delay).await;
-            if let Err(error) = this.check().await {
-                tracing::info!(%error, "update check not run");
+            loop {
+                if let Err(error) = this.check().await {
+                    tracing::info!(%error, "update check not run");
+                }
+                tokio::time::sleep(Duration::from_secs(24 * 60 * 60)).await;
             }
         });
     }

@@ -30,5 +30,6 @@ const result = await tools.mcp_vw.secret_run({
 5. **A key on a web page:** saving it is the user's action: they select the key in the browser panel, press **Save to vault**, name it and confirm. `browser_capture_secret` always refuses. The saved key then appears in `secret_list` for `secret_run`.
 6. **A key for an MCP server:** the user adds the server in Tools and picks the saved key; "Always allow" starts it without a prompt each time. The MCP label only helps the user find the key; it changes no permission.
 7. Vibe Work refuses some commands before they run as a safety reminder (deleting your home or a drive, disk tools, shutdown, rules the user added); the refusal names the reason. The user can run such a command in their own terminal.
+8. Settings > Network keeps proxy sign-in in the vault, hidden from the agent. Agent commands receive proxy addresses without the sign-in.
 
 `secret_run_status` reads the result of a long command using the request id returned by `secret_run`.

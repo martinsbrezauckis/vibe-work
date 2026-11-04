@@ -62,7 +62,12 @@ const frameFixture = `<title>Embedded login</title><form method="post">
 <button id="send">Sign in</button></form>
 <iframe src="https://nested.example.test/child"></iframe>`;
 await page.route("**/*", (route) => route.fulfill({
-  body: route.request().url().includes("nested.example.test") ? '<button id="nested">Nested button</button>'
+  body: route.request().url().includes("consent.example.test") ? `<title>Privacy choices</title>
+    <div role="dialog" aria-modal="true"><h1>Your privacy choices</h1>
+    <p>We and our partners use cookies to support independent journalism.</p>
+    <button id="accept">Accept all</button><button id="reject">Reject optional cookies</button>
+    <button id="manage">Manage choices</button></div>`
+    : route.request().url().includes("nested.example.test") ? '<button id="nested">Nested button</button>'
     : (route.request().url().includes("frame.example.test") || route.request().url().endsWith("/same-frame")) ? frameFixture : fixture,
   contentType: "text/html",
 }));

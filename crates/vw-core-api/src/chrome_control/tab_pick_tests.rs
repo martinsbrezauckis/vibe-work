@@ -171,7 +171,7 @@ async fn the_agents_tab_list_shows_no_local_network_title() {
         .lock()
         .unwrap()
         .insert("t".into(), "s".into());
-    let _seen = shared.chrome_control.owner.answering(|_, _| {
+    let _seen = super::test_support::answering(shared, |_, _| {
         json!({"structuredContent":{"status":"completed","action":"tabs.list","data":{"tabs":[
             {"tabId":1,"url":"http://172.20.3.4/admin","title":"Router admin secrets","active":false},
             {"tabId":2,"url":"https://example.com/","title":"Example Domain","active":true}
@@ -189,6 +189,75 @@ async fn the_agents_tab_list_shows_no_local_network_title() {
     assert!(!text.contains("Router admin secrets"), "{text}");
     assert!(text.contains("172.20.3.4"), "the address stays: {text}");
     assert!(text.contains("Example Domain"), "{text}");
+    core.shutdown().await;
+}
+
+/// The helper lists non-web tabs too. Their controllability and refusal text survive the app's model envelope.
+#[tokio::test]
+async fn non_web_tabs_and_their_refusal_reach_the_agent() {
+    const REFUSAL: &str = "Not run: no tab with this ID is available. Use a tabId from tabs.list";
+    let core = core_with_chrome("tab-non-web").await;
+    let shared = &core.shared;
+    open_chat(shared, "s", "ask");
+    shared
+        .chrome_control
+        .tasks
+        .lock()
+        .unwrap()
+        .insert("t".into(), "s".into());
+    let seen = super::test_support::answering(shared, |_, args| {
+        if args["action"] == "tabs.list" {
+            json!({"structuredContent":{"status":"completed","action":"tabs.list","data":{"tabs":[
+                {"tabId":1,"url":"about:blank","title":"","controllable":false},
+                {"tabId":2,"url":"chrome://newtab/","title":"New Tab","controllable":false},
+                {"tabId":3,"url":"https://example.com/","title":"Example","controllable":true}
+            ]}}})
+        } else {
+            json!({"structuredContent":{"status":"failed","action":"page.read","error":{"message":REFUSAL}}})
+        }
+    });
+    let listed = super::gateway::call(
+        shared,
+        "s",
+        "chrome_execute",
+        json!({"sessionId":"t","action":"tabs.list","args":{}}),
+    )
+    .await
+    .unwrap();
+    let tabs = &listed["vwMcpResult"]["structuredContent"]["untrustedPageContent"]["data"]["tabs"];
+    assert_eq!(tabs.as_array().unwrap().len(), 3, "{listed}");
+    for (index, url, controllable) in [
+        (0, "about:blank", false),
+        (1, "chrome://newtab/", false),
+        (2, "https://example.com/", true),
+    ] {
+        assert_eq!(tabs[index]["url"], url);
+        assert_eq!(tabs[index]["controllable"], controllable);
+    }
+    let refused = super::gateway::call(
+        shared,
+        "s",
+        "chrome_execute",
+        json!({"sessionId":"t","action":"page.read","args":{"tabId":1}}),
+    )
+    .await
+    .unwrap();
+    let result = &refused["vwMcpResult"];
+    assert_eq!(
+        result["structuredContent"]["untrustedPageContent"]["error"]["message"], REFUSAL,
+        "{refused}"
+    );
+    assert!(
+        result["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains(REFUSAL)
+    );
+    assert!(
+        calls(&seen)
+            .iter()
+            .any(|(_, args)| { args["action"] == "page.read" && args["args"]["tabId"] == 1 })
+    );
     core.shutdown().await;
 }
 

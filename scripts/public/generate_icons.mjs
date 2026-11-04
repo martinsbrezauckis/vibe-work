@@ -208,6 +208,37 @@ try {
     ["app-icon.png", frames.get(1024)],
     ...[16, 24, 32, 48, 64, 128].map((size) => [`${size}x${size}.png`, frames.get(size)]),
   ];
+  // The native tray uses the same pixel-fitted mark: small ICO frames, Linux PNG,
+  // and a black alpha-only macOS template at 18 pt and its 2x resolution.
+  const trayHeader = Buffer.alloc(6 + 2 * 16);
+  trayHeader.writeUInt16LE(1, 2);
+  trayHeader.writeUInt16LE(2, 4);
+  let trayOffset = trayHeader.length;
+  const trayFrames = [16, 32].map((size, index) => {
+    const png = frames.get(size);
+    const entry = 6 + index * 16;
+    trayHeader[entry] = trayHeader[entry + 1] = size;
+    trayHeader.writeUInt16LE(1, entry + 4);
+    trayHeader.writeUInt16LE(32, entry + 6);
+    trayHeader.writeUInt32LE(png.length, entry + 8);
+    trayHeader.writeUInt32LE(trayOffset, entry + 12);
+    trayOffset += png.length;
+    return png;
+  });
+  outputs.push(["tray-windows.ico", Buffer.concat([trayHeader, ...trayFrames])]);
+  outputs.push(["tray-linux.png", frames.get(24)]);
+  for (const size of [18, 36]) {
+    const scale = size / 18;
+    const cells = iconCells.map(([, , x, y]) =>
+      `<rect x="${x}" y="${y}" width="2" height="2"/>`).join("");
+    const template = `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}"><g fill="black" transform="translate(${2 * scale} ${4 * scale}) scale(${scale})">${cells}</g></svg>`;
+    const input = join(scratch, `template-${size}.svg`);
+    writeFileSync(input, template);
+    execFileSync(process.execPath, [cli, "icon", input, "--output", generated, "--png", String(size)],
+      { cwd: root, env: { ...process.env, RAYON_NUM_THREADS: "2" }, stdio: "pipe" });
+    outputs.push([size === 18 ? "tray-template.png" : "tray-template@2x.png",
+      readFileSync(join(generated, `${size}x${size}.png`))]);
+  }
   // Read and validate every expected output before replacing any checked-in asset.
   for (const [file, bytes] of outputs) writeFileSync(join(icons, file), bytes);
   console.log(

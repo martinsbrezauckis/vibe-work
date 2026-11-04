@@ -5,61 +5,104 @@
 // call (`REQ.textOffset`, `REQ.maxText`).
 // Hidden text is returned separately (bounded) for the prompt guard only.
 // REQ: { page, maxRefs, maxText, textOffset, find?, node? }. Synchronous; the answer is untrusted page data.
-/* global nodeIdentity, ENV, KEY_TEXT, REQ, actionableCandidate, clip, collect, enabled, frameDoc, globalRect, hideKeys, inFrame, keyHolder, keyLike, labelOf, loginRole, refOf, rememberLabelledKeys, roleOf, secretKind, submitOrigins, vaultFilled, visible, visualCandidate -- Supplied by the Rust script assembler and its shared prelude. */
+/* global nodeIdentity, ENV, KEY_TEXT, REQ, actionableCandidate, clip, collect, controlSearchText, formControl, enabled, frameDoc, globalRect, hideKeys, inFrame, keyHolder, keyLike, labelOf, loginRole, refOf, rememberLabelledKeys, roleOf, secretKind, submitOrigins, vaultFilled, visible, visualCandidate -- Supplied by the Rust script assembler and its shared prelude. */
 (() => {
   __VW_COMMON__
   const everything = collect();
+  if (ENV && !ENV.frameDocument) Object.defineProperty(ENV, "frameDocument", { value:
+    Array.from(crypto.getRandomValues(new Uint32Array(4)), n => n.toString(16)).join("-") });
   for (const el of everything.elements) rememberLabelledKeys(el);
   // The original address stays on the host for admission checks; only displayUrl goes into agent answers.
   const out = { url: String(location.href).slice(0, 2000), displayUrl: hideKeys(String(location.href)).slice(0, 2000), title: clip(hideKeys(document.title), 300), readyState: document.readyState };
+  out.document = ENV?.frameDocument || "";
   const { truncated, crossOriginFrames } = everything;
   const needle = typeof REQ.find === "string" ? REQ.find.toLowerCase() : null;
   // Search only redacted display fields, never the original value of a secret field. A checked click's fresh
   // observation (`REQ.node`) looks only for the node it clicks, so the ref cap never hides it.
   const focusedMatch = item => typeof REQ.node === "number" ? item.node === REQ.node : needle === null ||
-    [item.name, item.role, item.value].some(value => String(value || "").toLowerCase().includes(needle));
+    [item.name, item.role, item.value, item.searchText].some(value => String(value || "").toLowerCase().includes(needle));
+  // The fallback reader enters same-origin children itself. Measure their allocation from parent
+  // elements, clipped through every ancestor, using the same 40% threshold as the native merger.
+  const frameLimits = new WeakMap();
+  const frameLimit = el => {
+    if (!inFrame(el)) return 7;
+    const owner = el.ownerDocument;
+    if (frameLimits.has(owner)) return frameLimits.get(owner);
+    let left = 0, top = 0, right = innerWidth, bottom = innerHeight, doc = owner;
+    while (doc !== document) {
+      const frame = doc.defaultView?.frameElement;
+      if (!frame) { right = left; break; }
+      const r = globalRect(frame);
+      const sx = frame.offsetWidth ? r.width / frame.offsetWidth : 0;
+      const sy = frame.offsetHeight ? r.height / frame.offsetHeight : 0;
+      const x = r.x + frame.clientLeft * sx, y = r.y + frame.clientTop * sy;
+      left = Math.max(left, x); top = Math.max(top, y);
+      right = Math.min(right, x + frame.clientWidth * sx);
+      bottom = Math.min(bottom, y + frame.clientHeight * sy);
+      doc = frame.ownerDocument;
+    }
+    const area = innerWidth * innerHeight;
+    const limit = area > 0 && Math.max(0, right - left) * Math.max(0, bottom - top) >= area * 0.4 ? 7 : 3;
+    frameLimits.set(owner, limit);
+    return limit;
+  };
   const priority = el => {
     if (!visible(el)) return -1;
     const r = globalRect(el);
-    if (r.y + r.height <= 0 || r.y >= innerHeight || r.x + r.width <= 0 || r.x >= innerWidth) return 0;
+    const onScreen = r.y + r.height > 0 && r.y < innerHeight && r.x + r.width > 0 && r.x < innerWidth;
     for (let up = el; up; up = up.parentElement || up.getRootNode()?.host) {
-      if (up.matches('[role="dialog"], [aria-modal="true"], dialog[open]')) return 3;
+      if (onScreen && up.matches('[role="dialog"], [aria-modal="true"], dialog[open]')) return 6;
       const position = getComputedStyle(up).position;
-      if (position === "fixed" || position === "sticky") return 2;
+      if (onScreen && (position === "fixed" || position === "sticky")) return 5;
     }
-    return 1;
+    if (formControl(el)) return 4;
+    if (el.closest('main,article,[role=main],form') && !el.closest('nav,[role=navigation]')) return 3;
+    return onScreen ? 1 : 0;
   };
-  // Visible overlays precede body links, then offscreen and hidden controls.
+  // Overlays first, then rendered form controls and main content, even below the fold, before navigation.
   const elements = everything.elements.filter(el => actionableCandidate(el) || visualCandidate(el))
-    .map((el) => ({ el, rank: priority(el) }))
-    .sort((a, b) => b.rank - a.rank).map(({ el }) => el);
+    .map((el) => ({ el, rank: Math.min(priority(el), frameLimit(el)) }))
+    .sort((a, b) => b.rank - a.rank);
   const refs = [];
+  const choiceGroups = new Map();
+  // Retain up to one cap from each group before selecting, so children cannot consume the
+  // fallback reader's script cap before the host can reserve main-document slots.
+  const counts = [0, 0];
+  const room = el => counts[Number(inFrame(el))] < REQ.maxRefs;
+  const addRef = item => {
+    if (!focusedMatch(item)) return;
+    counts[Number(item.frame === true)] += 1;
+    refs.push(item);
+  };
   const frames = [];
   const seen = new Set();
-  // Elements that show a key come first (never trimmed away), named and valued as hidden.
+  // Key-bearing elements are considered first within each document, named and valued as hidden.
   for (const el of everything.elements) {
-    if (refs.length >= REQ.maxRefs) break;
-    if (!keyHolder(el)) continue;
+    // Code and styles are not page choices. Redaction still registers their tokens above.
+    if (!keyHolder(el) || !visible(el) || !room(el)) continue;
     const ref = refOf(el);
     if (seen.has(ref)) continue;
     seen.add(ref);
-    const item = { ref, role: actionableCandidate(el) ? roleOf(el) : "text", name: hideKeys(labelOf(el), el), tag: el.localName, keyLike: true, value: KEY_TEXT };
+    const item = { ref, role: actionableCandidate(el) ? roleOf(el) : "text", name: hideKeys(labelOf(el), el), tag: el.localName, node: nodeIdentity(el), priority: frameLimit(el), keyLike: true, value: KEY_TEXT };
+    if (inFrame(el)) item.frame = true;
     if (!visible(el)) item.visible = false;
-    if (focusedMatch(item)) refs.push(item);
+    addRef(item);
   }
-  for (const el of elements) {
+  for (const { el, rank } of elements) {
     const ref = refOf(el);
-    if (seen.has(ref)) continue;
+    const alreadySeen = seen.has(ref);
     seen.add(ref);
     const role = roleOf(el);
     const label = labelOf(el);
-    const item = { ref, role, name: hideKeys(label, el), tag: el.localName, node: nodeIdentity(el),
+    const item = { ref, role, name: hideKeys(label, el), tag: el.localName, node: nodeIdentity(el), priority: rank,
       box: Object.fromEntries(Object.entries(globalRect(el)).map(([key, value]) => [key, Math.round(value)])) };
+    item.searchText = controlSearchText(el);
     if (visualCandidate(el)) {
       item.coordinateKind = "region";
       item.name ||= `${el.localName} region`;
     }
     if (keyLike(label, el)) item.keyLike = true;
+    if (alreadySeen) { item.keyLike = true; item.value = KEY_TEXT; }
     if (role === "iframe") {
       let src;
       try {
@@ -71,7 +114,6 @@
       frames.push({ ref, name: item.name, src: clip(hideKeys(src), 200), sameOrigin: Boolean(frameDoc(el)), visible: visible(el) });
       continue;
     }
-    if (refs.length >= REQ.maxRefs) continue;
     if (inFrame(el)) item.frame = true;
     const isVisible = visible(el);
     if (!isVisible) item.visible = false;
@@ -121,7 +163,15 @@
         item.href = clip(hideKeys(el.getAttribute("href")), 300);
       }
     }
-    if (focusedMatch(item)) refs.push(item);
+    // Inventory is independent of find, viewport scrolling and the requested ref cap.
+    if (isVisible && (el.matches("button,a[href]") || ["button", "link"].includes(role))) {
+      const doc = el.ownerDocument;
+      if (!choiceGroups.has(doc)) choiceGroups.set(doc, { choices: [], total: 0 });
+      const group = choiceGroups.get(doc);
+      group.total += 1;
+      if (group.choices.length < 200) group.choices.push({ el, item });
+    }
+    if (!alreadySeen && room(el)) addRef(item);
   }
   // Visible page text, including any dialog text.
   let text;
@@ -155,7 +205,27 @@
     // A page that blocks the walk only loses the hidden-text check for this observation.
   }
   out.hiddenText = hideKeys(hidden.join("\n")).slice(0, 3000);
-  out.refs = refs;
+  out.coveringFrames = [];
+  for (const [doc, group] of choiceGroups) {
+    group.choices.sort((a, b) => a.el.compareDocumentPosition(b.el) & 2 ? 1 : -1);
+    const choices = group.choices.map(({ item }) => item);
+    if (doc === document) {
+      out.choiceRefs = choices;
+      out.choiceCount = group.total;
+    } else if (group.choices.length && frameLimit(group.choices[0].el) === 7) {
+      out.coveringFrames.push({ origin: hideKeys(doc.location.origin), choices,
+        total: group.total, complete: !truncated && group.total === choices.length });
+    }
+  }
+  refs.sort((a, b) => b.priority - a.priority);
+  let reserved = Math.min(counts[0], Math.ceil(REQ.maxRefs / 2)), remaining = REQ.maxRefs;
+  out.refs = refs.filter(item => {
+    const main = item.frame !== true;
+    if (!remaining || (!main && remaining <= reserved)) return false;
+    remaining -= 1;
+    if (main) reserved = Math.max(0, reserved - 1);
+    return true;
+  });
   out.allRefs = Array.from(new Set([...refs.map(item => item.ref), ...seen])).slice(0, 1000);
   out.refCount = seen.size - frames.length;
   out.frames = frames.slice(0, 20);

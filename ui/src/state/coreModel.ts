@@ -3,7 +3,7 @@
  * reducer that folds `CoreEvent`s and command results into it (Rust owns the session,
  * the UI owns the screen, components read this model only).
  * Depends on: protocol/core types, sessionChanges, sessionSummary. Called by: coreStore.
- * Invariants: reducers are pure; a `snapshot` replaces Vibe state, retaining local warning notices; a change for an unknown
+ * Invariants: reducers are pure; a newer `snapshot` replaces Vibe state, retaining local warning notices; a change for an unknown
  * session is ignored (and reported by `needsRefresh`); `lagged` keeps the model and waits for the
  * fresh snapshots that follow it by the subscription's rule.
  */
@@ -200,6 +200,8 @@ function withChildCards(state: CoreState, cards: CoreState["subagentCards"]): Co
 /** Folds one core event into the model. */
 export function applyEvent(state: CoreState, event: CoreEvent): CoreState {
   switch (event.type) {
+    case "feedback":
+      return state;
     case "askOpened":
       return { ...state, asks: { ...state.asks, [event.ask.id]: event.ask } };
     case "askClosed": {
@@ -251,7 +253,17 @@ export function applyEvent(state: CoreState, event: CoreEvent): CoreState {
       const next = at < 0 ? [...history, item] : history.map((e, i) => (i === at ? item : e));
       return withSession(state, { ...entry, state: { ...entry.state, history: next } });
     }
-    case "snapshot":
+    case "snapshot": {
+      // A background page can reach the event stream before the original open/read reply reaches the window.
+      // Local versions also order authoritative replacements; Vibe event IDs can reset on resume.
+      const next = event.snapshot.state;
+      const version =
+        typeof next === "object" && next !== null && !Array.isArray(next)
+          ? next["historyVersion"]
+          : undefined;
+      const previous = state.sessions[event.snapshot.sessionId]?.state?.["historyVersion"];
+      if (typeof version === "number" && typeof previous === "number" && version < previous)
+        return state;
       return {
         ...withSession(
           state,
@@ -266,6 +278,7 @@ export function applyEvent(state: CoreState, event: CoreEvent): CoreState {
           ? [...new Set([...state.needsRefresh, event.snapshot.sessionId])]
           : state.needsRefresh.filter((id) => id !== event.snapshot.sessionId),
       };
+    }
     case "change": {
       const change = event.change;
       if (change.kind === "notice") {

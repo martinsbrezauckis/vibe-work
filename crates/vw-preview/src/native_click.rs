@@ -91,7 +91,7 @@ impl NativeClickLease<'_> {
         for answer in &mut answers {
             if self
                 .service
-                .reading_allowed(&self.mount.session_id, &page, &answer.url)
+                .frame_reading_allowed(&self.mount.session_id, &page, &answer.url)
                 .is_err()
             {
                 answer.value = "null".into();
@@ -133,6 +133,20 @@ fn frame_registry(answers: &[FrameAnswer]) -> Result<BTreeMap<String, u64>, Prev
 }
 
 impl PreviewService {
+    /// Draws feedback for completed input only while the same mount is still shown. Drawing failure is optional.
+    #[cfg(feature = "click-marker")]
+    pub async fn show_input_marker(&self, id: &MountId, point: NativeClickPoint) {
+        let _activity = self.session_lock(&id.session_id).await;
+        if self.page_mount(&id.session_id).as_ref() == Some(id) {
+            let _ = self
+                .bounded(
+                    "showing browser input",
+                    self.engine.show_input_marker(id, point),
+                )
+                .await;
+        }
+    }
+
     /// Injects into exactly the admitted mount; the engine must refuse a hidden view or a foreign target window.
     /// The caller supplies host authorization, never an agent-supplied coordinate, and holds the returned
     /// lease until the isolated event receipt is confirmed.

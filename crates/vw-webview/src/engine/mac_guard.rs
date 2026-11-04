@@ -1,8 +1,8 @@
 //! macOS parts of a preview's network check: the content rules before the first page and, with the feature
 //! `macos-proxy` ([`MAC_PROXY`]), WebTransport off, the plain refusal when the check is not in place (fail closed)
-//! and the development-build fault switch the Mac review runs use. Without the feature (0.1.2: minimum macOS 11)
-//! all previews use content rules only, including required previews; failed rule installs refuse the mount.
-//! macOS preview network guard: 0.1.3 with minimum 14.
+//! and the development-build fault switch the Mac review runs use. The feature is on in every app build since 0.1.7
+//! (minimum macOS 14). Without it (0.1.2-0.1.6, minimum macOS 11; now only `--no-default-features` on the app) all
+//! previews use content rules only, including required previews; failed rule installs refuse the mount.
 //! Depends on: `rules_macos`, `platform` (macOS). Called by: the engine's mount (`proxy_for`, `check_guard`,
 //! `mount_inner`).
 

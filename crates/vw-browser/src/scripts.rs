@@ -25,7 +25,8 @@ const PAGE: &str = include_str!("js/page.js");
 const FULLPAGE: &str = include_str!("js/fullpage.js");
 
 fn assemble(body: &str, request: &Value) -> String {
-    let prelude = format!("const REQ = {request};\n{COMMON}");
+    let labels = include_str!("js/control_labels.js");
+    let prelude = format!("const REQ = {request};\n{COMMON}\n{labels}");
     body.replace("__VW_COMMON__", &prelude)
 }
 

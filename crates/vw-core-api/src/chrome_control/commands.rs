@@ -50,6 +50,30 @@ pub enum ChromeControlRequest {
     },
     /// Open the extension's store page in Chrome.
     OpenStore {},
+    /// Continue installation after setup, using Chrome's native prompt where supported.
+    Connect {},
+    /// Offer the shared browser setup with the store opened in Edge.
+    OfferEdgeSetup {},
+    /// Confirm the one-time Edge setup offer.
+    SetupEdge {
+        /// The offer shown to the person.
+        offer_id: String,
+    },
+    /// Open the unchanged extension listing in Edge.
+    OpenEdgeStore {},
+    /// Offer the optional Firefox connection.
+    OfferFirefoxSetup {},
+    /// Confirm the Firefox setup offer.
+    SetupFirefox {
+        /// The offer shown to the person.
+        offer_id: String,
+    },
+    /// Open the approved Firefox add-on listing.
+    OpenFirefoxStore {},
+    /// Open or reuse the app-owned Firefox window.
+    OpenFirefox {},
+    /// The person closes the app-owned Firefox window.
+    CloseFirefox {},
     /// Remove what Set up made.
     Remove {},
 }
@@ -73,9 +97,17 @@ pub struct ChromeControlView {
     pub selection_error: Option<String>,
     /// Where the setup stands.
     pub setup: setup::ChromeSetupView,
+    /// Edge's own setup and pairing state, absent while the optional module is off.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
+    pub edge: Option<Box<setup::ChromeSetupView>>,
+    /// Firefox setup, omitted while the optional module is off.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
+    pub firefox: Option<Box<setup::ChromeSetupView>>,
 }
 
-fn invalid(message: &str) -> CoreError {
+pub(super) fn invalid(message: &str) -> CoreError {
     CoreError::new(ErrorCode::InvalidCommand, message)
 }
 
@@ -107,7 +139,7 @@ pub(crate) fn view(shared: &crate::core::Shared) -> ChromeControlView {
         .pairing
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    if setup.package && !pairing.0.is_empty() {
+    if setup.package && setup.state != setup::SetupState::RepairRequired && !pairing.0.is_empty() {
         setup.pairing.clone_from(&pairing.0);
     }
     if setup.state == setup::SetupState::WaitingForExtension && setup.pairing == "Paired" {
@@ -116,23 +148,170 @@ pub(crate) fn view(shared: &crate::core::Shared) -> ChromeControlView {
     if setup.package {
         setup.fingerprint.clone_from(&pairing.1);
     }
+    let pairing_text = pairing.0.clone();
+    drop(pairing);
+    setup.addon = Some(addon_view(shared, &setup, &pairing_text));
+    let left = extension_left(chrome);
+    let external = chrome
+        .removed_external
+        .load(std::sync::atomic::Ordering::SeqCst);
+    setup.extension_left = (left && !external).then_some(true);
+    setup.extension_restart = (left && external).then_some(true);
     let selections = chrome
         .selections
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let edge = cfg!(feature = "your-edge").then(|| {
+        let mut edge = setup::view_for(
+            &chrome.config,
+            chrome.dir(),
+            &shared.instructions.own_home,
+            "Microsoft Edge",
+        );
+        edge.store_review = setup.store_review;
+        let pairing = chrome
+            .owner
+            .edge_pairing
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        // Like Chrome, a broken shared helper keeps its reinstall diagnosis ahead of pairing state.
+        if edge.package && edge.state != setup::SetupState::RepairRequired {
+            edge.pairing = if pairing.0.is_empty() {
+                vw_vocabulary::texts::EDGE_NOT_CONNECTED.into()
+            } else {
+                pairing.0.clone()
+            };
+            edge.fingerprint.clone_from(&pairing.1);
+        }
+        if edge.state == setup::SetupState::WaitingForExtension && edge.pairing == "Paired" {
+            edge.state = setup::SetupState::ExtensionAdded;
+        }
+        if let Some(reason) = super::edge_policy::refusal(&chrome.config) {
+            edge.pairing = reason.into();
+        }
+        drop(pairing);
+        edge.addon = Some(super::agent_browser::edge_addon(shared, &edge));
+        Box::new(edge)
+    });
     ChromeControlView {
+        firefox: super::firefox_commands::setup_view(shared),
+        edge,
         pending_selections: selections.ids(),
         selection_error: selections.error.clone(),
         enabled: chrome.enabled(),
         local_network: chrome.local_network(),
         local_network_applied: chrome.local_network_applied(),
-        work: chrome
-            .work
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .view(),
+        work: super::work::view(chrome),
         setup,
     }
+}
+
+/// Your Chrome's state now (the card's and the agent's).
+pub(crate) fn addon(shared: &crate::core::Shared) -> super::AddonView {
+    view(shared)
+        .setup
+        .addon
+        .unwrap_or_else(|| super::addon::view(super::AddonState::NotConnected, ""))
+}
+
+/// Your Chrome's one state (`addon`), from the live connection first and Chrome's files last.
+fn addon_view(
+    shared: &crate::core::Shared,
+    setup: &setup::ChromeSetupView,
+    pairing: &str,
+) -> super::AddonView {
+    if setup.state == setup::SetupState::RepairRequired {
+        let mut view = super::addon::view(super::AddonState::HelperSetupRequired, "");
+        view.extension_version =
+            super::installation::version(shared, super::agent_browser::Browser::Chrome);
+        return view;
+    }
+    let chrome = &shared.chrome_control;
+    let (waiting, connecting) = {
+        let enroll = chrome
+            .owner
+            .enroll
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        (
+            enroll.waiting_reported(),
+            enroll.connecting(tokio::time::Instant::now()),
+        )
+    };
+    let user_data = setup::user_data(chrome.dir(), "Google Chrome");
+    let profiles: Vec<std::path::PathBuf> = user_data
+        .iter()
+        .flat_map(|dir| super::probe::profiles(dir, &chrome.config.extension_id))
+        .collect();
+    let installed_version = super::addon::installed_version(
+        &profiles,
+        &chrome.config.extension_id,
+        pairing == "Paired",
+        &chrome
+            .owner
+            .connected_profiles
+            .snapshot()
+            .into_iter()
+            .filter(|(id, _)| super::agent_browser::Browser::Chrome.owns_profile(id))
+            .collect::<Vec<_>>(),
+    );
+    let paired_once = chrome.paired_once.load(std::sync::atomic::Ordering::SeqCst);
+    let facts = super::addon::Facts {
+        package: setup.package,
+        package_text: setup.pairing.clone(),
+        set_up: setup.state != setup::SetupState::NotSetUp
+            && setup.state != setup::SetupState::Absent,
+        browser_issue: setup.browser_issue,
+        enabled: chrome.enabled(),
+        connected: pairing == "Paired",
+        store_review: setup.store_review,
+        other_owner: pairing.contains("another Vibe Work"),
+        connecting: connecting || pairing == "Connecting",
+        waiting,
+        helper_up: !chrome
+            .owner
+            .tools
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .is_empty(),
+        paired_once,
+        // Only a disconnected remembered pairing needs an OS probe; live tools avoid a process per read.
+        chrome_running: paired_once
+            && pairing != "Paired"
+            && chrome.enabled()
+            && chrome.config.launcher.is_none()
+            && super::browser::running(),
+        install_state: setup.install_state.clone(),
+        extension_folder: !profiles.is_empty(),
+        installed_version,
+        min_version: shared
+            .config
+            .vibe_install
+            .as_ref()
+            .and_then(vw_vibe_install::VibeInstaller::extension_min_version),
+    };
+    let state = super::addon::state(&facts, || {
+        chrome.prober.probe(
+            profiles.clone(),
+            &chrome.config.extension_id,
+            std::time::Instant::now(),
+        )
+    });
+    let mut view = super::addon::view(state, &facts.package_text);
+    view.extension_version =
+        super::installation::version(shared, super::agent_browser::Browser::Chrome);
+    super::addon::reconnecting(&mut view, paired_once && !waiting);
+    view
+}
+
+/// After Remove: the extension is still in a profile of the folders Remove recorded.
+fn extension_left(chrome: &super::ChromeControl) -> bool {
+    chrome
+        .left_in_chrome
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .iter()
+        .any(|dir| !super::probe::profiles(dir, &chrome.config.extension_id).is_empty())
 }
 
 impl Core {
@@ -142,6 +321,20 @@ impl Core {
             .chrome_control
             .set_local_network(enabled)
             .map_err(|reason| invalid(&reason))?;
+        if !enabled && let Some(hub) = &self.shared.preview {
+            for label in hub.service.mount_labels() {
+                if let Some(page) = hub.service.page_for_mount(&label)
+                    && hub.browser.on_local_network(&page)
+                    && let Some(owner) = hub.service.owner_session_id(&page)
+                    && crate::browser_tabs::agent_page_allowed(&hub.service, &owner, &page)
+                {
+                    hub.service
+                        .suspend_page(&page)
+                        .await
+                        .map_err(|error| invalid(&error.to_string()))?;
+                }
+            }
+        }
         // Chrome's live tabs take the switch at once (the helper holds new actions until Chrome confirms).
         super::send_local_network(&self.shared).await;
         self.shared.emit(crate::CoreEvent::ChromeControl {
@@ -157,12 +350,18 @@ impl Core {
     fn chrome_result(&self, offer: Option<ToolsInstallOffer>) -> CommandResult {
         CommandResult::ChromeControl {
             view: self.chrome_view(),
-            offer,
+            offer: offer.map(Box::new),
         }
     }
 
-    fn setup_offer(&self) -> Result<ToolsInstallOffer, CoreError> {
+    fn setup_offer(&self, edge: bool) -> Result<ToolsInstallOffer, CoreError> {
+        if edge && !cfg!(feature = "your-edge") {
+            return Err(invalid(setup::absent_for(true)));
+        }
         let config = &self.shared.chrome_control.config;
+        if edge && let Some(reason) = super::edge_policy::refusal(config) {
+            return Err(invalid(reason));
+        }
         setup::packaged_helper(config).map_err(|reason| invalid(&reason))?;
         // In Google's review the store page is not opened (the setup says so instead), so the offer does not say it.
         let store = if store_review(&self.shared) {
@@ -174,18 +373,28 @@ impl Core {
             )
         };
         self.shared.install_offers.make(
-            OfferKey::new(OFFER_KIND, setup::PLUGIN, ""),
+            OfferKey::new(OFFER_KIND, setup::PLUGIN, if edge { "edge" } else { "" }),
             ToolsInstallOffer {
                 offer_id: String::new(),
                 kind: OFFER_KIND.to_owned(),
-                name: vw_vocabulary::texts::CHROME_NAME.to_owned(),
+                name: if edge {
+                    vw_vocabulary::texts::EDGE_NAME.to_owned()
+                } else {
+                    vw_vocabulary::texts::CHROME_NAME.to_owned()
+                },
                 publisher: Some("Vibe Work".to_owned()),
                 source: "Shipped with Vibe Work".to_owned(),
                 licence: None,
                 // The store and Chrome show the extension under its listing name, not "Your Chrome".
                 runs: format!(
                     "Adds a small program to Vibe Work's folder, for your user only (no \
-                     administrator), and tells Google Chrome where it is.{store}"
+                     administrator), and tells {} where it is.{store}",
+                    if cfg!(feature = "your-edge") && super::edge_policy::refusal(config).is_none()
+                    {
+                        "Chrome and Edge"
+                    } else {
+                        "Google Chrome"
+                    }
                 ),
                 version: None,
                 expires_at: 0,
@@ -195,23 +404,43 @@ impl Core {
     }
 
     /// `chromeControl` `setup`: takes the one-time offer, stores the owner identity and installs the helper.
-    async fn chrome_setup(&self, offer_id: String) -> Result<CommandResult, CoreError> {
+    async fn chrome_setup(
+        &self,
+        origin: Origin,
+        offer_id: String,
+        edge: bool,
+    ) -> Result<CommandResult, CoreError> {
+        if edge && !cfg!(feature = "your-edge") {
+            return Err(invalid(setup::absent_for(true)));
+        }
         let chrome = &self.shared.chrome_control;
+        if edge && let Some(reason) = super::edge_policy::refusal(&chrome.config) {
+            return Err(invalid(reason));
+        }
         let _held = chrome.lifecycle.lock().await;
-        if chrome
+        let installed = chrome
             .dir()
-            .is_some_and(|dir| dir.join("setup.json").is_file())
-        {
+            .is_some_and(|dir| dir.join("setup.json").is_file());
+        if installed && !edge {
             return Err(invalid(vw_vocabulary::texts::CHROME_ALREADY_SET_UP));
         }
         self.shared.install_offers.take(
             &offer_id,
-            &OfferKey::new(OFFER_KIND, setup::PLUGIN, ""),
+            &OfferKey::new(OFFER_KIND, setup::PLUGIN, if edge { "edge" } else { "" }),
             self.shared.asks.now_ms().into(),
         )?;
         let state = chrome
             .dir()
             .ok_or_else(|| invalid(vw_vocabulary::texts::CHROME_NO_APP_FOLDER))?;
+        if installed {
+            setup::register_edge(&chrome.config, state).map_err(|reason| invalid(&reason))?;
+            if !store_review(&self.shared) {
+                super::enroll::connect_edge(&self.shared, origin)
+                    .await
+                    .map_err(|reason| invalid(&reason))?;
+            }
+            return Ok(self.chrome_result(None));
+        }
         let keys = self
             .shared
             .config
@@ -230,12 +459,31 @@ impl Core {
                 "Could not write to Vibe Work’s folder. Nothing was changed. Check free disk space and try again."
             }));
         }
+        let browser = if edge {
+            super::enroll_browser::Browser::Edge
+        } else {
+            super::enroll_browser::Browser::Chrome
+        };
+        let _ = super::enroll::begin(&self.shared, origin, browser).await;
+        browser
+            .requested(&self.shared)
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        chrome
+            .set_enabled(true)
+            .map_err(|reason| invalid(&reason))?;
+        let launched = if store_review(&self.shared) {
+            Ok(())
+        } else if edge {
+            setup::open_store_for(&chrome.config, true)
+        } else {
+            super::extension_install::begin(&chrome.config, state)
+        };
+        // The Store opens first; a pending native handshake can then bring the pairing page forward.
         super::start_owner(&self.shared).await;
         tracing::info!("Chrome Control set up");
-        if store_review(&self.shared) {
-            tracing::info!("the store listing is in review: the store page is not opened");
-        } else if let Err(problem) = setup::open_store(&chrome.config) {
-            tracing::warn!(%problem, "the Chrome Web Store page could not be opened");
+        if let Err(problem) = launched {
+            super::owner::publish(&self.shared);
+            return Err(CoreError::new(ErrorCode::Internal, problem));
         }
         self.shared.emit(crate::CoreEvent::ChromeControl {
             view: self.chrome_view(),
@@ -250,13 +498,27 @@ impl Core {
             .dir()
             .ok_or_else(|| invalid("Vibe Work has no app folder."))?;
         super::stop_owner(&self.shared).await;
+        let user_data = setup::user_data(Some(state), "Google Chrome");
         if let Some(keys) = &self.shared.config.keys {
             keys.delete_chrome_owner()
                 .await
                 .map_err(|_| invalid(vw_vocabulary::texts::CHROME_OWNER_DELETE_FAILED))?;
         }
-        let removed = setup::remove(state);
+        // Chrome removes an extension it installed from Vibe Work's registration by itself once the registration
+        // is gone; a Store-added extension stays until the person removes it in Chrome.
+        let chrome_removes_it = super::extension_install::remove(&chrome.config, state)
+            .map_err(|reason| invalid(&reason))?;
+        chrome.forget_paired();
+        super::edge_state::remember_pairing(chrome, false);
+        let removed = setup::remove(&chrome.config, state);
         chrome.reset();
+        chrome
+            .removed_external
+            .store(chrome_removes_it, std::sync::atomic::Ordering::SeqCst);
+        *chrome
+            .left_in_chrome
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = user_data;
         removed.map_err(|reason| {
             CoreError::new(ErrorCode::Internal, {
                 tracing::warn!(%reason, "Chrome Control removal failed");
@@ -269,6 +531,59 @@ impl Core {
         Ok(self.chrome_result(None))
     }
 
+    async fn connect_chrome(&self, origin: Origin) -> Result<CommandResult, CoreError> {
+        let chrome = &self.shared.chrome_control;
+        let _held = chrome.lifecycle.lock().await;
+        if store_review(&self.shared) {
+            return Err(invalid("Extension in review"));
+        }
+        let state = chrome
+            .dir()
+            .filter(|dir| dir.join("setup.json").is_file())
+            .ok_or_else(|| invalid("Connect Chrome first"))?;
+        if let Some(issue) = super::browser::issue(&chrome.config) {
+            return Err(invalid(issue.label()));
+        }
+        // Chrome may start the helper as soon as it sees the extension: give it this version's copy first.
+        super::refresh_helper_held(chrome).await;
+        setup::repair_registrations(&chrome.config, state, Some("Google Chrome"))
+            .map_err(|_| invalid("Helper setup required"))?;
+        chrome
+            .set_enabled(true)
+            .map_err(|reason| invalid(&reason))?;
+        // Only the window's own Connect may mint a pairing ticket; it also revokes older ones.
+        let attempt =
+            super::enroll::begin(&self.shared, origin, super::enroll_browser::Browser::Chrome)
+                .await;
+        chrome
+            .connect_requested
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        // The pairing page opens at once only for a waiting extension the helper reported (or another
+        // owner); a helper status answer alone always names our fingerprint and proves no extension.
+        let step = self.chrome_view().setup.addon.map(|addon| addon.state);
+        let launched = if matches!(
+            step,
+            Some(super::AddonState::NotPaired | super::AddonState::OtherOwner)
+        ) {
+            chrome
+                .connect_requested
+                .store(false, std::sync::atomic::Ordering::SeqCst);
+            super::enroll::open_for_waiting(
+                &self.shared,
+                attempt.as_deref(),
+                super::enroll_browser::Browser::Chrome,
+            )
+            .await;
+            Ok(())
+        } else {
+            super::extension_install::begin(&chrome.config, state)
+        };
+        super::start_owner(&self.shared).await;
+        launched.map_err(|reason| invalid(&reason))?;
+        super::owner::publish(&self.shared);
+        Ok(self.chrome_result(None))
+    }
+
     /// `chromeControl`.
     ///
     /// # Errors
@@ -276,10 +591,30 @@ impl Core {
     /// saving availability, setup or removal fails.
     pub(crate) async fn chrome_control(
         &self,
-        _origin: Origin,
+        origin: Origin,
         request: ChromeControlRequest,
     ) -> Result<CommandResult, CoreError> {
         let chrome = &self.shared.chrome_control;
+        let edge = matches!(
+            request,
+            ChromeControlRequest::OfferEdgeSetup {}
+                | ChromeControlRequest::SetupEdge { .. }
+                | ChromeControlRequest::OpenEdgeStore {}
+        );
+        if edge && (!cfg!(feature = "your-edge") || !chrome.config.available()) {
+            return Err(invalid(setup::absent_for(true)));
+        }
+        let firefox = matches!(
+            request,
+            ChromeControlRequest::OfferFirefoxSetup {}
+                | ChromeControlRequest::SetupFirefox { .. }
+                | ChromeControlRequest::OpenFirefoxStore {}
+                | ChromeControlRequest::OpenFirefox {}
+                | ChromeControlRequest::CloseFirefox {}
+        );
+        if firefox && (!cfg!(feature = "your-firefox") || !chrome.config.available()) {
+            return Err(invalid(super::firefox_commands::ABSENT));
+        }
         if !chrome.config.available() && !matches!(request, ChromeControlRequest::Read {}) {
             return Err(invalid(setup::ABSENT));
         }
@@ -320,15 +655,41 @@ impl Core {
                 self.set_local_network(enabled).await
             }
             ChromeControlRequest::OfferSetup {} => {
-                let offer = self.setup_offer()?;
+                let offer = self.setup_offer(false)?;
                 Ok(self.chrome_result(Some(offer)))
             }
-            ChromeControlRequest::Setup { offer_id } => self.chrome_setup(offer_id).await,
+            ChromeControlRequest::Setup { offer_id } => {
+                self.chrome_setup(origin, offer_id, false).await
+            }
+            ChromeControlRequest::Connect {} => self.connect_chrome(origin).await,
             ChromeControlRequest::OpenStore {} => {
+                if store_review(&self.shared) {
+                    return Err(invalid("Extension in review"));
+                }
                 setup::open_store(&chrome.config)
                     .map_err(|reason| CoreError::new(ErrorCode::Internal, reason))?;
                 Ok(self.chrome_result(None))
             }
+            ChromeControlRequest::OfferEdgeSetup {} => {
+                Ok(self.chrome_result(Some(self.setup_offer(true)?)))
+            }
+            ChromeControlRequest::SetupEdge { offer_id } => {
+                self.chrome_setup(origin, offer_id, true).await
+            }
+            ChromeControlRequest::OpenEdgeStore {} => {
+                let _held = chrome.lifecycle.lock().await;
+                super::enroll::connect_edge(&self.shared, origin)
+                    .await
+                    .map_err(|reason| invalid(&reason))?;
+                Ok(self.chrome_result(None))
+            }
+            ChromeControlRequest::OfferFirefoxSetup {}
+            | ChromeControlRequest::SetupFirefox { .. }
+            | ChromeControlRequest::OpenFirefoxStore {} => Err(invalid(
+                "Firefox uses its own window. Choose Open window in Settings.",
+            )),
+            ChromeControlRequest::OpenFirefox {} => self.firefox_window(true).await,
+            ChromeControlRequest::CloseFirefox {} => self.firefox_window(false).await,
             ChromeControlRequest::Remove {} => self.chrome_remove().await,
         }
     }

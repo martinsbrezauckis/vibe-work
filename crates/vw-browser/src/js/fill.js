@@ -6,7 +6,7 @@
 // Answer: { status: ok|filled|stale|ambiguous|originChanged|frameOrigin|notCredential|formOrigin|formMethod|notActionable|
 //           cancelled|error, url, failed?, target?, submitsTo? }. Never the value, never a page exception text (a page
 //           could throw an error that quotes what it was given).
-/* global ENV, REQ, editable, enabled, findRef, hideKeys, labelOf, loginRole, roleOf, submitMethods, submitOrigins, viewOf, visible -- Supplied by the Rust script assembler and its shared prelude. */
+/* global ENV, REQ, editable, enabled, findRef, hideKeys, labelOf, loginRole, observedTarget, roleOf, submitMethods, submitOrigins, viewOf, visible -- Supplied by the Rust script assembler and its shared prelude. */
 (() => {
   __VW_COMMON__
   const result = (status, extra) => JSON.stringify({ status, url: String(location.href).slice(0, 2000), ...extra });
@@ -17,6 +17,7 @@
     if (found.length === 0) return result("stale");
     if (found.length > 1) return result("ambiguous");
     const el = found[0];
+    if (!observedTarget(el, REQ.observedNode, REQ.observedName)) return result("stale");
     const target = { role: roleOf(el), name: hideKeys(labelOf(el)) };
     let docOrigin = "";
     try {

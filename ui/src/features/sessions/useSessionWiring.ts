@@ -10,6 +10,7 @@
  */
 import { useEffect, useRef } from "react";
 
+import { activateNotification } from "./notificationActivation";
 import { SEARCH_AUTOLOAD_PAGES } from "../../state/coreStore";
 import { documentFocused } from "../../state/notifyStore";
 import { publishContextPoint, publishContextSave } from "../preview/contextSaveEvents";
@@ -79,22 +80,7 @@ export function useSessionWiring(): void {
         if (event.type === "browserSaveContext") publishContextSave(event.sessionId);
         else if (event.type === "browserPointContext") publishContextPoint(event.sessionId);
         else if (event.type === "openUpdates") shell.actions.openSettings("updates");
-        else {
-          void (async () => {
-            // The notification may have been shown before its child's card reached the parent.
-            // Resolve its destination from today's retained entry and hosting card at activation time.
-            const retained = toasts.history
-              .get()
-              .find((notice) => notice.id === event.notificationId);
-            const card = Object.values(core.store.get().subagentCards).find(
-              (card) => card.sessionId === event.sessionId,
-            );
-            const sessionId = card?.parentSessionId ?? retained?.sessionId ?? event.sessionId;
-            await sessions?.open(sessionId);
-            if (retained !== undefined) toasts.open(retained.id);
-            else toasts.openSession(sessionId);
-          })();
-        }
+        else void activateNotification(app, event);
       })
       .then((off) => {
         if (live) stop = off;
@@ -105,7 +91,7 @@ export function useSessionWiring(): void {
       live = false;
       stop?.();
     };
-  }, [core, sessions, shell, toasts]);
+  }, [app, core, shell]);
 
   // A search covers every page: while words are typed and Vibe has more pages, load them (capped;
   // beyond the cap the list offers a "Load more" button).

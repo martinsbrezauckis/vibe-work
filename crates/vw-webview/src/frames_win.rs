@@ -1,9 +1,8 @@
 //! Windows frame evaluation: every frame's private script world through the `WebView2` `DevTools` protocol
 //! (vw-preview `CdpFrames`), with a host-owned registry generation, so frame reads, final click validation and
-//! the event receipt run where page scripts cannot reach. A runtime that refuses the protocol keeps the older
-//! page-world evaluator for reads; its answers carry no generation, so checked native input stays refused.
+//! the event receipt run where page scripts cannot reach. A runtime that refuses the protocol fails closed for reads and input.
 //!
-//! Depends on: vw-platform `devtools_win` / `agent_frames_win`, vw-preview `CdpFrames`. Called by `agent_frames`
+//! Depends on: vw-platform `devtools_win`, vw-preview `CdpFrames`. Called by `agent_frames`
 //! and `frame_click` on the webview's UI thread.
 
 use std::cell::RefCell;
@@ -12,8 +11,8 @@ use std::rc::Rc;
 use std::sync::atomic::Ordering;
 
 use tauri::webview::PlatformWebview;
-use vw_platform::webview::{agent_frames_win, devtools_win};
-use vw_preview::{CDP_EVENTS, CdpDone, CdpFrames, CdpTransport, FrameAnswer, FramesDone};
+use vw_platform::webview::devtools_win;
+use vw_preview::{CDP_EVENTS, CdpDone, CdpFrames, CdpTransport, FramesDone};
 
 struct Channel {
     tools: devtools_win::DevTools,
@@ -39,8 +38,9 @@ impl CdpTransport for Channel {
 }
 
 thread_local! {
-    /// Isolated-world registries by webview; a webview missing here uses the page-world evaluator.
+    /// Isolated-world registries by webview; a webview missing here cannot be read.
     static VIEWS: RefCell<HashMap<usize, CdpFrames>> = RefCell::new(HashMap::new());
+    static COSMETICS: RefCell<HashMap<usize, vw_preview::shields::cosmetic::Cosmetics>> = RefCell::new(HashMap::new());
 }
 
 fn registry(key: usize) -> Option<CdpFrames> {
@@ -55,39 +55,49 @@ pub(crate) fn install(native: &PlatformWebview, done: Box<dyn FnOnce(Result<(), 
         tools.listen(
             &CDP_EVENTS,
             Box::new(move |session, method, params| {
+                let params = serde_json::from_str(params).unwrap_or_default();
                 if let Some(frames) = registry(key) {
-                    let params = serde_json::from_str(params).unwrap_or_default();
                     frames.on_event(session, method, &params);
+                }
+                let cosmetics = COSMETICS.with(|views| views.borrow().get(&key).cloned());
+                if let Some(cosmetics) = cosmetics {
+                    cosmetics.on_event(session, method, &params);
                 }
             }),
         )?;
-        Ok(CdpFrames::new(Rc::new(Channel {
+        let channel = Rc::new(Channel {
             tools,
             controller: controller.clone(),
-        })))
+        });
+        COSMETICS.with(|views| {
+            views.borrow_mut().insert(
+                key,
+                vw_preview::shields::cosmetic::Cosmetics::new(channel.clone()),
+            )
+        });
+        Ok(CdpFrames::new(channel))
     });
-    let fallback = move |reason: String, done: Box<dyn FnOnce(Result<(), String>)>| {
-        tracing::warn!("browser frames use the page-world evaluator: {reason}");
+    let refuse = move |reason: String, done: Box<dyn FnOnce(Result<(), String>)>| {
+        tracing::warn!("isolated browser frames unavailable: {reason}");
         VIEWS.with(|views| views.borrow_mut().remove(&key));
-        if let Err(error) = agent_frames_win::install(&controller) {
-            done(Err(error));
-        } else {
-            agent_frames_win::install_origin(&controller, done);
-        }
+        COSMETICS.with(|views| views.borrow_mut().remove(&key));
+        done(Err(format!(
+            "isolated browser worlds are unavailable: {reason}"
+        )));
     };
     match isolated {
         Ok(frames) => {
             VIEWS.with(|views| views.borrow_mut().insert(key, frames.clone()));
             frames.install(Box::new(move |result| match result {
                 Ok(()) => done(Ok(())),
-                Err(reason) => fallback(reason, done),
+                Err(reason) => refuse(reason, done),
             }));
         }
-        Err(reason) => fallback(reason, done),
+        Err(reason) => refuse(reason, done),
     }
 }
 
-/// Evaluates in all frames (`None`) or one frame id, in the agent's private world where available.
+/// Evaluates in all frames (`None`) or one frame id, in the agent's private world.
 pub(crate) fn evaluate(
     native: &PlatformWebview,
     frame: Option<&str>,
@@ -99,30 +109,10 @@ pub(crate) fn evaluate(
         frames.evaluate(frame, script, done);
         return;
     }
-    agent_frames_win::evaluate(
-        &controller,
-        frame,
-        script,
-        Box::new(move |result| {
-            done(result.map(|answers| {
-                answers
-                    .into_iter()
-                    .map(|(id, main, url, origin, value)| FrameAnswer {
-                        id,
-                        // Page-world answers never satisfy checked native input.
-                        generation: None,
-                        main,
-                        url,
-                        origin: Some(origin),
-                        value,
-                    })
-                    .collect()
-            }));
-        }),
-    );
+    done(Err("isolated browser worlds are unavailable".into()));
 }
 
-/// [`evaluate`] for an agent act's own input: a user gesture (the frame registry's page-world fallback has none).
+/// [`evaluate`] for an agent act's own input: a user gesture in the private world.
 pub(crate) fn evaluate_input(
     native: &PlatformWebview,
     frame: Option<&str>,
@@ -208,8 +198,11 @@ pub(crate) fn watch_act(
     vw_platform::webview::full_screen_win::on_change(
         &controller,
         Box::new(move |entered| {
-            if entered && crate::act_window::full_screen_entered(&label) && registry(key).is_some()
-            {
+            let refused = entered && crate::act_window::full_screen_entered(&label);
+            if !refused {
+                crate::full_screen::changed(&webview, entered);
+            }
+            if refused && registry(key).is_some() {
                 if exiting.swap(true, Ordering::Relaxed) {
                     return;
                 }
@@ -268,5 +261,26 @@ pub(crate) fn forget(native: &PlatformWebview) {
             .borrow_mut()
             .remove(&devtools_win::view_key(&controller))
     });
-    agent_frames_win::forget(&controller);
+    COSMETICS.with(|views| {
+        views
+            .borrow_mut()
+            .remove(&devtools_win::view_key(&controller))
+    });
+}
+
+/// Updates the native inspector sheets in every known frame; no page-world fallback.
+pub(crate) fn update_cosmetics(
+    native: &PlatformWebview,
+    matcher: std::sync::Arc<vw_preview::shields::matcher::Matcher>,
+    done: Box<dyn FnOnce(Result<(), String>)>,
+) {
+    let key = devtools_win::view_key(&native.controller());
+    let cosmetics = COSMETICS.with(|views| views.borrow().get(&key).cloned());
+    match cosmetics {
+        Some(cosmetics) => cosmetics.update(matcher, done),
+        None if matcher.is_empty() => done(Ok(())),
+        None => done(Err(
+            "Browser ad hiding requires the native frame channel".into()
+        )),
+    }
 }

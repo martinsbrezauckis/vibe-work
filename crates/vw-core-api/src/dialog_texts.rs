@@ -45,11 +45,6 @@ impl DialogTexts {
         self.insert(method, params, summary, false);
     }
 
-    /// Appends prepared details to the gate's existing sentence for exactly this confirmation.
-    pub(crate) fn set_suffix(&self, method: &str, params: &Value, suffix: String) {
-        self.insert(method, params, suffix, true);
-    }
-
     fn insert(&self, method: &str, params: &Value, text: String, suffix: bool) {
         let mut pending = self.pending.lock().unwrap_or_else(PoisonError::into_inner);
         pending.retain(|(m, p, _)| !(m == method && p == params));

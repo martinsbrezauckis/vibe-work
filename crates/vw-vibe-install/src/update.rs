@@ -139,15 +139,20 @@ impl VibeInstaller {
         let running = self.running();
         let checked_at = Some(now());
         // Signed, well formed and not a rollback: its Chrome store state is the one that holds from now on.
-        let extension = outcome.as_ref().ok().map(Manifest::extension_store);
-        if let Some(store) = extension
-            && let Err(error) = crate::extension_store::save(&self.inner.config.root, store)
+        let extension = outcome
+            .as_ref()
+            .ok()
+            .map(|manifest| manifest.chrome_extension.clone());
+        if let Some(record) = &extension
+            && let Err(error) =
+                crate::extension_store::save_record(&self.inner.config.root, record.clone())
         {
             info!(%error, "the Chrome store state could not be recorded (it applies to this run)");
         }
         let mut state = self.inner.lock();
-        if let Some(store) = extension {
-            state.extension_store = store;
+        if let Some(record) = extension {
+            state.extension_store = record.as_ref().and_then(|c| c.store);
+            state.extension_min_version = record.and_then(|c| c.min_version);
         }
         let result = match outcome {
             Ok(manifest) => {

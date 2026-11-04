@@ -64,8 +64,7 @@ export function BrowserShieldsSettings({ onError }: { onError: (error: string | 
   };
   if (core === null) return null;
   return (
-    <section aria-labelledby="ad-blocking-title">
-      <h3 id="ad-blocking-title">Ads and trackers</h3>
+    <>
       <div className="check" data-setting="browser-ad-blocking">
         <span>
           Ad blocking
@@ -85,6 +84,6 @@ export function BrowserShieldsSettings({ onError }: { onError: (error: string | 
           onChange={change}
         />
       </div>
-    </section>
+    </>
   );
 }

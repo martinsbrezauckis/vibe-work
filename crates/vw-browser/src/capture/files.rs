@@ -381,6 +381,10 @@ impl Folder {
         let text = [".md", ".txt", ".html", ".json", ".svg", ".css"]
             .iter()
             .any(|ext| name.to_ascii_lowercase().ends_with(ext));
+        let clean = text
+            .then(|| crate::text::capture_text(name, bytes))
+            .transpose()?;
+        let bytes = clean.as_ref().map_or(bytes, Vec::as_slice);
         let scrubbed = if text { vw_secrets::scrub(bytes) } else { None };
         let bytes = scrubbed
             .as_ref()
@@ -482,6 +486,8 @@ impl Folder {
         if !current.is_file() || current.len() > cap || self.read(name, cap)? != expected {
             return Err("capture.json is no longer the Before record".to_owned());
         }
+        let clean = crate::text::capture_text(name, bytes)?;
+        let bytes = clean.as_slice();
         let scrubbed = vw_secrets::scrub(bytes);
         let bytes = scrubbed
             .as_ref()

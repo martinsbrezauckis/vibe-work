@@ -138,8 +138,14 @@ async fn small_tool(
     tool: &str,
     args: &Value,
 ) -> Option<Result<Value, String>> {
+    #[cfg(feature = "video")]
+    if tool == "video_frames" {
+        return Some(super::video_tools::call(shared, tools, session_id, args.clone()).await);
+    }
     if names::is_chrome(tool) && !shared.chrome_control.config.available() {
-        return Some(Err(crate::chrome_control::setup::ABSENT.to_owned()));
+        let browser =
+            crate::chrome_control::agent_browser::selected(shared, session_id, tool, args);
+        return Some(Err(browser.text(crate::chrome_control::setup::ABSENT)));
     }
     if tool == names::CHROME_TOOL_LIST {
         return Some(Ok(crate::chrome_control::gateway::list(shared)));
@@ -151,9 +157,11 @@ async fn small_tool(
     }
 
     Some(match tool {
-        names::SESSION_STATUS | names::CONNECTORS_LIST | names::CONNECTOR_SUGGEST => {
-            super::session_facts::call(shared, session_id, tool, args).await
-        }
+        names::SESSION_STATUS
+        | names::CONNECTORS_LIST
+        | names::CONNECTOR_SUGGEST
+        | names::ADDON_SUGGEST => super::session_facts::call(shared, session_id, tool, args).await,
+        names::FEEDBACK_DRAFT => crate::feedback::offer(shared, session_id, args.clone()).await,
         names::SEARCH => super::search_tool::call(shared, session_id, args.clone()).await,
         names::READ_ALOUD => crate::read_aloud::tool(shared, session_id, args).await,
         names::PANEL_READ => crate::panel_read::tool(shared, session_id, args).await,

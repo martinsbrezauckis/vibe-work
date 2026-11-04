@@ -149,6 +149,26 @@ fn seen_of(shared: &Shared, item: &Value) -> Option<Seen> {
     })
 }
 
+/// The name the project of a Temporary chat's own folder shows: the folder's random name means nothing to the person.
+const TEMPORARY_CHAT: &str = "Temporary chat";
+
+/// Which of `folders` are Temporary chats' own folders (`temporary::new_scratch`).
+fn scratch_folders<'a>(shared: &Shared, folders: impl IntoIterator<Item = &'a str>) -> Vec<String> {
+    folders
+        .into_iter()
+        .filter(|f| shared.temporary.is_scratch(std::path::Path::new(f)))
+        .map(str::to_owned)
+        .collect()
+}
+
+/// Gives the automatic projects of `folders` (Temporary chats' own folders) their shown name.
+fn name_scratch(s: &mut State, folders: &[String]) -> usize {
+    folders
+        .iter()
+        .map(|f| usize::from(s.name_auto_project(f, TEMPORARY_CHAT)))
+        .sum()
+}
+
 /// A listing page: every session seen for the first time is filed by its folder (auto projects at the end).
 pub(crate) async fn listed(shared: &Shared, items: &[Value]) {
     let seen: Vec<Seen> = items.iter().filter_map(|i| seen_of(shared, i)).collect();
@@ -156,7 +176,11 @@ pub(crate) async fn listed(shared: &Shared, items: &[Value]) {
         return;
     }
     let now = vw_projects::now_ms();
-    file(shared, move |s| s.file_seen(&seen, now)).await;
+    let scratch = scratch_folders(shared, seen.iter().filter_map(|s| s.folder.as_deref()));
+    file(shared, move |s| {
+        s.file_seen(&seen, now) + name_scratch(s, &scratch)
+    })
+    .await;
 }
 
 /// A session state was loaded (`sessions::observe`). `new`: Vibe created the session in this call (start, fork, a
@@ -180,9 +204,13 @@ pub(crate) async fn loaded(shared: &Shared, params: &Value, state: &Value, new: 
         return;
     }
     let now = vw_projects::now_ms();
+    let scratch = scratch_folders(shared, [rule.as_deref(), started_in].into_iter().flatten());
     if !new {
         let seen = vec![Seen { id, folder: rule }];
-        file(shared, move |s| s.file_seen(&seen, now)).await;
+        file(shared, move |s| {
+            s.file_seen(&seen, now) + name_scratch(s, &scratch)
+        })
+        .await;
         return;
     }
     let hint = FILING.try_with(Clone::clone).ok();
@@ -207,7 +235,7 @@ pub(crate) async fn loaded(shared: &Shared, params: &Value, state: &Value, new: 
                 folder: folder.as_deref(),
             },
             now,
-        ))
+        )) + name_scratch(s, &scratch)
     })
     .await;
 }
@@ -358,6 +386,12 @@ fn server_work(shared: &Shared, folder: &str) -> bool {
 pub(crate) async fn retire_work_project(shared: &Shared) {
     let work = shared.supervisor.work_dir().to_string_lossy().into_owned();
     file(shared, move |s| usize::from(s.retire_auto_project(&work))).await;
+}
+
+/// Removes the empty automatic project `folder` got (a temporary chat's own folder, removed with the chat).
+pub(crate) async fn retire_folder_project(shared: &Shared, folder: &std::path::Path) {
+    let folder = folder.to_string_lossy().into_owned();
+    file(shared, move |s| usize::from(s.retire_auto_project(&folder))).await;
 }
 
 /// The folder whose handbook session `id` shows in its Project tab: its project's main folder,

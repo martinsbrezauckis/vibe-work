@@ -9,14 +9,14 @@ An independent open-source project, part of the ShellX family of apps
 ([theshellx.com/vibework](https://theshellx.com/vibework)); not affiliated with Mistral AI.
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/public/images/vibe-work-dark.webp">
-  <source media="(prefers-color-scheme: light)" srcset="docs/public/images/vibe-work-light.webp">
-  <img src="docs/public/images/vibe-work-dark.webp" alt="Vibe Work with three projects, a pending one-line edit to approve, and the Changes panel." width="1920">
+  <source media="(prefers-color-scheme: dark)" srcset="docs/public/images/vibe-work-016-dark.webp">
+  <source media="(prefers-color-scheme: light)" srcset="docs/public/images/vibe-work-016-light.webp">
+  <img src="docs/public/images/vibe-work-016-dark.webp" alt="Vibe Work with three projects, a pending one-line edit to approve, and the Changes panel." width="1920">
 </picture>
 
-Version 0.1.5 adds accessibility settings, prompt sounds and answers by voice, a chat's cost and usage, and a browser
-the agent can use inside embedded frames such as sign-in boxes. Something specific
-you want Vibe Work to do? Post it in
+Version 0.1.6 adds Your Edge, keeps chats working when you close the window, starts Temporary chats without choosing
+a folder, and supports HTTP, HTTPS and SOCKS proxies with sign-in and company certificates.
+Something specific you want Vibe Work to do? Post it in
 [Discussions](https://github.com/martinsbrezauckis/vibe-work/discussions). Changes per version: `CHANGELOG.md`.
 Questions and reports: `CONTRIBUTING.md`.
 
@@ -27,8 +27,11 @@ Questions and reports: `CONTRIBUTING.md`.
 - **Chats in projects.** Pick a folder and a model and type; answers stream in with their steps. Type @ to mention a
   file or another session in the same folder; Up and Down in an empty message box recall earlier prompts, shared
   with the Vibe CLI. The agent searches text and file names in the chat's folders, respecting ignored files.
-  Settings > Models and agent > Compaction point sets when each model's chats are compacted. Temporary chats are
-  deleted when you quit.
+  Settings > Models and agent > Compaction point sets when each model's chats are compacted. Temporary chats need no
+  folder: without one they work in an empty folder of their own. They are deleted when you quit.
+- **Tray.** Closing the window keeps chats working in the tray (menu bar on macOS); notifications reopen the chat
+  that needs you, and Quit ends the app. Settings > General > Keep running in the tray when the window closes turns
+  this off (on macOS: Keep running in the menu bar when the window closes).
 - **Approvals.** An edit card shows the change with the file's line numbers, a command card the exact command,
   before you answer. Access modes:
   [docs/public/VOCABULARY.md](docs/public/VOCABULARY.md#access-modes). A card says what Allow once or Allow for this
@@ -59,12 +62,14 @@ Questions and reports: `CONTRIBUTING.md`.
 - **Agent browser.** Web tabs the agent opens, reads, fills in and clicks through while you watch, with Stop. Logins
   come from the vault for sites you allow; the agent never sees the password. It also works inside embedded frames
   such as sign-in boxes. It clicks canvas and image controls, and controls that only accept a real mouse click, only
-  while the page still shows what it checked. On Linux, Settings > Browser blocks ads and trackers (Off, Balanced,
-  Strict).
-- **Your Chrome.** With the Chrome extension set up (Settings > Browser > Your Chrome), the agent works in your own
-  Chrome: each chat in its own window, as far as the chat's access mode allows, with Stop in the extension and on the
-  page. Local-network pages stay off for it until you turn on Settings > Developer > Local network pages for the agent
-  in Chrome; while that is off, it opens named sites over https only. Manual:
+  while the page still shows what it checked. On Windows, macOS and Linux, Settings > Browser blocks ads and trackers
+  (Off, Balanced, Strict).
+- **Your Chrome and Your Edge.** Connect the extension in Settings > Browser > Your Chrome or Your Edge
+  (Connect Chrome or Connect Edge). The agent works in your own Chrome or Microsoft Edge: each chat in its own
+  window, as far as the chat's access mode allows, with Stop in the extension and on the page.
+  Local-network pages stay off for the agent until you turn on Settings > Developer > Local network pages for
+  the agent; this applies to Your Chrome, Your Edge and the built-in Browser. While that is off, the agent opens
+  named sites in Your Chrome and Your Edge over https only. Manual:
   [docs/public/BROWSER_CONTROL.md](docs/public/BROWSER_CONTROL.md).
 - **Capture from a page.** A page's design system, structure, assets, text, full-page pictures and before/after
   differences, saved under `capture/`. The Browser tab's Capture menu also saves a PDF or one HTML file with pictures
@@ -77,7 +82,7 @@ Questions and reports: `CONTRIBUTING.md`.
   value, the agent never sees it. An optional check finds your stored secrets in saved chats and names those chats.
 - **Safety reminders.** Commands such as deleting your home folder, disk tools or shutdown are refused with a reason;
   each rule can be switched in Settings.
-- **Company networks.** Settings > Network: a proxy, the addresses that skip it and a company certificate, with a
+- **Company networks.** Settings > Network: HTTP, HTTPS or SOCKS proxies, addresses that skip them and a company certificate, with a
   connection test.
 - **Search, export, attachments.** Search across sessions, messages and files; export a session; attach images and
   documents by picker, paste or drop. Long pastes fold into an openable chip. Turn on Send to Vibe Work in
@@ -121,7 +126,7 @@ Download the installer for your system from
 | System | File | Updates |
 |---|---|---|
 | Windows 10 1809 (build 10.0.17763) or later (x64) | `.exe` installer, per user, no administrator rights | in the app |
-| macOS 11 or later (Apple silicon) | `.dmg`, signed and notarized | in the app |
+| macOS 14 or later (Apple silicon) | `.dmg`, signed and notarized | in the app |
 | Linux (x86_64): Ubuntu 24.04 and 26.04, Debian 13 | `.AppImage` | in the app |
 | Ubuntu 24.04 and 26.04, Debian 13 (x86_64) | `.deb` | install the next `.deb` |
 
@@ -170,8 +175,8 @@ you can revoke and links to the controls for lasting choices.
 - **Vibe's usage telemetry** follows Vibe's own setting, shown and changed in Settings > Privacy and data.
 - **Installing Vibe:** downloads from PyPI and GitHub, each checked against a pinned checksum.
 - **GitHub Releases:** the update check, once after start.
-- **What you open:** pages in the preview, the browser or your Chrome, connectors, tools you install, and your git
-  remotes when you push or open a pull request.
+- **What you open:** pages in the preview, the Browser, Your Chrome or Your Edge, connectors, tools you install,
+  and your git remotes when you push or open a pull request.
 
 Vibe Work sends no telemetry of its own. Sessions are stored by Vibe; settings and records stay in Vibe Work's data
 folder; keys stay in the encrypted vault.

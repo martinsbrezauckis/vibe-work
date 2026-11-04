@@ -71,7 +71,7 @@ pub use engine::{
 pub use engine_pool::{BrowserSaveGuard, EnginePoolSnapshot, MemoryProbe, effective_browser_cap};
 pub use frames::{
     DETACHED_FRAME, FrameAnswer, UNREADABLE_FRAME, UNREPORTING_FRAME_REFUSAL,
-    checked_frame_request, detached_aware, validate_frame_point,
+    checked_frame_request, detached_aware, main_answer, main_script, validate_frame_point,
 };
 pub use ids::{LABEL_PREFIX, StorageKey, is_preview_label};
 pub use layout::{DeviceWidth, MIN_SIDE, PARKED_AREA, Placement, Rect, parked, place};

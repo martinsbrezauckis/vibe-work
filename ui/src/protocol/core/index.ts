@@ -37,6 +37,7 @@ import type { GithubReadsView, GithubReadsRequest } from "./github_reads";
 import type { AskGrantsRequest, SessionGrant, GrantOffer, VibeRulesRequest, VibeRule, ChromeControlRequest, ChromeControlView, ChromeSelection, ChromeTab } from "./ask";
 import type { KeepAwakeView, KeepAwakeRequest } from "./keep_awake";
 import type { NewChatRequest, NewChatView } from "./new_chat";
+import type { FeedbackView, FeedbackRequest } from "./feedback";
 import type { SecretScanRequest, SecretScanView } from "./secret_scan";
 export type * from "./sessions";
 export type * from "./status";
@@ -69,9 +70,14 @@ export type * from "./github_reads";
 export type * from "./ask";
 export type * from "./keep_awake";
 export type * from "./new_chat";
+export type * from "./feedback";
 export type * from "./secret_scan";
 
-export type Command = { "type": "promptHistory",
+export type Command = { "type": "feedback",
+/**
+ * The panel operation.
+ */
+request: FeedbackRequest, } | { "type": "promptHistory",
 /**
  * Absent reads; present appends in CLI format before reading.
  */
@@ -437,7 +443,11 @@ request: SessionToolsRequest, } | { "type": "search",
  */
 request: SearchRequest, };
 
-export type CommandResult = { "type": "promptHistory",
+export type CommandResult = { "type": "feedback",
+/**
+ * Core-owned review and diagnostic facts.
+ */
+view: FeedbackView, } | { "type": "promptHistory",
 /**
  * Submitted prompts, without known vault values.
  */

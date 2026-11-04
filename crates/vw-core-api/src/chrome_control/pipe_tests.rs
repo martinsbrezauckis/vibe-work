@@ -51,6 +51,7 @@ async fn dispatch_write_cannot_block_the_supervisor() {
         id: 0,
         read_buffer: Vec::new(),
         shared: Weak::new(),
+        tolerant: std::collections::HashSet::new(),
     };
     // Below the request cap, above an OS pipe's capacity: the helper never drains it.
     let payload = || json!({"payload": "x".repeat(512 * 1024)});
@@ -132,6 +133,7 @@ printf '%s\n' '"result":{"chat":"first"}}'
         id: 0,
         read_buffer: Vec::new(),
         shared: Weak::new(),
+        tolerant: std::collections::HashSet::new(),
     };
     assert_eq!(
         pipe.begin("tools/call", json!({"chat":"first"})).await,
@@ -149,5 +151,51 @@ printf '%s\n' '"result":{"chat":"first"}}'
     );
     assert_ne!(pipe.read_buffer, [] as [u8; 0]);
     assert_eq!(pipe.next().await, Ok((1, json!({"chat":"first"}))));
+    pipe.close().await;
+}
+
+/// An older helper answers an enrollment request with "method not found": that answer is an outcome for that
+/// request only. The same error answer to a tool call still ends the connection.
+#[cfg(unix)]
+#[tokio::test]
+async fn only_enrollment_requests_take_an_error_answer() {
+    let script = r#"IFS= read -r first
+IFS= read -r second
+printf '%s\n' '{"jsonrpc":"2.0","id":1,"error":{"code":-32601,"message":"Method not found"}}'
+printf '%s\n' '{"jsonrpc":"2.0","id":2,"error":{"code":-32601,"message":"Method not found"}}'
+"#;
+    let mut child = tokio::process::Command::new("/bin/sh")
+        .args(["-c", script])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .kill_on_drop(true)
+        .spawn()
+        .unwrap();
+    let input = child.stdin.take();
+    let output = BufReader::new(child.stdout.take().unwrap().take(1024 * 1024 + 2));
+    let mut pipe = Pipe {
+        child,
+        _executable: None,
+        input,
+        output,
+        id: 0,
+        read_buffer: Vec::new(),
+        shared: Weak::new(),
+        tolerant: std::collections::HashSet::new(),
+    };
+    assert_eq!(
+        pipe.begin_tolerant("owner.enroll.mint", json!({})).await,
+        Ok(1)
+    );
+    assert_eq!(pipe.begin("tools/call", json!({})).await, Ok(2));
+    assert_eq!(
+        pipe.next().await,
+        Ok((
+            1,
+            json!({"rpcError":{"code":-32601,"message":"Method not found"}})
+        ))
+    );
+    assert_eq!(pipe.next().await, Err(()));
     pipe.close().await;
 }

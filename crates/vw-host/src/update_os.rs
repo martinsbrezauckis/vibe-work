@@ -1,5 +1,5 @@
 //! The oldest system a newer version runs on. A release manifest may name it per platform beside `url` and
-//! `signature`: macOS and Windows as `"minimumSystemVersion"` (`"11.0"`, the Windows build `"10.0.17763"`), Linux
+//! `signature`: macOS and Windows as `"minimumSystemVersion"` (`"14.0"`, the Windows build `"10.0.17763"`), Linux
 //! as `"minimumGlibc"` (`"2.39"`, the highest glibc symbol version the `AppImage`'s programs need: what decides
 //! whether it starts, whatever the distribution). The app reads the field of its own system and this computer's
 //! value ([`minimum_field`]), and on an older system the update flow shows why
@@ -13,7 +13,7 @@
 
 use serde::Serialize;
 
-/// The manifest field of macOS and Windows: the oldest system version (`11.0`, the Windows build `10.0.17763`).
+/// The manifest field of macOS and Windows: the oldest system version (`14.0`, the Windows build `10.0.17763`).
 pub const MINIMUM_SYSTEM_VERSION: &str = "minimumSystemVersion";
 
 /// The manifest field of Linux: the oldest C library (glibc) version the `AppImage`'s programs need (`2.39`).

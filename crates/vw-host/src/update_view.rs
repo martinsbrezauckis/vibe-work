@@ -66,6 +66,7 @@ impl UpdateNotice {
     /// Title and body of the OS notification, in plain words.
     #[must_use]
     pub fn text(&self) -> (String, String) {
+        let open = vw_vocabulary::texts::OPEN_VIBE_WORK;
         match self {
             Self::Available {
                 version,
@@ -83,15 +84,15 @@ impl UpdateNotice {
                 ..
             } => (
                 "Vibe Work update available".to_owned(),
-                format!("Version {version} is available. Open Vibe Work to see where to get it."),
+                format!("Version {version} is available. {open} to see where to get it."),
             ),
             Self::Available { version, .. } => (
                 "Vibe Work update available".to_owned(),
-                format!("Version {version} is available. Open Vibe Work to download it."),
+                format!("Version {version} is available. {open} to download it."),
             ),
             Self::Ready { version } => (
                 "Vibe Work update ready".to_owned(),
-                format!("Version {version} is downloaded. Open Vibe Work to install and restart."),
+                format!("Version {version} is downloaded. {open} to install and restart."),
             ),
         }
     }

@@ -18,6 +18,10 @@
 //! - The listener is loopback only and owned by the core (aborted on shutdown).
 
 mod browser_tools;
+#[cfg(feature = "video")]
+mod video_budget;
+#[cfg(feature = "video")]
+mod video_tools;
 pub(crate) use browser_tools::attach_tab;
 pub(crate) mod copycheck;
 mod gitcheck;
@@ -184,6 +188,10 @@ pub(crate) struct AgentTools {
     pub(crate) one_ask: crate::one_ask::Ledger,
     pub(crate) shell_commands: shell_commands::Commands,
     pub(crate) tool_asks: crate::ask::tool_calls::Calls,
+    #[cfg(feature = "video")]
+    video: video_budget::Budget,
+    #[cfg(feature = "video")]
+    pub(crate) video_history: crate::video_history::History,
     /// Which session took which copy (one active session per copy, `copycheck`).
     pub(crate) copy_locks: copycheck::CopyLocks,
     /// The tool sets that load only when needed and which sessions turned them on (`on_demand`).
@@ -215,6 +223,10 @@ impl AgentTools {
         Ok(Self {
             chrome_package,
             shared: OnceLock::new(),
+            #[cfg(feature = "video")]
+            video_history: crate::video_history::History::load(
+                config.data_dir.join("video-history.json"),
+            )?,
             config,
             table,
             endpoint,
@@ -225,6 +237,8 @@ impl AgentTools {
             one_ask: crate::one_ask::Ledger::default(),
             shell_commands: shell_commands::Commands::default(),
             tool_asks: crate::ask::tool_calls::Calls::default(),
+            #[cfg(feature = "video")]
+            video: video_budget::Budget::default(),
             copy_locks: copycheck::CopyLocks::default(),
             on_demand: crate::on_demand::OnDemand::default(),
             listener: Mutex::new(Some(listener)),
@@ -277,7 +291,7 @@ impl AgentTools {
             "transport": "stdio",
             "name": wire::SERVER_NAME,
             "command": self.config.binary.to_string_lossy(),
-            "args": server_args(chrome, crate::version()),
+            "args": server_args(chrome, crate::version(), crate::build_id()),
             "env": {
                 wire::ENV_ENDPOINT: self.endpoint.to_string(),
                 wire::ENV_CREDENTIAL: credential,
@@ -371,6 +385,12 @@ impl AgentTools {
     /// A deleted session's credentials stop working.
     pub(crate) fn session_deleted(&self, session_id: &str) {
         self.table.revoke_session(session_id);
+        #[cfg(feature = "video")]
+        self.video.forget(session_id);
+        #[cfg(feature = "video")]
+        if let Err(error) = self.video_history.forget(session_id) {
+            tracing::warn!(%error,"Could not delete saved video frames");
+        }
         self.on_demand.forget(session_id);
         tools::forget_finished(
             &mut self.finished.lock().unwrap_or_else(PoisonError::into_inner),
@@ -444,8 +464,8 @@ fn chrome_launch(package: bool, enabled: bool, mode: Option<&str>) -> ChromeLaun
 /// The tool server's launch arguments. Vibe keeps a stdio server's tool list for up to a day, shared by every chat,
 /// under a hash of its entry without the environment values: every argument set must therefore have one tool list.
 /// The Chrome choice is an argument (the server's list follows it), and so is the app version: after an update the
-/// agent gets this build's tools, not the previous build's. Two builds with the same version share the key.
-fn server_args(chrome: ChromeLaunch, app_version: &str) -> Vec<String> {
+/// agent gets this build's tools, not the previous build's. The compile-time build identity also separates test builds sharing one version.
+fn server_args(chrome: ChromeLaunch, app_version: &str, build_id: &str) -> Vec<String> {
     let mut args = vec!["mcp".to_owned()];
     match chrome {
         ChromeLaunch::Catalog => args.push(wire::CHROME_CATALOG_ARG.to_owned()),
@@ -453,7 +473,12 @@ fn server_args(chrome: ChromeLaunch, app_version: &str) -> Vec<String> {
         ChromeLaunch::Hidden => {}
         ChromeLaunch::NoPackage => args.push(wire::WITHOUT_CHROME_ARG.to_owned()),
     }
-    args.extend([wire::APP_VERSION_ARG.to_owned(), app_version.to_owned()]);
+    args.extend([
+        wire::APP_VERSION_ARG.to_owned(),
+        app_version.to_owned(),
+        wire::BUILD_ID_ARG.to_owned(),
+        build_id.to_owned(),
+    ]);
     args
 }
 
@@ -514,8 +539,28 @@ mod server_args_tests {
             ChromeLaunch::Hidden,
             ChromeLaunch::NoPackage,
         ] {
-            assert_ne!(server_args(chrome, "0.1.4"), server_args(chrome, "0.1.5"));
-            assert_eq!(server_args(chrome, "0.1.5"), server_args(chrome, "0.1.5"));
+            assert_ne!(
+                server_args(chrome, "0.1.4", "build-a"),
+                server_args(chrome, "0.1.5", "build-a")
+            );
+            assert_eq!(
+                server_args(chrome, "0.1.5", "build-a"),
+                server_args(chrome, "0.1.5", "build-a")
+            );
+        }
+    }
+
+    #[test]
+    fn builds_with_the_same_version_have_distinct_launch_entries() {
+        for chrome in [
+            ChromeLaunch::Catalog,
+            ChromeLaunch::Hidden,
+            ChromeLaunch::NoPackage,
+        ] {
+            assert_ne!(
+                server_args(chrome, "0.1.5", "build-a"),
+                server_args(chrome, "0.1.5", "build-b")
+            );
         }
     }
 
@@ -545,18 +590,35 @@ mod server_args_tests {
             );
         }
         let lines = [
-            server_args(ChromeLaunch::Catalog, "0.1.5"),
-            server_args(ChromeLaunch::Hidden, "0.1.5"),
-            server_args(ChromeLaunch::NoPackage, "0.1.5"),
+            server_args(ChromeLaunch::Catalog, "0.1.5", "build-a"),
+            server_args(ChromeLaunch::Hidden, "0.1.5", "build-a"),
+            server_args(ChromeLaunch::NoPackage, "0.1.5", "build-a"),
         ];
         assert_eq!(
             lines[0],
-            ["mcp", "--chrome-catalog", "--app-version", "0.1.5"]
+            [
+                "mcp",
+                "--chrome-catalog",
+                "--app-version",
+                "0.1.5",
+                "--build-id",
+                "build-a"
+            ]
         );
-        assert_eq!(lines[1], ["mcp", "--app-version", "0.1.5"]);
+        assert_eq!(
+            lines[1],
+            ["mcp", "--app-version", "0.1.5", "--build-id", "build-a"]
+        );
         assert_eq!(
             lines[2],
-            ["mcp", "--without-chrome", "--app-version", "0.1.5"]
+            [
+                "mcp",
+                "--without-chrome",
+                "--app-version",
+                "0.1.5",
+                "--build-id",
+                "build-a"
+            ]
         );
     }
 }

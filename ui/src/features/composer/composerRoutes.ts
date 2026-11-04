@@ -8,7 +8,8 @@
  * - `paste {text, start?, end?}`: inserts at a draft range (default: append), folding long text into a chip;
  * - `send {mode?: send|steer|queue}`: what Enter / Tab does with the current content;
  * - `insertContext {label, source, text, ref?}`: what "Point Vibe at this" does (a chip, never typed text);
- * - `chromeTabs`, `chromeTab {profileId, tabId}`, `chromeTabsClose`: open, pick and close Chrome context;
+ * - `browserTabs {browser?: Chrome|Edge|Firefox}` (alias `chromeTabs`), `chromeTab {profileId, tabId}`,
+ *   `chromeTabsClose`: open, switch, pick and close browser context;
  * - `attachImage {name, data}`: what pasting an image does (`data` = base64 of the file's bytes);
  * - `stop`, `retry {instructions?}`, `slash {name, args?}`, `access {mode}`, `model {alias?, effort?}`,
  *   `queueEdit {queueItemId, text}`, `queueRemove {queueItemId}`, `rewind {entryId, confirm?: here|new}`,

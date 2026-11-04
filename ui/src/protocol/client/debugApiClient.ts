@@ -54,6 +54,7 @@ export const EVENT_NAMES = [
   "gitBrowserChanged",
   "secretsChanged",
   "secretScan",
+  "feedback",
   "gitIdentityAsked",
   "gitIdentityAskClosed",
   "protectedChange",
@@ -157,6 +158,7 @@ export function createDebugApiClient(): CoreClient {
     openMailLink: () =>
       unsupported("opening a mail link works in the app, not in browser dev mode"),
     notifyOs: () => unsupported("OS notifications work in the app, not in browser dev mode"),
+    dismissOs: () => Promise.resolve(),
     onHostEvent: () => Promise.resolve(() => undefined),
     cliSharing: () =>
       Promise.reject(

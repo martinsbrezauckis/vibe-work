@@ -120,7 +120,7 @@ async fn focused_read_without_a_usable_ref_gives_a_different_next_step() {
             "{answer}"
         );
         assert!(
-            answer["nextStep"]
+            !answer["nextStep"]
                 .as_str()
                 .unwrap()
                 .contains("Do not repeat")

@@ -17,6 +17,10 @@ workspace = true
 name = "vw-agent-tools"
 path = "src/main.rs"
 
+[features]
+feedback = []
+video = []
+
 [dependencies]
 vw-gh-broker = { path = "../vw-gh-broker" }
 # Access-mode names in tool descriptions come from the shared vocabulary.

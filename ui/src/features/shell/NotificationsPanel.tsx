@@ -31,7 +31,7 @@ const FILTERS = [
 ] as const;
 const RESERVATION = "notifications-panel";
 
-/** A nonmodal, top-layer popover; Show all and OS activation use the same header anchor. */
+/** A nonmodal popover anchored to the bell; OS activation uses it only when no chat resolves. */
 export function NotificationsPanel() {
   const app = useApp();
   const { toasts, sessions } = app;

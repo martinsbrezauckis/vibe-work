@@ -46,8 +46,7 @@ impl Browser {
         let ancestors = self
             .current_seen(session_id)
             .and_then(|seen| {
-                seen.model
-                    .refs
+                seen.items
                     .iter()
                     .find(|r| r.id == *reference)
                     .and_then(|r| r.frame_id.as_ref())

@@ -23,7 +23,10 @@ impl TauriEngine {
         crate::agent_frames::forget(webview)?;
         webview
             .close()
-            .map_err(|e| EngineError::Platform(e.to_string()))
+            .map_err(|e| EngineError::Platform(e.to_string()))?;
+        #[cfg(windows)]
+        crate::full_screen::forget(webview);
+        Ok(())
     }
 
     pub(super) fn close_inner(&self, id: &MountId) -> Result<(), EngineError> {
@@ -43,14 +46,29 @@ impl TauriEngine {
             .unwrap_or_else(PoisonError::into_inner)
             .remove(&id.label);
         self.context_pollers.stop(&id.label);
+        self.initializers
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(&id.label);
         crate::act_window::forget(&id.label);
-        #[cfg(target_os = "linux")]
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
         self.filter_generations.forget(&id.label);
         self.shown
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .remove(&id.label);
         self.persons
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(&id.label);
+        #[cfg(target_os = "macos")]
+        crate::rules_macos::forget(
+            &self.app,
+            &format!("{}-shields", id.label),
+            &self.filter_generations,
+        );
+        #[cfg(windows)]
+        self.filters
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .remove(&id.label);

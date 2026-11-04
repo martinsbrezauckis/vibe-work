@@ -9,6 +9,7 @@
  * appear in the entry's text), so results are predictable, with label hits ranked before description hits.
  */
 import type { IconName } from "../../components/Icon";
+import { detectMac } from "../../state/shortcuts";
 import { TEXT } from "../../vocabulary";
 import { MISTRAL_LINKS } from "./mistralLinks";
 import { accessibilityCatalog } from "./accessibilityCatalog";
@@ -60,6 +61,13 @@ export interface SettingEntry {
 /** Every setting, in page order. */
 export const SETTINGS_INDEX: readonly SettingEntry[] = [
   ...accessibilityCatalog,
+  {
+    id: "close-to-tray",
+    category: "general",
+    label: detectMac() ? TEXT.closeToMenuBar : TEXT.closeToTray,
+    description: "",
+    keywords: "close window quit tray menu bar background running",
+  },
   {
     id: "ask-allowed",
     category: "safety",
@@ -330,7 +338,7 @@ export const SETTINGS_INDEX: readonly SettingEntry[] = [
   {
     id: "parallel-browser-sessions",
     category: "browser",
-    label: "Live browser tabs",
+    label: "Vibe Work browser · Live browser tabs",
     description:
       "How many page tabs can keep a browser engine open; background tabs pause at the limit. Auto adjusts to available memory.",
     keywords: "browser tabs pool parallel memory capacity auto",
@@ -338,15 +346,29 @@ export const SETTINGS_INDEX: readonly SettingEntry[] = [
   {
     id: "browser-ad-blocking",
     category: "browser",
-    label: "Ad blocking",
+    label: "Vibe Work browser · Ad blocking",
     description: "Off, Balanced, Strict",
     keywords: "browser ads trackers shields easylist easyprivacy",
   },
   ...chromeCatalog(),
   {
+    id: "firefox-control",
+    category: "browser",
+    label: TEXT.firefoxName,
+    description: "",
+    keywords: "firefox extension browser setup connection",
+  },
+  {
+    id: "edge-control",
+    category: "browser",
+    label: TEXT.edgeName,
+    description: "",
+    keywords: "edge extension browser setup connection",
+  },
+  {
     id: "browser-secret-permissions",
     category: "browser",
-    label: TEXT.secretPermissionsTitle,
+    label: `All browsers · ${TEXT.secretPermissionsTitle}`,
     description: TEXT.secretPermissionsSummary,
     keywords: "vault secret delegation access permissions entries project open",
   },
@@ -515,8 +537,9 @@ export const SETTINGS_INDEX: readonly SettingEntry[] = [
   {
     id: "chrome-local-network",
     category: "developer",
-    label: "Local network pages for the agent in Chrome",
-    description: "Lets the agent open and use pages on your local network in your Chrome.",
+    label: "Local network pages for the agent",
+    description:
+      "Lets the agent open and use local network pages in the built-in browser and your Chrome.",
     keywords: "local network lan router nas intranet private address chrome agent developer",
   },
   {
@@ -596,11 +619,18 @@ function queryWords(query: string): string[] {
  * Settings matching `query`: every word must appear in the label, description, keywords or category name. Label hits
  * first, then the rest, each in page order. An empty query matches nothing.
  */
-export function searchSettings(query: string, chromeAvailable = true): SettingEntry[] {
+export function searchSettings(
+  query: string,
+  chromeAvailable = true,
+  edgeAvailable = false,
+  firefoxAvailable = false,
+): SettingEntry[] {
   const words = queryWords(query);
   if (words.length === 0) return [];
   const hits = SEARCH_INDEX.filter((e) => {
     if (!chromeAvailable && e.id.startsWith("chrome-control")) return false;
+    if (!firefoxAvailable && e.id.startsWith("firefox-control")) return false;
+    if (!edgeAvailable && e.id.startsWith("edge-control")) return false;
     const hay =
       `${e.label} ${e.description} ${e.keywords} ${categoryOf(e.category).label}`.toLowerCase();
     return words.every((w) => hay.includes(w));

@@ -45,8 +45,18 @@ fn action_sentence<'a>(method: &str, params: &Value, base: &'a str) -> &'a str {
     match method {
         "agents/install" => "Install an agent that can run code in Vibe Work?",
         "agents/uninstall" => "Uninstall an agent from Vibe Work?",
-        "config/proxy/write" => {
+        // Name the certificate only when this write sets one (SSL_CERT_FILE / SSL_CERT_DIR with a value).
+        "config/proxy/write"
+            if ["SSL_CERT_FILE", "SSL_CERT_DIR"].iter().any(|key| {
+                params["changes"][key]
+                    .as_str()
+                    .is_some_and(|v| !v.is_empty())
+            }) =>
+        {
             "Change how Vibe connects to the internet? Its requests may go through the proxy you entered, and a certificate you chose will be trusted."
+        }
+        "config/proxy/write" => {
+            "Change how Vibe connects to the internet? Its requests may go through the proxy you entered."
         }
         "connector_catalog/auth/request" => "Open the sign-in page for this Mistral connector?",
         "connector_catalog/connect" => "Connect this Mistral connector?",
@@ -306,6 +316,26 @@ mod tests {
             crate::dialog::dialog_quote(&command)
         )));
         assert!(!summary.contains("session/shellCommand"));
+    }
+
+    #[test]
+    fn proxy_dialog_mentions_a_certificate_only_when_one_is_set() {
+        let without = confirmation_summary(
+            "config/proxy/write",
+            &json!({"sessionId": "s1", "changes": {"HTTPS_PROXY": "http://proxy.invalid:8080"}}),
+            "Change proxy settings",
+        );
+        assert!(without.contains("the proxy you entered"));
+        assert!(!without.contains("certificate"), "{without}");
+        let with = confirmation_summary(
+            "config/proxy/write",
+            &json!({"sessionId": "s1", "changes": {"SSL_CERT_FILE": "ca.pem"}}),
+            "Change proxy settings",
+        );
+        assert!(
+            with.contains("a certificate you chose will be trusted"),
+            "{with}"
+        );
     }
 
     #[test]

@@ -33,9 +33,12 @@ export function SettingsNav(): ReactElement {
   const offered = useOfferedCategories();
   const shownCategory = offered.find((c) => c.id === view.category) ?? offered[0];
   const chrome = useCoreState((s) => s.chromeControl);
-  const results = searchSettings(view.query, chromeAvailable(chrome)).filter((r) =>
-    offered.some((c) => c.id === r.category),
-  );
+  const results = searchSettings(
+    view.query,
+    chromeAvailable(chrome),
+    chrome?.edge !== undefined,
+    chrome?.firefox !== undefined,
+  ).filter((r) => offered.some((c) => c.id === r.category));
   const searching = view.query.trim() !== "";
   const widen = () => {
     const words = view.query;

@@ -5,8 +5,8 @@
 //! only Vibe knew would not move one request. The core's clients carry the real Mistral key, so what they connect
 //! through must be authenticated: the agent can write app data, so the core verifies its file with a random MAC
 //! key in the Mistral key's vault (a copy in the computer's credential store checks it while the vault is locked).
-//! It never reads Vibe's `.env`. A save writes both: Vibe's `.env` through
-//! `config/proxy/write` (for Vibe's own traffic, which holds only the
+//! Core-client routing never trusts Vibe's `.env`. A save writes both: Vibe's `.env` through
+//! `config/proxy/write` (credential-free loopback addresses for Vibe's own traffic, which holds only the
 //! placeholder key) and the core's file. What Settings shows, and what the core's clients use at the next start, is the
 //! core's file; the window never sees a sign-in.
 //!
@@ -64,6 +64,9 @@ const MASK: &str = "***@";
 /// new Save; the unlock checks and applies it.
 pub(crate) fn rejection_notice(keys: Option<&vw_keys::KeyService>) -> crate::event::CoreEvent {
     let message = match keys.and_then(vw_keys::KeyService::network_settings_wait) {
+        Some(vw_keys::NetworkWait::ProxySignIn) => {
+            "Saved network settings are used after you unlock the vault."
+        }
         Some(vw_keys::NetworkWait::LockAtQuit) => {
             "Saved network settings are used after you unlock the vault (\"Lock the vault when Vibe Work quits\" is on)."
         }
@@ -95,10 +98,17 @@ fn requested<'a>(changes: &'a NetworkChanges, field: &str) -> Option<&'a str> {
 
 /// The values a request means, checked: Vibe key to the new value (`None`: remove). A key whose typed value equals
 /// what is saved is not in the map.
-#[derive(Debug)]
 struct Checked {
     values: BTreeMap<&'static str, Option<String>>,
     settings: NetworkSettings,
+}
+
+impl std::fmt::Debug for Checked {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Checked")
+            .field("settings", &self.settings)
+            .finish_non_exhaustive()
+    }
 }
 
 /// Checks every provided field. Returns the problems when any value fails.
@@ -331,12 +341,11 @@ impl Core {
             .seal_network_settings(prepared.clone())
             .await
             .map_err(|error| CoreError::new(ErrorCode::KeyService, error.to_string()))?;
-        // A disk-confirmed write (the file is synced): on the blocking pool, never on an async worker.
         let file = file.to_path_buf();
         let result = tokio::task::spawn_blocking(move || {
             file.parent()
                 .map_or(Ok(()), vw_platform::ensure_private_dir)
-                .and_then(|()| vw_platform::replace_private(&file, text.as_bytes()))
+                .and_then(|()| vw_platform::replace_private_durable(&file, text.as_bytes()))
         })
         .await
         .map_err(|join| join.to_string())
@@ -373,10 +382,52 @@ impl Core {
         let tried = &checked.settings;
         let environment = NetworkSettings::from_environment();
         let used = NetworkSettings::effective(tried, &environment);
-        let probe = net::probe(&used, &self.shared.config.network_test_url).await;
+        if net::KEYS[..3]
+            .iter()
+            .any(|key| used.get(key).is_some_and(|value| has_sign_in(&value)))
+            && !self
+                .shared
+                .config
+                .keys
+                .as_ref()
+                .is_some_and(|keys| keys.proxy_sign_in_ready())
+        {
+            return NetworkResult::Refused {
+                problems: vec![NetworkProblem {
+                    field: "httpsProxy".into(),
+                    message: "Unlock the vault to use the proxy sign-in.".into(),
+                }],
+            };
+        }
+        let forwarded = self
+            .shared
+            .config
+            .keys
+            .as_ref()
+            .ok_or(vw_keys::KeyError::Internal)
+            .and_then(|keys| {
+                keys.network_probe(&used, self.shared.config.network_test_resolver.clone())
+            });
+        let Ok((guard, child)) = forwarded else {
+            return NetworkResult::Refused {
+                problems: vec![NetworkProblem {
+                    field: "httpsProxy".into(),
+                    message: "The proxy forwarder could not start.".into(),
+                }],
+            };
+        };
+        let protected = net::KEYS[..3]
+            .iter()
+            .any(|key| used.get(key).is_some_and(|value| has_sign_in(&value)));
+        let probe = net::probe(
+            if protected { &child } else { &used },
+            &self.shared.config.network_test_url,
+        )
+        .await;
         let mut outcome =
             crate::network_test::describe(probe, &used, overridden(tried, &environment));
-        crate::network_python::verify(&self.shared, &used, &mut outcome).await;
+        crate::network_python::verify(&self.shared, &child, &mut outcome).await;
+        drop(guard);
         NetworkResult::Tested { outcome }
     }
 
@@ -425,6 +476,17 @@ impl Core {
         }
         let after = prepared.settings();
         self.persist(&prepared).await?;
+        if let (Some(keys), Some(file)) =
+            (&self.shared.config.keys, &self.shared.config.network_file)
+        {
+            keys.network_saved(
+                file.clone(),
+                self.shared.instructions.own_home.join(".env"),
+                write.keys().map(|key| (*key).to_owned()).collect(),
+            )
+            .await
+            .map_err(|error| CoreError::new(ErrorCode::KeyService, error.to_string()))?;
+        }
         Ok(NetworkResult::Settings {
             view: Box::new(view_of(after, &environment, &net::current())),
             saved: true,
@@ -461,6 +523,10 @@ impl Core {
         write: &BTreeMap<&'static str, Option<String>>,
         prepared: &PreparedSettings,
     ) -> Result<(), CoreError> {
+        let keys = self.shared.config.keys.as_ref().ok_or_else(no_keys)?;
+        let child = keys.child_network_settings(prepared.settings());
+        let child_write: BTreeMap<&str, Option<String>> =
+            write.keys().map(|key| (*key, child.get(key))).collect();
         let changes: serde_json::Map<String, Value> = write
             .iter()
             .map(|(key, value)| {
@@ -476,7 +542,8 @@ impl Core {
             .filter(|(key, _)| matches!(**key, "HTTP_PROXY" | "HTTPS_PROXY" | "ALL_PROXY"))
             .filter_map(|(_, value)| value.as_deref())
             .collect();
-        let params = json!({"sessionId": session, "changes": changes});
+        let original = json!({"sessionId": session, "changes": changes});
+        let params = json!({"sessionId": session, "changes": child_write});
         let method = "config/proxy/write";
         let fingerprints = ["SSL_CERT_FILE", "SSL_CERT_DIR"]
             .into_iter()
@@ -495,11 +562,14 @@ impl Core {
                 ))
             })
             .collect::<String>();
-        if !fingerprints.is_empty() {
-            self.shared
-                .dialog_texts
-                .set_suffix(method, &params, fingerprints);
-        }
+        self.shared.dialog_texts.set(
+            method,
+            &params,
+            format!(
+                "{}{fingerprints}",
+                vw_gate::proxy_confirmation_summary(&original)
+            ),
+        );
         let scrubbed = |mut error: CoreError| {
             error.message = scrub(&error.message, &raw);
             error.summary = error.summary.map(|s| scrub(&s, &raw));
@@ -513,11 +583,12 @@ impl Core {
                 scrubbed(error)
             })?;
         let _ = self.shared.dialog_texts.take(method, &params);
+        keys.pause_vibe_proxy(prepared.settings());
         self.forward(origin, method, params, token.map(|t| t.as_str().to_owned()))
             .await
             .map_err(scrubbed)?;
         let after = self.read_vibe(origin, session).await?;
-        for (key, wanted) in write {
+        for (key, wanted) in &child_write {
             if after.get(key).as_deref() != wanted.as_deref() {
                 return Err(CoreError::new(
                     ErrorCode::ServerError,

@@ -85,6 +85,9 @@ impl DynConfirmer {
             }
             let confirmer = confirmer.clone();
             decorate(&mut request, &texts, &names, &store);
+            if request.method == "config/proxy/write" {
+                crate::network_raw::mask_values(&mut request.params["changes"]);
+            }
             // The presenter lists a window of its own under the ask's id, so the window can bring it to the front
             // (after `decorate`: the registered sentences are found by the request's own params).
             if let Some(fields) = request.params.as_object_mut() {

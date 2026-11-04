@@ -206,6 +206,7 @@ names:
 | `sessionHolder` | another process (the Vibe CLI, another app) holds a session a window shows (`holderPid`), or let it go (`null`): read-only here meanwhile; checked every 2 s |
 | `queueReturned` | messages that waited in a session's queue when its turn was stopped or failed were taken out of Vibe's queue, never sent (`items`: Vibe's queued items, oldest first); the window puts them back into the composer |
 | `debugApi` | the Debug API was switched on or off |
+| `feedback` | an in-memory feedback draft or reviewed report changed; `view` includes redacted prose, fixed system facts and the sharing choice. Only builds with feedback enabled publish it. |
 | `keepAwake` | the app-wide idle-sleep preference or hold status changed (`enabled`, `status`) |
 | `panelRead` | a session's agent called `panel_read` (`requestId`, `sessionId`): the window answers with `files` `panelAnswer` (what that session's side panel shows: tabs, open editors with unsaved text, selection and cursor line, the Files tab) within 5 s, and its editors show "Vibe is reading this editor" meanwhile |
 | `githubReads` | the GitHub reader opt-in or account status changed (`enabled`, `status`, `login`, `reason`); never credentials |
@@ -372,7 +373,16 @@ Wait for the window to settle before a screenshot: read `POST /ui/revision`, act
 ### `POST /window`
 
 The main window's size and state: `{"action": "state"}`, `{"action": "size", "width": 1280, "height": 800}`
-(logical pixels; the minimum size still applies), `maximize`, `restore`, `minimize`, `focus`.
+(logical pixels; the minimum size still applies), `maximize`, `restore`, `minimize`, `focus`, `show`, `close`.
+`close` sends the real window Close request: it hides when the General switch is on and a tray is available,
+otherwise it quits. `show` and `focus` reveal and focus a hidden window. State includes `visible`, `minimized`,
+`trayPresent` (an icon and a reachable host) and `mode` (`hidden` or `quits`, what Close currently does).
+
+### `POST /app`
+
+`{"action":"quit"}` explicitly quits Vibe Work and shuts down its sessions and child processes, including while
+its window is hidden. `{"action":"trayMenu","id":"open"}` and `{"action":"trayMenu","id":"quit"}` invoke the
+same handlers as the native tray menu's Open Vibe Work and Quit Vibe Work items. Unknown ids are refused.
 
 ### `GET /ui`
 
@@ -465,6 +475,7 @@ Every command is `{"type": "<name>", ...}`. Requests with an `op` take `{"type":
 | `network` | the proxy and certificate settings Vibe keeps, as Settings > Network shows them: `read` (the values Vibe Work keeps in its own file, needing no Vibe; an address with a sign-in comes back as `http://***@host:8080`, never with the sign-in; also what this computer's environment overrides and whether a saved change waits for a restart), `test` (`changes`: one request to Mistral's model list, without a key, with the saved settings and these values laid over them; nothing is saved), `save` (`changes`; writes Vibe's settings and Vibe Work's own file, so it needs Vibe running; a value that fails a check comes back as `refused` with one sentence per field). `changes` holds any of `httpProxy`, `httpsProxy`, `allProxy`, `noProxy`, `certificateFile`, `certificateFolder`: an absent field is unchanged, an empty one removes the setting. A save from the Debug API needs no dialog: it is answered like every other confirmation | `{"type":"network","request":{"op":"read"}}` |
 | `pickFolder` | chooses a folder like Choose folder (Debug API only) | `{"type":"pickFolder","path":"<absolute folder>"}` |
 | `promptHistory` | the earlier prompts that Up and Down bring back in an empty composer, shared with the Vibe CLI's own prompt history: without `text` it returns `entries` (oldest first); with `text` it first adds that prompt the way the CLI does. A prompt holding a vault value is never added or returned | `{"type":"promptHistory"}` |
+| `feedback` | Available only in builds with feedback enabled. `read` inspects the current draft and sharing choice; `open` offers a redacted draft with `kind` (`bug` or `feature`), `title`, `description` and `remarks`, without replacing an existing draft. There are no automatic chat or file attachments. The person edits and reviews it in the window. `review`, `share`, `close` and `send` are refused to the Debug API, including a window it drives. System facts cannot be supplied or edited; only the person can choose whether to share them and confirm Send. | `{"type":"feedback","request":{"op":"read"}}` |
 | `search` | search inside messages and files (the same results Ctrl K shows): `messages` (every conversation's messages, or one with `sessionId`; the first search fills the index from Vibe's stored history, `index.filling` says it is still running), `files` (names and lines in the sessions' folders, or one session's; ignored and build folders skipped), `status` | `{"type":"search","request":{"op":"messages","query":"rate limit"}}` |
 | `sessionTools` | a session as Markdown and temporary chats: `export` (the whole session as Markdown; tool steps summarised, file changes as diffs, known secret values replaced; `destination`, an absolute path, writes the file, else the text comes back), `startTemporary` (a chat Vibe Work deletes when it quits), `temporary` (their ids), `holder` (the pid of another process holding a session now, such as the Vibe CLI or another Vibe Work window; `null` when it is free or held by this app), `setSubagents` (`enabled`: saves the Subagents setting for new chats through a short-lived empty chat that is deleted again; chats that are already open keep their value, and the answer's `leftoverSessionId` names that chat if it could not be deleted), `excerpt` (`sessionId`: `{title, firstUser, lastAnswer}`, the session's title, first message and last answer, each bounded, about 2 KB, vault values withheld: what a session mention in the composer carries; reads the session without taking it) | `{"type":"sessionTools","request":{"op":"export","sessionId":"<id>","destination":"<absolute path>.md"}}` |
 
@@ -591,6 +602,13 @@ or `composer.paste-preview-close` to exercise the actual chip controls. Read `ui
 and `ui/composer` for the resulting draft. Pasted content retains the Debug API origin through later window edits.
 
 Read or act on a session's composer like typing and clicking do. Body: {action: read|type|paste|send|insertContext|attachImage|stop|retry|slash|access|model|queueEdit|queueRemove|rewind|rewindClose|branch, sessionId?: string (default: the selected session, else the new-chat view's composer "new-chat")}: type {text}; send {mode?: send|steer|queue} sends the current content (a typed !cmd runs a shell command, a GUI /command runs it; on "new-chat" it first starts the session in the folder chip's folder, applies the held access and model, then sends the first turn, and outcome.started names the new session; without a folder it refuses and keeps the text); insertContext {label, source, text, ref?} adds a context chip (always data, never a command); attachImage {name, data: base64}; retry {instructions?}; slash {name, args?}; access {mode} and model {alias?, effort?} answer with the composer as it then reads (on the new-chat composer they are held until its first send); queueEdit {queueItemId, text}; queueRemove {queueItemId}; rewind {entryId, confirm?: here|new}; branch {entryId}. The read answer's `heldByPid` is the pid of another Vibe process (for example the Vibe CLI) holding the session, while the composer is read-only, else null.
+
+`browserTabs {browser?: Chrome|Edge|Firefox}` opens Add a browser tab or switches the open picker to a usable
+browser. Without a browser it uses this chat's browser session or last picker choice, then Chrome or the first
+usable browser. `read` includes `browsers` and `chromePicker` (the shown browser, rows, loading and error).
+`chromeTabs` remains an alias; `chromeTab {profileId, tabId}` picks context and `chromeTabsClose` closes the picker.
+The shared opener is `composer.browser-tabs-open`; browser segments are `composer.browser-tabs-switch` with
+`data-item-id` equal to the browser name. Existing tab-row and close IDs remain available through `ui/controls`.
 
 An optional `ref` names the file's absolute path and first and last line (`path`, `start`, `end`); use 0 for both lines to point at the whole file. Clicking the chip before or after sending opens that code in the File tab. This is display information; the quoted text stays data, never a command.
 
@@ -894,7 +912,7 @@ Show, hide or toggle the session list. Body: {action: show|hide|toggle}. Returns
 
 ### `POST /ui/notifications`
 
-Read or set the notification state. Body: {action: read|level|focus}: level {level: errors|permissions|all}, focus {focused: bool|null} overrides the window-focus signal for tests (null = real). Returns the level, the focus override and the OS notifications the UI asked for since the page loaded. Each request contains a short body summary and may include a `notificationId` linking activation to the complete message retained in the app's Notifications panel.
+Read or set the notification state. Body: {action: read|level|focus}: level {level: errors|permissions|all}, focus {focused: bool|null} overrides the window-focus signal for tests (null = real). Returns the level, the focus override and the OS notifications the UI asked for since the page loaded. Each request contains a short body summary and may include a `notificationId` linking activation to the complete message retained in the app's Notifications panel. Activation opens the resolved chat and its waiting prompt with the bell closed, and marks that notification read. If the chat is unavailable or the notification has no chat, activation opens the bell instead.
 
 ### `POST /ui/pages`
 
@@ -1148,7 +1166,7 @@ Stop keeps the window; deletion closes it; app quit keeps windows and ends sessi
 live pairing state. A folder alone does not establish pairing.
 
 `POST /ui/composer {"action":"read","sessionId":"<id>"}` exposes `chromeState`, `chromePicker`, and context chips.
-`chromeTabs` opens the picker, `chromeTab {profileId,tabId}` adds exact tab context, and `chromeTabsClose` closes it.
+`browserTabs` (`chromeTabs` alias) opens the picker, `chromeTab {profileId,tabId}` adds exact tab context, and `chromeTabsClose` closes it.
 The picker reports loading/error/tab rows. Chips carry URL/title/selection and their normal or debug-api origin.
 A selected-text delivery is claimed once; a deleted destination falls back to New chat. These operations do not
 submit a message or create a running model turn. Core `tabs`/`tabContext` are owner context reads, not model tools.

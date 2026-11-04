@@ -52,7 +52,10 @@ pub(crate) async fn pick(
     let name = accessor(session_id);
     let err = |e: vw_preview::PreviewError| crate::previews::core_error(&e);
     let first = service
-        .evaluate(session_id, vw_pages::start_script(&name))
+        .evaluate(
+            session_id,
+            vw_pages::start_script_from(&name, service.page_accessor(session_id).as_deref()),
+        )
         .await
         .map_err(err)?;
     let mut answer = vw_pages::parse_pick(&first);
@@ -112,8 +115,7 @@ pub(crate) async fn run(
         (Some(target), None) => pick_at(service, session_id, &target).await,
         (None, None) => pick(service, session_id).await,
     }?;
-    // The pick script runs in the page's world, so the address it reports is the page's claim: the chip names the
-    // address the engine loaded instead. It counts only when the same settled page was there before and after the
+    // The isolated pick is bound to the address the engine loaded. It counts only when the same settled page was there before and after the
     // pick; a navigation in between (the page could start one right after answering) leaves the chip no address.
     let after = settled_url(service, &page);
     picked.url = match (before, after) {
@@ -153,7 +155,7 @@ pub(crate) async fn pick_in_tab(
         Some(target) => {
             vw_pages::target_script_with_quote(&preview_at(Some(target))?, target.quote.as_deref())
         }
-        None => vw_pages::selection_script(),
+        None => vw_pages::selection_script_from(service.page_accessor(tab).as_deref()),
     };
     let reply = service
         .evaluate_on_mount(&id, script)

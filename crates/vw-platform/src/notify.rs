@@ -16,14 +16,28 @@
 //!   Windows needs no thread (the toast's handlers run on the OS's callback thread).
 //! - Text is passed through as plain text; the OS decides how to render it.
 //! - Linux requests the packaged `vibe-work` hicolor icon; Windows/macOS use the installed app identity.
-//! - A click is the body or the "Open" button on every platform. Windows uses the toast library
-//!   underneath notify-rust directly ([`show_toast`]): notify-rust's handle stops listening at the
-//!   first event, and Windows reports "timed out" when a toast moves to the Notification Center.
+//! - A click is the body or the "Open" button on every platform. Windows owns the `WinRT` toast and
+//!   subscriptions in a bounded process-wide store. Activation, dismissal and expiry release it;
+//!   expiry also removes its Notification Center entry because no COM activator is registered.
+//!   The in-app bell retains notices independently of OS notification lifetime.
 
 use std::sync::Arc;
 use std::sync::atomic::AtomicUsize;
 #[cfg(not(windows))]
 use std::sync::atomic::Ordering;
+
+#[cfg(all(test, target_os = "linux"))]
+#[path = "notify/linux_tests.rs"]
+mod linux_tests;
+#[cfg(any(windows, test))]
+#[path = "notify/store.rs"]
+mod store;
+#[cfg(test)]
+#[path = "notify/store_tests.rs"]
+mod store_tests;
+#[cfg(windows)]
+#[path = "notify/windows.rs"]
+mod windows;
 
 /// Most notifications whose click we are still waiting for. A server closes a notification after
 /// its own timeout, which ends the waiting thread.
@@ -56,6 +70,22 @@ pub trait Notifier: Send + Sync {
         request: NotificationRequest,
         on_click: Box<dyn FnOnce() + Send>,
     ) -> Result<(), NotifyError>;
+
+    /// Shows an app-owned notification that can later be withdrawn by its history id.
+    ///
+    /// # Errors
+    /// Same as [`Self::show`].
+    fn show_tracked(
+        &self,
+        _id: u32,
+        request: NotificationRequest,
+        on_click: Box<dyn FnOnce() + Send>,
+    ) -> Result<(), NotifyError> {
+        self.show(request, on_click)
+    }
+
+    /// Removes a tracked notification where supported; other open notifications are retained.
+    fn dismiss(&self, _id: u32) {}
 }
 
 /// True when a Windows toast activation is the user opening the notification: a click on its body
@@ -65,43 +95,6 @@ pub trait Notifier: Send + Sync {
 #[must_use]
 pub(crate) fn is_open_activation(arguments: Option<&str>) -> bool {
     matches!(arguments, None | Some("default"))
-}
-
-/// Windows: the toast with persistent activation handling. notify-rust's handle reports only the
-/// FIRST event and Windows sends "dismissed: timed out" when the banner leaves the screen (or at once
-/// when banners are off), while the toast stays in the Notification Center and can still be clicked:
-/// observed on Windows 11 (`notify_probe --raw`: `Closed(Expired)` before any click, every click in
-/// the Notification Center lost). Its body click also reached `wait_for_action` as "__closed"
-/// (notify-rust 4.18.2). The toast's own `Activated` handler fires for every activation while the
-/// process lives; `on_click` still runs at most once.
-#[cfg(windows)]
-fn show_toast(
-    app_id: &str,
-    request: &NotificationRequest,
-    on_click: Box<dyn FnOnce() + Send>,
-) -> Result<(), NotifyError> {
-    use tauri_winrt_notification::{Duration, Toast};
-    let once = std::sync::Mutex::new(Some(on_click));
-    Toast::new(app_id)
-        .title(&request.title)
-        .text1(&request.body)
-        .sound(None)
-        .duration(Duration::Short)
-        .add_button("Open", "default")
-        .on_activated(move |arguments| {
-            if is_open_activation(arguments.as_deref()) {
-                let pending = once
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .take();
-                if let Some(click) = pending {
-                    click();
-                }
-            }
-            Ok(())
-        })
-        .show()
-        .map_err(|error| NotifyError(error.to_string()))
 }
 
 /// The real notifier.
@@ -137,12 +130,48 @@ impl Notifier for DesktopNotifier {
             let app_id = if self.installed {
                 self.app_id.as_str()
             } else {
-                tauri_winrt_notification::Toast::POWERSHELL_APP_ID
+                windows::POWERSHELL_APP_ID
             };
-            show_toast(app_id, &request, on_click)
+            windows::show_toast(app_id, None, &request, on_click)
         }
         #[cfg(not(windows))]
         self.show_and_wait(&request, on_click)
+    }
+
+    fn show_tracked(
+        &self,
+        id: u32,
+        request: NotificationRequest,
+        on_click: Box<dyn FnOnce() + Send>,
+    ) -> Result<(), NotifyError> {
+        #[cfg(windows)]
+        {
+            let app_id = if self.installed {
+                self.app_id.as_str()
+            } else {
+                windows::POWERSHELL_APP_ID
+            };
+            windows::show_toast(app_id, Some(id), &request, on_click)
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = id;
+            self.show(request, on_click)
+        }
+    }
+
+    fn dismiss(&self, id: u32) {
+        #[cfg(windows)]
+        {
+            let app_id = if self.installed {
+                self.app_id.as_str()
+            } else {
+                windows::POWERSHELL_APP_ID
+            };
+            windows::dismiss(app_id, id);
+        }
+        #[cfg(not(windows))]
+        let _ = id;
     }
 }
 
@@ -155,6 +184,16 @@ impl DesktopNotifier {
         request: &NotificationRequest,
         on_click: Box<dyn FnOnce() + Send>,
     ) -> Result<(), NotifyError> {
+        // The summary is plain text by the Freedesktop spec; only the body can carry markup and links.
+        #[cfg(target_os = "linux")]
+        let request = NotificationRequest {
+            title: request.title.clone(),
+            body: if linux_body_markup() {
+                linux_plain_text(&request.body)
+            } else {
+                request.body.clone()
+            },
+        };
         let mut notification = notify_rust::Notification::new();
         notification
             .summary(&request.title)
@@ -196,6 +235,21 @@ impl DesktopNotifier {
         }
         Ok(())
     }
+}
+
+/// Whether the server may render body markup: escape unless it says it does not (an unknown answer escapes).
+#[cfg(target_os = "linux")]
+fn linux_body_markup() -> bool {
+    !notify_rust::get_capabilities()
+        .is_ok_and(|capabilities| !capabilities.iter().any(|c| c == "body-markup"))
+}
+
+/// Freedesktop servers with `body-markup` interpret markup and hyperlinks; escape body text before it reaches notify-rust.
+#[cfg(target_os = "linux")]
+fn linux_plain_text(text: &str) -> String {
+    text.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
 }
 
 #[cfg(test)]

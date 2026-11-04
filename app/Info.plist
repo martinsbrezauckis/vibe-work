@@ -5,9 +5,19 @@
   development build embeds it into the binary). Dictation opens the microphone from the
   main window (getUserMedia in WKWebView), and macOS shows this sentence in its one-time permission prompt. Without
   it macOS refuses the microphone.
+  NSAllowsArbitraryLoadsInWebContent: the Browser and previews are web views that open plain-http pages like any browser.
+  Without it App Transport Security stops a bundled app's web views from loading http:// names (IP literals are exempt),
+  which also stops the macOS preview network guard's proof page (http://<token>.vw-guard.invalid/) before it reaches
+  the guard, so every guarded web tab is refused. It applies to web view content only; every page still goes through
+  the guard.
 -->
 <plist version="1.0">
 <dict>
+  <key>NSAppTransportSecurity</key>
+  <dict>
+    <key>NSAllowsArbitraryLoadsInWebContent</key>
+    <true/>
+  </dict>
   <key>NSMicrophoneUsageDescription</key>
   <string>Dictation sends your voice to Mistral's Voxtral to turn it into text while the mic button is on.</string>
   <key>NSServices</key>

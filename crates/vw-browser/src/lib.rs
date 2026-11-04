@@ -13,7 +13,7 @@
 //! Invariants:
 //! - Page-derived data is untrusted: parsed as data, capped, and returned under `untrustedPageContent`; nothing in
 //!   this crate ever follows page text.
-//! - An action targets a ref of the latest observation only; secrets are never typed by the agent (a vault login is
+//! - A ref action targets an observed node in the same document; secrets are never typed by the agent (a vault login is
 //!   filled by the core, never through `type`).
 //! - Every operation is bounded in time (see `driver`).
 
@@ -26,6 +26,7 @@ mod action_loop;
 pub mod annotate;
 mod answers;
 pub mod capture;
+mod choices;
 pub mod consent;
 mod consent_driver;
 pub mod delegation;
@@ -34,6 +35,10 @@ mod driver;
 pub mod frames;
 pub mod guard;
 mod image_read;
+mod inline_output;
+#[cfg(test)]
+mod inline_output_tests;
+mod input_marker;
 mod keys;
 mod labels;
 mod login_fill;
@@ -53,6 +58,7 @@ pub mod scripts;
 mod scroll_shown;
 mod secret_capture;
 mod sessions;
+pub mod text;
 mod upload;
 mod visual;
 

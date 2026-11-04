@@ -58,6 +58,7 @@ pub(crate) async fn observe(
     // The profile each session runs with (`access.rs`): from any result that carries a runtime, and
     // from an accepted switch.
     if let Some(id) = params.get("sessionId").and_then(Value::as_str) {
+        let previous_mode = crate::chrome_control::check::mode(shared, id);
         if method == "session/agent/update" {
             shared.access.observe_request(method, id, params);
         }
@@ -68,6 +69,7 @@ pub(crate) async fn observe(
         {
             shared.access.observe_runtime(id, runtime);
         }
+        crate::chrome_control::check::mode_changed(shared, id, previous_mode.as_deref());
     }
     shared.model_choices.observe(method, params, result)?;
     if method == "turn/start" {
@@ -102,16 +104,18 @@ pub(crate) async fn observe(
                 .and_then(Value::as_str)
                 .map(str::to_owned)
                 .ok_or_else(|| CoreError::bad_result(method, "state.session.id"))?;
-            // A rewind or compaction that produced another session is a new session for the
-            // store (local-only until listed), not a replacement of the source.
-            let source = params.get("sessionId").and_then(Value::as_str);
-            let kind = match kind {
-                LoadKind::Replace if source.is_some_and(|s| s != id) => LoadKind::New,
-                other => other,
-            };
             if kind == LoadKind::Resume {
                 crate::worktrees_restore::resumed(shared, &state).await?;
             }
+            // A resume/import, rewind or compaction that produced another session is new for the
+            // store (local-only until listed), not a replacement of the source.
+            let source = params.get("sessionId").and_then(Value::as_str);
+            let kind = match kind {
+                LoadKind::Resume | LoadKind::Replace if source.is_some_and(|s| s != id) => {
+                    LoadKind::New
+                }
+                other => other,
+            };
             if kind != LoadKind::Read {
                 let previous = shared.store.view(&id);
                 if let Err(reason) = crate::session_folders::check(
@@ -129,6 +133,7 @@ pub(crate) async fn observe(
                 .store
                 .load(state, kind)
                 .map_err(|e| CoreError::bad_result(method, &e.to_string()))?;
+            shared.history_loading.start(shared, &id);
             if kind != LoadKind::Read {
                 shared.supervisor.track_session(&id);
                 shared.access.observe_request(method, &id, params);
@@ -168,7 +173,10 @@ pub(crate) fn snapshot(shared: &Shared, id: &str) -> Result<SessionSnapshot, Cor
         .map(|view| {
             let mut snapshot = SessionSnapshot::from(view);
             super::agent_tools::shell_commands::project(shared, &mut snapshot.state);
+            #[cfg(feature = "video")]
+            crate::video_projection::apply(shared, &mut snapshot.state);
             crate::edit_preview::project(shared, &mut snapshot.state);
+            crate::chrome_control::approval::project(shared, &mut snapshot.state);
             shared.protected_changes.overlay(id, &mut snapshot.state);
             crate::ask::tool_calls::overlay(shared, id, &mut snapshot.state);
             snapshot.access_mode =
@@ -192,7 +200,10 @@ pub(crate) fn detail(result: &Value) -> Value {
 pub(crate) fn project_result(shared: &Shared, method: &str, params: &Value, result: &mut Value) {
     crate::provider_errors::value(result);
     super::agent_tools::shell_commands::project(shared, result);
+    #[cfg(feature = "video")]
+    crate::video_projection::apply(shared, result);
     crate::edit_preview::project(shared, result);
+    crate::chrome_control::approval::project(shared, result);
     let Some(state) = result.get_mut("state").filter(|s| s.is_object()) else {
         return;
     };
@@ -218,6 +229,14 @@ pub(crate) fn project_result(shared: &Shared, method: &str, params: &Value, resu
         {
             state["session"]["workspaceRoots"] = roots;
         }
+    }
+    // Continue has no requested ID: the returned ID selects the loaded session, if any.
+    if matches!(effect(method), Effect::Load(LoadKind::Resume))
+        && params["sessionId"]
+            .as_str()
+            .is_none_or(|id| state.pointer("/session/id").and_then(Value::as_str) == Some(id))
+    {
+        *state = shared.store.project_resume(std::mem::take(state));
     }
 }
 

@@ -30,6 +30,9 @@ pub(super) struct Pipe {
     id: u64,
     read_buffer: Vec<u8>,
     shared: Weak<Shared>,
+    /// Requests whose JSON-RPC error answer is a normal outcome (`begin_tolerant`): an older helper answers an
+    /// enrollment request it does not know with "method not found", which must not end the connection.
+    tolerant: std::collections::HashSet<u64>,
 }
 
 impl Pipe {
@@ -111,6 +114,7 @@ impl Pipe {
             id: 0,
             read_buffer: Vec::new(),
             shared,
+            tolerant: std::collections::HashSet::new(),
         };
         if pipe.initialize(secret).await.is_err() {
             // A refused helper is ended and reaped before the error returns: dropping it only starts the kill, and
@@ -185,6 +189,14 @@ impl Pipe {
         Ok(self.id)
     }
 
+    /// Like [`Self::begin`], but a JSON-RPC error answer arrives as `{"rpcError": error}` instead of ending the
+    /// connection. Only the owner's enrollment requests use it.
+    pub(super) async fn begin_tolerant(&mut self, method: &str, params: Value) -> Result<u64, ()> {
+        let id = self.begin(method, params).await?;
+        self.tolerant.insert(id);
+        Ok(id)
+    }
+
     // The buffer lives across select cancellation, including a partially read line.
     pub(super) async fn next(&mut self) -> Result<(u64, Value), ()> {
         loop {
@@ -205,10 +217,15 @@ impl Pipe {
             let line = std::mem::take(&mut self.read_buffer);
             let value: Value = serde_json::from_slice(&line).map_err(|_| ())?;
             if let Some(id) = value.get("id") {
-                return Ok((
-                    id.as_u64().ok_or(())?,
-                    value.get("result").cloned().ok_or(())?,
-                ));
+                let id = id.as_u64().ok_or(())?;
+                let tolerant = self.tolerant.remove(&id);
+                if let Some(result) = value.get("result") {
+                    return Ok((id, result.clone()));
+                }
+                return match value.get("error") {
+                    Some(error) if tolerant => Ok((id, json!({"rpcError": error}))),
+                    _ => Err(()),
+                };
             }
             super::owner::observe(&self.shared, &value)?;
             if value["method"] == "notifications/owner/error" {

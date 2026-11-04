@@ -15,6 +15,8 @@ use serde_json::Value;
 /// used yet. Session-channel methods include `turn/start`, `callback/result`, and
 /// `session/agent/update`; the others follow Vibe's handler requirements.
 const NEEDS_CHANNEL: &[&str] = &[
+    // Runtime reads back the attached session, including after a deferred key refresh closed its channel.
+    "runtime/read",
     "loops/list",
     "loops/create",
     "loops/delete",

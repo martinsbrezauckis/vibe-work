@@ -97,8 +97,7 @@ impl Browser {
             )
             .await
             .map_err(refused)?;
-        self.service
-            .reading_allowed(session_id, &page, &probe.url)
+        self.reading_ref_allowed(session_id, &page, &probe.url, action.reference())
             .map_err(refused)?;
         if probe.stale {
             return Err(refused(

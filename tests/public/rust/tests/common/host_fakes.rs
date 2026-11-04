@@ -66,7 +66,7 @@ pub fn file_confirmer(dir: PathBuf) -> SharedConfirmer {
 
 type Click = Box<dyn FnOnce() + Send>;
 /// A shown notification and its click callback (taken when the test clicks it).
-type Shown = (NotificationRequest, Option<Click>);
+type Shown = (NotificationRequest, Option<Click>, Option<u32>);
 
 /// A notifier that records what it was asked to show and keeps the click callbacks.
 #[derive(Clone, Default)]
@@ -89,7 +89,7 @@ impl Recording {
             .lock()
             .unwrap()
             .iter()
-            .map(|(r, _)| r.clone())
+            .map(|(r, _, _)| r.clone())
             .collect()
     }
     /// Simulates the user clicking notification `index`. False when it has no callback left.
@@ -99,13 +99,38 @@ impl Recording {
             .lock()
             .unwrap()
             .get_mut(index)
-            .and_then(|(_, c)| c.take());
+            .and_then(|(_, c, _)| c.take());
         callback.map(|c| c()).is_some()
     }
 }
 
 impl Notifier for Recording {
     fn show(&self, request: NotificationRequest, on_click: Click) -> Result<(), NotifyError> {
+        self.record(request, on_click, None);
+        Ok(())
+    }
+
+    fn show_tracked(
+        &self,
+        id: u32,
+        request: NotificationRequest,
+        on_click: Click,
+    ) -> Result<(), NotifyError> {
+        self.record(request, on_click, Some(id));
+        Ok(())
+    }
+
+    fn dismiss(&self, id: u32) {
+        for (_, callback, key) in self.shown.lock().unwrap().iter_mut() {
+            if *key == Some(id) {
+                *callback = None;
+            }
+        }
+    }
+}
+
+impl Recording {
+    fn record(&self, request: NotificationRequest, on_click: Click, id: Option<u32>) {
         if let Some(path) = &self.log {
             use std::io::Write;
             if let Ok(mut file) = std::fs::OpenOptions::new()
@@ -120,7 +145,9 @@ impl Notifier for Recording {
                 );
             }
         }
-        self.shown.lock().unwrap().push((request, Some(on_click)));
-        Ok(())
+        self.shown
+            .lock()
+            .unwrap()
+            .push((request, Some(on_click), id));
     }
 }

@@ -31,6 +31,8 @@ impl Notification {
 /// A read-only copy of one session's state of record plus store bookkeeping.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SessionView {
+    /// Local adoption/page sequence. Orders asynchronous UI replies independently of Vibe's event IDs.
+    pub history_version: u64,
     /// Session id (`state.session.id`).
     pub session_id: String,
     /// The full `PublicSessionState` as wire JSON (camelCase), including fields we do not model.

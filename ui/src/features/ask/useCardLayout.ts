@@ -1,4 +1,4 @@
-/** Fits the waiting card above the composer; CSS reserves body reading space and lets long payloads scroll.
+/** Fits the waiting card above the composer; question text uses the space left after its answers.
  * Depends on the transcript viewport and ResizeObserver. Called by AskCard; directed focus reveals the whole card.
  */
 import { useLayoutEffect, useState, type RefObject } from "react";
@@ -13,16 +13,42 @@ export function useCardLayout(frame: RefObject<HTMLDivElement | null>): number |
     const fit = () => {
       const style = getComputedStyle(card);
       const spacing = (parseFloat(style.marginTop) || 0) + (parseFloat(style.marginBottom) || 0);
-      if (viewport.clientHeight > 0) setHeight(Math.max(0, viewport.clientHeight - spacing));
+      if (viewport.clientHeight <= 0) return;
+      const available = Math.max(0, viewport.clientHeight - spacing);
+      setHeight(available);
+      const prompts = [...card.querySelectorAll<HTMLElement>(".q-prompt")];
+      if (prompts.length === 0) return;
+      // Answers, descriptions and the footer keep their natural height. Only the question text shrinks.
+      const reserved = card.offsetHeight - prompts.reduce((sum, el) => sum + el.offsetHeight, 0);
+      const reading = `${String(Math.max(0, (available - reserved) / prompts.length))}px`;
+      if (card.style.getPropertyValue("--question-max-height") !== reading)
+        card.style.setProperty("--question-max-height", reading);
+      prompts.forEach(markOverflow);
     };
     fit();
     const observer = new ResizeObserver(fit);
     observer.observe(viewport);
+    // Wrapping, text size and changes to the answer content all change the room left for the question.
+    if (card.classList.contains("qcard")) observer.observe(card);
+    const onScroll = (event: Event) => {
+      if (event.target instanceof HTMLElement && event.target.matches(".q-prompt"))
+        markOverflow(event.target);
+    };
+    card.addEventListener("scroll", onScroll, true);
     return () => {
       observer.disconnect();
+      card.removeEventListener("scroll", onScroll, true);
     };
   }, [frame]);
   return height;
+}
+
+/** Fades the reading area's bottom edge only while more question text follows. */
+function markOverflow(prompt: HTMLElement): void {
+  prompt.toggleAttribute(
+    "data-more",
+    prompt.scrollTop + prompt.clientHeight < prompt.scrollHeight - 1,
+  );
 }
 
 /** Focuses the first answer; arrival preserves the newest prompt's view, directed navigation reveals its own card. */

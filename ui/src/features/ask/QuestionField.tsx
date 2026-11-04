@@ -26,10 +26,12 @@ export function QuestionField({
   return (
     <fieldset data-item-id={name} className="q" disabled={disabled}>
       <legend id={legend}>
-        {question.header !== "" ? (
-          <Badge presentation="question-label">{question.header}</Badge>
-        ) : null}
-        {question.question}
+        <span className="q-prompt" tabIndex={0} data-testid="transcript.question-prompt">
+          {question.header !== "" ? (
+            <Badge presentation="question-label">{question.header}</Badge>
+          ) : null}
+          {question.question}
+        </span>
       </legend>
       <AnswerOptions
         question={question}

@@ -20,7 +20,7 @@
 //!   inline and same-origin scripts, unless the project turned prototype scripts off), and it runs sandboxed
 //!   (`sandbox allow-scripts`: an opaque origin, so no storage and no reading of other pages) with `connect-src
 //!   'none'` and `frame-src 'none'`; every other page, Markdown page and the live index get `script-src 'none'`.
-//!   The File tab's servers keep one policy for every HTML file ([`csp`], scripts on).
+//!   The File tab's servers keep scripts off for every file, including handbook prototypes.
 //! - The visual check's route (`/<capability>/.vw-check-<token>/...`, [`PagesServer::check_prefix`]) serves the same
 //!   files to the hidden checker webview only: a prototype page there runs WITHOUT the sandbox (the check document must measure
 //!   it from the same origin) and with a small error-recording script put after its doctype ([`ERROR_PRELUDE`]);
@@ -99,7 +99,7 @@ impl PagesServer {
     /// # Errors
     /// The bind or random-source error.
     pub async fn start_for_files(root: PathBuf, project: String) -> std::io::Result<Self> {
-        Self::start_inner(root, true, project, true).await
+        Self::start_inner(root, false, project, true).await
     }
 
     async fn start_inner(
@@ -366,7 +366,7 @@ fn serve(
     }
     if state.pdf {
         // The File tab: one policy for every file of the session's folder.
-        return Ok((mime, bytes, Policy::Files { scripts }));
+        return Ok((mime, bytes, Policy::Files { scripts: false }));
     }
     if !mime.starts_with("text/html") {
         return Ok((mime, bytes, Policy::Document));

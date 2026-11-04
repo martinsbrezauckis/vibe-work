@@ -29,7 +29,8 @@ pub enum SessionToolsRequest {
         destination: Option<String>,
     },
     /// Starts a temporary session: `startSession` with the same `agentConfig` (through the gate), recorded as
-    /// temporary before the answer (deleted when Vibe Work quits, or at the next start after a crash).
+    /// temporary before the answer (deleted when Vibe Work quits, or at the next start after a crash). Without a
+    /// `cwd` the session works in a new scratch folder of its own in app data, removed with the session.
     StartTemporary {
         /// `AgentConfig` object (filtered by the gate).
         #[serde(default, skip_serializing_if = "Option::is_none")]

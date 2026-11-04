@@ -31,6 +31,13 @@
 //!   Each sweep attempts an id once ([`Core::delete_temporary_all`]); unfinished deletion stays recorded.
 //! - When a folder is configured, an id is on the list only if the record on disk names it too ([`TemporarySessions::add`]
 //!   rolls the id back when the write fails).
+//! - A temporary chat started without a folder works in a scratch folder of its own that Vibe Work makes for it
+//!   ([`TemporarySessions::new_scratch`]: `temporary-folders/chat-<random>` beside `sessions_dir`, user-only). It
+//!   lies outside the session data (`sessions_dir`), which the agent's folder guard keeps the agent out of. The folder
+//!   and its automatic project go with the chat ([`chat_ended`]); a folder whose chat is gone without that (a crash)
+//!   is removed by the sweep once no temporary chat is left ([`Core::delete_temporary_all`]). The sweep also removes
+//!   folders of the same shape that earlier test builds made inside `sessions_dir` (`<sessions_dir>/temporary-folders`)
+//!   under the same rules. Nothing outside those folders is ever removed here.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -49,6 +56,8 @@ use crate::event::{AlertKind, CoreEvent};
 const DELETE_WAIT: Duration = Duration::from_secs(10);
 /// The record's file name inside `sessions_dir`.
 const FILE: &str = "temporary.json";
+/// The folder beside `sessions_dir` that holds the scratch folders of temporary chats started without a folder.
+const SCRATCH: &str = "temporary-folders";
 
 /// How one delete of a temporary session ended.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -72,6 +81,16 @@ pub(crate) struct TemporarySessions {
     ids: Mutex<BTreeSet<String>>,
     notices: Mutex<BTreeMap<String, CoreEvent>>,
     file: Option<PathBuf>,
+    /// Where scratch folders are made (`temporary-folders` beside `sessions_dir`; memory-only runs: the system temp
+    /// folder).
+    scratch_root: PathBuf,
+    /// Each memory-only unit-test core owns its root until the last fixture reference drops.
+    #[cfg(test)]
+    _scratch_fixture: Option<tempfile::TempDir>,
+    /// Where earlier test builds made them (`<sessions_dir>/temporary-folders`): only swept, never used.
+    old_scratch_root: Option<PathBuf>,
+    /// The scratch folder of each temporary chat that has one (this run).
+    scratch: Mutex<BTreeMap<String, PathBuf>>,
     /// Set at load when the record on disk is damaged and could not be moved aside: it has to stay as it is, so no
     /// write is attempted and every [`TemporarySessions::add`] fails with this text.
     frozen: Option<String>,
@@ -139,6 +158,21 @@ impl TemporarySessions {
     /// The list for `sessions_dir` (`None`: memory only), with the ids a previous run left in its file. A damaged
     /// record is moved aside and reported (see the module header).
     pub(crate) fn load(sessions_dir: Option<PathBuf>) -> Self {
+        let scratch_root = sessions_dir.as_ref().map_or_else(
+            || std::env::temp_dir().join(format!("vibe-work-{SCRATCH}-{}", std::process::id())),
+            |dir| dir.parent().unwrap_or(dir).join(SCRATCH),
+        );
+        // Unit-test cores share a process, but their startup/shutdown sweeps must not share folders.
+        #[cfg(test)]
+        let scratch_fixture = sessions_dir.is_none().then(tests::scratch_fixture);
+        #[cfg(test)]
+        let scratch_root = scratch_fixture
+            .as_ref()
+            .map_or(scratch_root, |dir| dir.path().to_path_buf());
+        let old_scratch_root = sessions_dir
+            .as_ref()
+            .map(|dir| dir.join(SCRATCH))
+            .filter(|old| *old != scratch_root);
         let file = sessions_dir.map(|dir| dir.join(FILE));
         let (ids, damage) = file
             .as_deref()
@@ -147,6 +181,11 @@ impl TemporarySessions {
             ids: Mutex::new(ids),
             notices: Mutex::default(),
             file,
+            scratch_root,
+            #[cfg(test)]
+            _scratch_fixture: scratch_fixture,
+            old_scratch_root,
+            scratch: Mutex::default(),
             frozen: None,
         };
         if let Some(damage) = damage {
@@ -291,6 +330,107 @@ impl TemporarySessions {
         }
     }
 
+    /// Makes a new, empty scratch folder for a temporary chat started without a folder (user-only, a random name no
+    /// other chat has). Blocking (disk).
+    ///
+    /// # Errors
+    /// [`NotRecorded`] naming the folder when it cannot be made.
+    pub(crate) fn new_scratch(&self) -> Result<PathBuf, NotRecorded> {
+        let cannot = |e: &dyn std::fmt::Display| {
+            NotRecorded(format!(
+                "the folder {} cannot be made ({e})",
+                self.scratch_root.display()
+            ))
+        };
+        vw_platform::ensure_private_dir(&self.scratch_root).map_err(|e| cannot(&e))?;
+        let mut random = [0_u8; 8];
+        getrandom::fill(&mut random).map_err(|e| cannot(&e))?;
+        let name = random
+            .iter()
+            .fold(String::with_capacity(16), |mut name, b| {
+                use std::fmt::Write as _;
+                let _ = write!(name, "{b:02x}");
+                name
+            });
+        let dir = self.scratch_root.join(format!("chat-{name}"));
+        // `create_dir`, never `create_dir_all`: a name that exists already is not taken over.
+        std::fs::create_dir(&dir).map_err(|e| cannot(&e))?;
+        vw_platform::ensure_private_dir(&dir).map_err(|e| cannot(&e))?;
+        Ok(dir)
+    }
+
+    /// Whether `folder` is a scratch folder made by [`Self::new_scratch`] (a direct `chat-` child of the scratch root).
+    pub(crate) fn is_scratch(&self, folder: &Path) -> bool {
+        is_scratch_in(&self.scratch_root, folder)
+    }
+
+    /// [`Self::new_scratch`] on the blocking pool.
+    pub(crate) async fn new_scratch_saved(self: &Arc<Self>) -> Result<PathBuf, NotRecorded> {
+        let record = self.clone();
+        tokio::task::spawn_blocking(move || record.new_scratch())
+            .await
+            .unwrap_or_else(|join| Err(NotRecorded(format!("the folder task stopped ({join})"))))
+    }
+
+    /// Notes that chat `id` works in scratch folder `dir` (it goes with the chat).
+    pub(crate) fn bind_scratch(&self, id: &str, dir: PathBuf) {
+        self.scratch
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(id.to_owned(), dir);
+    }
+
+    /// The scratch folder chat `id` works in, if it has one.
+    fn scratch_of(&self, id: &str) -> Option<PathBuf> {
+        self.scratch
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(id)
+            .cloned()
+    }
+
+    /// Removes chat `id`'s scratch folder, if it has one; returns it. Blocking (disk).
+    fn drop_scratch(&self, id: &str) -> Option<PathBuf> {
+        let dir = self
+            .scratch
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(id)?;
+        self.remove_scratch(&dir);
+        Some(dir)
+    }
+
+    /// Removes one scratch folder: only a direct child of the scratch root, and never through a link.
+    pub(crate) fn remove_scratch(&self, dir: &Path) {
+        remove_scratch_in(&self.scratch_root, dir);
+    }
+
+    /// Removes every scratch folder whose chat is gone: all of them once no temporary chat is left (a chat the sweep
+    /// could not delete keeps the folders until a later sweep). Returns the folders it removed. Blocking (disk).
+    fn sweep_scratch(&self) -> Vec<PathBuf> {
+        if !self
+            .ids
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .is_empty()
+        {
+            return Vec::new();
+        }
+        let mut found = sweep_root(&self.scratch_root);
+        if let Some(old) = &self.old_scratch_root {
+            found.extend(sweep_root(old));
+            // The old root goes too once it is empty (never recursively, never through a link).
+            if is_real_folder(old) {
+                let _ = std::fs::remove_dir(old);
+            }
+        }
+        self.scratch
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clear();
+        found
+    }
+
     /// Writes the whole record, replacing the file atomically. Memory-only (no folder configured) always succeeds.
     fn write(&self, ids: &BTreeSet<String>) -> Result<(), NotRecorded> {
         let Some(file) = &self.file else {
@@ -309,6 +449,19 @@ impl TemporarySessions {
         }
         vw_platform::replace_private(file, &bytes)
             .map_err(|e| NotRecorded(format!("{} cannot be written ({e})", file.display())))
+    }
+}
+
+/// Chat `id` ended (deleted): its scratch folder, if it has one, goes, and with it the automatic project the folder
+/// got in the sidebar. Called last, when nothing of the chat holds the folder any more (its processes, terminals and
+/// file views ended first).
+pub(crate) async fn chat_ended(shared: &Shared, id: &str) {
+    if shared.temporary.scratch_of(id).is_none() {
+        return;
+    }
+    let (record, id) = (shared.temporary.clone(), id.to_owned());
+    if let Ok(Some(dir)) = tokio::task::spawn_blocking(move || record.drop_scratch(&id)).await {
+        crate::projects_filing::retire_folder_project(shared, &dir).await;
     }
 }
 
@@ -381,6 +534,7 @@ impl Core {
                 // a temporary chat nobody wrote in answers "not found" to its own delete). Nothing left to delete,
                 // and the id must leave the record or every start would try it again.
                 self.shared.temporary.remove_saved(id).await;
+                chat_ended(&self.shared, id).await;
                 Deleted::Yes
             }
             Ok(Err(error)) => {
@@ -413,58 +567,104 @@ impl Core {
         if !ids.is_empty() {
             info!(deleted, of = ids.len(), "temporary sessions deleted");
         }
+        let record = self.shared.temporary.clone();
+        match tokio::task::spawn_blocking(move || record.sweep_scratch()).await {
+            Ok(removed) => {
+                for dir in removed {
+                    crate::projects_filing::retire_folder_project(&self.shared, &dir).await;
+                }
+            }
+            Err(join) => warn!(%join, "temporary sessions: the scratch folder sweep stopped"),
+        }
         deleted
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use std::sync::Arc;
-    use std::sync::atomic::{AtomicUsize, Ordering};
-
-    use super::TemporarySessions;
-
-    /// The record's writes wait for the disk (a synced replace): other async work on the same worker keeps running
-    /// meanwhile. One worker thread, a ticker task, 40 adds and removes: the ticker ran during them.
-    #[tokio::test(flavor = "current_thread")]
-    async fn writing_the_record_does_not_hold_the_async_worker() {
-        let dir = std::env::temp_dir().join(format!(
-            "vw-temporary-worker-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        let record = Arc::new(TemporarySessions::load(Some(dir.clone())));
-        let ticks = Arc::new(AtomicUsize::new(0));
-        let counter = ticks.clone();
-        let ticker = tokio::spawn(async move {
-            loop {
-                counter.fetch_add(1, Ordering::Relaxed);
-                tokio::task::yield_now().await;
-            }
-        });
-        tokio::task::yield_now().await;
-        let before = ticks.load(Ordering::Relaxed);
-        for i in 0..20 {
-            record.add_saved(&format!("s{i}")).await.unwrap();
-        }
-        for i in 0..20 {
-            record.remove_saved(&format!("s{i}")).await;
-        }
-        let during = ticks.load(Ordering::Relaxed) - before;
-        ticker.abort();
-        assert_eq!(record.ids(), Vec::<String>::new());
-        assert_eq!(
-            std::fs::read_to_string(dir.join(super::FILE)).unwrap(),
-            "[]",
-            "the record on disk follows every write"
-        );
-        assert!(
-            during >= 40,
-            "the ticker ran only {during} times during 40 writes"
-        );
-        let _ = std::fs::remove_dir_all(&dir);
+/// Removes `dir` when it is a scratch folder directly in `root` and `root` is a real folder; a link in place of the
+/// folder is removed itself, never followed.
+fn remove_scratch_in(root: &Path, dir: &Path) {
+    if !is_scratch_in(root, dir) || !is_real_folder(root) {
+        warn!(folder = ?dir, "temporary sessions: not a scratch folder; left alone");
+        return;
+    }
+    let removed = match std::fs::symlink_metadata(dir) {
+        // A link or junction in place of the folder: remove the link itself, never what it points to.
+        Ok(meta) if is_link(&meta) => remove_link(dir, &meta),
+        Ok(meta) if meta.is_dir() => std::fs::remove_dir_all(dir),
+        Ok(_) => std::fs::remove_file(dir),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(e),
+    };
+    if let Err(error) = removed {
+        // A process the chat left running can hold it (Windows); the next sweep tries again.
+        warn!(folder = ?dir, %error, "temporary sessions: a scratch folder could not be removed");
     }
 }
+
+/// Whether `folder` is a direct `chat-<16 hex>` child of `root`.
+fn is_scratch_in(root: &Path, folder: &Path) -> bool {
+    folder.parent() == Some(root)
+        && folder.file_name().is_some_and(|name| {
+            let name = name.to_string_lossy();
+            name.strip_prefix("chat-")
+                .is_some_and(|hex| hex.len() == 16 && hex.bytes().all(|b| b.is_ascii_hexdigit()))
+        })
+}
+
+/// Whether `root` is a real folder, not a link or (Windows) junction to somewhere else: cleanup only ever deletes
+/// inside a root it can trust.
+fn is_real_folder(root: &Path) -> bool {
+    std::fs::symlink_metadata(root).is_ok_and(|meta| meta.is_dir() && !is_link(&meta))
+}
+
+/// Removes every scratch folder in `root` (a real folder only); returns them. Only names this code makes
+/// (`chat-` + 16 hex digits) count; anything else in the root is left alone.
+fn sweep_root(root: &Path) -> Vec<PathBuf> {
+    if !is_real_folder(root) {
+        return Vec::new();
+    }
+    let Ok(entries) = std::fs::read_dir(root) else {
+        return Vec::new();
+    };
+    let found: Vec<PathBuf> = entries
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| is_scratch_in(root, path))
+        .collect();
+    for dir in &found {
+        remove_scratch_in(root, dir);
+    }
+    found
+}
+
+/// Whether `meta` (from `symlink_metadata`) is a symbolic link, or on Windows any reparse point (junctions too).
+fn is_link(meta: &std::fs::Metadata) -> bool {
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt as _;
+        const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
+        if meta.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+            return true;
+        }
+    }
+    meta.file_type().is_symlink()
+}
+
+/// Removes the link at `path` itself (a directory link or junction on Windows is removed as a directory entry).
+fn remove_link(path: &Path, meta: &std::fs::Metadata) -> std::io::Result<()> {
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt as _;
+        // A directory link or junction carries the directory attribute and is removed as a directory entry.
+        const FILE_ATTRIBUTE_DIRECTORY: u32 = 0x10;
+        if meta.file_attributes() & FILE_ATTRIBUTE_DIRECTORY != 0 {
+            return std::fs::remove_dir(path);
+        }
+    }
+    let _ = meta;
+    std::fs::remove_file(path)
+}
+
+#[cfg(test)]
+#[path = "temporary_tests.rs"]
+mod tests;

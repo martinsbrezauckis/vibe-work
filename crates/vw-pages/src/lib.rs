@@ -82,7 +82,7 @@ pub use page::{
 pub use page_menu::{
     MAX_COPY, PageMenuAt, copy_script as menu_copy_script, page_script as page_menu_script,
     parse_click as parse_menu_click, parse_copy as parse_menu_copy, selection_script,
-    target_script as menu_target_script,
+    selection_script_from, target_script as menu_target_script,
 };
 pub use paths::{
     DEFAULT_FOLDER, INDEX, PagePath, PathError, asset_allowed, clean_relative, is_page_name,
@@ -90,7 +90,7 @@ pub use paths::{
 pub use pick::{
     PickAnswer, PickAt, Picked, TargetMiss, accessor_name as pick_accessor, cancel_script,
     copy_target_script, parse as parse_pick, parse_named_copy, parse_target, poll_script,
-    start_script, target_script, target_script_with_quote,
+    start_script, start_script_from, target_script, target_script_with_quote,
 };
 pub use picking::{run_pick, section_of};
 pub use profile::{

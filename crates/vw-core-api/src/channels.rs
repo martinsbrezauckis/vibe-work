@@ -67,6 +67,9 @@ mod plugin_pins;
 mod quiet;
 #[path = "channels_resume.rs"]
 mod resume;
+#[cfg(test)]
+#[path = "channels_test_peer.rs"]
+mod test_peer;
 
 /// Identifies one channel across restarts: (server generation, channel id).
 pub(crate) type ChannelKey = (u64, u64);
@@ -111,6 +114,8 @@ pub(crate) struct OpenChannel {
 
 /// The registry of session channels.
 pub(crate) struct Channels {
+    #[cfg(test)]
+    pub(crate) test_transport: Mutex<Option<Arc<crate::history_test_vibe::FakeVibe>>>,
     supervisor: Arc<Supervisor>,
     wait: Duration,
     inner: Mutex<Inner>,
@@ -132,6 +137,7 @@ pub(crate) struct Channels {
     agent_tools: Option<Arc<crate::agent_tools::AgentTools>>,
     leases: Arc<crate::session_lease::Leases>,
     plugin_approvals: Arc<crate::plugin_approvals::PluginApprovals>,
+    history_loading: Arc<crate::history_loading::HistoryLoading>,
 }
 
 fn locked<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -173,8 +179,11 @@ impl Channels {
         agent_tools: Option<Arc<crate::agent_tools::AgentTools>>,
         leases: Arc<crate::session_lease::Leases>,
         plugin_approvals: Arc<crate::plugin_approvals::PluginApprovals>,
+        history_loading: Arc<crate::history_loading::HistoryLoading>,
     ) -> Self {
         Self {
+            #[cfg(test)]
+            test_transport: Mutex::new(None),
             supervisor,
             wait,
             inner: Mutex::new(Inner::default()),
@@ -187,6 +196,7 @@ impl Channels {
             agent_tools,
             leases,
             plugin_approvals,
+            history_loading,
         }
     }
 
@@ -395,6 +405,7 @@ impl Channels {
                 None
             } else {
                 inner.close_when_quiet.remove(id);
+                self.history_loading.stop(id);
                 inner.slots.remove(id)
             }
         };
@@ -494,6 +505,7 @@ impl Channels {
         }
         let lease = self.leases.claim(to)?;
         if let Some(slot) = inner.slots.remove(from) {
+            self.history_loading.stop(from);
             debug!(
                 channel_id = slot.key.1,
                 "channel now carries a new session id"
@@ -596,6 +608,7 @@ impl Channels {
             return None;
         }
         let id = id.clone();
+        self.history_loading.stop(&id);
         inner.slots.remove(&id);
         self.leases.release(&id);
         Some(id)
@@ -651,6 +664,7 @@ impl Channels {
             .map(|(id, _)| id.clone())
             .collect();
         for id in &gone {
+            self.history_loading.stop(id);
             inner.slots.remove(id);
         }
         gone
@@ -726,6 +740,9 @@ mod tests {
             None,
             leases,
             approvals,
+            Arc::new(crate::history_loading::HistoryLoading::new(
+                vw_session::SessionStore::new(),
+            )),
         );
         let (stdout, _stdout_peer) = tokio::io::duplex(1024);
         let (stdin, _stdin_peer) = tokio::io::duplex(1024);
@@ -757,6 +774,9 @@ mod tests {
             None,
             leases,
             approvals,
+            Arc::new(crate::history_loading::HistoryLoading::new(
+                vw_session::SessionStore::new(),
+            )),
         );
         super::locked(&channels.inner)
             .imported

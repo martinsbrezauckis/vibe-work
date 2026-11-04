@@ -20,7 +20,7 @@
 //!   Preview webviews live inside it as children with no capability (`capabilities/main.json` names
 //!   the `main` webview only) and their own navigation policy.
 //! - The updater plugin is registered only when the build carries an accepted update channel
-//!   (`updater.rs`); user builds then check once after start and follow the update policy (always a
+//!   (`updater.rs`); user builds then check after start and every 24 hours and follow the update policy (always a
 //!   notification; download in the background unless `settings.json` says `autoDownload: false`; install and
 //!   restart only after the user's agreement, `vw_host::update_flow`). The plugin is for Rust's own use: no
 //!   capability grants it to the webview, which reaches the flow only through the `update_*` commands.
@@ -40,6 +40,7 @@ mod live_profile;
 mod send_to;
 mod startup;
 mod startup_market;
+mod tray;
 mod updater;
 mod window_api;
 
@@ -99,6 +100,11 @@ fn navigation_guard<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
 /// type (`ui/src/features/files/drop.ts`: pictures inline, everything else `documents addDropped`).
 /// Kept for the day the Tauri drop is turned back on (then both paths must not add the same file twice).
 fn on_window_event(window: &tauri::Window, event: &tauri::WindowEvent) {
+    if window.label() == MAIN_WINDOW
+        && let tauri::WindowEvent::CloseRequested { api, .. } = event
+    {
+        tray::close(window, api);
+    }
     if window.label() == "main"
         && matches!(
             event,
@@ -126,7 +132,7 @@ fn on_window_event(window: &tauri::Window, event: &tauri::WindowEvent) {
 }
 
 /// Sends native minimize/show changes to the core; the document's visibility report cannot see every OS transition.
-fn report_native_window_visibility(window: &tauri::Window) {
+pub(crate) fn report_native_window_visibility<R: tauri::Runtime>(window: &tauri::Window<R>) {
     let (Ok(minimized), Ok(visible)) = (window.is_minimized(), window.is_visible()) else {
         return;
     };
@@ -220,6 +226,9 @@ fn log_a11y_bus(check: &vw_platform::a11y_bus::A11yBusCheck) {
 fn bridge_commands() -> impl Fn(tauri::ipc::Invoke) -> bool + Send + Sync + 'static {
     tauri::generate_handler![
         commands::core_execute,
+        commands::desktop_settings,
+        commands::desktop_subscribe,
+        commands::app_quit,
         commands::core_subscribe,
         commands::ui_control_next,
         commands::ui_control_reply,
@@ -237,6 +246,7 @@ fn bridge_commands() -> impl Fn(tauri::ipc::Invoke) -> bool + Send + Sync + 'sta
         commands::open_link,
         commands::open_mail_link,
         commands::notify_session,
+        commands::dismiss_notification,
         commands::show_prompt,
         commands::terminal_attach,
         commands::terminal_ack,
@@ -287,6 +297,7 @@ pub fn run() -> tauri::Result<()> {
             if !instance::admit(app, hand_over)? {
                 return Ok(());
             }
+            tray::setup(app.handle())?;
             let live_root = live_profile::root()?;
             let confirmer = dialogs::native_confirmer(app.handle().clone());
             if update_checks && let Ok(data) = startup::data_dir(app.handle()) {
@@ -353,6 +364,10 @@ pub fn run() -> tauri::Result<()> {
         })
         .build(context)?;
     app.run(move |app_handle, event| {
+        #[cfg(target_os = "macos")]
+        if let RunEvent::Reopen { .. } = event {
+            let _ = tray::reveal_main_window(app_handle);
+        }
         // On this (UI) thread, bounded even when a runtime task waits for this thread (`vw_host::exit`).
         if let RunEvent::Exit = event
             && let Some(host) = app_handle.state::<HostHandle>().try_get()

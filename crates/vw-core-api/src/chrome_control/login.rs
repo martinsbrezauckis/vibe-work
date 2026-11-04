@@ -112,7 +112,8 @@ pub(crate) async fn prepare(
             && result["structuredContent"]["error"]["code"] == "VAULT_REQUIRED"
             && result["structuredContent"]["error"]["details"]["noEffect"] == true);
     if !vault {
-        let answer = super::content::for_model(checked);
+        let mut answer = super::content::for_model(checked);
+        super::output::guard(&mut answer);
         return Ok(Box::pin(std::future::ready(Ok(
             json!({"vwMcpResult":answer}),
         ))));
@@ -177,6 +178,7 @@ pub(crate) async fn prepare(
         super::check::authorize(&shared, &current_session, "chrome_execute", &current_args)?;
         let mut receipt = execution.await?;
         super::content::mark(&mut receipt);
+        super::output::guard(&mut receipt);
         Ok(json!({"vwMcpResult":receipt}))
     }))
 }
@@ -241,7 +243,7 @@ mod tests {
             .unwrap()
             .insert("t".into(), "s".into());
         shared.chrome_control.set_local_network(true).unwrap();
-        let seen = shared.chrome_control.owner.answering(|_, _| {
+        let seen = super::super::test_support::answering(shared, |_, _| {
             json!({"isError":false,"content":[{"type":"text","text":"filled"}],
                 "structuredContent":{"operationId":"op","status":"completed","data":{"filled":true}}})
         });

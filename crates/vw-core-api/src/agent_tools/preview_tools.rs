@@ -50,14 +50,12 @@ fn preview_json(
             "title": if lan { None } else { v.title.clone() },
             "localNetwork": lan,
             "state": v.state,
-            "stateMeans": if v.server == Some(vw_preview::PreviewServerState::Stopped) {
-                "server stopped".to_owned()
-            } else { unavailable.unwrap_or_else(|| match v.state {
+            "stateMeans": unavailable.unwrap_or_else(|| match v.state {
                 vw_preview::PreviewState::Live => "shown to the user now",
                 vw_preview::PreviewState::Hidden => "running, not visible",
                 vw_preview::PreviewState::Suspended => "paused to save memory",
                 vw_preview::PreviewState::Stopped => "server stopped",
-            }.to_owned()) },
+            }.to_owned()),
             "server": v.server,
             "loading": v.loading,
             "width": v.width,
@@ -127,10 +125,14 @@ fn text(error: &CoreError) -> String {
 }
 
 fn open_note(view: &PreviewView, unavailable: Option<String>) -> String {
-    if view.server == Some(vw_preview::PreviewServerState::Stopped) {
+    if let Some(reason) = unavailable {
+        if view.server == Some(vw_preview::PreviewServerState::Stopped) {
+            format!("screenshot unavailable: {reason}")
+        } else {
+            format!("loaded, but screenshot unavailable: {reason}")
+        }
+    } else if view.server == Some(vw_preview::PreviewServerState::Stopped) {
         "The App preview remains stopped. Start its server if needed, then Reload.".to_owned()
-    } else if let Some(reason) = unavailable {
-        format!("loaded, but screenshot unavailable: {reason}")
     } else if view.loading {
         "still loading after 8 s; take a screenshot to see where it is".to_owned()
     } else {
@@ -193,12 +195,12 @@ async fn list(
         "leasedUnavailable": leased_unavailable,
         "leasedPorts": ports.leased,
         "portsInUse": busy,
-        "note": if hub.service.view(session_id).is_some_and(|view| view.server == Some(vw_preview::PreviewServerState::Stopped)) {
-            "The open App preview remains stopped; there is no page to show. Start its server if needed, then Reload."
+        "note": if let Some(view) = hub.service.view(session_id).filter(|view| view.server == Some(vw_preview::PreviewServerState::Stopped)) {
+            open_note(&view, hub.service.screenshot_unavailable_reason(session_id))
         } else { "the user sees the preview in Vibe Work's side panel; preview_open shows a page there. canOpen: \
                  this session's servers listening now. leasedFree: unassigned ports where binding succeeds; \
                  start a server with process_start first. leasedUnavailable: a pending/live process reserves \
-                 the port or the OS refuses binding, even though no listener is visible yet." },
+                 the port or the OS refuses binding, even though no listener is visible yet.".to_owned() },
     }))
 }
 
@@ -232,28 +234,28 @@ async fn open(
             .await
             .map_err(|e| text(&core_error(&e)))?;
         view = hub.service.view(session_id).unwrap_or(view);
-        // An explicit device width also asks the window to show this session's app preview. The window checks
-        // that it is the selected session; the tool never changes sessions or brings the OS window forward.
-        let mut changes = hub.service.visibility_changes();
-        shared.emit(CoreEvent::PreviewShowRequested {
-            session_id: session_id.to_owned(),
-        });
-        let deadline = Instant::now() + Duration::from_secs(2);
-        while hub
-            .service
-            .screenshot_unavailable_reason(session_id)
-            .is_some()
+    }
+    // Opening asks the window to show this session's App preview. The window checks
+    // that it is the selected session; the tool never changes sessions or brings the OS window forward.
+    let mut changes = hub.service.visibility_changes();
+    shared.emit(CoreEvent::PreviewShowRequested {
+        session_id: session_id.to_owned(),
+    });
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while hub
+        .service
+        .screenshot_unavailable_reason(session_id)
+        .is_some()
+    {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero()
+            || tokio::time::timeout(remaining, changes.changed())
+                .await
+                .is_err()
         {
-            let remaining = deadline.saturating_duration_since(Instant::now());
-            if remaining.is_zero()
-                || tokio::time::timeout(remaining, changes.changed())
-                    .await
-                    .is_err()
-            {
-                break;
-            }
-            view = hub.service.view(session_id).unwrap_or(view);
+            break;
         }
+        view = hub.service.view(session_id).unwrap_or(view);
     }
     view = hub.service.view(session_id).unwrap_or(view);
     let unavailable = hub.service.screenshot_unavailable_reason(session_id);
@@ -301,7 +303,7 @@ pub(crate) async fn call(
                         .into(),
                 );
             }
-            if hub.browser.on_local_network(session_id) {
+            if hub.browser.local_network_blocked(session_id) {
                 return Err(vw_browser::LOCAL_NETWORK.into());
             }
             let view = hub.service.view(session_id);
@@ -359,10 +361,22 @@ mod tests {
     }
 
     #[test]
+    fn window_visibility_precedes_a_retained_stopped_server_marker() {
+        let mut stopped = view();
+        stopped.state = PreviewState::Stopped;
+        stopped.server = Some(PreviewServerState::Stopped);
+        let reason = "The Vibe Work window is minimized or hidden, so App preview cannot be captured. Ask the user to show the window, or check App preview errors with preview_console.";
+        assert_eq!(
+            open_note(&stopped, Some(reason.to_owned())),
+            format!("screenshot unavailable: {reason}")
+        );
+    }
+
+    #[test]
     fn open_answer_names_away_reasons_without_width_advice() {
         for reason in [
-            "The Vibe Work window is minimized or hidden, so App preview cannot be captured. Ask the user to show it, or check without a screenshot (browser_read text).",
-            "The user is viewing another session, so App preview cannot be captured. Ask the user to open this session, or check without a screenshot (browser_read text).",
+            "The Vibe Work window is minimized or hidden, so App preview cannot be captured. Ask the user to show it, or check App preview errors with preview_console.",
+            "The user is viewing another session, so App preview cannot be captured. Ask the user to open this session, or check App preview errors with preview_console.",
         ] {
             let answer = open_note(&view(), Some(reason.to_owned()));
             assert_eq!(

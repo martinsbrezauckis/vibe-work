@@ -123,7 +123,7 @@ export interface UpdatesClient {
 /** What the UI asks the host to show as an OS notification (`vw_host::NotifyRequest`). */
 export interface OsNotification {
   sessionId: string;
-  /** In-app history entry to select on activation; omitted by older callers. */
+  /** In-app history entry to mark read on activation; omitted by older callers. */
   notificationId?: number;
   title: string;
   body: string;
@@ -160,6 +160,8 @@ export type TerminalChunkHandler = (chunk: Uint8Array | string, done: () => void
 
 /** The core as the UI sees it. */
 export interface CoreClient {
+  /** Native desktop lifecycle; absent in browser development and older test clients. */
+  desktop?: DesktopClient;
   /** Which transport this is (shown in diagnostics and tests). */
   readonly kind: "tauri" | "debug-api" | "fake";
   /**
@@ -223,6 +225,8 @@ export interface CoreClient {
   openMailLink(url: string): Promise<void>;
   /** Shows an OS notification; a click arrives through `onHostEvent`. Unsupported in dev mode. */
   notifyOs(notification: OsNotification): Promise<void>;
+  /** Withdraws the app's OS notification when its ask no longer needs an answer. */
+  dismissOs(notificationId: number): Promise<void>;
   /**
    * Brings an agent's waiting confirmation window (ask `askId`) to the front; false when none is open. It never
    * answers. Absent in browser dev mode.
@@ -314,4 +318,12 @@ export interface CliSharingView {
   cliVersion: string | null;
   bundledVersion: string | null;
   versionMismatch: boolean;
+}
+
+/** Native lifecycle wiring (mirrors vw_host::tray::TrayView). */
+export interface DesktopClient {
+  settings(enabled?: boolean): Promise<{ enabled: boolean; available: boolean }>;
+  quit(): Promise<void>;
+  /** Receives actual closes and synchronizes the user's notification preference. */
+  subscribe(onClose: () => void, notifications: boolean): Promise<() => void>;
 }

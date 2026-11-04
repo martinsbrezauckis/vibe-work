@@ -2,14 +2,35 @@
 //! Called by reads and receipts; all output passes policy, bounding, prompt guard and current-mount checks.
 use crate::{
     Browser, ReadOptions, guard,
-    model::PageModel,
+    model::{PageModel, RefItem},
     observe::{self, PAGE_CHARS},
     refs::PAGE_CLOSED,
     scripts,
 };
 const FIND_TEXT: usize = 20_000;
+
+/// Caps an already priority-ordered list, reserving half (rounded up) for available main refs.
+/// Full observations and focused output both use this, before any smaller byte-budget cap.
+pub(crate) fn reserve_main_refs(refs: &mut Vec<RefItem>, max_refs: usize) {
+    let mut reserved = max_refs
+        .div_ceil(2)
+        .min(refs.iter().filter(|item| item.frame != Some(true)).count());
+    let mut remaining = max_refs;
+    refs.retain(|item| {
+        let main = item.frame != Some(true);
+        if remaining == 0 || (!main && remaining <= reserved) {
+            return false;
+        }
+        remaining -= 1;
+        if main {
+            reserved = reserved.saturating_sub(1);
+        }
+        true
+    });
+}
+
 impl Browser {
-    /// Observes the page and records its refs as the session's latest.
+    /// Observes the page, retaining earlier refs in this document and replacing the receipt baseline.
     ///
     /// # Errors
     /// A plain-text reason (nothing open, the page did not answer).
@@ -80,13 +101,14 @@ impl Browser {
             .service
             .page_mount(session_id)
             .ok_or_else(|| PAGE_CLOSED.to_owned())?;
+        let offset = options.text_page.unwrap_or(0).saturating_mul(PAGE_CHARS);
         let (max_refs, max_text, offset) = if options.find.is_some() || node.is_some() {
-            (crate::model::MAX_REFS, FIND_TEXT, 0)
+            (crate::model::MAX_REFS, FIND_TEXT, offset)
         } else {
             (
                 options.max_refs.clamp(1, crate::model::MAX_REFS),
                 PAGE_CHARS,
-                options.text_page.unwrap_or(0) * PAGE_CHARS,
+                offset,
             )
         };
         let script = scripts::observe_focused(
@@ -119,8 +141,14 @@ impl Browser {
         if self.service.page_mount(session_id).as_ref() != Some(&mount) {
             return Err(PAGE_CLOSED.to_owned());
         }
+        // Keep priority order (including page-covering consent dialogs), but reserve half the
+        // slots for main-document candidates. Select before bound's absolute 200-ref cap too.
+        model
+            .refs
+            .sort_by_key(|item| std::cmp::Reverse(item.priority));
+        model.refs.retain(|item| crate::model::is_ref(&item.id));
+        reserve_main_refs(&mut model.refs, max_refs);
         model.bound(max_text);
-        model.refs.truncate(max_refs);
         let verdict = observe::verdict(&model);
         let mut seen = observe::seen(&model, mount);
         // which document this observation saw (its load count), for the fill's "current observation". A

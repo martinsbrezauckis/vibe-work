@@ -4,8 +4,19 @@ import type { ChromePicker } from "../../state/composerStore";
 import type { App } from "../shell/AppContext";
 
 type Source = "window" | "debug-api";
-export async function openChromeTabs(app: App, sessionId: string, origin: Source): Promise<void> {
-  const pending: ChromePicker = { sessionId, rows: [], loading: true, error: null };
+export async function openChromeTabs(
+  app: App,
+  sessionId: string,
+  origin: Source,
+  browser: "Chrome" | "Edge" | "Firefox" = "Chrome",
+): Promise<void> {
+  const pending: ChromePicker = {
+    sessionId,
+    rows: [],
+    loading: true,
+    error: null,
+    ...(browser !== "Chrome" ? { browser } : {}),
+  };
   app.composer.setChromePicker(pending);
   try {
     const result = await app.core?.run(
@@ -17,13 +28,22 @@ export async function openChromeTabs(app: App, sessionId: string, origin: Source
       throw new Error(
         "Chrome did not answer. Check that Chrome is open and paired, then try again.",
       );
-    app.composer.setChromePicker({ ...pending, loading: false, rows: result.tabs });
+    app.composer.setChromePicker({
+      ...pending,
+      loading: false,
+      rows: result.tabs.filter((tab) => {
+        const view = app.core?.store.get().chromeControl;
+        if (browser !== "Chrome") return tab.profileId.startsWith(`${browser.toLowerCase()}:`);
+        if (view?.firefox !== undefined && tab.profileId.startsWith("firefox:")) return false;
+        return view?.edge === undefined || !tab.profileId.startsWith("edge:");
+      }),
+    });
   } catch {
     if (app.composer.store.get().chromePicker === pending)
       app.composer.setChromePicker({
         ...pending,
         loading: false,
-        error: "Chrome did not answer. Check that Chrome is open and paired, then try again.",
+        error: `${browser} did not answer. Check that ${browser} is open and paired, then try again.`,
       });
   }
 }
@@ -35,6 +55,7 @@ export async function pickChromeTab(
 ): Promise<void> {
   const current = app.composer.store.get().chromePicker;
   if (current?.sessionId !== sessionId || current.loading) return;
+  const browser = current.browser ?? "Chrome";
   const pending = { ...current, loading: true, error: null };
   app.composer.setChromePicker(pending);
   try {
@@ -50,7 +71,7 @@ export async function pickChromeTab(
     const picked = result.selection;
     const actions = origin === "window" ? app.composer.actions : app.composer.debugApi;
     actions?.insertContext(sessionId, {
-      label: picked.title.slice(0, 60) || "Chrome tab",
+      label: picked.title.slice(0, 60) || `${browser} tab`,
       source: "browser",
       text: `${picked.url}\n${picked.text}`,
       modelText: picked.modelText,
@@ -61,7 +82,7 @@ export async function pickChromeTab(
       app.composer.setChromePicker({
         ...pending,
         loading: false,
-        error: "Chrome did not answer. Check that Chrome is open and paired, then try again.",
+        error: `${browser} did not answer. Check that ${browser} is open and paired, then try again.`,
       });
   }
 }

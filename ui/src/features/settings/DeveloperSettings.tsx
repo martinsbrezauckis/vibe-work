@@ -1,6 +1,6 @@
 /**
  * Settings › Developer: the Debug API switch and its token file (moved from the old Settings dialog), and the
- * Chrome Control switch for local-network pages (shown when this build has Chrome Control).
+ * shared switch for agent access to local-network pages.
  * Depends on: AppContext, hooks, protocol/client types, useChromeControl. Called by: SettingsPage.
  * Invariants: the switch calls the host (Tauri command) and the indicator follows the core's flag event, never the
  * click; in browser dev mode the switch is disabled with the reason; the token never crosses the bridge, only the
@@ -13,7 +13,6 @@ import { type ReactElement, useEffect, useState } from "react";
 import { toCallError } from "../../protocol/client/types";
 import { useApp } from "../shell/AppContext";
 import { useCoreState } from "../shell/hooks";
-import { chromeAvailable } from "./chrome/chromeRows";
 import { useChromeControl } from "./chrome/useChromeControl";
 
 /** The Developer section. */
@@ -91,15 +90,15 @@ export function DeveloperSettings(): ReactElement {
           onClick={flip}
         />
       </div>
-      {chromeAvailable(chrome.view) && (
+      {chrome.view !== null && (
         <div className="check" data-setting="chrome-local-network">
           <span>
-            Local network pages for the agent in Chrome
+            Local network pages for the agent
             {notApplied && <span className="d">Not applied in Chrome yet</span>}
           </span>
           <Switch
             data-testid="settings.developer-settings-local-network"
-            aria-label="Local network pages for the agent in Chrome"
+            aria-label="Local network pages for the agent"
             aria-checked={localNetwork}
             disabled={chrome.busy !== null}
             onClick={() => {

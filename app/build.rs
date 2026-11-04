@@ -11,6 +11,9 @@ mod release_pin;
 /// The Tauri commands the main window may call. Keep in sync with `src/commands.rs`.
 const BRIDGE_COMMANDS: &[&str] = &[
     "core_execute",
+    "desktop_settings",
+    "desktop_subscribe",
+    "app_quit",
     "core_subscribe",
     "ui_control_next",
     "ui_control_reply",
@@ -28,6 +31,7 @@ const BRIDGE_COMMANDS: &[&str] = &[
     "open_link",
     "open_mail_link",
     "notify_session",
+    "dismiss_notification",
     "show_prompt",
     "terminal_attach",
     "terminal_ack",

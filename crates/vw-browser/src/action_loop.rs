@@ -32,7 +32,7 @@ impl Browser {
             return Err(error);
         }
         if by == Actor::Agent
-            && self.on_local_network(session_id)
+            && self.local_network_blocked(session_id)
             && !matches!(action, Action::Navigate { .. })
         {
             let error = refused(LOCAL_NETWORK);

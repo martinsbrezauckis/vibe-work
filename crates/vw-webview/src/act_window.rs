@@ -378,6 +378,7 @@ pub(crate) fn install(view: &webkit2gtk::WebView, label: String) {
     });
     view.connect_enter_fullscreen(move |view| {
         if !agent_acting(&label) {
+            crate::linux_layout::page_full_screen(view, true);
             return false;
         }
         refused(&label, ActRefusal::FullScreen);
@@ -393,6 +394,10 @@ pub(crate) fn install(view: &webkit2gtk::WebView, label: String) {
             );
         });
         true
+    });
+    view.connect_leave_fullscreen(|view| {
+        crate::linux_layout::page_full_screen(view, false);
+        false
     });
 }
 

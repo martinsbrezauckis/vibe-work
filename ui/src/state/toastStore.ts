@@ -22,7 +22,7 @@ export interface Toast extends ToastSpec {
   id: number;
   /** Local receipt time, kept with the complete text for the app run. */
   createdAt: number;
-  /** Read when the retained panel is opened, including notices received while it is open. */
+  /** Read on activation or when the retained panel is opened, including notices received while it is open. */
   read: boolean;
 }
 
@@ -48,8 +48,12 @@ export function createToasts() {
   const tellDismissed = (ids: readonly number[]): void => {
     if (ids.length > 0) for (const listener of dismissedListeners) listener(ids);
   };
-  const markRead = () => {
-    history.set((list) => list.map((notice) => (notice.read ? notice : { ...notice, read: true })));
+  const markRead = (id?: number) => {
+    history.set((list) =>
+      list.map((notice) =>
+        notice.read || (id !== undefined && notice.id !== id) ? notice : { ...notice, read: true },
+      ),
+    );
   };
   const retain = (notice: Toast): void => {
     if (isBellKind(notice.bellKind))
@@ -96,9 +100,13 @@ export function createToasts() {
         ),
       );
     },
+    /** Marks the activated notice read without opening the bell or reading unrelated notices. */
+    markRead(id: number): void {
+      markRead(id);
+    },
     /** Opens the full notifications panel, optionally at one retained notification. */
     open,
-    /** Opens the most recent notification for a session after OS activation. */
+    /** Opens the latest retained notice when its chat cannot be opened. */
     openSession(sessionId: string): void {
       open([...history.get()].reverse().find((notice) => notice.sessionId === sessionId)?.id);
     },

@@ -262,9 +262,18 @@ mod tests {
         }
         #[cfg(windows)]
         {
-            std::os::windows::fs::symlink_file("docs/note.txt", root.join("chat/report.txt"))
-                .unwrap();
-            std::os::windows::fs::symlink_dir("docs", root.join("chat/linked-docs")).unwrap();
+            use crate::read_exclusions::tests::test_link_created;
+            let test = "browser_upload::tests::upload_refuses_in_folder_links_in_every_component";
+            if !test_link_created(
+                std::os::windows::fs::symlink_file("docs/note.txt", root.join("chat/report.txt")),
+                test,
+            ) || !test_link_created(
+                std::os::windows::fs::symlink_dir("docs", root.join("chat/linked-docs")),
+                test,
+            ) {
+                std::fs::remove_dir_all(root).unwrap();
+                return;
+            }
         }
         for path in ["report.txt", "linked-docs/note.txt"] {
             let error = read_all(&[root.join("chat")], &[path.to_owned()])

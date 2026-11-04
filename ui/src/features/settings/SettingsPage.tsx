@@ -233,9 +233,12 @@ export function SettingsPage(): ReactElement {
     offered[0] ?? { id: "general", label: "General" };
   const searching = view.query.trim() !== "";
   const chrome = useCoreState((s) => s.chromeControl);
-  const results = searchSettings(view.query, chromeAvailable(chrome)).filter((r) =>
-    offered.some((c) => c.id === r.category),
-  );
+  const results = searchSettings(
+    view.query,
+    chromeAvailable(chrome),
+    chrome?.edge !== undefined,
+    chrome?.firefox !== undefined,
+  ).filter((r) => offered.some((c) => c.id === r.category));
   return (
     <div className="settings-page ui-body" role="region" aria-label="Settings" ref={root}>
       <div className="set-body">

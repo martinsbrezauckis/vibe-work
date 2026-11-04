@@ -1,18 +1,82 @@
 //! App-owned Chrome connection. The chat access mode owns permissions.
 //! Used by agent tools and Settings; pairing is independent of action authority.
+mod addon;
+pub(crate) mod agent_browser;
+pub(crate) mod approval;
+#[cfg(all(test, feature = "your-edge"))]
+mod approval_tests;
+mod availability;
 pub(crate) mod batch;
+mod browser;
+mod capabilities;
+#[cfg(test)]
+mod capability_tests;
 pub(crate) mod check;
 pub(crate) mod commands;
 mod content;
+#[cfg(test)]
+#[cfg(feature = "your-edge")]
+mod edge_agent_tests;
+#[cfg(test)]
+#[cfg(feature = "your-edge")]
+mod edge_lifecycle_tests;
+mod edge_policy;
+mod edge_state;
+mod enroll;
+mod enroll_browser;
 mod escalation;
+mod extension_install;
+mod extension_registry;
+mod firefox_commands;
 pub(crate) mod gateway;
+mod helper_refresh;
+#[cfg(test)]
+mod live_tests;
 pub(crate) mod login;
 mod mapping;
 mod network;
+#[cfg(test)]
+mod observation_output_tests;
+mod observation_support;
+#[cfg(test)]
+mod observation_support_tests;
+#[cfg(test)]
+mod observation_tests;
+mod output;
+mod output_batch;
+mod output_cache;
+mod output_fragment;
+#[cfg(test)]
+mod output_guard_tests;
+mod output_receipt;
+mod output_status;
+#[cfg(test)]
+mod output_tests;
+#[cfg(test)]
+mod output_walk_tests;
 mod owner;
+mod person_stop;
+#[cfg(test)]
+mod person_stop_tests;
 mod pipe;
+mod probe;
+#[cfg(test)]
+mod profile_alias_tests;
+mod profile_ids;
+mod receipt;
+#[cfg(test)]
+mod receipt_tests;
+mod reconnect;
+#[cfg(all(test, feature = "your-edge"))]
+mod reconnect_tests;
+#[cfg(test)]
+mod registry_native_tests;
 mod reopen;
+#[cfg(test)]
+mod security_tests;
 mod selection;
+#[cfg(all(test, feature = "your-edge"))]
+mod session_routing_tests;
 pub(crate) mod setup;
 mod store;
 mod tabs;
@@ -21,7 +85,10 @@ pub use tabs::ChromeTab;
 mod switch_order_tests;
 #[cfg(test)]
 mod tab_pick_tests;
+#[cfg(test)]
+pub(crate) mod test_support;
 mod work;
+pub use addon::{AddonState, AddonView};
 pub use commands::{ChromeControlRequest, ChromeControlView};
 pub use selection::ChromeSelection;
 use serde_json::json;
@@ -43,6 +110,7 @@ struct LocalNetwork {
 }
 pub(crate) struct ChromeControl {
     dir: Option<PathBuf>,
+    local_network_dir: PathBuf,
     enabled: AtomicBool,
     /// The person's local-network switch and its change number (see [`LocalNetwork`]).
     local_network: Mutex<LocalNetwork>,
@@ -50,9 +118,26 @@ pub(crate) struct ChromeControl {
     owner: owner::Owner,
     lifecycle: tokio::sync::Mutex<()>,
     generation: AtomicU64,
+    /// A Connect Chrome click may open the unchanged extension's pairing page once.
+    connect_requested: AtomicBool,
+    /// An Edge setup/store click may open Edge's own pairing page once.
+    edge_connect_requested: AtomicBool,
+    /// A profile was connected with this setup at least once (kept in the state folder): a closed Chrome then
+    /// reads "Connected when Chrome is open", never the pairing step again.
+    paired_once: AtomicBool,
+    /// Edge's earlier live connection, separate from Chrome and never permission to act.
+    edge_paired_once: AtomicBool,
+    /// Read-only look at Chrome's preferences (one probe at a time).
+    prober: probe::Prober,
+    /// Edge's own preferences cache; a Chrome result must never answer an Edge probe.
+    edge_prober: probe::Prober,
+    /// After Remove: the Chrome user data folders to check for an extension Chrome did not remove by itself.
+    left_in_chrome: Mutex<Vec<PathBuf>>,
+    removed_external: AtomicBool,
     work: Mutex<work::Work>,
     selections: Mutex<selection::Selections>,
     tasks: Mutex<std::collections::HashMap<String, String>>,
+    output_cache: Mutex<output_cache::Cache>,
     chat_profiles: Mutex<std::collections::HashMap<String, String>>,
     /// Per chat, its session ids that ended because a turn ended (`reopen`): that chat may use them again.
     turn_ended: Mutex<std::collections::HashMap<String, std::collections::VecDeque<String>>>,
@@ -64,8 +149,8 @@ pub(crate) struct ChromeControl {
     local_network_delivery: tokio::sync::Mutex<()>,
     /// A delivery retry is running (one at a time).
     local_network_retry: AtomicBool,
-    /// Chats whose person pressed Stop in Chrome during the current turn: their Chrome calls are refused until it ends.
-    stopped_by_person: Mutex<std::collections::HashSet<String>>,
+    /// Last person Stop per browser and chat, bound to its turn and retained for racing replies.
+    stopped_by_person: Mutex<std::collections::HashMap<String, Vec<person_stop::Stopped>>>,
     /// Tests: holds the next switch delivery right after it read the switch (signals, then waits to be released).
     #[cfg(test)]
     pub(super) hold_after_sampling: Mutex<
@@ -76,12 +161,20 @@ pub(crate) struct ChromeControl {
     >,
 }
 impl ChromeControl {
-    pub(crate) fn new(_vibe_home: &Path, config: ChromeControlConfig) -> Self {
+    pub(crate) fn new(vibe_home: &Path, config: ChromeControlConfig) -> Self {
         let dir = owner::state_dir(&config);
         let enabled = dir.as_deref().is_none_or(store::enabled);
-        let local_network = dir.as_deref().is_some_and(store::local_network);
+        let local_network_dir = dir
+            .clone()
+            .unwrap_or_else(|| vibe_home.join("browser-settings"));
+        let local_network = store::local_network(&local_network_dir);
+        let paired_once = dir.as_deref().is_some_and(store::paired_once);
+        let edge_paired_once = dir
+            .as_deref()
+            .is_some_and(|dir| store::paired_once(&dir.join("edge")));
         Self {
             dir,
+            local_network_dir,
             enabled: AtomicBool::new(enabled),
             local_network: Mutex::new(LocalNetwork {
                 on: local_network,
@@ -91,12 +184,21 @@ impl ChromeControl {
             owner: owner::Owner::default(),
             lifecycle: tokio::sync::Mutex::new(()),
             generation: AtomicU64::new(0),
+            connect_requested: AtomicBool::new(false),
+            edge_connect_requested: AtomicBool::new(false),
+            paired_once: AtomicBool::new(paired_once),
+            edge_paired_once: AtomicBool::new(edge_paired_once),
+            prober: probe::Prober::default(),
+            edge_prober: probe::Prober::default(),
+            left_in_chrome: Mutex::new(Vec::new()),
+            removed_external: AtomicBool::new(false),
             work: Mutex::new(work::Work::default()),
             selections: Mutex::new(selection::Selections::default()),
             tasks: Mutex::new(std::collections::HashMap::new()),
+            output_cache: Mutex::new(output_cache::Cache::default()),
             chat_profiles: Mutex::new(std::collections::HashMap::new()),
             turn_ended: Mutex::new(std::collections::HashMap::new()),
-            stopped_by_person: Mutex::new(std::collections::HashSet::new()),
+            stopped_by_person: Mutex::new(std::collections::HashMap::new()),
             local_network_acked: Mutex::new(None),
             local_network_delivery: tokio::sync::Mutex::new(()),
             local_network_retry: AtomicBool::new(false),
@@ -162,16 +264,33 @@ impl ChromeControl {
             .local_network
             .lock()
             .unwrap_or_else(PoisonError::into_inner);
-        if let Some(dir) = self.dir() {
-            store::save_local_network(dir, on)?;
-        }
+        store::save_local_network(&self.local_network_dir, on)?;
         *state = LocalNetwork {
             on,
             generation: state.generation + 1,
         };
         Ok(())
     }
+    /// A profile is connected now: remembered for the setup's lifetime (`paired_once`).
+    pub(super) fn mark_paired(&self) {
+        if !self.paired_once.swap(true, Ordering::SeqCst)
+            && let Some(dir) = self.dir()
+            && let Err(reason) = store::save_paired_once(dir, true)
+        {
+            tracing::debug!(%reason, "the Chrome pairing record could not be saved");
+        }
+    }
+    /// Chrome holds another owner: the earlier pairing no longer holds.
+    pub(super) fn forget_paired(&self) {
+        if self.paired_once.swap(false, Ordering::SeqCst)
+            && let Some(dir) = self.dir()
+        {
+            let _ = store::save_paired_once(dir, false);
+        }
+    }
     pub(crate) fn reset(&self) {
+        self.connect_requested.store(false, Ordering::SeqCst);
+        self.edge_connect_requested.store(false, Ordering::SeqCst);
         self.generation.fetch_add(1, Ordering::SeqCst);
         self.work
             .lock()
@@ -212,30 +331,46 @@ impl ChromeControl {
                 ids.pop_front();
             }
         }
+        // A racing reply still needs its turn's reason after interruption. A new turn has a different id.
+        // Unbound idle rows keep the existing end-of-turn cleanup behavior.
         self.stopped_by_person
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
-            .remove(chat);
+            .entry(chat.to_owned())
+            .and_modify(|held| held.retain(|stop| stop.turn.is_some()));
         self.end_chat(chat, false);
     }
-    /// The person stopped these chats' sessions in Chrome (owner, from the helper's status): their Chrome work stays
-    /// stopped for the turn, and their turn-ended ids no longer reopen anything.
-    pub(super) fn person_stopped(&self, chats: &[String]) {
-        if chats.is_empty() {
-            return;
-        }
+    /// The person stopped these browser sessions (owner, from the helper's status): each browser stays
+    /// stopped for the turn, and its turn-ended ids no longer reopen anything. Claims one interrupt per turn,
+    /// including when both browsers report Stop together.
+    fn person_stopped(&self, stopped: &[person_stop::Stopped]) -> Vec<person_stop::Stopped> {
+        let mut claimed = Vec::new();
         let mut ended = self
             .turn_ended
             .lock()
             .unwrap_or_else(PoisonError::into_inner);
-        for chat in chats {
-            ended.remove(chat);
-        }
-        drop(ended);
-        self.stopped_by_person
+        let work = self.work.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut held = self
+            .stopped_by_person
             .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .extend(chats.iter().cloned());
+            .unwrap_or_else(PoisonError::into_inner);
+        for stop in stopped {
+            let person_stop::Stopped { chat, browser, .. } = stop;
+            if let Some(ids) = ended.get_mut(chat) {
+                ids.retain(|id| {
+                    work.profile_of(id).is_some_and(|profile| {
+                        agent_browser::Browser::from_profile(profile) != *browser
+                    })
+                });
+            }
+            let browsers = held.entry(chat.clone()).or_default();
+            if !browsers.iter().any(|held| held.turn == stop.turn) {
+                claimed.push(stop.clone());
+            }
+            browsers.retain(|held| held.browser != *browser);
+            browsers.push(stop.clone());
+        }
+        claimed
     }
     /// The person's Stop in Vibe Work (`stops::stopped`): the chat's Chrome work ends and its turn-ended
     /// ids no longer reopen anything; only the automatic turn end keeps them.
@@ -246,14 +381,28 @@ impl ChromeControl {
             .remove(chat);
         self.end_chat(chat, false);
     }
-    /// Whether the person stopped this chat's Chrome work in the current turn.
-    pub(super) fn stopped_by_person(&self, chat: &str) -> bool {
+    /// The browser whose session the person stopped in this turn, independent of later requested profiles.
+    pub(super) fn stopped_by_person(
+        &self,
+        chat: &str,
+        browser: agent_browser::Browser,
+        turn: Option<&str>,
+    ) -> bool {
         self.stopped_by_person
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
-            .contains(chat)
+            .get(chat)
+            .is_some_and(|browsers| {
+                browsers
+                    .iter()
+                    .any(|held| held.browser == browser && held.turn.as_deref() == turn)
+            })
     }
     pub(crate) fn end_chat(&self, chat: &str, deleted: bool) {
+        self.output_cache
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clear_chat(chat);
         self.work
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
@@ -318,10 +467,51 @@ pub(crate) fn declarations(config: &ts_rs::Config) -> Vec<String> {
         ChromeTab::decl(config),
         ChromeSetupView::decl(config),
         setup::SetupState::decl(config),
+        browser::BrowserIssue::decl(config),
+        addon::AddonView::decl(config),
+        addon::AddonState::decl(config),
+        addon::AddonAction::decl(config),
     ]
 }
+/// Brings the helper copy Chrome starts up to this app version (see `helper_refresh`), on the blocking pool and
+/// under the setup lock, so Set up and Remove never run beside it. A failure is logged and retried at the next
+/// start or Connect; it never stops the app.
+pub(crate) async fn refresh_helper(shared: &std::sync::Arc<crate::core::Shared>) {
+    let chrome = &shared.chrome_control;
+    let _held = chrome.lifecycle.lock().await;
+    refresh_helper_held(chrome).await;
+}
+
+/// [`refresh_helper`] for a caller that holds the setup lock already.
+async fn refresh_helper_held(chrome: &ChromeControl) {
+    let Some(state) = chrome.dir().map(Path::to_path_buf) else {
+        return;
+    };
+    if !chrome.config.available() {
+        return;
+    }
+    let config = chrome.config.clone();
+    match tokio::task::spawn_blocking(move || helper_refresh::refresh(&config, &state)).await {
+        Ok(Ok(helper_refresh::Refreshed::Replaced)) => {
+            tracing::info!("Chrome Control: the helper Chrome starts was updated to this version");
+        }
+        Ok(Ok(_)) => {}
+        Ok(Err(reason)) => {
+            tracing::warn!(%reason, "Chrome Control: the helper Chrome starts could not be updated yet");
+        }
+        Err(join) => tracing::warn!(%join, "Chrome Control: the helper update task stopped"),
+    }
+}
+
 /// Starts the installed helper without giving startup errors any secret-bearing details.
 pub(crate) async fn start_owner(shared: &std::sync::Arc<crate::core::Shared>) {
+    let chrome = &shared.chrome_control;
+    if chrome.config.available()
+        && let Some(state) = chrome.dir()
+        && let Err(reason) = setup::repair_registrations(&chrome.config, state, None)
+    {
+        tracing::warn!(%reason, "Browser helper registration needs setup");
+    }
     if let Err(reason) = owner::start(shared).await {
         tracing::warn!(%reason, "Chrome Control could not start");
         return;
@@ -437,3 +627,23 @@ mod lifecycle_tests {
 
 #[cfg(test)]
 mod pairing_tests;
+
+#[cfg(test)]
+mod connected_schema_tests;
+
+mod connected_schema;
+
+pub(crate) mod installation;
+
+#[cfg(all(test, feature = "your-edge"))]
+mod browser_addon_tests;
+
+#[cfg(test)]
+mod status_actions_tests;
+
+mod status_actions;
+
+#[cfg(test)]
+mod schema_budget_tests;
+#[cfg(test)]
+mod summary_support_tests;

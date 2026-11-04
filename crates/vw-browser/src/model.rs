@@ -1,6 +1,6 @@
 //! The page model the observe script answers, parsed and bounded again on our side. Everything here is
-//! untrusted page data: the page shares the script's JavaScript world and can change any answer, so every string
-//! and list is capped here whatever the script promised, and refs must have the ref shape.
+//! untrusted page data: isolated readers copy a page-controlled DOM, so every string and list is capped again
+//! here and refs must have the ref shape.
 //!
 //! Depends on: serde, `serde_json`. Called by: `observe`, `driver`, tests.
 //! Invariants: [`parse_answer`] never panics and turns anything malformed into an error text; after
@@ -13,10 +13,11 @@ use serde::{Deserialize, Serialize};
 pub const MAX_ANSWER: usize = 2 * 1024 * 1024;
 /// Refs listed in one observation at most.
 pub const MAX_REFS: usize = 200;
-/// Refs remembered as valid per observation at most.
+/// DOM refs remembered per document at most; also bounds a single observation's presence scan.
 pub const MAX_ALL_REFS: usize = 1000;
 
 fn cap(text: &mut String, max: usize) {
+    text.retain(|c| !crate::text::hidden(c));
     if text.chars().count() > max {
         *text = text.chars().take(max).collect();
     }
@@ -42,13 +43,16 @@ pub fn is_ref(text: &str) -> bool {
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RefItem {
+    /// Observation ordering across frames; retained by the host, never sent to the agent.
+    #[serde(default, skip_serializing)]
+    pub priority: i8,
     /// Short label drawn on the agent screenshot.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
     /// Screenshot-derived region kind: region, text, button or checkbox.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub coordinate_kind: Option<String>,
-    /// Actual observed DOM node identity, held for coordinate validation.
+    /// Actual observed DOM node identity, held for ref and coordinate validation.
     #[serde(default, skip_serializing)]
     pub node: u64,
     /// Frame-local rectangle retained for point validation.
@@ -70,6 +74,9 @@ pub struct RefItem {
     pub role: String,
     /// Its accessible name.
     pub name: String,
+    /// Redacted label, placeholder and widget context used only for finding and the prompt guard.
+    #[serde(default, skip_serializing)]
+    pub search_text: String,
     /// Its tag.
     #[serde(default)]
     pub tag: String,
@@ -164,10 +171,39 @@ pub struct Scroll {
     pub viewport: i64,
 }
 
+/// A parent-measured covering frame's rendered buttons and links, independent of a find query.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FrameChoices {
+    /// Verified document origin; page-controlled strings remain untrusted.
+    pub origin: String,
+    /// Named choices in DOM order, including below-fold controls but excluding hidden ones.
+    pub choices: Vec<RefItem>,
+    /// Number found before the bounded inventory was shortened.
+    pub total: u32,
+    /// The DOM scan and inventory both completed.
+    pub complete: bool,
+}
+
 /// What the observe script answers.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PageModel {
+    /// Per-document choice scan before query/ref limits; consumed by the native frame merger.
+    #[serde(default, skip_serializing)]
+    pub choice_refs: Vec<RefItem>,
+    /// Rendered buttons/links found before the choice inventory cap.
+    #[serde(default, skip_serializing)]
+    pub choice_count: u32,
+    /// Parent-measured covering frames; native merging discards any child-supplied inventory.
+    #[serde(default)]
+    pub covering_frames: Vec<FrameChoices>,
+    /// Document nonce, never exposed as page content. Also works for an empty focused read.
+    #[serde(default, skip_serializing)]
+    pub document: String,
+    /// Verified documents that answered this read, including frames with no matching controls.
+    #[serde(skip)]
+    pub documents: Vec<crate::frames::FrameRef>,
     /// Main viewport size in CSS pixels.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub viewport: Option<(u32, u32)>,
@@ -186,7 +222,7 @@ pub struct PageModel {
     /// Interactive elements (at most the requested number).
     #[serde(default)]
     pub refs: Vec<RefItem>,
-    /// Every ref of the page (valid for actions).
+    /// Bounded presence scan; only observed refs with metadata authorize actions.
     #[serde(default)]
     pub all_refs: Vec<String>,
     /// How many interactive elements the page has.
@@ -225,6 +261,12 @@ pub struct PageModel {
 }
 
 impl PageModel {
+    /// All observed controls, including choices listed outside the ordinary ref budget.
+    pub(crate) fn observed_refs(&self) -> impl Iterator<Item = &RefItem> {
+        self.refs
+            .iter()
+            .chain(self.covering_frames.iter().flat_map(|f| &f.choices))
+    }
     /// The page URL safe to display, falling back to the original for older observations.
     #[must_use]
     pub fn displayed_url(&self) -> &str {
@@ -233,6 +275,7 @@ impl PageModel {
 
     /// Applies every cap (`max_text` = the requested text window).
     pub fn bound(&mut self, max_text: usize) {
+        cap(&mut self.document, 80);
         cap(&mut self.url, 2000);
         cap_opt(&mut self.display_url, 2000);
         cap(&mut self.title, 300);
@@ -241,9 +284,23 @@ impl PageModel {
         cap(&mut self.hidden_text, 3000);
         self.refs.retain(|r| is_ref(&r.id));
         self.refs.truncate(MAX_REFS);
-        for r in &mut self.refs {
+        self.choice_refs.retain(|r| is_ref(&r.id));
+        self.choice_refs.truncate(MAX_REFS);
+        for frame in &mut self.covering_frames {
+            cap(&mut frame.origin, 300);
+            frame.choices.retain(|r| is_ref(&r.id));
+            frame.choices.truncate(MAX_REFS);
+            frame.complete &= frame.choices.len() == frame.total as usize;
+        }
+        for r in self
+            .refs
+            .iter_mut()
+            .chain(&mut self.choice_refs)
+            .chain(self.covering_frames.iter_mut().flat_map(|f| &mut f.choices))
+        {
             cap(&mut r.role, 30);
             cap(&mut r.name, 160);
+            cap(&mut r.search_text, 600);
             cap(&mut r.tag, 20);
             cap_opt(&mut r.value, 300);
             cap_opt(&mut r.redacted, 20);

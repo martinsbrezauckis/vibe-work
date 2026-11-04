@@ -31,6 +31,8 @@ export function pickOption(question: Question, picked: Picked, label: string): P
  * keyboard or accessibility press) is never a selection.
  */
 function selectingText(event: MouseEvent<HTMLElement>): boolean {
+  // A native control click is intentional even if the webview retains an earlier text selection.
+  if (event.target instanceof HTMLInputElement) return false;
   if (event.detail === 0) return false;
   const selection = window.getSelection();
   if (selection === null || selection.isCollapsed) return false;

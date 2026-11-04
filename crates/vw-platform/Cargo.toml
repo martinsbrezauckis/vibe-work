@@ -22,6 +22,11 @@ unwrap_used = "deny"
 expect_used = "deny"
 
 [features]
+# Optional native input markers; renderers and their tests compile only with this switch.
+click-marker = []
+# Native system proxy/PAC discovery for the opt-in guard transports.
+proxy-resolver = ["dep:libloading", "windows/Win32_Networking_WinHttp", "dep:core-foundation-sys"]
+video = ["dep:gstreamer", "dep:gstreamer-app", "dep:gstreamer-video", "windows/Win32_Media_MediaFoundation", "windows/Win32_System_Com_StructuredStorage", "windows/Win32_System_Variant", "dep:objc2-av-foundation", "dep:objc2-core-foundation", "dep:objc2-core-media", "dep:objc2-core-graphics"]
 # Native webview calls for the preview engine (`webview.rs`); only vw-webview turns it on.
 webview = [
     "dep:webview2-com",
@@ -36,6 +41,7 @@ webview = [
 ]
 
 [dependencies]
+libloading = { version = "0.7.4", optional = true }
 # Handle-relative cleanup of immutable Vibe package copies; never follow links while changing modes.
 cap-std = "4.0.3"
 cap-fs-ext = "4.0.3"
@@ -43,7 +49,7 @@ cap-fs-ext = "4.0.3"
 keepawake = { version = "=0.6.1", default-features = false }
 thiserror = "2"
 arboard = { version = "=3.6.1", default-features = false, features = ["wayland-data-control"] }
-tokio = { version = "1.53", features = ["sync", "time", "rt"] }
+tokio = { version = "1.53", features = ["sync", "time", "rt", "macros"] }
 zeroize = "1.8"
 # Link checks before opening the browser; same major version as vw-host.
 url = "2"
@@ -67,6 +73,12 @@ dispatch2 = "0.3"
 objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSGraphics", "NSRunningApplication"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
+core-foundation-sys = { version = "0.8", optional = true }
+objc2-core-foundation = { version = "0.3", optional = true, default-features = false, features = ["std", "CFCGTypes"] }
+objc2-av-foundation = { version = "0.3", optional = true, default-features = false, features = ["std", "AVAsset", "AVAssetTrack", "AVAssetImageGenerator", "AVMediaFormat", "objc2-core-media", "objc2-core-graphics", "objc2-core-foundation"] }
+objc2-core-media = { version = "0.3", optional = true, default-features = false, features = ["std", "CMTime", "CMFormatDescription"] }
+objc2-core-graphics = { version = "0.3", optional = true, default-features = false, features = ["std", "CGAffineTransform", "CGBitmapContext", "CGColorSpace", "CGContext", "CGImage", "CGGeometry"] }
+
 # `WKWebView` snapshots (webview.rs, feature `webview`), the confirmation window (`confirm_window/mac.rs`) and the
 # services provider of "Send to Vibe Work" (`send_to_mac.rs`). The versions wry 0.57 already uses (lockfile).
 objc2 = "0.6"
@@ -90,15 +102,19 @@ base64 = { version = "0.22", optional = true }
 # Owned-tree cleanup (`remove_tree/windows.rs`): handle disposition preserves shared read-only attributes.
 # The Git Bash wrapper's kill-on-close job (`kill_job.rs`): job objects, the command line, the standard handles.
 # The person's pointer watch (`native_click/person/windows.rs`): the low-level mouse hook, button state.
-windows = { version = "0.62", features = ["Win32_Globalization", "Win32_Foundation", "Win32_System_Threading", "Win32_Graphics_Gdi", "Win32_Storage_Xps", "Win32_UI_WindowsAndMessaging", "Win32_UI_ColorSystem", "Win32_Security", "Win32_Security_Authorization", "Win32_Storage_FileSystem", "Win32_UI_Shell", "Win32_System_Com", "Win32_UI_Controls", "Win32_System_JobObjects", "Win32_System_Environment", "Win32_System_Console", "Win32_UI_Input_KeyboardAndMouse", "Win32_System_LibraryLoader"] }
+# Toast objects and subscriptions (`notify/windows.rs`) stay alive for banner clicks, then are removed.
+windows = { version = "0.62", features = ["Data_Xml_Dom", "Foundation", "UI_Notifications", "Win32_Globalization", "Win32_Foundation", "Win32_System_Threading", "Win32_Graphics_Gdi", "Win32_Storage_Xps", "Win32_UI_WindowsAndMessaging", "Win32_UI_ColorSystem", "Win32_UI_HiDpi", "Win32_Security", "Win32_Security_Authorization", "Win32_Storage_FileSystem", "Win32_UI_Shell", "Win32_System_Com", "Win32_UI_Controls", "Win32_System_JobObjects", "Win32_System_Environment", "Win32_System_Console", "Win32_UI_Input_KeyboardAndMouse", "Win32_System_LibraryLoader"] }
 # The "Send to Vibe Work" Explorer verbs under HKCU (`send_to_windows.rs`) and the WebView2 UserDataFolder policy
 # lookup (webview.rs `user_data_folder_override`); already in the lockfile (0.6.1).
 windows-registry = "0.6"
-# Toasts with an Activated handler that lives as long as the toast (notify.rs `show_toast`): the crate
-# notify-rust uses on Windows, same version (already in the lockfile).
-tauri-winrt-notification = "=0.8.1"
 
 [target.'cfg(target_os = "linux")'.dependencies]
+# Bounded StatusNotifier watcher/host detection; same pure-Rust bus transport as notify-rust.
+zbus = "5.19"
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
+gstreamer = { version = "0.24", optional = true }
+gstreamer-app = { version = "0.24", optional = true }
+gstreamer-video = { version = "0.24", optional = true }
 # gnu_get_libc_version for the update check's glibc reading (`system_version.rs`). Already in the lockfile.
 libc = "0.2"
 # The startup accessibility bus check (`a11y_bus.rs`): libdbus, the library GTK's accessibility bridge registers

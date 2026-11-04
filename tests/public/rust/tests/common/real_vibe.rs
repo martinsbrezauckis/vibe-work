@@ -133,7 +133,7 @@ pub fn supervisor_config(run: &Path, model: &ScriptedModel) -> SupervisorConfig 
     }
     // Match the existing public fixture's budget; no startup or request timeout is extended.
     config.handshake_timeout = std::time::Duration::from_secs(60);
-    config.shutdown_grace = std::time::Duration::from_secs(1);
+    // Keep the production shutdown grace: Python cleanup can exceed one second under load.
     config.backoff = vw_supervisor::Backoff {
         initial: std::time::Duration::from_millis(20),
         factor: 2,
@@ -141,6 +141,16 @@ pub fn supervisor_config(run: &Path, model: &ScriptedModel) -> SupervisorConfig 
         max_attempts: 3,
         stable_after: std::time::Duration::from_secs(60),
     };
+    config
+}
+
+/// A project-backed supervisor with stable app data beside the project, never containing it.
+/// Direct core fixtures use this when installing the product's folder guards.
+pub fn project_config(project: &Path, model: &ScriptedModel) -> SupervisorConfig {
+    let mut name = project.file_name().unwrap().to_os_string();
+    name.push("-app-data");
+    let mut config = supervisor_config(&project.with_file_name(name), model);
+    config.cwd = project.to_path_buf();
     config
 }
 

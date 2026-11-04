@@ -19,14 +19,20 @@ use crate::sessions::Seen;
 
 /// Refs listed by default.
 pub const DEFAULT_REFS: usize = 32;
-/// Characters of visible text per text page (`textPage`).
+/// UTF-16 units of visible text per script text page (`textPage`).
 pub const PAGE_CHARS: usize = 2500;
 /// Characters of the default text preview.
 pub const PREVIEW_CHARS: usize = 800;
 /// Default size of a read's answer, in bytes of JSON.
 pub const READ_BUDGET: usize = 3000;
 /// Largest size a read may ask for (`maxBytes`).
-pub const MAX_BUDGET: usize = 64_000;
+pub const MAX_BUDGET: usize = 4000;
+/// An action receipt's total compact JSON budget.
+pub const ACT_BUDGET: usize = 4000;
+/// Maximum refs requested for a full agent read; focused reads scan more before filtering.
+pub const MAX_OUTPUT_REFS: usize = 32;
+/// Total indented JSON budget, leaving room for three results in a code-mode return.
+pub const PRETTY_BUDGET: usize = 4500;
 /// Smallest size a read may ask for.
 pub const MIN_BUDGET: usize = 1500;
 /// Longest ref string (a name, a value, a link) in an answer.
@@ -68,8 +74,9 @@ pub fn verdict_with(model: &PageModel, extra: &[(String, String)]) -> Verdict {
         ("text".to_owned(), model.text.as_str()),
         ("hiddenText".to_owned(), model.hidden_text.as_str()),
     ];
-    for r in &model.refs {
+    for r in model.observed_refs() {
         sources.push((format!("element {}", r.id), r.name.as_str()));
+        sources.push((format!("label context {}", r.id), r.search_text.as_str()));
         if let Some(value) = &r.value {
             sources.push((format!("value of {}", r.id), value.as_str()));
         }
@@ -86,16 +93,23 @@ pub fn verdict_with(model: &PageModel, extra: &[(String, String)]) -> Verdict {
 /// The refs an action may use after this observation.
 #[must_use]
 pub(crate) fn seen(model: &PageModel, mount: vw_preview::MountId) -> Seen {
-    let mut refs: HashSet<String> = model.all_refs.iter().cloned().collect();
+    // allRefs is only a bounded presence scan, not a list the agent has read with labels/identity.
+    let mut refs = HashSet::new();
     let mut names = HashMap::new();
-    for r in &model.refs {
-        refs.insert(r.id.clone());
+    let mut items = Vec::new();
+    for r in model.observed_refs() {
+        if items.len() >= crate::model::MAX_ALL_REFS || !refs.insert(r.id.clone()) {
+            continue;
+        }
         names.insert(r.id.clone(), (r.role.clone(), r.name.clone()));
+        items.push(r.clone());
     }
     for f in &model.frames {
         refs.insert(f.id.clone());
     }
     let ids: Vec<&str> = model.refs.iter().map(|r| r.id.as_str()).collect();
+    let mut choices = json!({});
+    crate::choices::include(&mut choices, model);
     Seen {
         mount,
         snapshot: hash(&[
@@ -104,9 +118,11 @@ pub(crate) fn seen(model: &PageModel, mount: vw_preview::MountId) -> Seen {
             &ids.join(","),
             &model.text,
             &model.text_offset.to_string(),
+            &choices.to_string(),
         ]),
         refs,
         names,
+        items,
         model: model.clone(),
         loads: None,
     }
@@ -190,6 +206,11 @@ pub fn content(model: &PageModel, preview: bool) -> Value {
         "textPages": pages,
         "refs": capped_refs(&model.refs),
     });
+    if preview && model.text_length > text.encode_utf16().count() as u64 {
+        out["textContinuation"] = json!(
+            "Preview only. browser_read {textPage:0} reads the first text window; increment textPage for later windows."
+        );
+    }
     if !model.frames.is_empty() {
         out["frames"] = json!(model.frames);
     }
@@ -199,6 +220,7 @@ pub fn content(model: &PageModel, preview: bool) -> Value {
     if !model.unread_frames.is_empty() {
         out["unreadFrames"] = json!(model.unread_frames);
     }
+    crate::choices::include(&mut out, model);
     if let Some(viewport) = viewport_for(model, &model.refs) {
         out["viewport"] = viewport;
     }
@@ -245,7 +267,7 @@ fn trim_text(value: &mut Value, minimum: usize) -> Option<usize> {
 
 /// Trims `out["untrustedPageContent"]` (refs from the end, then text) until `out` fits `budget` bytes; records what was
 /// left out and the answer's size (`size`: bytes and approximate tokens, ~4 bytes each).
-pub fn fit(out: &mut Value, budget: usize) {
+pub(crate) fn fit_capture(out: &mut Value, budget: usize) {
     // Room for the `trimmed` and `size` fields added below.
     let target = budget.saturating_sub(260);
     let (mut refs_cut, mut text_cut, mut other_cut) = (0usize, 0usize, 0usize);
@@ -330,6 +352,11 @@ pub fn fit(out: &mut Value, budget: usize) {
     out["size"] = json!({"bytes": bytes, "approxTokens": bytes.div_ceil(4)});
 }
 
+/// Fits the complete read or action result, including metadata, notes and JSON indentation.
+pub fn fit(out: &mut Value, budget: usize) {
+    crate::inline_output::fit(out, budget);
+}
+
 /// A focused read (`find`): only the refs whose role, name or value contains `query` (any case) and the text lines
 /// that contain it, with their counts; the answer fits `budget` bytes.
 #[must_use]
@@ -346,7 +373,12 @@ pub fn found(
     let refs: Vec<&crate::model::RefItem> = model
         .refs
         .iter()
-        .filter(|r| hit(&r.name) || hit(&r.role) || r.value.as_deref().is_some_and(hit))
+        .filter(|r| {
+            hit(&r.name)
+                || hit(&r.role)
+                || hit(&r.search_text)
+                || r.value.as_deref().is_some_and(hit)
+        })
         .collect();
     let lines: Vec<String> = model
         .text
@@ -355,8 +387,8 @@ pub fn found(
         .filter(|l| !l.is_empty() && hit(l))
         .map(|l| chars(l, TEXT_LINE_CHARS))
         .collect();
-    let shown: Vec<crate::model::RefItem> =
-        refs.iter().take(FIND_REFS).map(|r| (*r).clone()).collect();
+    let mut shown: Vec<crate::model::RefItem> = refs.iter().map(|r| (*r).clone()).collect();
+    crate::read::reserve_main_refs(&mut shown, FIND_REFS);
     let mut out = host;
     out["snapshot"] = json!(snapshot);
     out["find"] = json!(chars(query, 100));
@@ -366,7 +398,9 @@ pub fn found(
         "title": chars(&model.title, ITEM_CHARS),
         "refs": capped_refs(&shown),
         "text": lines.into_iter().take(FIND_LINES).collect::<Vec<_>>(),
+        "textPageNumber": model.text_offset / PAGE_CHARS as u64,
     });
+    crate::choices::include(&mut out["untrustedPageContent"], model);
     if let Some(viewport) = viewport_for(model, &shown) {
         out["untrustedPageContent"]["viewport"] = viewport;
     }
@@ -376,6 +410,13 @@ pub fn found(
     }
     out["promptGuard"] = guard_json(verdict);
     out["note"] = json!(UNTRUSTED_NOTE);
+    if refs.len() > FIND_REFS
+        || out["matches"]["textLines"].as_u64().unwrap_or(0) > FIND_LINES as u64
+    {
+        out["note2"] = json!(
+            "Only some matches are listed. At least half the ref slots are reserved for the main document when it has enough candidates. Continue browser_read with a more specific find; for later text combine find with textPage. Keep tab."
+        );
+    }
     fit(&mut out, budget);
     // Diagnose what actually survived the byte budget. Text hits and hidden/disabled refs cannot be clicked;
     // another identical find cannot recover a missing label or traverse an unreadable frame.
@@ -389,13 +430,13 @@ pub fn found(
             "No matching visible, enabled control ref was returned."
         } else if model.truncated {
             "The DOM scan reached its limit; no matching control ref was returned."
-        } else if model.frames.iter().any(|f| f.visible && !f.same_origin) {
-            "No matching control ref was returned; a visible cross-origin frame cannot be read."
+        } else if !model.unread_frames.is_empty() || model.cross_origin_frames > 0 {
+            "No matching control ref was returned; some frames could not be read."
         } else {
             "No matching control ref was returned; text alone cannot be clicked."
         };
         out["nextStep"] = json!(format!(
-            "{reason} Read without find for visible labels, or use browser_capture to inspect the screen. Do not repeat this find unchanged: on an unchanged page it returns this same answer."
+            "{reason} Read without find for visible labels, or use browser_capture to inspect the screen."
         ));
         fit(&mut out, budget);
     }
@@ -417,8 +458,10 @@ pub fn answer(
     // Recounted by `fit` once trimming is done.
     out["refsShown"] = json!(model.refs.len());
     out["refsTotal"] = json!(model.ref_count);
-    if model.truncated {
-        out["note2"] = json!("the page is very large: only part of it was read");
+    if model.truncated || model.ref_count as usize > model.refs.len() {
+        out["note2"] = json!(
+            "Only part of the page's controls is listed. At least half the ref slots are reserved for the main document when it has enough candidates. Continue browser_read with find set to a label or role; it also searches readable frames. Keep the same tab."
+        );
     }
     if model.scroll.height > model.scroll.viewport {
         out["scroll"] = json!(model.scroll);

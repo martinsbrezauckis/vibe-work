@@ -1,0 +1,46 @@
+/* Feedback-specific layout using existing modal, field and control tokens; imported by FeedbackDialog. */
+.modal.feedback-dialog {
+  width: min(560px, calc(100vw - 48px));
+}
+.feedback-dialog section {
+  display: grid;
+  gap: 12px;
+  max-height: 65vh;
+  overflow-y: auto;
+}
+.feedback-dialog .git-field {
+  margin: 0;
+}
+.feedback-dialog textarea {
+  resize: vertical;
+  min-height: 64px;
+  width: 100%;
+}
+.feedback-prose {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.feedback-share {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.feedback-facts {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 6px 16px;
+  font-size: var(--text-12);
+}
+.feedback-facts dt {
+  color: var(--text-3);
+}
+.feedback-facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.feedback-prose,
+.feedback-dialog h4,
+.feedback-facts {
+  margin: 0;
+}

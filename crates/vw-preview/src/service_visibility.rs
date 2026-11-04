@@ -40,9 +40,9 @@ impl PreviewService {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             == Some(false)
         {
-            return Err(PreviewError::ScreenshotHidden(format!(
-                "The Vibe Work window is minimized or hidden, so {label} cannot be captured. Ask the user to show the window, or check without a screenshot (browser_read text)."
-            )));
+            return Err(PreviewError::ScreenshotHidden(
+                visibility::window_closed_text(&label, owner == session_id),
+            ));
         }
         if let Some(reason) = visibility::screenshot_reason(
             report.as_ref().map(|(report, _)| report),

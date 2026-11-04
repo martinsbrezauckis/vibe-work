@@ -2,6 +2,51 @@
 
 All notable changes to Vibe Work. Versions follow [Semantic Versioning](https://semver.org/); dates are UTC.
 
+## 0.1.6 (2026-11-04)
+
+Built for Vibe 3.0.4 on Python 3.14.8. This release adds Your Edge, working in the tray and more network options.
+
+- Your Chrome: Settings > Browser > Your Chrome shows each setup step with the one button it needs, and pairing starts
+  as soon as the extension is in Chrome. On macOS it says where Chrome asks to enable the extension, and each system
+  says how to restart Chrome when that is needed.
+- Settings > Browser is grouped into Vibe Work browser, Your Chrome, Your Edge and All browsers.
+  Tools shows Your Chrome above Connectors.
+- The agent knows when the Vibe Work extension is missing, turned off, not paired or out of date, and offers you the
+  Connect Chrome card to fix it. Settings > Browser shows each browser's extension version and whether it is on.
+- The agent gets stuck less in your browser: a refused action says exactly what to change, scrolling and short waits
+  work as in other browser tools, and pages full of ads or frames still show their fields.
+- With the Vibe Work extension 0.1.4, the agent can also copy and paste in Your Chrome and Your Edge, check a page at
+  phone or tablet size, in dark mode or with touch, answer a page's network requests with test data, and wait for a
+  download to finish.
+- Stop now also stops Your Chrome for the rest of the turn.
+- Removing Your Chrome leaves nothing of Vibe Work behind, and a later setup starts clean.
+- A Temporary chat starts as soon as you send, without choosing a folder, in an empty folder of its own.
+  Vibe Work tries to remove the folder when the chat is deleted. If it cannot, cleanup retries at Quit or startup
+  once no temporary chats remain.
+- In Accept edits, the agent looks at the preview, reads its console and searches your folders without asking each
+  time. Opening, clicking, typing and changes still ask.
+- The preview says why it shows no picture while the window is minimized.
+- Close the window to keep chats working in the tray. Notifications reopen the chat that needs you; Quit ends the app.
+  Settings > General > Keep running in the tray when the window closes turns this off
+  (on macOS: Keep running in the menu bar when the window closes).
+- Your Edge: the agent can work in your own Microsoft Edge, with the same extension, chat windows and permissions
+  as Your Chrome. Set it up in Settings > Browser > Your Edge.
+- The Browser reads pages in a private script world, removes hidden control characters from text sent to the agent,
+  and blocks service workers in embedded frames too. Files opened for preview cannot run scripts.
+- Settings > Developer > Local network pages for the agent also applies to the built-in Browser.
+- Subagents spend less time waiting to discover browser tools when the app is busy.
+- Settings > Network supports HTTP, HTTPS and SOCKS proxies, including sign-in (kept in the vault), addresses that
+  skip the proxy and company certificates.
+- The Browser’s ad and tracker blocker (Off, Balanced, Strict) now works on Windows and macOS too.
+- macOS: Vibe Work now needs macOS 14 Sonoma or later (was 11). On the Mac, previews and prototype pages now check
+  every address a page connects to, also names that point to this computer or your local network, as on Windows
+  and Linux. On macOS 11 to 13, Vibe Work 0.1.2 or later says to update macOS first instead of offering this
+  update.
+- Many smaller fixes.
+- Known limit: while the agent works on a site in Your Chrome or Your Edge, that site's background workers can still
+  open a WebSocket to an address on your local network, as they can when you open the site yourself. Chrome does not
+  let extensions block these connections.
+
 ## 0.1.5 (2026-11-02)
 
 Built for Vibe 3.0.4 on Python 3.14.8. This release adds accessibility settings, session costs and a browser that sees more of the page.

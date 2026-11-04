@@ -192,7 +192,7 @@ impl PreviewService {
             no_peer_connections: false,
         };
         if let Err(error) = self.bounded("mount", self.engine.mount(spec)).await {
-            self.cancel_pending_navigation(session_id);
+            self.revoke_failed_mount(session_id, &label);
             let id = MountId {
                 session_id: session_id.to_owned(),
                 label: label.clone(),
@@ -220,6 +220,37 @@ impl PreviewService {
             mount.state = MountState::Ready;
         }
         Ok(())
+    }
+
+    /// Retires a refused target and its request authority before native close, which may fail.
+    fn revoke_failed_mount(&self, session_id: &str, label: &str) {
+        self.cancel_pending_navigation(session_id);
+        // A refused setup is not a suspended page: layout must never retry its target later.
+        // Revoke callbacks before native cleanup, which can fail or time out.
+        {
+            let mut state = self.inner.lock();
+            state.by_label.remove(label);
+            if let Some(entry) = state.entries.get_mut(session_id) {
+                entry.url = None;
+                entry.title = None;
+                entry.pending_open = None;
+                entry.pending_previous_url = None;
+                entry.pending_requested_admitted = None;
+                entry.pending_admitted_urls.clear();
+                entry.allowed.clear();
+                entry.server_status = None;
+            }
+        }
+        if let Some(guard) = self
+            .inner
+            .guard
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .as_ref()
+        {
+            guard.forget_session(label);
+        }
+        self.inner.changed(session_id);
     }
 
     /// An incomplete setup keeps its identity until close succeeds; it can never be reused.

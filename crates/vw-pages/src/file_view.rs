@@ -24,7 +24,7 @@ use crate::viewer::{Viewer, ViewerView};
 const MAX_FOLDER_SERVERS: usize = 8;
 
 impl PagesService {
-    /// The page server for `root` (any folder), started on first use; scripts on, like the Project tab's default.
+    /// The page server for `root` (any folder), started on first use with file scripts disabled.
     async fn folder_server(&self, root: &Path) -> Result<Arc<PagesServer>, PagesError> {
         let mut servers = self.servers.lock().await;
         if let Some(server) = servers.get(root) {

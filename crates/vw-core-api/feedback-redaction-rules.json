@@ -1,0 +1,125 @@
+{
+  "_comment": "Ordered app-only rules for Rust's regex crate; synthetic expectations live in tests/public/fixtures/feedback-redaction.json. Labels plus length/charset conservatively identify opaque keys; this is best effort, not an entropy guarantee.",
+  "rules": [
+    {
+      "name": "pem",
+      "pattern": "-----BEGIN [A-Z0-9 ]+-----[\\s\\S]*?(?:-----END [A-Z0-9 ]+-----|$)",
+      "flags": "",
+      "replacement": "[redacted key]"
+    },
+    {
+      "name": "quoted-credentials",
+      "pattern": "\\b[A-Za-z0-9_-]*(?:api[_-]?key|access[_-]?token|token|password|secret|authorization|user(?:name)?)[\"']?\\s*[=:]\\s*(?:\"[^\"]*\"|'[^']*')",
+      "flags": "i",
+      "replacement": "[redacted]"
+    },
+    {
+      "name": "credentials",
+      "pattern": "\\b[A-Za-z0-9_-]*(?:api[_-]?key|access[_-]?token|token|password|secret|authorization|user(?:name)?)[\"']?\\s*[=:]\\s*[\"']?[^\\s,\"']+",
+      "flags": "i",
+      "replacement": "[redacted]"
+    },
+    {
+      "name": "labelled-key",
+      "pattern": "\\b(?:[A-Za-z0-9]+[_-])*key[\"']?\\s*[=:]\\s*[\"']?[A-Za-z0-9_+./=-]{20,}[\"']?",
+      "flags": "i",
+      "replacement": "[redacted]"
+    },
+    {
+      "name": "bearer",
+      "pattern": "\\bBearer\\s+[^\\s,]+",
+      "flags": "i",
+      "replacement": "Bearer [redacted]"
+    },
+    {
+      "name": "github",
+      "pattern": "\\b(?:gh[pousr]_|github_pat_)[A-Za-z0-9_]{20,}",
+      "flags": "",
+      "replacement": "[redacted key]"
+    },
+    {
+      "name": "gitlab",
+      "pattern": "\\b(?:glpat-|gldt-|glrt-)[A-Za-z0-9_-]{20,}",
+      "flags": "",
+      "replacement": "[redacted key]"
+    },
+    {
+      "name": "slack",
+      "pattern": "\\bxox[a-z]-[A-Za-z0-9-]{10,}",
+      "flags": "",
+      "replacement": "[redacted key]"
+    },
+    {
+      "name": "ai-and-stripe",
+      "pattern": "\\b(?:sk-ant-|sk-|sk_live_|rk_live_|sk_)[A-Za-z0-9_-]{8,}",
+      "flags": "",
+      "replacement": "[redacted key]"
+    },
+    {
+      "name": "aws",
+      "pattern": "\\b(?:AKIA|ASIA)[A-Z0-9]{16,}",
+      "flags": "",
+      "replacement": "[redacted key]"
+    },
+    {
+      "name": "google",
+      "pattern": "\\bAIza[A-Za-z0-9_-]{35,}",
+      "flags": "",
+      "replacement": "[redacted key]"
+    },
+    {
+      "name": "npm",
+      "pattern": "\\bnpm_[A-Za-z0-9]{36,}",
+      "flags": "",
+      "replacement": "[redacted key]"
+    },
+    {
+      "name": "pypi",
+      "pattern": "\\bpypi-[A-Za-z0-9_-]{16,}",
+      "flags": "",
+      "replacement": "[redacted key]"
+    },
+    {
+      "name": "jwt",
+      "pattern": "\\beyJ[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+",
+      "flags": "",
+      "replacement": "[redacted key]"
+    },
+    {
+      "name": "long-opaque-value",
+      "pattern": "\\b[A-Za-z0-9_+/-]{32,}={0,2}",
+      "flags": "",
+      "replacement": "[redacted key]"
+    },
+    {
+      "name": "url",
+      "pattern": "\\b(?:https?|file)://[^\\s<>\"']+",
+      "flags": "i",
+      "replacement": "[redacted address]"
+    },
+    {
+      "name": "home-path",
+      "pattern": "(?:[A-Za-z]:\\\\Users\\\\|/(?:home|Users)/)[^\\r\\n<>\"]+",
+      "flags": "i",
+      "replacement": "[redacted path]"
+    },
+    {
+      "name": "quoted-path",
+      "pattern": "[\"'](?:[A-Za-z]:\\\\|\\\\\\\\|/|~/)[^\"'\\r\\n]+[\"']",
+      "flags": "",
+      "replacement": "[redacted path]"
+    },
+    {
+      "name": "path",
+      "pattern": "(?:[A-Za-z]:\\\\|\\\\\\\\|/|~/)[^\\s<>\"']+",
+      "flags": "",
+      "replacement": "[redacted path]"
+    },
+    {
+      "name": "email",
+      "pattern": "[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}",
+      "flags": "i",
+      "replacement": "[redacted email]"
+    }
+  ]
+}

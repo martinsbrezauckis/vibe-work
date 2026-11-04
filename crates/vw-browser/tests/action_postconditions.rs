@@ -327,3 +327,43 @@ async fn native_checkbox_postcondition_is_proved_and_failure_reason_is_preserved
     );
     assert_eq!(rig.engine.native_clicks.load(Ordering::Relaxed), 2);
 }
+
+#[tokio::test]
+async fn cross_origin_text_is_proved_before_one_submission() {
+    let rig = Rig::new().await;
+    rig.engine.eval(r#"document.body.innerHTML = '<iframe style="width:600px;height:400px" src="https://frame.example.test/login"></iframe>'; scrollTo(0,0)"#).await;
+    rig.engine
+        .wait_for_frame("https://frame.example.test/login", "#user")
+        .await;
+    rig.engine
+        .eval_in_frame_pages(
+            r"(() => {
+      if (location.hostname !== 'frame.example.test') return;
+      document.querySelector('form').onsubmit = event => {
+        event.preventDefault();
+        window.submissions = (window.submissions || 0) + 1;
+      };
+    })()",
+        )
+        .await;
+    for submit in [false, true] {
+        let answer = act(
+            &rig,
+            "User",
+            json!({"action":"type", "text":"Frame value", "submit":submit}),
+        )
+        .await
+        .unwrap();
+        assert_eq!(answer["ok"], true);
+    }
+    rig.engine
+        .eval_in_frame_pages(
+            r"(() => {
+      if (location.hostname !== 'frame.example.test') return;
+      if (window.submissions !== 1 || document.querySelector('#user').value !== 'Frame value') {
+        throw new Error('frame text must be accepted and submitted exactly once');
+      }
+    })()",
+        )
+        .await;
+}

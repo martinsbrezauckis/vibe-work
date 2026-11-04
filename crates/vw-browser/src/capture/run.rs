@@ -208,7 +208,7 @@ impl Browser {
             self.log_capture(session_id, by, what, &Err(error.clone()));
             return Err(error);
         }
-        if by == Actor::Agent && self.on_local_network(session_id) {
+        if by == Actor::Agent && self.local_network_blocked(session_id) {
             let error = refused(LOCAL_NETWORK);
             self.log_capture(session_id, by, what, &Err(error.clone()));
             return Err(error);
@@ -743,6 +743,6 @@ fn answer(run: &Run, what: What) -> Value {
         out["skipped"] = json!(run.skipped);
     }
     out[OUTCOME_KEY] = json!(outcome(run, what));
-    observe::fit(&mut out, ANSWER_BUDGET);
+    observe::fit_capture(&mut out, ANSWER_BUDGET);
     out
 }

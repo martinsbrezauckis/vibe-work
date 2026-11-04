@@ -7,6 +7,7 @@
  * the UI-control loop only polls while the Debug API is on, or always in browser dev mode where
  * the Debug API is the transport itself.
  */
+import { startDesktopLifecycle } from "../../state/desktopLifecycle";
 import { startRegionNavigation } from "./regionNavigation";
 import { startReplyAnnouncements } from "../transcript/replyAnnouncements";
 import { startAccessibility } from "./accessibilityWiring";
@@ -53,6 +54,7 @@ import { keyReadiness, vaultReadiness } from "../../state/keyReadiness";
 /** Installs the shell's wiring for the lifetime of the component. */
 export function useShellWiring(): void {
   const app = useApp();
+  useEffect(() => startDesktopLifecycle(app), [app]);
   useEffect(() => startAccessibility(app), [app]);
   useEffect(startRegionNavigation, []);
   useEffect(() => {
@@ -162,6 +164,7 @@ export function useShellWiring(): void {
               id: action.id,
               keys: action.keys,
               description: action.label,
+              ...(action.allowInTerminal ? { allowInTerminal: true } : {}),
               run: action.run,
             }),
           ]),

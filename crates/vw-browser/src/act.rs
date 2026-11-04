@@ -303,7 +303,7 @@ fn reference(value: Option<String>, action: &str) -> Result<String, String> {
         Ok(text)
     } else {
         Err(format!(
-            "'{}' is not a ref: use a ref from the latest browser_read (e + 8 hex digits)",
+            "'{}' is not a ref: use a ref from browser_read of this document (e + 8 hex digits)",
             text.chars().take(40).collect::<String>()
         ))
     }

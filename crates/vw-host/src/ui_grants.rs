@@ -112,28 +112,12 @@ fn git(name: &'static str, op: &str, body: &Value) -> Grant {
     Grant::new(name, pin_if(pins, "/request/remote", body, "remote"))
 }
 
-/// Routes that only read the page or its layout (they send no command that could act).
-const PURE_ROUTES: &[&str] = &[
-    "controls",
-    "state",
-    "revision",
-    "settle",
-    "rect",
-    "layout",
-    "trace",
-    "setup",
-    "secrets",
-    "toasts",
-    "notifications",
-    "walkthrough",
-];
-
 /// Whether a request may act, so the window counts as driven by the Debug API while it is pending
-/// ([`crate::UiBridge::driving`]): every request but a pure read (a read-only route, or an explicit `read` / `state`
-/// action). A request without an `action` on a route that has actions counts as acting (its default may act).
+/// ([`crate::UiBridge::driving`]). Only a validated read contract is non-driving; malformed or unknown payloads
+/// conservatively count as acting. The bridge rejects malformed known payloads before queueing them.
 #[must_use]
 pub fn drives(route: &str, body: &Value) -> bool {
-    !(PURE_ROUTES.contains(&route) || matches!(text(body, "action"), Some("read" | "state")))
+    crate::ui_contract::drives(route, body).unwrap_or(true)
 }
 
 /// The grants of one request: `route` is the name without `ui/`, `body` what the caller posted.

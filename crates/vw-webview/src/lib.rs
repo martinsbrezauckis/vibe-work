@@ -15,6 +15,10 @@ mod engine;
 mod frame_click;
 #[cfg(windows)]
 mod frames_win;
+#[cfg(any(windows, test))]
+mod full_screen;
+#[cfg(feature = "click-marker")]
+mod input_marker;
 #[cfg(target_os = "linux")]
 mod linux_agent;
 #[cfg(target_os = "linux")]

@@ -1,0 +1,355 @@
+{
+  "_comment": "App redaction cases used by the Rust core tests. Every credential is synthetic, deliberately fake and never usable.",
+  "cases": [
+    {
+      "name": "gitlab-personal-20",
+      "input": "Before glpat-abcdefghijklmnopqrst after.",
+      "expected": "Before [redacted key] after."
+    },
+    {
+      "name": "ghp_",
+      "input": "Before ghp_FAKE0123456789abcdefFAKE0123456789ab after.",
+      "expected": "Before [redacted key] after."
+    },
+    {
+      "name": "gho_",
+      "input": "Before gho_FAKE0123456789abcdefFAKE0123456789ab after.",
+      "expected": "Before [redacted key] after."
+    },
+    {
+      "name": "ghu_",
+      "input": "Before ghu_FAKE0123456789abcdefFAKE0123456789ab after.",
+      "expected": "Before [redacted key] after."
+    },
+    {
+      "name": "ghs_",
+      "input": "Before ghs_FAKE0123456789abcdefFAKE0123456789ab after.",
+      "expected": "Before [redacted key] after."
+    },
+    {
+      "name": "ghr_",
+      "input": "Before ghr_FAKE0123456789abcdefFAKE0123456789ab after.",
+      "expected": "Before [redacted key] after."
+    },
+    {
+      "name": "github-fine-grained",
+      "input": "Before github_pat_FAKE0123456789abcdefFA_FAKE0123456789abcdefFAKE0123456789abcdefFAKE0123456789abcde after.",
+      "expected": "Before [redacted key] after."
+    },
+    {
+      "name": "gldt-",
+      "input": "Before gldt-FAKE0123456789abcdefg after.",
+      "expected": "Before [redacted key] after."
+    },
+    {
+      "name": "glrt-",
+      "input": "Before glrt-FAKE0123456789abcdefg after.",
+      "expected": "Before [redacted key] after."
+    },
+    {
+      "name": "slack-b",
+      "input": "Before xoxb-0000000000-1111111111-FAKE0123456789abcdefFAKE after.",
+      "expected": "Before [redacted key] after."
+    },
+    {
+      "name": "slack-a",
+      "input": "Before xoxa-0000000000-1111111111-FAKE0123456789abcdefFAKE after.",
+      "expected": "Before [redacted key] after."
+    },
+    {
+      "name": "slack-p",
+      "input": "Before xoxp-0000000000-1111111111-FAKE0123456789abcdefFAKE after.",
+      "expected": "Before [redacted key] after."
+    },
+    {
+      "name": "slack-r",
+      "input": "Before xoxr-0000000000-1111111111-FAKE0123456789abcdefFAKE after.",
+      "expected": "Before [redacted key] after."
+    },
+    {
+      "name": "slack-s",
+      "input": "Before xoxs-0000000000-1111111111-FAKE0123456789abcdefFAKE after.",
+      "expected": "Before [redacted key] after."
+    },
+    {
+      "name": "sk-",
+      "input": "Before sk-FAKE0123456789abcdefFAKE0123456789abcdefFAKE0123456789abcdef after.",
+      "expected": "Before [redacted key] after."
+    },
+    {
+      "name": "sk-ant-api03-",
+      "input": "Before sk-ant-api03-FAKE0123456789abcdefFAKE0123456789abcdefFAKE0123456789abcdef after.",
+      "expected": "Before [redacted key] after."
+    },
+    {
+      "name": "AKIA",
+      "input": "Before AKIAFAKE0123456789AB after.",
+      "expected": "Before [redacted key] after."
+    },
+    {
+      "name": "ASIA",
+      "input": "Before ASIAFAKE0123456789AB after.",
+      "expected": "Before [redacted key] after."
+    },
+    {
+      "name": "google",
+      "input": "Before AIzaFAKE0123456789abcdefFAKE0123456789a after.",
+      "expected": "Before [redacted key] after."
+    },
+    {
+      "name": "sk_live_",
+      "input": "Before sk_live_FAKE0123456789abcdefFAKE after.",
+      "expected": "Before [redacted key] after."
+    },
+    {
+      "name": "rk_live_",
+      "input": "Before rk_live_FAKE0123456789abcdefFAKE after.",
+      "expected": "Before [redacted key] after."
+    },
+    {
+      "name": "npm",
+      "input": "Before npm_FAKE0123456789abcdefFAKE0123456789ab after.",
+      "expected": "Before [redacted key] after."
+    },
+    {
+      "name": "pypi",
+      "input": "Before pypi-FAKE0123456789abcdefFAKE0123456789abcdefFAKE0123456789abcdefFAKE0123456789abcdef after.",
+      "expected": "Before [redacted key] after."
+    },
+    {
+      "name": "jwt",
+      "input": "Before eyJhbGciOiJub25lIn0.eyJzdWIiOiJGQUtFLU5PVC1BLVRPS0VOIn0.RkFLRV9TSUdOQVRVUkU after.",
+      "expected": "Before [redacted key] after."
+    },
+    {
+      "name": "pem-PRIVATE KEY",
+      "input": "Before -----BEGIN PRIVATE KEY-----\nFAKE NOT A KEY\n-----END PRIVATE KEY----- after.",
+      "expected": "Before [redacted key] after."
+    },
+    {
+      "name": "pem-RSA PRIVATE KEY",
+      "input": "Before -----BEGIN RSA PRIVATE KEY-----\nFAKE NOT A KEY\n-----END RSA PRIVATE KEY----- after.",
+      "expected": "Before [redacted key] after."
+    },
+    {
+      "name": "pem-EC PRIVATE KEY",
+      "input": "Before -----BEGIN EC PRIVATE KEY-----\nFAKE NOT A KEY\n-----END EC PRIVATE KEY----- after.",
+      "expected": "Before [redacted key] after."
+    },
+    {
+      "name": "pem-OPENSSH PRIVATE KEY",
+      "input": "Before -----BEGIN OPENSSH PRIVATE KEY-----\nFAKE NOT A KEY\n-----END OPENSSH PRIVATE KEY----- after.",
+      "expected": "Before [redacted key] after."
+    },
+    {
+      "name": "pem-PUBLIC KEY",
+      "input": "Before -----BEGIN PUBLIC KEY-----\nFAKE NOT A KEY\n-----END PUBLIC KEY----- after.",
+      "expected": "Before [redacted key] after."
+    },
+    {
+      "name": "pem-CERTIFICATE",
+      "input": "Before -----BEGIN CERTIFICATE-----\nFAKE NOT A KEY\n-----END CERTIFICATE----- after.",
+      "expected": "Before [redacted key] after."
+    },
+    {
+      "name": "pem-truncated",
+      "input": "Before -----BEGIN PRIVATE KEY-----\nFAKE NOT A KEY",
+      "expected": "Before [redacted key]"
+    },
+    {
+      "name": "label-key=",
+      "input": "key=F4ke9Qz2Ab7Cd8Ef3Gh5Jk6L",
+      "expected": "[redacted]"
+    },
+    {
+      "name": "label-KEY: ",
+      "input": "KEY: F4ke9Qz2Ab7Cd8Ef3Gh5Jk6L",
+      "expected": "[redacted]"
+    },
+    {
+      "name": "label-signing_key = ",
+      "input": "signing_key = F4ke9Qz2Ab7Cd8Ef3Gh5Jk6L",
+      "expected": "[redacted]"
+    },
+    {
+      "name": "label-\"client-key\": \"",
+      "input": "\"client-key\": \"F4ke9Qz2Ab7Cd8Ef3Gh5Jk6L\"",
+      "expected": "\"[redacted]"
+    },
+    {
+      "name": "label-token: ",
+      "input": "token: F4ke9Qz2Ab7Cd8Ef3Gh5Jk6L",
+      "expected": "[redacted]"
+    },
+    {
+      "name": "label-api_key=",
+      "input": "api_key=F4ke9Qz2Ab7Cd8Ef3Gh5Jk6L",
+      "expected": "[redacted]"
+    },
+    {
+      "name": "prose-37",
+      "input": "The token expired; key=Escape closes the dialog.",
+      "expected": "The token expired; key=Escape closes the dialog."
+    },
+    {
+      "name": "prose-38",
+      "input": "key=short",
+      "expected": "key=short"
+    },
+    {
+      "name": "prose-39",
+      "input": "A short sk-note and glpat-note in prose.",
+      "expected": "A short sk-note and glpat-note in prose."
+    },
+    {
+      "name": "prose-40",
+      "input": "ghp_help and npm_install are labels.",
+      "expected": "ghp_help and npm_install are labels."
+    },
+    {
+      "name": "prose-41",
+      "input": "The tab disappeared after closing another tab.",
+      "expected": "The tab disappeared after closing another tab."
+    },
+    {
+      "name": "benign-monkey",
+      "input": "monkey=curiousgeorgeadventure",
+      "expected": "monkey=curiousgeorgeadventure"
+    },
+    {
+      "name": "benign-turkey",
+      "input": "turkey=curiousgeorgeadventure",
+      "expected": "turkey=curiousgeorgeadventure"
+    },
+    {
+      "name": "benign-hotkey",
+      "input": "hotkey=curiousgeorgeadventure",
+      "expected": "hotkey=curiousgeorgeadventure"
+    },
+    {
+      "name": "benign-donkey",
+      "input": "donkey=curiousgeorgeadventure",
+      "expected": "donkey=curiousgeorgeadventure"
+    },
+    {
+      "name": "benign-turkey-colon",
+      "input": "turkey: curiousgeorgeadventure",
+      "expected": "turkey: curiousgeorgeadventure"
+    },
+    {
+      "name": "boundary--apikey",
+      "input": "apikey=abcdefghijklmnopqrst",
+      "expected": "[redacted]"
+    },
+    {
+      "name": "boundary-Before -apikey",
+      "input": "Before apikey=abcdefghijklmnopqrst",
+      "expected": "Before [redacted]"
+    },
+    {
+      "name": "boundary-(-apikey",
+      "input": "(apikey=abcdefghijklmnopqrst",
+      "expected": "([redacted]"
+    },
+    {
+      "name": "boundary--secret_key",
+      "input": "secret_key=abcdefghijklmnopqrst",
+      "expected": "[redacted]"
+    },
+    {
+      "name": "boundary-Before -secret_key",
+      "input": "Before secret_key=abcdefghijklmnopqrst",
+      "expected": "Before [redacted]"
+    },
+    {
+      "name": "boundary-(-secret_key",
+      "input": "(secret_key=abcdefghijklmnopqrst",
+      "expected": "([redacted]"
+    },
+    {
+      "name": "boundary--access_key",
+      "input": "access_key=abcdefghijklmnopqrst",
+      "expected": "[redacted]"
+    },
+    {
+      "name": "boundary-Before -access_key",
+      "input": "Before access_key=abcdefghijklmnopqrst",
+      "expected": "Before [redacted]"
+    },
+    {
+      "name": "boundary-(-access_key",
+      "input": "(access_key=abcdefghijklmnopqrst",
+      "expected": "([redacted]"
+    },
+    {
+      "name": "boundary--private_key",
+      "input": "private_key=abcdefghijklmnopqrst",
+      "expected": "[redacted]"
+    },
+    {
+      "name": "boundary-Before -private_key",
+      "input": "Before private_key=abcdefghijklmnopqrst",
+      "expected": "Before [redacted]"
+    },
+    {
+      "name": "boundary-(-private_key",
+      "input": "(private_key=abcdefghijklmnopqrst",
+      "expected": "([redacted]"
+    },
+    {
+      "name": "boundary--client-key",
+      "input": "client-key=abcdefghijklmnopqrst",
+      "expected": "[redacted]"
+    },
+    {
+      "name": "boundary-Before -client-key",
+      "input": "Before client-key=abcdefghijklmnopqrst",
+      "expected": "Before [redacted]"
+    },
+    {
+      "name": "boundary-(-client-key",
+      "input": "(client-key=abcdefghijklmnopqrst",
+      "expected": "([redacted]"
+    },
+    {
+      "name": "boundary--signing_key",
+      "input": "signing_key=abcdefghijklmnopqrst",
+      "expected": "[redacted]"
+    },
+    {
+      "name": "boundary-Before -signing_key",
+      "input": "Before signing_key=abcdefghijklmnopqrst",
+      "expected": "Before [redacted]"
+    },
+    {
+      "name": "boundary-(-signing_key",
+      "input": "(signing_key=abcdefghijklmnopqrst",
+      "expected": "([redacted]"
+    },
+    {
+      "name": "boundary--key",
+      "input": "key=abcdefghijklmnopqrst",
+      "expected": "[redacted]"
+    },
+    {
+      "name": "boundary-Before -key",
+      "input": "Before key=abcdefghijklmnopqrst",
+      "expected": "Before [redacted]"
+    },
+    {
+      "name": "boundary-(-key",
+      "input": "(key=abcdefghijklmnopqrst",
+      "expected": "([redacted]"
+    },
+    {
+      "name": "unicode-letter-before-gitlab",
+      "input": "églpat-abcdefghijklmnopqrst",
+      "expected": "églpat-abcdefghijklmnopqrst"
+    },
+    {
+      "name": "unicode-case-key",
+      "input": "Key=abcdefghijklmnopqrst",
+      "expected": "[redacted]"
+    }
+  ]
+}

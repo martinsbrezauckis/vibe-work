@@ -5,6 +5,7 @@
  * Invariants: an action reads the current state when it runs (never a stale closure); the same
  * combo string drives the shortcut and the label shown in the palette.
  */
+import { detectMac } from "../../state/shortcuts";
 import { TEXT } from "../../vocabulary";
 import { computeLayout } from "../../state/panelLayout";
 import { TAB_META } from "../../state/shellState";
@@ -19,6 +20,8 @@ export interface ShellAction {
   label: string;
   /** Combo (`Mod+K` style) for both the shortcut and the palette label; omit for palette-only. */
   keys?: string;
+  /** Application-wide actions can also run while a terminal owns keyboard input. */
+  allowInTerminal?: boolean;
   /** Extra words the palette matches (for example an older name). */
   keywords?: string;
   run: () => void;
@@ -30,6 +33,19 @@ export function shellActions(app: App): ShellAction[] {
   const a = shell.actions;
   const layout = () => computeLayout(shell.store.get(), window.innerWidth);
   return [
+    ...(app.core?.client.desktop !== undefined && !detectMac()
+      ? [
+          {
+            id: "quit",
+            label: TEXT.quitVibeWork,
+            keys: "Mod+Q",
+            allowInTerminal: true,
+            run: () => {
+              void app.core?.client.desktop?.quit();
+            },
+          },
+        ]
+      : []),
     {
       id: "palette",
       label: "Open the command palette",

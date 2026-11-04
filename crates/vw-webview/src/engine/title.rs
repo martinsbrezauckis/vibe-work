@@ -1,6 +1,6 @@
 //! Reads the title and URL from one document in the preview webview.
 //!
-//! Depends on: Tauri's native script callback and preview hooks. Called by page-load and title-change callbacks.
+//! Depends on: native isolated frame evaluation and preview hooks. Called by page-load and title-change callbacks.
 
 use std::sync::Arc;
 
@@ -48,81 +48,64 @@ fn next(json: &str, expected: &Url, attempt: u32) -> Next {
     }
 }
 
-/// A delayed title callback reads the current document, not the callback's stale text.
+/// Reads metadata through the native main-frame world and uses the native address, never a page's URL claim.
+async fn document(webview: &Webview<Wry>) -> Option<String> {
+    let answers = crate::agent_frames::evaluate(webview, None, vw_preview::main_script(DOCUMENT))
+        .await
+        .ok()?;
+    let answer = vw_preview::main_answer(answers).ok()?;
+    let (reported, title, state) = pair(&answer.value)?;
+    let native = Url::parse(&answer.url).ok()?;
+    if native.origin() != reported.origin() {
+        return None;
+    }
+    serde_json::to_string(&(native.as_str(), title, state)).ok()
+}
+
+/// A delayed title callback reads the current native document instead of the callback's stale text.
 pub(super) fn report(webview: &Webview<Wry>, hooks: &Arc<dyn PreviewHooks>, label: &str) {
-    let hooks = hooks.clone();
-    let label = label.to_owned();
-    let _ = webview.eval_with_callback(DOCUMENT, move |json| {
-        if let Some((url, text, _)) = pair(&json) {
+    let (webview, hooks, label) = (webview.clone(), hooks.clone(), label.to_owned());
+    tauri::async_runtime::spawn(async move {
+        if let Some(json) = document(&webview).await
+            && let Some((url, text, _)) = pair(&json)
+        {
             let _ = hooks.page_event(&label, PageEvent::TitleAt { url, text });
         }
     });
 }
 
-/// Finish when the loaded document itself reports the expected URL and complete readiness, read again for a
-/// bounded time while it is not complete; after that the engine's finished load counts if the URL still matches
-/// (see [`READS`]). Another URL ends it without a finish.
+/// Finishes only the matching native document. Missing isolation or a changed page never supplies a title.
 pub(super) fn finish(
     webview: &Webview<Wry>,
     hooks: &Arc<dyn PreviewHooks>,
     label: &str,
     expected: Url,
 ) {
-    finish_read(webview, hooks.clone(), label.to_owned(), expected, 1);
-}
-
-fn finish_read(
-    webview: &Webview<Wry>,
-    hooks: Arc<dyn PreviewHooks>,
-    label: String,
-    expected: Url,
-    attempt: u32,
-) {
-    let again = webview.clone();
-    let asked = webview.eval_with_callback(DOCUMENT, move |json| match next(&json, &expected, attempt) {
-        Next::Finish(url, text) => {
-            if attempt > 1 {
-                tracing::debug!(
-                    label = %label,
-                    attempt,
-                    state = pair(&json).map(|(_, _, state)| state).as_deref().unwrap_or("unreadable"),
-                    "page load finished after more reads of its document"
-                );
+    let (webview, hooks, label) = (webview.clone(), hooks.clone(), label.to_owned());
+    tauri::async_runtime::spawn(async move {
+        for attempt in 1..=READS {
+            let json = document(&webview).await.unwrap_or_default();
+            match next(&json, &expected, attempt) {
+                Next::Finish(url, text) => {
+                    let _ = hooks.page_event(
+                        &label,
+                        PageEvent::TitleAt {
+                            url: url.clone(),
+                            text,
+                        },
+                    );
+                    if !hooks.page_event(&label, PageEvent::Finished(url))
+                        && let Ok(blank) = Url::parse("about:blank")
+                    {
+                        let _ = webview.navigate(blank);
+                    }
+                    return;
+                }
+                Next::Again => tokio::time::sleep(AGAIN_AFTER).await,
+                Next::Stop => return,
             }
-            let _ = hooks.page_event(
-                &label,
-                PageEvent::TitleAt {
-                    url: url.clone(),
-                    text,
-                },
-            );
-            if !hooks.page_event(&label, PageEvent::Finished(url))
-                && let Ok(blank) = Url::parse("about:blank")
-            {
-                let _ = again.navigate(blank);
-            }
-        }
-        Next::Again => {
-            let (webview, hooks, label, expected) =
-                (again.clone(), hooks.clone(), label.clone(), expected.clone());
-            std::thread::spawn(move || {
-                std::thread::sleep(AGAIN_AFTER);
-                finish_read(&webview, hooks, label, expected, attempt + 1);
-            });
-        }
-        Next::Stop => {
-            tracing::debug!(
-                label = %label,
-                expected = %expected,
-                attempt,
-                document = ?pair(&json).map(|(url, _, state)| (url.to_string(), state)),
-                "page load finished, but its document is another one or unreadable: no finish"
-            );
         }
     });
-    if let Err(error) = asked {
-        tracing::debug!(%error, "page load finished, but the document could not be read");
-    }
 }
 
 #[cfg(test)]

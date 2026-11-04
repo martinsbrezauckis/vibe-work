@@ -88,7 +88,7 @@ pub(crate) async fn native_click(
     // macOS: the person sees where the agent clicked (a ring in the view, never in the page). A marker that cannot be
     // drawn never fails the click.
     .inspect(|()| {
-        #[cfg(target_os = "macos")]
+        #[cfg(all(target_os = "macos", feature = "click-marker"))]
         {
             let webview = webview.clone();
             tauri::async_runtime::spawn(async move {

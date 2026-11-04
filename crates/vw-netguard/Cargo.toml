@@ -11,7 +11,12 @@ publish = false
 [lints]
 workspace = true
 
+[features]
+# Proxy transports and native PAC resolution; the app enables these in its default build.
+proxy-transports = ["dep:vw-platform", "dep:native-tls", "dep:tokio-native-tls", "dep:rustls", "dep:tokio-rustls", "dep:rustls-platform-verifier"]
+
 [dependencies]
+vw-platform = { path = "../vw-platform", optional = true, features = ["proxy-resolver"] }
 tokio = { version = "1.53", features = ["net", "io-util", "time", "sync", "rt", "macros"] }
 tracing = "0.1"
 url = "2"
@@ -23,3 +28,32 @@ serde_json = "1"
 # the core's clients; 0.1.21 and its system-proxy dependencies are already in the lock file.
 hyper-util = { version = "0.1.21", default-features = false, features = ["client-proxy", "client-proxy-system"] }
 http = "1"
+
+# Same TLS rule as vw-mistral: Linux uses rustls + ring and the OS trust store, with
+# company certificates added to the platform verifier. Never link OpenSSL on Linux.
+[target.'cfg(target_os = "linux")'.dependencies]
+rustls = { version = "0.23.45", optional = true, default-features = false, features = ["ring", "std", "tls12", "logging"] }
+tokio-rustls = { version = "0.26.6", optional = true, default-features = false, features = ["logging", "tls12"] }
+rustls-platform-verifier = { version = "0.7.1", optional = true }
+
+# Windows/macOS keep the OS TLS stack (SChannel / Security.framework), as in vw-mistral.
+[target.'cfg(not(target_os = "linux"))'.dependencies]
+native-tls = { version = "0.2.18", optional = true }
+tokio-native-tls = { version = "0.3.1", optional = true }
+
+[dev-dependencies]
+# Runtime test certificates and PEM for the isolated Linux platform trust store.
+rcgen = { version = "0.14", default-features = false }
+time = "0.3"
+# Inspect the encoded validity rather than only the generator's input dates.
+x509-parser = "0.18"
+
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+# Reuse the proxy's ring provider for fixture key generation and signing.
+rcgen = { version = "0.14", default-features = false, features = ["ring", "pem"] }
+
+[target.'cfg(not(target_os = "linux"))'.dev-dependencies]
+# Pure-Rust signing lets Linux cross-target Clippy run without a Windows/Apple C SDK.
+rsa = { version = "0.9", default-features = false, features = ["std", "u64_digit", "getrandom", "sha2"] }
+# Only the native-TLS fixture needs an in-memory PKCS#12 identity.
+p12-keystore = "0.4"

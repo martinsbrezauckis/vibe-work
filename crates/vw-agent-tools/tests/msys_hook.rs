@@ -43,7 +43,7 @@ mod tests {
     fn maps_file_fields_but_refuses_native_vibe_home_and_other_copy() {
         let root = Path::new(env!("CARGO_TARGET_TMPDIR"))
             .join(format!("msys-hook-{}", std::process::id()));
-        let home = root.join("vibe-home");
+        let home = root.join("app-data").join("vibe-home");
         let cwd = root.join("project");
         let other = home.join("worktrees/other/session");
         for dir in [&home, &cwd, &other] {
@@ -107,7 +107,7 @@ mod tests {
     fn non_windows_hook_leaves_msys_spelling_unchanged() {
         let root = Path::new(env!("CARGO_TARGET_TMPDIR"))
             .join(format!("msys-hook-{}", std::process::id()));
-        let home = root.join("home");
+        let home = root.join("app-data").join("home");
         let cwd = root.join("project");
         std::fs::create_dir_all(&home).unwrap();
         std::fs::create_dir_all(&cwd).unwrap();

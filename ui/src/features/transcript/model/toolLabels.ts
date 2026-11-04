@@ -110,6 +110,7 @@ const APP_ACTIONS: Readonly<Record<string, string>> = {
   session_status: "Read this session's access mode",
   connectors_list: "List available connectors",
   connector_suggest: "Offer a connector",
+  addon_suggest: "Offer an add-on",
   document_read: "Read an attached document",
   propose_protected_change: "Propose a change to Vibe's folder",
   protected_change_status: "Read the change outcome",

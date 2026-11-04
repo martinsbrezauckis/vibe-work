@@ -10,13 +10,15 @@
 //!                "requirements": "vibe-2.26.2.requirements.txt", "requirementsSha256": "<hex>",
 //!                "requirementsBytes": 80872, "packages": 101,
 //!                "wheels": {"x86_64-unknown-linux-gnu": {"filename": "...", "bytes": 1, "sha256": "<hex>"}}}],
-//!  "chromeExtension": {"store": "review"}}
+//!  "chromeExtension": {"store": "review", "minVersion": "0.1.4"}}
 //! ```
 //! `chromeExtension` is optional (`write_manifest.py --chrome-store`): `"review"` while the Chrome extension's
 //! store listing is in Google's review (Your Chrome's setup then says so in place of the store button), `"available"`
 //! once it is listed. It is covered by the signature like every other byte, but it only changes a label: an absent
 //! field, an unknown `store` value or a field that is not such an object all read as absent (the store link), and
-//! never make an otherwise valid manifest fail. The last accepted value is kept by [`crate::extension_store`].
+//! never make an otherwise valid manifest fail. `minVersion` (`--chrome-min-version`) is the oldest extension version
+//! the release works with; an installed one that is older reads as "Update the extension". It is read the same lenient
+//! way, apart from `store`. The last accepted values are kept by [`crate::extension_store`].
 //! The signature is `vibe-support.json.sig`: base64 of the minisign signature text, exactly the encoding the Tauri
 //! CLI writes for update packages (`tools/public/vibe-support/sign`).
 //!
@@ -165,28 +167,72 @@ pub enum ExtensionStore {
     Available,
 }
 
-/// `chromeExtension` of the manifest.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+/// `chromeExtension` of the manifest. Each field is read on its own and leniently: an unknown or malformed value
+/// is absent and never drops the other field.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
 pub struct ChromeExtension {
     /// The listing's state.
-    pub store: ExtensionStore,
+    #[serde(
+        default,
+        deserialize_with = "known_store",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub store: Option<ExtensionStore>,
+    /// The oldest extension version this release works with (a plain dotted version). An installed extension
+    /// older than it reads as "Update the extension"; absent, every version is accepted.
+    #[serde(
+        default,
+        deserialize_with = "plain_min_version",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub min_version: Option<String>,
 }
 
 impl Manifest {
     /// The extension's store state this manifest states (`None`: absent or not a known value).
     #[must_use]
     pub fn extension_store(&self) -> Option<ExtensionStore> {
-        self.chrome_extension.map(|c| c.store)
+        self.chrome_extension.as_ref().and_then(|c| c.store)
+    }
+
+    /// The oldest extension version this manifest accepts (`None`: absent or not a plain version).
+    #[must_use]
+    pub fn extension_min_version(&self) -> Option<&str> {
+        self.chrome_extension
+            .as_ref()
+            .and_then(|c| c.min_version.as_deref())
     }
 }
 
-/// Reads `chromeExtension` leniently: anything but `{"store": "review" | "available"}` is absent (module docs).
+/// Reads `chromeExtension` leniently: anything but an object is absent (module docs).
 fn known_extension<'de, D>(deserializer: D) -> Result<Option<ChromeExtension>, D::Error>
 where
     D: serde::Deserializer<'de>,
 {
     let value = serde_json::Value::deserialize(deserializer)?;
-    Ok(serde_json::from_value::<ChromeExtension>(value).ok())
+    Ok(serde_json::from_value::<ChromeExtension>(value)
+        .ok()
+        .filter(|c| c.store.is_some() || c.min_version.is_some()))
+}
+
+fn known_store<'de, D>(deserializer: D) -> Result<Option<ExtensionStore>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = serde_json::Value::deserialize(deserializer)?;
+    Ok(serde_json::from_value::<ExtensionStore>(value).ok())
+}
+
+fn plain_min_version<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = serde_json::Value::deserialize(deserializer)?;
+    Ok(value
+        .as_str()
+        .filter(|v| v.len() <= 32 && compare_versions(v, v).is_some())
+        .map(str::to_owned))
 }
 
 /// Compares two plain dotted versions numerically (`2.26.10` > `2.26.9`; `2.26` = `2.26.0`). `None` when either

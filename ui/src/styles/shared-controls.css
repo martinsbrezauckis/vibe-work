@@ -506,3 +506,37 @@ select:disabled {
 .file-choice-folder {
   color: var(--text-3);
 }
+
+/* Compact navigation between browser tab lists, using the shared tab semantics and theme tokens. */
+.ui-segments {
+  display: flex;
+  align-self: flex-start;
+  gap: 2px;
+  margin: 6px 10px 2px;
+  padding: 2px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+}
+.ui-segment {
+  padding: 4px 10px;
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--text-2);
+  font: inherit;
+  font-size: var(--text-12);
+  cursor: pointer;
+}
+.ui-segment:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+.ui-segment[aria-selected="true"] {
+  background: var(--active);
+  color: var(--text);
+}
+.ui-segment:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}

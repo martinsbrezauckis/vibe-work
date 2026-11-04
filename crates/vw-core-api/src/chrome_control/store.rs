@@ -17,6 +17,22 @@ pub(super) fn save_enabled(dir: &Path, enabled: bool) -> Result<(), String> {
     .map_err(|_| "Could not save the setting. Nothing changed; try again.".to_owned())
 }
 
+/// A profile was connected with this setup at least once. Missing or corrupt = no.
+pub(super) fn paired_once(dir: &Path) -> bool {
+    std::fs::read(dir.join("paired.json"))
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<bool>(&bytes).ok())
+        .unwrap_or(false)
+}
+pub(super) fn save_paired_once(dir: &Path, paired: bool) -> Result<(), String> {
+    std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    std::fs::write(
+        dir.join("paired.json"),
+        if paired { "true" } else { "false" },
+    )
+    .map_err(|e| e.to_string())
+}
+
 /// Settings > Developer > Local network pages for the agent (Chrome Control only). Missing or corrupt = off.
 pub(super) fn local_network(dir: &Path) -> bool {
     std::fs::read(dir.join("local-network.json"))

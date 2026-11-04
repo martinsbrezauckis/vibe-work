@@ -193,11 +193,12 @@ impl UiBridge {
     /// # Errors
     /// The UI's own error, or `timeout` when no UI client answered in time.
     pub async fn request(&self, name: &str, body: Value) -> Result<Value, CoreError> {
+        // Validate the route's contract in the host before the page can act on the payload.
+        let drives = crate::ui_contract::drives(name, &body)?;
         let id = format!("ui-{}", self.inner.counter.fetch_add(1, Ordering::Relaxed));
         // From the authenticated request alone, before the page sees it.
         let grants =
             crate::ui_grants::for_request(name, &body, self.inner.facts.get().map(AsRef::as_ref));
-        let drives = crate::ui_grants::drives(name, &body);
         let (tx, rx) = oneshot::channel();
         {
             let mut pending = self

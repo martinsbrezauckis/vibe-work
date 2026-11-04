@@ -116,6 +116,9 @@ impl Core {
         if let Some(refusal) = crate::worktrees::raw_worktree_refusal(&command) {
             return Err(refusal);
         }
+        if let Some(result) = self.intercept_proxy_write(origin, &command).await {
+            return result;
+        }
         // Vibe's unified harness has no `tools/list`: answered here from the session's `runtime/read`.
         if let Command::Call { method, params, .. } = &command
             && method == crate::tools_list::METHOD
@@ -171,7 +174,7 @@ impl Core {
                 {
                     message.push(json!({"type": "text", "text": line}));
                 }
-                let reply = match self
+                let mut reply = match self
                     .forward_with_access_switch(
                         origin,
                         &method,
@@ -190,6 +193,7 @@ impl Core {
                         return Err(error);
                     }
                 };
+                crate::network_raw::mask_reply(&method, &mut reply.result);
                 if setup_first.is_some()
                     && let (Some(guard), Some(id)) = (&mut setup_guard, setup_id)
                 {
@@ -250,6 +254,9 @@ impl Core {
             Command::AskGrants { request } => self.ask_grants(request),
             Command::ChromeControl { request } => self.chrome_control(origin, request).await,
             Command::VibeRules { request } => self.vibe_rules(origin, request).await,
+            Command::Feedback { request } => Ok(CommandResult::Feedback {
+                view: self.feedback(origin, request).await?,
+            }),
             Command::KeepAwake { request } => self.keep_awake(request).await,
             Command::NewChat { request } => self.new_chat(origin, request).await,
             Command::SecretScan { request } => self.secret_scan(request).await,
@@ -589,8 +596,6 @@ impl Core {
         // since the continuation was scheduled refuses it here, before a stopped chat is reopened (the test that
         // decides runs again right before the send, `turn_start::call`).
         let params = crate::stop_tree::admit(&self.shared, method, params, stop).await?;
-        // A composer's runtime read must wait for the open's verified mode too.
-        let _runtime_restore = self.runtime_restore_lock(method, &params).await;
         // A stuck session is never opened implicitly (`stuck.rs`): refused at once, nothing sent.
         let opens = needs_channel(method, &params).or_else(|| {
             (method == "session/resume")
@@ -622,6 +627,8 @@ impl Core {
         self.ensure_command_channel(origin, method, &admission_params, token.as_ref())
             .await?;
         self.shared.channels.canonical_params(method, &mut params);
+        // Attach first: reopening takes this same restore lock. Then read only the verified runtime.
+        let _runtime_restore = self.runtime_restore_lock(method, &params).await;
         Box::pin(crate::model_choices::before(&self.shared, method, &params)).await;
         let _skills_guard = self.lock_skills_work(method).await;
         // The session's review baseline exists before Vibe starts working in its folder.

@@ -1,15 +1,7 @@
-//! The typed requests both clients of the core send (the UI over Tauri IPC and the Debug
-//! API over HTTP), who sent them, and what comes back.
-//!
-//! Depends on: `view` (result payloads), `serde`, `serde_json`. Called by: `dispatch` (executes
-//! them), vw-debug-api (decodes them from request bodies), the UI through the generated TypeScript.
-//! Invariants:
-//! - Wire form: `{"type": "<camelCaseVariant>", ...camelCase fields}`; unknown fields are refused
-//!   (`deny_unknown_fields`), so a misspelled key is an error and never a silent default.
-//!   One identifier has one wire spelling across clients; aliases cannot silently diverge.
-//! - Nested Vibe structures (`agentConfig`, message content, callback answers) stay JSON values
-//!   here; the gate validates them against the generated protocol types before anything is sent.
-
+//! Typed core requests/results for Tauri UI and Debug API HTTP; executed by `dispatch`.
+//! Depends on view payloads, serde and `serde_json`; the UI uses generated TypeScript bindings.
+//! Wire tags and fields are camelCase, unknown fields are refused, and each identifier has one spelling.
+//! Nested Vibe JSON is validated by the gate against generated protocol types before sending.
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -53,6 +45,11 @@ pub(crate) use crate::command_origin::requester;
     deny_unknown_fields
 )]
 pub enum Command {
+    /// Feedback draft, review, consent and explicit delivery.
+    Feedback {
+        /// The panel operation.
+        request: crate::FeedbackRequest,
+    },
     /// Reads shared CLI prompt history, or appends one submitted prompt.
     PromptHistory {
         /// Absent reads; present appends in CLI format before reading.
@@ -520,6 +517,11 @@ pub enum Command {
     rename_all_fields = "camelCase"
 )]
 pub enum CommandResult {
+    /// The feedback panel after an operation.
+    Feedback {
+        /// Core-owned review and diagnostic facts.
+        view: crate::FeedbackView,
+    },
     /// Shared prompt history, oldest first (at most 100).
     PromptHistory {
         /// Submitted prompts, without known vault values.
@@ -737,7 +739,7 @@ pub enum CommandResult {
         /// Availability, connection and chat work states.
         view: crate::ChromeControlView,
         /// The set up offer the window shows before the click (`offerSetup` only).
-        offer: Option<crate::ToolsInstallOffer>,
+        offer: Option<Box<crate::ToolsInstallOffer>>,
     },
     /// Connected tabs for the composer picker.
     ChromeTabs {

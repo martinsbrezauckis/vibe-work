@@ -1,5 +1,6 @@
 /** Renders permission and question cards with their offered answers. Depends on shared controls and card focus; called by the ask adapters. */
 import {
+  type CSSProperties,
   type KeyboardEvent,
   type MouseEvent,
   type PointerEvent,
@@ -198,7 +199,11 @@ function PermissionCard(props: AskCardProps): ReactElement {
     <div
       ref={frame}
       hidden={!arrival.visible}
-      style={{ maxHeight }}
+      style={
+        {
+          "--ask-max-height": maxHeight === undefined ? undefined : `${String(maxHeight)}px`,
+        } as CSSProperties
+      }
       tabIndex={-1}
       data-testid="transcript.approval-card-div"
       className={`approval${props.className === undefined ? "" : ` ${props.className}`}${fresh ? " arrive" : ""}`}

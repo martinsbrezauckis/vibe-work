@@ -12,6 +12,7 @@
   display: flex;
   flex-direction: column;
   box-sizing: border-box;
+  max-height: var(--ask-max-height, none);
   margin: 4px 0 22px;
   border: 1px solid color-mix(in srgb, var(--orange) 55%, transparent);
   border-radius: var(--radius-xl);
@@ -163,9 +164,39 @@
   gap: 6px;
 }
 .q legend {
+  position: relative;
   font-weight: var(--weight-semibold);
   padding: 0;
   margin-bottom: 4px;
+}
+.q-prompt {
+  display: block;
+  max-height: max(2lh, min(10lh, var(--question-max-height, 10lh)));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: var(--control-line) var(--panel);
+}
+.q legend:has(.q-prompt[data-more])::after {
+  content: "";
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 12px;
+  height: 1lh;
+  pointer-events: none;
+  background: linear-gradient(transparent, var(--panel));
+}
+.approval.qcard {
+  /* At large text sizes, scroll the complete question card in the chat column. */
+  max-height: none;
+  overflow: visible;
+}
+.qcard .ask-body {
+  min-height: 0;
+  flex-shrink: 0;
+  overflow: visible;
 }
 .q-tag {
   font-size: var(--text-11);
@@ -176,15 +207,13 @@
   padding: 0 6px;
   margin-right: 8px;
 }
-/* A question's answer options, all shown: a long list scrolls inside itself while the question above it and Other,
-   Submit and Skip below it stay on screen. It keeps about three rows before the card body itself scrolls. */
+/* Answer options keep their natural height; only the long question above them scrolls. */
 .q-opts {
   display: grid;
   gap: 1px;
   min-height: 84px;
   margin: 0 -8px;
-  overflow-y: auto;
-  overscroll-behavior: contain;
+  flex-shrink: 0;
 }
 .q-opts:has(> .q-opt:only-child),
 .q-opts:has(> .q-opt:nth-child(2):last-child) {
@@ -246,17 +275,12 @@
   grid-column: 3;
   grid-row: 1;
 }
-/* At most two lines; the whole text stays the option's accessible description. */
+/* Descriptions stay readable in full at every text size. */
 .q-desc {
   grid-column: 2;
   min-width: 0;
   font-size: var(--text-12);
   color: var(--text-3);
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  line-clamp: 2;
-  overflow: hidden;
   overflow-wrap: anywhere;
 }
 .q-other {

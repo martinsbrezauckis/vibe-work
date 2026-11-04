@@ -31,6 +31,15 @@ impl Transport for SupervisedTransport {
     ) -> impl Future<Output = Result<Value, RpcError>> + Send {
         let channels = self.channels.clone();
         let method = method.to_owned();
-        async move { channels.request(&method, params).await }
+        async move {
+            #[cfg(test)]
+            {
+                let fake = channels.test_transport.lock().unwrap().clone();
+                if let Some(fake) = fake {
+                    return fake.request(&method, params).await;
+                }
+            }
+            channels.request(&method, params).await
+        }
     }
 }

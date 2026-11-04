@@ -11,7 +11,12 @@ publish = false
 [lints]
 workspace = true
 
+[features]
+# Proxy transport settings for the optional network guard.
+proxy-transports = ["reqwest/socks", "dep:rustls-pki-types"]
+
 [dependencies]
+rustls-pki-types = { version = "1", optional = true, features = ["std"] }
 # HTTPS client. Linux: rustls with the `ring` provider installed by us (reqwest's own default
 # provider is aws-lc-rs, a heavier C build) and the OS trust store through rustls-platform-verifier.
 # Windows and macOS: the OS TLS stack (SChannel, Security.framework) through native-tls: OS trust

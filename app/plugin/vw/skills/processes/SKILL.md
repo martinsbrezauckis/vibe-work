@@ -15,6 +15,7 @@ await tools.mcp_vw.process_start({ command: "python3 -m http.server $PORT --bind
 ```
 
 1. `processes_list` lists this session's processes with their pids, ports and URLs, including servers started earlier that are still running ("started earlier, still running").
+   The status bar's running-process count opens Processes. Left running lists agent processes that kept running after their chat was deleted, with the chat's title (when known) and pid. Stop ends the process and its children.
 2. `process_start` (`command`, optional session `cwd` and `port`) starts a process that survives Vibe and the app closing; background shell commands and `tools.process.start` do not.
 3. `PORT` is leased: `$PORT` in bash and Windows PowerShell (`$env:PORT` also works there). `port_lease` lists the leased ports. Windows runs `pwsh` 7 when it is installed (`&&` works), else 5.1 (no `&&`). The process record's `shell` says which ran.
 4. `process_stop({ pid })` and `process_restart({ pid })` take a pid from `processes_list`. The list keeps the last 1 KiB of captured output for eight recent finished processes in this session (64 across the app), including after stop; older entries are evicted, and closing the app clears finished snapshots. Literal kills of other sessions/apps or nonliteral targets ask the user; literal targets of this session's own processes pass.

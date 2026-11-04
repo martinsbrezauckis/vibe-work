@@ -150,10 +150,7 @@ pub async fn host_subscribe(
     host.get().await.subscribe_host(move |event| {
         // A clicked notification should bring the window forward; Windows and macOS already do
         // it, a Linux desktop often does not.
-        if let Some(window) = crate::main_window(&app) {
-            let _ = window.unminimize();
-            let _ = window.set_focus();
-        }
+        let _ = crate::tray::reveal_main_window(&app);
         events.send(event).is_ok()
     });
     Ok(())
@@ -325,6 +322,19 @@ pub async fn notify_session(
         return Ok(());
     }
     host.get().await.notify(&request)
+}
+
+/// Removes an app-owned OS notification whose ask no longer needs an answer.
+///
+/// # Errors
+/// None; the bridge uses the same result type as the other notification command.
+#[tauri::command]
+pub async fn dismiss_notification(
+    host: State<'_, HostHandle>,
+    notification_id: u32,
+) -> Result<(), CoreError> {
+    host.get().await.dismiss_notification(notification_id);
+    Ok(())
 }
 
 /// Brings the waiting confirmation window of ask `ask_id` (an agent's request, a window of its own) to the front;
@@ -525,4 +535,32 @@ pub async fn send_to(
     tauri::async_runtime::spawn_blocking(move || host.send_to(request))
         .await
         .map_err(|error| CoreError::new(ErrorCode::Internal, error.to_string()))?
+}
+
+/// Reads or saves the General close switch; availability always includes a fresh tray-host check.
+///
+/// # Errors
+/// The settings file could not be written.
+#[tauri::command]
+pub async fn desktop_settings(
+    app: AppHandle,
+    enabled: Option<bool>,
+) -> Result<vw_host::tray::TrayView, String> {
+    crate::tray::view(&app, enabled).await
+}
+
+/// Connects window-close voice cleanup and the user's notification preference.
+// Tauri injects AppHandle by value into commands.
+#[allow(clippy::needless_pass_by_value)]
+#[tauri::command]
+pub fn desktop_subscribe(app: AppHandle, closing: Channel<()>, notifications: bool) {
+    crate::tray::subscribe(&app, closing, notifications);
+}
+
+/// Explicit Quit, shared with the tray menu and the Debug API.
+// Tauri injects AppHandle by value into commands.
+#[allow(clippy::needless_pass_by_value)]
+#[tauri::command]
+pub fn app_quit(app: AppHandle) {
+    app.exit(0);
 }

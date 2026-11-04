@@ -11,6 +11,7 @@
  * so it can never become a command; a deleted session's draft and chips are dropped.
  */
 import type { ContextItem } from "../features/composer/model/message";
+import { FEEDBACK_ENABLED } from "./feedbackEnabled";
 import { selectedModel } from "../features/composer/model/models";
 import type { ComposerActions } from "./composerImpl";
 import { runningTurnId } from "../features/composer/model/session";
@@ -66,6 +67,8 @@ type Deferred = Pick<ComposerActions, (typeof DEFERRED)[number]>;
 export interface NewChatStarter {
   /** Why Send cannot start now (for example a copy without a branch name), or `null`. */
   refuse(): string | null;
+  /** False when the chat starts without a chosen folder (a Temporary chat gets a folder of its own). */
+  needsFolder(): boolean;
   /** Starts the session; resolves to its id, or `null` when it did not start (the failure was shown). */
   start(): Promise<string | null>;
 }
@@ -211,7 +214,7 @@ export function createComposer(deps: {
         composer.note(NEW_CHAT, message);
         return { ok: false, kind, message };
       };
-      if (folder === null) {
+      if (folder === null && (newChatStarter?.needsFolder() ?? true)) {
         composer.holdNewChat({ askFolder: true });
         return refuse(
           "folder",
@@ -255,7 +258,9 @@ export function createComposer(deps: {
         newChatHandOver?.expectStart();
         started =
           newChatStarter === null
-            ? ((await deps.sessions?.startIn(folder)) ?? null)
+            ? folder === null
+              ? null
+              : ((await deps.sessions?.startIn(folder)) ?? null)
             : await newChatStarter.start();
         if (started === null) {
           const back = composer.restore(
@@ -280,7 +285,7 @@ export function createComposer(deps: {
         let picked = true;
         // What was open on the New chat screen is the session's before its first message goes out.
         await handOver();
-        composer.resetNewChat();
+        composer.resetNewChat(started);
         if (held.mode !== null) {
           // Keep the native access choice's consent across session creation, without promoting API input.
           const access = held.trustedAccessPick && bound === "ui" ? await load("window") : impl;
@@ -380,6 +385,8 @@ export function createComposer(deps: {
         return sessionId === NEW_CHAT ? Promise.resolve() : deferred.loadLoops(sessionId, force);
       },
       runCommand(sessionId: string, name: string, args: string): Promise<SendOutcome> {
+        if (FEEDBACK_ENABLED && name === "feedback")
+          return deferred.runCommand(sessionId, name, args);
         const blocked = deps.keyGuard?.() ?? null;
         if (blocked !== null) return Promise.resolve({ ok: false, kind: "key", message: blocked });
         if (sessionId === NEW_CHAT) {
@@ -395,6 +402,20 @@ export function createComposer(deps: {
        * a Debug API client wrote goes out with the Debug API origin whoever sends it (provenance).
        */
       send(sessionId: string, mode: SendMode): Promise<NewChatOutcome> {
+        const current = composer.store.get();
+        if (
+          FEEDBACK_ENABLED &&
+          /^\/feedback(?:\s|$)/.test((current.drafts[sessionId] ?? "").trim()) &&
+          current.literal[sessionId] !== true &&
+          (current.context[sessionId]?.length ?? 0) === 0 &&
+          (current.images[sessionId]?.length ?? 0) === 0
+        ) {
+          const content = takeContent(composer, sessionId);
+          if (content !== null) {
+            const bound = origin === "debug-api" || content.by === "debug-api" ? "debug-api" : "ui";
+            return load(bound).then((impl) => impl.sendContent(sessionId, mode, content));
+          }
+        }
         const keyBlocked = deps.keyGuard?.() ?? null;
         if (keyBlocked !== null)
           return Promise.resolve({ ok: false, kind: "key", message: keyBlocked });

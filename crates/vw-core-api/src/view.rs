@@ -45,6 +45,8 @@ pub struct SessionSnapshot {
 impl From<SessionView> for SessionSnapshot {
     fn from(mut v: SessionView) -> Self {
         crate::provider_errors::value(&mut v.state);
+        // App observation: orders page snapshots and command replies without changing Vibe's event IDs.
+        v.state["historyVersion"] = Value::from(v.history_version);
         Self {
             session_id: v.session_id,
             state: v.state,

@@ -113,7 +113,13 @@ export function createVoice(deps: {
   deps.shell.store.subscribe(() => {
     voiceChat.prompt.reconcile();
   });
-  return { settings, dictation, narration, voiceChat, prompts };
+  const stopForClose = () => {
+    voiceChat.turnOff();
+    narration.stopAll();
+    prompts.stop();
+    dictation.stopForClose();
+  };
+  return { settings, dictation, narration, voiceChat, prompts, stopForClose };
 }
 
 /** The voice controllers. */

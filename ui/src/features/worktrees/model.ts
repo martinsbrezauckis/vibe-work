@@ -1,9 +1,7 @@
 /**
- * Worktree per session: pure rules the views use. Whether "Work in a new copy" starts on, the
- * remembered choice, the header chip text and the end-of-session summary lines.
+ * Worktree per session: pure rules for the header chip text and end-of-session summary lines.
  * Depends on: protocol types. Called by: state/worktrees.ts and the worktree views.
- * Invariants: no I/O except the remembered choice in localStorage, every access wrapped (storage can be
- * missing or blocked; the app works without it).
+ * Invariants: no I/O.
  */
 import type {
   IncludeReport,
@@ -12,39 +10,6 @@ import type {
   WorktreeInfo,
   WorktreeInspection,
 } from "../../protocol/core";
-
-const CHOICE_KEY = "vw.worktreeCopy";
-
-/** The user's last "Work in a new copy" choice (`null` when never made or storage is unavailable). */
-export function rememberedChoice(): boolean | null {
-  try {
-    const value = localStorage.getItem(CHOICE_KEY);
-    return value === "on" ? true : value === "off" ? false : null;
-  } catch {
-    return null;
-  }
-}
-
-/** Remembers the choice; a storage failure is ignored. */
-export function rememberChoice(on: boolean): void {
-  try {
-    localStorage.setItem(CHOICE_KEY, on ? "on" : "off");
-  } catch {
-    // Storage unavailable: the default applies next time.
-  }
-}
-
-/**
- * Existing copies start with the toggle off. Other folders default on when another live session works
- * in the repository, else use the user's last choice, else off.
- */
-export function copyByDefault(
-  othersLive: boolean,
-  remembered: boolean | null,
-  existingCopy = false,
-): boolean {
-  return !existingCopy && (othersLive || remembered === true);
-}
 
 /** The header chip text for a session's copy, e.g. `vibe/fix-login · from main`. */
 export function chipText(info: WorktreeInfo): string {

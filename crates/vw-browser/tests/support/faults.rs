@@ -1,7 +1,7 @@
 //! Fault switches of the test page engine that model what other engines answer, through `PageEngine`'s frame answers.
 //! Called by the all-frames evaluation in `mod.rs`.
 
-use super::PageEngine;
+use super::{EngineError, PageEngine};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 /// Takes one from `counter` when it is above zero (`u64::MAX` never runs out); whether it did.
@@ -15,6 +15,21 @@ pub(super) fn take_one(counter: &AtomicU64) -> bool {
 }
 
 impl PageEngine {
+    /// Capture uses isolated frame evaluation; fault injection must follow the same pin step on either path.
+    pub(super) async fn capture_pin(&self) -> Result<(), EngineError> {
+        if let Some(action) = self.on_pin.lock().unwrap().take() {
+            action();
+        }
+        self.pinned.notify_one();
+        if self.fail_pin.load(Ordering::Relaxed) {
+            return Err(EngineError::Platform("forced slice failure".into()));
+        }
+        if self.hold_pin.load(Ordering::Relaxed) {
+            self.release.acquire().await.unwrap().forget();
+        }
+        Ok(())
+    }
+
     /// While `detached_child_evaluations` lasts, an all-frames evaluation (reads, the click's frame registry and its
     /// receipt) also gets an answer from a removed child frame's handle (`{"detached":true}`), as `WebKit` on macOS
     /// answers for a while after the frame left the page.

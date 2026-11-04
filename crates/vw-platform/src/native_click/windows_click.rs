@@ -81,6 +81,9 @@ pub fn click(
                 if recovery.is_ok() { "queued" } else { "failed" }
             ));
         }
+        // The marker is a transparent host child; it neither changes the page nor takes its focus.
+        #[cfg(feature = "click-marker")]
+        let _ = crate::webview::click_marker_win::show(controller, point);
         Ok(())
     }
 }

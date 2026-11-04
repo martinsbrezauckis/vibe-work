@@ -28,6 +28,7 @@ import type {
 } from "../../../protocol/generated";
 import { VOICE_INSTRUCTION } from "../../voice/voiceChatText";
 import { parseLoopArgs } from "./loopArgs";
+import { pageContextText } from "./pageText";
 import { isClientCommand } from "./slashNames";
 import type { CodeRef } from "../../files/model/context";
 
@@ -131,7 +132,7 @@ export function turnContent(
   context.forEach((item, i) => {
     blocks.push({
       type: "resource",
-      resource: { uri: item.uri ?? contextUri(i), kind: "text", text: item.modelText ?? item.text },
+      resource: { uri: item.uri ?? contextUri(i), kind: "text", text: pageContextText(item) },
     });
   });
   for (const image of images) {
@@ -187,7 +188,7 @@ function queuedContent(
     blocks.push({
       type: "embedded_resource",
       uri: item.uri ?? contextUri(i),
-      text: item.modelText ?? item.text,
+      text: pageContextText(item),
     });
   });
   for (const image of images) {

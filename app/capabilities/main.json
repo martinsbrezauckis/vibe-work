@@ -5,6 +5,9 @@
   "webviews": ["main"],
   "permissions": [
     "allow-core-execute",
+    "allow-desktop-settings",
+    "allow-desktop-subscribe",
+    "allow-app-quit",
     "allow-core-subscribe",
     "allow-ui-control-next",
     "allow-ui-control-reply",
@@ -22,6 +25,7 @@
     "allow-open-link",
     "allow-open-mail-link",
     "allow-notify-session",
+    "allow-dismiss-notification",
     "allow-show-prompt",
     "allow-terminal-attach",
     "allow-terminal-ack",

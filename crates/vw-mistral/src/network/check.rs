@@ -135,7 +135,17 @@ pub fn check_proxy_url(label: &str, raw: &str) -> Result<String, String> {
         return Err(format!("{label}: The address cannot contain a backslash."));
     }
     let lower = value.to_ascii_lowercase();
-    if !(lower.starts_with("http://") || lower.starts_with("https://")) {
+    let socks = cfg!(feature = "proxy-transports")
+        && ["socks4://", "socks4a://", "socks5://", "socks5h://"]
+            .iter()
+            .any(|s| lower.starts_with(s));
+    if !(lower.starts_with("http://") || lower.starts_with("https://") || socks) {
+        #[cfg(feature = "proxy-transports")]
+        if value.contains("://") {
+            return Err(format!(
+                "{label}: Use an HTTP, HTTPS, SOCKS4 or SOCKS5 proxy address."
+            ));
+        }
         return Err(if value.contains("://") {
             format!(
                 "{label}: Only addresses that start with http:// or https:// work here. SOCKS and other kinds are not supported."
@@ -160,7 +170,7 @@ pub fn check_proxy_url(label: &str, raw: &str) -> Result<String, String> {
             "{label}: A proxy address ends after the port. Remove everything after it (for example http://proxy.example.com:8080)."
         ));
     }
-    let scheme_len = if lower.starts_with("https://") { 8 } else { 7 };
+    let scheme_len = lower.find("://").map_or(0, |at| at + 3);
     Ok(format!("{}{}", &lower[..scheme_len], &value[scheme_len..]))
 }
 
@@ -410,6 +420,7 @@ mod tests {
         );
         for (input, fragment) in [
             ("proxy.corp:8080", "Start the address with http://"),
+            #[cfg(not(feature = "proxy-transports"))]
             ("socks5://proxy:1080", "SOCKS"),
             ("http://", "not a valid address"),
             ("http://proxy:99999", "not a valid address"),

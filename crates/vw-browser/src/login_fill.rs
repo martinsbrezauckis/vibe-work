@@ -1,13 +1,13 @@
 //! Vault fill in the agent browser: the ShellX checks against credential retargeting ("a same-origin page retargets a
 //! granted credential") on the
-//! session's latest observation and in the page, and the write. The vault, the grant and the dialog are the core's
+//! session's retained document observation and in the page, and the write. The vault, the grant and the dialog are the core's
 //! (vw-core-api `browser_fill`); this module never sees a vault and gets a value only for [`Browser::fill_write`].
 //!
 //! Order (the core keeps it): [`Browser::fill_check`] (host checks on the host-held observation, then the page script
 //! without a value) -> the core's login lookup, grant or dialog, password read -> [`Browser::fill_write`] (the page
 //! script repeats every check in the same call that writes).
 //!
-//! Depends on: `driver` (page accessor, Stop, the Lan rule), `sessions` (the latest observation), `scripts`
+//! Depends on: `driver` (page accessor, Stop, the Lan rule), `sessions` (document observations), `scripts`
 //! (`js/fill.js`), `model`, url, zeroize. Called by: vw-core-api (`browser_fill`).
 //! Invariants:
 //! - [`Browser::fill_check`] runs no vault code and puts no value into a page; every refusal names the failed check.
@@ -128,6 +128,20 @@ fn shown(origins: &[String]) -> String {
 }
 
 impl Browser {
+    fn retained_fill(&self, session: &str, reference: &str) -> Result<(), FillRefusal> {
+        if self
+            .current_seen(session)
+            .is_some_and(|seen| seen.refs.contains(reference))
+        {
+            Ok(())
+        } else {
+            Err(refusal(
+                "observation",
+                "the field ref is no longer retained: call browser_read again",
+            ))
+        }
+    }
+
     /// Every check before the vault is touched (module docs): the agent's Stop and the Lan rule, a current host-held
     /// observation that lists `reference` as a sign-in field, a secure page, a form that submits only to the page's
     /// own origin, then the same checks in the page now (no value in the script).
@@ -143,7 +157,7 @@ impl Browser {
         if by == Actor::Agent && self.sessions.stopped(session_id) {
             return Err(refusal("stopped", STOPPED));
         }
-        if by == Actor::Agent && self.on_local_network(session_id) {
+        if by == Actor::Agent && self.local_network_blocked(session_id) {
             return Err(refusal("localNetwork", LOCAL_NETWORK));
         }
         if !is_ref(reference) {
@@ -168,15 +182,14 @@ impl Browser {
             ));
         }
         let item = seen
-            .model
-            .refs
+            .items
             .iter()
             .find(|r| r.id == reference)
             .ok_or_else(|| {
                 refusal(
                     "observation",
                     format!(
-                        "ref {reference} is not listed in your latest browser_read: read again (find: 'password' \
+                        "ref {reference} is not retained from browser_read of this document: read again (find: 'password' \
                          lists the sign-in fields) and use a ref from it"
                     ),
                 )
@@ -330,6 +343,8 @@ impl Browser {
             "role": target.role.as_str(),
             "origin": target.origin,
         });
+        self.retained_fill(session_id, &target.reference)?;
+        self.bind_ref_request(session_id, &mut request);
         match value {
             Some(v) => request["value"] = json!(v),
             None => request["check"] = json!(true),
@@ -354,8 +369,7 @@ impl Browser {
         };
         drop(script);
         let answer: Answer = parse_answer(&raw).map_err(|e| refusal("page", e))?;
-        self.service
-            .reading_allowed(session_id, &page, &answer.url)
+        self.reading_ref_allowed(session_id, &page, &answer.url, Some(&target.reference))
             .map_err(|e| refusal("currentObservation", e))?;
         let reference = &target.reference;
         match answer.status.as_str() {

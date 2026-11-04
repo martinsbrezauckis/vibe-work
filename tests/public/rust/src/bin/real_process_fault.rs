@@ -464,6 +464,9 @@ fn main() {
     }
     drop(input);
     let status = child.wait().unwrap();
+    if let Some(delay) = plan["exitDelayMs"].as_u64() {
+        std::thread::sleep(Duration::from_millis(delay));
+    }
     let _ = out.join();
     // process::exit skips destructors, so restore the fault explicitly after Vibe has stopped.
     drop(pending.lock().unwrap().take());

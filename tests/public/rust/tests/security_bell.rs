@@ -51,7 +51,7 @@ async fn local_and_core_assisted_hooks_report_each_final_refusal_once() {
     let dirs = Dirs::new("security-classes");
     let rig = rig(&dirs, "security-classes").await;
     let session = rig.start_session(&dirs.root, "ask").await;
-    let home = dirs.root.join("vibe-home");
+    let home = dirs.app_data.join("vibe-home");
     std::fs::create_dir_all(&home).unwrap();
     let mut events = rig.core.subscribe(Some(session.clone()));
     while events.try_next().is_some() {}

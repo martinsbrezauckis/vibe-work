@@ -87,9 +87,12 @@ pub(crate) fn line(entry: &Value, by_id: &HashMap<&str, &Value>) -> Option<Strin
         });
     }
     // A successful transport binding or input rewrite is bookkeeping, not conversation.
-    if name == "vibe-work tool receipt"
-        && reason.is_none()
-        && (status == "ok" || (pre_tool && status == "warning" && input_rewrite(content)))
+    if reason.is_none()
+        && ((name == "vibe-work tool receipt" && status == "ok")
+            || (matches!(name, "vibe-work tool receipt" | "vibe-work folder guard")
+                && pre_tool
+                && status == "warning"
+                && input_rewrite(content)))
     {
         return None;
     }
@@ -130,4 +133,35 @@ pub(crate) fn refused_calls<'a>(
             denial_reason(by_id.get(call).copied(), text(&e["detail"], "hookName")).map(|_| call)
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn folder_rewrites_stay_out_of_exported_conversation() {
+        for tool in ["read", "edit", "bash"] {
+            let entry = json!({"type":"notice", "detail": {
+                "kind":"hook_completed", "scope":"pre_tool", "hookName":"vibe-work folder guard",
+                "status":"warning", "content":format!("Rewrote tool_input for '{tool}'")
+            }});
+            assert_eq!(line(&entry, &HashMap::new()), None);
+        }
+    }
+
+    #[test]
+    fn folder_refusals_and_unfamiliar_warnings_remain_exported() {
+        for (status, content) in [
+            ("error", "Folder unavailable"),
+            ("warning", "Folder changed"),
+        ] {
+            let entry = json!({"type":"notice", "detail": {
+                "kind":"hook_completed", "scope":"pre_tool", "hookName":"vibe-work folder guard",
+                "status":status, "content":content
+            }});
+            assert!(line(&entry, &HashMap::new()).is_some());
+        }
+    }
 }

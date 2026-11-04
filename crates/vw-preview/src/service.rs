@@ -739,7 +739,7 @@ impl PreviewService {
         let _activity = self.session_lock(session_id).await;
         let id = self.ensure_mounted(session_id).await?;
         Ok(self
-            .bounded("evaluate", self.engine.evaluate(&id, script))
+            .bounded("evaluate", self.engine.evaluate_isolated(&id, script))
             .await?)
     }
 

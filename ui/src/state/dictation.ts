@@ -433,6 +433,12 @@ export function createDictation(deps: {
     start,
     stop,
     cancel,
+    /** Close cancels an unready microphone and drops any queued restart, while keeping recorded text. */
+    stopForClose() {
+      queuedStart = null;
+      if (store.get().phase === "starting") cancel();
+      else void stop();
+    },
     queueStart,
     /** The text box reports its selection, so the text lands where the user is typing. */
     setCaret(sessionId: string, start: number, end: number): void {

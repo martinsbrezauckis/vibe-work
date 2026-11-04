@@ -9,33 +9,54 @@
  */
 import { type ReactElement, useEffect, useState } from "react";
 
+import type { NewFolderBy } from "../../state/shellState";
+import { useStore } from "../../state/createStore";
+import { NO_WORKTREES } from "../../state/worktrees";
 import type { FolderSession } from "../../protocol/core";
 import { useApp } from "../shell/AppContext";
 
 const NONE: readonly FolderSession[] = [];
 
 /** Live sessions in `folder`'s repository (empty when none, when it is not git, or while unknown). */
-export function useSharedFolder(folder: string | null): readonly FolderSession[] {
-  const { core } = useApp();
+export function useSharedFolder(
+  folder: string | null,
+  by: NewFolderBy | null,
+): { sessions: readonly FolderSession[]; pending: boolean } {
+  const { core, worktrees } = useApp();
+  const request = useStore(worktrees?.store ?? NO_WORKTREES, (s) => s.newChatRequest);
   // Answers are kept with the folder they are for, so a changed folder never shows the old answer.
-  const [found, setFound] = useState<{ folder: string; sessions: readonly FolderSession[] } | null>(
-    null,
-  );
+  const [found, setFound] = useState<{
+    folder: string;
+    by: NewFolderBy | null;
+    request: number;
+    sessions: readonly FolderSession[];
+  } | null>(null);
   useEffect(() => {
     if (folder === null || core === null) return;
     let live = true;
     core
       .run({ type: "changes", request: { op: "folderSessions", cwd: folder } })
       .then((result) => {
-        if (!live || result.type !== "changes" || result.result.kind !== "folder") return;
-        setFound({ folder, sessions: result.result.isGit ? result.result.sessions : [] });
+        if (!live) return;
+        const sessions =
+          result.type === "changes" && result.result.kind === "folder" && result.result.isGit
+            ? result.result.sessions
+            : NONE;
+        setFound({ folder, by, request, sessions });
       })
-      .catch(() => undefined);
+      .catch(() => {
+        if (live) setFound({ folder, by, request, sessions: NONE });
+      });
     return () => {
       live = false;
     };
-  }, [core, folder]);
-  return found !== null && found.folder === folder ? found.sessions : NONE;
+  }, [core, folder, by, request]);
+  const current =
+    found !== null && found.folder === folder && found.by === by && found.request === request;
+  return {
+    sessions: current ? found.sessions : NONE,
+    pending: folder !== null && core !== null && !current,
+  };
 }
 
 /** The note shown above the start buttons. */

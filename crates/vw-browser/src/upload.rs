@@ -85,6 +85,7 @@ impl Browser {
         let mut request = action
             .page_request(&page)
             .ok_or_else(|| failed("this action does not run in the page"))?;
+        self.bind_ref_request(session_id, &mut request);
         request["token"] = json!(token);
         request["nativeUser"] = json!(by == Actor::User);
         if let Some(consent) = consent
@@ -102,9 +103,8 @@ impl Browser {
             )
             .await
             .map_err(page_error)?;
-        self.service
-            .reading_allowed(session_id, &page, &answer.url)
+        self.reading_ref_allowed(session_id, &page, &answer.url, action.reference())
             .map_err(refused)?;
-        crate::answers::interpret(answer, action)
+        self.interpret_ref_answer(session_id, answer, action)
     }
 }

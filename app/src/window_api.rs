@@ -15,7 +15,7 @@
 #[cfg(feature = "e2e-script")]
 use tauri::Manager;
 use tauri::{AppHandle, LogicalSize, Size};
-use vw_debug_api::{AppWindow, BoxFuture, WindowRequest, WindowState, WindowView};
+use vw_debug_api::{AppRequest, AppWindow, BoxFuture, WindowRequest, WindowState, WindowView};
 
 /// The [`AppWindow`] of the running app.
 pub struct TauriWindow {
@@ -51,14 +51,23 @@ impl TauriWindow {
         (width, height)
     }
 
-    fn state(&self, window: &tauri::Window) -> Result<WindowState, String> {
+    async fn state(&self, window: &tauri::Window) -> Result<WindowState, String> {
         let scale = window.scale_factor().map_err(|e| e.to_string())?;
         let size = window
             .inner_size()
             .map_err(|e| e.to_string())?
             .to_logical::<f64>(scale);
         let (min_width, min_height) = self.min_size();
+        let tray = crate::tray::view(&self.app, None).await?;
         Ok(WindowState {
+            visible: window.is_visible().unwrap_or(false),
+            tray_present: tray.available,
+            mode: if tray.enabled && tray.available {
+                "hidden"
+            } else {
+                "quits"
+            }
+            .to_owned(),
             width: size.width,
             height: size.height,
             scale,
@@ -95,7 +104,11 @@ impl AppWindow for TauriWindow {
             if window.is_minimized().map_err(|e| e.to_string())?
                 || !window.is_visible().map_err(|e| e.to_string())?
             {
-                return Err("Not run: the Vibe Work window is minimized or hidden. Show the window, then retry the screenshot.".to_owned());
+                #[cfg(target_os = "macos")]
+                let text = vw_vocabulary::texts::CAPTURE_WINDOW_CLOSED_MAC;
+                #[cfg(not(target_os = "macos"))]
+                let text = vw_vocabulary::texts::CAPTURE_WINDOW_CLOSED;
+                return Err(text.replace("{label}", "the main window"));
             }
             vw_webview::window_shot::capture(&window, &id).await
         })
@@ -107,6 +120,8 @@ impl AppWindow for TauriWindow {
             let done = |r: tauri::Result<()>| r.map_err(|e| e.to_string());
             match request {
                 WindowRequest::State {} => {}
+                WindowRequest::Close {} => done(window.close())?,
+                WindowRequest::Show {} => done(crate::tray::reveal_main_window(&self.app))?,
                 WindowRequest::Size { width, height } => {
                     #[cfg(all(debug_assertions, feature = "e2e-script"))]
                     if std::env::var("VW_E2E_NARROW_WINDOW").as_deref() == Ok("1") {
@@ -127,13 +142,29 @@ impl AppWindow for TauriWindow {
                 }
                 WindowRequest::Minimize {} => done(window.minimize())?,
                 WindowRequest::Focus {} => {
-                    done(window.unminimize())?;
-                    done(window.set_focus())?;
+                    done(crate::tray::reveal_main_window(&self.app))?;
                 }
             }
             // The OS applies a size or state change asynchronously: give it a moment before reporting.
             tokio::time::sleep(std::time::Duration::from_millis(150)).await;
-            self.state(&window)
+            self.state(&window).await
+        })
+    }
+
+    fn app_control(&self, request: AppRequest) -> BoxFuture<'_, Result<(), String>> {
+        Box::pin(async move {
+            match request {
+                AppRequest::Quit {} => {
+                    self.app.exit(0);
+                    Ok(())
+                }
+                #[cfg(feature = "e2e-script")]
+                AppRequest::UpdateNotice {} => {
+                    crate::updater::test_notice(&self.app);
+                    Ok(())
+                }
+                AppRequest::TrayMenu { id } => crate::tray::menu(&self.app, &id),
+            }
         })
     }
 

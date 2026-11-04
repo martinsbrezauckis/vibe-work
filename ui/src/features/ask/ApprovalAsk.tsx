@@ -30,6 +30,7 @@ import { ShowAll } from "../transcript/rows/ShowAll";
 import { AskCard } from "./AskCard";
 import { AuditRow } from "./AuditRow";
 import { useCardClose } from "./useCardClose";
+import { browserApprovalName } from "./browserApproval";
 import { useWho } from "./useWho";
 import {
   type AskChoice,
@@ -157,6 +158,7 @@ export function ApprovalAsk({
     hostSessionId,
     sourceSession,
   );
+  const browserName = browserApprovalName(entry);
   const summary = approvalSummary(entry);
   const via = useTranscriptUi((s) => s.answered[callbackId]);
   const alwaysDone = useTranscriptUi((s) => s.always[callbackId]);
@@ -197,7 +199,7 @@ export function ApprovalAsk({
     <AskCard
       id={callbackId}
       question={approvalQuestion(entry)}
-      who={who.text}
+      who={browserName === null ? who.text : who.text.replace("your Chrome", browserName)}
       whoTitle={who.title}
       summary={summary}
       reason={str(detailOf(entry)["reason"])}

@@ -9,7 +9,7 @@ use serde_json::Value;
 
 use crate::anomaly::AnomalyKind;
 use crate::change::{Action, Applied, Change, Notification};
-use crate::session::{SessionEntry, merged_with_prefix};
+use crate::session::{SessionEntry, merged_with_prefix, retain_history_prefix};
 use crate::store::{Inner, SessionStore};
 
 /// What produced the state being loaded; decides how it is merged.
@@ -19,7 +19,8 @@ pub enum LoadKind {
     /// server's `session/list` shows it.
     New,
     /// `session/resume` or `session/continue`: after a restart. A turn that was running before and
-    /// is missing from the resumed state is marked interrupted locally.
+    /// is missing from the resumed state is marked interrupted locally. A verified loaded history
+    /// prefix is kept, while the resumed state still resets event bookkeeping as usual.
     Resume,
     /// `session/read`: the latest page. An already-loaded history/turn prefix is kept in front of
     /// it, and entries in the page replace ours (so they win, e.g. `truncated` on effect output).
@@ -66,6 +67,18 @@ impl SessionStore {
             projected.runtime.clone_from(&entry.runtime);
             let _ = projected.fold_runtime_into_session();
             projected.state
+        })
+    }
+
+    /// Retains a verified loaded history prefix in a same-session resume result, as [`Self::load`]
+    /// does. The caller must treat a resume that returned a different session id as a new load.
+    #[must_use]
+    pub fn project_resume(&self, mut state: Value) -> Value {
+        self.with(|inner| {
+            if let Some(entry) = session_id_of(&state).and_then(|id| inner.sessions.get(id)) {
+                retain_history_prefix(&entry.state, &mut state);
+            }
+            state
         })
     }
 
@@ -310,11 +323,18 @@ impl Inner {
             .and_then(Value::as_array)
             .cloned()
             .unwrap_or_default();
-        let next = if kind == LoadKind::Read {
-            merged_with_prefix(&entry.state, state)
-        } else {
-            state
+        let next = match kind {
+            LoadKind::Read => merged_with_prefix(&entry.state, state),
+            LoadKind::Resume => {
+                let mut state = state;
+                retain_history_prefix(&entry.state, &mut state);
+                state
+            }
+            LoadKind::New | LoadKind::Replace => state,
         };
+        if matches!(kind, LoadKind::New | LoadKind::Replace) {
+            entry.history_paging.truncated = false;
+        }
         replay.extend(entry.replace_state(next));
         let _ = entry.fold_runtime_into_session();
         let interrupted = if kind == LoadKind::Resume {

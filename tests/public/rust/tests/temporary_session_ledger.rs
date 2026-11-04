@@ -257,30 +257,28 @@ async fn start_fails_when_the_record_is_unreadable_and_cannot_be_moved_aside() {
     assert_eq!(error.code, ErrorCode::Internal, "{error:?}");
     assert!(temporary_ids(&r).await.is_empty());
     assert_eq!(listed(&r).await, before, "no session is left behind");
-    // Unix reports a path below a plain file as "not a directory", which freezes the record at load, before any
-    // session exists. Windows reports "not found" there: the record looks like a first run, the start goes out,
-    // and writing the record (below the same plain file) fails. The new session is then deleted again, so on both
-    // systems the start fails as `internal` and nothing is kept; only the step that notices the broken folder
+    // No session is ever started. Unix reports a path below a plain file as "not a directory", which freezes the
+    // record at load, so the start is refused before anything else. Windows reports "not found" there: the record
+    // looks like a first run, but a chat started without a folder first gets its own scratch folder (below the same
+    // plain file), and making it fails before the start goes out. Only the step that notices the broken folder
     // differs.
+    assert!(
+        !r.received()
+            .iter()
+            .any(|m| m == "session/start" || m == "session/delete"),
+        "{:?}",
+        r.received()
+    );
     #[cfg(unix)]
-    {
-        assert!(
-            !r.received().iter().any(|m| m == "session/start"),
-            "{:?}",
-            r.received()
-        );
-        assert!(logged_error(&log, "temporary"), "{}", log.text());
-    }
+    assert!(logged_error(&log, "temporary"), "{}", log.text());
     #[cfg(not(unix))]
     {
-        let received = r.received();
-        let start = received.iter().position(|m| m == "session/start");
-        let delete = received.iter().rposition(|m| m == "session/delete");
+        let _ = &log;
         assert!(
-            matches!((start, delete), (Some(start), Some(delete)) if start < delete),
-            "the started session was deleted again: {received:?}"
+            error.message.contains("not started") && error.message.contains("folder"),
+            "{}",
+            error.message
         );
-        assert!(logged_error(&log, "temporary"), "{}", log.text());
     }
     r.core.shutdown().await;
 }

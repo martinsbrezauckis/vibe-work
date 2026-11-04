@@ -31,7 +31,9 @@ import {
   obj,
   str,
 } from "../model/entries";
+import { videoView } from "../model/video";
 import { StepItem } from "./StepItem";
+import { AddonSuggestion } from "../../connectors/AddonSuggestion";
 import { ConnectorSuggestion } from "../../connectors/ConnectorSuggestion";
 
 type StepsRow = Extract<Row, { kind: "steps" }>;
@@ -197,6 +199,9 @@ export function StepsGroup({ row }: { row: StepsRow }): ReactElement {
   const expandedByDefault = useShellState((s) => s.showThinkingExpanded);
   const hasThinking = row.items.some((item) => item.kind === "reasoning");
   const open = useTranscriptUi((s) => s.open[row.key] ?? (expandedByDefault && hasThinking));
+  const hasVideo = row.items.some(
+    (item) => item.kind === "effect" && videoView(item.entry) !== null,
+  );
   const label = open ? "Hide steps and notes" : "Show steps and notes";
   return (
     <div
@@ -218,17 +223,24 @@ export function StepsGroup({ row }: { row: StepsRow }): ReactElement {
         {row.live ? <Walker /> : null}
         <span className="steps-label">{headerText(row)}</span>
       </button>
-      {open ? (
+      {open || hasVideo ? (
         <div className="lane">
-          {row.items.map((item) => (
-            <ItemView key={`${item.kind}:${entryId(item.entry)}`} item={item} />
-          ))}
+          {row.items
+            .filter((item) => open || (item.kind === "effect" && videoView(item.entry) !== null))
+            .map((item) => (
+              <ItemView key={`${item.kind}:${entryId(item.entry)}`} item={item} />
+            ))}
         </div>
       ) : null}
       {row.items
         .filter((item) => item.kind === "effect")
         .map((item) => (
           <ConnectorSuggestion key={entryId(item.entry)} entry={item.entry} />
+        ))}
+      {row.items
+        .filter((item) => item.kind === "effect")
+        .map((item) => (
+          <AddonSuggestion key={`addon:${entryId(item.entry)}`} entry={item.entry} />
         ))}
     </div>
   );

@@ -41,7 +41,9 @@ pub fn per_run_leases() -> LeaseConfig {
 /// Folders shared by the cores of one test (a restart reuses them).
 #[derive(Clone)]
 pub struct Dirs {
+    /// Project folders are siblings of app data, never children of the Vibe home's parent.
     pub root: PathBuf,
+    pub app_data: PathBuf,
     pub ledger: PathBuf,
     pub data: PathBuf,
     pub stored: PathBuf,
@@ -50,13 +52,17 @@ pub struct Dirs {
 
 impl Dirs {
     pub fn new(name: &str) -> Self {
-        let root = scratch(name);
+        let base = scratch(name);
+        let root = base.join("project");
+        let app_data = base.join("app-data");
+        std::fs::create_dir_all(&root).unwrap();
         Self {
-            ledger: root.join("ledger"),
-            data: root.join("agent-tools"),
-            stored: root.join("vibe-home/logs/session/unified"),
+            ledger: app_data.join("ledger"),
+            data: app_data.join("agent-tools"),
+            stored: app_data.join("vibe-home/logs/session/unified"),
             leases: per_run_leases(),
             root,
+            app_data,
         }
     }
 }
@@ -115,11 +121,15 @@ pub async fn rig_with_script(
     script: crate::common::scripted_model::Script,
     tweak: impl FnOnce(&mut CoreConfig),
 ) -> Rig {
-    let run = dirs.root.join(tag);
+    let run = dirs.app_data.join(tag);
     std::fs::create_dir_all(&run).unwrap();
     let model = crate::common::scripted_model::ScriptedModel::start(script).await;
     let mut config = crate::common::shared_real_vibe::supervisor_config(&run, &model);
-    crate::common::shared_real_vibe::reuse_home(&mut config, &dirs.root.join("vibe-home"), &model);
+    crate::common::shared_real_vibe::reuse_home(
+        &mut config,
+        &dirs.app_data.join("vibe-home"),
+        &model,
+    );
     config.cwd.clone_from(&dirs.root);
     crate::common::core::record(&mut config, &run);
     let agent_log = run.join("agent-config.jsonl");

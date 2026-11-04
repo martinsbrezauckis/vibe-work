@@ -2,7 +2,7 @@
 //! asks the window (`CoreEvent::PanelRead`), the window answers with its typed view of that session's side panel
 //! (`files` `panelAnswer`, a [`PanelView`]), and the agent gets it bounded, with plain notes on how to use it.
 //!
-//! Depends on: the session store, `panel_view`, events. Called by: `agent_tools::tools` (the tool), `files` (the
+//! Depends on: the session store, `panel_view`, events, `search_read_rules`. Called by: `agent_tools::tools` (the tool), `files` (the
 //! window's answer).
 //! Invariants:
 //! - Read-only: nothing here changes the panel, an editor or a file.
@@ -11,6 +11,7 @@
 //! - The answer carries editor text and Files-tab state only ([`PanelView`] refuses unknown fields); Terminal and
 //!   Browser are named, never copied. Every text is bounded.
 //! - No window, or no answer in [`WAIT`]: a plain outcome that says so, never a guess.
+//! - Editors with paths pass the person's file-read rules before any text or selection is copied to the answer.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -23,6 +24,8 @@ use tokio::sync::oneshot;
 use crate::core::Shared;
 use crate::event::CoreEvent;
 use crate::panel_view::{PanelEditor, PanelView};
+
+mod rules;
 
 /// How long the tool waits for the window.
 const WAIT: Duration = Duration::from_secs(5);
@@ -97,7 +100,7 @@ pub(crate) async fn tool(shared: &Shared, session: &str, args: &Value) -> Result
         session_id: session.to_owned(),
     });
     if let Ok(Ok(view)) = tokio::time::timeout(WAIT, reply).await {
-        Ok(agent_answer(view))
+        rules::answer(shared, session, view).await
     } else {
         shared.panel_reads.forget(&request_id);
         Ok(json!({
@@ -119,9 +122,14 @@ fn label(text: &str) -> String {
     cut(text, MAX_LABEL).0
 }
 
-fn editor_json(editor: PanelEditor) -> Value {
+fn editor_json(editor: PanelEditor, withheld: Option<&str>) -> Value {
     let mut out = Map::new();
     out.insert("path".into(), json!(label(&editor.path)));
+    if let Some(reason) = withheld {
+        out.insert("status".into(), json!("withheld"));
+        out.insert("reason".into(), json!(reason));
+        return Value::Object(out);
+    }
     out.insert("focused".into(), json!(editor.focused));
     if let Some(side) = editor.side.filter(|s| s == "left" || s == "right") {
         out.insert("side".into(), json!(side));
@@ -160,15 +168,18 @@ fn editor_json(editor: PanelEditor) -> Value {
 }
 
 /// The agent's answer for `view`: bounded fields plus notes on what they mean.
-pub(crate) fn agent_answer(view: PanelView) -> Value {
+fn agent_answer(view: PanelView, withheld: impl Fn(&str) -> Option<&'static str>) -> Value {
     let tabs: Vec<String> = view.tabs.iter().take(MAX_TABS).map(|t| label(t)).collect();
-    let unsaved = view.editors.iter().any(|e| e.unsaved_text.is_some());
     let editors: Vec<Value> = view
         .editors
         .into_iter()
         .take(MAX_EDITORS)
-        .map(editor_json)
+        .map(|editor| {
+            let reason = withheld(&editor.path);
+            editor_json(editor, reason)
+        })
         .collect();
+    let unsaved = editors.iter().any(|e| e.get("unsavedText").is_some());
     let mut notes: Vec<&str> = Vec::new();
     if editors.is_empty() {
         notes.push(if view.open {
@@ -208,9 +219,16 @@ pub(crate) fn agent_answer(view: PanelView) -> Value {
 }
 
 #[cfg(test)]
+mod rule_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::panel_view::{PanelFiles, PanelSelection};
+
+    fn agent_answer(view: PanelView) -> Value {
+        super::agent_answer(view, |_| None)
+    }
 
     fn editor(path: &str) -> PanelEditor {
         PanelEditor {

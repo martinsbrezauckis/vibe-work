@@ -77,6 +77,7 @@ jobs:
           BUNDLES: ${{ matrix.bundles }}
         run: >-
           pnpm tauri build
+          --features your-edge,proxy-transports,macos-proxy
           --ci
           --no-sign
           --bundles "$BUNDLES"

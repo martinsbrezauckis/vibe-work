@@ -14,8 +14,10 @@ import { Walker } from "../../../components/Walker";
 
 import { useApp } from "../../shell/AppContext";
 import { useTranscriptUi } from "../hooks";
-import { chromeOutcome } from "../model/chromeOutcome";
+import { chromeOutcome, chromeStepLabel } from "../model/chromeOutcome";
 import { type Obj, effectView, entryId } from "../model/entries";
+import { VideoFrames } from "./VideoFrames";
+import { videoView } from "../model/video";
 import { StepBody } from "./StepBody";
 import { formatElapsed } from "./Time";
 
@@ -41,6 +43,13 @@ export const StepItem = memo(function StepItem({ entry }: { entry: Obj }): React
   const key = `step:${id}`;
   const open = useTranscriptUi((s) => s.open[key] === true);
   const view = effectView(entry);
+  view.verb = chromeStepLabel(entry, view.verb);
+  view.target = chromeStepLabel(entry, view.target);
+  const video = videoView(entry);
+  if (video !== null) {
+    view.verb = view.live ? "Reading video…" : "Video";
+    view.target = video.source;
+  }
   const state = stateClass(view);
   const label = `${open ? "Hide" : "Show"} details for ${view.verb} ${view.target}`;
   const outcome = chromeOutcome(entry);
@@ -75,6 +84,7 @@ export const StepItem = memo(function StepItem({ entry }: { entry: Obj }): React
           {outcome}
         </p>
       )}
+      <VideoFrames entry={entry} />
       {open ? <StepBody entry={entry} view={view} /> : null}
     </div>
   );

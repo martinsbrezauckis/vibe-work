@@ -27,11 +27,16 @@ pub const PUSH_REFUSED_KEY: &str = "url.push-is-the-users-step-in-vibe-work:.pus
 /// are applied first). Blocking transports would also break fetch; a pre-push hook path would replace the
 /// repository's own hooks for the agent's commits.
 pub fn isolate_credentials(env: &mut Vec<(OsString, OsString)>) {
-    env.retain(|(name, _)| {
+    env.retain(|(name, value)| {
         let Some(name) = name.to_str() else {
             return false;
         };
         let upper = name.to_ascii_uppercase();
+        if matches!(upper.as_str(), "HTTP_PROXY" | "HTTPS_PROXY" | "ALL_PROXY")
+            && value.to_string_lossy().contains('@')
+        {
+            return false;
+        }
         !upper.starts_with("GIT_CONFIG_")
             && !upper.starts_with("GCM_")
             && !matches!(
@@ -80,9 +85,40 @@ mod tests {
     use std::process::{Command, Stdio};
 
     #[test]
+    fn every_proxy_spelling_removes_sign_ins_and_keeps_public_routes() {
+        for key in [
+            "HTTP_PROXY",
+            "HTTPS_PROXY",
+            "ALL_PROXY",
+            "http_proxy",
+            "https_proxy",
+            "all_proxy",
+        ] {
+            let mut env = vec![(
+                OsString::from(key),
+                OsString::from("http://alice:synthetic-secret@proxy.invalid:8080"),
+            )];
+            isolate_credentials(&mut env);
+            assert!(!env.iter().any(|(name, _)| name == key), "{key} survived");
+            let mut env = vec![(
+                OsString::from(key),
+                OsString::from("http://127.0.0.1:12345"),
+            )];
+            isolate_credentials(&mut env);
+            assert!(
+                env.iter()
+                    .any(|(name, value)| name == key && value == "http://127.0.0.1:12345")
+            );
+        }
+    }
+
+    #[test]
     fn removes_ambient_channels_and_replaces_stale_git_config() {
         let mut env = [
             ("PATH", "/usr/bin"),
+            ("HTTPS_PROXY", "http://alice:s3cret@proxy:8080"),
+            ("all_proxy", "socks5://alice:s3cret@proxy:1080"),
+            ("HTTP_PROXY", "http://127.0.0.1:12345"),
             ("GH_TOKEN", "synthetic-token"),
             ("GITHUB_TOKEN", "synthetic-token"),
             ("GH_CONFIG_DIR", "/synthetic/auth"),
@@ -107,6 +143,11 @@ mod tests {
                 .map(|(_, value)| value.to_string_lossy().into_owned())
         };
         assert_eq!(find("PATH").as_deref(), Some("/usr/bin"));
+        assert!(find("HTTPS_PROXY").is_none() && find("all_proxy").is_none());
+        assert_eq!(
+            find("HTTP_PROXY").as_deref(),
+            Some("http://127.0.0.1:12345")
+        );
         assert_eq!(find("GIT_CONFIG_COUNT").as_deref(), Some("3"));
         assert_eq!(find("GIT_CONFIG_KEY_2").as_deref(), Some(PUSH_REFUSED_KEY));
         assert_eq!(find("GIT_CONFIG_VALUE_2").as_deref(), Some(""));

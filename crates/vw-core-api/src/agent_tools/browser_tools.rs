@@ -59,6 +59,7 @@ pub(super) async fn prepare(
     owner: &str,
     args: &Value,
 ) -> Result<Option<crate::ask::tool_calls::receipts::Execution>, String> {
+    vw_agent_tools::browser_input::validate(names::BROWSER_ACT, args)?;
     target(shared.chrome_control.config.available(), args)?;
     if args["action"] == "close_tab" {
         return crate::browser_tab_tools::prepare_close(
@@ -111,6 +112,7 @@ pub(crate) async fn call(
     tool: &str,
     args: Value,
 ) -> Result<Value, String> {
+    vw_agent_tools::browser_input::validate(tool, &args)?;
     if tool == names::BROWSER_CAPTURE_SECRET {
         return Err("Not run: saving a key to the vault is the user's action. Ask the user to save it in the browser panel (select the key, then Save to vault).".to_owned());
     }

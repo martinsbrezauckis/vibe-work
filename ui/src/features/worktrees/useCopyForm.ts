@@ -5,8 +5,9 @@
  * debounced, until the user edits the name). The copy starts without a first turn: the composer sends it.
  * Depends on: state/worktrees (`run`, `start`), model.ts. Called by: sessions/NewChatPanel.
  * Invariants: answers are kept with the folder they are for (a changed folder never shows the old one); a
- * failed read hides the section (starting in the folder itself stays possible); the toggle's last value is
- * remembered; every request is the window's (a folder a Debug API client chose was picked for this run).
+ * failed read hides the section (starting in the folder itself stays possible); the toggle is
+ * local to this new chat, defaulting on only for a shared folder that is not already a copy; every request is the
+ * window's (a folder a Debug API client chose was picked for this run).
  */
 import { useEffect, useState } from "react";
 
@@ -14,13 +15,14 @@ import type { IncludeReport, WorktreeOptions } from "../../protocol/core";
 import type { NewFolderBy } from "../../state/shellState";
 import { NO_WORKTREES, type Worktrees } from "../../state/worktrees";
 import { useStore } from "../../state/createStore";
-import { copyByDefault, rememberChoice, rememberedChoice } from "./model";
 
 /** Debounce of the name suggestion while typing (ms). */
 const SUGGEST_DELAY = 250;
 
 /** The form's state and actions. */
 export interface CopyForm {
+  /** Folder options have not settled for this new-chat request. */
+  pending: boolean;
   /** The folder is a git repository (the section shows). */
   available: boolean;
   /** Branch of the existing Vibe Work copy chosen as the chat folder. */
@@ -66,10 +68,15 @@ function defaultBase(options: WorktreeOptions): string {
 export function useCopyForm(
   folder: string | null,
   by: NewFolderBy | null,
-  othersLive: boolean,
   worktrees: Worktrees | null,
+  shared: boolean,
 ): CopyForm {
-  const [found, setFound] = useState<{ folder: string; options: WorktreeOptions } | null>(null);
+  const [found, setFound] = useState<{
+    folder: string;
+    by: NewFolderBy | null;
+    request: number;
+    options: WorktreeOptions | null;
+  } | null>(null);
   // The user's choice in this panel (`null`: none yet, the default applies).
   const [choice, setChoice] = useState<{
     folder: string | null;
@@ -78,12 +85,17 @@ export function useCopyForm(
   } | null>(null);
   const newChatRequest = useStore(worktrees?.store ?? NO_WORKTREES, (s) => s.newChatRequest);
   const requestedCopy = useStore(worktrees?.store ?? NO_WORKTREES, (s) => s.newChatCopy);
-  const options = found !== null && found.folder === folder ? found.options : null;
+  const current =
+    found !== null &&
+    found.folder === folder &&
+    found.by === by &&
+    found.request === newChatRequest;
+  const options = current ? found.options : null;
   const existingBranch = options?.existingBranch ?? null;
   const on =
     choice?.folder === folder && choice.request === newChatRequest
       ? choice.on
-      : (requestedCopy ?? copyByDefault(othersLive, rememberedChoice(), existingBranch !== null));
+      : (requestedCopy ?? (shared && existingBranch === null));
   const [base, setBase] = useState("");
   const [message, setMessage] = useState("");
   const [branch, setBranchState] = useState("");
@@ -95,15 +107,21 @@ export function useCopyForm(
     worktrees
       .run({ op: "options", cwd: folder })
       .then((result) => {
-        if (!live || result.kind !== "options") return;
-        setFound({ folder, options: result.options });
+        if (!live) return;
+        setFound({
+          folder,
+          by,
+          request: newChatRequest,
+          options: result.kind === "options" ? result.options : null,
+        });
+        if (result.kind !== "options") return;
         setChoice(null);
         setBase(defaultBase(result.options));
         setBranchState(result.options.suggestion ?? "");
         setEdited(false);
       })
       .catch(() => {
-        if (live) setFound(null);
+        if (live) setFound({ folder, by, request: newChatRequest, options: null });
       });
     return () => {
       live = false;
@@ -113,10 +131,9 @@ export function useCopyForm(
   // the message is the new-chat composer's text, so it changes with every key. A name is suggested only
   // while a copy would be made (a git folder, offered, the switch on): a plain folder is never asked (the core
   // refuses a non-git folder, which showed as a refusal toast on macOS where the test folder is no repository).
-  const copyOn =
-    found !== null && found.folder === folder && found.options.isGit && found.options.offered && on;
+  const copyOn = options?.isGit === true && options.offered && on;
   useEffect(() => {
-    if (!copyOn || edited || worktrees === null) return;
+    if (!copyOn || edited || worktrees === null || folder === null) return;
     let live = true;
     const timer = setTimeout(() => {
       worktrees
@@ -136,6 +153,7 @@ export function useCopyForm(
   const offered = options?.offered === true;
   const head = options?.head;
   return {
+    pending: folder !== null && worktrees !== null && !current,
     available,
     existingBranch,
     notPicked: options?.picked === false,
@@ -144,7 +162,6 @@ export function useCopyForm(
     on,
     setOn(next) {
       setChoice({ folder, request: newChatRequest, on: next });
-      rememberChoice(next);
     },
     branches: options?.branches ?? [],
     detached: head?.kind === "detached" ? head.commit : null,

@@ -39,7 +39,7 @@ pub enum NetworkRequest {
 }
 
 /// The values of a request. Each is optional: absent is unchanged, empty removes the setting.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct NetworkChanges {
@@ -68,6 +68,18 @@ pub struct NetworkChanges {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "ts", ts(optional))]
     pub certificate_folder: Option<String>,
+}
+
+impl std::fmt::Debug for NetworkChanges {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mask =
+            |value: &Option<String>| value.as_deref().map(vw_mistral::network::mask_proxy_url);
+        f.debug_struct("NetworkChanges")
+            .field("http_proxy", &mask(&self.http_proxy))
+            .field("https_proxy", &mask(&self.https_proxy))
+            .field("all_proxy", &mask(&self.all_proxy))
+            .finish_non_exhaustive()
+    }
 }
 
 /// One setting as Settings shows it.

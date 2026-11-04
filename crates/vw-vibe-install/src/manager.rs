@@ -125,6 +125,8 @@ pub(crate) struct State {
     /// The Chrome extension store state of the last accepted manifest ([`crate::extension_store`]); kept when a
     /// later check fails.
     pub(crate) extension_store: Option<crate::support::ExtensionStore>,
+    /// The oldest Chrome extension version the last accepted manifest accepts (same record and rules).
+    pub(crate) extension_min_version: Option<String>,
 }
 
 pub(crate) struct Inner {
@@ -202,6 +204,8 @@ impl VibeInstaller {
             support: crate::update::SupportState::default(),
             update_job: None,
             extension_store: crate::extension_store::load(&config.root),
+            extension_min_version: crate::extension_store::load_record(&config.root)
+                .and_then(|c| c.min_version),
         };
         let view = watch::Sender::new(snapshot(&pinned, &state));
         Self {
@@ -253,6 +257,13 @@ impl VibeInstaller {
     #[must_use]
     pub fn extension_store(&self) -> Option<crate::support::ExtensionStore> {
         self.inner.lock().extension_store
+    }
+
+    /// The oldest Chrome extension version the last accepted manifest accepts (this run's, else the recorded one);
+    /// `None` when none stated a plain version.
+    #[must_use]
+    pub fn extension_min_version(&self) -> Option<String> {
+        self.inner.lock().extension_min_version.clone()
     }
 
     /// Every view change, current one first.

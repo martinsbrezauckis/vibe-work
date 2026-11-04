@@ -193,6 +193,7 @@ pub(crate) async fn deletion_children(
 
 /// A session was deleted (Vibe confirmed `session/delete`): everything of it ends now.
 pub(crate) async fn deleted(shared: &Shared, id: &str) {
+    shared.history_loading.stop(id);
     crate::chrome_control::end_chat(shared, id, true);
     locked(&shared.ends.pending).remove(id);
     // The title is read before the store forgets the session (the "left running" list names it).
@@ -239,6 +240,8 @@ pub(crate) async fn deleted(shared: &Shared, id: &str) {
     locked(&shared.git.repos).remove(id);
     // its copy (if any) may now be an orphan, listed at the next start.
     crate::worktrees::session_deleted(shared, id);
+    // A temporary chat's own folder goes last, when nothing of the chat holds it any more.
+    crate::temporary::chat_ended(shared, id).await;
 }
 
 /// A session was archived (Vibe confirmed it). Its channel closes when it is quiet; its resources end then too, or

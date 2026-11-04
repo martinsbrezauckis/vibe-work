@@ -67,10 +67,7 @@ pub(crate) fn admit(
         hand_over,
         move || {
             crate::main_window(&handle).is_some_and(|window| {
-                if window.unminimize().is_err()
-                    || window.show().is_err()
-                    || window.set_focus().is_err()
-                {
+                if crate::tray::reveal_main_window(&handle).is_err() {
                     return false;
                 }
                 let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);

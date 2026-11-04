@@ -96,7 +96,7 @@ fn command_substitutions_are_not_literal_folder_paths() {
 #[test]
 fn windows_shell_assignment_with_find_does_not_hit_invalid_filename() -> std::io::Result<()> {
     let cwd = std::fs::canonicalize(std::env::temp_dir())?;
-    let layout = Layout::new(&cwd.join("shell-find-absent-vibe-home"), &cwd)?;
+    let layout = Layout::new(&cwd.join("shell-find-app-data/vibe-home"), &cwd)?;
     let no_copy_check = |_: &Path, _: bool| -> Result<(), String> {
         panic!("a command outside Vibe home asked for a copy permit")
     };
@@ -228,7 +228,7 @@ fn layout_and_path_resolution_errors_name_the_path() -> std::io::Result<()> {
 #[test]
 fn missing_home_and_worktrees_do_not_block_an_outside_folder() -> std::io::Result<()> {
     let root = std::fs::canonicalize(std::env::temp_dir())?;
-    let home = root.join("folders-absent-vibe-home");
+    let home = root.join("folders-app-data/vibe-home");
     let cwd = root.join("folders-outside-project");
     let layout = Layout::new(&home, &cwd)?;
     assert!(layout.own.is_none());
@@ -420,15 +420,16 @@ fn the_chrome_control_state_folder_is_refused_for_every_use() -> std::io::Result
             );
         }
     }
-    // A neighbour with a longer name is not the folder.
-    assert_eq!(
-        layout.check(
-            &data.join("chrome-control-notes.txt"),
-            &data,
-            Access::Read,
-            &|_, _| Ok(())
-        ),
-        None
+    // Other app-data files are private too, even when their names resemble the browser folder.
+    assert!(
+        layout
+            .check(
+                &data.join("chrome-control-notes.txt"),
+                &data,
+                Access::Read,
+                &|_, _| Ok(())
+            )
+            .is_some()
     );
     let command = format!(
         "cat {}",
@@ -576,4 +577,23 @@ fn heredoc_bypasses_through_grouping_quoting_and_forms_are_refused() -> std::io:
     std::fs::remove_dir_all(&root)?;
     assert!(bypasses.is_empty(), "must be refused: {bypasses:#?}");
     Ok(())
+}
+
+#[test]
+fn approval_refusal_names_the_approval_files_folder_instead_of_its_ancestor() {
+    // The real path: macOS's temp folder is behind the /var -> /private/var link, and the refusal names real paths.
+    let root = std::env::temp_dir()
+        .canonicalize()
+        .unwrap()
+        .join("approval-path-diagnosis");
+    let data = root.join("app-data");
+    let layout = Layout::new(&data.join("vibe-home"), &root.join("project")).unwrap();
+    let reason = layout
+        .check(&root, &root, Access::Unknown, &|_, _| Ok(()))
+        .unwrap();
+    assert!(
+        reason.contains(&format!("plugin approvals ({})", shown::shown(&data))),
+        "{reason}"
+    );
+    assert!(reason.contains("change plugins in Tools"));
 }

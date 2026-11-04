@@ -39,7 +39,20 @@ pub(crate) fn accept_loop(inner: Arc<Inner>, listener: TcpListener, who: Who) ->
                 continue;
             };
             let (inner, who) = (inner.clone(), who.clone());
-            tokio::spawn(async move { serve_one(inner, stream, who).await });
+            let mut enabled = inner.enabled.subscribe();
+            tokio::spawn(async move {
+                let active = *enabled.borrow_and_update();
+                if !active {
+                    let mut stream = stream;
+                    answer(&mut stream, "503 Service Unavailable", "Unlock the vault.").await;
+                    return;
+                }
+                tokio::select! {
+                    biased;
+                    _ = enabled.changed() => {},
+                    () = serve_one(inner, stream, who) => {},
+                }
+            });
         }
     })
 }
@@ -108,6 +121,9 @@ fn canary(
     bare: &str,
     port: u16,
 ) -> Option<&'static str> {
+    if !inner.canaries.load(std::sync::atomic::Ordering::SeqCst) {
+        return None;
+    }
     if let Some(token) = bare.strip_suffix(CANARY_SUFFIX) {
         inner.saw(token);
         return Some("Vibe Work network guard: active.");
@@ -260,12 +276,13 @@ impl Decided<'_> {
 /// The connection for a request the policy allowed: to `addrs`, or for a `public` target through the user's proxy
 /// when one applies (the route). Every proxy is asked for a checked address, never the name. The error is the page text
 /// of a 502.
+#[cfg(not(feature = "proxy-transports"))]
 async fn open(
     decided: &Decided<'_>,
     tunnel: bool,
     public: bool,
     addrs: &[SocketAddr],
-) -> Result<(TcpStream, Option<crate::upstream::Route>), String> {
+) -> Result<(crate::stream::Stream, Option<crate::upstream::Route>), String> {
     let (host, bare, port) = (decided.host, decided.bare, decided.port);
     let route = if public {
         decided.inner.upstream_route(tunnel, host, port)
@@ -276,7 +293,7 @@ async fn open(
         let stream = connect(addrs)
             .await
             .map_err(|e| unreachable(bare, port, &e))?;
-        return Ok((stream, None));
+        return Ok((Box::new(stream), None));
     };
     let through = if tunnel {
         crate::upstream::tunnel(proxy, addrs).await
@@ -284,10 +301,52 @@ async fn open(
         crate::upstream::connect(proxy).await
     };
     match through {
-        Ok(stream) => Ok((stream, route)),
+        Ok(stream) => Ok((Box::new(stream), route)),
         Err(error) => Err(format!(
             "{bare}:{port} could not be reached through your proxy: {error}."
         )),
+    }
+}
+
+#[cfg(feature = "proxy-transports")]
+async fn open(
+    decided: &Decided<'_>,
+    tunnel: bool,
+    public: bool,
+    addrs: &[SocketAddr],
+    target: &Target,
+) -> Result<(crate::stream::Stream, Option<crate::upstream::Route>), String> {
+    if !public {
+        return connect(addrs)
+            .await
+            .map(|s| (Box::new(s) as crate::stream::Stream, None))
+            .map_err(|e| unreachable(decided.bare, decided.port, &e));
+    }
+    let upstream = decided
+        .inner
+        .upstream
+        .read()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .clone();
+    let url = match target {
+        Target::Forward { url, .. } => url.clone(),
+        _ => url::Url::parse(&format!("https://{}:{}/", decided.host, decided.port))
+            .map_err(|_| "The proxy address is not valid.".to_owned())?,
+    };
+    let opened = tokio::time::timeout(Duration::from_secs(45), upstream.open(&url, tunnel, addrs))
+        .await
+        .unwrap_or(Err(crate::upstream::Error::Timeout));
+    match opened {
+        Ok(connection) => Ok(connection),
+        Err(error) => {
+            decided.inner.record(
+                decided.inner.refusal_key(decided.who).as_deref(),
+                decided.bare,
+                decided.port,
+                error.outcome(),
+            );
+            Err(error.state().to_owned())
+        }
     }
 }
 
@@ -321,7 +380,11 @@ async fn relay(
         return;
     }
     let tunnel = matches!(head.target, Target::Tunnel { .. });
-    let (mut upstream, route) = match open(decided, tunnel, public, addrs).await {
+    #[cfg(not(feature = "proxy-transports"))]
+    let opened = open(decided, tunnel, public, addrs).await;
+    #[cfg(feature = "proxy-transports")]
+    let opened = open(decided, tunnel, public, addrs, &head.target).await;
+    let (mut upstream, route) = match opened {
         Ok(open) => open,
         Err(text) => {
             answer(&mut stream, "502 Bad Gateway", &text).await;
@@ -380,6 +443,15 @@ async fn relay(
                 body,
                 upgrade,
                 route.is_some(),
+                #[cfg(feature = "proxy-transports")]
+                |reason| {
+                    decided.inner.record(
+                        decided.inner.refusal_key(decided.who).as_deref(),
+                        decided.bare,
+                        decided.port,
+                        reason,
+                    );
+                },
             )
             .await;
         }

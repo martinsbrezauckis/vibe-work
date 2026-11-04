@@ -6,12 +6,13 @@
  * the step that turns Chrome Control's (or the headless browser's) tools on for the chat gets one line too:
  * they turn on when the reply ends and Vibe continues by itself, they are already on, or it was refused.
  * Pure. Depends on: entries. Called by: StepItem.
- * Invariant: no operation names or codes in the words; `null` for a step that is not Chrome Control's or still runs.
- * Invariant: every line is one of this file's fixed lines. An answer's words (an error's message or details, a page's
- * text) never reach it; from the untrusted page envelope only the error code is read, as a key into a closed list.
+ * Invariant: `null` for a step that is not Chrome Control's or still runs.
+ * Receipt-owned error reasons use a short sanitised line. From the untrusted page envelope only the error code is
+ * read, as a key into a closed list; page messages and details never become an outcome line.
  */
-import { TEXT } from "../../../vocabulary";
-import { type Obj, detailOf, effectView, obj, outputOf, outputText, str } from "./entries";
+import { TEXT, term } from "../../../vocabulary";
+import { type Obj, detailOf, effectView, inputOf, obj, outputOf, outputText, str } from "./entries";
+import { chromeErrorReason } from "./chromeErrorReason";
 
 const CHROME_TOOL = /^mcp_vw\.chrome_(status|session|execute)$/i;
 
@@ -63,6 +64,39 @@ function answerOf(entry: Obj): Obj | null {
   return jsonObject(outputText(entry));
 }
 
+/** Browser words use the host receipt or requested profile, never the untrusted page payload. */
+function browserWords(entry: Obj, text: string): string {
+  const input = inputOf(entry);
+  const requested =
+    detailOf(entry)["toolName"] === "mcp_vw.chrome_session" && input?.["action"] === "open"
+      ? str(input["profileId"])
+      : null;
+  const profile = str(answerOf(entry)?.["profileId"]) ?? requested ?? "";
+  const browser = profile.startsWith("edge:")
+    ? "Edge"
+    : profile.startsWith("firefox:")
+      ? "Firefox"
+      : profile.startsWith("chrome:") || /^[\da-f]{8}(?:-[\da-f]{4}){3}-[\da-f]{12}$/i.test(profile)
+        ? "Chrome"
+        : null;
+  if (browser !== null) return text.replace(/\bChrome\b/g, browser);
+  if (text === term("builtinSkills", "vw:chrome").name) return "Your browser";
+  if (text === NO_CHROME) return "Not done: your browser is not connected to Vibe Work right now.";
+  return text
+    .replace(/\bYour Chrome\b/g, "Your browser")
+    .replace(/\bChrome\b/g, "your browser")
+    .replace(/^your browser\b/, "Your browser");
+}
+
+/** Localizes only built-in browser labels; page titles and other free text stay unchanged. */
+export function chromeStepLabel(entry: Obj, text: string): string {
+  const tool = str(detailOf(entry)["toolName"]) ?? "";
+  return CHROME_TOOL.test(tool) &&
+    [term("builtinSkills", "vw:chrome").name, "Read Chrome status"].includes(text)
+    ? browserWords(entry, text)
+    : text;
+}
+
 /** A field of the answer, or of its `operation`, `result` or `error` object. */
 function field(answer: Obj | null, name: string): string | null {
   if (answer === null) return null;
@@ -97,6 +131,8 @@ const ANY_PROBLEM = TEXT.chromeProblem;
 
 /** Each line and the codes that give it. */
 const LINES: readonly (readonly [string, readonly string[]])[] = [
+  // The tool's missing-target diagnosis and recovery, without protocol names or page-controlled words.
+  ["Not done: No tab selected. Choose a tab or create one first.", ["TARGET_REQUIRED"]],
   [
     REFUSED,
     // Helper (broker) and extension refusals; DENIED is the helper's code for a "denied" status.
@@ -160,12 +196,14 @@ const BY_CODE: ReadonlyMap<string, string> = new Map(
 /**
  * The failure line of an answer, or `null`. A helper answer is wrapped by the core (`untrustedPageContent`,
  * content.rs): there only `error.code` is read, never its message or details, which can carry page text, and a code
- * not in the list gives {@link ANY_PROBLEM}. The core's own failures and older answers carry the code outside; there
- * only a known code gives a line. A status of "unknown" never says "Not done" (the effect may have happened).
+ * not in the list gives {@link ANY_PROBLEM}. Receipt-owned codes take precedence; their own messages are handled
+ * separately by chromeErrorReason. A status of "unknown" never says "Not done" (the effect may have happened).
  */
 function failureLine(answer: Obj | null, status: string | null): string | null {
   const page = obj(answer?.["untrustedPageContent"]);
-  const code = page === null ? field(answer, "code") : str(obj(page["error"])?.["code"]);
+  const code =
+    str(obj(answer?.["error"])?.["code"]) ??
+    (page === null ? field(answer, "code") : str(obj(page["error"])?.["code"]));
   if (code === null || code === "") return null;
   const line = BY_CODE.get(code) ?? (page === null ? null : ANY_PROBLEM);
   if (line === null) return null;
@@ -198,7 +236,14 @@ export function chromeOutcome(entry: Obj): string | null {
   const answer = answerOf(entry);
   const status = field(answer, "status")?.toLowerCase() ?? null;
   const failure = failureLine(answer, status);
-  if (failure !== null) return failure;
-  if (status !== null && Object.hasOwn(BY_STATUS, status)) return BY_STATUS[status] ?? null;
-  return view.status === "failed" ? ANY_PROBLEM : null;
+  const reason = chromeErrorReason(answer, status, failure?.startsWith("Not known:") ?? false);
+  if (reason !== null) return reason;
+  if (failure !== null) return browserWords(entry, failure);
+  const line =
+    status !== null && Object.hasOwn(BY_STATUS, status)
+      ? (BY_STATUS[status] ?? null)
+      : view.status === "failed"
+        ? ANY_PROBLEM
+        : null;
+  return line === null ? null : browserWords(entry, line);
 }

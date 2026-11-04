@@ -87,8 +87,7 @@ export function BrowserPoolSettings({
 
   if (core === null) return null;
   return (
-    <section aria-labelledby="browser-pool-title">
-      <h3 id="browser-pool-title">Browser</h3>
+    <>
       <div className="check" data-setting="parallel-browser-sessions">
         <span>
           Live browser tabs
@@ -125,6 +124,6 @@ export function BrowserPoolSettings({
           }}
         />
       </div>
-    </section>
+    </>
   );
 }

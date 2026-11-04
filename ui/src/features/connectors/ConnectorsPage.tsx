@@ -6,6 +6,7 @@
  * Depends on: hooks, the connector views, model/view. Called by: Content.
  * Invariants: components render, the connectors controller decides; no vendor logos.
  */
+import { ChromeCard } from "../settings/chrome/ChromeConnection";
 import { Button } from "../../components/Controls";
 import type { ReactElement } from "react";
 
@@ -94,6 +95,7 @@ export function ConnectorsPage(): ReactElement {
   return (
     <div className={`cpage ${selected === null ? "" : "has-detail"}`} data-testid="connectors-page">
       <div className="cmain">
+        <ChromeCard />
         <div className="chead">
           <ToolsTabs />
           <p className="cmuted">

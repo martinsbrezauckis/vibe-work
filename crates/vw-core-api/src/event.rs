@@ -42,6 +42,11 @@ pub struct SubagentCard {
     rename_all_fields = "camelCase"
 )]
 pub enum CoreEvent {
+    /// A feedback draft or review changed in memory.
+    Feedback {
+        /// Current panel state.
+        view: crate::FeedbackView,
+    },
     /// A permission prompt opened with a shared deadline.
     AskOpened {
         /// Value-free pending metadata.
@@ -661,7 +666,8 @@ impl CoreEvent {
             | Self::BrowserChanged { session_id }
             | Self::PagesChanged { session_id }
             | Self::FilesChanged { session_id } => session_id.as_deref().is_none_or(|s| s == id),
-            Self::GitBrowserChanged { .. }
+            Self::Feedback { .. }
+            | Self::GitBrowserChanged { .. }
             | Self::Lagged {}
             | Self::Server { .. }
             | Self::WorktreesChanged {}

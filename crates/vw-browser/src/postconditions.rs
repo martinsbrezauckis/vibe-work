@@ -50,7 +50,10 @@ impl Browser {
             .run_in_mount(session, scripts::act(&request), Some(&mount))
             .await
             .map_err(failed)?;
-        self.check_answer(session, &page, &answer.url)
+        self.check_read_mount()
+            .and_then(|()| {
+                self.reading_ref_allowed(session, &page, &answer.url, action.reference())
+            })
             .map_err(failed)?;
         answers::interpret(answer, action)
     }
@@ -83,7 +86,15 @@ impl Browser {
             )
             .await
             .map_err(failed)?;
-        self.check_answer(session, request["page"].as_str().unwrap_or(""), &answer.url)
+        self.check_read_mount()
+            .and_then(|()| {
+                self.reading_ref_allowed(
+                    session,
+                    request["page"].as_str().unwrap_or(""),
+                    &answer.url,
+                    action.reference(),
+                )
+            })
             .map_err(failed)?;
         proved.effect = answers::interpret(answer, action)?.effect;
         Ok(proved)

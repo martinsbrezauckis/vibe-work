@@ -12,12 +12,15 @@ publish = false
 workspace = true
 
 [features]
+# Optional native feedback after agent input.
+click-marker = []
 # TypeScript bindings for the UI (through vw-core-api's gen-core-ts).
 ts = ["dep:ts-rs"]
 # Test fixture only: exact loopback origin may exercise the shared browser profile.
 e2e-script = []
 
 [dependencies]
+vw-vocabulary = { path = "../vw-vocabulary" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
@@ -41,3 +44,8 @@ vw-netguard = { path = "../vw-netguard" }
 sysinfo = { version = "=0.38.4", default-features = false, features = ["system"] }
 # ABP parsing and ordered WebKit content-rule conversion; filter data is downloaded only for Strict.
 adblock = { version = "=0.13.5", default-features = false, features = ["content-blocking"] }
+
+# Indexed evaluation of the same WebKit JSON for WebView2 (already transitive dependencies).
+regex = "1"
+regex-syntax = "0.8"
+aho-corasick = "1"

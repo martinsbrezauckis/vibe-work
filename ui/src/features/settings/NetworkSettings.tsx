@@ -12,10 +12,11 @@
  * - A value the core refuses shows its sentence under its field; the test names the failure and the next step.
  * - Nothing is saved without the native confirmation the core asks on Save.
  */
-import { useId, type ReactElement, type ReactNode } from "react";
+import { useId, useState, type ReactElement, type ReactNode } from "react";
 
 import { Button } from "../../components/Controls";
 import type { NetworkFieldView } from "../../protocol/core";
+import { TEXT } from "../../vocabulary";
 import { useNetwork } from "./useNetwork";
 
 /** One text field with its label, helper line and the sentences that belong to it. */
@@ -33,7 +34,9 @@ function Field(props: {
   extra?: ReactNode;
 }): ReactElement {
   const id = useId();
+  const [editing, setEditing] = useState(false);
   const { field } = props;
+  const mask = props.secret === true && (editing || props.value !== (field?.value ?? ""));
   return (
     <div className="key-field">
       <label htmlFor={id}>{props.label}</label>
@@ -41,7 +44,7 @@ function Field(props: {
         <input
           data-testid={props.testId}
           id={id}
-          type="text"
+          type={mask ? "password" : "text"}
           {...(props.secret === true ? { "data-secret": "true" } : {})}
           value={props.value}
           placeholder={props.placeholder}
@@ -50,6 +53,12 @@ function Field(props: {
           autoCapitalize="off"
           autoCorrect="off"
           spellCheck={false}
+          onFocus={() => {
+            setEditing(true);
+          }}
+          onBlur={() => {
+            setEditing(false);
+          }}
           aria-invalid={props.problem === undefined ? undefined : true}
           onChange={(e) => {
             props.onChange(e.target.value);
@@ -127,7 +136,7 @@ export function NetworkSettings(): ReactElement | null {
         <>
           {view.restartNeeded && n.note === null && (
             <p className="key-line" role="status">
-              Saved settings apply the next time Vibe Work starts. Close it and open it again.
+              {`Saved settings apply the next time Vibe Work starts. ${TEXT.quitVibeWork} and open it again.`}
             </p>
           )}
           {n.note !== null && (

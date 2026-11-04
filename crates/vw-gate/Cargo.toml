@@ -11,6 +11,10 @@ publish = false
 [lints]
 workspace = true
 
+[features]
+# Keep the method gate's transport contract aligned with the app's network settings.
+proxy-transports = ["vw-mistral/proxy-transports"]
+
 [dependencies]
 vw-ask = { path = "../vw-ask" }
 vw-vocabulary = { path = "../vw-vocabulary" }

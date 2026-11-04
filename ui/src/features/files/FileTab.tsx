@@ -318,15 +318,17 @@ export function SessionFile({
           >
             Reload
           </Button>
-          <Button
-            data-testid="files.file-tab-external"
-            type="button"
-            appearance="compact"
-            disabled={busy}
-            onClick={() => void external("reveal")}
-          >
-            Show in folder
-          </Button>
+          {content?.file.startsWith("video:") !== true && (
+            <Button
+              data-testid="files.file-tab-external"
+              type="button"
+              appearance="compact"
+              disabled={busy}
+              onClick={() => void external("reveal")}
+            >
+              Show in folder
+            </Button>
+          )}
           {content !== null && content.openClass !== "refused" && (
             <Button
               data-testid="files.file-tab-external-2"

@@ -130,8 +130,16 @@ export function createNotifier(options: { persist?: boolean } = {}) {
           closedAt?: number;
           stopped?: true;
           ended?: true;
+          shown?: Promise<void>;
+          withdrawn?: true;
         }
       >();
+      const withdraw = (retained: { id: number; shown?: Promise<void>; withdrawn?: true }) => {
+        if (retained.shown === undefined || retained.withdrawn === true) return;
+        retained.withdrawn = true;
+        // Native Show can still be in flight when the answer arrives; removal must follow it.
+        void retained.shown.then(() => core.client.dismissOs(retained.id)).catch(() => undefined);
+      };
       return core.store.subscribe(() => {
         const next = core.store.get();
         const found = transitions(last, next);
@@ -157,6 +165,7 @@ export function createNotifier(options: { persist?: boolean } = {}) {
         for (const [key, retained] of retainedCallbacks) {
           // Metadata may arrive after callbacksChanged. A transport callback never asks the person.
           if (toolTransport(next, retained.sessionId, retained.callbackId)) {
+            withdraw(retained);
             forget?.(retained.id);
             retainedCallbacks.delete(key);
             continue;
@@ -205,6 +214,7 @@ export function createNotifier(options: { persist?: boolean } = {}) {
                 delete retained.closedAt;
                 continue;
               }
+              withdraw(retained);
               if (
                 retained.stopped === undefined &&
                 (ended || performance.now() - retained.closedAt >= WAIT_MS)
@@ -219,6 +229,7 @@ export function createNotifier(options: { persist?: boolean } = {}) {
               }
               continue;
             }
+            withdraw(retained);
             forget?.(retained.id);
             retainedCallbacks.delete(key);
           }
@@ -268,7 +279,10 @@ export function createNotifier(options: { persist?: boolean } = {}) {
             });
           if (!announce) continue;
           store.set((s) => ({ ...s, log: [...s.log, notification].slice(-LOG_MAX) }));
-          core.client.notifyOs(notification).then(
+          const shown = core.client.notifyOs(notification);
+          const retained = callbackKey === null ? undefined : retainedCallbacks.get(callbackKey);
+          if (retained !== undefined) retained.shown = shown;
+          shown.then(
             () => {
               store.set((s) => (s.error === null ? s : { ...s, error: null }));
             },

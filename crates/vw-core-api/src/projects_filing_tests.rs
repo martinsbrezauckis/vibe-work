@@ -67,3 +67,42 @@ async fn the_empty_automatic_work_project_is_removed() {
     super::retire_work_project(shared).await;
     assert_eq!(projects(shared), Vec::new());
 }
+
+/// PREDICT (before the change): a Temporary chat started without a folder shows in the sidebar under a project
+/// named after its own random folder (`chat-<16 hex>`). After it the project reads "Temporary chat" (no folder name),
+/// whether the start or a later listing filed the chat first; a chat in a person's folder keeps its folder name.
+#[tokio::test]
+async fn a_temporary_chats_own_folder_shows_as_temporary_chat() {
+    let core = crate::offline_core::start("filing-temporary").await;
+    let shared = &core.shared;
+    let names = || -> Vec<String> {
+        shared
+            .projects
+            .store
+            .read(|s| s.projects().iter().map(|p| p.name.clone()).collect())
+    };
+    let started = shared.temporary.new_scratch().unwrap();
+    let started = started.to_string_lossy().into_owned();
+    let start = json!({"agentConfig": {"cwd": started}});
+    let state = json!({"session": {"id": "temporary-started", "cwd": started}});
+    super::loaded(shared, &start, &state, true).await;
+    let listed = shared.temporary.new_scratch().unwrap();
+    super::listed(shared, &[json!({"id":"temporary-listed", "cwd": listed})]).await;
+    super::loaded(
+        shared,
+        &json!({}),
+        &json!({"session": {"id": "person", "cwd": "/code/app"}}),
+        false,
+    )
+    .await;
+    let all = names();
+    assert_eq!(
+        all,
+        vec!["Temporary chat", "Temporary chat (2)", "app"],
+        "{all:?}"
+    );
+    for dir in [std::path::PathBuf::from(started), listed] {
+        shared.temporary.remove_scratch(&dir);
+    }
+    core.shutdown().await;
+}

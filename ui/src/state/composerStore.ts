@@ -46,6 +46,7 @@ import {
   pasteMarker,
   pastesIn,
 } from "../features/composer/model/pastes";
+import { NEW_CHAT } from "./newChatKey";
 import { createStore } from "./createStore";
 import { loadDefaultReasoning, saveDefaultReasoning } from "./defaultReasoning";
 
@@ -88,6 +89,8 @@ export interface RewindDialog {
 
 /** The visible Chrome tab picker, bound to the composer that opened it. */
 export interface ChromePicker {
+  /** Browser explicitly chosen by the person; omitted for the original Chrome picker. */
+  browser?: "Edge" | "Firefox";
   sessionId: string;
   rows: readonly ChromeTab[];
   loading: boolean;
@@ -128,6 +131,8 @@ export interface ComposerState {
   editing: { sessionId: string; queueItemId: string; text: string } | null;
   rewind: RewindDialog | null;
   chromePicker: ChromePicker | null;
+  /** Last browser shown by each composer, retained when the picker closes. */
+  tabBrowser: Readonly<Record<string, "Chrome" | "Edge" | "Firefox">>;
   /** Sessions whose draft the app put back (a rewound message): sent as text until the user edits it. */
   literal: Readonly<Record<string, true>>;
   /** Sessions whose draft text a Debug API client wrote (until the user edits it). */
@@ -183,6 +188,7 @@ const EMPTY: ComposerState = {
   editing: null,
   rewind: null,
   chromePicker: null,
+  tabBrowser: {},
   literal: {},
   draftBy: {},
   newChat: NO_PICKS,
@@ -319,7 +325,17 @@ export function createComposerStore(persist: boolean) {
     history,
     store,
     setChromePicker(chromePicker: ChromePicker | null): void {
-      store.set((s) => ({ ...s, chromePicker }));
+      store.set((s) => ({
+        ...s,
+        chromePicker,
+        tabBrowser:
+          chromePicker === null
+            ? s.tabBrowser
+            : {
+                ...s.tabBrowser,
+                [chromePicker.sessionId]: chromePicker.browser ?? "Chrome",
+              },
+      }));
     },
     /** Documents install the save step for attachments held before a chat exists. */
     setPrepareContext(prepare: typeof prepareContext): void {
@@ -598,8 +614,16 @@ export function createComposerStore(persist: boolean) {
       store.set((s) => ({ ...s, newChat: { ...s.newChat, ...patch } }));
     },
     /** Forgets the new-chat view's held picks (after its session started). */
-    resetNewChat(): void {
-      store.set((s) => (s.newChat === NO_PICKS ? s : { ...s, newChat: NO_PICKS }));
+    resetNewChat(sessionId: string): void {
+      store.set((s) => ({
+        ...s,
+        newChat: NO_PICKS,
+        tabBrowser: setIn<"Chrome" | "Edge" | "Firefox">(
+          setIn(s.tabBrowser, sessionId, s.tabBrowser[NEW_CHAT]),
+          NEW_CHAT,
+          undefined,
+        ),
+      }));
     },
     /** Drops everything kept for sessions that were deleted. */
     forget(ids: readonly string[]): void {
@@ -619,8 +643,10 @@ export function createComposerStore(persist: boolean) {
           draftBy,
           compacting,
           pluginReloadFailed,
+          tabBrowser,
         } = s;
         for (const id of ids) {
+          tabBrowser = setIn(tabBrowser, id, undefined);
           literal = setIn(literal, id, undefined);
           draftBy = setIn(draftBy, id, undefined);
           context = setIn(context, id, undefined);
@@ -636,6 +662,7 @@ export function createComposerStore(persist: boolean) {
         }
         return {
           ...s,
+          tabBrowser,
           drafts,
           context,
           images,

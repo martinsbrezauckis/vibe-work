@@ -28,6 +28,8 @@ import { droppedItems, runDrop } from "../files/drop";
 import { fileItems } from "../files/attachments";
 import { registerComposerFocus } from "../../state/composerFocus";
 import { NEW_CHAT } from "../../state/newChatKey";
+import { useStore } from "../../state/createStore";
+import { NO_SESSION_TOOLS } from "../../state/sessionTools";
 import { retryLabel } from "../../state/turnRetry";
 import { useApp } from "../shell/AppContext";
 import { useKeyReadiness } from "../shell/KeyNotice";
@@ -43,9 +45,8 @@ import { FileMentionMenu } from "./FileMentionMenu";
 import { usePromptHistory } from "./usePromptHistory";
 import { useFileMention } from "./useFileMention";
 import { ChromeTabPicker } from "./ChromeTabPicker";
-import { openChromeTabs } from "./chromeTabs";
+import { openBrowserTabs, usableBrowsers } from "./browserTabs";
 import { ChromeWorkNote } from "./ChromeWorkNote";
-import { chromeUsable } from "../settings/chrome/chromeRows";
 import { LoopsStrip } from "./LoopsStrip";
 import { useAutoHeight } from "./autoHeight";
 import { ComposerTools } from "./ComposerTools";
@@ -72,7 +73,7 @@ export default function Composer({ sessionId }: { sessionId: string }): ReactEle
   const app = useApp();
   const { composer, core, documents, market } = app;
   const key = useKeyReadiness();
-  const chromeEnabled = useCoreState((s) => chromeUsable(s.chromeControl));
+  const browserEnabled = useCoreState((s) => usableBrowsers(s.chromeControl).length > 0);
   const readOnly = useHeldBy(sessionId) !== null;
   const heldKind = useCoreState((s) => s.heldKind[sessionId]);
   const entry = useCoreState((s) => s.sessions[sessionId]);
@@ -106,6 +107,10 @@ export default function Composer({ sessionId }: { sessionId: string }): ReactEle
   const actions = composer.actions;
   const isNew = sessionId === NEW_CHAT;
   const newFolder = useShellState((s) => s.newFolder);
+  const temporary = useStore(
+    app.sessionTools?.store ?? NO_SESSION_TOOLS,
+    (s) => s.newChatTemporary,
+  );
   const held = useComposerState((s) => s.newChat);
   const box = useRef<HTMLTextAreaElement>(null);
   const history = usePromptHistory(sessionId, draft, box);
@@ -424,15 +429,15 @@ export default function Composer({ sessionId }: { sessionId: string }): ReactEle
           }}
         />
         <ComposerTools
-          chromeTab={
-            chromeEnabled ? (
+          browserTab={
+            browserEnabled ? (
               <Button
                 type="button"
                 appearance="choice"
-                data-testid="composer.chrome-tabs-open"
-                onClick={() => void openChromeTabs(app, sessionId, "window")}
+                data-testid="composer.browser-tabs-open"
+                onClick={() => void openBrowserTabs(app, sessionId, "window")}
               >
-                Add a Chrome tab…
+                {TEXT.addBrowserTab}
               </Button>
             ) : null
           }
@@ -497,7 +502,11 @@ export default function Composer({ sessionId }: { sessionId: string }): ReactEle
             // Learnable by sight while a card waits.
             wording(TEXT.askWaitingHint, { shortcut: formatKeys(GO_TO_PROMPT_KEYS) })
           ) : isNew ? (
-            "Enter to send: the chat starts in the folder above · Shift+Enter for a new line"
+            temporary && newFolder === null ? (
+              "Enter to send: the chat starts in a folder of its own · Shift+Enter for a new line"
+            ) : (
+              "Enter to send: the chat starts in the folder above · Shift+Enter for a new line"
+            )
           ) : (
             <>
               {running ? "Enter to steer · Tab to queue" : "Enter to send"} · Shift+Enter for a new

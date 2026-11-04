@@ -35,6 +35,7 @@ import { onCardFocusRequest, pendingCardFocus } from "../ask/cardFocus";
 import { protectedChangeOf } from "./model/protectedChange";
 import { str } from "./model/entries";
 import { useFollow } from "./useFollow";
+import { useHistoryAnchor } from "./useHistoryAnchor";
 import { useQuoteMenu } from "./useQuoteMenu";
 
 const NONE: readonly JsonValue[] = [];
@@ -86,6 +87,7 @@ export function Transcript({ sessionId }: { sessionId: string }): ReactElement {
   const listRef = useRef<VListHandle>(null);
   const attention = rows.reduce((last, row, index) => (waiting(row) ? index : last), -1);
   const follow = useFollow(listRef, rows.length, rows, { paused: finding || covered, attention });
+  const rememberAnchor = useHistoryAnchor(listRef, rows, follow.pinned || attention >= 0);
   useStepTarget(sessionId, rows, listRef, follow.pause);
   // "Go to the waiting prompt": a card the list has not drawn is scrolled into view (it then takes the focus).
   useEffect(() => {
@@ -140,11 +142,19 @@ export function Transcript({ sessionId }: { sessionId: string }): ReactElement {
             aria-live="off"
             data-focus-region="transcript"
             tabIndex={0}
-            onScroll={follow.onScroll}
+            onScroll={(offset) => {
+              follow.onScroll(offset);
+              rememberAnchor(offset);
+            }}
             onResize={follow.onResize}
           >
             {(row: Row, index: number) => (
               <div role="listitem" aria-posinset={index + 1} aria-setsize={rows.length}>
+                {index === 0 && entry.state?.["historyTruncated"] === true ? (
+                  <div className="tx-row">
+                    <div className="other-row">Older messages are not shown.</div>
+                  </div>
+                ) : null}
                 <RowView key={row.key} row={row} sessionId={sessionId} />
               </div>
             )}

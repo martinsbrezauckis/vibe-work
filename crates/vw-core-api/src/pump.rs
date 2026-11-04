@@ -1,28 +1,18 @@
-//! Feeds channel notifications into the store, resyncs, maintains callbacks and model aliases,
-//! restores sessions after server restarts, closes idle channels and answers `callback/call`.
-//! Vibe's lobby lease reports (`session/lease/updated`) go to `session_holder`.
-//! Depends on: vw-rpc (subscriptions, server requests), vw-session (store), vw-gate (callbacks,
-//! aliases), `core::Shared`, `channels`, `event`, `view`, `recovery`. Called by: `core` (spawns `run`,
-//! installs `callback_handler` on the supervisor).
+//! Feeds channel notifications into the store, resyncs, maintains callbacks/model aliases, restores sessions,
+//! closes idle channels and answers `callback/call`. Lobby lease reports go to `session_holder`.
+//! Depends on vw-rpc, vw-session, vw-gate, `core::Shared`, channels, event, view and recovery.
+//! Called by core, which spawns `run` and installs `callback_handler` on the supervisor.
 //! Invariants:
-//! - One pump task per core; it holds only a `Weak` to the core, so dropping the last `Core`
-//!   handle ends it. One small forwarder task per channel subscription feeds it (bounded queue).
-//! - Events of a channel belong to its session: a notification or callback naming a session that
-//!   ANOTHER channel carries is dropped and counted (`Channels::foreign`; Vibe never sent one in the
-//!   observed session streams). A callback naming a session NO channel holds (a subagent's card on its parent's
-//!   channel) is kept, and its answer goes back on the channel it arrived on (`Channels::note_callback`).
-//! - At most one `session/read` resync per session is in flight; requests that arrive meanwhile
-//!   are coalesced into one more read after it (a bad stream cannot fan out reads). Nothing is read
-//!   on a timer: every session with a channel streams its own events (removed the poll).
-//! - When a session's open callbacks shrink, the closed ids are removed from the gate's book; when
-//!   the server restarts or a session's channel dies, those callbacks are closed (they died with it).
-//! - A lagged or gapped channel leads to a resync of its session; a lagged or gapped lobby to a
-//!   resync of every loaded session.
-//! - One approval per call (`one_ask`): an approval card for a bash call whose guard dialog the user approved moments before is
-//!   answered "approve" (once) here and never shown; every other card is shown and remembered for its answer.
-//! - Session grants (`ask::grants`): an approval whose tool and required permissions equal a grant the user made
-//!   with "Allow for this session" earlier in the same session is answered "approve" (once) here and never shown.
-//!   Grants end when their session leaves the store and follow a hand-off; a server restart keeps them.
+//! - One pump holds a Weak to the core; one forwarder per channel feeds its bounded queue.
+//! - Events naming a session held by ANOTHER channel are dropped and counted (`Channels::foreign`).
+//!   Callbacks for a session with no channel (a subagent's card on its parent's channel) are kept;
+//!   answers return on the arriving channel (`Channels::note_callback`).
+//! - At most one resync per session runs; concurrent requests coalesce into one more read. No timer reads.
+//! - Closed callbacks leave the gate's book; server restart or channel death closes that channel's callbacks.
+//! - A lagged/gapped channel resyncs its session; a lagged/gapped lobby resyncs every loaded session.
+//! - `one_ask` approves a bash callback once when its guard was already approved; other cards are remembered.
+//! - `ask::grants` approves matching session grants once without another card. Grants end with the session,
+//!   follow hand-offs and survive a server restart.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::atomic::Ordering;
@@ -66,7 +56,10 @@ pub(crate) fn callback_handler(
             )));
         };
         crate::agent_tools::shell_commands::project(&shared, &mut request.params);
+        #[cfg(feature = "video")]
+        crate::video_projection::apply(&shared, &mut request.params);
         crate::edit_preview::project(&shared, &mut request.params);
+        crate::chrome_control::approval::project(&shared, &mut request.params);
         if let Err(error) = crate::agent_tools::shell_commands::verified(&request.params) {
             return std::future::ready(Err(error));
         }
@@ -453,11 +446,20 @@ impl Pump {
                     // Not while the core restores the session's profile: right after a resume Vibe
                     // reports the profile the resume ran with, which must not replace what the session had.
                     if let Some(sid) = session.filter(|sid| !shared.channels.is_restoring(sid)) {
+                        let previous_mode = crate::chrome_control::check::mode(&shared, sid);
                         shared.access.observe_runtime(sid, &n.params["runtime"]);
+                        crate::chrome_control::check::mode_changed(
+                            &shared,
+                            sid,
+                            previous_mode.as_deref(),
+                        );
                     }
                 }
                 crate::agent_tools::shell_commands::project(&shared, &mut n.params);
+                #[cfg(feature = "video")]
+                crate::video_projection::apply(&shared, &mut n.params);
                 crate::edit_preview::project(&shared, &mut n.params);
+                crate::chrome_control::approval::project(&shared, &mut n.params);
                 // A title or preview change (an auto-title, a rename) holds no vault value from here on.
                 crate::title_guard::withhold_in(&shared, &mut n.params);
                 let session = item.key.and_then(|key| shared.channels.session_of(key));
@@ -472,7 +474,6 @@ impl Pump {
         }
         true
     }
-
     /// A subscription ended: lagged (resubscribe, resync) or its channel died.
     fn ended(&mut self, shared: &Arc<Shared>, key: Option<ChannelKey>, lagged: bool) {
         match (key, lagged) {
@@ -627,6 +628,12 @@ impl Pump {
     /// Carries out the actions of one store update and keeps the callback book in step.
     fn after_apply(&mut self, shared: &Arc<Shared>, applied: &Applied) {
         for change in &applied.changes {
+            if let Change::Replaced { session_id } = change {
+                shared.history_loading.start(shared, session_id);
+            }
+            if let Change::Removed { session_id } = change {
+                shared.history_loading.stop(session_id);
+            }
             crate::guard_refusals::observe(shared, change);
             self.browser_changed(shared, change);
             crate::on_demand::observe(shared, change);

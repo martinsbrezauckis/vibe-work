@@ -36,7 +36,8 @@ pub(crate) fn root(folder: &Path) -> io::Result<Dir> {
     let anchor = Dir::open_ambient_dir(base, cap_std::ambient_authority())?;
     directory(&anchor, &relative)
 }
-fn directory(root: &Dir, relative: &Path) -> io::Result<Dir> {
+/// Opens each child through its verified parent, refusing links and Windows reparse points.
+pub(crate) fn directory(root: &Dir, relative: &Path) -> io::Result<Dir> {
     let mut dir = root.try_clone()?;
     for part in relative.components() {
         if part == Component::CurDir {

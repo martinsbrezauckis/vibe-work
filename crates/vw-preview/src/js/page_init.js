@@ -11,6 +11,7 @@
 // The accessor name is random per mount and non-enumerable: a collision guard, not a secret.
 (() => {
   const NAME = __VW_NAME__;
+  const TRUSTED = false;
   // The page's own menu wears the app's menu tokens (light and dark values, filled in at mount) for the page's light
   // or dark: a declared `color-scheme`, `prefers-color-scheme` when the page offers both, else the colour the page
   // paints; the app's theme when the page shows none of these.
@@ -48,13 +49,16 @@
   let contextIntent = false;
   let contextExpires = 0;
   let contextMenu = null;
+  let contextHost = null;
   // Point Vibe at this: what the right click was on, to select it again for the shell's pick (a selection on any
   // web page; on a page of this computer also an element's own text).
   let pointRange = null;
+  let pointChoice = null;
   let pointIntent = false;
   let pointExpires = 0;
   const closeContextMenu = () => {
-    if (contextMenu) contextMenu.remove();
+    if (contextHost) contextHost.remove();
+    contextHost = null;
     contextMenu = null;
   };
   // The page can read the intent accessor, but only a trusted page-menu click can set it.
@@ -82,6 +86,7 @@
   });
   const localPage = () => /^https?:$/.test(location.protocol) && ["localhost", "127.0.0.1", "[::1]"].includes(location.hostname);
   window.addEventListener("contextmenu", (event) => {
+    if (!TRUSTED) return;
     closeContextMenu();
     contextChoice = "";
     contextElement = "selected text";
@@ -90,6 +95,7 @@
     contextReady = false;
     contextIntent = false;
     pointRange = null;
+    pointChoice = null;
     pointIntent = false;
     if (!event.isTrusted) return;
     const selection = window.getSelection();
@@ -160,6 +166,7 @@
     };
     if (pointRange) {
       const range = pointRange;
+      const saved = { node: range.commonAncestorContainer, quote: String(range).slice(0, 100000) };
       const point = button("Point Vibe at this");
       point.addEventListener("click", (click) => {
         click.preventDefault();
@@ -169,6 +176,7 @@
           again?.removeAllRanges();
           again?.addRange(range);
           pointIntent = true;
+          pointChoice = saved;
           pointExpires = performance.now() + 10000;
         }
         contextChoice = "";
@@ -223,12 +231,15 @@
       closeContextMenu();
     }, true);
     if (saveable) menu.appendChild(item);
-    document.documentElement.appendChild(menu);
+    const host = document.createElement("div");
+    host.attachShadow({ mode: "closed" }).appendChild(menu);
+    document.documentElement.appendChild(host);
+    contextHost = host;
     contextMenu = menu;
     menu.firstChild?.focus();
   }, true);
   window.addEventListener("pointerdown", (event) => {
-    if (contextMenu && !contextMenu.contains(event.target)) {
+    if (contextMenu && event.target !== contextHost && !contextMenu.contains(event.target)) {
       closeContextMenu();
       contextChoice = "";
       contextTarget = null;
@@ -259,7 +270,7 @@
   try {
     const refuse = () => Promise.reject(new DOMException("Service workers are off in this browser", "SecurityError"));
     if (window.ServiceWorkerContainer) {
-      Object.defineProperty(ServiceWorkerContainer.prototype, "register", { value: refuse, configurable: false });
+      Object.defineProperty(ServiceWorkerContainer.prototype, "register", { value: refuse, configurable: false, writable: false });
     }
   } catch {
     // Already locked by the page: the engine's clearing at the next mount still applies.
@@ -272,6 +283,11 @@
     // A document without a root yet: the counter stays 0 (settling then waits its minimum).
   }
   const api = {
+    takePointChoice: () => {
+      const choice = !pointChoice || performance.now() < pointExpires ? pointChoice : { node: null, quote: "" };
+      pointChoice = null;
+      return choice;
+    },
     dialogs,
     stability,
     mutations: () => mutations,

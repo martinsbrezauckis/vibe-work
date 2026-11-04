@@ -22,6 +22,7 @@ pub(crate) const EVENT_LOG_CAP: usize = 1024;
 /// The owned state of one session. Fields are crate-private; outside code gets [`SessionView`].
 #[derive(Debug)]
 pub(crate) struct SessionEntry {
+    pub(crate) history_paging: crate::history::HistoryPaging,
     pub(crate) state: Value,
     pub(crate) last_event_id: u64,
     pub(crate) local_only: bool,
@@ -53,6 +54,7 @@ impl SessionEntry {
     /// Adopts `state` as a brand-new entry.
     pub(crate) fn new(state: Value, local_only: bool) -> Self {
         Self {
+            history_paging: crate::history::HistoryPaging::default(),
             last_event_id: watermark(&state),
             state,
             local_only,
@@ -88,9 +90,14 @@ impl SessionEntry {
 
     /// Copies the entry into a public view.
     pub(crate) fn view(&self) -> SessionView {
+        let mut state = self.state.clone();
+        if self.history_paging.truncated {
+            state["historyTruncated"] = Value::Bool(true);
+        }
         SessionView {
+            history_version: self.history_paging.version,
             session_id: self.id().to_owned(),
-            state: self.state.clone(),
+            state,
             last_event_id: self.last_event_id,
             local_only: self.local_only,
             resync_pending: self.resync_pending,
@@ -117,6 +124,7 @@ impl SessionEntry {
     /// would apply stale patches to the fresh state (and ask for a resync again and again), so a
     /// watermark that goes backwards discards the log.
     pub(crate) fn replace_state(&mut self, state: Value) -> Vec<Notification> {
+        self.reset_history(&state);
         let previous = self.last_event_id;
         self.last_event_id = watermark(&state);
         if self.last_event_id < previous {
@@ -229,7 +237,7 @@ fn ids(items: &[Value]) -> Vec<&str> {
         .collect()
 }
 
-/// Keeps an already-loaded prefix in front of a newer page `current` (a snapshot or read returns
+/// Keeps an already-loaded prefix in front of a newer page `current` (a snapshot, read or resume returns
 /// only the latest page). Port of `events.py _merge_snapshot_suffix`. Returns the merged list and
 /// whether a non-empty prefix was preserved.
 pub(crate) fn merge_suffix(previous: &Value, current: &Value) -> (Value, bool) {
@@ -259,17 +267,12 @@ pub(crate) fn merge_suffix(previous: &Value, current: &Value) -> (Value, bool) {
     (Value::Array(merged), start > 0)
 }
 
-/// Builds the state to adopt when a same-session snapshot or read arrives: the new state with
-/// the already-loaded history/turn prefix retained (`_apply_snapshot`).
-pub(crate) fn merged_with_prefix(previous: &Value, mut next: Value) -> Value {
-    retain_observations(previous, &mut next);
+/// Keeps only the verified history prefix and its cursor. Resume uses this without retaining old
+/// turns or transient observations, so missing running turns can still be marked interrupted.
+pub(crate) fn retain_history_prefix(previous: &Value, next: &mut Value) {
     let (history, kept) = merge_suffix(
         previous.get("history").unwrap_or(&Value::Null),
         next.get("history").unwrap_or(&Value::Null),
-    );
-    let (turns, _) = merge_suffix(
-        previous.get("turns").unwrap_or(&Value::Null),
-        next.get("turns").unwrap_or(&Value::Null),
     );
     if kept {
         next["historyBeforeCursor"] = previous
@@ -277,6 +280,17 @@ pub(crate) fn merged_with_prefix(previous: &Value, mut next: Value) -> Value {
             .cloned()
             .unwrap_or(Value::Null);
     }
+    next["history"] = history;
+}
+
+/// Builds the state to adopt when a same-session snapshot or read arrives: the new state with
+/// the already-loaded history/turn prefix retained (`_apply_snapshot`).
+pub(crate) fn merged_with_prefix(previous: &Value, mut next: Value) -> Value {
+    retain_observations(previous, &mut next);
+    let (turns, _) = merge_suffix(
+        previous.get("turns").unwrap_or(&Value::Null),
+        next.get("turns").unwrap_or(&Value::Null),
+    );
     // A page requested without history carries `history: null` and an empty `activeCallbacks`
     // Keep what we know instead of closing callbacks that are still open.
     if next.get("history").is_none_or(Value::is_null) {
@@ -285,7 +299,7 @@ pub(crate) fn merged_with_prefix(previous: &Value, mut next: Value) -> Value {
             .cloned()
             .unwrap_or_else(|| json!([]));
     }
-    next["history"] = history;
+    retain_history_prefix(previous, &mut next);
     next["turns"] = turns;
     next
 }

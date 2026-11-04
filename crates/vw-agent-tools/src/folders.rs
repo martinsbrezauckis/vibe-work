@@ -12,7 +12,9 @@
 //! Vibe home and W = V/worktrees: P inside a copy `W/<repo>/<name>` is decided by the core (above); V itself, W and a
 //! `W/<repo>` folder (they hold several copies) are refused. Writes and unknown uses ([`Access`]: bash, any tool but `read_file`) are also refused anywhere else in V
 //! (Vibe's `config.toml`, `hooks.toml`, the connector cache the model proxy relies on, and session data);
-//! `read_file` may read there (Vibe's skills live under `logs/`). The user's project folders remain available.
+//! `read_file` may read there (including skills and their references). Outside V, app data is private except for
+//! the temporary chat's own scratch folder.
+//! The user's project folders remain available.
 //!
 //! Choke points: the `pre_tool` hook (`hook.rs`) on EVERY tool call: any path-naming input field ([`PATH_FIELDS`],
 //! absolute [`PATTERN_FIELDS`]) of any tool (Vibe's `read_file`, `write_file`, `edit`, legacy `grep`, `process.start`
@@ -276,7 +278,7 @@ fn resolve_with_hops(path: &Path, hops: &mut usize) -> std::io::Result<PathBuf> 
 /// What a tool does with a path, for [`Layout::check`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Access {
-    /// Reads only (`read_file`): the Vibe home is readable (Vibe's skills live under `logs/`), other copies are not.
+    /// Reads only (`read_file`): the Vibe home is readable; copies still require permission.
     Read,
     /// Writes (`write_file`, `edit`): nothing in the Vibe home outside the own copy (its config, hooks, connector
     /// cache, sessions are Vibe Work's control files.
@@ -433,7 +435,7 @@ impl Layout {
         {
             return Some(format!(
                 "Not run: Vibe Work's plugin approvals ({}); change plugins in Tools. {own}",
-                shown::shown(&joined)
+                shown::shown(data)
             ));
         }
         if access != Access::Read
@@ -447,7 +449,7 @@ impl Layout {
         }
         if let Some(copy) = self.copy_of(&real) {
             let is_own = self.own.as_ref() == Some(&copy);
-            return match permits(&copy, is_own) {
+            return match app_data::copy_permit(self, &copy, is_own, permits) {
                 Ok(()) => None,
                 Err(why) => Some(format!(
                     "Not run: a session copy you cannot use now ({}): {why}. {own}",
@@ -472,7 +474,7 @@ impl Layout {
                 shown::shown(&joined)
             ));
         }
-        None
+        app_data::check(self, &real, access, &own)
     }
 }
 
@@ -641,6 +643,7 @@ fn computed_shell_word(source: &Word, expanded: &str) -> bool {
     source.expanded && (expanded.contains('$') || expanded.contains('`'))
 }
 
+mod app_data;
 mod mentions;
 mod shown;
 use mentions::raw_mentions;
@@ -785,6 +788,8 @@ fn check_segments(
     None
 }
 
+#[cfg(test)]
+mod scratch_tests;
 #[cfg(test)]
 mod tests;
 

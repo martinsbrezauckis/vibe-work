@@ -1,4 +1,4 @@
-//! Per-session state of the agent browser: the latest observation's refs (what an action may target),
+//! Per-session state of the agent browser: bounded document-scoped refs (what an action may target),
 //! the user's Stop (a flag plus a cancellation counter an action in flight watches), and the action log the
 //! Browser tab shows. The user's own clicks and typing in the page never enter the log: only `browser_act` calls do
 //! (the agent's, labelled `agent`, the Debug API's, labelled `debugApi`, and the window's, labelled `user`).
@@ -96,7 +96,7 @@ pub struct BrowserState {
     pub receipts: Vec<crate::delegation::DelegationReceipt>,
 }
 
-/// The latest observation's refs.
+/// The latest observation plus bounded ref history for its document.
 #[derive(Clone, Debug)]
 pub(crate) struct Seen {
     /// The engine mount that answered; a released/replaced mount cannot reuse its refs.
@@ -105,6 +105,8 @@ pub(crate) struct Seen {
     pub(crate) refs: HashSet<String>,
     /// Names of the refs that were listed (for the prompt guard's target check and the log).
     pub(crate) names: HashMap<String, (String, String)>,
+    /// Most recently observed first; retains frame, node and label checks across focused reads.
+    pub(crate) items: Vec<crate::model::RefItem>,
     /// The observation itself (the "before" of the next action's receipt).
     pub(crate) model: crate::model::PageModel,
     /// The mount's finished loads when the observation was made (a fill needs the same document).
@@ -335,18 +337,34 @@ impl Sessions {
         }
     }
 
-    /// Records the latest observation's refs.
-    pub(crate) fn set_seen(&self, session_id: &str, seen: Seen) {
+    /// Records a receipt baseline and remembers refs from the same document, newest first.
+    pub(crate) fn set_seen(&self, session_id: &str, mut seen: Seen) {
         let mut sessions = self.lock();
         let session = sessions.entry(session_id.to_owned()).or_default();
         if !session.ended {
+            if let Some(previous) = &session.seen {
+                seen.retain_from(previous);
+            }
             session.seen = Some(seen);
         }
     }
 
-    /// The latest observation's refs.
+    /// The latest observation and its bounded document-scoped ref history.
     pub(crate) fn seen(&self, session_id: &str) -> Option<Seen> {
         self.lock().get(session_id).and_then(|s| s.seen.clone())
+    }
+
+    /// A live identity check found the element gone or changed; no subsequent action inherits its authority.
+    pub(crate) fn forget_ref(&self, session_id: &str, reference: &str) {
+        if let Some(seen) = self
+            .lock()
+            .get_mut(session_id)
+            .and_then(|s| s.seen.as_mut())
+        {
+            seen.refs.remove(reference);
+            seen.names.remove(reference);
+            seen.items.retain(|item| item.id != reference);
+        }
     }
 
     /// Forgets the refs (the page was replaced by a navigation that did not come from an observation).

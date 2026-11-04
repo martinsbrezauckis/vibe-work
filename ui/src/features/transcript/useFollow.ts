@@ -94,6 +94,24 @@ export function useFollow(
       onKeyDown: (event: KeyboardEvent) => {
         if (event.key === "ArrowUp" || event.key === "PageUp" || event.key === "Home")
           userUp.current = true;
+        const target = event.target;
+        if (
+          event.key === "Home" &&
+          (event.ctrlKey || event.metaKey) &&
+          !event.altKey &&
+          !event.shiftKey &&
+          target instanceof HTMLElement &&
+          target.closest(".tx-list") !== null &&
+          target.closest(
+            "input, textarea, select, [contenteditable]:not([contenteditable=false])",
+          ) === null
+        ) {
+          // Cancel the initial bottom measurement before jumping. A native scroll can otherwise race
+          // that pending correction, leaving the viewport over rows the virtualizer has not measured.
+          event.preventDefault();
+          pause();
+          list.current?.scrollToIndex(0, { align: "start" });
+        }
       },
       onTouchStart: (event: TouchEvent) => {
         touchY.current = event.touches[0]?.clientY ?? 0;

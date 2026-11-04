@@ -51,6 +51,20 @@ export function insideTauri(): boolean {
 export function createTauriClient(): CoreClient {
   return {
     kind: "tauri",
+    desktop: {
+      settings: (enabled) => call("desktop_settings", { enabled: enabled ?? null }),
+      async quit() {
+        await call<null>("app_quit", {});
+      },
+      async subscribe(onClose, notifications) {
+        const channel = new Channel<null>();
+        channel.onmessage = onClose;
+        await call<null>("desktop_subscribe", { closing: channel, notifications });
+        return () => {
+          channel.onmessage = () => undefined;
+        };
+      },
+    },
     // Every command is the window's: nothing here can claim the Debug API origin (`app/src/commands.rs`).
     execute: (command: Command) => call<CommandResult>("core_execute", { command, doc: DOCUMENT }),
     async subscribe(onEvent) {
@@ -87,6 +101,9 @@ export function createTauriClient(): CoreClient {
     },
     async notifyOs(notification) {
       await call<null>("notify_session", { request: notification });
+    },
+    async dismissOs(notificationId) {
+      await call<null>("dismiss_notification", { notificationId });
     },
     showPrompt: (askId: string) => call<boolean>("show_prompt", { askId }),
     async onHostEvent(onEvent) {

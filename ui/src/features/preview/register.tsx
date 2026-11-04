@@ -57,10 +57,12 @@ export function registerPreviewTab(app: App): () => void {
       event.type === "previewShowRequested" &&
       panelOwner(app.shell.store.get()) === event.sessionId
     ) {
-      // can leave a web tab selected. An explicit preview width asks to show the
-      // pinned App preview, so select it before the tool waits for a live view.
-      void browser.switchTab(event.sessionId, event.sessionId);
-      app.shell.actions.openTab("browser");
+      // A previous web tab can still be selected. Finish selecting App preview
+      // before revealing the panel, including when the tool did not ask for a width.
+      void browser.switchTab(event.sessionId, event.sessionId).then(() => {
+        if (panelOwner(app.shell.store.get()) === event.sessionId)
+          app.shell.actions.openTab("browser");
+      });
     }
   });
   const removeRoute = registerBrowserRoute(app, browser, previews, capture);

@@ -1,9 +1,32 @@
 //! Native frame evaluation seam for browser refs. The engine supplies routing handles, never page messages.
-//! Called by browser observation/input through the service's mount lock; unsupported engines retain main-only reads.
+//! Called by browser observation/input through the service's mount lock; unsupported engines refuse isolated reads.
 
 use std::sync::Arc;
 
 use crate::{EngineError, MountId, PreviewError, PreviewService};
+
+/// Prevents a main-document operation from running in child frames while using native frame enumeration.
+#[must_use]
+pub fn main_script(script: &str) -> String {
+    format!("if (window === window.top) {{\n{script}\n}} else {{ null; }}")
+}
+
+/// Selects exactly one native main frame; ambiguous or missing frame identity is never accepted.
+///
+/// # Errors
+/// The native main document is unavailable or ambiguous.
+pub fn main_answer(answers: Vec<FrameAnswer>) -> Result<FrameAnswer, EngineError> {
+    let mut main = answers.into_iter().filter(|answer| answer.main);
+    let answer = main
+        .next()
+        .ok_or_else(|| EngineError::Platform("the main document is unavailable".into()))?;
+    if main.next().is_some() {
+        return Err(EngineError::Platform(
+            "the main document is ambiguous".into(),
+        ));
+    }
+    Ok(answer)
+}
 
 /// The answer an all-frames evaluation gives for a child frame whose script could not run (a scriptless sandbox, a
 /// frame destroyed meanwhile): the browser leaves that frame out of a read, and a checked click is refused while a

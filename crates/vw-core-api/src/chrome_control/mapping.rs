@@ -5,6 +5,28 @@ use vw_ask::chrome::{Group, Need, Tier};
 
 // action, helper capability, Vibe Work permission
 const ACTIONS: &[(&str, &str, Need)] = &[
+    (
+        "clipboard.read",
+        "clipboard.read",
+        Need::Group(Group::SiteData),
+    ),
+    (
+        "clipboard.write",
+        "clipboard.write",
+        // Same tier as clipboard work on the desktop (a shell command runs without asking only at Full access).
+        Need::Group(Group::SiteData),
+    ),
+    (
+        "network.intercept",
+        "network.intercept",
+        Need::Group(Group::Scripts),
+    ),
+    ("tabs.emulate", "tabs.emulate", Need::Group(Group::Forms)),
+    (
+        "files.wait_download",
+        "files.download",
+        Need::Group(Group::Forms),
+    ),
     ("auth.basic", "auth.secrets", Need::Group(Group::SignIn)),
     ("files.drop", "files.upload", Need::Group(Group::Forms)),
     ("webmcp.list", "raw.execute", Need::Group(Group::Scripts)),
@@ -58,6 +80,7 @@ const ACTIONS: &[(&str, &str, Need)] = &[
     ),
     ("cookies.read", "cookies.read", Need::Group(Group::SiteData)),
     ("page.read", "page.read", Need::Group(Group::Read)),
+    ("page.find", "page.read", Need::Group(Group::Read)),
     ("page.wait", "page.read", Need::Group(Group::Read)),
     (
         "capture.screenshot",
@@ -175,6 +198,10 @@ const ACTIONS: &[(&str, &str, Need)] = &[
         Need::Group(Group::Forms),
     ),
 ];
+
+pub(super) fn action_names() -> impl Iterator<Item = &'static str> {
+    ACTIONS.iter().map(|(action, _, _)| *action)
+}
 
 pub(super) fn action(tool: &str, args: &Value) -> String {
     if tool == "chrome_execute" {
@@ -355,24 +382,21 @@ mod catalog_tests {
             .iter()
             .find(|t| t["name"] == "chrome_execute")
             .unwrap();
-        let actions = tool
-            .pointer("/inputSchema/properties/action/enum")
-            .unwrap()
-            .as_array()
-            .unwrap();
-        assert_eq!(actions.len(), ACTIONS.len());
-        for action in actions {
-            let id = action.as_str().unwrap();
-            assert_eq!(
-                ACTIONS.iter().filter(|(a, _, _)| *a == id).count(),
-                1,
-                "{id}"
-            );
+        // Vibe caches tool schemas across chats; discover action names through live chrome_status.
+        assert_eq!(
+            tool.pointer("/inputSchema/properties/action/type"),
+            Some(&json!("string"))
+        );
+        let mut names = std::collections::HashSet::new();
+        for (action, _, _) in ACTIONS {
+            assert!(names.insert(action), "duplicate {action}");
         }
         if let Ok(path) = std::env::var("VW_CHROME_CATALOG") {
             let catalog: Value = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
             let rows = catalog["actions"].as_array().unwrap();
-            assert_eq!(rows.len(), ACTIONS.len());
+            // A pinned helper may predate optional app actions. Every action it advertises must
+            // still have exactly the app's permission; the independent fixture pins the latest set.
+            assert!(rows.len() <= ACTIONS.len());
             for row in rows {
                 assert!(
                     ACTIONS

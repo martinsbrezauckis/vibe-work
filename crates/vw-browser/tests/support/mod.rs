@@ -2,10 +2,10 @@
 //! Depends on Node, playwright-core and its installed Chromium; called by browser integration tests.
 //! Each test owns its subprocess, storage and page; page scripts are the production scripts.
 #![allow(dead_code)]
-
 mod faults;
 mod readiness;
-
+use base64::{Engine as _, engine::general_purpose::STANDARD};
+use serde_json::{Value, json};
 use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
@@ -14,14 +14,10 @@ use std::sync::{
     atomic::{AtomicBool, AtomicU64, Ordering},
 };
 use std::time::Duration;
-
-use base64::{Engine as _, engine::general_purpose::STANDARD};
-use serde_json::{Value, json};
 use tokio::sync::{Notify, Semaphore};
 use url::Url;
 use vw_browser::capture::{Fetch, FetchFuture};
 use vw_browser::{Browser, Sessions};
-
 mod cdp;
 pub use cdp::NATIVE_CLICK_WITHOUT_WINDOW;
 use cdp::{CdpRequest, PICKERS, cdp_frames, cdp_worker};
@@ -31,12 +27,10 @@ use vw_preview::{
     PageEvent, Placement, PreviewConfig, PreviewEngine, PreviewHooks, PreviewService, Rect,
     Storage,
 };
-
 pub const SESSION: &str = "fixture";
 pub const URL: &str = "https://93.184.215.14/";
 /// How long after the person's last press or release this fake engine still refuses checked input.
 pub const PERSON_RECENT: Duration = Duration::from_millis(300);
-
 pub(crate) struct Pipe {
     child: Child,
     input: ChildStdin,
@@ -83,6 +77,7 @@ pub struct PageEngine {
     pub on_pin: Mutex<Option<Box<dyn FnOnce() + Send>>>,
     pub on_click: Mutex<Option<Box<dyn FnOnce() + Send>>>,
     pub native_clicks: AtomicU64,
+    pub input_markers: Mutex<Vec<vw_preview::NativeClickPoint>>,
     pub reverse_frames: AtomicBool,
     pub after_verify: Mutex<Option<String>>,
     pub after_point_validation: Mutex<Option<String>>,
@@ -174,6 +169,7 @@ impl PageEngine {
             on_pin: Mutex::new(None),
             on_click: Mutex::new(None),
             native_clicks: AtomicU64::new(0),
+            input_markers: Mutex::default(),
             reverse_frames: AtomicBool::new(false),
             after_verify: Mutex::new(None),
             after_point_validation: Mutex::new(None),
@@ -449,6 +445,15 @@ impl PageEngine {
 }
 
 impl PreviewEngine for PageEngine {
+    #[cfg(feature = "click-marker")]
+    fn show_input_marker(
+        &self,
+        _: &MountId,
+        point: vw_preview::NativeClickPoint,
+    ) -> EngineFuture<'_, ()> {
+        self.input_markers.lock().unwrap().push(point);
+        Box::pin(async { Ok(()) })
+    }
     fn isolated_frame_input(&self) -> bool {
         !self.page_world.load(Ordering::Relaxed)
     }
@@ -639,16 +644,7 @@ impl PreviewEngine for PageEngine {
                 }
             }
             if pin {
-                if let Some(action) = self.on_pin.lock().unwrap().take() {
-                    action();
-                }
-                self.pinned.notify_one();
-                if self.fail_pin.load(Ordering::Relaxed) {
-                    return Err(EngineError::Platform("forced slice failure".into()));
-                }
-                if self.hold_pin.load(Ordering::Relaxed) {
-                    self.release.acquire().await.unwrap().forget();
-                }
+                self.capture_pin().await?;
             }
             Ok(value.to_string())
         })
@@ -777,6 +773,9 @@ impl PageEngine {
                 && let Some(action) = self.on_click.lock().unwrap().take()
             {
                 action();
+            }
+            if request.as_ref().is_some_and(|req| req["op"] == "pin") {
+                self.capture_pin().await?;
             }
             self.observe_faults(frame.is_none(), &script, &mut answers)?;
             if script.contains("JSON.stringify(state.result)")

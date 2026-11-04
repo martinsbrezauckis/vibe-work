@@ -168,9 +168,7 @@ pub fn normalise(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut space = true;
     for c in text.chars() {
-        if matches!(c, '\u{200b}'..='\u{200f}' | '\u{2060}'..='\u{2064}' | '\u{feff}' | '\u{00ad}')
-            || ('\u{0300}'..='\u{036f}').contains(&c)
-        {
+        if crate::text::hidden(c) || ('\u{0300}'..='\u{036f}').contains(&c) {
             continue;
         }
         let c = fold(c);

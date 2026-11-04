@@ -41,16 +41,25 @@ impl crate::Browser {
             .service
             .page_mount(session)
             .ok_or(crate::refs::PAGE_CLOSED)?;
-        if by == crate::Actor::Agent && self.on_local_network(session) {
+        if by == crate::Actor::Agent && self.local_network_blocked(session) {
             return Err(crate::LOCAL_NETWORK.into());
         }
         let mut bound = self.clone();
         bound.read_mount = Some(mount);
+        bound.read_actor = Some(by);
         bound.check_read_mount()?;
         Ok(bound)
     }
 
     pub(crate) fn check_read_mount(&self) -> Result<(), String> {
+        if self.read_actor == Some(crate::Actor::Agent)
+            && self
+                .read_mount
+                .as_ref()
+                .is_some_and(|mount| self.local_network_blocked(&mount.session_id))
+        {
+            return Err(crate::LOCAL_NETWORK.into());
+        }
         if let Some(mount) = &self.read_mount
             && self.service.page_mount(&mount.session_id).as_ref() != Some(mount)
         {

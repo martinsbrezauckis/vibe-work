@@ -1,0 +1,23 @@
+{
+  "rules": [
+    {"trigger":{"url-filter":"/ad","load-type":["third-party"]},"action":{"type":"block"}},
+    {"trigger":{"url-filter":"/image","resource-type":["image"]},"action":{"type":"block"}},
+    {"trigger":{"url-filter":"/site","if-domain":["127.0.0.1"]},"action":{"type":"block"}},
+    {"trigger":{"url-filter":"/excluded","unless-domain":["127.0.0.1"]},"action":{"type":"block"}},
+    {"trigger":{"url-filter":"/ad-allow","resource-type":["script"]},"action":{"type":"ignore-previous-rules"}},
+    {"trigger":{"url-filter":"/ad-allow-reblock"},"action":{"type":"block"}},
+    {"trigger":{"url-filter":".*"},"action":{"type":"css-display-none","selector":".sponsor"}}
+  ],
+  "vectors": [
+    {"url":"http://localhost:PORT/ad.js","type":"script","page":"http://127.0.0.1:PORT/","blocked":true,"selectors":[]},
+    {"url":"http://127.0.0.1:PORT/ad.js","type":"script","page":"http://127.0.0.1:PORT/","blocked":false,"selectors":[]},
+    {"url":"http://localhost:PORT/ad-allow.js","type":"script","page":"http://127.0.0.1:PORT/","blocked":false,"selectors":[]},
+    {"url":"http://localhost:PORT/ad-allow-reblock.js","type":"script","page":"http://127.0.0.1:PORT/","blocked":true,"selectors":[]},
+    {"url":"http://localhost:PORT/ad-frame","type":"document","page":"http://127.0.0.1:PORT/","blocked":true,"selectors":[".sponsor"]},
+    {"url":"http://127.0.0.1:PORT/image","type":"image","page":"http://127.0.0.1:PORT/","blocked":true,"selectors":[]},
+    {"url":"http://127.0.0.1:PORT/image","type":"raw","page":"http://127.0.0.1:PORT/","blocked":false,"selectors":[]},
+    {"url":"http://127.0.0.1:PORT/site","type":"raw","page":"http://127.0.0.1:PORT/","blocked":true,"selectors":[]},
+    {"url":"http://127.0.0.1:PORT/excluded","type":"raw","page":"http://127.0.0.1:PORT/","blocked":false,"selectors":[]},
+    {"url":"http://localhost:PORT/ordinary","type":"document","page":"http://127.0.0.1:PORT/","blocked":false,"selectors":[".sponsor"]}
+  ]
+}

@@ -1,14 +1,72 @@
 //! Set up is all or nothing, registers per user, and Remove deletes exactly what it made (scratch homes only).
 use super::*;
 
+#[test]
+fn user_data_uses_receipt_identity_then_vendor_paths_and_never_guesses_chrome() {
+    let s = Scratch::new("browser-folder-identity");
+    let chrome = [
+        r"C:\Users\Person\AppData\Local\Google\Chrome\User Data",
+        r"C:\Users\Person\AppData\Local\Google\Chrome SxS\User Data",
+        "/Users/person/Library/Application Support/Google/Chrome Beta",
+        "/Users/person/Library/Application Support/Google/Chrome Canary",
+        "/home/person/.config/google-chrome",
+        "/home/person/.config/google-chrome-unstable",
+    ];
+    let edge = [
+        r"C:\Users\Person\AppData\Local\Microsoft\Edge\User Data",
+        r"C:\Users\Person\AppData\Local\Microsoft\Edge Dev\User Data",
+        "/Users/person/Library/Application Support/Microsoft Edge",
+        "/Users/person/Library/Application Support/Microsoft Edge Canary",
+        "/home/person/.config/microsoft-edge",
+        "/home/person/.config/microsoft-edge-beta",
+    ];
+    let receipt = Receipt {
+        // An explicit setup identity wins even for a custom or misleadingly named folder.
+        browsers: vec!["Google Chrome".into(), "Microsoft Edge".into()],
+        user_data: ["/custom/microsoft-edge", "/custom/google-chrome"]
+            .into_iter()
+            .chain(chrome)
+            .chain(edge)
+            .chain(["/unrelated/edge-copy", "/unknown"])
+            .map(PathBuf::from)
+            .collect(),
+        ..Receipt::default()
+    };
+    std::fs::create_dir_all(s.state()).unwrap();
+    std::fs::write(
+        s.state().join(RECEIPT),
+        serde_json::to_vec(&receipt).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        user_data(Some(&s.state()), "Google Chrome"),
+        ["/custom/microsoft-edge"]
+            .into_iter()
+            .chain(chrome)
+            .map(PathBuf::from)
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(
+        user_data(Some(&s.state()), "Microsoft Edge"),
+        ["/custom/google-chrome"]
+            .into_iter()
+            .chain(edge)
+            .map(PathBuf::from)
+            .collect::<Vec<_>>()
+    );
+}
+
 struct Scratch {
     root: PathBuf,
-    registry_key: String,
+    /// This test's own disposable registry key (Windows); removed on drop (the shared parent stays).
+    registry: super::super::registry_native_tests::TestRoot,
 }
 
 impl Scratch {
     fn new(name: &str) -> Self {
-        let root = std::env::temp_dir().join(format!("vw-cc-setup-{name}-{}", std::process::id()));
+        let root = std::env::var_os("VW_TEST_ROOT")
+            .map_or_else(std::env::temp_dir, PathBuf::from)
+            .join(format!("vw-cc-setup-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         let package = root.join("package");
         std::fs::create_dir_all(package.join("bin")).unwrap();
@@ -24,20 +82,19 @@ impl Scratch {
         )
         .unwrap();
         std::fs::create_dir_all(root.join("home")).unwrap();
-        std::fs::create_dir_all(root.join("data/vibe-home")).unwrap();
+        std::fs::create_dir_all(root.join("data").join("vibe-home")).unwrap();
         Self {
-            root,
-            registry_key: format!(
-                r"HKCU\Software\VibeWorkTests\setup-{name}-{}",
-                std::process::id()
-            ),
+            root: vw_platform::canonical_plain(&root).unwrap(),
+            registry: super::super::registry_native_tests::TestRoot::new(&format!("setup-{name}")),
         }
     }
     fn config(&self) -> ChromeControlConfig {
         ChromeControlConfig {
             package: Some(self.root.join("package")),
             user_home: Some(self.root.join("home")),
-            windows_registry_root: format!(r"{}\NativeMessagingHosts", self.registry_key),
+            firefox_registry_root: format!(r"{}\FirefoxNativeMessagingHosts", self.registry.key()),
+            edge_registry_root: format!(r"{}\EdgeNativeMessagingHosts", self.registry.key()),
+            windows_registry_root: format!(r"{}\NativeMessagingHosts", self.registry.key()),
             ..ChromeControlConfig::default()
         }
     }
@@ -45,7 +102,7 @@ impl Scratch {
         self.root.join("data").join("chrome-control")
     }
     fn vibe_home(&self) -> PathBuf {
-        self.root.join("data/vibe-home")
+        self.root.join("data").join("vibe-home")
     }
     fn every_file(&self) -> Vec<PathBuf> {
         fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
@@ -68,7 +125,6 @@ impl Scratch {
 
 impl Drop for Scratch {
     fn drop(&mut self) {
-        let _ = registry_delete(&self.registry_key);
         let _ = std::fs::remove_dir_all(&self.root);
     }
 }
@@ -91,6 +147,20 @@ fn registration(key: &str) -> (Option<i32>, Vec<u8>, Vec<u8>) {
     (output.status.code(), output.stdout, output.stderr)
 }
 
+#[test]
+fn windows_registry_manifest_paths_use_native_separators_for_both_browsers() {
+    for root in [r"C:\Users\Test Person\data", "C:/Users/Test Person/data"] {
+        let state = Path::new(root).join("chrome-control");
+        for browser in ["Google Chrome", "Microsoft Edge"] {
+            assert_eq!(
+                windows_native_path(&manifest_path(&state, browser)),
+                format!(r"C:\Users\Test Person\data\chrome-control\host\{HOST_NAME}.json"),
+                "{browser}: {root}"
+            );
+        }
+    }
+}
+
 #[cfg(windows)]
 #[test]
 fn set_up_and_remove_use_the_configured_key_and_leave_real_chrome_untouched() {
@@ -98,13 +168,17 @@ fn set_up_and_remove_use_the_configured_key_and_leave_real_chrome_untouched() {
     let config = s.config();
     let real = format!(r"HKCU\Software\Google\Chrome\NativeMessagingHosts\{HOST_NAME}");
     let before = registration(&real);
+    let real_edge = format!(r"HKCU\Software\Microsoft\Edge\NativeMessagingHosts\{HOST_NAME}");
+    let edge_before = registration(&real_edge);
     let key = format!(r"{}\{HOST_NAME}", config.windows_registry_root);
     assert_eq!(
         targets(&s.root.join("home"), &config)[0].registry,
         Some(config.windows_registry_root.as_str())
     );
     assert_eq!(registration(&key).0, Some(1));
-    let view = install(&config, &s.state(), &s.vibe_home()).unwrap();
+    // Configured roots can contain forward slashes; persisted native paths must not.
+    let mixed_state = PathBuf::from(s.state().to_str().unwrap().replace('\\', "/"));
+    let view = install(&config, &mixed_state, &s.vibe_home()).unwrap();
     assert_eq!(view.state, SetupState::WaitingForExtension);
     let installed = registration(&key);
     assert_eq!(installed.0, Some(0));
@@ -119,13 +193,26 @@ fn set_up_and_remove_use_the_configured_key_and_leave_real_chrome_untouched() {
     );
     assert!(!host["path"].as_str().unwrap().contains('/'));
     assert_eq!(registration(&real), before);
+    assert_eq!(registration(&real_edge), edge_before);
     let receipt = read_receipt(&s.state()).unwrap();
-    assert_eq!(receipt.registry_keys, vec![key.clone()]);
+    let mut expected = vec![key.clone()];
+    if cfg!(feature = "your-edge") {
+        let edge_key = format!(r"{}\{HOST_NAME}", config.edge_registry_root);
+        let edge_installed = registration(&edge_key);
+        assert_eq!(edge_installed.0, Some(0));
+        assert!(String::from_utf8_lossy(&edge_installed.1).contains(manifest.to_str().unwrap()));
+        expected.push(edge_key);
+    }
+
+    assert_eq!(receipt.registry_keys, expected);
     assert!(!receipt.user_data[0].to_str().unwrap().contains('/'));
-    remove(&s.state()).unwrap();
-    assert_eq!(registration(&key).0, Some(1));
+    remove(&s.config(), &s.state()).unwrap();
+    for key in expected {
+        assert_eq!(registration(&key).0, Some(1));
+    }
     assert!(!s.state().exists());
     assert_eq!(registration(&real), before);
+    assert_eq!(registration(&real_edge), edge_before);
 }
 
 #[cfg(windows)]
@@ -141,10 +228,10 @@ fn a_failed_receipt_rolls_back_registration_and_scratch_drop_cleans_up_after_pan
             Some(config.windows_registry_root.as_str())
         );
         let key = format!(r"{}\{HOST_NAME}", config.windows_registry_root);
-        std::fs::create_dir_all(s.state().join("setup.new")).unwrap();
+        std::fs::create_dir_all(s.state().join("setup.json")).unwrap();
         assert!(install(&config, &s.state(), &s.vibe_home()).is_err());
         assert_eq!(registration(&key).0, Some(1));
-        std::fs::remove_dir(s.state().join("setup.new")).unwrap();
+        std::fs::remove_dir(s.state().join("setup.json")).unwrap();
         install(&config, &s.state(), &s.vibe_home()).unwrap();
         assert_eq!(registration(&key).0, Some(0));
         panic!("exercise scratch cleanup on test failure");
@@ -244,7 +331,7 @@ fn remove_deletes_exactly_what_set_up_made_and_the_saved_permissions() {
     std::fs::write(s.root.join("home/keep.txt"), b"the user's").unwrap();
     install(&s.config(), &s.state(), &s.vibe_home()).unwrap();
     std::fs::write(s.state().join("permissions.json"), b"{}").unwrap();
-    remove(&s.state()).unwrap();
+    remove(&s.config(), &s.state()).unwrap();
     let mut after = s.every_file();
     after.retain(|p| !p.ends_with("keep.txt"));
     assert_eq!(after, before);
@@ -303,7 +390,7 @@ fn readonly_session_packages_survive_chrome_remove_and_rollback() {
     let checkout = s.vibe_home().join("logs/session/plugins/packages/ab/hash");
     crate::readonly_fixture::readonly_package(&checkout);
     install(&s.config(), &s.state(), &s.vibe_home()).unwrap();
-    remove(&s.state()).unwrap();
+    remove(&s.config(), &s.state()).unwrap();
     assert!(checkout.join("skills/example/SKILL.md").is_file());
     let blocker = if cfg!(target_os = "macos") {
         s.root
@@ -344,3 +431,23 @@ fn planted_helper_is_refused_before_copy_or_registration() {
     assert_eq!(error, vw_vocabulary::texts::CHROME_PACKAGE_CHANGED);
     assert_eq!(s.every_file(), Vec::<PathBuf>::new());
 }
+
+#[cfg(feature = "your-edge")]
+#[path = "setup_edge_tests.rs"]
+mod edge_tests;
+
+#[cfg(feature = "your-firefox")]
+#[test]
+fn owned_firefox_never_registers_a_native_addon_host() {
+    let scratch = Scratch::new("owned-firefox");
+    let config = scratch.config();
+    assert!(
+        !targets(&scratch.root.join("home"), &config)
+            .iter()
+            .any(|t| t.name == "Mozilla Firefox")
+    );
+}
+
+#[cfg(unix)]
+#[path = "setup_repair_tests.rs"]
+mod repair_tests;

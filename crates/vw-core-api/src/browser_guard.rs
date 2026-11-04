@@ -143,3 +143,37 @@ pub(crate) fn register_internal_ports(shared: &Shared, guard: &vw_netguard::NetG
         guard.add_internal_port(port);
     }
 }
+
+/// Updates the existing browser guard after vault-backed proxy settings become available.
+pub(crate) fn refresh_network_guard(shared: &Shared) {
+    let Some(guard) = shared.preview.as_ref().and_then(|hub| hub.guard.as_ref()) else {
+        return;
+    };
+    // Public requests go through the user's proxy: Settings > Network (or the process environment) when
+    // set, else the guard keeps the system's proxy settings it read when it was bound.
+    #[cfg(not(feature = "proxy-transports"))]
+    let network = vw_mistral::network::current();
+    #[cfg(not(feature = "proxy-transports"))]
+    if network.has_proxy() {
+        guard.set_upstream(vw_netguard::Upstream::from_values(
+            network.http_proxy.as_deref(),
+            network.https_proxy.as_deref(),
+            network.all_proxy.as_deref(),
+            network.no_proxy.as_deref(),
+        ));
+    }
+    #[cfg(feature = "proxy-transports")]
+    {
+        let network = vw_mistral::network::guard_current();
+        guard.set_upstream(
+            vw_netguard::Upstream::from_values(
+                network.http_proxy.as_deref(),
+                network.https_proxy.as_deref(),
+                network.all_proxy.as_deref(),
+                network.no_proxy.as_deref(),
+            )
+            .with_system_resolver()
+            .with_certificates(network.guard_certificates()),
+        );
+    }
+}

@@ -79,6 +79,10 @@ pub enum WindowRequest {
         /// Height.
         height: f64,
     },
+    /// Send the real native close request.
+    Close {},
+    /// Show and focus the hidden window.
+    Show {},
     /// Maximize.
     Maximize {},
     /// Leave maximized or minimized.
@@ -89,10 +93,34 @@ pub enum WindowRequest {
     Focus {},
 }
 
+/// Explicit application actions, available through the authenticated Debug API.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(tag = "action", rename_all = "camelCase", deny_unknown_fields)]
+pub enum AppRequest {
+    /// End the application and every owned child through the normal exit path.
+    Quit {},
+    /// Test builds only: exercise the shipping update-notification hook without installing an update.
+    #[cfg(feature = "e2e-script")]
+    UpdateNotice {},
+    /// Invoke the same handler as a native tray menu item (`open` or `quit`).
+    TrayMenu {
+        /// Stable native menu id.
+        id: String,
+    },
+}
+
 /// The main window's state.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
+// Independent native facts in the Debug API response, not mutually exclusive modes.
+#[allow(clippy::struct_excessive_bools)]
 pub struct WindowState {
+    /// Whether the native window is visible.
+    pub visible: bool,
+    /// This run has a tray icon and a reachable host.
+    pub tray_present: bool,
+    /// What close currently does: `hidden` or `quits`.
+    pub mode: String,
     /// Inner width in logical pixels.
     pub width: f64,
     /// Inner height in logical pixels.
@@ -120,6 +148,12 @@ pub trait AppWindow: Send + Sync {
     /// Acts on the main window and returns its state afterwards.
     fn control(&self, request: WindowRequest) -> BoxFuture<'_, Result<WindowState, String>>;
 
+    /// Explicit application action (same paths as the native tray). The default refuses.
+    fn app_control(&self, request: AppRequest) -> BoxFuture<'_, Result<(), String>> {
+        let _ = request;
+        Box::pin(async { Err("this run cannot control the application".to_owned()) })
+    }
+
     /// Test builds only (feature `e2e-script`): evaluates `js` (already wrapped by the route) in the main
     /// webview and returns the engine's JSON result text; [`crate::e2e_script::TIMEOUT`] when the page did not
     /// answer in time. The default refuses, so a host without an engine (test hosts) needs no implementation.
@@ -145,6 +179,7 @@ pub(crate) fn router() -> Router<ApiState> {
         .route("/windows", get(windows))
         .route("/screenshot", get(screenshot))
         .route("/window", post(window))
+        .route("/app", post(app_control))
 }
 
 fn no_window() -> Response {
@@ -483,6 +518,20 @@ async fn window(State(state): State<ApiState>, headers: HeaderMap, body: Bytes) 
     };
     match app.control(request).await {
         Ok(view) => ok(&view),
+        Err(message) => failed(&message),
+    }
+}
+
+async fn app_control(State(state): State<ApiState>, headers: HeaderMap, body: Bytes) -> Response {
+    let request = match decode::<AppRequest>(&headers, &body) {
+        Ok(request) => request,
+        Err(response) => return *response,
+    };
+    let Some(app) = state.window.clone() else {
+        return no_window();
+    };
+    match app.app_control(request).await {
+        Ok(()) => ok(&json!({})),
         Err(message) => failed(&message),
     }
 }

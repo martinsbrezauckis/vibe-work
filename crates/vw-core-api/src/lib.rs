@@ -32,6 +32,19 @@ compile_error!(
 #[cfg(all(feature = "e2e-script", not(debug_assertions)))]
 compile_error!("the e2e-script feature is for debug test builds only");
 
+#[cfg(all(
+    not(debug_assertions),
+    any(
+        feature = "your-firefox",
+        feature = "video",
+        feature = "feedback",
+        feature = "click-marker"
+    )
+))]
+compile_error!(
+    "Firefox, video review, feedback and click markers are not available in release builds"
+);
+
 mod access;
 mod agent_access;
 pub(crate) mod agent_tools;
@@ -68,6 +81,8 @@ mod chrome_control;
 mod clock;
 mod command;
 mod read_exclusions;
+#[cfg(test)]
+mod release_modules_tests;
 pub use chrome_control::{
     ChromeControlConfig, ChromeControlRequest, ChromeControlView, ChromeSelection, ChromeSetupView,
     ChromeTab, ChromeWorkView,
@@ -174,6 +189,7 @@ mod mcp_keys_config;
 mod names;
 mod network;
 mod network_python;
+mod network_raw;
 mod network_test;
 mod network_view;
 mod on_demand;
@@ -206,6 +222,11 @@ pub use protected_changes_view::{
 };
 #[cfg(test)]
 mod feature_test_core;
+mod history_loading;
+#[cfg(test)]
+mod history_loading_tests;
+#[cfg(test)]
+mod history_test_vibe;
 #[cfg(test)]
 mod offline_core;
 mod own_server;
@@ -292,6 +313,7 @@ mod tools_list;
 mod transport;
 mod vault_scope;
 mod vibe_install;
+mod vibe_processes;
 mod view;
 mod voice_prompts;
 mod work;
@@ -436,6 +458,12 @@ pub fn version() -> &'static str {
     env!("CARGO_PKG_VERSION")
 }
 
+/// Compile-time identity used to separate tool catalogs between builds of the same version.
+#[must_use]
+pub fn build_id() -> &'static str {
+    env!("VW_TOOL_BUILD_ID")
+}
+
 pub use git_browser_view::{
     GitBrowserNode, GitBrowserRequest, GitBrowserResult, GitBrowserSnapshot,
 };
@@ -456,3 +484,30 @@ mod command_origin;
 #[cfg(test)]
 #[path = "../../../tests/public/fixtures/readonly_package.rs"]
 mod readonly_fixture;
+
+#[cfg(feature = "video")]
+mod video_history;
+
+#[cfg(feature = "video")]
+mod video_projection;
+
+#[cfg(feature = "video")]
+mod video_image;
+
+#[cfg(feature = "video")]
+mod video_files;
+
+#[cfg(all(test, feature = "feedback"))]
+mod feedback_tests;
+
+#[cfg(all(test, feature = "feedback"))]
+mod feedback_redaction_tests;
+
+mod feedback;
+mod feedback_redact;
+mod feedback_system;
+mod feedback_transport;
+mod feedback_view;
+pub use feedback_view::{
+    FeedbackDraft, FeedbackKind, FeedbackReport, FeedbackRequest, FeedbackSystem, FeedbackView,
+};

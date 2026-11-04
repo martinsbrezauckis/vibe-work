@@ -277,6 +277,40 @@ impl PreviewService {
         accessor: &str,
         url: &str,
     ) -> Result<(), String> {
+        self.frame_reading_allowed(session_id, accessor, url)?;
+        let state = self.inner.lock();
+        let engine = state
+            .entries
+            .get(session_id)
+            .filter(|entry| {
+                entry
+                    .ready_mount()
+                    .is_some_and(|mount| mount.page == accessor)
+            })
+            .and_then(|entry| entry.url.as_ref());
+        let reported =
+            url::Url::parse(url).map_err(|_| "the page reported an unreadable address")?;
+        if !matches!(reported.scheme(), "http" | "https")
+            || engine.is_none_or(|engine| engine.origin() != reported.origin())
+        {
+            return Err(
+                "the page address differs from the browser engine: call browser_read again".into(),
+            );
+        }
+        Ok(())
+    }
+
+    /// Checks an engine-identified frame against this mount's network policy. Its caller must verify the frame's
+    /// native origin and document identity; cross-origin children are legitimate and are not the top document.
+    ///
+    /// # Errors
+    /// A stale mount or address forbidden by its network policy.
+    pub fn frame_reading_allowed(
+        &self,
+        session_id: &str,
+        accessor: &str,
+        url: &str,
+    ) -> Result<(), String> {
         let state = self.inner.lock();
         let entry = state
             .entries

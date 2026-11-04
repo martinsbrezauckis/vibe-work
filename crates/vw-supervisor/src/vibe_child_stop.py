@@ -1,10 +1,12 @@
-"""Vibe Work's 3.0.4 Stop, configuration-switch and plugin-hook guards, loaded by the server launcher.
+"""Vibe Work's 3.0.4 Stop, process-start, configuration and plugin-hook guards, loaded by the server launcher.
 
 A Stop of an owned child session goes through Vibe's subagent controller and its
 durable interrupt operation. Access-mode switches wait for configuration reads
-and reloads before rebuilding synchronously. Revisit both at each Vibe pin
+and reloads before rebuilding synchronously. Revisit these guards at each Vibe pin
 bump. Native plugin hook subprocesses are refused before binding: they bypass
 our tool guards. No installed Vibe files are changed; original handlers apply allowed operations.
+An admitted background process finishes its acknowledgment even when its turn is interrupted,
+so it stays listed and its own Stop can finish. Turn Stop never waits for the process to exit.
 """
 import importlib.metadata
 import sys
@@ -152,6 +154,75 @@ def install_plugin_hook_guard():
     _runtime._runnable_plugin_hooks = runnable
 
 
+def install_process_start_guard():
+    """Cancellation must not lose a live process's publication or leave its Stop barrier locked."""
+    import asyncio
+    from functools import wraps
+    from mistralai_vibe_local_harness.vibe._runtime import DurableSessionRuntime
+
+    original = DurableSessionRuntime._acknowledge_process_result_applied
+    original_apply = DurableSessionRuntime._apply
+    original_resolve = DurableSessionRuntime._resolve_action
+
+    async def finish(awaitable):
+        pending = asyncio.create_task(awaitable)
+        cancelled = False
+        while not pending.done():
+            try:
+                await asyncio.shield(pending)
+            except asyncio.CancelledError:
+                # Every wait stays shielded, including a second or later Stop.
+                cancelled = True
+        result = pending.result()
+        if cancelled:
+            raise asyncio.CancelledError
+        return result
+
+    @wraps(original_resolve)
+    async def resolve(self, action, **kwargs):
+        if getattr(getattr(action, "call", None), "name", None) == "process.start":
+            if not hasattr(self, "_vw_process_starts"):
+                self._vw_process_starts = {}
+            self._vw_process_starts[action.action_id] = action
+        try:
+            return await original_resolve(self, action, **kwargs)
+        except BaseException:
+            getattr(self, "_vw_process_starts", {}).pop(action.action_id, None)
+            raise
+
+    async def acknowledged(self, action, event):
+        await original(self, action, event)
+        getattr(self, "_vw_process_starts", {}).pop(action.action_id, None)
+
+    @wraps(original)
+    async def acknowledge(self, action, event):
+        if getattr(getattr(action, "call", None), "name", None) != "process.start":
+            return await original(self, action, event)
+        return await finish(acknowledged(self, action, event))
+
+    @wraps(original_apply)
+    async def apply(self, event):
+        # Inspection's pending actions contain only names, not the full call
+        # required by acknowledgment. Keep the actual admitted action until ack.
+        action = getattr(self, "_vw_process_starts", {}).get(getattr(event, "action_id", None))
+        if action is None:
+            return await original_apply(self, event)
+
+        async def apply_and_acknowledge():
+            # Core removes the pending action BEFORE awaiting process persistence.
+            # Cancellation there makes failure settlement skip it, so the atomic
+            # unit must begin before apply, and include barrier release/publication.
+            transition = await original_apply(self, event)
+            await acknowledged(self, action, event)
+            return transition
+
+        return await finish(apply_and_acknowledge())
+
+    DurableSessionRuntime._resolve_action = resolve
+    DurableSessionRuntime._apply = apply
+    DurableSessionRuntime._acknowledge_process_result_applied = acknowledge
+
+
 def install():
     if importlib.metadata.version("mistral-vibe") != "3.0.4":
         return
@@ -161,6 +232,8 @@ def install():
 
     install_config_switch_guard(adapter)
     install_plugin_hook_guard()
+    install_process_start_guard()
+    install_process_tracking()  # noqa: F821 - launch.rs prepends vibe_process_tracking.py
     original = adapter.UnifiedHarnessBackendAdapter.interrupt_turn
 
     async def interrupt_turn(self, params):

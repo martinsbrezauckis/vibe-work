@@ -10,6 +10,7 @@
  * never Vibe's `approve_permanently`; "Stop the turn" is never a card button (the composer's Stop does
  * it); a button exists only when its answer is offered, so a key is never bound to an absent button.
  */
+import { browserApprovalName, browserApprovalSummary } from "./browserApproval";
 import { builtinTool, toolFallback, toolText } from "../transcript/model/toolLabels";
 import type { AskRecord, Command, CoversPart } from "../../protocol/core";
 import { type Decision, approvalEffect, offeredDecisions } from "../transcript/model/callbacks";
@@ -127,7 +128,7 @@ const COMMAND_TOOLS = [
 /** True for a Chrome Control call (its tools are routed through Vibe Work's checked MCP gateway). */
 export function isChromeControl(entry: Obj): boolean {
   const tool = str(approvalEffect(entry)["toolName"]) ?? "";
-  return /^mcp_vw\.chrome_(status|task|execute)$/.test(tool);
+  return /^mcp_vw\.chrome_(status|task|session|execute)$/.test(tool);
 }
 
 /** A tool name as people read it: Vibe's `mcp_` route prefix dropped ("mcp_notes.list_notes" → "notes.list_notes"). */
@@ -143,7 +144,8 @@ export function approvalQuestion(entry: Obj): string {
   const tool = str(effect["toolName"]) ?? "";
   if (tool === "mcp_vw.document_read" && entry["vwToolAsk"] === true)
     return str(obj(effect["display"])?.["summary"]) ?? "Read this document?";
-  if (isChromeControl(entry)) return "Allow this in your Chrome?";
+  const browserName = browserApprovalName(entry);
+  if (browserName !== null) return `Allow this in ${browserName}?`;
   if (kind === "shell" || kind === "file_search" || COMMAND_TOOLS.includes(tool))
     return "Allow this command?";
   if (kind === "file_edit" || kind === "file_write") return "Allow this edit?";
@@ -157,6 +159,8 @@ export function approvalQuestion(entry: Obj): string {
 
 /** The exact what (`display.summary`), or the entry's title. */
 export function approvalSummary(entry: Obj): string {
+  const summary = browserApprovalSummary(entry);
+  if (summary !== null) return summary;
   const effect = approvalEffect(entry);
   const tool = str(effect["toolName"]) ?? "";
   return toolText(

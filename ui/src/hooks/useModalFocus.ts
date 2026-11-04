@@ -3,8 +3,9 @@
  * restoration. Adapted from ShellX's modal focus hook.
  * Depends on: react. Called by: every modal surface (command palette, settings).
  * Invariants:
- * - While a modal is open, everything outside it is `inert` and `aria-hidden`, restored exactly
- *   (including elements that already had those) on close. The one exception is the dialog's own scrim
+ * - While a modal is open, branches outside it become `inert` and `aria-hidden`; branches already
+ *   inert stay owned by their renderer or outer modal. Only this modal's changes are undone on close.
+ *   The one exception is the dialog's own scrim
  *   (a sibling with class `scrim`, the dimmed backdrop): it is `aria-hidden` but stays clickable, so "a click
  *   outside closes" works. An inert scrim is not hit-tested at all (HTML: inert nodes act as
  *   `pointer-events: none`), which silently broke every scrim's `onClick`. The app's announcement regions
@@ -56,6 +57,9 @@ function inertOutside(dialog: HTMLElement): () => void {
     for (const child of Array.from(parent.children)) {
       if (child === kept || !(child instanceof HTMLElement)) continue;
       if (selectorOwner(child, dialog)) continue;
+      // The covering page owns its work view's inert state. Its close commit can remove inert
+      // before this dialog's cleanup runs; restoring a saved true here would freeze that view.
+      if (child.inert) continue;
       // The app's announcement regions keep speaking while a dialog is open (a prompt can arrive meanwhile).
       if (child.hasAttribute("data-announcer-root")) continue;
       changed.push({

@@ -19,6 +19,9 @@ use vw_rpc::RpcError;
 /// Why a core could not start.
 #[derive(Debug, thiserror::Error)]
 pub enum CoreStartError {
+    /// The independent background-process tracker could not start.
+    #[error("Background process tracking could not start: {0}")]
+    ProcessTracking(String),
     /// User plugin approvals could not be prepared.
     #[error("{0}")]
     PluginApprovals(String),

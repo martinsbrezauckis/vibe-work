@@ -1,12 +1,13 @@
 // HTML drag-and-drop between two observed refs. Inserted inside act.js; uses its checks and result helpers.
 // Never reads files or field values; only the page's dragstart handler populates the DataTransfer.
-/* global REQ, actionRef, checks, fire, point, result, viewOf -- act.js prelude. */
+/* global REQ, actionRef, checks, fire, observedTarget, point, result, viewOf -- act.js prelude. */
 /* exported dragTo */
 const dragTo = (source, target, hitPoint) => {
   const found = actionRef(REQ.to);
   if (found.found.length === 0) return result("stale");
   if (!found.target) return result("ambiguous");
   const destination = found.target;
+  if (!observedTarget(destination, REQ.observedToNode, REQ.observedToName)) return result("stale");
   if (source.ownerDocument !== destination.ownerDocument)
     return result("error", { message: "drag between documents is unavailable" });
   const checked = checks(destination, "drag");

@@ -12,6 +12,15 @@ publish = false
 workspace = true
 
 [features]
+click-marker = ["vw-browser/click-marker"]
+# Upstream proxy transports, enabled by the app default features.
+proxy-transports = ["vw-netguard/proxy-transports", "vw-mistral/proxy-transports", "vw-gate/proxy-transports"]
+feedback = ["vw-agent-tools/feedback"]
+video = ["dep:vw-video", "vw-agent-tools/video"]
+video-test = ["video", "vw-video/helper"]
+# Browser modules selected by the app; Firefox remains off by default.
+your-firefox = []
+your-edge = []
 # TypeScript bindings for the UI (ui/src/protocol/core/), written by the gen-core-ts binary and
 # checked for drift by scripts/public/check.sh. Off in the app build.
 # The vault test switch (three locks: this feature, a run-time switch, an isolated test profile). Its source is
@@ -26,6 +35,7 @@ path = "src/bin/gen_core_ts.rs"
 required-features = ["ts"]
 
 [dependencies]
+vw-video = { path = "../vw-video", optional = true }
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 vw-ask = { path = "../vw-ask" }
 vw-proposals = { path = "../vw-proposals" }
@@ -56,6 +66,8 @@ base64 = "0.23"
 # Random dictation stream ids; already in the lock file through vw-documents.
 getrandom = "0.3"
 zeroize = "1.8"
+# Fixed-size process receipt credentials, checked before allocating a client task.
+subtle = "2.6"
 vw-gate = { path = "../vw-gate" }
 vw-session = { path = "../vw-session" }
 vw-supervisor = { path = "../vw-supervisor" }
@@ -115,8 +127,11 @@ process-wrap = { version = "10.0.1", default-features = false, features = ["toki
 rustix = { version = "1.1.5", default-features = false, features = ["std", "fs"] }
 
 [target.'cfg(windows)'.dependencies]
+# Atomic external-extension registration and conditional cleanup; already in Cargo.lock.
+winreg = { version = "0.56", features = ["transactions"] }
 # Rust-only BLAKE3 on Windows (same output), as vw-vault: no C/asm build in the msvc cross lint.
 blake3 = { version = "1.8", features = ["pure"] }
 
 [dev-dependencies]
+tempfile = "3"
 tokio = { version = "1.53", features = ["test-util"] }

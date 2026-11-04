@@ -1,4 +1,5 @@
 /** General's power card and immediate idle-sleep switch. Depends on the typed core state hook; SettingsPage renders this row only. */
+import { CloseToTraySettings } from "./CloseToTraySettings";
 import { SettingsRow, Switch } from "../../components/Controls";
 import { useKeepAwake } from "../../state/useKeepAwake";
 import { useApp } from "../shell/AppContext";
@@ -11,6 +12,7 @@ export function KeepAwakeSettings() {
   return (
     <section aria-labelledby="keep-awake-title">
       <h3 id="keep-awake-title">Power</h3>
+      <CloseToTraySettings />
       <SettingsRow data-setting="keep-awake">
         <span>
           <label htmlFor="keep-awake-switch">Keep this computer awake while Vibe is working</label>

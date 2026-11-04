@@ -14,6 +14,10 @@ pub(crate) async fn prepare(
     args: &mut Value,
 ) -> Result<Option<Execution>, String> {
     let tools = shared.agent_tools.as_ref().ok_or("Tools unavailable.")?;
+    #[cfg(feature = "video")]
+    if tool == "video_frames" {
+        return super::video_tools::prepare(shared, owner, source, call, args.clone()).map(Some);
+    }
     // Without the Chrome package the check below refuses every Chrome tool with "not in this version" first.
     if tool == "chrome_execute" && shared.chrome_control.config.available() {
         crate::chrome_control::gateway::validate_execute_args(args)?;

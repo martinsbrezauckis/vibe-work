@@ -8,6 +8,7 @@ use vw_agent_tools::wire::tools as names;
 use vw_ask::{AnsweredBy, Outcome, Scope};
 
 const PREFIX: &str = "vw-tool-";
+mod read_rules;
 pub(crate) mod receipts;
 struct Call {
     session: String,
@@ -36,6 +37,7 @@ fn asks_inside(tool: &str, args: &Value) -> bool {
             | names::SESSION_STATUS
             | names::CONNECTORS_LIST
             | names::CONNECTOR_SUGGEST
+            | names::ADDON_SUGGEST
             | names::SECRET_RUN_STATUS
             | names::PROPOSE_PROTECTED_CHANGE
             | names::PROTECTED_CHANGE_STATUS
@@ -48,6 +50,35 @@ fn asks_inside(tool: &str, args: &Value) -> bool {
             && matches!(args["action"].as_str(), Some("fill" | "close_tab")))
 }
 
+/// Calls that only read what this chat can already see (its preview list and console, a picture of its preview, its
+/// folders). In Accept edits they run without a card, as reading does in other coding agents; the other modes keep the
+/// card. Opening, clicking, typing, every write and every call that could change what is shown
+/// keep their approval: a preview picture that sets a width, reading a browser page (it can open, switch or reload a
+/// tab) and reading the side panels (an editor there can hold a file the person's read rules exclude).
+fn reads_only(tool: &str, args: &Value) -> bool {
+    match tool {
+        names::PREVIEW_LIST | names::PREVIEW_CONSOLE | names::SEARCH => true,
+        names::PREVIEW_SCREENSHOT => args.get("width").is_none_or(Value::is_null),
+        _ => false,
+    }
+}
+
+/// Whether the person set a stricter rule for `tool` in Vibe (`read_rules`); only the default card goes.
+async fn stricter_rule(shared: &Arc<Shared>, owner: &str, tool: &str) -> bool {
+    let home = shared.instructions.own_home.clone();
+    // The chat's folders as its tools see them; read without the folder guard's own refusal record (the tool's
+    // run still checks them).
+    let roots: Vec<std::path::PathBuf> = crate::processes::contexts(&shared.store)
+        .into_iter()
+        .find(|c| c.session_id == owner)
+        .map(|c| c.folders)
+        .unwrap_or_default();
+    let tool = tool.to_owned();
+    tokio::task::spawn_blocking(move || read_rules::stricter(&home, &roots, "accept-edits", &tool))
+        .await
+        .unwrap_or(true)
+}
+
 pub(crate) async fn permission(
     shared: &Arc<Shared>,
     owner: &str,
@@ -56,11 +87,27 @@ pub(crate) async fn permission(
     tool: &str,
     args: &Value,
 ) -> Result<(), String> {
-    if asks_inside(tool, args) || shared.access.remembered(owner).as_deref() == Some("auto-approve")
+    let mode = shared.access.remembered(owner);
+    if asks_inside(tool, args) || mode.as_deref() == Some("auto-approve") {
+        return Ok(());
+    }
+    if reads_only(tool, args)
+        && mode.as_deref() == Some("accept-edits")
+        && !stricter_rule(shared, owner, tool).await
     {
         return Ok(());
     }
     let detail = json!({"kind":"approval", "effect":{"kind":"tool", "toolName":format!("mcp_vw.{tool}"), "input":args}, "requiredPermissions":[]});
+    #[cfg(feature = "video")]
+    let detail = if tool == "video_frames" {
+        let request: vw_agent_tools::video::Request =
+            serde_json::from_value(args.clone()).map_err(|e| format!("Invalid video request: {e}. Supply integer millisecond times, a supported selection and output mode."))?;
+        let mut detail = detail;
+        detail["effect"]["display"] = json!({"summary":request.preflight()?});
+        detail
+    } else {
+        detail
+    };
     approve(shared, owner, source, call, detail).await
 }
 
@@ -84,6 +131,7 @@ pub(crate) async fn approve(
     if source != session {
         entry["vwSourceSession"] = json!(source);
     }
+    crate::chrome_control::approval::project(shared, &mut entry);
     if let Some(grant) = shared.ask_grants.matching(session, &entry) {
         shared
             .ask_grants
@@ -359,3 +407,48 @@ mod transport_tests {
 #[cfg(test)]
 #[path = "tool_calls_cap_tests.rs"]
 mod cap_tests;
+
+#[cfg(test)]
+#[path = "tool_calls_read_tests.rs"]
+mod read_tests;
+
+#[cfg(test)]
+mod suggestion_tests {
+    use super::*;
+    #[tokio::test]
+    async fn addon_cards_need_no_approval_in_any_access_mode() {
+        let core = crate::offline_core::start("addon-card-permission").await;
+        for mode in [
+            "ask",
+            "accept-edits",
+            "smart-approve",
+            "auto-approve",
+            "vw-plan",
+            "plan",
+            "explore",
+        ] {
+            core.shared.access.observe_request(
+                "session/agent/update",
+                "s",
+                &json!({"agentName":mode}),
+            );
+            for tool in [names::CONNECTOR_SUGGEST, names::ADDON_SUGGEST] {
+                let answer = tokio::time::timeout(
+                    std::time::Duration::from_millis(100),
+                    permission(
+                        &core.shared,
+                        "s",
+                        "s",
+                        "call",
+                        tool,
+                        &json!({"addon":"chrome","reason":"Read a page"}),
+                    ),
+                )
+                .await;
+                assert!(matches!(answer, Ok(Ok(()))), "{mode} {tool}: {answer:?}");
+                assert_eq!(core.shared.asks.list(), [] as [vw_ask::Ask; 0]);
+            }
+        }
+        core.shutdown().await;
+    }
+}

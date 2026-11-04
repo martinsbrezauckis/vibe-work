@@ -102,7 +102,8 @@ async fn serve_one(stream: TcpStream, shared: Weak<Shared>) {
                             return;
                         };
                         answer
-                    } else if names::CHROME_TOOLS.contains(&request.tool.as_str())
+                    } else if (cfg!(feature = "video") && request.tool == "video_frames")
+                        || names::CHROME_TOOLS.contains(&request.tool.as_str())
                         || matches!(
                             request.tool.as_str(),
                             names::GIT_CHECK

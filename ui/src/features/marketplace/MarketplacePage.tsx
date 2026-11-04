@@ -4,6 +4,7 @@
  * Depends on: hooks, model, MarketCard, MarketDetail, ToolsTabs. Called by: Content.
  * Invariants: components render, the marketplace controller decides; no vendor logos.
  */
+import { ChromeCard } from "../settings/chrome/ChromeConnection";
 import { Button } from "../../components/Controls";
 import type { ReactElement } from "react";
 
@@ -92,6 +93,7 @@ export function MarketplacePage(): ReactElement {
       data-testid="marketplace-page"
     >
       <div className="cmain">
+        <ChromeCard />
         <div className="chead">
           <ToolsTabs />
           <p className="cmuted">

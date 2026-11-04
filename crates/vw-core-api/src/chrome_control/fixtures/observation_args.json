@@ -1,0 +1,13 @@
+{
+  "description": "Independent accepted arguments for negotiated observations; used by observation_support_tests.",
+  "calls": [
+    {"action":"page.read","args":{"tabId":1,"includeText":false,"scope":"viewport","includeBounds":true}},
+    {"action":"page.read","args":{"tabId":1,"cursor":"capture:Opaque/+=😀"}},
+    {"action":"page.find","args":{"query":"the date of birth field","tabId":1,"frameId":2,"ref":"form","limit":5}},
+    {"action":"page.find","args":{"tabId":1,"cursor":"find:Opaque/+=😀"}},
+    {"action":"page.click","args":{"ref":"dob","observation":{"mode":"changes","interactiveOnly":false,"maxChars":320,"limit":5,"maxBytes":2200}}},
+    {"action":"page.type","args":{"ref":"subjects","text":"Maths","clear":true,"observation":{"mode":"full"}}},
+    {"action":"page.select","args":{"ref":"city","text":"Delhi","observation":{"mode":"changes"}}},
+    {"action":"page.select","args":{"ref":"city","value":"delhi","observation":{"mode":"full","maxBytes":3000}}}
+  ]
+}

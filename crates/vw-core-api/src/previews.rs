@@ -18,14 +18,16 @@ use std::sync::{Arc, Mutex, PoisonError, Weak};
 use tokio::task::JoinHandle;
 use vw_preview::{
     EngineError, HistoryStep, OpenRequest, PreviewConfig, PreviewEngine, PreviewError,
-    PreviewService, PreviewView, loopback_url,
+    PreviewService, PreviewView,
 };
 
 use crate::command::CommandResult;
 use crate::core::{Core, Shared};
 use crate::error::{CoreError, ErrorCode};
 use crate::event::CoreEvent;
-use crate::preview_ports::{busy_ports, busy_view, port_owner, session_ports};
+use crate::preview_ports::{
+    Points, busy_ports, busy_view, names_public, navigation_text, port_owner, session_ports,
+};
 use crate::preview_view::{BrowserOverlayAction, PreviewRequest, PreviewResult};
 
 /// The preview engine and settings the app hands to the core. `None` in `CoreConfig::preview`: no previews (the
@@ -38,7 +40,7 @@ pub struct PreviewSetup {
     pub config: PreviewConfig,
     /// The agent browser's network guard (the same one the engine sends its webviews through): the
     /// request-time layer. `None` means only that layer is missing: public pages still open under the navigation
-    /// policy (link-local, file and app-own targets refused, LAN only for the user, names DNS-checked before an open
+    /// policy (link-local, file and app-own targets refused, LAN needs the current grant, names checked before an open
     /// and on every in-place navigation, per-session storage).
     pub guard: Option<vw_netguard::NetGuard>,
 }
@@ -159,16 +161,10 @@ pub(crate) fn start_events(shared: &Arc<Shared>) {
         hub.service.set_network_guard(guard.clone());
         guard.set_context(Arc::new(crate::browser_guard::GuardContext::new(shared)));
         crate::browser_guard::register_internal_ports(shared, guard);
-        // Public requests go through the user's proxy: Settings > Network (or the process environment) when
-        // set, else the guard keeps the system's proxy settings it read when it was bound.
-        let network = vw_mistral::network::current();
-        if network.has_proxy() {
-            guard.set_upstream(vw_netguard::Upstream::from_values(
-                network.http_proxy.as_deref(),
-                network.https_proxy.as_deref(),
-                network.all_proxy.as_deref(),
-                network.no_proxy.as_deref(),
-            ));
+        if let Some(keys) = &shared.config.keys {
+            keys.register_browser_guard(guard.clone());
+        } else {
+            crate::browser_guard::refresh_network_guard(shared);
         }
         guard.serve();
     }
@@ -382,10 +378,8 @@ async fn blocking<T: Send + 'static>(
 
 /// Opens a URL (or a port + path) of `session_id` in its preview: the shared path of the UI, the Debug API and
 /// the agent's `preview_open` / `browser_act navigate`. Refusals are plain text naming the owner.
-/// `strict` means the AGENT is opening: only proven ports (fact-tier ownership or a lease) open, the preview may then
-/// navigate only among those, and nothing on the local network opens. Otherwise the user (the
-/// address bar, or the Debug API acting as the user) may open a private-network address or a name that
-/// resolves there; it opens as a Lan page the agent neither reads nor acts on.
+/// `strict` means the agent is opening: ports require proven ownership and local-network pages require the
+/// person's current Developer switch. The user and Debug API retain their ordinary network scope.
 pub(crate) async fn open_for_session(
     shared: &Arc<Shared>,
     session_id: &str,
@@ -403,22 +397,13 @@ pub(crate) async fn open_for_session(
     if !crate::new_chat::known_owner(shared, &owner) {
         return Err(CoreError::not_loaded(&owner));
     }
-    let text = match (url, port) {
-        (Some(url), None) => url,
-        (None, Some(port)) => loopback_url(port, path.as_deref())
-            .map_err(|e| CoreError::new(ErrorCode::InvalidParams, e.to_string()))?,
-        _ => {
-            return Err(CoreError::new(
-                ErrorCode::InvalidParams,
-                "give either a url or a port",
-            ));
-        }
-    };
+    let text = navigation_text(url, port, path.as_deref())?;
     let (shared_for_scan, id) = (shared.clone(), owner.clone());
     let ports = blocking(move || session_ports(&shared_for_scan, &id))
         .await?
         .map_err(|e| CoreError::new(ErrorCode::Internal, format!("process monitor: {e}")))?;
     let user = !strict;
+    let allow_lan = user || shared.chrome_control.local_network();
     let denied = |text: String| {
         let message = if strict {
             crate::guard_refusals::record(
@@ -439,7 +424,7 @@ pub(crate) async fn open_for_session(
         .check(
             &text,
             |p| port_owner(shared, &ports, &owner, p, strict),
-            user,
+            allow_lan,
         )
         .map_err(|e| denied(e.to_string()))?;
     if session_id == owner
@@ -455,9 +440,9 @@ pub(crate) async fn open_for_session(
     }
     let lan = match destination {
         vw_preview::Destination::Lan => true,
-        vw_preview::Destination::Public => match names_public(hub, &url).await? {
+        vw_preview::Destination::Public => match names_public(&hub.service, &url).await? {
             Points::Public => false,
-            Points::LocalNetwork if user => true,
+            Points::LocalNetwork if allow_lan => true,
             Points::LocalNetwork => {
                 return Err(denied(
                     vw_preview::UrlRefusal::Lan(
@@ -476,7 +461,11 @@ pub(crate) async fn open_for_session(
     // Other sessions' servers join the URL rules now, from this open's scan, not at the next re-check: a page's
     // first requests to them go out as it loads (macOS compiles the rules before that) and are not repeated.
     hub.service.set_server_ports(ports.servers.clone()).await;
-    hub.service
+    if strict && lan && !shared.chrome_control.local_network() {
+        return Err(denied(vw_browser::LOCAL_NETWORK.into()));
+    }
+    let opened = hub
+        .service
         .open(OpenRequest {
             session_id: session_id.to_owned(),
             url,
@@ -486,35 +475,15 @@ pub(crate) async fn open_for_session(
             lan,
         })
         .await
-        .map_err(|e| core_error(&e))
-}
-
-/// Where a public-looking host name points.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Points {
-    /// Every answer is public.
-    Public,
-    /// Some answers are private-network or carrier-grade-NAT addresses (the rest public): a local-network page.
-    LocalNetwork,
-}
-
-/// Where a host NAME points (the baseline every platform has; Linux checks every request again in the
-/// network guard), through the preview service's shared, bounded lookup (the navigation hooks then answer this page
-/// from its cache). A lookup that fails or times out refuses the open (fail closed: the page would not load anyway).
-/// Loopback, link-local and other special answers refuse it for everyone; private-network answers make it a
-/// local-network page (the caller decides who may open those).
-async fn names_public(hub: &PreviewHub, url: &url::Url) -> Result<Points, CoreError> {
-    let Some(url::Host::Domain(name)) = url.host() else {
-        return Ok(Points::Public);
-    };
-    match hub.service.check_name(name).await {
-        vw_preview::NameVerdict::Public => Ok(Points::Public),
-        vw_preview::NameVerdict::LocalNetwork(_) => Ok(Points::LocalNetwork),
-        vw_preview::NameVerdict::Refused(why) => Err(CoreError::new(
-            ErrorCode::Denied,
-            format!("{why}: not opened"),
-        )),
+        .map_err(|e| core_error(&e))?;
+    if strict && lan && !shared.chrome_control.local_network() {
+        hub.service
+            .suspend_page(session_id)
+            .await
+            .map_err(|e| core_error(&e))?;
+        return Err(denied(vw_browser::LOCAL_NETWORK.into()));
     }
+    Ok(opened)
 }
 
 impl Core {

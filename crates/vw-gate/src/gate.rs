@@ -321,6 +321,22 @@ impl<T: Transport, C: Confirmer> Gate<T, C> {
             })
     }
 
+    /// Spend the original proxy-write consent and bind it to the core's credential-free forwarding call.
+    /// The core stores the sign-in in its vault; only the loopback address reaches Vibe. No second dialog is shown.
+    /// # Errors
+    /// Either shape is invalid, or the original single-use confirmation is absent, expired or mismatched.
+    pub fn confirm_proxy_forwarding(
+        &self,
+        original: &Value,
+        forwarded: &Value,
+        token: Option<&ConfirmationToken>,
+    ) -> Result<ConfirmationToken, GateError> {
+        let method = "config/proxy/write";
+        self.plan(method, forwarded)?;
+        self.authorise(method, original, token)?;
+        self.state().vault.mint(method, forwarded, self.clock.now())
+    }
+
     /// Asks the user, in the native dialog, to approve one exact call, and returns the token that
     /// lets [`Gate::call`] send it once.
     ///

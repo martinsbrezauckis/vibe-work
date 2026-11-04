@@ -127,6 +127,30 @@ async fn several_files_only_where_the_field_takes_several() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn long_file_names_keep_every_upload_outcome_inline() {
+    let rig = Rig::new().await;
+    rig.engine.eval(PAGE).await;
+    let files = (0..16)
+        .map(|i| file(&format!("report-{}-{i}.txt", "é".repeat(100)), i + 1))
+        .collect();
+    let receipt = upload(&rig, "Your photos", files).await.unwrap();
+    assert!(
+        receipt.to_string().len() <= 4000,
+        "{} bytes",
+        receipt.to_string().len()
+    );
+    assert!(serde_json::to_string_pretty(&receipt).unwrap().len() <= 4500);
+    assert_eq!(receipt["result"]["files"].as_array().unwrap().len(), 16);
+    assert_eq!(receipt["result"]["fileNamesOmitted"], true);
+    assert_eq!(
+        rig.engine
+            .eval("document.getElementById('many').files.length")
+            .await,
+        16
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_choose_file_button_resolves_to_the_pages_field_and_other_refs_are_refused() {
     let rig = Rig::new().await;
     rig.engine.eval("document.body.innerHTML = `<button type=button onclick=\"document.getElementById('hidden').click()\">Choose file</button><input type=file id=hidden style=display:none><button type=button>Nothing to attach</button>`; scrollTo(0,0); window.seen = []; document.getElementById('hidden').addEventListener('change', e => seen.push(e.target.files[0].name));").await;

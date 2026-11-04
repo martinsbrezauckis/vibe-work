@@ -1,5 +1,6 @@
 //! The store effect of an accepted `turn/start` on a core without Vibe: the chat reads running from Vibe's reply on,
 //! before Vibe's own events for the turn arrive (they can lag the reply by tens of seconds).
+//! Also checks result projection and observation for bounded same-session resumes and authoritative replacements.
 use serde_json::{Value, json};
 use vw_session::LoadKind;
 
@@ -99,4 +100,92 @@ async fn an_enqueue_reply_lists_no_turn() {
     let state = super::snapshot(shared, "s").unwrap().state;
     assert_eq!(running_turn(&state), None);
     assert_eq!(state["turns"].as_array().unwrap().len(), 1);
+}
+
+fn history_state(id: &str) -> Value {
+    let mut state = idle();
+    state["session"]["id"] = json!(id);
+    state["history"] = json!([
+        {"id":"early", "type":"message", "role":"user", "content":[]},
+        {"id":"recent", "type":"message", "role":"assistant", "content":[]}
+    ]);
+    state["historyBeforeCursor"] = json!("before-loaded");
+    state
+}
+
+#[tokio::test]
+async fn resume_and_continue_results_keep_the_same_history_as_the_store() {
+    let core = crate::offline_core::start("resume-prefix").await;
+    let shared = &core.shared;
+    for method in ["session/resume", "session/continue"] {
+        let full = history_state("s");
+        let _ = shared.store.load(full.clone(), LoadKind::New).unwrap();
+        let mut page = full.clone();
+        page["history"] = json!([full["history"][1]]);
+        page["historyBeforeCursor"] = json!("before-tail");
+        // Continue chooses the latest eligible session; its protocol params carry no session ID.
+        let params = if method == "session/continue" {
+            json!({})
+        } else {
+            json!({"sessionId":"s"})
+        };
+        let mut result = json!({"state":page});
+        // The dispatcher projects before observing, then returns this result to generic callers.
+        super::project_result(shared, method, &params, &mut result);
+        super::observe(shared, method, &params, &result)
+            .await
+            .unwrap();
+        let snapshot = super::snapshot(shared, "s").unwrap();
+        assert_eq!(result["state"]["history"], full["history"], "{method}");
+        assert_eq!(result["state"]["history"], snapshot.state["history"]);
+        assert_eq!(result["state"]["historyBeforeCursor"], "before-loaded");
+        assert_eq!(snapshot.state["historyBeforeCursor"], "before-loaded");
+    }
+}
+
+#[tokio::test]
+async fn replacement_and_import_results_never_inherit_history() {
+    let core = crate::offline_core::start("resume-authoritative").await;
+    let shared = &core.shared;
+    for method in [
+        "session/history/clear",
+        "session/rewind",
+        "session/compact",
+        "session/start",
+        "session/fork",
+        "session/resume",
+    ] {
+        let full = history_state("s");
+        let _ = shared.store.load(full.clone(), LoadKind::New).unwrap();
+        let mut page = full.clone();
+        page["history"] = json!([full["history"][1]]);
+        page["historyBeforeCursor"] = json!("before-tail");
+        let params = if method == "session/resume" {
+            // Even if the destination was previewed, a returned different id is an authoritative new load.
+            let _ = shared
+                .store
+                .load(history_state("source"), LoadKind::New)
+                .unwrap();
+            json!({"sessionId":"source"})
+        } else {
+            json!({"sessionId":"s", "sourceSessionId":"s"})
+        };
+        let mut result = json!({"state":page.clone()});
+        super::project_result(shared, method, &params, &mut result);
+        super::observe(shared, method, &params, &result)
+            .await
+            .unwrap();
+        assert_eq!(result["state"]["history"], page["history"], "{method}");
+        assert_eq!(
+            super::snapshot(shared, "s").unwrap().state["history"],
+            page["history"],
+            "{method}"
+        );
+        if method == "session/resume" {
+            assert_eq!(
+                super::snapshot(shared, "source").unwrap().state["history"],
+                full["history"]
+            );
+        }
+    }
 }

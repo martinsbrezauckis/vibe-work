@@ -1,0 +1,130 @@
+//! The gateway wakes only the selected browser, once per lost connection, before dispatching any action.
+//! Uses injected browser launchers and real owner/gateway state; no desktop or native host is required.
+use super::super::{agent_browser::Browser, edge_agent_tests::fixture_with, gateway, owner};
+use serde_json::json;
+use std::sync::{Arc, Mutex};
+
+#[tokio::test]
+async fn a_stopped_worker_is_woken_before_the_action_is_sent_once() {
+    for (browser, profile) in [(Browser::Chrome, "chrome:p"), (Browser::Edge, "edge:p")] {
+        let launches = Arc::new(Mutex::new(Vec::new()));
+        let recorded = launches.clone();
+        let core = fixture_with(
+            "browser-worker-wake",
+            json!([{"profileId":profile,"connected":true}]),
+            move |config| {
+                let launch = Arc::new(move |url: &str| {
+                    recorded.lock().unwrap().push(url.to_owned());
+                    Ok(())
+                });
+                if browser == Browser::Edge {
+                    config.edge_launcher = Some(launch);
+                } else {
+                    config.launcher = Some(launch);
+                }
+            },
+        )
+        .await;
+        gateway::call(
+            &core.shared,
+            "s",
+            "chrome_session",
+            json!({"action":"open","profileId":profile}),
+        )
+        .await
+        .unwrap();
+        let chrome = &core.shared.chrome_control;
+        if browser == Browser::Edge {
+            chrome.owner.edge_pairing.lock().unwrap().0 = "Connecting".into();
+        } else {
+            chrome.owner.pairing.lock().unwrap().0 = "Connecting".into();
+        }
+        let weak = Arc::downgrade(&core.shared);
+        let observed = launches.clone();
+        let seen = chrome.owner.answering(move |tool, _| {
+            let result = if tool == "chrome_status" {
+                json!({"structuredContent":{"profiles":[{"profileId":profile,"connected":!observed.lock().unwrap().is_empty()}]}})
+            } else { json!({"structuredContent":{"status":"completed"}}) };
+            owner::update_pairing(&weak, &result);
+            result
+        });
+        let reply = gateway::call(
+            &core.shared,
+            "s",
+            "chrome_execute",
+            json!({"sessionId":"task","action":"page.read","args":{}}),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            reply["vwMcpResult"]["structuredContent"]["status"], "completed",
+            "{reply}"
+        );
+        assert_eq!(
+            *launches.lock().unwrap(),
+            [format!(
+                "chrome-extension://{}/ui.html?surface=panel",
+                chrome.config.extension_id
+            )]
+        );
+        assert_eq!(
+            seen.lock()
+                .unwrap()
+                .iter()
+                .filter(|(name, _)| name == "chrome_execute")
+                .count(),
+            1
+        );
+        core.shutdown().await;
+    }
+}
+
+#[tokio::test]
+async fn failed_wakes_do_not_open_another_tab_on_each_call() {
+    let launches = Arc::new(Mutex::new(Vec::new()));
+    let recorded = launches.clone();
+    let core = fixture_with(
+        "browser-worker-stuck",
+        json!([{"profileId":"edge:p","connected":true}]),
+        move |config| {
+            config.edge_launcher = Some(Arc::new(move |url| {
+                recorded.lock().unwrap().push(url.to_owned());
+                Ok(())
+            }));
+        },
+    )
+    .await;
+    core.shared
+        .chrome_control
+        .owner
+        .edge_pairing
+        .lock()
+        .unwrap()
+        .0 = "Connecting".into();
+    core.shared
+        .chrome_control
+        .owner
+        .answering(|_, _| json!({"structuredContent":{"profiles":[]}}));
+    for _ in 0..2 {
+        let started = tokio::time::Instant::now();
+        let reply = gateway::call(
+            &core.shared,
+            "s",
+            "chrome_session",
+            json!({"action":"open","profileId":"edge:p"}),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            reply["vwMcpResult"]["structuredContent"]["error"]["code"],
+            "EXTENSION_UNRESPONSIVE"
+        );
+        assert!(started.elapsed() < std::time::Duration::from_secs(7));
+    }
+    assert_eq!(
+        launches.lock().unwrap().len(),
+        1,
+        "at most one wake per disconnected browser"
+    );
+    core.shutdown().await;
+}

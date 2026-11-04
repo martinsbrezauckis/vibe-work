@@ -35,8 +35,8 @@ impl TauriEngine {
     /// - macOS with `macos-proxy` ([`MAC_PROXY`]): the listener of the mount's website data store (the store carries
     ///   the setting; the shared web store serves several mounts), the same port for the store's life; the content
     ///   rules keep each mount to its own rights for literals. A listener that cannot start, or no guard at all on the
-    ///   previews' instance, refuses the mount (fail closed). Without the feature (0.1.2), macOS previews use content
-    ///   rules only, including required previews; a failed rule install refuses the mount.
+    ///   previews' instance, refuses the mount (fail closed). Without the feature (0.1.2-0.1.6), macOS previews use
+    ///   content rules only, including required previews; a failed rule install refuses the mount.
     pub(super) fn proxy_for(&self, spec: &MountSpec) -> Result<Option<String>, EngineError> {
         let id = &spec.id;
         let Some(guard) = &self.guard else {
@@ -151,8 +151,8 @@ impl TauriEngine {
     }
 }
 
-/// On macOS, 0.1.2 keeps content-rules-only previews; the proxy is required with
-/// `macos-proxy` (0.1.3, minimum macOS 14). Explicit platform inputs let every build test that policy.
+/// On macOS the proxy is required with `macos-proxy` (the app's default since 0.1.7, minimum macOS 14); a build
+/// without it keeps content-rules-only previews. Explicit platform inputs let every build test that policy.
 fn proxy_required_for(needs_guard: bool, macos: bool, mac_proxy: bool) -> bool {
     needs_guard && (!macos || mac_proxy)
 }

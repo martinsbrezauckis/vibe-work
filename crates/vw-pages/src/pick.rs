@@ -107,6 +107,13 @@ pub(crate) const DESCRIBE_JS: &str = r##"  const clip = (v, n) => String(v || ""
 /// The script that starts a pick (its value is the first answer).
 #[must_use]
 pub fn start_script(name: &str) -> String {
+    start_script_from(name, None)
+}
+
+/// Starts a preview pick, consuming a browser menu's frozen selection before reading a live selection.
+#[must_use]
+pub fn start_script_from(name: &str, page: Option<&str>) -> String {
+    let page = serde_json::json!(page);
     format!(
         r#"(() => {{
   const NAME = {name};
@@ -119,6 +126,12 @@ pub fn start_script(name: &str) -> String {
 {DESCRIBE_JS}
   const old = window[NAME + "_stop"]; if (typeof old === "function") old();
   const st = {{ result: {{ state: "pending" }} }};
+  const saved = window[{page}]?.takePointChoice?.();
+  if (saved) {{
+    let node = saved.node;
+    if (node?.nodeType !== 1) node = node?.parentElement;
+    return JSON.stringify(node?.isConnected ? describe(node, saved.quote) : {{state:"cancelled"}});
+  }}
   const sel = window.getSelection && window.getSelection();
   if (sel && !sel.isCollapsed && String(sel).trim()) {{
     let node = sel.getRangeAt(0).commonAncestorContainer;

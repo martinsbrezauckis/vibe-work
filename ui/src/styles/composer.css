@@ -502,6 +502,16 @@
   justify-content: space-between;
   padding-right: 4px;
 }
+.chrome-tabs {
+  overflow: hidden;
+}
+.chrome-tabs[data-side="below"] {
+  top: calc(100% + 8px);
+  bottom: auto;
+}
+.chrome-tabs > :not(.slash-list) {
+  flex-shrink: 0;
+}
 .chrome-tabs .it {
   grid-template-columns: minmax(0, 1fr);
   gap: 2px;

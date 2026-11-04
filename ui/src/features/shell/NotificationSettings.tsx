@@ -1,11 +1,12 @@
 /**
  * The notification section of Settings: which events produce an OS notification, and whether the
  * system lets the app show them. Notifications appear only while the window is not focused or the
- * session is not the open one; supported activation opens the session and its full notification.
+ * session is not the open one; activation opens its chat, or the bell when no chat resolves.
  * Depends on: AppContext, state/osNotify, state/createStore, components/Selector. Called by: settings/SettingsPage (the Settings dialog is gone).
  * Invariants: the level is remembered (localStorage via the notifier); when the host reports that
  * the OS refused the last notification, the row says "off in system settings" instead of pretending.
  */
+import { term } from "../../vocabulary";
 import { Selector } from "../../components/Selector";
 import { NOTIFY_LEVELS, type NotifyLevel } from "../../state/osNotify";
 import { useStore } from "../../state/createStore";
@@ -39,6 +40,10 @@ export function NotificationSettings() {
             notifier.setLevel(l);
           }}
         />
+      </div>
+      <div className="check">
+        <span>On click</span>
+        <span>{term("workNames", "session").tooltip}</span>
       </div>
       {error !== null && (
         <p className="key-field-hint ui-help" aria-live="polite">

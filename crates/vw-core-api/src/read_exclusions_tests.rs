@@ -65,9 +65,17 @@ fn protected_symlinks_do_not_own_outside_hard_links_but_direct_files_do() {
     }
     #[cfg(windows)]
     {
-        std::os::windows::fs::symlink_file(&original, root.join("app-data/linked-file")).unwrap();
-        std::os::windows::fs::symlink_dir(&outside, root.join("app-data/linked-directory"))
-            .unwrap();
+        let test = "protected_symlinks_do_not_own_outside_hard_links_but_direct_files_do";
+        if !test_link_created(
+            std::os::windows::fs::symlink_file(&original, root.join("app-data/linked-file")),
+            test,
+        ) || !test_link_created(
+            std::os::windows::fs::symlink_dir(&outside, root.join("app-data/linked-directory")),
+            test,
+        ) {
+            std::fs::remove_dir_all(root).unwrap();
+            return;
+        }
     }
     policy
         .check_opened(&File::open(&alias).unwrap(), &alias, None)
@@ -85,7 +93,13 @@ fn hard_links_to_every_protected_location_are_refused_but_ordinary_links_are_all
     let (root, policy, paths) = fixture("hard-links");
     for (i, path) in paths.iter().enumerate() {
         let alias = root.join(format!("notes-{i}.json"));
-        std::fs::hard_link(path, &alias).unwrap();
+        if !test_link_created(
+            std::fs::hard_link(path, &alias),
+            "hard_links_to_every_protected_location_are_refused_but_ordinary_links_are_allowed",
+        ) {
+            std::fs::remove_dir_all(root).unwrap();
+            return;
+        }
         let error = policy
             .check_opened(&File::open(&alias).unwrap(), &alias, None)
             .expect_err("hard-linked protected file was allowed");
@@ -100,7 +114,13 @@ fn hard_links_to_every_protected_location_are_refused_but_ordinary_links_are_all
     policy
         .check_opened(&File::open(&original).unwrap(), &original, None)
         .unwrap();
-    std::fs::hard_link(&original, &alias).unwrap();
+    if !test_link_created(
+        std::fs::hard_link(&original, &alias),
+        "hard_links_to_every_protected_location_are_refused_but_ordinary_links_are_allowed",
+    ) {
+        std::fs::remove_dir_all(root).unwrap();
+        return;
+    }
     policy
         .check_opened(&File::open(&alias).unwrap(), &alias, None)
         .unwrap();
@@ -230,5 +250,83 @@ fn only_the_own_copy_is_exempt_and_a_vault_inside_it_is_still_excluded() {
     assert!(!policy.excludes(&own.join("src/a")));
     assert!(policy.excludes(&vault.join("profile.json")));
     assert!(policy.excludes(&own.with_file_name("other").join("src/a")));
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+pub(crate) fn test_link_created(result: std::io::Result<()>, test: &str) -> bool {
+    match result {
+        Ok(()) => true,
+        Err(error) if error.raw_os_error() == Some(1314) => {
+            use std::io::Write;
+            // Write directly so libtest's normal output capture cannot hide the skip.
+            writeln!(std::io::stderr(), "NOT RUN {test}: Windows link privilege is missing (ERROR_PRIVILEGE_NOT_HELD, 1314).").unwrap();
+            false
+        }
+        Err(error) => panic!("{test}: link fixture failed: {error}"),
+    }
+}
+
+#[test]
+fn missing_link_privilege_is_reported_as_a_named_skip() {
+    assert!(!test_link_created(
+        Err(std::io::Error::from_raw_os_error(1314)),
+        "synthetic missing-privilege case"
+    ));
+    assert!(test_link_created(Ok(()), "synthetic permitted case"));
+}
+
+#[test]
+#[should_panic(expected = "link fixture failed")]
+fn other_link_errors_are_failures() {
+    test_link_created(
+        Err(std::io::Error::from_raw_os_error(5)),
+        "synthetic other-error case",
+    );
+}
+
+#[cfg(windows)]
+#[test]
+fn protected_junctions_do_not_own_outside_hard_links_but_direct_files_do() {
+    let (root, policy, paths) = fixture("junctions");
+    let outside = root.join("outside");
+    std::fs::create_dir(&outside).unwrap();
+    let original = outside.join("ordinary.txt");
+    let alias = root.join("alias.txt");
+    std::fs::write(&original, "ordinary").unwrap();
+    std::fs::hard_link(&original, &alias).unwrap();
+    // Built from components: cmd.exe reads a forward slash in an unquoted argument as the start of a switch.
+    let linked_outside = root.join("app-data").join("linked-directory");
+    let linked_protected = root.join("protected-alias");
+    for (link, target) in [
+        (linked_outside.as_path(), outside.as_path()),
+        (linked_protected.as_path(), paths[0].parent().unwrap()),
+    ] {
+        let output = std::process::Command::new("cmd.exe")
+            .args(["/d", "/c", "mklink", "/J"])
+            .arg(link)
+            .arg(target)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "junction fixture failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    policy
+        .check_opened(&File::open(&alias).unwrap(), &alias, None)
+        .unwrap();
+    let protected = linked_protected.join("profile.json");
+    assert_eq!(
+        policy.check_opened(&File::open(&protected).unwrap(), &protected, None),
+        Err(PROTECTED.into())
+    );
+    std::fs::hard_link(&original, root.join("app-data/direct.txt")).unwrap();
+    assert_eq!(
+        policy.check_opened(&File::open(&alias).unwrap(), &alias, None),
+        Err(PROTECTED.into())
+    );
+    std::fs::remove_dir(linked_outside).unwrap();
+    std::fs::remove_dir(linked_protected).unwrap();
     std::fs::remove_dir_all(root).unwrap();
 }

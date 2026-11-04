@@ -144,7 +144,13 @@ pub(crate) async fn open_channel(
 }
 
 /// The Stop, configuration-switch and plugin-hook guards, passed to the environment's Python with `-c`.
-pub const CHILD_STOP_ADAPTER: &str = include_str!("vibe_child_stop.py");
+pub const CHILD_STOP_ADAPTER: &str = concat!(
+    include_str!("vibe_process_identity.py"),
+    "\n",
+    include_str!("vibe_process_tracking.py"),
+    "\n",
+    include_str!("vibe_child_stop.py")
+);
 
 /// The interpreter the server is started with when `program` (canonical) runs through [`CHILD_STOP_ADAPTER`]:
 /// the spawned command is then `<python> -P -c <adapter> <program> <mode args>...`, so the spawned process is that

@@ -16,6 +16,7 @@ import { waitingSessions } from "../ask/waiting";
 import type { App } from "./AppContext";
 import { awayFromHome, goHome, homeTarget } from "./home";
 import { openNewChat } from "./newChat";
+import { coveringPage } from "./coveringPage";
 
 function asObject(body: unknown): Record<string, unknown> {
   if (typeof body === "object" && body !== null && !Array.isArray(body))
@@ -110,17 +111,7 @@ export function registerShellRoutes(app: App): () => void {
       }));
       // Read from the stores, not the DOM: the page this call opened or left may not have re-rendered yet.
       const view = shell.store.get();
-      const current = view.settings.open
-        ? "settings"
-        : (app.projects?.store.get().open ?? false)
-          ? "projects"
-          : (app.connectors?.store.get().open ?? false)
-            ? "tools"
-            : (app.libraries?.store.get().open ?? false)
-              ? "libraries"
-              : view.selected === null
-                ? "new-chat"
-                : "home";
+      const current = coveringPage(app) ?? (view.selected === null ? "new-chat" : "home");
       return {
         items: items.map((i) => ({ id: i.id, label: i.label })),
         current,
@@ -155,7 +146,7 @@ export function registerShellRoutes(app: App): () => void {
           server: core?.store.get().server.phase ?? "unavailable",
           debugApi: core?.store.get().debugApi.enabled ?? false,
           // what covers the content (settings, palette,...) and the toasts on screen.
-          overlay: s.overlay,
+          overlay: s.overlay ?? coveringPage(app),
           toasts: app.toasts.store.get().map(({ id, kind, text }) => ({ id, kind, text })),
           // The version Settings > About shows (the core's `status`; `null` before it arrived).
           appVersion: core?.store.get().appVersion ?? null,

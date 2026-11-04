@@ -58,7 +58,7 @@ impl Core {
     /// Vibe's background processes of the session, from the store's copy of its state.
     fn vibe_processes(&self, session_id: &str) -> Vec<SessionProcessView> {
         let state = self.shared.store.view(session_id).map(|v| v.state);
-        state
+        let mut items: Vec<SessionProcessView> = state
             .as_ref()
             .and_then(|s| s.pointer("/backgroundProcesses"))
             .and_then(Value::as_array)
@@ -80,7 +80,25 @@ impl Core {
                     earlier: false,
                 })
             })
-            .collect()
+            .collect();
+        for tracked in self.shared.vibe_processes.live(session_id) {
+            let id = format!("vibe:{}", tracked.id);
+            if let Some(item) = items.iter_mut().find(|item| item.id == id) {
+                item.pid = Some(tracked.process.pid);
+                item.status = "running".into();
+            } else {
+                items.push(SessionProcessView {
+                    id,
+                    kind: "vibe".into(),
+                    command: Some(tracked.command),
+                    status: "running".into(),
+                    pid: Some(tracked.process.pid),
+                    ports: Vec::new(),
+                    earlier: false,
+                });
+            }
+        }
+        items
     }
 
     /// The agent's live `process_start` processes of the session.
@@ -266,15 +284,32 @@ impl Core {
             if !self.vibe_processes(session_id).iter().any(|p| p.id == id) {
                 return Err(not_here());
             }
-            self.shared
-                .gate
-                .call(
-                    "session/backgroundProcess/stop",
-                    json!({"sessionId": session_id, "processId": process_id}),
-                    None,
-                )
-                .await
-                .map_err(|e| CoreError::from_gate("session/backgroundProcess/stop", &e))?;
+            let tracked = self
+                .shared
+                .vibe_processes
+                .live(session_id)
+                .into_iter()
+                .find(|item| item.id == process_id);
+            let stop = self.shared.gate.call(
+                "session/backgroundProcess/stop",
+                json!({"sessionId": session_id, "processId": process_id}),
+                None,
+            );
+            if let Some(tracked) = tracked {
+                // Vibe can stop the OS process yet never resolve its startup barrier.
+                // Bound that wait; the monitor always checks the captured native identity.
+                let _ = tokio::time::timeout(std::time::Duration::from_secs(2), stop).await;
+                let outcome = self.stop_process(session_id, tracked.process).await?;
+                if !outcome.gone {
+                    return Err(CoreError::new(
+                        ErrorCode::Internal,
+                        "Background process is still running",
+                    ));
+                }
+            } else {
+                stop.await
+                    .map_err(|e| CoreError::from_gate("session/backgroundProcess/stop", &e))?;
+            }
             return Ok(ProcessesResult::StoppedSession { id: id.to_owned() });
         }
         let process = if let Some(rest) = id.strip_prefix("terminal:") {

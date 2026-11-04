@@ -35,8 +35,8 @@
 //!     another environment on the folder has other ones), no preview can have the guard's proxy, so the previews'
 //!     instance refuses them with a plain message naming why (`win_guard`: never silently unguarded).
 //!   - macOS: URL content rules per mount (`rules_macos`, layer `ContentRules`), applied before the first page;
-//!     these alone protect previews in 0.1.2's default build, and a failed install refuses the mount;
-//!     with the feature `macos-proxy` (0.1.3, minimum macOS 14; `mac_guard::MAC_PROXY`) also
+//!     these alone protected previews in 0.1.2-0.1.6 (a failed install refuses the mount);
+//!     with the feature `macos-proxy` (every app build since 0.1.7, minimum macOS 14; `mac_guard::MAC_PROXY`) also
 //!     the guard's listener of the mount's website data store (`proxy_url_for_store`: `WKWebsiteDataStore`
 //!     `proxyConfigurations` belongs to the store, which several mounts can share), set by wry before the webview
 //!     exists. `WebKit` sends host NAMES through it (resolved, checked and connected by the guard: DNS rebinding
@@ -94,6 +94,8 @@ pub struct TauriEngine {
     hooks: OnceLock<Arc<dyn PreviewHooks>>,
     /// Console drain expression per mount label.
     drains: Mutex<HashMap<String, String>>,
+    /// Browser environment installed only in the engine's isolated worlds.
+    initializers: Mutex<HashMap<String, String>>,
     /// Native pollers for physical page-menu selections; closed with their mount.
     context_pollers: context_menu::Pollers,
     /// Receives browser menu session ids.
@@ -116,10 +118,15 @@ pub struct TauriEngine {
     guard: Option<vw_netguard::NetGuard>,
     /// This instance requires the build's protection layers: content rules on default macOS, proxy proof elsewhere.
     needs_guard: bool,
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     filter_generations: Arc<vw_netguard::rules::RuleGenerations>,
-    /// Windows: a preview with the guard's browser arguments could not be created once (an environment
-    /// with other arguments shares its browser process): later previews use the default arguments.
+    /// Windows: each native request handler reads a shared, atomically replaced matcher.
+    #[cfg(windows)]
+    filters: Mutex<HashMap<String, shields::FilterSlot>>,
+    /// Windows: tabs reuse the compiled index for the confirmed JSON.
+    #[cfg(windows)]
+    filter_cache: shields::FilterCache,
+    /// Windows: a preview with proxy arguments was refused because its folder already has another process.
     #[cfg(windows)]
     proxy_args_refused: std::sync::atomic::AtomicBool,
     /// macOS: orders rule-list compiles per webview.
@@ -150,6 +157,7 @@ impl TauriEngine {
             window_label: window_label.to_owned(),
             hooks: OnceLock::new(),
             drains: Mutex::new(HashMap::new()),
+            initializers: Mutex::new(HashMap::new()),
             context_pollers: context_menu::Pollers::default(),
             context_sink: None,
             shown: Mutex::new(HashMap::new()),
@@ -161,8 +169,12 @@ impl TauriEngine {
             foreign_profiles: Mutex::new(HashMap::new()),
             guard: None,
             needs_guard: false,
-            #[cfg(target_os = "linux")]
+            #[cfg(any(target_os = "linux", target_os = "macos"))]
             filter_generations: Arc::default(),
+            #[cfg(windows)]
+            filters: Mutex::default(),
+            #[cfg(windows)]
+            filter_cache: tokio::sync::Mutex::new(None),
             #[cfg(windows)]
             proxy_args_refused: std::sync::atomic::AtomicBool::new(false),
             #[cfg(target_os = "macos")]
@@ -178,7 +190,7 @@ impl TauriEngine {
     }
 
     /// Requires the build's protection layers before the first page: a guard listener and proven canary on
-    /// Linux/Windows and macOS with `macos-proxy`; default macOS (0.1.2) uses content rules only.
+    /// Linux/Windows and macOS with `macos-proxy` (the app's default); macOS without it uses content rules only.
     /// Proxied macOS also needs WebTransport off; Windows needs its own guarded data folder.
     /// A missing or unproven layer refuses the mount with a plain error.
     #[must_use]
@@ -256,7 +268,14 @@ impl TauriEngine {
                 tracing::warn!(%error, "a held preview request could not be answered (closing?): not sent");
             }
         });
-        let facts = platform::secure(webview, spec.storage.key.hex(), decide, post).await?;
+        let facts = platform::secure(
+            webview,
+            spec.storage.key.hex(),
+            decide,
+            self.block_requests(&spec.id.label)?,
+            post,
+        )
+        .await?;
         // The barrier checks host names at request time (held with a deferral): the navigation hook never waits.
         self.hooks()?.names_checked_later(&spec.id.label);
         self.hooks()?.network_guard(
@@ -346,12 +365,15 @@ impl TauriEngine {
             }
             Err(error) => return Err(error),
         };
+        let trusted = self.remember_initializer(&spec);
         let setup = async {
             self.native_watches(&webview, &spec.id.label).await?;
-            #[cfg(target_os = "linux")]
-            if let Some(rules) = hooks.content_filter() {
-                self.apply_filter(&webview, &spec.id.label, rules).await?;
-            }
+            self.apply_filter(
+                &webview,
+                &spec.id.label,
+                hooks.content_filter().unwrap_or_else(|| "[]".into()),
+            )
+            .await?;
             #[cfg(windows)]
             self.secure(&webview, &spec, &hooks).await?;
             match spec.placement {
@@ -400,7 +422,8 @@ impl TauriEngine {
         if spec.context_menu
             && let Some(sink) = &self.context_sink
         {
-            self.context_pollers.start(webview, &spec.id, sink.clone());
+            self.context_pollers
+                .start(webview, &spec.id, sink.clone(), trusted);
         }
         Ok(())
     }
@@ -435,6 +458,7 @@ impl PreviewEngine for TauriEngine {
         script: String,
     ) -> EngineFuture<'_, Option<Vec<vw_preview::FrameAnswer>>> {
         let webview = self.webview(id);
+        let script = self.isolated_script(id, &script);
         Box::pin(async move {
             crate::agent_frames::evaluate(&webview?, frame, script)
                 .await
@@ -448,6 +472,7 @@ impl PreviewEngine for TauriEngine {
         script: String,
     ) -> EngineFuture<'_, Option<Vec<vw_preview::FrameAnswer>>> {
         let webview = self.webview(id);
+        let script = self.isolated_script(id, &script);
         let label = id.label.clone();
         Box::pin(async move {
             let webview = webview?;
@@ -463,23 +488,35 @@ impl PreviewEngine for TauriEngine {
         cfg!(any(target_os = "linux", target_os = "macos", windows))
     }
     fn supports_content_filter(&self) -> bool {
-        cfg!(target_os = "linux")
+        true
     }
     fn update_content_filter(&self, id: &MountId, rules: String) -> EngineFuture<'_, ()> {
         let id = id.clone();
         Box::pin(async move {
-            #[cfg(target_os = "linux")]
+            self.apply_filter(&self.webview(&id)?, &id.label, rules)
+                .await
+        })
+    }
+
+    #[cfg(feature = "click-marker")]
+    fn show_input_marker(
+        &self,
+        id: &MountId,
+        point: vw_preview::NativeClickPoint,
+    ) -> EngineFuture<'_, ()> {
+        let id = id.clone();
+        Box::pin(async move {
+            let _visibility = self.visibility.lock().await;
+            if self
+                .shown
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .get(&id.label)
+                .is_some_and(|shown| shown.visible && !shown.overlay_hidden)
             {
-                self.apply_filter(&self.webview(&id)?, &id.label, rules)
-                    .await
+                crate::input_marker::show(&self.webview(&id)?, point).await?;
             }
-            #[cfg(not(target_os = "linux"))]
-            {
-                let _ = (id, rules);
-                Err(EngineError::Unsupported(
-                    "Ad blocking is unavailable on this system".into(),
-                ))
-            }
+            Ok(())
         })
     }
 

@@ -41,10 +41,21 @@ where
     let mut images = Vec::new();
     let mut status = "completed";
     let mut cancel = Some(cancel);
+    let mut longest_step = Duration::ZERO;
+    let mut next_step = None;
     for (index, mut step) in steps.into_iter().enumerate() {
+        // Reserve observation time before admitting another input near the batch deadline.
+        // A genuine timeout remains unknown; a step stopped here has never been dispatched.
+        let reserve = Duration::from_secs(5).max(longest_step.saturating_mul(2));
+        if index > 0 && deadline.saturating_duration_since(tokio::time::Instant::now()) <= reserve {
+            status = "stopped";
+            next_step = Some(index + 1);
+            break;
+        }
         if step["action"] == "capture.screenshot" || step["action"] == "capture.zoom" {
             step["args"]["saveTo"] = json!("file");
         }
+        let started = tokio::time::Instant::now();
         let result = match tokio::time::timeout_at(deadline, execute(step)).await {
             Ok(Ok(result)) => result["vwMcpResult"].clone(),
             Ok(Err(reason)) => owner::failure(&reason, "REFUSED"),
@@ -60,6 +71,7 @@ where
                 result
             }
         };
+        longest_step = longest_step.max(started.elapsed());
         if let Some(content) = result["content"].as_array() {
             images.extend(
                 content
@@ -82,10 +94,19 @@ where
             break;
         }
     }
-    let body = json!({"status":status,"steps":receipts});
+    let mut body = json!({"status":status,"steps":receipts});
+    if let Some(next) = next_step {
+        body["nextStep"] = json!(next);
+        body["reason"] = json!("Batch time budget: the next step was not dispatched.");
+    }
     let mut content = vec![json!({"type":"text","text":body.to_string()})];
     content.extend(images);
-    json!({"vwMcpResult":{"isError":false,"structuredContent":body,"content":content}})
+    let mut result = json!({"isError":false,"structuredContent":body,"content":content});
+    // Modern observations must reach the scoped finisher intact so its outer buffer owns any omission.
+    if !super::output_cache::observation(&result) {
+        super::output::guard(&mut result);
+    }
+    json!({"vwMcpResult":result})
 }
 
 /// Settle vault decisions before running any step. Prepared writes still recheck the live mode.
@@ -112,7 +133,7 @@ pub(crate) async fn prepare(
     Ok(Box::pin(async move {
         let shared = shared.upgrade().ok_or("Vibe Work closed.")?;
         let id = args["sessionId"].clone();
-        Ok(run(
+        let mut answer = run(
             steps(&args)?,
             |mut step| {
                 step["sessionId"] = id.clone();
@@ -135,7 +156,11 @@ pub(crate) async fn prepare(
                     .control(json!({"action":"cancel","sessionId":id}));
             },
         )
-        .await)
+        .await;
+        if super::output_cache::observation(&answer["vwMcpResult"]) {
+            super::output_cache::bound(&shared, &chat, &args, &mut answer["vwMcpResult"]);
+        }
+        Ok(answer)
     }))
 }
 
@@ -237,6 +262,34 @@ mod tests {
             "Batch output limit reached"
         );
         assert!(serde_json::to_vec(&result).unwrap().len() < 1_000_000);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn repeated_clicks_stop_before_a_step_without_observation_time() {
+        let mut dispatched = 0;
+        let result = run(
+            vec![json!({"action":"page.click","args":{"ref":"previous"}}); 16],
+            |_| {
+                dispatched += 1;
+                async {
+                    tokio::time::sleep(Duration::from_secs(3)).await;
+                    Ok(json!({"vwMcpResult":{"structuredContent":{"status":"completed","data":{"effect":"page_changed"}}}}))
+                }
+            },
+            || panic!("a predictable batch tail must not fence a dispatched click"),
+        ).await;
+        let body = &result["vwMcpResult"]["structuredContent"];
+        assert_eq!(body["status"], "stopped");
+        assert_eq!(body["steps"].as_array().unwrap().len(), dispatched);
+        assert!(
+            body["steps"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|s| s["result"]["status"] == "completed")
+        );
+        assert_eq!(body["nextStep"], dispatched + 1);
+        assert!(dispatched < 16);
     }
 
     #[tokio::test(start_paused = true)]
