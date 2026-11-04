@@ -53,7 +53,8 @@ x509-parser = "0.18"
 rcgen = { version = "0.14", default-features = false, features = ["ring", "pem"] }
 
 [target.'cfg(not(target_os = "linux"))'.dev-dependencies]
-# Pure-Rust signing lets Linux cross-target Clippy run without a Windows/Apple C SDK.
+# Pure-Rust fixture signing; cross-building rustls still needs the target C SDK.
 rsa = { version = "0.9", default-features = false, features = ["std", "u64_digit", "getrandom", "sha2"] }
-# Only the native-TLS fixture needs an in-memory PKCS#12 identity.
-p12-keystore = "0.4"
+# The test server uses rustls on every OS; the product client still uses native TLS here.
+rustls = { version = "0.23.45", default-features = false, features = ["ring", "std", "tls12", "logging"] }
+tokio-rustls = { version = "0.26.6", default-features = false, features = ["logging", "tls12"] }

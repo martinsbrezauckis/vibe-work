@@ -154,6 +154,21 @@ fn an_unavailable_protected_identity_refuses_hard_links_but_does_not_scan_single
     let error = policy
         .check_opened(&File::open(&alias).unwrap(), &alias, None)
         .unwrap_err();
+    // F_GETPATH may name a different hard link on macOS, producing the safe location refusal.
+    // The single-link check above must still succeed; this alias must always be refused.
+    #[cfg(target_os = "macos")]
+    {
+        assert!(
+            error.contains("Choose the file again") || error.contains("vault or app state"),
+            "{error}"
+        );
+        // Also exercise the unavailable-identity walk when the OS path guard refused first.
+        let (identity, links) =
+            vw_platform::final_path::identity(&File::open(&alias).unwrap()).unwrap();
+        assert!(links > 1);
+        assert_eq!(policy.check_hard_links(identity, None), Err(()));
+    }
+    #[cfg(not(target_os = "macos"))]
     assert!(
         error.contains("vault or app state") && error.contains("Choose a file"),
         "{error}"

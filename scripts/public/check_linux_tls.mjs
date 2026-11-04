@@ -5,7 +5,7 @@ import { execFileSync } from "node:child_process";
 import { REPO_ROOT } from "./lib_files.mjs";
 
 const options = { cwd: REPO_ROOT, encoding: "utf8", maxBuffer: 8 * 1024 * 1024 };
-const tree = execFileSync("cargo", ["tree", "--locked", "-p", "app", "--target",
+const tree = execFileSync("cargo", ["tree", "--color", "never", "--locked", "-p", "app", "--target",
   "x86_64-unknown-linux-gnu", "--edges", "normal", "--prefix", "none", "--format", "{p}"], options);
 // openssl-probe only locates the OS certificate store; it does not link OpenSSL.
 const forbidden = new Set(["openssl", "openssl-sys", "native-tls", "tokio-native-tls"]);

@@ -16,7 +16,7 @@ const required = new Map([
 const forbidden = new Set(["your-firefox", "video", "video-test", "feedback", "click-marker"]);
 const errors = [];
 for (const target of targets) {
-  const tree = execFileSync("cargo", ["tree", "--locked", "-p", "app", "--target", target,
+  const tree = execFileSync("cargo", ["tree", "--color", "never", "--locked", "-p", "app", "--target", target,
     "--edges", "normal,build", "--prefix", "none", "--format", "{p}|{f}"],
   { cwd: REPO_ROOT, encoding: "utf8", maxBuffer: 8 * 1024 * 1024 });
   const packages = new Map();

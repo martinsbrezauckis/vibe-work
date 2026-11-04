@@ -1,4 +1,4 @@
-//! Test-only signing keys: Linux reuses ring, native-TLS targets use pure Rust without a cross C SDK.
+//! Test-only signing keys: Linux reuses ring, other targets use pure Rust without a cross C SDK.
 //! Called by the proxy identity generator; every private key is throwaway and stays in memory.
 #[cfg(not(target_os = "linux"))]
 pub use native::KeyPair;
