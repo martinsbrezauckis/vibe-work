@@ -9,8 +9,10 @@ fn next_start_restores_config_explanations_without_rewriting_personal_lines() {
     .join(format!("config-comments-{}", std::process::id()));
     std::fs::create_dir_all(&root).unwrap();
     let path = root.join("config.toml");
+    // The person chose false after the one-time registry migration.
+    experiment_pins::ensure(&root).unwrap();
     // Vibe's rewrite has retained the values, dropped our notes, and the person added a line of their own.
-    let original = "# my own explanation\ninclude_commit_signature = false # mine\nenable_system_trust_store = true\nexperimental_enable_pr_monitoring = false\nexperimental_enable_registry_skills = false\nsmart_approve_default = false\n\n[utility_models]\ntitle = 'mistral-medium-3.5' # keep this spelling\n";
+    let original = "# my own explanation\ninclude_commit_signature = false # mine\nenable_system_trust_store = true\nexperimental_enable_pr_monitoring = false\nexperimental_enable_registry_skills = false\nexperimental_enable_mistral_mcp_connector = false\nexperimental_local_runtime_session_api = false\nexperimental_enable_document_library_connector = false\nexperimental_enable_model_catalog = false\nexperimental_enable_local_projects = false\nexperimental_enable_pr_discovery = false\nexperimental_enable_tab_status = false\ndefault_agent = \"accept-edits\"\n\n[utility_models]\ntitle = 'mistral-medium-3.5' # keep this spelling\n";
     std::fs::write(&path, original).unwrap();
     for _ in 0..2 {
         commit_signature::ensure(&root).unwrap();
@@ -21,7 +23,7 @@ fn next_start_restores_config_explanations_without_rewriting_personal_lines() {
         for phrase in [
             "# Vibe Work: the agent's commits",
             "# Vibe Work: Vibe checks HTTPS",
-            "# Vibe Work: Mistral's experiments",
+            "# Vibe Work: unsupported experimental features stay off.",
             "# Vibe Work: session titles",
         ] {
             assert_eq!(

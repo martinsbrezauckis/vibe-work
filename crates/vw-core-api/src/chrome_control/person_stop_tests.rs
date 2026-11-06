@@ -39,7 +39,7 @@ async fn fixture(name: &str, profile: &str) -> crate::Core {
         .owner
         .edge_pairing
         .lock()
-        .unwrap() = ("Paired".into(), None);
+        .unwrap() = (crate::chrome_control::PairingState::Paired, None);
     test_support::answering(
         &core.shared,
         |_, args| json!({"structuredContent":{"sessionId":"new-task","profileId":args["profileId"],"state":"active"}}),
@@ -78,6 +78,9 @@ async fn a_new_turn_never_receives_the_previous_stopped_session() {
             .chrome_control
             .owner
             .answering(move |tool, args| {
+                if tool == "chrome_status" {
+                    return json!({"structuredContent":{}});
+                }
                 assert_eq!(tool, "chrome_session");
                 assert_eq!(args["action"], "open");
                 let current = calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
@@ -101,11 +104,18 @@ async fn a_new_turn_never_receives_the_previous_stopped_session() {
             assert!(result.unwrap_err().contains("stopped session"));
         }
         assert_eq!(opens.load(std::sync::atomic::Ordering::SeqCst), 3);
-        assert!(
+        assert_eq!(
             seen.lock()
                 .unwrap()
                 .iter()
-                .all(|(tool, _)| tool == "chrome_session")
+                .map(|(tool, _)| tool.as_str())
+                .collect::<Vec<_>>(),
+            [
+                "chrome_status",
+                "chrome_session",
+                "chrome_session",
+                "chrome_session"
+            ]
         );
         assert!(
             !core
@@ -128,7 +138,10 @@ async fn stopped_open_recovery_never_replays_an_unknown_or_newly_stopped_open() 
         status(&core, "stopped", Instant::now());
         super::end_turn(&core.shared, "a");
         turn(&core, "a", "two", true);
-        let seen = core.shared.chrome_control.owner.answering(move |_, _| {
+        let seen = core.shared.chrome_control.owner.answering(move |tool, _| {
+            if tool == "chrome_status" {
+                return json!({"structuredContent":{}});
+            }
             json!({"structuredContent":{"sessionId":if unknown {"task-a"} else {"new-stopped"},
                 "state":"stopped","status":if unknown {"unknown"} else {"failed"}}})
         });
@@ -147,7 +160,14 @@ async fn stopped_open_recovery_never_replays_an_unknown_or_newly_stopped_open() 
         } else {
             assert!(result.unwrap_err().contains("stopped session"));
         }
-        assert_eq!(seen.lock().unwrap().len(), 1);
+        assert_eq!(
+            seen.lock()
+                .unwrap()
+                .iter()
+                .map(|(tool, _)| tool.as_str())
+                .collect::<Vec<_>>(),
+            ["chrome_status", "chrome_session"]
+        );
         assert!(
             !core
                 .shared
@@ -169,11 +189,13 @@ async fn reusing_an_ended_id_as_active_is_not_replayed_or_claimed_not_run() {
     status(&core, "stopped", Instant::now());
     super::end_turn(&core.shared, "a");
     turn(&core, "a", "two", true);
-    let seen = core
-        .shared
-        .chrome_control
-        .owner
-        .answering(|_, _| json!({"structuredContent":{"sessionId":"task-a","state":"active"}}));
+    let seen = core.shared.chrome_control.owner.answering(|tool, _| {
+        if tool == "chrome_status" {
+            json!({"structuredContent":{}})
+        } else {
+            json!({"structuredContent":{"sessionId":"task-a","state":"active"}})
+        }
+    });
     let reason = gateway::call(
         &core.shared,
         "a",
@@ -184,7 +206,14 @@ async fn reusing_an_ended_id_as_active_is_not_replayed_or_claimed_not_run() {
     .unwrap_err();
     assert!(reason.contains("reused an ended session"));
     assert!(!reason.contains("Not run"));
-    assert_eq!(seen.lock().unwrap().len(), 1);
+    assert_eq!(
+        seen.lock()
+            .unwrap()
+            .iter()
+            .map(|(tool, _)| tool.as_str())
+            .collect::<Vec<_>>(),
+        ["chrome_status", "chrome_session"]
+    );
     core.shutdown().await;
 }
 
@@ -301,6 +330,20 @@ async fn interrupted_once(profile: &str, browser: &str) {
         );
     }
     turn(&core, "a", "two", true);
+    for args in [
+        json!({"sessionId":"task-a","action":"page.read","args":{}}),
+        json!({"sessionId":"task-a","steps":[{"action":"page.read","args":{}}]}),
+    ] {
+        let reason = gateway::call(&core.shared, "a", "chrome_execute", args)
+            .await
+            .unwrap_err();
+        assert_eq!(
+            reason,
+            format!(
+                "Not run: this {browser} session was stopped; open a new one with chrome_session."
+            )
+        );
+    }
     let opened = gateway::call(
         &core.shared,
         "a",

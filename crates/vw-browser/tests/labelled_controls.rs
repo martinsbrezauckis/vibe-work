@@ -166,6 +166,41 @@ async fn hidden_checkbox_label_has_an_actionable_ref() {
 }
 
 #[tokio::test]
+async fn visible_toggle_label_reports_and_sets_the_hidden_controls_state() {
+    let rig = page("<style>input{opacity:0;position:absolute}</style><label for=x>Visible choice</label><input id=x type=checkbox checked>").await;
+    let answer = read(&rig, Some("Visible choice")).await;
+    let label = refs(&answer).iter().find(|r| r["tag"] == "label").unwrap();
+    assert_eq!(label["checked"], true, "{answer}");
+    assert_eq!(label["role"], "checkbox", "{answer}");
+    let action =
+        vw_browser::parse(&json!({"action":"check", "ref":label["ref"],"checked":false})).unwrap();
+    let result = rig
+        .browser
+        .act(SESSION, action, Actor::Agent, &NoNavigation)
+        .await
+        .unwrap();
+    assert_eq!(result["result"]["checked"], false, "{result}");
+    assert_eq!(
+        rig.engine
+            .eval("document.querySelector('input').checked")
+            .await,
+        false
+    );
+}
+
+#[tokio::test]
+async fn disabled_hidden_toggle_keeps_its_visible_label_and_state() {
+    let rig = page("<style>input{opacity:0;position:absolute}</style><label for=x>Required storage</label><input id=x type=checkbox checked disabled>").await;
+    let answer = read(&rig, Some("Required storage")).await;
+    let label = refs(&answer)
+        .iter()
+        .find(|r| r["tag"] == "label")
+        .expect("visible disabled choice");
+    assert_eq!(label["checked"], true, "{answer}");
+    assert_eq!(label["disabled"], true, "{answer}");
+}
+
+#[tokio::test]
 async fn selected_custom_values_are_found_without_exposing_secret_values() {
     let rig = page(include_str!("support/practice_form.html")).await;
     rig.engine.eval(r"for (const [id, text] of [['state','NCR'],['city','Delhi']]) {

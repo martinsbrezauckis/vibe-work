@@ -212,6 +212,10 @@ async fn full_session_records_keep_their_shared_context() {
     assert_eq!(status["sessionDefaults"]["clientSessionId"], "s");
     assert_eq!(status["sessions"].as_array().unwrap().len(), 2);
     let capabilities = &status["capabilities"];
+    for action in ["history.read", "bookmarks.read"] {
+        assert_eq!(capabilities["actions"][action]["approvalRequired"], true);
+        assert!(capabilities["actions"][action].get("needs").is_none());
+    }
     for action in catalog()["actions"].as_array().unwrap() {
         let id = action["id"].as_str().unwrap();
         let name = &capabilities["actions"][id]["capability"];

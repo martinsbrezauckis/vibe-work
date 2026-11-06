@@ -51,6 +51,51 @@ impl PluginIdentity {
         })
     }
 
+    /// Fresh identities in bounded batches; only the Python startup is shared, never an approval decision.
+    pub(crate) fn names(
+        &self,
+        folders: &[PathBuf],
+        home: &Path,
+    ) -> Result<Vec<Option<String>>, CoreError> {
+        if folders.is_empty() {
+            return Ok(Vec::new());
+        }
+        let python = self
+            .python()
+            .ok_or_else(|| error("Vibe's Python environment is unavailable"))?;
+        let code = concat!(
+            include_str!("plugin_read_guard.py"),
+            "\n",
+            include_str!("plugin_identity.py")
+        );
+        let mut resolved = Vec::with_capacity(folders.len());
+        // Keep the argument list small on Windows as well as Unix.
+        for batch in folders.chunks(16) {
+            let args: Vec<&Path> = std::iter::once(Path::new("--batch"))
+                .chain(batch.iter().map(PathBuf::as_path))
+                .collect();
+            let output = run_vibe_python(
+                &python,
+                code,
+                &args,
+                home,
+                Duration::from_secs(30),
+                MAX_IDENTITY_BYTES,
+            )
+            .map_err(error)?;
+            let names: Vec<Vec<String>> = serde_json::from_slice(&output).map_err(error)?;
+            if names.len() != batch.len() {
+                return Err(error("incomplete identity batch"));
+            }
+            resolved.extend(
+                names
+                    .into_iter()
+                    .map(|mut names| (names.len() == 1).then(|| names.remove(0))),
+            );
+        }
+        Ok(resolved)
+    }
+
     pub(crate) fn name(&self, folder: &Path, home: &Path) -> Result<Option<String>, CoreError> {
         let python = self
             .python()

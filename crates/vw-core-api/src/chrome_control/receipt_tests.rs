@@ -25,7 +25,7 @@ async fn every_action_receipt_names_its_bound_browser() {
         .owner
         .edge_pairing
         .lock()
-        .unwrap() = ("Paired".into(), None);
+        .unwrap() = (crate::chrome_control::PairingState::Paired, None);
     let profiles = if cfg!(feature = "your-edge") {
         vec!["chrome:profile", "edge:profile"]
     } else {

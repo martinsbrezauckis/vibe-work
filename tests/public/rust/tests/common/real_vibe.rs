@@ -72,7 +72,7 @@ pub fn vibe_config(model: &ScriptedModel) -> String {
         r#"enable_telemetry = false
 smart_approve_available = true
 enable_connectors = {}
-experimental_enable_registry_skills = false
+experimental_enable_registry_skills = true
 include_commit_signature = false
 active_model = "large-4"
 

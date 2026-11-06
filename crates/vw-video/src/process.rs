@@ -1,6 +1,10 @@
 //! Bounded helper supervision. Cancellation kills the process namespace/group and always schedules a reap.
 use process_wrap::tokio::{ChildWrapper, CommandWrap};
 use std::time::Duration;
+/// `STATUS_QUOTA_EXCEEDED`: Windows ended the worker at its Job's CPU-time limit (`vw_platform` video isolation).
+/// The work was too large for the limit; it is a timeout with a next step, not a broken worker.
+#[cfg(windows)]
+const CPU_QUOTA: u32 = 0xC000_0044;
 /// Executes a prepared sandbox command with a deadline and bounded output.
 /// # Errors
 /// Spawn, deadline, output flood, cancellation or nonzero exit.
@@ -41,6 +45,8 @@ pub async fn capture(
         .stderr()
         .take()
         .ok_or("decode_failed: helper stderr")?;
+    #[cfg(target_os = "macos")]
+    let pid = process.id().ok_or("backend_unavailable: helper identity")?;
     let work = async {
         let send = async {
             stdin
@@ -63,14 +69,24 @@ pub async fn capture(
             wait
         )?;
         if !status.success() {
-            return Err(if err.starts_with(b"bwrap:") {
-                "backend_unavailable: Linux sandbox namespaces or media access denied"
-            } else {
-                "decode_failed: video helper terminated"
+            #[cfg(windows)]
+            if status.code().map(i32::cast_unsigned) == Some(CPU_QUOTA) {
+                return Err("timeout: video worker CPU time limit".into());
             }
-            .into());
+            return Err(if err.starts_with(b"bwrap:") {
+                "backend_unavailable: Linux sandbox namespaces or media access denied".into()
+            } else {
+                format!("decode_failed: video helper terminated ({status})")
+            });
         }
         Ok(out)
+    };
+    #[cfg(target_os = "macos")]
+    let work = async {
+        tokio::select! {
+            result = work => result,
+            error = memory_limit(pid) => Err(error),
+        }
     };
     let result = tokio::time::timeout(deadline, work)
         .await
@@ -79,8 +95,24 @@ pub async fn capture(
     if let Some(mut process) = child.0.take() {
         let _ = process.start_kill();
         let _ = process.wait().await;
+        ended();
     }
     result
+}
+#[cfg(target_os = "macos")]
+async fn memory_limit(pid: u32) -> String {
+    loop {
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        match vw_platform::video_sandbox::resident_bytes(pid) {
+            Ok(bytes) if bytes <= 512 * 1024 * 1024 => (),
+            Ok(_) => return "limit_exceeded: helper resident memory".into(),
+            Err(error) => {
+                // Give the concurrently polled wait future a chance to collect a just-exited child.
+                tokio::time::sleep(Duration::from_millis(20)).await;
+                return error;
+            }
+        }
+    }
 }
 struct Child(Option<Box<dyn ChildWrapper>>);
 impl Drop for Child {
@@ -90,10 +122,17 @@ impl Drop for Child {
             if let Ok(runtime) = tokio::runtime::Handle::try_current() {
                 runtime.spawn(async move {
                     let _ = process.wait().await;
+                    ended();
                 });
             }
         }
     }
+}
+/// After a helper is reaped. A killed Windows bootstrap (deadline, cancellation) cannot delete its own
+/// `AppContainer` profile, so the parent removes profiles whose bootstrap no longer runs.
+fn ended() {
+    #[cfg(windows)]
+    vw_platform::video_sandbox::sweep();
 }
 async fn bounded(pipe: impl tokio::io::AsyncRead + Unpin, limit: usize) -> Result<Vec<u8>, String> {
     use tokio::io::AsyncReadExt;
@@ -108,54 +147,5 @@ async fn bounded(pipe: impl tokio::io::AsyncRead + Unpin, limit: usize) -> Resul
     Ok(bytes)
 }
 #[cfg(test)]
-#[cfg(unix)]
-mod tests {
-    use super::*;
-    fn shell(script: &str) -> CommandWrap {
-        CommandWrap::with_new("/bin/sh", |c| {
-            c.args(["-c", script]);
-        })
-    }
-    #[tokio::test]
-    #[cfg(target_os = "linux")]
-    async fn cancelled_helper_is_killed_and_reaped() {
-        let dir = tempfile::tempdir().unwrap();
-        let pidfile = dir.path().join("pid");
-        let command = CommandWrap::with_new("/bin/sh", |c| {
-            c.args(["-c", "printf '%s' $$ > \"$1\"; exec sleep 30", "worker"])
-                .arg(&pidfile);
-        });
-        let task = tokio::spawn(capture(command, Duration::from_secs(35), Vec::new()));
-        let started = std::time::Instant::now();
-        while !pidfile.exists() && started.elapsed() < Duration::from_secs(2) {
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-        let pid = std::fs::read_to_string(pidfile).unwrap();
-        task.abort();
-        let _ = task.await;
-        let proc = std::path::Path::new("/proc").join(pid);
-        let started = std::time::Instant::now();
-        while proc.exists() && started.elapsed() < Duration::from_secs(2) {
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-        assert!(!proc.exists(), "cancelled helper remains alive or unreaped");
-    }
-    #[tokio::test]
-    async fn helper_deadline_is_external() {
-        assert_eq!(
-            capture(shell("sleep 10"), Duration::from_millis(20), Vec::new())
-                .await
-                .unwrap_err(),
-            "timeout: video helper deadline"
-        );
-    }
-    #[tokio::test]
-    async fn helper_output_flood_is_bounded() {
-        assert_eq!(
-            capture(shell("yes overflow"), Duration::from_secs(3), Vec::new())
-                .await
-                .unwrap_err(),
-            "limit_exceeded: helper output"
-        );
-    }
-}
+#[path = "process_tests.rs"]
+mod tests;

@@ -52,7 +52,21 @@ fn sheets_have_bounded_geometry_bytes_and_all_actual_timestamps() {
         "h264-aac.mp4",
     ] {
         let j = job(file, &[41, 999, 2501, 3999], "contact_sheet");
-        let reply = vw_video::worker::extract(&j).unwrap_or_else(|e| panic!("{file}: {e}"));
+        let reply = match vw_video::worker::extract(&j) {
+            Ok(reply) => reply,
+            Err(reason)
+                if !cfg!(target_os = "linux")
+                    && std::path::Path::new(file)
+                        .extension()
+                        .is_some_and(|ext| ext.eq_ignore_ascii_case("webm"))
+                    && (reason.starts_with("unsupported_codec:")
+                        || reason.starts_with("unsupported_container:")) =>
+            {
+                eprintln!("NOT RUN: {file} sheet pixels; this computer cannot decode it: {reason}");
+                continue;
+            }
+            Err(reason) => panic!("{file}: {reason}"),
+        };
         vw_video::protocol::validate(&j, &reply).unwrap();
         assert_eq!(reply.frames.len(), 4);
         assert_eq!(reply.image_count, 1);
@@ -107,6 +121,7 @@ fn complete_owned_corpus_has_frames_or_named_unsupported_support() {
             Err(reason) => {
                 assert!(
                     reason.starts_with("unsupported_codec:")
+                        || reason.starts_with("unsupported_container:")
                         || reason.starts_with("backend_unavailable:"),
                     "{file}: {reason}"
                 );

@@ -9,10 +9,23 @@ async fn feedback_redaction_cases_reach_review_and_wire() {
     .unwrap();
     let core = crate::offline_core::start("feedback-redaction").await;
     for row in fixture["cases"].as_array().unwrap() {
-        let input = row["input"].as_str().unwrap();
-        let expected = row["expected"].as_str().unwrap();
+        // Provider formats are assembled only in memory: committed fixtures contain harmless markers.
+        let marker = row["credentialParts"].as_array().map(|parts| {
+            parts
+                .iter()
+                .map(|part| part.as_str().unwrap())
+                .collect::<String>()
+        });
+        let input = row["input"].as_str().unwrap().replace(
+            "<synthetic-credential>",
+            marker.as_deref().unwrap_or("<synthetic-credential>"),
+        );
+        let expected = row["expected"].as_str().unwrap().replace(
+            "<synthetic-credential>",
+            marker.as_deref().unwrap_or("<synthetic-credential>"),
+        );
         assert_eq!(
-            crate::feedback_redact::text(input, &[]),
+            crate::feedback_redact::text(&input, &[]),
             expected,
             "{}",
             row["name"]
@@ -25,7 +38,7 @@ async fn feedback_redaction_cases_reach_review_and_wire() {
                         kind: FeedbackKind::Bug,
                         title: "Tab disappears".into(),
                         description: "Close the second tab.".into(),
-                        remarks: input.into(),
+                        remarks: input,
                     },
                 },
             )

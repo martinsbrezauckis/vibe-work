@@ -57,7 +57,7 @@ fn labels_states() {
             },
             Probe::Unknown,
             S::ChromeMissing,
-            "Google Chrome not found",
+            "Google Chrome is not installed",
             None,
         ),
         (
@@ -525,4 +525,89 @@ fn live_profile_versions_follow_status_and_clear_on_disconnect() {
     );
     profiles.observe(&serde_json::json!({"profiles":[]}));
     assert_eq!(profiles.snapshot(), Vec::<(String, Option<String>)>::new());
+}
+#[test]
+fn a_disabled_extension_overrides_a_stale_connecting_phase() {
+    let facts = Facts {
+        paired_once: true,
+        connecting: true,
+        extension_folder: true,
+        ..ready()
+    };
+    assert_eq!(state(&facts, || Probe::Off), AddonState::TurnedOffInChrome);
+    assert_eq!(
+        state(
+            &Facts {
+                connected: true,
+                ..facts
+            },
+            || panic!("live connection wins")
+        ),
+        AddonState::Connected
+    );
+}
+
+#[test]
+fn a_missing_browser_is_diagnosed_before_setup_and_never_offers_connect() {
+    let facts = Facts {
+        set_up: false,
+        browser_issue: Some(BrowserIssue::Missing),
+        ..ready()
+    };
+    let state = state(&facts, never_probed);
+    assert_eq!(state, AddonState::ChromeMissing);
+    for browser in [
+        super::super::agent_browser::Browser::Chrome,
+        super::super::agent_browser::Browser::Edge,
+    ] {
+        let view = view_for(state, "", browser);
+        assert_eq!(view.action, None);
+        assert!(view.label.contains("is not installed"));
+        assert!(view.step.as_deref().unwrap().starts_with("Install "));
+        assert!(
+            !view
+                .instruction
+                .contains(vw_vocabulary::texts::CONNECTOR_CONNECT)
+        );
+        assert!(!super::super::availability::reason(&view, browser).contains("addon_suggest"));
+    }
+}
+
+#[test]
+fn a_lost_connection_retries_before_asking_for_a_browser_restart() {
+    for browser in [
+        super::super::agent_browser::Browser::Chrome,
+        super::super::agent_browser::Browser::Edge,
+    ] {
+        let mut view = view_for(AddonState::Connecting, "", browser);
+        reconnecting_for(&mut view, true, browser);
+        assert_eq!(
+            view.instruction,
+            browser.words("{browser}'s Vibe Work connection was lost and is reconnecting automatically. Retry this step in a few seconds. Only if the connection stays down, ask the person to open {browser}'s Extensions page and turn on Vibe Work if it is off, or restart {browser} if it is already on.")
+        );
+    }
+}
+
+#[test]
+fn first_disconnect_recovery_works_even_before_preferences_record_the_extension_is_off() {
+    let facts = Facts {
+        paired_once: true,
+        connecting: true,
+        chrome_running: true,
+        ..ready()
+    };
+    for probe in [Probe::Unknown, Probe::NotOff, Probe::Off] {
+        let state = state(&facts, || probe);
+        for browser in [
+            super::super::agent_browser::Browser::Chrome,
+            super::super::agent_browser::Browser::Edge,
+        ] {
+            let mut view = view_for(state, "", browser);
+            reconnecting_for(&mut view, true, browser);
+            assert_eq!(view.label, browser.words("Turn on in {browser}"));
+            assert!(view.instruction.contains("Extensions page"));
+            assert!(!view.instruction.contains("icon"));
+            assert!(!view.instruction.contains("Check connection"));
+        }
+    }
 }

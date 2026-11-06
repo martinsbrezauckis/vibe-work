@@ -15,6 +15,7 @@ import { useCoreState } from "../../shell/hooks";
 interface ChromeStatus {
   text: string;
   alert: boolean;
+  kind?: "removed";
 }
 
 /** What the section reads and does. */
@@ -89,16 +90,7 @@ export function useChromeControl(
                     : request
               : request;
         const result = await core.run({ type: "chromeControl", request: selected });
-        if (request.op === "remove")
-          setStatus({
-            text:
-              result.type === "chromeControl" && result.view.setup.extensionRestart === true
-                ? "Removed. Restart Chrome to finish."
-                : result.type === "chromeControl" && result.view.setup.extensionLeft === true
-                  ? TEXT.chromeRemoved
-                  : "Removed.",
-            alert: false,
-          });
+        if (request.op === "remove") setStatus({ kind: "removed", text: "Removed.", alert: false });
         return result;
       } catch (thrown) {
         const error = toCallError(thrown).error;
@@ -132,7 +124,7 @@ export function useChromeControl(
         });
       } else if (
         current?.setup.addon?.action === "turnOn" ||
-        (current?.setup.addon === undefined && current?.setup.pairing === "Paired")
+        (current?.setup.addon === undefined && current?.setup.pairingState === "paired")
       ) {
         await core.run({ type: "chromeControl", request: { op: "setEnabled", enabled: true } });
       } else {
@@ -147,13 +139,16 @@ export function useChromeControl(
   }, [core]);
 
   const setupState = view?.setup.state;
+  const pendingRemoval =
+    status?.kind === "removed" &&
+    (view?.setup.extensionRestart === true || view?.setup.extensionLeft === true);
   // Core owner notifications supply pairing; reads also discover extension installation and restart completion.
   useEffect(() => {
     if (
       core === null ||
       setupState === undefined ||
       setupState === "absent" ||
-      setupState === "notSetUp"
+      (setupState === "notSetUp" && !pendingRemoval)
     )
       return;
     const timer = setInterval(() => {
@@ -162,7 +157,19 @@ export function useChromeControl(
     return () => {
       clearInterval(timer);
     };
-  }, [core, setupState]);
+  }, [core, setupState, pendingRemoval]);
 
-  return { view, busy, status, readError, run, connect };
+  const liveStatus =
+    status?.kind === "removed"
+      ? {
+          ...status,
+          text:
+            view?.setup.extensionRestart === true
+              ? "Removed. Restart Chrome to finish."
+              : view?.setup.extensionLeft === true
+                ? TEXT.chromeRemoved
+                : "Removed.",
+        }
+      : status;
+  return { view, busy, status: liveStatus, readError, run, connect };
 }

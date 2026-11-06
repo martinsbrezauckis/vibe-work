@@ -43,7 +43,21 @@ fn bframes_and_eof_never_reuse_stale_frames() {
         "hevc-main.mp4",
         "h264-fragmented.mp4",
     ] {
-        let mut d = open(file);
+        let root = std::env::var_os("VW_VIDEO_CORPUS").expect("verified corpus");
+        let mut d = match Decoder::open(&Path::new(&root).join(file), 1280) {
+            Ok(decoder) => decoder,
+            Err(reason)
+                if !cfg!(target_os = "linux")
+                    && file == "hevc-main.mp4"
+                    && reason.starts_with("unsupported_codec:") =>
+            {
+                eprintln!(
+                    "NOT RUN: HEVC covering frames; this computer cannot decode it: {reason}"
+                );
+                continue;
+            }
+            Err(reason) => panic!("{file}: {reason}"),
+        };
         let duration = d.metadata().unwrap().duration_ns;
         assert!(d.frame(duration, 640).is_err());
         for ms in [41, 999, 2501, 0, 3999, 41] {

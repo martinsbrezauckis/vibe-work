@@ -220,7 +220,7 @@ async fn wait_for(
         Ok(Ok(answer)) => answer
             .clone()
             .unwrap_or_else(|| Err("the proposal is no longer pending".into()))
-            .map(Value::String),
+            .map(|text| final_reply(id, &text)),
         Ok(Err(_)) => Err("the proposal is no longer pending".into()),
         Err(_) => {
             // Open ask: the user has not decided. No open ask: the decision arrived and is being carried out.
@@ -240,6 +240,10 @@ async fn wait_for(
             }))
         }
     }
+}
+/// Every settled answer retains the handle for a later status request, including an immediate decline.
+fn final_reply(id: &str, text: &str) -> Value {
+    serde_json::json!({"proposalId": id, "text": text})
 }
 /// `protected_change_status`: the outcome of a review this session proposed, waiting like `propose` while it is open.
 async fn status(shared: &Arc<Shared>, session_id: &str, args: &Value) -> Result<Value, String> {
@@ -263,7 +267,7 @@ async fn status(shared: &Arc<Shared>, session_id: &str, args: &Value) -> Result<
                 if saved.view.status == State::Pending {
                     return Err("the proposal is no longer pending".into());
                 }
-                return Ok(Value::String(reply(&saved.view)));
+                return Ok(final_reply(id, &reply(&saved.view)));
             }
         }
     };

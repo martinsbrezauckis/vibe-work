@@ -24,7 +24,7 @@
  * - Drafts are stored on every change (when `persist`) WITH their provenance (`user` / `debug-api` /
  *   `literal`). The default reasoning preference is stored only on an explicit pick. Images and context
  *   stay in memory: they can be large and belong to one message. Unknown draft provenance loads as Debug API.
- * - A long paste is held aside (`pastes`, in memory) behind a marker in the draft; `takeContent` puts the
+ * - A long paste is saved with its draft within the draft size limit; `takeContent` puts the
  *   full text back in place of each marker, so what is sent is the message as pasted. Only what the user
  *   can see is a command: a message that starts with a marker is sent as text (`literal`).
  */
@@ -271,7 +271,7 @@ function setIn<T>(
 /** Creates the store; `persist` keeps drafts and explicit default reasoning picks in app storage. */
 export function createComposerStore(persist: boolean) {
   const history = createStore<readonly string[]>([]);
-  const stored = persist ? loadDrafts() : { drafts: {}, by: {} };
+  const stored = persist ? loadDrafts() : { drafts: {}, by: {}, pastes: {} };
   const marks = (by: string) =>
     Object.fromEntries(
       Object.entries(stored.by)
@@ -282,20 +282,26 @@ export function createComposerStore(persist: boolean) {
     ...EMPTY,
     defaultReasoning: persist ? loadDefaultReasoning() : null,
     drafts: stored.drafts,
+    pastes: stored.pastes,
     draftBy: marks("debug-api") as Record<string, "debug-api">,
     literal: Object.fromEntries(Object.keys(marks("literal")).map((id) => [id, true as const])),
   });
-  let saved: Pick<ComposerState, "drafts" | "draftBy" | "literal"> = store.get();
+  let saved: Pick<ComposerState, "drafts" | "draftBy" | "literal" | "pastes"> = store.get();
   if (persist) {
     store.subscribe(() => {
       const s = store.get();
-      if (s.drafts === saved.drafts && s.draftBy === saved.draftBy && s.literal === saved.literal)
+      if (
+        s.drafts === saved.drafts &&
+        s.draftBy === saved.draftBy &&
+        s.literal === saved.literal &&
+        s.pastes === saved.pastes
+      )
         return;
       saved = s;
       const by: Record<string, DraftBy> = {};
       for (const id of Object.keys(s.literal)) by[id] = "literal";
       for (const id of Object.keys(s.draftBy)) by[id] = "debug-api";
-      saveDrafts(s.drafts, by);
+      saveDrafts(s.drafts, by, s.pastes);
     });
   }
   let counter = 0;

@@ -77,7 +77,9 @@ try {
     try {
       const request = JSON.parse(line);
       let value = null;
-      if (request.op === "mount") {
+      if (request.op === "publicPages") {
+        await page.unroute("**/*");
+      } else if (request.op === "mount") {
         await page.addInitScript(request.init);
         await page.goto(request.url);
       } else if (request.op === "navigate") {

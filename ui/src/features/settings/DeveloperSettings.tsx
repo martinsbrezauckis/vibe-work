@@ -25,7 +25,8 @@ export function DeveloperSettings(): ReactElement {
   const chrome = useChromeControl();
   const localNetwork = chrome.view?.localNetwork ?? false;
   // A paired Chrome that has not taken the switch's current value yet (the core keeps sending it).
-  const notApplied = chrome.view?.setup.pairing === "Paired" && !chrome.view.localNetworkApplied;
+  const notApplied =
+    chrome.view?.setup.pairingState === "paired" && !chrome.view.localNetworkApplied;
   useEffect(() => {
     if (core === null || !canSwitch) return;
     let live = true;

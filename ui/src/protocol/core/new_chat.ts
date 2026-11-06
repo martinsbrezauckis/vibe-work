@@ -5,25 +5,25 @@
  * scripts/public/check.sh fails when this file and the Rust types disagree.
  */
 
-export type NewChatRequest = { "op": "state", } | { "op": "setFolder", 
+export type NewChatRequest = { "op": "state", } | { "op": "setFolder",
 /**
  * An absolute folder the user chose, a session works in, or a project's main folder.
  */
-folder?: string, } | { "op": "adopt", 
+folder?: string, } | { "op": "adopt",
 /**
  * The session the first message started.
  */
 sessionId: string, } | { "op": "closeAll", };
 
-export type NewChatView = { 
+export type NewChatView = {
 /**
  * The id terminal, preview and browser requests use for the New chat screen (internal, never shown).
  */
-ownerId: string, 
+ownerId: string,
 /**
  * The folder new terminals open in; `None` with `home` set: the home folder.
  */
-folder?: string, 
+folder?: string,
 /**
  * The home folder new terminals open in when no folder is chosen.
  */

@@ -15,14 +15,15 @@
 //! Invariant: the only crate allowed to relax the `unsafe_code` ban, and only behind a safe API with a SAFETY comment.
 //! Only `process` (macOS `proc_pidinfo`, Windows process handles) and `webview` (feature `webview`: `WebView2` and
 //! `WKWebView` screenshots), `native_click` (scoped webview input), `private_file` (Windows DACLs and
-//! owners), `background` (per-thread scheduling), `window_keys` (the main window's bare Alt tap), `event_target` (tao's event-target window on a polite close), `final_path` (Windows: `GetFinalPathNameByHandleW`),
+//! owners), `atomic_file` (Windows: retained ordinary-file DACLs), `background` (per-thread scheduling), `window_keys` (the main window's bare Alt tap), `event_target` (tao's event-target window on a polite close), `final_path` (Windows: `GetFinalPathNameByHandleW`),
 //! `a11y_bus` (Linux: `NO_AT_BRIDGE` for one run, set only while the process has one thread),
 //! `content_rules` (macOS `WKContentRuleList` per preview webview, with URL rules), `web_transport` (macOS: the
 //! WebTransport preference of one preview webview), `exec_inherit` (Linux: close-on-exec for inherited
 //! descriptors before the restart after an update), `send_to` (the Windows Send to shortcut through COM, the
 //! macOS services provider), `confirm_window` (the macOS `NSAlert` sheet and the Windows task dialog of the app's
 //! confirmations), `remove_tree` (Windows: file deletion that preserves shared read-only attributes), `kill_job` (Windows: a program in a
-//! kill-on-close job, for the Git Bash wrapper) and
+//! kill-on-close job, for the Git Bash wrapper), `tcp_listeners` (Windows owner-PID listener tables),
+//! `startup_error` (Windows: the startup message box), and
 //! `webview2_env` (Windows: the `WebView2` loader's variables removed from this process at startup) use it.
 
 #[cfg(all(feature = "click-marker", not(debug_assertions)))]
@@ -31,8 +32,10 @@ compile_error!("click markers are not available in release builds");
 #[cfg(target_os = "linux")]
 #[allow(unsafe_code)]
 pub mod a11y_bus;
+pub mod atomic_file;
 #[allow(unsafe_code)]
 mod background;
+pub mod browser;
 pub mod checked_executable;
 pub mod child_env;
 pub mod clipboard;
@@ -69,9 +72,15 @@ mod open_url;
 mod paths;
 mod private_file;
 mod process;
+#[cfg(any(windows, test))]
+mod tcp_listeners;
+#[cfg(windows)]
+pub use tcp_listeners::{TcpListener, windows_tcp_listeners};
 mod remove_tree;
 mod reveal;
 pub mod send_to;
+#[cfg(feature = "startup-dialog")]
+pub mod startup_error;
 mod system_version;
 pub mod tray;
 #[cfg(all(feature = "webview", target_os = "macos"))]
@@ -133,6 +142,16 @@ pub mod webview_audio;
 #[allow(unsafe_code)]
 pub mod video;
 
+/// Restricted video helper launchers and native resource accounting.
+#[cfg(feature = "video-sandbox")]
+#[allow(unsafe_code)]
+#[path = "video/isolation/mod.rs"]
+pub mod video_sandbox;
+
 #[cfg(feature = "proxy-resolver")]
 #[allow(unsafe_code)]
 pub mod proxy;
+
+#[cfg(windows)]
+#[allow(unsafe_code)]
+pub mod credentials;

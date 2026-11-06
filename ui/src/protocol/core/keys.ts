@@ -5,91 +5,91 @@
  * scripts/public/check.sh fails when this file and the Rust types disagree.
  */
 
-export type KeyRequest = { "op": "readStatus", } | { "op": "createVault", 
+export type KeyRequest = { "op": "readStatus", } | { "op": "createVault",
 /**
  * The new passphrase.
  */
-passphrase: SecretInput, } | { "op": "unlockVault", 
+passphrase: SecretInput, } | { "op": "unlockVault",
 /**
  * The passphrase.
  */
-passphrase: SecretInput, 
+passphrase: SecretInput,
 /**
  * Which vault, when two exist.
  */
-vault?: VaultChoice, } | { "op": "lockVault", } | { "op": "setLockVaultOnQuit", 
+vault?: VaultChoice, } | { "op": "lockVault", } | { "op": "setLockVaultOnQuit",
 /**
  * On: quitting locks the vault and deletes its kept key.
  */
-on: boolean, } | { "op": "setupStoreKey", 
+on: boolean, } | { "op": "setupStoreKey",
 /**
  * The key.
  */
-apiKey: SecretInput, } | { "op": "listKeyCandidates", } | { "op": "useExistingKey", 
+apiKey: SecretInput, } | { "op": "listKeyCandidates", } | { "op": "useExistingKey",
 /**
  * Its vault item id.
  */
-itemId: string, } | { "op": "listMistralKeys", } | { "op": "addMistralKey", 
+itemId: string, } | { "op": "listMistralKeys", } | { "op": "addMistralKey",
 /**
  * The vault display label.
  */
-name: string, 
+name: string,
 /**
  * One-way secret input.
  */
-apiKey: SecretInput, } | { "op": "useMistralKey", 
+apiKey: SecretInput, } | { "op": "useMistralKey",
 /**
  * The chosen vault identity.
  */
-itemId: string, } | { "op": "renameMistralKey", 
+itemId: string, } | { "op": "renameMistralKey",
 /**
  * Vault identity.
  */
-itemId: string, 
+itemId: string,
 /**
  * New label.
  */
-name: string, } | { "op": "removeMistralKey", 
+name: string, } | { "op": "removeMistralKey",
 /**
  * Vault identity.
  */
-itemId: string, } | { "op": "testKey", } | { "op": "detectVibeKey", } | { "op": "importVibeKey", 
+itemId: string, } | { "op": "testKey", } | { "op": "detectVibeKey", } | { "op": "importVibeKey",
 /**
  * From where.
  */
-source: VibeKeySource, } | { "op": "removeVibeKeyOriginal", 
+source: VibeKeySource, } | { "op": "removeVibeKeyOriginal",
 /**
  * Which one.
  */
 source: VibeKeySource, };
 
-export type MistralKeyView = { 
+export type MistralKeyView = {
 /**
  * Vault item identity.
  */
-itemId: string, 
+itemId: string,
 /**
  * Vault display label.
  */
-label: string, 
+label: string,
 /**
  * This credential is selected.
  */
-inUse: boolean, 
+inUse: boolean,
 /**
  * Latest completed test, or null before the first test.
  */
 lastTest: MistralKeyTestView | null, };
 
-export type MistralKeyTestView = { 
+export type MistralKeyTestView = {
 /**
  * Number of available models on success.
  */
-modelCount: number | null, 
+modelCount: number | null,
 /**
  * HTTP failure status, when an answer arrived.
  */
-code: number | null, 
+code: number | null,
 /**
  * Fixed explanation on failure; never a response body.
  */
@@ -97,67 +97,67 @@ text: string | null, };
 
 export type SecretInput = string;
 
-export type KeyStatusView = { 
+export type KeyStatusView = {
 /**
  * `noVault`, `locked`, `unlocked`, `twoVaults`, `remoteNotSupported`, `legacyProfile`,
  * `setupUnfinished`.
  */
-vaultState: string, 
+vaultState: string,
 /**
  * `vibeWork`, `shellx` or `desktop` when locked or unlocked.
  */
-vaultKind: string | null, 
+vaultKind: string | null,
 /**
  * Actual existing local vaults; an unselected install can offer each for use.
  */
-availableVaults: Array<VaultChoice>, 
+availableVaults: Array<VaultChoice>,
 /**
  * A managed install has persisted a vault choice.
  */
-vaultSelected: boolean, 
+vaultSelected: boolean,
 /**
  * The selected vault's profile folder, or null before a choice.
  */
-vaultPath: string | null, 
+vaultPath: string | null,
 /**
  * The vault's key is kept in this computer's credential store (it opens at the next start
  * without the passphrase).
  */
-rememberedDevice: boolean, 
+rememberedDevice: boolean,
 /**
  * "Lock the vault when Vibe Work quits" (absent in a status from before the switch: off).
  */
-lockVaultOnQuit: boolean, 
+lockVaultOnQuit: boolean,
 /**
  * `unknown` (locked), `missing`, `ready`.
  */
-keyState: string, 
+keyState: string,
 /**
  * The vault item the key comes from, when ready.
  */
-keyItemId: string | null, 
+keyItemId: string | null,
 /**
  * True when that item is Vibe Work's own resource.
  */
-ownKey: boolean, 
+ownKey: boolean,
 /**
  * The active vault item's nonsecret details; null when locked, missing or unavailable.
  */
-activeKey?: KeyMetadataView | null, 
+activeKey?: KeyMetadataView | null,
 /**
  * Why remembering this device did not work, if it did not.
  */
 rememberNote: string | null, };
 
-export type KeyMetadataView = { 
+export type KeyMetadataView = {
 /**
  * Vault display title.
  */
-label: string, 
+label: string,
 /**
  * Known origin of this item.
  */
-source: KeySourceView, 
+source: KeySourceView,
 /**
  * Original creation time in Unix milliseconds.
  */
@@ -165,29 +165,29 @@ addedMs: number, };
 
 export type KeySourceView = "vault" | "vibe";
 
-export type KeyCandidateView = { 
+export type KeyCandidateView = {
 /**
  * Vault item id.
  */
-itemId: string, 
+itemId: string,
 /**
  * Its title.
  */
-label: string, 
+label: string,
 /**
  * `resource` or `compat`.
  */
 source: string, };
 
-export type VibeKeyView = { 
+export type VibeKeyView = {
 /**
  * Where.
  */
-source: VibeKeySource, 
+source: VibeKeySource,
 /**
  * File path or keyring service.
  */
-location: string, 
+location: string,
 /**
  * True for Vibe's keychain item on macOS (setup names the keychain when it offers the removal).
  */

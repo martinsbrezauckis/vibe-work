@@ -26,7 +26,8 @@ const FULLPAGE: &str = include_str!("js/fullpage.js");
 
 fn assemble(body: &str, request: &Value) -> String {
     let labels = include_str!("js/control_labels.js");
-    let prelude = format!("const REQ = {request};\n{COMMON}\n{labels}");
+    let context = include_str!("js/choice_context.js");
+    let prelude = format!("const REQ = {request};\n{COMMON}\n{labels}\n{context}");
     body.replace("__VW_COMMON__", &prelude)
 }
 
@@ -52,6 +53,20 @@ pub fn observe(page: &str, max_refs: usize, max_text: usize, text_offset: usize)
     observe_focused(page, max_refs, max_text, text_offset, None, None)
 }
 
+/// A receipt keeps the acted-on control ahead of the ordinary ref cap, including in native frames.
+#[must_use]
+pub(crate) fn observe_receipt(
+    page: &str,
+    max_refs: usize,
+    max_text: usize,
+    reference: &str,
+) -> String {
+    assemble(
+        OBSERVE,
+        &json!({"page":page,"maxRefs":max_refs,"maxText":max_text,"textOffset":0,"priorityRef":reference}),
+    )
+}
+
 /// Observes matching controls before the ref cap, using only their redacted display fields; with `node`, only the
 /// element of that observed node identity (in each frame), whatever the ref cap.
 #[must_use]
@@ -75,6 +90,8 @@ pub fn act(request: &Value) -> String {
     assemble(ACT, request)
         .replace("__VW_NATIVE_CLICK__", NATIVE_CLICK)
         .replace("__VW_DRAG__", include_str!("js/drag.js"))
+        .replace("__VW_WIDGET_DATES__", include_str!("js/widget_dates.js"))
+        .replace("__VW_FORM_VALUES__", include_str!("js/form_values.js"))
 }
 
 /// Final boolean validation, evaluated in the OS engine's UI callback. Repeats authority, hit test and geometry;

@@ -24,7 +24,7 @@ a Vibe tag locks the fixed version itself. Because `mistral-vibe`'s own metadata
 `--no-deps`: this file is the complete install set (the check above proves it names every package the wheel
 requires), so nothing is resolved and nothing outside it can be installed. Every package keeps `--require-hashes`.
 
-Usage: python3 -I generate_pin.py --vibe 3.0.4 --commit <sha> --uv 0.12.24 --python 3.14.8 --out <crate>/pin [--work <scratch>]
+Usage: python3 -I generate_pin.py --vibe 3.1.0 --commit <sha> --uv 0.12.24 --python 3.14.8 --out <crate>/pin [--work <scratch>]
 Needs: git, uv, network. Writes `vibe-install.json` and `vibe.requirements.txt` into --out.
 Called by: maintainers when bumping Vibe (with tools/public/codegen/vibe.pin, regenerated types, bench, gate).
 """
@@ -53,9 +53,7 @@ TARGETS = {
 # Security overrides: package -> (fixed version, the advisories it fixes). Generation fails when an entry is stale
 # (the tag's lock already has that version or a later one) or names a package the lock does not have: remove it then.
 # The fixed release must be a pure-Python wheel (`py3-none-any`, not yanked), so one file serves every target.
-SECURITY_OVERRIDES = {
-    "pyasn1": ("0.6.5", "GHSA-2qm8-x737-gmw5, GHSA-9m75-vc3g-4x39, GHSA-fm9c-5rcf-2q5p, GHSA-mm57-4v3p-rchx"),
-}
+SECURITY_OVERRIDES = {}
 
 
 def version_key(version: str) -> tuple[int, ...]:

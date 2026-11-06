@@ -22,7 +22,7 @@ export function TemporaryChip({ sessionId }: { sessionId: string }): ReactElemen
     <Badge
       presentation="temporary"
       data-testid="temporary-chip"
-      title="Temporary chat: Vibe Work deletes it when it quits. Files it changed stay changed."
+      title="Temporary chat: deleted when you quit. Files in a folder you chose stay changed; the chat's own folder is removed."
     >
       Temporary · deleted when you quit
     </Badge>

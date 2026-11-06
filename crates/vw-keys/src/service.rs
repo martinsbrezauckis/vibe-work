@@ -533,35 +533,26 @@ impl KeyService {
         Ok(())
     }
 
-    /// Mistral credentials already in the vault (metadata only).
+    /// Compatibility view of the same saved-key catalog used by Settings and setup.
     ///
     /// # Errors
     /// [`KeyError::Vault`].
     pub async fn candidates(&self) -> Result<Vec<Candidate>, KeyError> {
-        let vault = Arc::clone(&self.vault);
-        Ok(mistral_key::find_existing(
-            &blocking(move || vault.list_items()).await??,
-        ))
+        Ok(self
+            .key_catalog()
+            .await?
+            .into_iter()
+            .map(|(candidate, _)| candidate)
+            .collect())
     }
 
-    /// Uses an existing vault item as the key (read from it each unlock; not copied).
+    /// Compatibility name for selecting a saved key without copying its value.
+    /// The core applies the same confirmation and busy policy for both command names.
     ///
     /// # Errors
-    /// [`KeyError::NotACandidate`], [`KeyError::Vault`].
+    /// As [`KeyService::use_mistral_key`].
     pub async fn use_existing(&self, item_id: String) -> Result<(), KeyError> {
-        let _selection = self.selection.lock().await;
-        if !self
-            .candidates()
-            .await?
-            .iter()
-            .any(|c| c.item_id == item_id)
-        {
-            return Err(KeyError::NotACandidate);
-        }
-        self.settings.set_key_item_id(&item_id)?;
-        self.refresh_key().await;
-        self.key_changed();
-        Ok(())
+        self.use_mistral_key(item_id).await
     }
 
     /// The test call with the key in use (`GET /v1/models` direct to Mistral).

@@ -17,8 +17,8 @@
 //! - Text is passed through as plain text; the OS decides how to render it.
 //! - Linux requests the packaged `vibe-work` hicolor icon; Windows/macOS use the installed app identity.
 //! - A click is the body or the "Open" button on every platform. Windows owns the `WinRT` toast and
-//!   subscriptions in a bounded process-wide store. Activation, dismissal and expiry release it;
-//!   expiry also removes its Notification Center entry because no COM activator is registered.
+//!   subscriptions in a bounded process-wide store. Activation and dismissal release it;
+//!   banner timeout retains it for the installed app’s COM activator in Notification Center.
 //!   The in-app bell retains notices independently of OS notification lifetime.
 
 use std::sync::Arc;
@@ -26,6 +26,13 @@ use std::sync::atomic::AtomicUsize;
 #[cfg(not(windows))]
 use std::sync::atomic::Ordering;
 
+#[cfg(windows)]
+#[allow(unsafe_code)]
+#[path = "notify/activation.rs"]
+mod activation;
+#[cfg(any(windows, test))]
+#[path = "notify/icon.rs"]
+mod icon;
 #[cfg(all(test, target_os = "linux"))]
 #[path = "notify/linux_tests.rs"]
 mod linux_tests;
@@ -106,12 +113,31 @@ pub struct DesktopNotifier {
 }
 
 impl DesktopNotifier {
+    /// Registers the installed Windows toast header logo at a stable, app-owned PNG path.
+    /// Development runs keep their borrowed identity; other platforms use their bundle icon.
+    ///
+    /// # Errors
+    /// The icon cannot be saved or the per-user identity cannot be updated.
+    #[cfg(windows)]
+    pub fn set_icon(&self, path: &std::path::Path, png: &[u8]) -> Result<(), NotifyError> {
+        if !self.installed {
+            return Ok(());
+        }
+        icon::save(path, png)?;
+        activation::set_icon(&self.app_id, path).map_err(|e| NotifyError(e.to_string()))
+    }
+
     /// `app_id` is the bundle identifier. `installed` is false for development runs, where Windows
     /// has no registered app identity and macOS borrows the terminal's.
     #[must_use]
     pub fn new(app_id: impl Into<String>, installed: bool) -> Self {
+        let app_id = app_id.into();
+        #[cfg(windows)]
+        if installed {
+            let _ = activation::register(&app_id);
+        }
         Self {
-            app_id: app_id.into(),
+            app_id,
             installed,
             waiters: Arc::new(AtomicUsize::new(0)),
         }

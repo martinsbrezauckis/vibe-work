@@ -35,7 +35,10 @@ impl Core {
         if let Some(id) = params["sessionId"].as_str().filter(|_| opening) {
             let mut reply = None;
             self.bounded_open(id, async {
-                reply = Some(call.await.map_err(|e| CoreError::from_gate(method, &e))?);
+                reply =
+                    Some(call.await.map_err(|e| {
+                        crate::config_validation::from_gate(&self.shared, method, &e)
+                    })?);
                 Ok(())
             })
             .await?;

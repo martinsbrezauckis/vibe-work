@@ -44,14 +44,27 @@ pub(crate) async fn prepare(
                 .into());
         }
     }
+    if tool == "chrome_execute" && crate::chrome_control::read_consent::needed(shared, owner, args)
+    {
+        return crate::chrome_control::read_consent::prepare(
+            shared,
+            owner,
+            source,
+            call,
+            args.clone(),
+        )
+        .await
+        .map(Some);
+    }
     if tool == "chrome_execute"
         && args["steps"].as_array().is_some_and(|steps| {
             steps.iter().any(|step| {
                 ["auth.fill", "auth.basic"].contains(&step["action"].as_str().unwrap_or_default())
+                    || crate::chrome_control::read_consent::needed(shared, owner, step)
             })
         })
     {
-        return crate::chrome_control::batch::prepare(shared, owner, args.clone())
+        return crate::chrome_control::batch::prepare(shared, owner, source, call, args.clone())
             .await
             .map(Some);
     }

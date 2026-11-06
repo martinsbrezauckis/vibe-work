@@ -1,6 +1,6 @@
 //! Browser identity for agent calls and add-on facts. Uses owned pairing/profile state, never page data.
 //! The gateway preserves explicit profile ids and a chat's binding; discovery prefers the only paired browser.
-use super::{AddonState, AddonView};
+use super::{AddonState, AddonView, PairingState};
 use crate::core::Shared;
 use serde_json::Value;
 use std::sync::PoisonError;
@@ -35,7 +35,11 @@ impl Browser {
                 .waiting_reported()
     }
     pub(crate) fn from_profile(profile: &str) -> Self {
-        if cfg!(feature = "your-edge") && profile.starts_with("edge:") {
+        if cfg!(feature = "your-edge")
+            && (profile.starts_with("edge:")
+                || profile.eq_ignore_ascii_case("edge")
+                || profile.eq_ignore_ascii_case(vw_vocabulary::texts::EDGE_NAME))
+        {
             Self::Edge
         } else {
             Self::Chrome
@@ -60,13 +64,34 @@ impl Browser {
             Self::Edge => vw_vocabulary::texts::EDGE_NAME,
         }
     }
-    pub(crate) fn text(self, text: &str) -> String {
+    pub(crate) fn short_name(self) -> &'static str {
         match self {
-            Self::Chrome => text.into(),
-            Self::Edge => text
-                .replace("Google Chrome", "Microsoft Edge")
-                .replace("Chrome", "Edge"),
+            Self::Chrome => "Chrome",
+            Self::Edge => "Edge",
         }
+    }
+    /// Render fixed templates at the display boundary; browser names in dynamic text are never rewritten.
+    pub(super) fn words(self, template: &str) -> String {
+        template
+            .replace(
+                "{download}",
+                match self {
+                    Self::Chrome => "google.com/chrome",
+                    Self::Edge => "microsoft.com/edge",
+                },
+            )
+            .replace(
+                "{fullBrowser}",
+                match self {
+                    Self::Chrome => "Google Chrome",
+                    Self::Edge => "Microsoft Edge",
+                },
+            )
+            .replace("{browser}", self.short_name())
+            .replace("{yourBrowser}", self.name())
+    }
+    pub(crate) fn text(self, text: &str) -> String {
+        super::browser_text::render(self, text)
     }
     pub(super) fn paired(self, shared: &Shared) -> bool {
         let owner = &shared.chrome_control.owner;
@@ -74,7 +99,7 @@ impl Browser {
             Self::Chrome => &owner.pairing,
             Self::Edge => &owner.edge_pairing,
         };
-        pairing.lock().unwrap_or_else(PoisonError::into_inner).0 == "Paired"
+        pairing.lock().unwrap_or_else(PoisonError::into_inner).0 == PairingState::Paired
     }
     pub(crate) fn addon(self, shared: &Shared) -> AddonView {
         if self == Self::Chrome {
@@ -82,15 +107,21 @@ impl Browser {
         }
         let view = super::commands::view(shared);
         view.edge.and_then(|edge| edge.addon).unwrap_or_else(|| {
-            let mut view = super::addon::view(AddonState::Unavailable, super::setup::ABSENT);
-            view.label = self.text(&view.label);
-            view.instruction = self.text(&view.instruction);
-            view
+            super::addon::view_for(
+                AddonState::Unavailable,
+                super::setup::absent_for(true),
+                self,
+            )
         })
     }
 }
 
 pub(crate) fn selected(shared: &Shared, session: &str, tool: &str, args: &Value) -> Browser {
+    if tool == "chrome_status"
+        && let Some(profile) = args["profileId"].as_str()
+    {
+        return Browser::from_profile(profile);
+    }
     if let Some(profile) = super::receipt::profile(shared, tool, args) {
         return Browser::from_profile(&profile);
     }
@@ -117,6 +148,39 @@ pub(crate) fn selected(shared: &Shared, session: &str, tool: &str, args: &Value)
     }
 }
 
+fn edge_outdated(
+    shared: &Shared,
+    setup: &super::setup::ChromeSetupView,
+    profiles: &[std::path::PathBuf],
+) -> bool {
+    let chrome = &shared.chrome_control;
+    let live: Vec<_> = chrome
+        .owner
+        .connected_profiles
+        .snapshot()
+        .into_iter()
+        .filter(|(id, _)| Browser::Edge.owns_profile(id))
+        .collect();
+    let installed = super::addon::installed_version(
+        profiles,
+        &chrome.config.extension_id,
+        setup.pairing_state == PairingState::Paired,
+        &live,
+    );
+    let min = shared
+        .config
+        .vibe_install
+        .as_ref()
+        .and_then(vw_vibe_install::VibeInstaller::extension_min_version);
+    installed
+        .as_deref()
+        .zip(min.as_deref())
+        .is_some_and(|(installed, min)| {
+            vw_vibe_install::support::compare_versions(installed, min)
+                == Some(std::cmp::Ordering::Less)
+        })
+}
+
 /// Edge's own state uses the shared switch/package and only Edge's live pairing/version observations.
 /// Chrome's on-disk installation or process probe cannot describe Edge.
 pub(super) fn edge_addon(shared: &Shared, setup: &super::setup::ChromeSetupView) -> AddonView {
@@ -129,39 +193,28 @@ pub(super) fn edge_addon(shared: &Shared, setup: &super::setup::ChromeSetupView)
         };
     }
     let chrome = &shared.chrome_control;
-    let live: Vec<_> = chrome
-        .owner
-        .connected_profiles
-        .snapshot()
-        .into_iter()
-        .filter(|(id, _)| Browser::Edge.owns_profile(id))
-        .collect();
     let profiles = super::installation::profiles(shared, Browser::Edge);
-    let installed = super::addon::installed_version(
-        &profiles,
-        &chrome.config.extension_id,
-        setup.pairing == "Paired",
-        &live,
-    );
-    let min = shared
-        .config
-        .vibe_install
-        .as_ref()
-        .and_then(vw_vibe_install::VibeInstaller::extension_min_version);
-    let outdated = installed
-        .as_deref()
-        .zip(min.as_deref())
-        .is_some_and(|(installed, min)| {
-            vw_vibe_install::support::compare_versions(installed, min)
-                == Some(std::cmp::Ordering::Less)
-        });
+    let outdated = edge_outdated(shared, setup, &profiles);
     let state = if !setup.package {
         S::Unavailable
     } else if setup.state == super::setup::SetupState::RepairRequired {
         S::HelperSetupRequired
+    } else if let Some(issue) = setup.browser_issue {
+        match issue {
+            super::browser::BrowserIssue::Missing => S::ChromeMissing,
+            super::browser::BrowserIssue::Sandboxed => S::ChromeSandboxed,
+            super::browser::BrowserIssue::DifferentBrowser => S::OtherBrowser,
+        }
+    } else if setup.state != super::setup::SetupState::NotSetUp
+        && chrome
+            .owner
+            .credential_missing
+            .load(std::sync::atomic::Ordering::SeqCst)
+    {
+        S::OwnerCredentialMissing
     } else if !chrome.enabled() {
         S::SwitchedOff
-    } else if setup.pairing == "Paired" {
+    } else if setup.pairing_state == PairingState::Paired {
         if outdated {
             S::UpdateNeeded
         } else {
@@ -171,11 +224,11 @@ pub(super) fn edge_addon(shared: &Shared, setup: &super::setup::ChromeSetupView)
         S::NotSetUp
     } else if setup.store_review {
         S::InReview
-    } else if setup.pairing.contains("another Vibe Work") {
+    } else if setup.pairing_state == PairingState::OtherOwner {
         S::OtherOwner
-    } else if setup.pairing == "Connecting" {
+    } else if setup.pairing_state == PairingState::Connecting {
         S::Connecting
-    } else if setup.pairing.contains("Waiting for you to pair") {
+    } else if setup.pairing_state == PairingState::Waiting {
         S::NotPaired
     } else if !chrome.owner.is_running() {
         S::HelperNotRunning
@@ -191,7 +244,7 @@ pub(super) fn edge_addon(shared: &Shared, setup: &super::setup::ChromeSetupView)
         .edge_paired_once
         .load(std::sync::atomic::Ordering::SeqCst)
     {
-        if chrome.config.launcher.is_none() && super::browser::edge_running() {
+        if chrome.config.edge_launcher.is_none() && super::browser::edge_running(&chrome.config) {
             S::Connecting
         } else {
             S::ChromeClosed
@@ -204,11 +257,13 @@ pub(super) fn edge_addon(shared: &Shared, setup: &super::setup::ChromeSetupView)
     } else {
         super::setup::absent_for(true)
     };
-    let mut view = super::addon::view(state, package_text);
+    let package_text = Browser::Edge.text(package_text);
+    let mut view = super::addon::view_for(state, &package_text, Browser::Edge);
     view.extension_version = super::installation::version(shared, Browser::Edge);
-    super::addon::reconnecting(&mut view, Browser::Edge.reconnectable(shared));
-    view.label = Browser::Edge.text(&view.label);
-    view.instruction = Browser::Edge.text(&view.instruction);
-    view.step = view.step.map(|step| Browser::Edge.text(&step));
+    super::addon::reconnecting_for(
+        &mut view,
+        Browser::Edge.reconnectable(shared),
+        Browser::Edge,
+    );
     view
 }

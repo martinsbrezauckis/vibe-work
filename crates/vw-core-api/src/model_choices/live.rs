@@ -44,11 +44,7 @@ pub(crate) async fn before(shared: &Arc<Shared>, method: &str, params: &Value) {
         return;
     };
     let choices = &shared.model_choices;
-    let expected = choices
-        .fallbacks
-        .get(id)
-        .or_else(|| choices.pending.get(id))
-        .or_else(|| choices.remembered.get(id));
+    let expected = choices.records.get(id).expected();
     let runtime = match super::restore::read(shared, id).await {
         Ok(runtime) => runtime,
         Err(error) => {
@@ -96,6 +92,9 @@ pub(crate) async fn pick(
                 return Ok(replacement(shared, id, choice, reply.result["runtime"].clone()).await);
             }
             if let Err(error) = shared.model_choices.observe(method, params, &reply.result) {
+                if error.code == crate::error::ErrorCode::Internal {
+                    return Err(error);
+                }
                 if let Some(choice) = selected.as_ref() {
                     return Ok(
                         replacement(shared, id, choice, reply.result["runtime"].clone()).await,

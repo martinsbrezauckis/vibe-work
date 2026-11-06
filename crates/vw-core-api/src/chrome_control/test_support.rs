@@ -21,7 +21,7 @@ pub(crate) fn answering(
         )
         .unwrap();
     }
-    *chrome.owner.pairing.lock().unwrap() = ("Paired".into(), None);
+    *chrome.owner.pairing.lock().unwrap() = (crate::chrome_control::PairingState::Paired, None);
     chrome.owner.answering(answer)
 }
 

@@ -13,7 +13,7 @@ fn video_is_absent_without_feature() {
     );
 }
 #[test]
-#[cfg(feature = "video")]
+#[cfg(all(feature = "video", any(windows, target_os = "macos")))]
 fn video_reaches_mcp_as_image_content() {
     let list = vw_agent_tools::mcp::tool_list();
     assert!(
@@ -49,4 +49,36 @@ fn video_reaches_mcp_as_image_content() {
             .get("vwImage")
             .is_none()
     );
+}
+
+#[test]
+fn video_catalog_follows_the_platform_and_feature() {
+    let listed = vw_agent_tools::mcp::tool_list()
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|tool| tool["name"] == "video_frames");
+    assert_eq!(
+        listed,
+        cfg!(all(feature = "video", any(windows, target_os = "macos")))
+    );
+}
+
+#[test]
+#[cfg(all(feature = "video", target_os = "linux"))]
+fn linux_video_refuses_without_progress_or_forwarding() {
+    let input = json!({"id":1,"method":"tools/call","params":{"name":"video_frames","arguments":{"path":"clip.mp4","selection":{"kind":"timestamps","times_ms":[999]},"output":"frame"}}}).to_string()+"\n";
+    let mut output = Vec::new();
+    vw_agent_tools::mcp::serve(
+        input.as_bytes(),
+        &mut output,
+        |_: &str, _: Value| -> Result<Value, String> {
+            panic!("Linux video must not reach the core");
+        },
+    )
+    .unwrap();
+    let response: Value = serde_json::from_slice(&output).unwrap();
+    let text = response["result"]["content"][0]["text"].as_str().unwrap();
+    assert!(text.starts_with("Not run: video review is not available on Linux yet."));
+    assert!(text.contains("Ask for still images"));
 }

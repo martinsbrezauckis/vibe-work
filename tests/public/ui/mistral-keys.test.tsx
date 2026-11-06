@@ -186,7 +186,7 @@ it("decline keeps the current key and uses the specified toast", async () => {
   expect(rows()[0]?.inUse).toBe(true);
 });
 
-it("busy disables use with its reason; switching labels the row", async () => {
+it("local chat activity leaves admission to the core; switching disables and labels the row", async () => {
   const { section, app } = await setup();
   act(() => {
     present(app.core).store.set((s) => ({
@@ -203,11 +203,17 @@ it("busy disables use with its reason; switching labels the row", async () => {
     }));
   });
   const button = await section.findByRole("button", { name: "Use this key" });
+  expect(button).toBeEnabled();
+  expect(button).not.toHaveAttribute("title");
+  act(() => {
+    present(app.keys).store.set((state) => ({
+      ...state,
+      busy: true,
+      switching: "1",
+    }));
+  });
   expect(button).toBeDisabled();
-  expect(button).toHaveAttribute(
-    "title",
-    "Wait until the chats finish, then switch keys.",
-  );
+  expect(button).toHaveTextContent("Switching…");
 });
 
 it("locked names the vault action and shows no rows", async () => {

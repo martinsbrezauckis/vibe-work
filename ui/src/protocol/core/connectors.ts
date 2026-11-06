@@ -6,157 +6,157 @@
  */
 
 import type { SecretInput } from "./keys";
-export type ConnectorsRequest = { "op": "read", 
+export type ConnectorsRequest = { "op": "read",
 /**
  * The session whose live state is merged in.
  */
-sessionId?: string, } | { "op": "refresh", 
+sessionId?: string, } | { "op": "refresh",
 /**
  * As in `read`.
  */
-sessionId?: string, } | { "op": "signIn", 
+sessionId?: string, } | { "op": "signIn",
 /**
  * The session to ask through.
  */
-sessionId: string, 
+sessionId: string,
 /**
  * The connector.
  */
-alias: string, } | { "op": "connect", 
+alias: string, } | { "op": "connect",
 /**
  * The session to ask through.
  */
-sessionId: string, 
+sessionId: string,
 /**
  * The connector.
  */
-alias: string, } | { "op": "setConnectorOff", 
+alias: string, } | { "op": "setConnectorOff",
 /**
  * The connector.
  */
-alias: string, 
+alias: string,
 /**
  * True: off.
  */
-off: boolean, } | { "op": "addServer", 
+off: boolean, } | { "op": "addServer",
 /**
  * `https://...` (or `http://` on this computer); no query or fragment.
  */
-url: string, 
+url: string,
 /**
  * Name in Vibe's config; Vibe derives one from the address when absent.
  */
-name?: string, } | { "op": "signInServer", 
+name?: string, } | { "op": "signInServer",
 /**
  * The server's name.
  */
-name: string, } | { "op": "cancelSignIn", } | { "op": "signOutServer", 
+name: string, } | { "op": "cancelSignIn", } | { "op": "signOutServer",
 /**
  * The server's name.
  */
-name: string, } | { "op": "removeServer", 
+name: string, } | { "op": "removeServer",
 /**
  * The server's name.
  */
-name: string, } | { "op": "setServerOff", 
+name: string, } | { "op": "setServerOff",
 /**
  * The server's name.
  */
-name: string, 
+name: string,
 /**
  * True: off.
  */
-off: boolean, } | { "op": "addKeyServer", 
+off: boolean, } | { "op": "addKeyServer",
 /**
  * `https://...` (or `http://` on this computer); no query or fragment.
  */
-url: string, 
+url: string,
 /**
  * Name in Vibe's config; derived from the address when absent.
  */
-name?: string, 
+name?: string,
 /**
  * The vault secret to use (a project secret's id); or `newSecret`.
  */
-secretId?: string, 
+secretId?: string,
 /**
  * A new secret to store and use (one-way: the answer has no value).
  */
-newSecret?: NewServerSecret, 
+newSecret?: NewServerSecret,
 /**
  * The header that carries the key as is; absent: `Authorization: Bearer <key>`.
  */
-header?: string, } | { "op": "allowServerKey", 
+header?: string, } | { "op": "allowServerKey",
 /**
  * The server's name.
  */
 name: string, };
 
-export type ConnectorsResult = { "kind": "view", 
+export type ConnectorsResult = { "kind": "view",
 /**
  * Connectors and servers.
  */
-view: ConnectorsView, } | { "kind": "signInStarted", 
+view: ConnectorsView, } | { "kind": "signInStarted",
 /**
  * The connector.
  */
-alias: string, 
+alias: string,
 /**
  * The session that asked.
  */
-sessionId: string, 
+sessionId: string,
 /**
  * Vibe's request id (the notice carries the same id).
  */
-requestId: string, } | { "kind": "serverSignInStarted", 
+requestId: string, } | { "kind": "serverSignInStarted",
 /**
  * The server.
  */
-name: string, } | { "kind": "serverAdded", 
+name: string, } | { "kind": "serverAdded",
 /**
  * The name Vibe saved the server under.
  */
-name: string, 
+name: string,
 /**
  * False when the same address was already configured (Vibe kept the existing entry).
  */
-created: boolean, 
+created: boolean,
 /**
  * The state after it.
  */
 view: ConnectorsView, };
 
-export type ConnectorsView = { 
+export type ConnectorsView = {
 /**
  * How fresh the catalog is.
  */
-catalog: CatalogLoad, 
+catalog: CatalogLoad,
 /**
  * Why the catalog could not be loaded (Vibe's message), when it could not.
  */
-catalogError: string | null, 
+catalogError: string | null,
 /**
  * The current key can use shared connectors only; private sign-ins are unavailable.
  */
-privateConnectorsHidden?: boolean, 
+privateConnectorsHidden?: boolean,
 /**
  * Mistral-hosted connectors, in Vibe's order.
  */
-connectors: Array<ConnectorView>, 
+connectors: Array<ConnectorView>,
 /**
  * MCP servers: from Vibe Work's own config and, when a session's state was read, from that session
  * (plugins, servers of trusted project folders).
  */
-servers: Array<ServerView>, 
+servers: Array<ServerView>,
 /**
  * Mistral's console page for the account's connectors (where a connector's account link is
  * removed); `null` when Vibe could not resolve the organization.
  */
-manageUrl: string | null, 
+manageUrl: string | null,
 /**
  * The session whose live state is merged in (`null`: none was open).
  */
-sessionId: string | null, 
+sessionId: string | null,
 /**
  * The server whose sign-in is running now, if any.
  */
@@ -164,129 +164,129 @@ signingIn: string | null, };
 
 export type CatalogLoad = "fresh" | "cached" | "notLoaded";
 
-export type ConnectorView = { 
+export type ConnectorView = {
 /**
  * Vibe's id (`linear`, `github_app`, ...).
  */
-alias: string, 
+alias: string,
 /**
  * Vibe's display name (sometimes just the id).
  */
-displayName: string, 
+displayName: string,
 /**
  * `ready`, `needs_auth`, `needs_setup` or `unavailable` (Vibe's words).
  */
-readiness: string, 
+readiness: string,
 /**
  * `oauth`, `credentials_setup`, `none` or `unknown`.
  */
-authAction: string, 
+authAction: string,
 /**
  * Turned off in Vibe's config.
  */
-off: boolean, 
+off: boolean,
 /**
  * The connector's tools (empty until signed in).
  */
-tools: Array<ToolView>, 
+tools: Array<ToolView>,
 /**
  * Vibe's reason when it is unavailable.
  */
-diagnostic: string | null, 
+diagnostic: string | null,
 /**
  * The status in the merged session (`connected`, `needs_auth`, `disabled`, ...), when read.
  */
 sessionStatus: string | null, };
 
-export type ServerView = { 
+export type ServerView = {
 /**
  * The name in Vibe's config (the stable id).
  */
-name: string, 
+name: string,
 /**
  * What to show (Vibe's display name, else the name).
  */
-displayName: string, 
+displayName: string,
 /**
  * `streamable-http`, `http`, `stdio` or what Vibe reports.
  */
-transport: string, 
+transport: string,
 /**
  * Scheme, host and path of a remote server's address (no query, no fragment); `null` for a server
  * that runs on this computer.
  */
-address: string | null, 
+address: string | null,
 /**
  * `oauth`, `static` (headers or a key in Vibe's config), `none` or `unknown`.
  */
-signIn: string, 
+signIn: string,
 /**
  * Turned off in Vibe's config.
  */
-off: boolean, 
+off: boolean,
 /**
  * The live status (`connected`, `needs_auth`, `disabled`, `unavailable`, ...) from the merged
  * session, `null` when no session state was read.
  */
-status: string | null, 
+status: string | null,
 /**
  * Tools, from the merged session.
  */
-tools: Array<ToolView>, 
+tools: Array<ToolView>,
 /**
  * Vibe's error text, when it has one.
  */
-error: string | null, 
+error: string | null,
 /**
  * The plugin that provides it (`null`: Vibe's config).
  */
-plugin: string | null, 
+plugin: string | null,
 /**
  * Origin: built-in for app-injected tools or a built-in plugin; otherwise the pinned plugin’s scope, when known.
  */
-source?: string, 
+source?: string,
 /**
  * True when it is in Vibe Work's own config (it can be signed out, turned off and removed here).
  */
-configured: boolean, 
+configured: boolean,
 /**
  * The key Vibe Work adds for it (`null`: not a key server).
  */
 key: ServerKeyView | null, };
 
-export type ToolView = { 
+export type ToolView = {
 /**
  * The tool's name.
  */
-name: string, 
+name: string,
 /**
  * Its description, when given.
  */
-description: string | null, 
+description: string | null,
 /**
  * False when turned off (only known from a session's state).
  */
 enabled: boolean | null, };
 
-export type NewServerSecret = { 
+export type NewServerSecret = {
 /**
  * Its name in the vault.
  */
-name: string, 
+name: string,
 /**
  * The key or token.
  */
 value: SecretInput, };
 
-export type ServerKeyView = { 
+export type ServerKeyView = {
 /**
  * The vault secret's name (`null` while the vault is locked).
  */
-secretName: string | null, 
+secretName: string | null,
 /**
  * `Authorization: Bearer` or the custom header's name (`null` while locked).
  */
-header: string | null, 
+header: string | null,
 /**
  * `always`, `untilClose` (allowed until Vibe Work closes), `none` (not allowed now), `locked` (vault locked).
  */

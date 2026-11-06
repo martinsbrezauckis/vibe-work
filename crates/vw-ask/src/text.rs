@@ -31,9 +31,8 @@ pub fn plain_note(note: &str) -> String {
         .collect()
 }
 /// The result of a call the user said No to on a Vibe Work card or window. The agent's turn goes on with it, so
-/// the agent explains the need and offers other routes instead of repeating the call.
-pub const DECLINED: &str =
-    "Not run: the user declined this. Explain why it is needed for the user's delegated task.";
+/// the refusal applies for the task unless the user brings it up again.
+pub const DECLINED: &str = "Not run: the user declined this. Do not ask again for this in this task unless the user brings it up.";
 
 /// The outcome sentence; permission never adds text to an allowed tool's normal result. A No is always
 /// [`DECLINED`], with no note or subject appended.

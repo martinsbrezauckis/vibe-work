@@ -114,7 +114,7 @@ pub(crate) async fn call(
 ) -> Result<Value, String> {
     vw_agent_tools::browser_input::validate(tool, &args)?;
     if tool == names::BROWSER_CAPTURE_SECRET {
-        return Err("Not run: saving a key to the vault is the user's action. Ask the user to save it in the browser panel (select the key, then Save to vault).".to_owned());
+        return Err("Not run: saving a key to the vault is the user's action. Ask the user to select the key in the browser panel, then choose Save to vault in the toolbar, in Browser options when narrow, or by right-click on the selection.".to_owned());
     }
     if tool == names::BROWSER_READ
         && args

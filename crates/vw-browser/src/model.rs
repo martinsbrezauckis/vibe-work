@@ -189,6 +189,12 @@ pub struct FrameChoices {
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PageModel {
+    /// Rendered terms of overlays, kept independently of the find query and text paging.
+    #[serde(default)]
+    pub choice_context: Vec<crate::choice_context::ChoiceContext>,
+    /// Whole-document terms used only when the parent verifies a covering frame.
+    #[serde(default, skip_serializing)]
+    pub document_context: Option<crate::choice_context::ChoiceContext>,
     /// Per-document choice scan before query/ref limits; consumed by the native frame merger.
     #[serde(default, skip_serializing)]
     pub choice_refs: Vec<RefItem>,
@@ -282,6 +288,14 @@ impl PageModel {
         cap(&mut self.ready_state, 20);
         cap(&mut self.text, max_text);
         cap(&mut self.hidden_text, 3000);
+        self.choice_context.truncate(4);
+        for context in self
+            .choice_context
+            .iter_mut()
+            .chain(self.document_context.iter_mut())
+        {
+            context.bound();
+        }
         self.refs.retain(|r| is_ref(&r.id));
         self.refs.truncate(MAX_REFS);
         self.choice_refs.retain(|r| is_ref(&r.id));

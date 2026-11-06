@@ -1,5 +1,5 @@
 {
-  "_comment": "Method -> Pydantic model name table for Vibe app-server 3.0.4. Vibe has no central registry (the server dispatches with match statements), so this table is our own data, derived from the dispatch code and live-validated by the protocol bench. generate.py fails on drift: every name in protocol.SERVER_METHODS must be a key of `requests`, every key must be a real method, and every model name must exist. A null model means Vibe declares none for that side.",
+  "_comment": "Method -> Pydantic model name table for Vibe app-server 3.1.0. Vibe has no central registry (the server dispatches with match statements), so this table is our own data, derived from the dispatch code and live-validated by the protocol bench. generate.py fails on drift: every name in protocol.SERVER_METHODS must be a key of `requests`, every key must be a real method, and every model name must exist. A null model means Vibe declares none for that side.",
   "requests": {
     "initialize": {
       "params": "InitializeParams",
@@ -657,10 +657,6 @@
       "params": "ProtocolModel",
       "result": "ProtocolModel"
     },
-    "setup/oidc-headers": {
-      "params": "OidcHeadersParams",
-      "result": "OidcHeadersResponse"
-    },
     "setup/oidc-poll": {
       "params": "OidcAttemptParams",
       "result": "OidcPollResponse"
@@ -692,6 +688,18 @@
     "skills/local/write": {
       "params": "SkillsLocalWriteParams",
       "result": "SkillsLocalWriteResponse"
+    },
+    "platformCredentials/headers": {
+      "params": "PlatformCredentialHeadersParams",
+      "result": "PlatformCredentialHeadersResponse"
+    },
+    "artifacts/subscribe": {
+      "params": null,
+      "result": "EmptyResponse"
+    },
+    "session/context/read": {
+      "params": "SessionContextReadParams",
+      "result": "SessionContextReadResponse"
     }
   },
   "notifications": {
@@ -755,6 +763,10 @@
     "clientTool/terminal/release": {
       "params": "ClientToolTerminalParams",
       "result": "EmptyResponse"
+    },
+    "session/peer/restore": {
+      "params": "SessionPeerRestoreParams",
+      "result": "SessionPeerRestoreResponse"
     }
   }
 }

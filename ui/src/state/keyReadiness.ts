@@ -1,8 +1,8 @@
 /**
  * Mistral key and vault guards and recovery copy, derived from the key controller's metadata.
  * Depends on: keyStore, keyView. Called by: the shell notice, status bar and composer.
- * Invariants: one stable description per state; no secrets or I/O; a failed test blocks sending
- * until a new test succeeds. Runs without a key service keep their existing environment-key flow.
+ * Invariants: one stable description per state; no secrets or I/O; only a rejected key test blocks
+ * sending. Runs without a key service keep their existing environment-key flow.
  */
 import type { KeyUi } from "./keyStore";
 import { VAULT_LOCKED_NOTICE } from "./keyText";
@@ -93,7 +93,11 @@ export function keyReadiness(state: KeyUi): KeyReadiness | null {
     case "blocked":
       return BLOCKED;
     case "ready":
-      if (state.test.phase === "failed") return FAILED;
+      if (
+        state.test.phase === "failed" &&
+        ["unauthorized", "forbidden"].includes(state.test.reason)
+      )
+        return FAILED;
       if (state.test.phase === "running") return TESTING;
       return null;
     case "loading":

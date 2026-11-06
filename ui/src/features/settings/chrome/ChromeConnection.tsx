@@ -1,12 +1,20 @@
 /** Shared live connection control for Tools and Browser settings. The hook owns commands; only core state proves connection. */
-import { useId, type ReactElement } from "react";
+import { useId, useState, type ReactElement } from "react";
 import { Button, SettingsRow } from "../../../components/Controls";
+import { ChromeRemoveDialog } from "./ChromeDialogs";
 import { TEXT } from "../../../vocabulary";
 import { chromeAvailable, pairingStep, setupLine, stepAction, stepLabel } from "./chromeRows";
 import { useChromeControl, type ChromeControlState } from "./useChromeControl";
 
 /** One app click starts setup; Chrome keeps its own installation and pairing consent. */
-export function ChromeConnection({ chrome }: { chrome: ChromeControlState }): ReactElement {
+export function ChromeConnection({
+  chrome,
+  browser = "Chrome",
+}: {
+  chrome: ChromeControlState;
+  browser?: "Chrome" | "Edge";
+}): ReactElement {
+  const [removeOpen, setRemoveOpen] = useState(false);
   const view = chrome.view;
   const action = stepAction(view);
   const needsPair = pairingStep(view);
@@ -16,7 +24,9 @@ export function ChromeConnection({ chrome }: { chrome: ChromeControlState }): Re
         <span>
           Connection
           <span className="d" role="status" aria-live="polite">
-            {chrome.readError !== null && view === null ? "State unavailable" : setupLine(view)}
+            {chrome.readError !== null && view === null
+              ? "State unavailable"
+              : setupLine(view, browser)}
           </span>
         </span>
         {action !== null ? (
@@ -27,12 +37,14 @@ export function ChromeConnection({ chrome }: { chrome: ChromeControlState }): Re
             disabled={
               chrome.busy !== null ||
               view === null ||
-              !view.setup.package ||
-              view.setup.storeReview ||
-              view.setup.browserIssue !== undefined
+              (action !== "remove" &&
+                (!view.setup.package ||
+                  view.setup.storeReview ||
+                  view.setup.browserIssue !== undefined))
             }
             onClick={() => {
-              void chrome.connect();
+              if (action === "remove") setRemoveOpen(true);
+              else void chrome.connect();
             }}
           >
             {stepLabel(action)}
@@ -40,6 +52,13 @@ export function ChromeConnection({ chrome }: { chrome: ChromeControlState }): Re
         ) : null}
       </SettingsRow>
       {view?.setup.addon?.step ? <p className="key-line">{view.setup.addon.step}</p> : null}
+      <ChromeRemoveDialog
+        open={removeOpen}
+        chrome={chrome}
+        onClose={() => {
+          setRemoveOpen(false);
+        }}
+      />
       {needsPair && view?.setup.fingerprint ? (
         <p className="key-line" data-chrome-fingerprint="">
           Compare identity · <code>{view.setup.fingerprint}</code>

@@ -61,6 +61,12 @@ pub(super) fn copy_permit(
 
 pub(super) fn check(layout: &Layout, real: &Path, access: Access, own: &str) -> Option<String> {
     let data = layout.vibe_home.parent()?;
+    if !matches!(access, Access::Read | Access::Context) && contains(real, data) {
+        return Some(format!(
+            "Not run: this folder contains Vibe Work's own app data ({}); the agent does not read or change it. {own} Work only in your own folder.",
+            shown::shown(real)
+        ));
+    }
     if !contains(data, real) || access == Access::Read && contains(&layout.vibe_home, real) {
         return None;
     }

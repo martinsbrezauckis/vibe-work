@@ -8,6 +8,7 @@
  * the Debug API is the transport itself.
  */
 import { startDesktopLifecycle } from "../../state/desktopLifecycle";
+import { startAppAttention } from "../../state/appAttention";
 import { startRegionNavigation } from "./regionNavigation";
 import { startReplyAnnouncements } from "../transcript/replyAnnouncements";
 import { startAccessibility } from "./accessibilityWiring";
@@ -55,6 +56,7 @@ import { keyReadiness, vaultReadiness } from "../../state/keyReadiness";
 export function useShellWiring(): void {
   const app = useApp();
   useEffect(() => startDesktopLifecycle(app), [app]);
+  useEffect(() => startAppAttention(app), [app]);
   useEffect(() => startAccessibility(app), [app]);
   useEffect(startRegionNavigation, []);
   useEffect(() => {

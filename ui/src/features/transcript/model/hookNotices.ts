@@ -1,6 +1,7 @@
 /**
  * Conversation views of Vibe's structured hook notices. The session history stays untouched for
  * diagnostics; only lifecycle/no-op notices and a duplicated skipped call leave the transcript.
+ * Contract: tests/public/fixtures/hook-outcomes.json is also checked against Markdown export.
  * Depends on: entries, toolLabels. Called by: build and the hook row. Unknown notices remain visible.
  */
 import {
@@ -174,7 +175,10 @@ export function transcriptEntries(
     (entryType(entry) === "callback" &&
       entry["vwToolAsk"] !== true &&
       str(obj(obj(detailOf(entry)["effect"])?.["input"])?.["_vwReceipt"]) !== null) ||
-    obj(entry["outcome"])?.["type"] === "discarded"
+    // Vibe discards interrupted output from model context but keeps the text the person watched.
+    // Other discarded generations (for example a replaced attempt) remain hidden.
+    (obj(entry["outcome"])?.["type"] === "discarded" &&
+      !(roleOf(entry) === "assistant" && obj(entry["outcome"])?.["cause"] === "interrupt"))
       ? false
       : isHookNotice(entry)
         ? hookLine(entry, steps) !== null

@@ -1,7 +1,7 @@
 //! Browser availability and connection setup for Settings and the Debug API.
 //! Called by core dispatch; permissions come from chat access modes.
 
-use super::setup;
+use super::{PairingState, setup};
 use crate::install_offers::{OfferKey, ToolsInstallOffer};
 use crate::{CommandResult, Core, CoreError, ErrorCode, Origin};
 
@@ -139,18 +139,24 @@ pub(crate) fn view(shared: &crate::core::Shared) -> ChromeControlView {
         .pairing
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    if setup.package && setup.state != setup::SetupState::RepairRequired && !pairing.0.is_empty() {
-        setup.pairing.clone_from(&pairing.0);
+    if setup.package
+        && setup.state != setup::SetupState::RepairRequired
+        && pairing.0 != PairingState::Unknown
+    {
+        setup.pairing = pairing.0.label("Chrome");
     }
-    if setup.state == setup::SetupState::WaitingForExtension && setup.pairing == "Paired" {
+    setup.pairing_state = pairing.0;
+    if setup.state == setup::SetupState::WaitingForExtension
+        && setup.pairing_state == PairingState::Paired
+    {
         setup.state = setup::SetupState::ExtensionAdded;
     }
     if setup.package {
         setup.fingerprint.clone_from(&pairing.1);
     }
-    let pairing_text = pairing.0.clone();
+    let pairing_state = pairing.0;
     drop(pairing);
-    setup.addon = Some(addon_view(shared, &setup, &pairing_text));
+    setup.addon = Some(addon_view(shared, &setup, pairing_state));
     let left = extension_left(chrome);
     let external = chrome
         .removed_external
@@ -176,18 +182,22 @@ pub(crate) fn view(shared: &crate::core::Shared) -> ChromeControlView {
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         // Like Chrome, a broken shared helper keeps its reinstall diagnosis ahead of pairing state.
         if edge.package && edge.state != setup::SetupState::RepairRequired {
-            edge.pairing = if pairing.0.is_empty() {
+            edge.pairing = if pairing.0 == PairingState::Unknown {
                 vw_vocabulary::texts::EDGE_NOT_CONNECTED.into()
             } else {
-                pairing.0.clone()
+                pairing.0.label("Edge")
             };
             edge.fingerprint.clone_from(&pairing.1);
         }
-        if edge.state == setup::SetupState::WaitingForExtension && edge.pairing == "Paired" {
+        edge.pairing_state = pairing.0;
+        if edge.state == setup::SetupState::WaitingForExtension
+            && edge.pairing_state == PairingState::Paired
+        {
             edge.state = setup::SetupState::ExtensionAdded;
         }
         if let Some(reason) = super::edge_policy::refusal(&chrome.config) {
             edge.pairing = reason.into();
+            edge.pairing_state = PairingState::Blocked;
         }
         drop(pairing);
         edge.addon = Some(super::agent_browser::edge_addon(shared, &edge));
@@ -218,7 +228,7 @@ pub(crate) fn addon(shared: &crate::core::Shared) -> super::AddonView {
 fn addon_view(
     shared: &crate::core::Shared,
     setup: &setup::ChromeSetupView,
-    pairing: &str,
+    pairing: PairingState,
 ) -> super::AddonView {
     if setup.state == setup::SetupState::RepairRequired {
         let mut view = super::addon::view(super::AddonState::HelperSetupRequired, "");
@@ -246,7 +256,7 @@ fn addon_view(
     let installed_version = super::addon::installed_version(
         &profiles,
         &chrome.config.extension_id,
-        pairing == "Paired",
+        pairing == PairingState::Paired,
         &chrome
             .owner
             .connected_profiles
@@ -263,11 +273,15 @@ fn addon_view(
             && setup.state != setup::SetupState::Absent,
         browser_issue: setup.browser_issue,
         enabled: chrome.enabled(),
-        connected: pairing == "Paired",
+        connected: pairing == PairingState::Paired,
         store_review: setup.store_review,
-        other_owner: pairing.contains("another Vibe Work"),
-        connecting: connecting || pairing == "Connecting",
+        other_owner: pairing == PairingState::OtherOwner,
+        connecting: connecting || pairing == PairingState::Connecting,
         waiting,
+        credential_missing: chrome
+            .owner
+            .credential_missing
+            .load(std::sync::atomic::Ordering::SeqCst),
         helper_up: !chrome
             .owner
             .tools
@@ -277,10 +291,10 @@ fn addon_view(
         paired_once,
         // Only a disconnected remembered pairing needs an OS probe; live tools avoid a process per read.
         chrome_running: paired_once
-            && pairing != "Paired"
+            && pairing != PairingState::Paired
             && chrome.enabled()
             && chrome.config.launcher.is_none()
-            && super::browser::running(),
+            && super::browser::running(&chrome.config),
         install_state: setup.install_state.clone(),
         extension_folder: !profiles.is_empty(),
         installed_version,
@@ -476,7 +490,7 @@ impl Core {
         } else if edge {
             setup::open_store_for(&chrome.config, true)
         } else {
-            super::extension_install::begin(&chrome.config, state)
+            super::extension_install::begin_async(&chrome.config, state).await
         };
         // The Store opens first; a pending native handshake can then bring the pairing page forward.
         super::start_owner(&self.shared).await;
@@ -513,6 +527,10 @@ impl Core {
         let removed = setup::remove(&chrome.config, state);
         chrome.reset();
         chrome
+            .owner
+            .credential_missing
+            .store(false, std::sync::atomic::Ordering::SeqCst);
+        chrome
             .removed_external
             .store(chrome_removes_it, std::sync::atomic::Ordering::SeqCst);
         *chrome
@@ -531,23 +549,49 @@ impl Core {
         Ok(self.chrome_result(None))
     }
 
-    async fn connect_chrome(&self, origin: Origin) -> Result<CommandResult, CoreError> {
+    fn chrome_open_store(&self) -> Result<CommandResult, CoreError> {
         let chrome = &self.shared.chrome_control;
-        let _held = chrome.lifecycle.lock().await;
+        if chrome
+            .owner
+            .credential_missing
+            .load(std::sync::atomic::Ordering::SeqCst)
+        {
+            return Err(invalid(vw_vocabulary::texts::CHROME_OWNER_MISSING));
+        }
         if store_review(&self.shared) {
             return Err(invalid("Extension in review"));
         }
+        setup::open_store(&chrome.config)
+            .map_err(|reason| CoreError::new(ErrorCode::Internal, reason))?;
+        Ok(self.chrome_result(None))
+    }
+
+    async fn connect_chrome(&self, origin: Origin) -> Result<CommandResult, CoreError> {
+        let chrome = &self.shared.chrome_control;
+        let _held = chrome.lifecycle.lock().await;
+        if chrome
+            .owner
+            .credential_missing
+            .load(std::sync::atomic::Ordering::SeqCst)
+        {
+            return Err(invalid(vw_vocabulary::texts::CHROME_OWNER_MISSING));
+        }
+        if store_review(&self.shared) {
+            return Err(invalid("Extension in review"));
+        }
+        setup::packaged_helper(&chrome.config).map_err(|reason| invalid(&reason))?;
         let state = chrome
             .dir()
             .filter(|dir| dir.join("setup.json").is_file())
             .ok_or_else(|| invalid("Connect Chrome first"))?;
+        super::browser::refresh(&chrome.config).await;
         if let Some(issue) = super::browser::issue(&chrome.config) {
             return Err(invalid(issue.label()));
         }
         // Chrome may start the helper as soon as it sees the extension: give it this version's copy first.
         super::refresh_helper_held(chrome).await;
         setup::repair_registrations(&chrome.config, state, Some("Google Chrome"))
-            .map_err(|_| invalid("Helper setup required"))?;
+            .map_err(|reason| invalid(&reason))?;
         chrome
             .set_enabled(true)
             .map_err(|reason| invalid(&reason))?;
@@ -576,9 +620,16 @@ impl Core {
             .await;
             Ok(())
         } else {
-            super::extension_install::begin(&chrome.config, state)
+            super::extension_install::begin_async(&chrome.config, state).await
         };
         super::start_owner(&self.shared).await;
+        if chrome
+            .owner
+            .credential_missing
+            .load(std::sync::atomic::Ordering::SeqCst)
+        {
+            return Err(invalid(vw_vocabulary::texts::CHROME_OWNER_MISSING));
+        }
         launched.map_err(|reason| invalid(&reason))?;
         super::owner::publish(&self.shared);
         Ok(self.chrome_result(None))
@@ -619,7 +670,10 @@ impl Core {
             return Err(invalid(setup::ABSENT));
         }
         match request {
-            ChromeControlRequest::Read {} => Ok(self.chrome_result(None)),
+            ChromeControlRequest::Read {} => {
+                super::browser::refresh(&chrome.config).await;
+                Ok(self.chrome_result(None))
+            }
             ChromeControlRequest::TakeSelection { selection_id } => {
                 let mut selection = chrome
                     .selections
@@ -662,14 +716,7 @@ impl Core {
                 self.chrome_setup(origin, offer_id, false).await
             }
             ChromeControlRequest::Connect {} => self.connect_chrome(origin).await,
-            ChromeControlRequest::OpenStore {} => {
-                if store_review(&self.shared) {
-                    return Err(invalid("Extension in review"));
-                }
-                setup::open_store(&chrome.config)
-                    .map_err(|reason| CoreError::new(ErrorCode::Internal, reason))?;
-                Ok(self.chrome_result(None))
-            }
+            ChromeControlRequest::OpenStore {} => self.chrome_open_store(),
             ChromeControlRequest::OfferEdgeSetup {} => {
                 Ok(self.chrome_result(Some(self.setup_offer(true)?)))
             }

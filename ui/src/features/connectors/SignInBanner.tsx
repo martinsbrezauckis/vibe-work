@@ -70,7 +70,7 @@ export function SignInBanner(): ReactElement | null {
       {prompts.map((p) => (
         <div data-item-id={p.id} key={p.id} className="csignin-row prompt" data-prompt={p.id}>
           <b>{p.name}</b>
-          <span> needs you to sign in (a session asked).</span>
+          <span> {p.message ?? "needs you to sign in (a session asked)."}</span>
           <span className="csignin-acts">
             <Button
               data-testid="connectors.sign-in-banner-open-prompt"

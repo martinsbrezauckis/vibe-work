@@ -28,16 +28,18 @@ function IdentitySettings({ identity }: { identity: ReturnType<typeof gitIdentit
           disabled={state.busy || state.view === null}
         />
 
-        <Button
-          type="button"
-          data-testid="settings.git-identity-save"
-          variant="primary"
-          shape="outlined"
-          disabled={state.busy || state.view === null || (!empty && !validIdentity(state.draft))}
-          onClick={() => void identity.save()}
-        >
-          {state.busy ? "Saving…" : "Save"}
-        </Button>
+        <div className="set-actions">
+          <Button
+            type="button"
+            data-testid="settings.git-identity-save"
+            variant="primary"
+            shape="outlined"
+            disabled={state.busy || state.view === null || (!empty && !validIdentity(state.draft))}
+            onClick={() => void identity.save()}
+          >
+            {state.busy ? "Saving…" : "Save"}
+          </Button>
+        </div>
         {state.saved && (
           <p className="key-line" role="status">
             Saved in Vibe Work for new repositories.

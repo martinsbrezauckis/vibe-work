@@ -2,7 +2,11 @@
 //! Verifies one hold, same-thread release, refusal without retries, waits and subagents.
 
 use crate::KeepAwakeStatus as Status;
-use crate::keep_awake::{AwakeState, state_working};
+use crate::keep_awake::AwakeState;
+
+fn state_working(state: &serde_json::Value, pending: bool) -> bool {
+    vw_session::Activity::from_state(state).working(pending)
+}
 use serde_json::json;
 use std::sync::{Arc, Mutex};
 use vw_platform::keep_awake::{IdleSleepBackend, IdleSleepHold, SleepRefused};

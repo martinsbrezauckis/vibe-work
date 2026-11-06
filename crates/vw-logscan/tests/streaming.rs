@@ -12,7 +12,7 @@ use base64::{
 use vw_logscan::{Encoding, Secret, redact, scan};
 
 const CHUNK: usize = 64 * 1024;
-const TOKEN: &str = "ghp_boundaryFixture012345";
+const TOKEN: &str = "synthetic-boundary-marker";
 
 fn input() -> Vec<Secret> {
     vec![Secret::new("boundary", TOKEN.to_owned())]

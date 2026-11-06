@@ -48,13 +48,12 @@ impl Commands {
                 .as_str()
                 .or_else(|| value["id"].as_str())
                 .unwrap_or_default();
-            let call = id.strip_prefix("approval-").unwrap_or(id);
             let command = self
                 .0
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner)
                 .iter()
-                .find(|(s, c, _)| s == session && c == call)
+                .find(|(s, c, _)| s == session && crate::one_ask::callback_matches_call(id, c))
                 .map(|(_, _, text)| text.clone());
             if let Some(detail) = value.pointer_mut("/detail/effect")
                 && detail["kind"] == "file_search"
@@ -107,6 +106,13 @@ mod tests {
         commands.project(&mut card);
         assert!(card["detail"]["effect"]["vwCommand"].is_null());
         card["sessionId"] = json!("s");
+        commands.project(&mut card);
+        assert_eq!(card["detail"]["effect"]["vwCommand"], observed["command"]);
+        card["id"] = json!("approval-c-1a2b3c4d");
+        card["detail"]["effect"]
+            .as_object_mut()
+            .unwrap()
+            .remove("vwCommand");
         commands.project(&mut card);
         assert_eq!(card["detail"]["effect"]["vwCommand"], observed["command"]);
     }

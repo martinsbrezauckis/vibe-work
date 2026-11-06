@@ -37,7 +37,8 @@ impl Core {
                 )
             })?;
         if let Err(error) = self.shared.gate.register_picked_folder(&dir) {
-            self.shared.temporary.remove_scratch(&dir);
+            let record = self.shared.temporary.clone();
+            let _ = tokio::task::spawn_blocking(move || record.remove_scratch(&dir)).await;
             return Err(CoreError::from_gate("sessionTools", &error));
         }
         if !config.is_object() {

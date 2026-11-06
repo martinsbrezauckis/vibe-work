@@ -8,11 +8,14 @@ mod approval_tests;
 mod availability;
 pub(crate) mod batch;
 mod browser;
+mod browser_text;
+pub(crate) mod builtin;
 mod capabilities;
 #[cfg(test)]
 mod capability_tests;
 pub(crate) mod check;
 pub(crate) mod commands;
+mod connection_notice;
 mod content;
 #[cfg(test)]
 #[cfg(feature = "your-edge")]
@@ -45,6 +48,7 @@ mod observation_tests;
 mod output;
 mod output_batch;
 mod output_cache;
+mod output_file;
 mod output_fragment;
 #[cfg(test)]
 mod output_guard_tests;
@@ -55,6 +59,10 @@ mod output_tests;
 #[cfg(test)]
 mod output_walk_tests;
 mod owner;
+#[cfg(test)]
+mod owner_credential_tests;
+mod pairing;
+pub use pairing::PairingState;
 mod person_stop;
 #[cfg(test)]
 mod person_stop_tests;
@@ -63,6 +71,11 @@ mod probe;
 #[cfg(test)]
 mod profile_alias_tests;
 mod profile_ids;
+pub(crate) mod read_consent;
+#[cfg(test)]
+mod read_consent_tests;
+#[cfg(test)]
+mod read_output_tests;
 mod receipt;
 #[cfg(test)]
 mod receipt_tests;
@@ -77,6 +90,10 @@ mod security_tests;
 mod selection;
 #[cfg(all(test, feature = "your-edge"))]
 mod session_routing_tests;
+mod session_title;
+mod session_title_output;
+#[cfg(test)]
+mod session_title_output_tests;
 pub(crate) mod setup;
 mod store;
 mod tabs;
@@ -467,6 +484,7 @@ pub(crate) fn declarations(config: &ts_rs::Config) -> Vec<String> {
         ChromeTab::decl(config),
         ChromeSetupView::decl(config),
         setup::SetupState::decl(config),
+        PairingState::decl(config),
         browser::BrowserIssue::decl(config),
         addon::AddonView::decl(config),
         addon::AddonState::decl(config),
@@ -506,6 +524,7 @@ async fn refresh_helper_held(chrome: &ChromeControl) {
 /// Starts the installed helper without giving startup errors any secret-bearing details.
 pub(crate) async fn start_owner(shared: &std::sync::Arc<crate::core::Shared>) {
     let chrome = &shared.chrome_control;
+    browser::refresh(&chrome.config).await;
     if chrome.config.available()
         && let Some(state) = chrome.dir()
         && let Err(reason) = setup::repair_registrations(&chrome.config, state, None)

@@ -16,14 +16,10 @@ export function KeepAwakeSettings() {
       <SettingsRow data-setting="keep-awake">
         <span>
           <label htmlFor="keep-awake-switch">Keep this computer awake while Vibe is working</label>
-          <span className="d" id="keep-awake-description">
-            While a chat is working, your computer does not go to sleep on its own.
-          </span>
         </span>
         <Switch
           data-testid="settings.keep-awake-settings-enabled"
           id="keep-awake-switch"
-          aria-describedby="keep-awake-description"
           aria-checked={view?.enabled ?? true}
           disabled={view === null || pending}
           onClick={() => {

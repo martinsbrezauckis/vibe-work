@@ -1,6 +1,7 @@
 ; Vibe Work NSIS uninstall data handlers. Included by the pinned Tauri 2.10.1 template.
 ; Called after standalone GUI removal; updates, /P and /S retain all user data.
-; Invariant: tier 2 deletes only listed settings/preferences/caches. Only the
+; Program integration, including per-run video sandboxes, is removed at every standalone level.
+; Invariant: tier 2 deletes only listed settings/preferences/caches and app-managed runtimes. Only the
 ; separate tier-3 choice deletes managed sessions, browser sign-ins and the private/legacy vault.
 ; Every app-owned ancestor is checked; links/reparse points are never traversed.
 ; "Send to Vibe Work": an interactive install asks once whether to add the Explorer right-click entries (the same keys
@@ -9,6 +10,7 @@
 ; Program files: install and uninstall also delete the install-folder files earlier versions shipped and this one
 ; does not (VIBE_DELETE_RETIRED_FILES), so an update leaves no stale file and an uninstall no install folder.
 
+Var DeleteCredentialsIncomplete
 Var DeleteSessionsVaultIncomplete
 
 ; The app data folder's name (the Tauri identifier). Tauri's template includes this file before it defines
@@ -16,6 +18,10 @@ Var DeleteSessionsVaultIncomplete
 ; ${BUNDLEID} would stay literal text and the cleanup would look in a folder that does not exist
 ; A release check keeps this equal to the identifier and keeps ${BUNDLEID} out of Function bodies.
 !define VIBE_DATA_ID "app.vibework.desktop"
+!define VIBE_BROWSER_HOST "com.vibework.chrome_control"
+!define VIBE_BROWSER_EXTENSION "gnlamocfdabihichplpepjpehlbafhng"
+!define VIBE_VIDEO_PROFILE_PREFIX "app.vibework.desktop.video."
+!define VIBE_VIDEO_PROFILE_MAPPINGS "Software\Classes\Local Settings\Software\Microsoft\Windows\CurrentVersion\AppContainer\Mappings"
 
 ; Files an earlier release installed under $INSTDIR that this version no longer ships. An update installs over the
 ; old version without uninstalling it (/UPDATE) and the uninstaller deletes only its own version's files, so these
@@ -101,8 +107,28 @@ Var DeleteSessionsVaultIncomplete
   ${EndIf}
 !macroend
 
+!macro NSIS_HOOK_CLEAN_CREDENTIALS
+  StrCpy $DeleteCredentialsIncomplete 0
+  ${If} $DeleteSessionsVaultCheckboxState = 1
+  ${AndIf} $UpdateMode <> 1
+  ${AndIf} $PassiveMode <> 1
+  ${AndIfNot} ${Silent}
+    ClearErrors
+    ExecWait '"$INSTDIR\${MAINBINARYNAME}.exe" --clear-install-credentials' $0
+    ${If} ${Errors}
+    ${OrIf} $0 <> 0
+      StrCpy $DeleteCredentialsIncomplete 1
+    ${EndIf}
+  ${EndIf}
+!macroend
+
 !macro NSIS_HOOK_POSTUNINSTALL
   !insertmacro VIBE_SEND_TO_REMOVE
+  !insertmacro VIBE_BROWSER_HELPER_REMOVE
+  !insertmacro VIBE_VIDEO_PROFILES_REMOVE
+  !insertmacro VIBE_NOTIFICATION_ICON_REMOVE
+  DeleteRegKey HKCU "Software\Classes\CLSID\{E9D28628-47A6-45A7-80C2-2BDC64107A50}"
+  DeleteRegKey HKCU "Software\Classes\AppUserModelId\${BUNDLEID}"
   ${If} $UpdateMode <> 1
   ${AndIf} $PassiveMode <> 1
   ${AndIfNot} ${Silent}
@@ -112,13 +138,127 @@ Var DeleteSessionsVaultIncomplete
     ${If} $DeleteSessionsVaultCheckboxState = 1
       !insertmacro NSIS_HOOK_DELETE_SESSIONS_VAULT
     ${EndIf}
+    ${If} $DeleteAppDataCheckboxState = 1
+    ${OrIf} $DeleteSessionsVaultCheckboxState = 1
+      !insertmacro VIBE_REMOVE_EMPTY_APP_DATA "$APPDATA"
+      !insertmacro VIBE_REMOVE_EMPTY_APP_DATA "$LOCALAPPDATA"
+    ${EndIf}
   ${EndIf}
 !macroend
 
+; The notification image belongs to the removed app, not retained personal data.
+!macro VIBE_NOTIFICATION_ICON_REMOVE
+  ${If} $UpdateMode <> 1
+    !insertmacro VIBE_DELETE_DATA_PATH "$APPDATA" "${BUNDLEID}\notification-icon.png"
+    !insertmacro VIBE_DELETE_DATA_PATH "$LOCALAPPDATA" "${BUNDLEID}\notification-icon.png"
+  ${EndIf}
+!macroend
+
+; Profiles are program integration, independent of the choices to remove personal data.
+!macro VIBE_VIDEO_PROFILES_REMOVE
+  ${If} $UpdateMode <> 1
+    Call un.DeleteVideoProfiles
+  ${EndIf}
+!macroend
+
+; Snapshot owned monikers before deleting: deletion shifts the registry's enumeration indexes.
+; The API removes the profile and its storage; never delete mapping keys or follow a registry-supplied path.
+Function un.DeleteVideoProfiles
+  Push $0
+  Push $1
+  Push $2
+  Push $3
+  Push $4
+  SetRegView 64
+  StrCpy $0 0
+  StrCpy $1 0
+  video_profiles_scan:
+    ClearErrors
+    EnumRegKey $2 HKCU "${VIBE_VIDEO_PROFILE_MAPPINGS}" $0
+    IfErrors video_profiles_collected
+    StrCmp $2 "" video_profiles_collected
+    IntOp $0 $0 + 1
+    ClearErrors
+    ReadRegStr $3 HKCU "${VIBE_VIDEO_PROFILE_MAPPINGS}\$2" "Moniker"
+    IfErrors video_profiles_scan
+    StrCpy $4 $3 27
+    StrCmpS $4 "${VIBE_VIDEO_PROFILE_PREFIX}" 0 video_profiles_scan
+    Push $3
+    IntOp $1 $1 + 1
+    Goto video_profiles_scan
+  video_profiles_collected:
+    SetRegView lastused
+  video_profiles_remove:
+    IntCmp $1 0 video_profiles_done
+    Pop $3
+    IntOp $1 $1 - 1
+    System::Call 'userenv::DeleteAppContainerProfile(w r3) i.r0'
+    ${If} $0 <> 0
+      DetailPrint "Could not remove video sandbox $3 ($0)."
+    ${EndIf}
+    Goto video_profiles_remove
+  video_profiles_done:
+    Pop $4
+    Pop $3
+    Pop $2
+    Pop $1
+    Pop $0
+FunctionEnd
+
 !macro VIBE_DELETE_DATA_PATH ROOT RELATIVE
+  Push $R8
+  StrCpy $R8 0
   Push "${ROOT}"
   Push "${RELATIVE}"
   Call un.DeleteDataPath
+  Pop $R8
+!macroend
+
+!macro VIBE_REMOVE_EMPTY_DATA_PATH ROOT RELATIVE
+  Push $R8
+  StrCpy $R8 1
+  Push "${ROOT}"
+  Push "${RELATIVE}"
+  Call un.DeleteDataPath
+  Pop $R8
+!macroend
+
+; Only for app-managed runtime versions: visit children bottom-up, preserving every file.
+!macro VIBE_REMOVE_EMPTY_DATA_TREE ROOT RELATIVE
+  Push $R8
+  StrCpy $R8 2
+  Push "${ROOT}"
+  Push "${RELATIVE}"
+  Call un.DeleteDataPath
+  Pop $R8
+!macroend
+
+; Run after both choices: retained data keeps its parents, and linked ancestors are never traversed.
+!macro VIBE_REMOVE_EMPTY_APP_DATA ROOT
+  ${If} $DeleteSessionsVaultCheckboxState = 1
+    !insertmacro VIBE_REMOVE_EMPTY_DATA_PATH "${ROOT}" "${BUNDLEID}\changes\worktrees\records"
+    !insertmacro VIBE_REMOVE_EMPTY_DATA_PATH "${ROOT}" "${BUNDLEID}\changes\worktrees"
+    !insertmacro VIBE_REMOVE_EMPTY_DATA_PATH "${ROOT}" "${BUNDLEID}\changes\no-hooks"
+  ${EndIf}
+  !insertmacro VIBE_REMOVE_EMPTY_DATA_PATH "${ROOT}" "${BUNDLEID}\changes\git"
+  !insertmacro VIBE_REMOVE_EMPTY_DATA_PATH "${ROOT}" "${BUNDLEID}\changes"
+  !insertmacro VIBE_REMOVE_EMPTY_DATA_PATH "${ROOT}" "${BUNDLEID}\pages"
+  !insertmacro VIBE_REMOVE_EMPTY_DATA_PATH "${ROOT}" "${BUNDLEID}\work"
+  !insertmacro VIBE_REMOVE_EMPTY_DATA_PATH "${ROOT}" "${BUNDLEID}\preview"
+  !insertmacro VIBE_REMOVE_EMPTY_DATA_PATH "${ROOT}" "${BUNDLEID}"
+!macroend
+
+; A known filename never authorizes removing a directory that happens to use that name.
+!macro VIBE_DELETE_SENSITIVE_FILE ROOT RELATIVE
+  Push $R8
+  StrCpy $R8 3
+  Push "${ROOT}"
+  Push "${RELATIVE}"
+  Call un.DeleteDataPath
+  Pop $R8
+  ${If} $R9 <> 1
+    StrCpy $DeleteSessionsVaultIncomplete 1
+  ${EndIf}
 !macroend
 
 !macro VIBE_DELETE_SENSITIVE_PATH ROOT RELATIVE
@@ -128,11 +268,54 @@ Var DeleteSessionsVaultIncomplete
   ${EndIf}
 !macroend
 
+; Registrations are program integration, removed at every standalone level. Foreign values/children stay.
+!macro VIBE_BROWSER_HOST_REMOVE KEY
+  ReadRegStr $0 HKCU "${KEY}" ""
+  ${If} $0 == "$LOCALAPPDATA\VibeWork\ChromeControl\host\${VIBE_BROWSER_HOST}.json"
+    DeleteRegValue HKCU "${KEY}" ""
+    DeleteRegKey /ifempty HKCU "${KEY}"
+  ${EndIf}
+!macroend
+
+!macro VIBE_BROWSER_EXTENSION_REMOVE KEY
+  ReadRegStr $0 HKCU "${KEY}" "update_url"
+  ${If} $0 == "https://clients2.google.com/service/update2/crx"
+    DeleteRegValue HKCU "${KEY}" "update_url"
+    DeleteRegKey /ifempty HKCU "${KEY}"
+  ${EndIf}
+!macroend
+
+!macro VIBE_BROWSER_HELPER_REMOVE
+  ${If} $UpdateMode <> 1
+    SetShellVarContext current
+    Push $0
+    Push $1
+    ; Chrome/Edge can still hold a native host after the app exits. Only this install's copied executable qualifies.
+    nsExec::ExecToStack `"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -Command "$$helper = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'VibeWork\ChromeControl\bin\chrome-control.exe'; Get-CimInstance Win32_Process | Where-Object { $$_.ExecutablePath -eq $$helper } | ForEach-Object { $$p = Get-Process -Id $$_.ProcessId -ErrorAction SilentlyContinue; if ($$p) { Stop-Process -Id $$_.ProcessId -Force -ErrorAction SilentlyContinue; [void]$$p.WaitForExit(10000) } }"`
+    Pop $0
+    Pop $1
+    !insertmacro VIBE_BROWSER_HOST_REMOVE "Software\Google\Chrome\NativeMessagingHosts\${VIBE_BROWSER_HOST}"
+    !insertmacro VIBE_BROWSER_HOST_REMOVE "Software\Microsoft\Edge\NativeMessagingHosts\${VIBE_BROWSER_HOST}"
+    !insertmacro VIBE_BROWSER_EXTENSION_REMOVE "Software\Google\Chrome\Extensions\${VIBE_BROWSER_EXTENSION}"
+    !insertmacro VIBE_BROWSER_EXTENSION_REMOVE "Software\Microsoft\Edge\Extensions\${VIBE_BROWSER_EXTENSION}"
+    !insertmacro VIBE_DELETE_DATA_PATH "$LOCALAPPDATA" "VibeWork\ChromeControl"
+    ${If} $R9 <> 1
+      DetailPrint "Browser helper removal incomplete."
+    ${EndIf}
+    !insertmacro VIBE_REMOVE_EMPTY_DATA_PATH "$LOCALAPPDATA" "VibeWork"
+    Pop $1
+    Pop $0
+  ${EndIf}
+!macroend
+
 !macro NSIS_HOOK_DELETE_APP_DATA
   SetShellVarContext current
   Push "$APPDATA"
   Push "${BUNDLEID}"
   Call un.DeleteSettingsAndCaches
+  ; Installed runtimes belong to the app. Never follow choice.json to an existing install the person selected.
+  !insertmacro VIBE_DELETE_DATA_PATH "$APPDATA" "${BUNDLEID}\vibe"
+  !insertmacro VIBE_DELETE_DATA_PATH "$LOCALAPPDATA" "${BUNDLEID}\vibe"
   Push "$LOCALAPPDATA"
   Push "${BUNDLEID}"
   Call un.DeleteSettingsAndCaches
@@ -141,7 +324,20 @@ Var DeleteSessionsVaultIncomplete
 !macro NSIS_HOOK_DELETE_SESSIONS_VAULT
   SetShellVarContext current
   StrCpy $DeleteSessionsVaultIncomplete 0
+  !insertmacro VIBE_DELETE_SENSITIVE_FILE "$APPDATA" "${BUNDLEID}\plugin-approvals.json"
+  !insertmacro VIBE_DELETE_SENSITIVE_FILE "$LOCALAPPDATA" "${BUNDLEID}\plugin-approvals.json"
+  !insertmacro VIBE_DELETE_SENSITIVE_PATH "$APPDATA" "${BUNDLEID}\vault-settings.json"
+  !insertmacro VIBE_DELETE_SENSITIVE_PATH "$APPDATA" "${BUNDLEID}\preview\adopted-storage.json"
+  Push "$APPDATA"
+  Push "${BUNDLEID}"
+  Call un.RemoveEmptyRuntimeParents
+  !insertmacro VIBE_DELETE_SENSITIVE_PATH "$LOCALAPPDATA" "${BUNDLEID}\vault-settings.json"
+  !insertmacro VIBE_DELETE_SENSITIVE_PATH "$LOCALAPPDATA" "${BUNDLEID}\preview\adopted-storage.json"
+  Push "$LOCALAPPDATA"
+  Push "${BUNDLEID}"
+  Call un.RemoveEmptyRuntimeParents
   !insertmacro VIBE_DELETE_SENSITIVE_PATH "$APPDATA" "${BUNDLEID}\sessions"
+  !insertmacro VIBE_DELETE_SENSITIVE_PATH "$APPDATA" "${BUNDLEID}\temporary-folders"
   !insertmacro VIBE_DELETE_SENSITIVE_PATH "$APPDATA" "${BUNDLEID}\projects"
   !insertmacro VIBE_DELETE_SENSITIVE_PATH "$APPDATA" "${BUNDLEID}\changes\sessions"
   !insertmacro VIBE_DELETE_SENSITIVE_PATH "$APPDATA" "${BUNDLEID}\vibe-home"
@@ -152,7 +348,11 @@ Var DeleteSessionsVaultIncomplete
   Call un.DeleteBrowserProfiles
   !insertmacro VIBE_DELETE_SENSITIVE_PATH "$APPDATA" "${BUNDLEID}\pages-view"
   !insertmacro VIBE_DELETE_SENSITIVE_PATH "$APPDATA" "${BUNDLEID}\files-view"
+  !insertmacro VIBE_DELETE_SENSITIVE_PATH "$APPDATA" "${BUNDLEID}\EBWebView"
   !insertmacro VIBE_DELETE_SENSITIVE_PATH "$LOCALAPPDATA" "${BUNDLEID}\EBWebView"
+  ${If} $DeleteCredentialsIncomplete = 1
+    MessageBox MB_OK|MB_ICONEXCLAMATION "Vibe Work could not remove its saved credentials. Remove Vibe Work entries in Windows Credential Manager."
+  ${EndIf}
   ${If} $DeleteSessionsVaultIncomplete = 1
     MessageBox MB_OK|MB_ICONEXCLAMATION "Vibe Work could not verify complete session, browser sign-in and private vault removal. Some data may remain in Vibe Work app data or the Vibe Work Vault folder."
   ${EndIf}
@@ -286,10 +486,63 @@ Function un.DeleteSettingsAndCaches
   !insertmacro VIBE_DELETE_DATA_PATH "$0" "$6\changes\offers.json"
   !insertmacro VIBE_DELETE_DATA_PATH "$0" "$6\updates.json"
   !insertmacro VIBE_DELETE_DATA_PATH "$0" "$6\updates"
+  !insertmacro VIBE_DELETE_DATA_PATH "$0" "$6\network"
+  !insertmacro VIBE_DELETE_DATA_PATH "$0" "$6\vault-selection.json"
+  !insertmacro VIBE_DELETE_DATA_PATH "$0" "$6\.vault-selection.lock"
+  !insertmacro VIBE_DELETE_DATA_PATH "$0" "$6\agent-tools"
+  !insertmacro VIBE_DELETE_DATA_PATH "$0" "$6\debug-api"
+  !insertmacro VIBE_DELETE_DATA_PATH "$0" "$6\processes"
+  !insertmacro VIBE_DELETE_DATA_PATH "$0" "$6\shell"
+  !insertmacro VIBE_DELETE_DATA_PATH "$0" "$6\files-viewer"
+  !insertmacro VIBE_DELETE_DATA_PATH "$0" "$6\instance.json"
+  !insertmacro VIBE_DELETE_DATA_PATH "$0" "$6\instance.lock"
+  !insertmacro VIBE_DELETE_DATA_PATH "$0" "$6\preview\downloads-staging"
+  !insertmacro VIBE_DELETE_DATA_PATH "$0" "$6\preview\engine-pool.json"
+  !insertmacro VIBE_DELETE_DATA_PATH "$0" "$6\preview\wipe-pending.json"
   !insertmacro VIBE_DELETE_DATA_PATH "$0" "$6\vibe\probe"
   ; Display preferences (theme, panel widths, accessibility and notification choices) are the main window's
   ; WebView2 localStorage; only that store goes, the profile's cookies and sign-ins are tier 3.
   !insertmacro VIBE_DELETE_DATA_PATH "$0" "$6\EBWebView\Default\Local Storage"
+  Push $0
+  Push $6
+  Call un.DeleteRuntimeCaches
+  Pop $5
+  Pop $4
+  Pop $3
+  Pop $2
+  Pop $1
+  Pop $0
+  Pop $6
+FunctionEnd
+
+Function un.DeleteRuntimeCaches
+  Push $R7
+  Exch 2
+  Exch 1
+  StrCpy $R7 0
+  Call un.VisitRuntimeParents
+  Pop $R7
+FunctionEnd
+
+Function un.RemoveEmptyRuntimeParents
+  Push $R7
+  Exch 2
+  Exch 1
+  StrCpy $R7 1
+  Call un.VisitRuntimeParents
+  Pop $R7
+FunctionEnd
+
+Function un.VisitRuntimeParents
+  ; Called with the mode in R7 and the same checked data root/relative identifier as settings cleanup.
+  Exch $6
+  Exch 1
+  Exch $0
+  Push $1
+  Push $2
+  Push $3
+  Push $4
+  Push $5
   ; Managed runtime version caches only; never remove the runtime/home wholesale.
   StrCpy $3 "$0"
   System::Call 'kernel32::GetFileAttributesW(w r3) i .r4'
@@ -341,8 +594,12 @@ Function un.DeleteSettingsAndCaches
     Goto version_next
   version_done:
     StrCmp $5 1 caches_advance
-    !insertmacro VIBE_DELETE_DATA_PATH "$0" "$6\vibe\$2\cache"
-    !insertmacro VIBE_DELETE_DATA_PATH "$0" "$6\vibe\$2\dl"
+    ${If} $R7 = 1
+      !insertmacro VIBE_REMOVE_EMPTY_DATA_TREE "$0" "$6\vibe\$2"
+    ${Else}
+      !insertmacro VIBE_DELETE_DATA_PATH "$0" "$6\vibe\$2\cache"
+      !insertmacro VIBE_DELETE_DATA_PATH "$0" "$6\vibe\$2\dl"
+    ${EndIf}
   caches_advance:
     ClearErrors
     FindNext $1 $2
@@ -350,6 +607,9 @@ Function un.DeleteSettingsAndCaches
   caches_close:
     FindClose $1
   caches_done:
+  ${If} $R7 = 1
+    !insertmacro VIBE_REMOVE_EMPTY_DATA_PATH "$0" "$6\vibe"
+  ${EndIf}
   Pop $5
   Pop $4
   Pop $3
@@ -362,6 +622,8 @@ FunctionEnd
 Function un.DeleteDataPath
   ; Two inputs: OS data root, then a relative literal from the lists above.
   ; $R9 = 1 only when absence is verified; missing ancestors also prove absence.
+  ; R8 modes: 0 deletes a tree, 1 an empty folder, 2 empty descendants, 3 a file only.
+  ; All modes share the ancestor/reparse checks; macros save/restore R8.
   Exch $1
   Exch 1
   Exch $0
@@ -390,9 +652,18 @@ Function un.DeleteDataPath
     StrCpy $3 "$3$2"
     Goto data_append
   data_delete:
+    StrCmp $R8 1 data_empty
+    StrCmp $R8 3 data_file
     Push "$3"
     Call un.DeleteTreeNoReparse
     Pop $R9
+    Goto data_verify
+  data_file:
+    Delete "$3"
+    Goto data_verify
+  data_empty:
+    RMDir "$3"
+  data_verify:
     StrCpy $R9 0
     System::Call 'kernel32::GetFileAttributesW(w r3) i .r4 ?e'
     Pop $5
@@ -426,6 +697,7 @@ Function un.DeleteTreeNoReparse
   IntOp $5 $4 & 0x10
   IntCmp $5 0 tree_file tree_dir tree_dir
   tree_file:
+    StrCmp $R8 2 tree_done
     Delete "$0"
     Goto tree_done
   tree_dir:

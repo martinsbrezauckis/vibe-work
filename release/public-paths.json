@@ -11,6 +11,7 @@
     "third_party/jsdiff/",
     "third_party/tauri-runtime-wry/",
     "third_party/wry/",
+    "third_party/media/",
     "third_party/shellx-vault/",
     "docs/public/",
     "tests/public/",

@@ -3,8 +3,7 @@
  * the one-line warning when the CLI's Vibe version differs from the bundled one.
  * Depends on: AppContext, protocol/client (`cliSharing`). Called by: settings/SettingsPage (the Settings dialog is gone).
  * Invariants: the switch is ON (sharing) by default, so "keep separate" is shown as the inverse of the
- * saved `share` flag; a change applies at the next start and the row says so; the help line names the side
- * effect (Vibe writes `logs/mcp-descriptors/` and plugin packages into the shared folder); the warning
+ * saved `share` flag; a change applies at the next start and the row says so; the warning
  * shows only when both versions are known and differ; nothing is shown outside the app window.
  */
 import { Switch } from "../../components/Controls";
@@ -62,16 +61,10 @@ export function CliSharingSettings() {
       <div className="check" data-setting="cli-sharing">
         <span>
           Keep Vibe Work sessions separate from the CLI
-          <span className="d">
-            Off (default): Vibe Work and the Vibe command line share one session list. Vibe then
-            also writes its <span className="mono">logs/mcp-descriptors/</span> and plugin packages
-            into the shared folder. On: Vibe Work keeps its own sessions. Applies the next time Vibe
-            Work starts. Each choice shows a different chat list; chats in the other list are
-            hidden, not deleted, until you switch back.
-          </span>
+          <span className="d">Applies after restart</span>
           {view !== null && !view.cliHomeFound && (
             <span className="d" data-testid="cli-sharing-nohome">
-              No Vibe command line folder was found on this computer.
+              Vibe command line folder not found
             </span>
           )}
         </span>
@@ -85,9 +78,7 @@ export function CliSharingSettings() {
       </div>
       {view?.versionMismatch === true && (
         <p className="key-field-hint ui-help" role="status" data-testid="cli-version-warning">
-          Your Vibe command line is {view.cliVersion}, Vibe Work uses {view.bundledVersion}.
-          Sessions are shared, but a newer version may save them in a format the older one cannot
-          open.
+          Version mismatch: CLI {view.cliVersion} · Vibe Work {view.bundledVersion}
         </p>
       )}
     </section>

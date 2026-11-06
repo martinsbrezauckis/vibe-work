@@ -25,6 +25,7 @@ import { contextSession } from "./connectors";
 import type { CoreController } from "./coreStore";
 import { createStore } from "./createStore";
 import { createOfferFlow, isStaleOffer } from "./installOffers";
+import { watchMarket } from "./marketWatch";
 import { createPluginNotices } from "./pluginNotices";
 import type { Toasts } from "./toastStore";
 import type { Shell } from "./shellStore";
@@ -134,7 +135,7 @@ export function createMarket(deps: {
   });
 
   /** Reads the view with the context session's state. */
-  const reload = async (origin: "ui" | "debug-api"): Promise<void> => {
+  const read = async (origin: "ui" | "debug-api"): Promise<void> => {
     patch({ loading: true });
     const sessionId = contextSession(core, shell);
     const cwd = shell.store.get().newFolder;
@@ -153,6 +154,26 @@ export function createMarket(deps: {
     } finally {
       patch({ loading: false });
     }
+  };
+
+  let inFlight: Promise<void> | null = null;
+  let nextRead: { origin: "ui" | "debug-api"; allowed: () => boolean } | null = null;
+  const reload = (origin: "ui" | "debug-api", allowed = () => true): Promise<void> => {
+    if (inFlight !== null) {
+      nextRead = { origin, allowed };
+      return inFlight;
+    }
+    inFlight = (async () => {
+      await read(origin);
+      while (nextRead !== null) {
+        const next = nextRead;
+        nextRead = null;
+        if (next.allowed()) await read(next.origin);
+      }
+    })().finally(() => {
+      inFlight = null;
+    });
+    return inFlight;
   };
 
   // Install progress and outcomes arrive as events (the install runs in the core's background).
@@ -325,70 +346,12 @@ export function createMarket(deps: {
     offers: offers.store,
     actions: actions("ui"),
     debugApi: actions("debug-api"),
-    /** Discovery remains active while Tools is closed; every listener is released on unmount. */
+    /** One inventory schedule while Tools is visible; mutations refresh explicitly. */
     watch(): () => void {
-      let busy = false;
-      let queued: ReturnType<typeof setTimeout> | null = null;
-      let queuedDeadline = 0;
-      let lastRead = 0;
-      // A read asked for while another runs: the running one may have looked before the change that asked.
-      let again = false;
-      let stopped = false;
-      const read = async () => {
-        if (busy) {
-          again = true;
-          return;
-        }
-        busy = true;
-        lastRead = performance.now();
-        try {
-          await reload("ui");
-        } finally {
-          busy = false;
-          if (again && !stopped) {
-            again = false;
-            void read();
-          }
-        }
-      };
-      // Each read starts Vibe's plugin resolver (a Python process), so a working chat's stream of session
-      // changes may trigger at most one read every few seconds; navigation and Vibe restarts stay prompt.
-      const schedule = (delay = 300) => {
-        const deadline = performance.now() + delay;
-        if (queued !== null) {
-          if (deadline >= queuedDeadline) return;
-          clearTimeout(queued);
-        }
-        queuedDeadline = deadline;
-        queued = setTimeout(() => {
-          queued = null;
-          queuedDeadline = 0;
-          void read();
-        }, delay);
-      };
-      const stopShell = shell.store.subscribe(() => {
-        schedule();
-      });
-      const stopCore = core.listen((event) => {
-        if (event.type === "server") schedule();
-        else if (event.type === "change")
-          schedule(Math.max(300, CHANGE_READ_GAP_MS - (performance.now() - lastRead)));
-      });
-      const interval = setInterval(() => void read(), 15_000);
-      void read();
-      return () => {
-        stopped = true;
-        clearInterval(interval);
-        if (queued !== null) clearTimeout(queued);
-        stopShell();
-        stopCore();
-      };
+      return watchMarket(core, shell, connectors, store, (allowed) => reload("ui", allowed));
     },
   } as const;
 }
-
-/** Smallest gap between plugin reads caused by session changes (a turn emits many). */
-const CHANGE_READ_GAP_MS = 5_000;
 
 /** The marketplace controller. */
 export type Market = ReturnType<typeof createMarket>;

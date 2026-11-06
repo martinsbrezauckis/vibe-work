@@ -8,163 +8,163 @@
 import type { JsonValue } from "./index";
 
 import type { SessionSnapshot } from "./sessions";
-export type WorktreesRequest = { "op": "count", } | { "op": "options", 
+export type WorktreesRequest = { "op": "count", } | { "op": "options",
 /**
  * The folder the new session is about to start in.
  */
-cwd: string, } | { "op": "suggestName", 
+cwd: string, } | { "op": "suggestName",
 /**
  * The folder the new session is about to start in.
  */
-cwd: string, 
+cwd: string,
 /**
  * The first message (may be empty).
  */
-text: string, } | { "op": "start", 
+text: string, } | { "op": "start",
 /**
  * The session's `AgentConfig` (its `cwd` names the folder; it may not carry `worktree`).
  */
-agentConfig: JsonValue, 
+agentConfig: JsonValue,
 /**
  * The base: a local branch name, or the commit id of a detached checkout.
  */
-base: string, 
+base: string,
 /**
  * The new branch (must not exist).
  */
-branch: string, } | { "op": "info", 
+branch: string, } | { "op": "info",
 /**
  * Session id.
  */
-sessionId: string, } | { "op": "inspect", 
+sessionId: string, } | { "op": "inspect",
 /**
  * Session id.
  */
-sessionId: string, } | { "op": "remove", 
+sessionId: string, } | { "op": "remove",
 /**
  * Session id.
  */
-sessionId: string, 
+sessionId: string,
 /**
  * `fingerprint` of the inspection the user saw.
  */
 fingerprint: string, } | { "op": "orphans", };
 
-export type WorktreesResult = { "kind": "count", 
+export type WorktreesResult = { "kind": "count",
 /**
  * Number of extant linked session copies.
  */
-count: number, } | { "kind": "options", 
+count: number, } | { "kind": "options",
 /**
  * The answer.
  */
-options: WorktreeOptions, } | { "kind": "name", 
+options: WorktreeOptions, } | { "kind": "name",
 /**
  * `vibe/<slug>`.
  */
-branch: string, 
+branch: string,
 /**
  * The worktree folder name that goes with it.
  */
-folder: string, } | { "kind": "started", 
+folder: string, } | { "kind": "started",
 /**
  * The new session (as `startSession` returns it).
  */
-snapshot: SessionSnapshot, 
+snapshot: SessionSnapshot,
 /**
  * Its copy.
  */
-info: WorktreeInfo, 
+info: WorktreeInfo,
 /**
  * What `.worktreeinclude` copied into it and what it skipped (names only).
  */
-include: IncludeReport, 
+include: IncludeReport,
 /**
  * One setup line from package files in the new copy's root, for its first task.
  */
-setup: string | null, } | { "kind": "info", 
+setup: string | null, } | { "kind": "info",
 /**
  * The copy, `null` when the session works in its folder.
  */
-info: WorktreeInfo | null, } | { "kind": "inspection", 
+info: WorktreeInfo | null, } | { "kind": "inspection",
 /**
  * What a removal would lose and whether it can happen.
  */
-inspection: WorktreeInspection, } | { "kind": "removed", 
+inspection: WorktreeInspection, } | { "kind": "removed",
 /**
  * What happened.
  */
-outcome: RemoveOutcome, } | { "kind": "orphans", 
+outcome: RemoveOutcome, } | { "kind": "orphans",
 /**
  * Undecided leftovers and kept copies, oldest first.
  */
 orphans: Array<OrphanWorktree>, };
 
-export type WorktreeOptions = { 
+export type WorktreeOptions = {
 /**
  * The folder was picked natively in this run. Otherwise only an exact recorded copy is recognized.
  */
-picked: boolean, 
+picked: boolean,
 /**
  * Branch of an existing Vibe Work managed copy at this folder, when recognized.
  */
-existingBranch: string | null, 
+existingBranch: string | null,
 /**
  * The folder is inside a git working tree (false also when it was not read).
  */
-isGit: boolean, 
+isGit: boolean,
 /**
  * Root of the repository's main working tree (window only; `null` for the Debug API).
  */
-repoRoot: string | null, 
+repoRoot: string | null,
 /**
  * The folder's `HEAD`.
  */
-head: Head | null, 
+head: Head | null,
 /**
  * Local branches (base choices), the current one first. For the Debug API the names only (`commit`
  * empty).
  */
-branches: Array<BranchInfo>, 
+branches: Array<BranchInfo>,
 /**
  * A copy may be made.
  */
-offered: boolean, 
+offered: boolean,
 /**
  * Why not (plain words), when it is git but not offered.
  */
-reason: string | null, 
+reason: string | null,
 /**
  * The suggestion for an empty first message.
  */
-suggestion: string | null, 
+suggestion: string | null,
 /**
  * What a copy started now would take from `.worktreeinclude` (names only, `null` when no copy
  * is offered or the folder was not read).
  */
 include: IncludeReport | null, };
 
-export type WorktreeInfo = { 
+export type WorktreeInfo = {
 /**
  * The session.
  */
-sessionId: string, 
+sessionId: string,
 /**
  * Its branch.
  */
-branch: string, 
+branch: string,
 /**
  * The base it started from (`null` for a copy Vibe Work did not make, e.g. a fork's).
  */
-base: string | null, 
+base: string | null,
 /**
  * The copy's folder (`null` while pending, and for the Debug API).
  */
-path: string | null, 
+path: string | null,
 /**
  * Where it stands.
  */
-state: WorktreeState, 
+state: WorktreeState,
 /**
  * Vibe Work made it (a record exists).
  */
@@ -172,151 +172,151 @@ madeHere: boolean, };
 
 export type WorktreeState = "pending" | "ready" | "missing" | "removed";
 
-export type WorktreeInspection = { 
+export type WorktreeInspection = {
 /**
  * The session.
  */
-sessionId: string, 
+sessionId: string,
 /**
  * The copy's folder.
  */
-path: string | null, 
+path: string | null,
 /**
  * The folder exists.
  */
-exists: boolean, 
+exists: boolean,
 /**
  * Its branch.
  */
-branch: string | null, 
+branch: string | null,
 /**
  * The base it started from.
  */
-base: string | null, 
+base: string | null,
 /**
  * Paths whose unsaved state a removal discards (window only).
  */
-files: Array<LostFile>, 
+files: Array<LostFile>,
 /**
  * How many there are.
  */
-fileCount: number, 
+fileCount: number,
 /**
  * Commits no other branch or remote contains (window only; `<id> <subject>`).
  */
-unmerged: Array<string>, 
+unmerged: Array<string>,
 /**
  * How many there are.
  */
-unmergedTotal: number, 
+unmergedTotal: number,
 /**
  * Ignored build output that goes with the folder (counted only).
  */
-buildOutput: number, 
+buildOutput: number,
 /**
  * Stash entries made on the branch (window only; they stay in the stash list).
  */
-stashes: Array<string>, 
+stashes: Array<string>,
 /**
  * How many there are.
  */
-stashCount: number, 
+stashCount: number,
 /**
  * What happens to the branch.
  */
-branchPlan: BranchPlan, 
+branchPlan: BranchPlan,
 /**
  * Why it cannot be removed now (plain words); `null` when it can.
  */
-blocked: string | null, 
+blocked: string | null,
 /**
  * Other sessions holding it (Vibe's count), when Vibe was asked.
  */
-holders: number | null, 
+holders: number | null,
 /**
  * Names this exact state for `remove`.
  */
 fingerprint: string, };
 
-export type BranchPlan = { "kind": "deleted" } | { "kind": "kept", 
+export type BranchPlan = { "kind": "deleted" } | { "kind": "kept",
 /**
  * For the dialog.
  */
 reason: string, };
 
-export type RemoveOutcome = { 
+export type RemoveOutcome = {
 /**
  * The folder is gone.
  */
-removed: boolean, 
+removed: boolean,
 /**
  * The branch is gone.
  */
-branchDeleted: boolean, 
+branchDeleted: boolean,
 /**
  * Vibe's outcome word (`removed`, `kept_in_use`, ...).
  */
-vibeOutcome: string, 
+vibeOutcome: string,
 /**
  * Vibe's reasons when it kept the copy.
  */
 reasons: Array<string>, };
 
-export type OrphanWorktree = { 
+export type OrphanWorktree = {
 /**
  * The original session's id.
  */
-sessionId: string, 
+sessionId: string,
 /**
  * The copy's folder (window only).
  */
-path: string | null, 
+path: string | null,
 /**
  * Its branch.
  */
-branch: string, 
+branch: string,
 /**
  * Its base.
  */
-base: string, 
+base: string,
 /**
  * The repository (window only; `null` for the Debug API).
  */
-repoRoot: string | null, 
+repoRoot: string | null,
 /**
  * When the copy was made (ms since the epoch).
  */
 createdAtMs: number, };
 
-export type Head = { "kind": "branch", 
+export type Head = { "kind": "branch",
 /**
  * Short name (`main`).
  */
-name: string, } | { "kind": "detached", 
+name: string, } | { "kind": "detached",
 /**
  * The commit id.
  */
 commit: string, } | { "kind": "unborn" };
 
-export type BranchInfo = { 
+export type BranchInfo = {
 /**
  * Short name.
  */
-name: string, 
+name: string,
 /**
  * The commit it points at.
  */
-commit: string, 
+commit: string,
 /**
  * Checked out in the folder's checkout.
  */
 current: boolean, };
 
-export type LostFile = { 
+export type LostFile = {
 /**
  * Path relative to the worktree root (a folder ends in `/`).
  */
-path: string, 
+path: string,
 /**
  * What it is.
  */
@@ -326,47 +326,47 @@ export type LostKind = "added" | "modified" | "deleted" | "renamed" | "typeChang
 
 export type Decision = "kept" | "removed";
 
-export type IncludeReport = { 
+export type IncludeReport = {
 /**
  * A `.worktreeinclude` exists at the repository root.
  */
-found: boolean, 
+found: boolean,
 /**
  * Files to copy (plan) or copied (result), sorted by path.
  */
-files: Array<IncludeFile>, 
+files: Array<IncludeFile>,
 /**
  * Their total size in bytes.
  */
-bytes: number, 
+bytes: number,
 /**
  * Selected files that are not copied, with the reason (at most [`MAX_SKIPS_LISTED`] listed).
  */
-skipped: Array<IncludeSkip>, 
+skipped: Array<IncludeSkip>,
 /**
  * How many files were skipped in all.
  */
-skippedTotal: number, 
+skippedTotal: number,
 /**
  * Why the whole copy did not happen or stopped (plain words); `null` when nothing went wrong.
  */
 stopped: string | null, };
 
-export type IncludeFile = { 
+export type IncludeFile = {
 /**
  * Path relative to the repository root, `/` separated.
  */
-path: string, 
+path: string,
 /**
  * Size in bytes (at most [`MAX_BYTES`]).
  */
 size: number, };
 
-export type IncludeSkip = { 
+export type IncludeSkip = {
 /**
  * The path (relative, `/` separated; lossy text for a name that is not valid text).
  */
-path: string, 
+path: string,
 /**
  * Why.
  */

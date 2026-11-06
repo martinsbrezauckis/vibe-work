@@ -7,17 +7,17 @@
 
 export type KeepAwakeStatus = "idle" | "active" | "refused";
 
-export type KeepAwakeView = { 
+export type KeepAwakeView = {
 /**
  * Keep this computer awake while Vibe is working. On by default.
  */
-enabled: boolean, 
+enabled: boolean,
 /**
  * Current OS request status.
  */
 status: KeepAwakeStatus, };
 
-export type KeepAwakeRequest = { "op": "read", } | { "op": "write", 
+export type KeepAwakeRequest = { "op": "read", } | { "op": "write",
 /**
  * New preference.
  */

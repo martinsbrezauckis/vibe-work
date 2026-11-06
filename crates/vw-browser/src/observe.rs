@@ -84,6 +84,15 @@ pub fn verdict_with(model: &PageModel, extra: &[(String, String)]) -> Verdict {
     for f in &model.frames {
         sources.push((format!("frame {}", f.id), f.name.as_str()));
     }
+    for context in &model.choice_context {
+        sources.push(("choice terms".into(), &context.text));
+        sources.extend(
+            context
+                .headings
+                .iter()
+                .map(|heading| ("choice heading".into(), heading.as_str())),
+        );
+    }
     for (channel, text) in extra {
         sources.push((channel.clone(), text.as_str()));
     }
@@ -110,6 +119,7 @@ pub(crate) fn seen(model: &PageModel, mount: vw_preview::MountId) -> Seen {
     let ids: Vec<&str> = model.refs.iter().map(|r| r.id.as_str()).collect();
     let mut choices = json!({});
     crate::choices::include(&mut choices, model);
+    crate::choice_context::include(&mut choices, model);
     Seen {
         mount,
         snapshot: hash(&[
@@ -221,6 +231,7 @@ pub fn content(model: &PageModel, preview: bool) -> Value {
         out["unreadFrames"] = json!(model.unread_frames);
     }
     crate::choices::include(&mut out, model);
+    crate::choice_context::include(&mut out, model);
     if let Some(viewport) = viewport_for(model, &model.refs) {
         out["viewport"] = viewport;
     }
@@ -401,6 +412,7 @@ pub fn found(
         "textPageNumber": model.text_offset / PAGE_CHARS as u64,
     });
     crate::choices::include(&mut out["untrustedPageContent"], model);
+    crate::choice_context::include(&mut out["untrustedPageContent"], model);
     if let Some(viewport) = viewport_for(model, &shown) {
         out["untrustedPageContent"]["viewport"] = viewport;
     }

@@ -31,21 +31,24 @@ compile_error!(
     "the e2e-script feature is for debug test builds only; it must never be in a release build"
 );
 
+mod attention;
 mod commands;
 mod dialogs;
 mod in_front;
 mod instance;
 mod live_profile;
+mod notifications;
 #[cfg(target_os = "macos")]
 mod send_to;
+mod setup;
 mod startup;
 mod startup_market;
 mod tray;
 mod updater;
 mod window_api;
 
-use tauri::webview::{NewWindowResponse, PageLoadEvent, PermissionResponse};
-use tauri::{Manager, RunEvent, WebviewWindowBuilder};
+use tauri::webview::{PageLoadEvent, PermissionResponse};
+use tauri::{Manager, RunEvent};
 use vw_core_api::{Command, PreviewRequest};
 use vw_host::HostHandle;
 use vw_host::navigation::navigation_allowed;
@@ -227,6 +230,7 @@ fn bridge_commands() -> impl Fn(tauri::ipc::Invoke) -> bool + Send + Sync + 'sta
     tauri::generate_handler![
         commands::core_execute,
         commands::desktop_settings,
+        attention::desktop_attention,
         commands::desktop_subscribe,
         commands::app_quit,
         commands::core_subscribe,
@@ -294,71 +298,10 @@ pub fn run() -> tauri::Result<()> {
         .invoke_handler(bridge_commands())
         .on_window_event(on_window_event)
         .setup(move |app| {
-            if !instance::admit(app, hand_over)? {
-                return Ok(());
-            }
-            tray::setup(app.handle())?;
-            let live_root = live_profile::root()?;
-            let confirmer = dialogs::native_confirmer(app.handle().clone());
-            if update_checks && let Ok(data) = startup::data_dir(app.handle()) {
-                updater::start(
-                    app.handle(),
-                    &app.state::<updater::UpdatesHandle>(),
-                    data,
-                    startup::DEV_BUILD,
-                );
-            }
-            handle.start_in_background(
-                &tauri::async_runtime::handle().inner().clone(),
-                startup::host_config(app.handle(), confirmer),
-            );
-            // The window is created in code (its config has `create: false`) so that opening
-            // further windows (`window.open`, `target=_blank`) can be refused. Its config also has
-            // `dragDropEnabled: false`: Tauri's own file-drop handler took every OLE drop on Windows
-            // (the page saw no drag event, so dropping an image on the composer did nothing
-            // on Windows 11), and the app uses only the webview's HTML5 drop.
-            let Some(config) = app.config().app.windows.first() else {
-                return Err("tauri.conf.json defines no window".into());
-            };
-            // The main window grants the microphone (dictation) and nothing else; the
-            // decision is vw_host::media's. Linux also needs WebKitGTK's media stream switched on before the first
-            // document exists (vw_webview::enable_media_capture, called right after the build on this thread).
-            let mut builder = WebviewWindowBuilder::from_config(app.handle(), config)?;
-            // A development run with its own data folder keeps its web storage there too (Windows and Linux; WKWebView
-            // keeps one store per app, which the macOS test runner separates per run).
-            if live_root.is_none()
-                && let Some(dev) = startup::dev_data_override()
-            {
-                builder = builder.data_directory(dev.join("webview"));
-            }
-            let window = live_profile::window(builder, live_root)?
-                .on_new_window(|_url, _features| NewWindowResponse::Deny)
-                .on_permission_request(|_webview, kind| main_permission(&kind.to_string()))
-                .build()?;
-            vw_webview::prepare_child_views(&window)?;
-            vw_webview::enable_media_capture(&window)?;
-            if let Some(native) = app.handle().get_window("main") {
-                report_native_window_visibility(&native);
-            }
-            // Windows: a bare Alt tap put the window in menu mode, and every bridge call waited until the next key.
-            // The app has no menu bar, so the tap is ignored (Alt+Space unchanged).
-            #[cfg(windows)]
-            if let Err(error) = window
-                .hwnd()
-                .map_err(|e| e.to_string())
-                .and_then(|h| vw_platform::ignore_bare_alt(h.0 as isize))
-            {
-                tracing::warn!(%error, "the main window keeps the OS's Alt menu mode");
-            }
-            // Windows: a polite close (taskkill without /F, MainWindowHandle) of the minimized app hit tao's
-            // event-target window and cut the event loop's route; it is now passed on to this window.
-            #[cfg(windows)]
-            if let Err(error) = window
-                .hwnd()
-                .map_err(|e| e.to_string())
-                .and_then(|h| vw_platform::keep_event_target_on_close(h.0 as isize))
-            {
-                tracing::warn!(%error, "the event-target window keeps the OS's WM_CLOSE");
+            if let Err(error) = setup::start(app, &handle, hand_over, update_checks) {
+                // Tauri panics if this callback returns Err, including across AppKit's event callback.
+                vw_platform::startup_error::show(&error.to_string());
+                app.handle().exit(1);
             }
             Ok(())
         })

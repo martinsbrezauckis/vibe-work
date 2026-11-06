@@ -7,6 +7,14 @@ import json
 import sys
 from pathlib import Path
 
-root = Path(sys.argv[1]).absolute()
-result = ReadOnlyPluginResolver(plugin_dirs=[root]).resolve()  # noqa: F821 - plugin_read_guard.py is prepended by Rust.
-print(json.dumps([plugin.name for plugin in result.plugins if plugin.root == root.resolve()]))
+def names(folder):
+    root = Path(folder).absolute()
+    result = ReadOnlyPluginResolver(plugin_dirs=[root]).resolve()  # noqa: F821 - plugin_read_guard.py is prepended by Rust.
+    return [plugin.name for plugin in result.plugins if plugin.root == root.resolve()]
+
+
+# Independent resolutions keep duplicate names in different folders from shadowing each other.
+if sys.argv[1] == "--batch":
+    print(json.dumps([names(folder) for folder in sys.argv[2:]]))
+else:
+    print(json.dumps(names(sys.argv[1])))

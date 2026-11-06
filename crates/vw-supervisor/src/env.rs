@@ -27,6 +27,18 @@ pub const API_KEY_VAR: &str = "MISTRAL_API_KEY";
 /// that a Vibe CLI pointed at Vibe Work's home, whose `MISTRAL_API_KEY` is the user's real key, sends nothing.
 pub const MCP_TOKEN_VAR: &str = "VW_MCP_TOKEN";
 
+/// Unsupported experiments pinned off in both the app config and the server environment.
+pub const EXPERIMENT_CONFIG_KEYS: [&str; 8] = [
+    "experimental_enable_pr_monitoring",
+    "experimental_enable_mistral_mcp_connector",
+    "experimental_local_runtime_session_api",
+    "experimental_enable_document_library_connector",
+    "experimental_enable_model_catalog",
+    "experimental_enable_local_projects",
+    "experimental_enable_pr_discovery",
+    "experimental_enable_tab_status",
+];
+
 /// Names copied from the parent environment when present. Locale, terminal, proxy and CA settings
 /// make HTTPS and tools work; the Linux session block reaches the keyring; the Windows block is what Python and a console child need to start.
 /// Matched case-insensitively on Windows (its env names are case-insensitive).
@@ -225,6 +237,9 @@ impl SecretProvider for EnvSecretProvider {
 /// An explicit variable was refused.
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum EnvError {
+    /// Unsupported experiments cannot override the app-owned config pins.
+    #[error("refusing {0}: experimental features are disabled")]
+    Experiment(String),
     /// The name is a loader/runtime hijack variable.
     #[error("refusing to pass {0} to the server: loader/runtime hijack variable")]
     Hijack(String),
@@ -257,6 +272,9 @@ pub struct EnvPlan<'a> {
 /// [`EnvError`] when an explicit variable is refused.
 pub fn build_env(plan: &EnvPlan<'_>) -> Result<Vec<(OsString, OsString)>, EnvError> {
     for (name, value) in plan.extra {
+        if name.to_ascii_uppercase().starts_with("VIBE_EXPERIMENTAL_") {
+            return Err(EnvError::Experiment(name.clone()));
+        }
         if name.eq_ignore_ascii_case(API_KEY_VAR) || name.eq_ignore_ascii_case(MCP_TOKEN_VAR) {
             return Err(EnvError::KeyAsExtra);
         }
@@ -276,6 +294,13 @@ pub fn build_env(plan: &EnvPlan<'_>) -> Result<Vec<(OsString, OsString)>, EnvErr
     };
     for (name, value) in plan.extra {
         set(name, value.clone());
+    }
+    // Environment takes precedence over trusted project config as well as user config.
+    for key in EXPERIMENT_CONFIG_KEYS {
+        set(
+            &format!("VIBE_{}", key.to_ascii_uppercase()),
+            "false".into(),
+        );
     }
     set("VIBE_HOME", plan.vibe_home.as_os_str().to_owned());
     set(
@@ -373,5 +398,41 @@ fn same_name(a: &OsStr, b: &OsStr) -> bool {
             .eq_ignore_ascii_case(&b.to_string_lossy())
     } else {
         a == b
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn experiments_cannot_be_enabled_through_the_environment() {
+        for name in [
+            "VIBE_EXPERIMENTAL_LOCAL_RUNTIME_SESSION_API",
+            "VIBE_EXPERIMENTAL_ENABLE_MISTRAL_MCP_CONNECTOR",
+            "VIBE_EXPERIMENTAL_ENABLE_PR_MONITORING",
+        ] {
+            let extra = [(name.to_owned(), OsString::from("true"))];
+            let mut plan = EnvPlan {
+                parent: vec![(name.into(), "true".into())],
+                extra: &[],
+                vibe_home: Path::new("vibe-home"),
+                home: None,
+                key: None,
+                mcp_token: None,
+            };
+            assert!(
+                build_env(&plan)
+                    .unwrap()
+                    .iter()
+                    .any(|(key, value)| key == name && value == "false"),
+                "{name} must override trusted project config too"
+            );
+            plan.extra = &extra;
+            assert!(
+                build_env(&plan).is_err(),
+                "{name} must not override the pin"
+            );
+        }
     }
 }

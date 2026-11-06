@@ -44,6 +44,7 @@ pub(super) fn validate_public_args(args: &Value) -> Result<(), String> {
 /// Keeps the single-action/batch contract explicit while native discovery receives a flat object schema.
 pub(crate) fn validate_execute_args(args: &Value) -> Result<(), String> {
     validate_public_args(args)?;
+    super::output_file::validate(args)?;
     if args.get("steps").is_some() {
         return super::batch::steps(args).map(|_| ());
     }
@@ -55,6 +56,9 @@ pub(crate) fn validate_execute_args(args: &Value) -> Result<(), String> {
 
 fn validate_session_args(args: &Value) -> Result<(), String> {
     validate_public_args(args)?;
+    if args.get("title").is_some() {
+        return Err("Not run: Vibe Work supplies this chat's browser session title; omit title from the tool arguments.".into());
+    }
     let field = match args["action"].as_str() {
         Some("open") => "profileId",
         Some("get" | "cancel" | "stop") => "sessionId",
@@ -134,7 +138,9 @@ fn refusal(shared: &Shared, session: &str, task: &str, owner: Option<&str>) -> &
         Some((true, state)) if state == "disconnected" => {
             "Not run: this Chrome session lost its connection to Chrome."
         }
-        Some((true, _)) => "Not run: this Chrome session was stopped.",
+        Some((true, _)) => {
+            "Not run: this Chrome session was stopped; open a new one with chrome_session."
+        }
         Some((false, _)) => OTHER,
         None if chrome
             .turn_ended
@@ -169,9 +175,15 @@ pub(crate) async fn call(
     if tool == "chrome_status" {
         validate_public_args(&args)?;
         if let Some(actions) = super::status_actions::requested(&args)? {
-            return super::status_actions::call(shared, session, &actions)
-                .await
-                .map_err(|reason| browser.text(&reason));
+            return super::status_actions::call(
+                shared,
+                session,
+                &actions,
+                args["profileId"].as_str(),
+            )
+            .await
+            .inspect(|answer| super::connection_notice::refused(shared, session, browser, answer))
+            .map_err(|reason| browser.text(&reason));
         }
     }
     let requested_action = args
@@ -182,6 +194,7 @@ pub(crate) async fn call(
     call_selected(shared, session, tool, args)
         .await
         .map(|mut answer| {
+            super::connection_notice::refused(shared, session, browser, &answer);
             super::receipt::stamp(shared, tool, &output_request, &mut answer["vwMcpResult"]);
             if tool == "chrome_status" {
                 let addons = super::installation::addons(shared);
@@ -291,8 +304,10 @@ fn local_reply(
     session: &str,
     tool: &str,
     args: &Value,
+    consent: Option<&super::read_consent::ReadConsent>,
 ) -> Result<Option<Value>, String> {
     validate_public_args(args)?;
+    super::output_file::validate(args)?;
     if tool == "chrome_execute"
         && let Some(action) = args["action"].as_str()
         && let Some(answer) = super::output_status::unknown_action(action)
@@ -311,7 +326,7 @@ fn local_reply(
     if let Some(refusal) = super::availability::refusal(shared, browser, true) {
         return Ok(Some(refusal));
     }
-    super::check::authorize(shared, session, tool, args)?;
+    super::check::authorize_read(shared, session, tool, args, consent)?;
     if let Err(reason) = validate_session(shared, session, tool, args) {
         return lease_refusal(
             shared,
@@ -336,7 +351,7 @@ pub(super) async fn call_one(
     args: Value,
 ) -> Result<Value, String> {
     let request = args.clone();
-    let mut answer = call_one_inner(shared, session, tool, args).await?;
+    let mut answer = call_one_inner(shared, session, tool, args, None).await?;
     super::receipt::stamp(shared, tool, &request, &mut answer["vwMcpResult"]);
     if tool != "chrome_status" {
         super::output::guard(&mut answer["vwMcpResult"]);
@@ -344,13 +359,14 @@ pub(super) async fn call_one(
     Ok(answer)
 }
 
-async fn call_one_inner(
+pub(super) async fn call_one_inner(
     shared: &Arc<Shared>,
     session: &str,
     tool: &str,
     mut args: Value,
+    consent: Option<&super::read_consent::ReadConsent>,
 ) -> Result<Value, String> {
-    if let Some(reply) = local_reply(shared, session, tool, &args)? {
+    if let Some(reply) = local_reply(shared, session, tool, &args, consent)? {
         return Ok(reply);
     }
     let browser = agent_browser::selected(shared, session, tool, &args);
@@ -363,7 +379,7 @@ async fn call_one_inner(
         }
         // Waiting for a native port grants no authority: mode and the person's Stop are checked again.
         super::reconnect::stopped(shared, session, browser)?;
-        super::check::authorize(shared, session, tool, &args)?;
+        super::check::authorize_read(shared, session, tool, &args, consent)?;
     }
     let mut live = super::availability::live(shared, browser);
     if let Err(reason) = validate_session(shared, session, tool, &args) {
@@ -378,17 +394,23 @@ async fn call_one_inner(
             Err(reason) => return lease_refusal(shared, browser, live, reason),
         }
     }
-    if let Some(refusal) = super::availability::gate(shared, browser, live) {
+    // A status read can discover the reconnect itself. The local switch/version checks above still apply.
+    if !(tool == "chrome_status" && browser.was_paired(shared))
+        && let Some(refusal) = super::availability::gate(shared, browser, live)
+    {
         return Ok(refusal);
     }
     if tool == "chrome_execute" {
         super::observation_support::require(shared, &args).await?;
         super::reconnect::stopped(shared, session, browser)?;
-        super::check::authorize(shared, session, tool, &args)?;
+        super::check::authorize_read(shared, session, tool, &args, consent)?;
         validate_session(shared, session, tool, &args)?;
     }
     let request = tool == "chrome_session" && args["action"] == "open";
     if request {
+        super::session_title::apply(shared, session, &mut args).await?;
+        super::reconnect::stopped(shared, session, browser)?;
+        super::check::authorize_read(shared, session, tool, &args, consent)?;
         args["_clientSessionId"] = json!(session);
         if let Ok(folders) = crate::agent_tools::session::folders(shared, session)
             && let Some(folder) = folders.first()
@@ -397,9 +419,13 @@ async fn call_one_inner(
         }
     }
     let pending = super::person_stop::PendingCall::new(shared, session, tool, &args);
+    if super::output_file::requested(&args) {
+        super::output_file::folder(shared, session)?;
+    }
     let clamped = super::output::clamp_request(tool, &mut args);
     let output_request = args.clone();
-    let mut answer = super::login::send(shared, session, tool, args)
+    args.as_object_mut().map(|args| args.remove("saveTo"));
+    let mut answer = super::read_consent::send(shared, session, tool, args, consent)
         .await
         .map_err(|reason| pending.refusal(shared, session, browser).unwrap_or(reason))?;
     if request {
@@ -422,28 +448,8 @@ async fn call_one_inner(
         answer.value_mut(),
     );
     super::check::annotate_modes(shared, session, tool, answer.value_mut());
-    // If the connection changed during the call, report the card's current diagnosis too; never for an unknown
-    // outcome (the connection ended mid-call): the action may have run, so it must not read as not run.
-    let error = &answer.value()["structuredContent"]["error"];
-    let reconnecting = browser.reconnectable(shared)
-        && browser.addon(shared).state == super::AddonState::Connecting;
-    if answer.value()["structuredContent"]["status"] != "unknown"
-        && ((reconnecting && error["code"] == "PROFILE_NOT_CONNECTED")
-            || (request && browser.reconnectable(shared) && error["code"] == "SESSION_NOT_READY"))
-    {
-        return Ok(super::reconnect::pending(browser));
-    }
-    if !error.is_null()
-        && !reconnecting
-        && error["code"] != "TRANSPORT_LOST"
-        && answer.value()["structuredContent"]["status"] != "unknown"
-        && let Some(refusal) = super::availability::refusal(
-            shared,
-            browser,
-            super::availability::live(shared, browser),
-        )
-    {
-        return Ok(refusal);
+    if let Some(reply) = super::availability::after_call(shared, browser, tool, request, &answer) {
+        return Ok(reply);
     }
     Ok(super::output_cache::for_model(
         shared,

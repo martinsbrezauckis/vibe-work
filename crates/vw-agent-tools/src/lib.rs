@@ -26,11 +26,12 @@
 //!   argv, a log line or an error text.
 //! - Nothing here decides ownership: the core does, from the process monitor (vw-procmon).
 
-#[cfg(all(not(debug_assertions), any(feature = "feedback", feature = "video")))]
-compile_error!("feedback and video tools are not available in release builds");
+#[cfg(all(not(debug_assertions), feature = "feedback"))]
+compile_error!("feedback tools are not available in release builds");
 
 pub mod agent_env;
 pub mod browser_input;
+mod chrome_output;
 mod chrome_specs;
 pub mod cli;
 mod command_segments;
@@ -70,7 +71,7 @@ pub fn version() -> &'static str {
 /// The typed browser tools forwarded by the core after checking the current chat mode.
 #[must_use]
 pub fn chrome_tool_list() -> Vec<serde_json::Value> {
-    chrome_specs::tool_list()
+    chrome_output::catalog()
 }
 
 pub mod video;

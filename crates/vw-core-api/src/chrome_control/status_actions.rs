@@ -9,10 +9,14 @@ pub(super) fn requested(args: &Value) -> Result<Option<Vec<String>>, String> {
         return Ok(None);
     };
     let invalid = || {
-        "Not run: chrome_status takes action or 1..8 unique actions, without other arguments."
+        "Not run: chrome_status takes action or 1..8 unique actions, with an optional profileId."
             .to_owned()
     };
-    if args.as_object().is_none_or(|m| m.len() != 1) {
+    if args.as_object().is_none_or(|m| {
+        m.keys()
+            .any(|key| !["actions", "profileId"].contains(&key.as_str()))
+    }) || args.get("profileId").is_some_and(|id| !id.is_string())
+    {
         return Err(invalid());
     }
     let rows = actions
@@ -59,16 +63,19 @@ pub(super) async fn call(
     shared: &Arc<Shared>,
     chat: &str,
     actions: &[String],
+    profile: Option<&str>,
 ) -> Result<Value, String> {
     let mut rows = Vec::new();
     let mut first = None;
     let mut more_options = None;
     for action in actions {
-        let mut answer =
-            super::gateway::call_selected(shared, chat, "chrome_status", json!({"action":action}))
-                .await?;
+        let mut args = json!({"action":action});
+        if let Some(profile) = profile {
+            args["profileId"] = json!(profile);
+        }
+        let mut answer = super::gateway::call_selected(shared, chat, "chrome_status", args).await?;
         let result = &mut answer["vwMcpResult"];
-        if result["isError"] == true {
+        if result["isError"] == true || result["structuredContent"].get("error").is_some() {
             return Ok(answer);
         }
         super::output_status::compact(shared, chat, Some(action), result);

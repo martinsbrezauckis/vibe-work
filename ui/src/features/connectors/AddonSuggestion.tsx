@@ -19,7 +19,9 @@ function BrowserSuggestion({ addon, reason }: { addon: "chrome" | "edge"; reason
       <span>
         <b>{edge ? TEXT.edgeName : TEXT.chromeName}</b> · {reason}
       </span>
-      {edge ? (
+      {edge &&
+      chrome.view?.setup.browserIssue === undefined &&
+      chrome.view?.setup.addon?.action !== "remove" ? (
         <SettingsRow>
           <span>
             Connection
@@ -38,7 +40,7 @@ function BrowserSuggestion({ addon, reason }: { addon: "chrome" | "edge"; reason
           </Button>
         </SettingsRow>
       ) : (
-        <ChromeConnection chrome={chrome} />
+        <ChromeConnection chrome={chrome} browser={edge ? "Edge" : "Chrome"} />
       )}
     </div>
   );

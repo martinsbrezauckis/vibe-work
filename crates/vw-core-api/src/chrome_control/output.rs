@@ -39,6 +39,16 @@ pub(super) fn clamp_request(tool: &str, args: &mut Value) -> bool {
     if tool != "chrome_execute" || args["action"] != "page.read" {
         return false;
     }
+    if super::output_file::requested(args) {
+        return false;
+    }
+    if args["args"].get("cursor").is_none()
+        && let Some(fields) = args["args"].as_object_mut()
+    {
+        // A text-size request must not implicitly enlarge the helper's byte budget.
+        fields.entry("maxBytes").or_insert(json!(2000));
+        fields.entry("limit").or_insert(json!(8));
+    }
     let mut clamped = false;
     for key in ["maxChars", "maxBytes"] {
         if args["args"][key].as_u64().is_some_and(|n| n > LIMIT as u64) {

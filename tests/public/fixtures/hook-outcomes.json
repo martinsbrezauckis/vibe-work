@@ -1,0 +1,703 @@
+[
+  {
+    "name": "wrapped denial",
+    "history": [
+      {
+        "id": "hook",
+        "type": "notice",
+        "message": "Hook completed",
+        "detail": {
+          "kind": "hook_completed",
+          "hookName": "guard",
+          "status": "error",
+          "scope": "pre_tool",
+          "content": "Denied tool 'bash'",
+          "toolCallId": "call"
+        }
+      },
+      {
+        "id": "call",
+        "type": "effect",
+        "detail": {
+          "toolName": "bash",
+          "input": {
+            "command": "git push"
+          }
+        },
+        "state": {
+          "status": "skipped",
+          "reason": "<tool_error>Tool 'bash' was denied by hook 'guard': Not run: remote writes need your approval. Use Push in Vibe Work.</tool_error>"
+        }
+      }
+    ],
+    "lines": [
+      {
+        "id": "hook",
+        "text": "Not run: remote writes need your approval. Use Push in Vibe Work."
+      }
+    ],
+    "effects": []
+  },
+  {
+    "name": "plain placeholder denial",
+    "history": [
+      {
+        "id": "hook",
+        "type": "notice",
+        "message": "Hook completed",
+        "detail": {
+          "kind": "hook_completed",
+          "hookName": "guard",
+          "status": "error",
+          "scope": "pre_tool",
+          "content": "Denied tool 'bash'",
+          "toolCallId": "call"
+        }
+      },
+      {
+        "id": "effect-call",
+        "type": "effect",
+        "detail": {
+          "toolName": "tool"
+        },
+        "state": {
+          "status": "skipped",
+          "reason": "Not run: remote writes need your approval. Use Push in Vibe Work."
+        }
+      }
+    ],
+    "lines": [
+      {
+        "id": "hook",
+        "text": "Not run: remote writes need your approval. Use Push in Vibe Work."
+      }
+    ],
+    "effects": []
+  },
+  {
+    "name": "ordered denials",
+    "history": [
+      {
+        "id": "first",
+        "type": "notice",
+        "message": "Hook completed",
+        "detail": {
+          "kind": "hook_completed",
+          "hookName": "guard",
+          "status": "error",
+          "scope": "pre_tool",
+          "content": "Denied tool 'bash'",
+          "toolCallId": "a"
+        }
+      },
+      {
+        "id": "second",
+        "type": "notice",
+        "message": "Hook completed",
+        "detail": {
+          "kind": "hook_completed",
+          "hookName": "guard",
+          "status": "error",
+          "scope": "pre_tool",
+          "content": "Denied tool 'bash'",
+          "toolCallId": "b"
+        }
+      },
+      {
+        "id": "effect-a",
+        "type": "effect",
+        "detail": {
+          "toolName": "tool"
+        },
+        "state": {
+          "status": "skipped",
+          "reason": "Reason A. Try A."
+        }
+      },
+      {
+        "id": "effect-b",
+        "type": "effect",
+        "detail": {
+          "toolName": "tool"
+        },
+        "state": {
+          "status": "skipped",
+          "reason": "Reason B. Try B."
+        }
+      }
+    ],
+    "lines": [
+      {
+        "id": "first",
+        "text": "Reason A. Try A."
+      },
+      {
+        "id": "second",
+        "text": "Reason B. Try B."
+      }
+    ],
+    "effects": []
+  },
+  {
+    "name": "user boundary",
+    "history": [
+      {
+        "id": "hook",
+        "type": "notice",
+        "message": "Hook completed",
+        "detail": {
+          "kind": "hook_completed",
+          "hookName": "guard",
+          "status": "error",
+          "scope": "pre_tool",
+          "content": "Denied tool 'bash'",
+          "toolCallId": "call"
+        }
+      },
+      {
+        "id": "you",
+        "type": "message",
+        "role": "user",
+        "content": [
+          {
+            "type": "text",
+            "text": "next"
+          }
+        ]
+      },
+      {
+        "id": "effect-call",
+        "type": "effect",
+        "detail": {
+          "toolName": "tool"
+        },
+        "state": {
+          "status": "skipped",
+          "reason": "Not run: remote writes need your approval. Use Push in Vibe Work."
+        }
+      }
+    ],
+    "lines": [
+      {
+        "id": "hook",
+        "text": "Not run: guard refused running commands."
+      }
+    ],
+    "effects": [
+      "effect-call"
+    ]
+  },
+  {
+    "name": "orphan placeholder",
+    "history": [
+      {
+        "id": "effect-call",
+        "type": "effect",
+        "detail": {
+          "toolName": "tool"
+        },
+        "state": {
+          "status": "skipped",
+          "reason": "Not run: remote writes need your approval. Use Push in Vibe Work."
+        }
+      }
+    ],
+    "lines": [],
+    "effects": [
+      "effect-call"
+    ]
+  },
+  {
+    "name": "allowed note bookkeeping",
+    "history": [
+      {
+        "id": "hook",
+        "type": "notice",
+        "message": "Hook completed",
+        "detail": {
+          "kind": "hook_completed",
+          "hookName": "vibe-work allowed note",
+          "status": "warning",
+          "scope": "post_tool",
+          "content": "Appended 42 chars to tool result",
+          "toolCallId": "call"
+        }
+      }
+    ],
+    "lines": [],
+    "effects": []
+  },
+  {
+    "name": "failed allowed note stays visible",
+    "history": [
+      {
+        "id": "hook",
+        "type": "notice",
+        "message": "Hook completed",
+        "detail": {
+          "kind": "hook_completed",
+          "hookName": "vibe-work allowed note",
+          "status": "error",
+          "scope": "post_tool",
+          "content": "Could not append the decision",
+          "toolCallId": "call"
+        }
+      }
+    ],
+    "lines": [
+      {
+        "id": "hook",
+        "text": "vibe-work allowed note: Could not append the decision"
+      }
+    ],
+    "effects": []
+  },
+  {
+    "name": "receipt and folder bookkeeping",
+    "history": [
+      {
+        "id": "receipt",
+        "type": "notice",
+        "message": "Hook completed",
+        "detail": {
+          "kind": "hook_completed",
+          "hookName": "vibe-work tool receipt",
+          "status": "ok",
+          "scope": "pre_tool",
+          "content": "bound",
+          "toolCallId": "call"
+        }
+      },
+      {
+        "id": "rewrite",
+        "type": "notice",
+        "message": "Hook completed",
+        "detail": {
+          "kind": "hook_completed",
+          "hookName": "vibe-work folder guard",
+          "status": "warning",
+          "scope": "pre_tool",
+          "content": "Rewrote tool_input for 'bash'",
+          "toolCallId": "call"
+        }
+      }
+    ],
+    "lines": [],
+    "effects": []
+  },
+  {
+    "name": "warning followed by invalid rewrite denial",
+    "history": [
+      {
+        "id": "hook",
+        "type": "notice",
+        "message": "Hook completed",
+        "detail": {
+          "kind": "hook_completed",
+          "hookName": "guard",
+          "status": "warning",
+          "scope": "pre_tool",
+          "content": "Rewrote tool_input",
+          "toolCallId": "call"
+        }
+      },
+      {
+        "id": "call",
+        "type": "effect",
+        "detail": {
+          "toolName": "bash",
+          "input": {
+            "command": "git push"
+          }
+        },
+        "state": {
+          "status": "skipped",
+          "reason": "<tool_error>Tool 'bash' was denied by hook 'guard': Not run: remote writes need your approval. Use Push in Vibe Work.</tool_error>"
+        }
+      }
+    ],
+    "lines": [
+      {
+        "id": "hook",
+        "text": "Not run: remote writes need your approval. Use Push in Vibe Work."
+      }
+    ],
+    "effects": []
+  },
+  {
+    "name": "strict hook failure",
+    "history": [
+      {
+        "id": "hook",
+        "type": "notice",
+        "message": "Hook completed",
+        "detail": {
+          "kind": "hook_completed",
+          "hookName": "guard",
+          "status": "error",
+          "scope": "pre_tool",
+          "content": "Denied tool 'bash' (strict)",
+          "toolCallId": "call"
+        }
+      },
+      {
+        "id": "effect-call",
+        "type": "effect",
+        "detail": {
+          "toolName": "tool"
+        },
+        "state": {
+          "status": "skipped",
+          "reason": "invalid response: stdout was not JSON"
+        }
+      }
+    ],
+    "lines": [
+      {
+        "id": "hook",
+        "text": "guard failed; the call was not run."
+      }
+    ],
+    "effects": []
+  },
+  {
+    "name": "post tool failure keeps completed step",
+    "history": [
+      {
+        "id": "run",
+        "type": "effect",
+        "detail": {
+          "toolName": "bash",
+          "input": {
+            "command": "ls"
+          }
+        },
+        "state": {
+          "status": "completed"
+        }
+      },
+      {
+        "id": "hook",
+        "type": "notice",
+        "message": "Hook completed",
+        "detail": {
+          "kind": "hook_completed",
+          "hookName": "guard",
+          "status": "error",
+          "scope": "post_tool",
+          "content": "Hook timed out",
+          "toolCallId": "call"
+        }
+      }
+    ],
+    "lines": [
+      {
+        "id": "hook",
+        "text": "guard: Hook timed out"
+      }
+    ],
+    "effects": [
+      "run"
+    ]
+  },
+  {
+    "name": "unfamiliar warning stays visible",
+    "history": [
+      {
+        "id": "hook",
+        "type": "notice",
+        "message": "Hook completed",
+        "detail": {
+          "kind": "hook_completed",
+          "hookName": "guard",
+          "status": "warning",
+          "scope": "pre_tool",
+          "content": "Folder changed",
+          "toolCallId": "call"
+        }
+      }
+    ],
+    "lines": [
+      {
+        "id": "hook",
+        "text": "guard: Folder changed"
+      }
+    ],
+    "effects": []
+  },
+  {
+    "name": "lifecycle and noop",
+    "history": [
+      {
+        "id": "start",
+        "type": "notice",
+        "detail": {
+          "kind": "hook_run_started"
+        }
+      },
+      {
+        "id": "hook",
+        "type": "notice",
+        "message": "Hook completed",
+        "detail": {
+          "kind": "hook_completed",
+          "hookName": "guard",
+          "status": "ok",
+          "scope": "pre_tool",
+          "content": "",
+          "toolCallId": "call"
+        }
+      }
+    ],
+    "lines": [],
+    "effects": []
+  },
+  {
+    "name": "denial without a skipped effect",
+    "history": [
+      {
+        "id": "hook",
+        "type": "notice",
+        "message": "Hook completed",
+        "detail": {
+          "kind": "hook_completed",
+          "hookName": "guard",
+          "status": "error",
+          "scope": "pre_tool",
+          "content": "Denied tool 'bash'",
+          "toolCallId": "call",
+          "toolName": "file_system.bash"
+        }
+      }
+    ],
+    "lines": [
+      {
+        "id": "hook",
+        "text": "Not run: guard refused running commands."
+      }
+    ],
+    "effects": []
+  },
+  {
+    "name": "unknown tool refusal",
+    "history": [
+      {
+        "id": "hook",
+        "type": "notice",
+        "message": "Hook completed",
+        "detail": {
+          "kind": "hook_completed",
+          "hookName": "guard",
+          "status": "error",
+          "scope": "pre_tool",
+          "content": "Denied tool 'custom.exec'",
+          "toolCallId": "call",
+          "toolName": "custom.exec"
+        }
+      }
+    ],
+    "lines": [
+      {
+        "id": "hook",
+        "text": "Not run: guard refused the call."
+      }
+    ],
+    "effects": []
+  },
+  {
+    "name": "unmatched named skip",
+    "history": [
+      {
+        "id": "hook",
+        "type": "notice",
+        "message": "Hook completed",
+        "detail": {
+          "kind": "hook_completed",
+          "hookName": "guard",
+          "status": "error",
+          "scope": "pre_tool",
+          "content": "Denied tool 'bash'",
+          "toolCallId": "call"
+        }
+      },
+      {
+        "id": "other",
+        "type": "effect",
+        "detail": {
+          "toolName": "bash",
+          "input": {}
+        },
+        "state": {
+          "status": "skipped",
+          "reason": "User declined"
+        }
+      }
+    ],
+    "lines": [
+      {
+        "id": "hook",
+        "text": "Not run: guard refused running commands."
+      }
+    ],
+    "effects": [
+      "other"
+    ]
+  },
+  {
+    "name": "fallback for mcp_vw.process_start",
+    "history": [
+      {
+        "id": "hook",
+        "type": "notice",
+        "message": "Hook completed",
+        "detail": {
+          "kind": "hook_completed",
+          "hookName": "guard",
+          "status": "error",
+          "scope": "pre_tool",
+          "content": "Denied tool 'mcp_vw.process_start'",
+          "toolCallId": "call",
+          "toolName": "mcp_vw.process_start"
+        }
+      }
+    ],
+    "lines": [
+      {
+        "id": "hook",
+        "text": "Not run: guard refused this action."
+      }
+    ],
+    "effects": []
+  },
+  {
+    "name": "fallback for mcp_vw.future_tool",
+    "history": [
+      {
+        "id": "hook",
+        "type": "notice",
+        "message": "Hook completed",
+        "detail": {
+          "kind": "hook_completed",
+          "hookName": "guard",
+          "status": "error",
+          "scope": "pre_tool",
+          "content": "Denied tool 'mcp_vw.future_tool'",
+          "toolCallId": "call",
+          "toolName": "mcp_vw.future_tool"
+        }
+      }
+    ],
+    "lines": [
+      {
+        "id": "hook",
+        "text": "Not run: guard refused the call."
+      }
+    ],
+    "effects": []
+  },
+  {
+    "name": "fallback for file_system.write_file",
+    "history": [
+      {
+        "id": "hook",
+        "type": "notice",
+        "message": "Hook completed",
+        "detail": {
+          "kind": "hook_completed",
+          "hookName": "guard",
+          "status": "error",
+          "scope": "pre_tool",
+          "content": "Denied tool 'file_system.write_file'",
+          "toolCallId": "call",
+          "toolName": "file_system.write_file"
+        }
+      }
+    ],
+    "lines": [
+      {
+        "id": "hook",
+        "text": "Not run: guard refused creating and changing files."
+      }
+    ],
+    "effects": []
+  },
+  {
+    "name": "fallback for ui.read_file",
+    "history": [
+      {
+        "id": "hook",
+        "type": "notice",
+        "message": "Hook completed",
+        "detail": {
+          "kind": "hook_completed",
+          "hookName": "guard",
+          "status": "error",
+          "scope": "pre_tool",
+          "content": "Denied tool 'ui.read_file'",
+          "toolCallId": "call",
+          "toolName": "ui.read_file"
+        }
+      }
+    ],
+    "lines": [
+      {
+        "id": "hook",
+        "text": "Not run: guard refused reading files."
+      }
+    ],
+    "effects": []
+  },
+  {
+    "name": "multiple notices for one call",
+    "history": [
+      {
+        "id": "h1",
+        "type": "notice",
+        "message": "Hook completed",
+        "detail": {
+          "kind": "hook_completed",
+          "hookName": "guard-one",
+          "status": "error",
+          "scope": "pre_tool",
+          "content": "Denied tool 'bash'",
+          "toolCallId": "call"
+        }
+      },
+      {
+        "id": "h2",
+        "type": "notice",
+        "message": "Hook completed",
+        "detail": {
+          "kind": "hook_completed",
+          "hookName": "guard-two",
+          "status": "error",
+          "scope": "pre_tool",
+          "content": "Denied tool 'bash'",
+          "toolCallId": "call"
+        }
+      },
+      {
+        "id": "effect-call",
+        "type": "effect",
+        "detail": {
+          "toolName": "tool"
+        },
+        "state": {
+          "status": "skipped",
+          "reason": "Not run: remote writes need your approval. Use Push in Vibe Work."
+        }
+      }
+    ],
+    "lines": [
+      {
+        "id": "h1",
+        "text": "Not run: remote writes need your approval. Use Push in Vibe Work."
+      },
+      {
+        "id": "h2",
+        "text": "Not run: remote writes need your approval. Use Push in Vibe Work."
+      }
+    ],
+    "effects": []
+  }
+]

@@ -10,9 +10,19 @@ pub(super) async fn send(
     shared: &Arc<Shared>,
     session: &str,
     tool: &str,
-    mut args: Value,
+    args: Value,
 ) -> Result<owner::Answer, String> {
-    let mut tier = super::check::authorize(shared, session, tool, &args)?;
+    send_read(shared, session, tool, args, None).await
+}
+
+pub(super) async fn send_read(
+    shared: &Arc<Shared>,
+    session: &str,
+    tool: &str,
+    mut args: Value,
+    consent: Option<&super::read_consent::ReadConsent>,
+) -> Result<owner::Answer, String> {
+    let mut tier = super::check::authorize_read(shared, session, tool, &args, consent)?;
     let sensitive = tool == "chrome_execute"
         && super::capabilities::gated(args["action"].as_str().unwrap_or_default());
     if tool == "chrome_execute" {
@@ -25,19 +35,25 @@ pub(super) async fn send(
                 .filter(|cap| extended || !super::capabilities::PERMISSIONS.contains(cap))
                 .collect::<Vec<_>>()
         );
+        if consent.is_some() && super::read_consent::personal_read(tool, &args) {
+            let action = args["action"].clone();
+            if let Some(capabilities) = args["_approvedCapabilities"].as_array_mut() {
+                capabilities.push(action);
+            }
+        }
         // The agent's network rule: a url argument is checked now, everything else in Chrome (network.rs).
         super::network::prepare(shared, session, &mut args).await?;
     }
     // DNS and port discovery can wait: captured permissions never outlive the live chat mode.
     if sensitive {
-        tier = super::check::authorize(shared, session, tool, &args)?;
+        tier = super::check::authorize_read(shared, session, tool, &args, consent)?;
         super::gateway::validate_session(shared, session, tool, &args)?;
         args["_approvedCapabilities"] = json!(super::mapping::capabilities(tier));
     }
     let checked = args.clone();
     let answer = shared.chrome_control.owner.call(tool, args).await;
     if sensitive {
-        super::check::authorize(shared, session, tool, &checked)?;
+        super::check::authorize_read(shared, session, tool, &checked, consent)?;
         super::gateway::validate_session(shared, session, tool, &checked)?;
     }
     if let owner::Answer::Helper(result) = &answer

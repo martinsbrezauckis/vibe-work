@@ -53,15 +53,16 @@ async fn disabled_feedback_refuses_every_entry_point() {
     core.shutdown().await;
 }
 
-#[cfg(not(feature = "video"))]
 #[test]
-fn disabled_video_is_absent_from_agent_commands() {
+fn video_frames_is_listed_only_on_supported_platforms() {
     let tools = vw_agent_tools::mcp::tool_list();
-    assert!(
-        !tools
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|tool| tool["name"] == "video_frames")
+    let listed = tools
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|tool| tool["name"] == "video_frames");
+    assert_eq!(
+        listed,
+        cfg!(all(feature = "video", any(windows, target_os = "macos")))
     );
 }

@@ -101,6 +101,9 @@ async fn agent_stop_then_open(profile: &str) {
     .unwrap();
     let weak = Arc::downgrade(shared);
     shared.chrome_control.owner.answering(move |tool, args| {
+            if tool == "chrome_status" {
+                return json!({"structuredContent":{}});
+            }
             assert_eq!(tool, "chrome_session");
             if args["action"] == "stop" {
                 let shared = weak.upgrade().unwrap();

@@ -121,8 +121,7 @@ pub(crate) enum Pre {
 }
 
 impl Hooks {
-    /// Reports a refused sub-request of mount `label` to the security bell, except the engine's own favicon request
-    /// of a canary page (Vibe Work's check traffic, refused all the same: never the page's refusal).
+    /// Logs a blocked background request without presenting it as a refused agent action.
     fn record_request(&self, label: &str, url: &Url) {
         if crate::policy::embedded_document(url) {
             tracing::debug!(
@@ -147,8 +146,10 @@ impl Hooks {
             }
         };
         if let Some(session) = session {
-            self.0
-                .guard_refused(&session, "This request is not allowed from this page");
+            tracing::info!(
+                %session, scheme = url.scheme(), port = ?url.port_or_known_default(),
+                "browser background request refused"
+            );
         }
     }
     /// The policy part of a top-level navigation decision (under the registry lock, never waiting).
@@ -248,6 +249,13 @@ impl Hooks {
     /// Records a refused navigation for the receipts, the UI and the security bell, once per refusal: the other
     /// hook's report of the same navigation (`WebView2` reports one to both, see [`Seen`]) records nothing.
     fn record(&self, session: &str, url: &Url, reason: &str, seen: Seen) {
+        if seen == Seen::Request {
+            tracing::info!(
+                %session, scheme = url.scheme(), port = ?url.port_or_known_default(), %reason,
+                "browser background name lookup refused"
+            );
+            return;
+        }
         if crate::policy::embedded_document(url) {
             tracing::debug!(
                 scheme = url.scheme(),

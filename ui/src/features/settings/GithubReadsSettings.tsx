@@ -38,10 +38,6 @@ export function GithubReadsSettings() {
       <SettingsRow>
         <span>
           <label htmlFor="github-reads-switch">Let Vibe read GitHub with your gh login</label>
-          <span className="d" id="github-reads-description">
-            Read pull requests, issues, runs and the GitHub API with your gh login. Vibe never sees
-            your token and cannot write.
-          </span>
           <span className="d" id="github-reads-status" aria-live="polite">
             {githubReadsStatus(view, pending)}
           </span>
@@ -49,7 +45,7 @@ export function GithubReadsSettings() {
         <Switch
           id="github-reads-switch"
           data-testid="settings.github-reads-enabled"
-          aria-describedby="github-reads-description github-reads-status"
+          aria-describedby="github-reads-status"
           aria-checked={view?.enabled ?? false}
           disabled={pending || unavailable}
           onClick={() => {

@@ -24,7 +24,7 @@ export function MistralKeyDetails({
   const { keys, shell } = useApp();
   const availability = useKeyUi((s) => s.availability);
   const status = useKeyUi((s) => s.status);
-  const candidates = useKeyUi((s) => s.candidates);
+  const candidates = useKeyUi((s) => s.mistralKeys);
   const test = useKeyUi((s) => s.test);
   const busy = useKeyUi((s) => s.busy);
   const problem = useKeyUi((s) => s.problem);

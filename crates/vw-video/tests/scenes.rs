@@ -10,7 +10,7 @@ use vw_video::{
 fn job(selection: &Value, output: &str) -> Job {
     let root = std::env::var_os("VW_VIDEO_CORPUS").expect("verified corpus plus owned cut fixture");
     Job { id: "cuts".into(), request: serde_json::from_value(json!({
-        "path":std::path::Path::new(&root).join("scene-cuts.webm"), "selection":selection,"output":output
+        "path":std::path::Path::new(&root).join(std::env::var("VW_VIDEO_SCENE_FIXTURE").unwrap_or_else(|_| "scene-cuts.webm".into())), "selection":selection,"output":output
     })).unwrap() }
 }
 fn scenes(start: u64, end: u64, cap: usize) -> Value {

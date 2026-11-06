@@ -88,6 +88,8 @@ def load_entry(folder: Path, minimum: str, maximum: str | None, out: Path) -> di
     app_max = version_key(maximum.split("-")[0].split("+")[0]) if maximum else None
     if version in NEVER_OFFER:
         raise ManifestError(f"Vibe {version} is never offered: {NEVER_OFFER[version]}")
+    if version_key(version) >= (3, 1, 0) and app_min < (0, 1, 7):
+        raise ManifestError("Vibe 3.1.0 or later needs min=0.1.7 or later")
     if version_key(version) >= (3, 0, 4) and app_min < (0, 1, 4):
         raise ManifestError("Vibe 3.0.4 or later needs min=0.1.4 or later")
     if version_key(version) >= (3, 0, 0) and app_min < (0, 1, 2):

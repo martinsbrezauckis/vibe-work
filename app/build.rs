@@ -12,6 +12,7 @@ mod release_pin;
 const BRIDGE_COMMANDS: &[&str] = &[
     "core_execute",
     "desktop_settings",
+    "desktop_attention",
     "desktop_subscribe",
     "app_quit",
     "core_subscribe",

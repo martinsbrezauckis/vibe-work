@@ -205,7 +205,15 @@ function withPanel(state: ShellState, panel: PanelState): ShellState {
 
 /** Opens `kind` (adding it once) and makes it the active tab. Ends a pinned list's hold on the room: where list,
  * chat and panel do not all fit, the panel shows again and the list folds (`computeLayout`). */
-export function openTab(state: ShellState, kind: TabKind): ShellState {
+export function openTab(state: ShellState, kind: TabKind, sessionId?: string): ShellState {
+  if (sessionId !== undefined && sessionId !== panelOwner(state)) {
+    const panel = state.panels[sessionId] ?? CLOSED;
+    const tabs = panel.tabs.includes(kind) ? panel.tabs : [...panel.tabs, kind];
+    return {
+      ...state,
+      panels: { ...state.panels, [sessionId]: { open: true, tabs, active: kind } },
+    };
+  }
   const panel = panelOf(state);
   const tabs = panel.tabs.includes(kind) ? panel.tabs : [...panel.tabs, kind];
   const next = withPanel(state, { open: true, tabs, active: kind });

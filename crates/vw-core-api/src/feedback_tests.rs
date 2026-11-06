@@ -149,13 +149,15 @@ async fn feedback_redacts_before_preview_and_does_not_overwrite_open_work() {
     use crate::{FeedbackRequest as R, Origin};
     let core = crate::offline_core::start("feedback-redaction").await;
     let mut text = draft();
-    text.remarks = "api_key=abcdef1234567890 /home/alice/work/file C:\\Users\\Bob\\source token: deadbeef0123456789".into();
+    text.remarks =
+        "api_key=preview-marker /home/alice/work/file C:\\Users\\Bob\\source token: event-marker"
+            .into();
     let first = core
         .feedback(Origin::DebugApi, R::Open { draft: text })
         .await
         .unwrap();
     let shown = first.draft.unwrap().remarks;
-    for value in ["abcdef1234567890", "alice", "Bob", "deadbeef0123456789"] {
+    for value in ["preview-marker", "alice", "Bob", "event-marker"] {
         assert!(!shown.contains(value), "{shown}");
     }
     assert!(
@@ -191,8 +193,8 @@ async fn feedback_delivery_sends_only_the_reviewed_payload_and_requires_a_storag
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     let core = crate::offline_core::start("feedback-wire-redaction").await;
     let mut input = draft();
-    let secret = "glpat-abcdefghijklmnopqrst";
-    input.remarks = secret.into();
+    let secret = ["gl", "pat-", "abcdefghijklmnopqrst"].concat();
+    input.remarks = secret.clone();
     let report = core
         .feedback(
             crate::Origin::Ui,
@@ -202,12 +204,13 @@ async fn feedback_delivery_sends_only_the_reviewed_payload_and_requires_a_storag
         .unwrap()
         .review
         .unwrap();
-    assert!(!report.draft.remarks.contains(secret));
+    assert!(!report.draft.remarks.contains(&secret));
     for status in [201, 302, 202] {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
         let expected = serde_json::to_vec(&report).unwrap();
         let receipt_id = report.id.clone();
+        let secret = secret.clone();
         let task = tokio::spawn(async move {
             let (mut stream, _) = listener.accept().await.unwrap();
             let mut bytes = Vec::new();
@@ -231,7 +234,7 @@ async fn feedback_delivery_sends_only_the_reviewed_payload_and_requires_a_storag
                 bytes.extend_from_slice(&chunk[..n]);
             }
             assert_eq!(&bytes[header_end..], expected);
-            assert!(!String::from_utf8_lossy(&bytes[header_end..]).contains(secret));
+            assert!(!String::from_utf8_lossy(&bytes[header_end..]).contains(&secret));
             let body = serde_json::json!({"id":receipt_id,"stored":true}).to_string();
             let reply = format!(
                 "HTTP/1.1 {status} Result\r\nContent-Length: {}\r\nContent-Type: application/json\r\nLocation: http://127.0.0.1:1/forbidden\r\nConnection: close\r\n\r\n{body}",

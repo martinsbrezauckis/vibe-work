@@ -29,7 +29,7 @@ export function KeyStep({
   onSaved?: () => void;
 }) {
   const { keys } = useApp();
-  const candidates = useKeyUi((s) => s.candidates);
+  const candidates = useKeyUi((s) => s.mistralKeys);
   const vibeKeys = useKeyUi((s) => s.vibeKeys);
   const busy = useKeyUi((s) => s.busy);
   const problem = useKeyUi((s) => s.problem);

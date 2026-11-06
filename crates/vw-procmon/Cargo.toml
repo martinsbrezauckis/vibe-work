@@ -31,12 +31,14 @@ nix = { version = "0.31", default-features = false, features = ["signal", "proce
 # (1.1.5, through listeners' and tempfile's trees).
 rustix = { version = "1.1", default-features = false, features = ["std", "process"] }
 
-[target.'cfg(any(windows, target_os = "macos"))'.dependencies]
-# Listening TCP sockets with their owner pid (Windows: GetExtendedTcpTable, macOS: libproc fd walk); checked
+[target.'cfg(target_os = "macos")'.dependencies]
+# Listening TCP sockets with their owner pid (macOS: libproc fd walk); Windows uses vw-platform. Checked
 # 0.6.1 (MIT), deps windows 0.62 / byteorder only; no declared MSRV, edition 2024 +
 # let-chains = 1.88 in practice (0.4.0-0.6.1 all use let-chains; 0.3.0 has none but no socket state field). Linux uses our own /proc reader
 # (keeps other users' listeners as "other app").
 listeners = "=0.6.1"
+
+[target.'cfg(any(windows, target_os = "macos"))'.dependencies]
 # Command line, cwd, parent and owner of other processes (Windows PEB reads, macOS KERN_PROCARGS2). Checked
 # 0.38.4 (MIT, MSRV 1.88, windows 0.62 like listeners and vw-supervisor); 0.39.x needs
 # 1.95 (the Windows test machine has 1.94.1), 0.36.1 (MSRV 1.75) would gain nothing (listeners needs 1.88) and add windows 0.61.

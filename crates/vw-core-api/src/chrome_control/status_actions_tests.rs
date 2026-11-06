@@ -172,3 +172,12 @@ async fn oversized_schema_combination_is_explicitly_refused_without_partial_rows
     assert!(result.unwrap_err().contains("no schemas were omitted"));
     core.shutdown().await;
 }
+#[test]
+fn multi_action_discovery_accepts_an_explicit_browser() {
+    assert!(
+        super::status_actions::requested(
+            &serde_json::json!({"profileId":"edge","actions":["page.read"]})
+        )
+        .is_ok()
+    );
+}

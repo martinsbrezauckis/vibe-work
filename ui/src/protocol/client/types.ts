@@ -322,6 +322,8 @@ export interface CliSharingView {
 
 /** Native lifecycle wiring (mirrors vw_host::tray::TrayView). */
 export interface DesktopClient {
+  /** Waiting chats not yet opened; native hosts paint the Dock/taskbar and tray together. */
+  attention?(count: number): Promise<void>;
   settings(enabled?: boolean): Promise<{ enabled: boolean; available: boolean }>;
   quit(): Promise<void>;
   /** Receives actual closes and synchronizes the user's notification preference. */

@@ -14,8 +14,7 @@ An independent open-source project, part of the ShellX family of apps
   <img src="docs/public/images/vibe-work-016-dark.webp" alt="Vibe Work with three projects, a pending one-line edit to approve, and the Changes panel." width="1920">
 </picture>
 
-Version 0.1.6 adds Your Edge, keeps chats working when you close the window, starts Temporary chats without choosing
-a folder, and supports HTTP, HTTPS and SOCKS proxies with sign-in and company certificates.
+Version 0.1.7 adds local video review and a badge when a chat needs you, and runs on Vibe 3.1.0.
 Something specific you want Vibe Work to do? Post it in
 [Discussions](https://github.com/martinsbrezauckis/vibe-work/discussions). Changes per version: `CHANGELOG.md`.
 Questions and reports: `CONTRIBUTING.md`.
@@ -29,6 +28,9 @@ Questions and reports: `CONTRIBUTING.md`.
   with the Vibe CLI. The agent searches text and file names in the chat's folders, respecting ignored files.
   Settings > Models and agent > Compaction point sets when each model's chats are compacted. Temporary chats need no
   folder: without one they work in an empty folder of their own. They are deleted when you quit.
+- **Video review.** The agent can look at a local video on Windows and macOS through selected frames, scene
+  changes and contact sheets shown in the chat, using the video support your computer already has.
+- **Needs you.** A badge on the app icon or a mark in the tray shows when a chat is waiting for you.
 - **Tray.** Closing the window keeps chats working in the tray (menu bar on macOS); notifications reopen the chat
   that needs you, and Quit ends the app. Settings > General > Keep running in the tray when the window closes turns
   this off (on macOS: Keep running in the menu bar when the window closes).
@@ -37,7 +39,7 @@ Questions and reports: `CONTRIBUTING.md`.
   [docs/public/VOCABULARY.md](docs/public/VOCABULARY.md#access-modes). A card says what Allow once or Allow for this
   session covers. Saying No on a card for Vibe's own tools (commands, file edits) stops the turn. A No in Vibe Work's
   own prompts (Git guard, processes, vault, documents, protected folders, cards for Vibe Work's tools) answers only
-  that call and the turn goes on; the agent is told you declined and to explain why it is needed for your task.
+  that call and the turn goes on; the agent is told you declined and not to ask again for it in this task unless you bring it up.
   Unanswered cards wait until you answer; Stop or closing the chat counts as No. A new card waits until you stop
   typing, and a held key does not answer it.
   Review and revoke permissions in Settings > Allowed without asking.
@@ -142,7 +144,7 @@ is too old.
 
 Updates are signed and installed when you click Install and restart. How to check a download's checksum and
 signature: [docs/public/RELEASE_VERIFICATION.md](docs/public/RELEASE_VERIFICATION.md). Vibe Work installs the Vibe versions it has been
-tested with (3.0.4 for this release); newer tested versions arrive through a signed list, without a new app release.
+tested with (3.1.0 for this release); newer tested versions arrive through a signed list, without a new app release.
 
 ## Send files or text to a chat
 
@@ -165,7 +167,7 @@ store while unlocked. After updating from 0.1.1 or 0.1.0 with Remember on this c
 
 Permission cards show the action and wait until you answer. Saying No on a card for Vibe's own tools stops the
 turn; write what to do instead in the chat. A No in Vibe Work's own prompts answers only that call and the turn
-goes on; the agent is told you declined and to explain why it is needed for your task. Ctrl/Cmd+Shift+A goes to a waiting prompt. The session header lists its permissions; Settings > Allowed without asking lists permissions
+goes on; the agent is told you declined and not to ask again for it in this task unless you bring it up. Ctrl/Cmd+Shift+A goes to a waiting prompt. The session header lists its permissions; Settings > Allowed without asking lists permissions
 you can revoke and links to the controls for lasting choices.
 
 ## What leaves your computer
@@ -201,15 +203,15 @@ Requirements: Rust 1.99.0 (pinned by `rust-toolchain.toml`), Node 22 or later, p
 A development build starts Vibe from a `data/` folder in the repository (git-ignored):
 
 ```sh
-# The pinned Vibe (version in tools/public/codegen/vibe.pin), hash-locked like the app installs it, in data/vibe-3.0.4/venv.
-uv venv --python 3.14.8 data/vibe-3.0.4/venv
-uv pip install --python data/vibe-3.0.4/venv --require-hashes --only-binary :all: --no-deps -r crates/vw-vibe-install/pin/vibe.requirements.txt
+# The pinned Vibe (version in tools/public/codegen/vibe.pin), hash-locked like the app installs it, in data/vibe-3.1.0/venv.
+uv venv --python 3.14.8 data/vibe-3.1.0/venv
+uv pip install --python data/vibe-3.1.0/venv --require-hashes --only-binary :all: --no-deps -r crates/vw-vibe-install/pin/vibe.requirements.txt
 # The included minimal Vibe config is copied into each run folder; your own ~/.vibe stays untouched.
 mkdir -p data/vibe-home-template
 cp tools/public/dev/vibe-config.template.toml data/vibe-home-template/config.toml
 
 pnpm install --frozen-lockfile
-VW_DEV_SERVER_BIN="$PWD/data/vibe-3.0.4/venv/bin/vibe-app-server" VW_DEV_KEYS=1 pnpm tauri dev
+VW_DEV_SERVER_BIN="$PWD/data/vibe-3.1.0/venv/bin/vibe-app-server" VW_DEV_KEYS=1 pnpm tauri dev
 ```
 
 `VW_DEV_SERVER_BIN`, `VW_DEV_HOME_TEMPLATE` and `VW_DEV_RUN_DIR` (absolute paths) override the Vibe program, the

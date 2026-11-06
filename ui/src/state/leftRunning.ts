@@ -34,7 +34,7 @@ export interface LeftRunningState {
 
 /** "python3 · port 5173" / "pid 4242". */
 export function processLabel(item: LeftRunningView): string {
-  const name = item.name ?? `pid ${String(item.pid)}`;
+  const name = item.command ?? item.name ?? `pid ${String(item.pid)}`;
   if (item.ports.length === 0) return name;
   const ports = item.ports.map(String).join(", ");
   return `${name} · port${item.ports.length === 1 ? "" : "s"} ${ports}`;

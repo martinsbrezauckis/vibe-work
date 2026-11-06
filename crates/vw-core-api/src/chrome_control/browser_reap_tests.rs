@@ -55,3 +55,106 @@ fn chrome_launch_reaps_its_child() {
         String::from_utf8_lossy(&result.stderr)
     );
 }
+
+#[cfg(feature = "your-edge")]
+#[test]
+fn edge_store_launch_reaps_its_child() {
+    const CHILD: &str = "VW_EDGE_REAP_FIXTURE";
+    if let Some(pid_file) = std::env::var_os(CHILD) {
+        super::super::setup::open_store_for(&ChromeControlConfig::default(), true).unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+        let pid = loop {
+            if let Ok(pid) = std::fs::read_to_string(&pid_file) {
+                break pid.trim().to_owned();
+            }
+            assert!(std::time::Instant::now() < deadline, "launcher never ran");
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        };
+        let proc = PathBuf::from(format!("/proc/{pid}/stat"));
+        while proc.exists() && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert!(
+            !proc.exists(),
+            "Edge store child remains: {:?}",
+            std::fs::read_to_string(proc)
+        );
+        return;
+    }
+    let dir = std::env::var_os("VW_TEST_ROOT")
+        .map_or_else(std::env::temp_dir, PathBuf::from)
+        .join(format!("edge-reap-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let launcher = dir.join("microsoft-edge");
+    std::fs::write(
+        &launcher,
+        "#!/bin/sh\nprintf '%s' \"$$\" > \"$VW_EDGE_REAP_FIXTURE\"\n",
+    )
+    .unwrap();
+    std::fs::set_permissions(&launcher, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let result = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "chrome_control::browser::reap_tests::edge_store_launch_reaps_its_child",
+            "--nocapture",
+        ])
+        .env(CHILD, dir.join("pid"))
+        .env("PATH", &dir)
+        .output()
+        .unwrap();
+    std::fs::remove_dir_all(&dir).unwrap();
+    assert!(
+        result.status.success(),
+        "{}\n{}",
+        String::from_utf8_lossy(&result.stdout),
+        String::from_utf8_lossy(&result.stderr)
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn process_detection_never_blocks_the_async_worker() {
+    const CHILD: &str = "VW_BROWSER_SLOW_PROBE";
+    if let Some(pid_file) = std::env::var_os(CHILD) {
+        let start = std::time::Instant::now();
+        let _ = running(&ChromeControlConfig::default());
+        let elapsed = start.elapsed();
+        // Let the bounded background probe finish so its child cannot outlive this test process.
+        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+        assert!(
+            elapsed < std::time::Duration::from_millis(200),
+            "status blocked the async worker for {elapsed:?}"
+        );
+        if let Ok(pid) = std::fs::read_to_string(pid_file) {
+            assert!(!PathBuf::from(format!("/proc/{}/stat", pid.trim())).exists());
+        }
+        return;
+    }
+    let dir = std::env::var_os("VW_TEST_ROOT")
+        .map_or_else(std::env::temp_dir, PathBuf::from)
+        .join(format!("browser-slow-probe-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let probe = dir.join("pgrep");
+    std::fs::write(
+        &probe,
+        "#!/bin/sh\nprintf '%s' \"$$\" > \"$VW_BROWSER_SLOW_PROBE\"\nexec /bin/sleep 2\n",
+    )
+    .unwrap();
+    std::fs::set_permissions(&probe, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let result = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "chrome_control::browser::reap_tests::process_detection_never_blocks_the_async_worker",
+            "--nocapture",
+        ])
+        .env(CHILD, dir.join("pid"))
+        .env("PATH", &dir)
+        .output()
+        .unwrap();
+    std::fs::remove_dir_all(&dir).unwrap();
+    assert!(
+        result.status.success(),
+        "{}\n{}",
+        String::from_utf8_lossy(&result.stdout),
+        String::from_utf8_lossy(&result.stderr)
+    );
+}

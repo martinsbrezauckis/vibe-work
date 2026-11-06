@@ -7,25 +7,25 @@
 
 export type GithubReadsStatus = "missing" | "signedOut" | "signedIn" | "starting" | "on" | "error" | "enterprise" | "loggedOut";
 
-export type GithubReadsView = { 
+export type GithubReadsView = {
 /**
  * Off by default; no token is stored with this preference.
  */
-enabled: boolean, 
+enabled: boolean,
 /**
  * Current state of the reader.
  */
-status: GithubReadsStatus, 
+status: GithubReadsStatus,
 /**
  * Signed-in account, when known.
  */
-login: string | null, 
+login: string | null,
 /**
  * Safe startup failure reason, when known.
  */
 reason: string | null, };
 
-export type GithubReadsRequest = { "op": "read", } | { "op": "write", 
+export type GithubReadsRequest = { "op": "read", } | { "op": "write",
 /**
  * Requested opt-in.
  */

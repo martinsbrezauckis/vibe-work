@@ -24,7 +24,7 @@ const INTERACTIVE =
 // Some site footers install a click listener on a plain span/div and expose only a pointer cursor. Give a
 // small, visibly labelled target a ref so normal hit testing can decide whether to act.
 const customClickable = (el) => {
-  if (labelledToggle(el) && !visible(el.control)) return visible(el) && enabled(el.control);
+  if (labelledToggle(el) && !visible(el.control)) return visible(el);
   if (matches(el, INTERACTIVE) || !["a", "span", "div", "p", "li", "label"].includes(el.localName)) return false;
   if (el.closest(INTERACTIVE)) return false;
   if (!visible(el) || !enabled(el)) return false;
@@ -40,6 +40,7 @@ const roleOf = (el) => {
   const tag = String(el.localName || "").toLowerCase();
   const explicit = el.getAttribute && el.getAttribute("role");
   if (explicit) return clip(explicit, 30);
+  if (labelledToggle(el) && !visible(el.control)) return roleOf(el.control);
   if (customClickable(el)) return "button";
   if (tag === "a") return "link";
   if (tag === "button" || tag === "summary") return "button";
@@ -327,6 +328,7 @@ const visibilityState = (el) => {
 };
 const visible = (el) => visibilityState(el).visible;
 const enabled = (el) => {
+  if (labelledToggle(el) && !enabled(el.control)) return false;
   if (el.disabled || (el.getAttribute && el.getAttribute("aria-disabled") === "true")) return false;
   for (let cur = el, depth = 0; cur && depth < 256; cur = composedParent(cur), depth += 1) {
     if (cur.inert || matches(cur, "fieldset[disabled]")) return false;
@@ -339,7 +341,7 @@ const editable = (el) => {
   if (tag === "textarea") return enabled(el) && !el.readOnly;
   if (tag !== "input") return false;
   const type = String(el.getAttribute("type") || "text").toLowerCase();
-  return !["button", "submit", "reset", "checkbox", "radio", "file", "hidden", "image", "range", "color"].includes(type)
+  return !["button", "submit", "reset", "checkbox", "radio", "file", "hidden", "image"].includes(type)
     && enabled(el) && !el.readOnly;
 };
 

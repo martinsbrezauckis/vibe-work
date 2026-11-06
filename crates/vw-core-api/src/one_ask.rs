@@ -3,7 +3,7 @@
 //!
 //! The order of the two asks in Vibe's default runtime:
 //! - **a `bash` call:** our `pre_tool` hook (the git guard `git_check`, the kill guard `kill_check`) runs FIRST; Vibe's
-//!   approval card (`callback/call`, callback id `approval-<tool call id>`, the exact command in `effect.input`)
+//!   approval card (`callback/call`, callback id `approval-<tool call id>-<nonce>`, the exact command in `effect.input`)
 //!   comes after it, and only when the session's permissions ask (none in auto-approve, none when smart approve
 //!   lets the call run, none when the user's config allows `bash`);
 //! - **a call of our own MCP tools** (`mcp_vw.process_start`, `mcp_vw.secret_run`): Vibe's card comes FIRST (when the
@@ -41,9 +41,30 @@ use crate::command::Origin;
 /// Most remembered items of each kind.
 pub(crate) const MAX: usize = 256;
 
-/// The prefix of Vibe's approval callback ids: `approval-<tool call id>` (`_unified_harness_backend_adapter`, measured
-/// A different id never matches: the card is then shown (a double ask, never a missed one).
+/// Vibe's approval prefix; `callback_matches_call` validates the rest against a known hook call.
 pub(crate) const CARD_PREFIX: &str = "approval-";
+
+/// Match a known hook call against Vibe's callback identity. The current runtime appends
+/// `secrets.token_hex(4)`; older stored callbacks use the exact unsuffixed form.
+/// Never infer a call by trimming arbitrary ID text or accepting an unbounded prefix.
+pub(crate) fn callback_matches_call(callback: &str, call: &str) -> bool {
+    if call.is_empty() {
+        return false;
+    }
+    let Some(tail) = callback
+        .strip_prefix(CARD_PREFIX)
+        .and_then(|id| id.strip_prefix(call))
+    else {
+        return false;
+    };
+    tail.is_empty()
+        || tail.strip_prefix('-').is_some_and(|nonce| {
+            nonce.len() == 8
+                && nonce
+                    .bytes()
+                    .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        })
+}
 
 /// Who else asks the user about the call a guard is deciding.
 #[derive(Clone, Copy, Debug)]
@@ -172,19 +193,16 @@ impl Ledger {
     }
 
     /// True when Vibe's approval card `callback` asks about a call whose guard already answered for the user: the
-    /// same session, the callback id `approval-<that call id>`, and the same command (a guard's dialog). The memory is used up.
+    /// same session, matching callback/call identity, and the same command. The memory is used up.
     pub(crate) fn answer_for_card(&self, callback: &Value) -> bool {
         let Some((session, id, effect)) = approval_parts(callback) else {
-            return false;
-        };
-        let Some(call_id) = id.strip_prefix(CARD_PREFIX) else {
             return false;
         };
         let command = effect.pointer("/input/command").and_then(Value::as_str);
         let mut inner = self.lock();
         let found = inner.guard_yes.iter().position(|g| {
             command.is_some_and(|command| g.command == command)
-                && g.call_id == call_id
+                && callback_matches_call(id, &g.call_id)
                 && g.sessions.iter().any(|s| s == session)
         });
         found.is_some_and(|at| inner.guard_yes.remove(at).is_some())
@@ -322,6 +340,56 @@ mod tests {
         ledger.guard_said_yes(&["s"], "", "git fetch");
         assert!(!ledger.answer_for_card(&card("s", "approval-", "file_system.bash", &cmd)));
         assert_eq!(approve_once()["decision"]["type"], "approve");
+    }
+
+    #[test]
+    fn callback_identity_accepts_only_the_known_call_and_exact_nonce_shape() {
+        use super::callback_matches_call;
+        assert!(callback_matches_call("approval-call-1", "call-1"));
+        assert!(callback_matches_call("approval-call-1-1a2b3c4d", "call-1"));
+        for callback in [
+            "approval-call-2-1a2b3c4d",
+            "approval-call-1-1234567",
+            "approval-call-1-123456789",
+            "approval-call-1-1A2B3C4D",
+            "approval-call-1-nothex!!",
+            "approval-call-1-extra-1a2b3c4d",
+            "question-call-1-1a2b3c4d",
+        ] {
+            assert!(!callback_matches_call(callback, "call-1"), "{callback}");
+        }
+        assert!(!callback_matches_call("approval--1a2b3c4d", ""));
+    }
+
+    #[test]
+    fn a_unique_callback_nonce_keeps_the_exact_guard_decision() {
+        let ledger = Ledger::default();
+        let cmd = json!({"command":"git fetch"});
+        ledger.guard_said_yes(&["s"], "call-1", "git fetch");
+        assert!(!ledger.answer_for_card(&card(
+            "s",
+            "approval-call-2-1a2b3c4d",
+            "file_system.bash",
+            &cmd
+        )));
+        assert!(!ledger.answer_for_card(&card(
+            "s",
+            "approval-call-1-extra-1a2b3c4d",
+            "file_system.bash",
+            &cmd
+        )));
+        assert!(ledger.answer_for_card(&card(
+            "s",
+            "approval-call-1-1a2b3c4d",
+            "file_system.bash",
+            &cmd
+        )));
+        assert!(!ledger.answer_for_card(&card(
+            "s",
+            "approval-call-1-9a2b3c4d",
+            "file_system.bash",
+            &cmd
+        )));
     }
 
     #[test]

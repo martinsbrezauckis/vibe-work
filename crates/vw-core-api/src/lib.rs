@@ -36,14 +36,11 @@ compile_error!("the e2e-script feature is for debug test builds only");
     not(debug_assertions),
     any(
         feature = "your-firefox",
-        feature = "video",
         feature = "feedback",
         feature = "click-marker"
     )
 ))]
-compile_error!(
-    "Firefox, video review, feedback and click markers are not available in release builds"
-);
+compile_error!("Firefox, feedback and click markers are not available in release builds");
 
 mod access;
 mod agent_access;
@@ -88,6 +85,7 @@ pub use chrome_control::{
     ChromeTab, ChromeWorkView,
 };
 mod command_decode;
+mod config_validation;
 mod confirmer;
 mod connector_consent;
 mod connectors;
@@ -129,6 +127,7 @@ pub mod files_scope;
 mod files_view;
 mod files_write;
 mod fill_grants;
+mod folder_access;
 mod full_access_alert;
 mod git_api;
 mod git_browser;
@@ -188,6 +187,7 @@ mod mcp_keys;
 mod mcp_keys_config;
 mod names;
 mod network;
+mod network_facts;
 mod network_python;
 mod network_raw;
 mod network_test;
@@ -210,6 +210,7 @@ mod plugin_identity;
 mod plugin_refresh;
 mod preview_pick;
 mod preview_ports;
+mod preview_readiness;
 mod preview_view;
 mod previews;
 mod processes;

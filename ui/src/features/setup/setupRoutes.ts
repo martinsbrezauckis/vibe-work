@@ -70,7 +70,7 @@ export function registerSetupRoutes(app: App): () => void {
       busy: s.busy,
       test: s.test.phase === "failed" ? { phase: "failed", reason: s.test.reason } : s.test,
       problem: s.problem?.reason ?? null,
-      savedKeys: s.candidates.length,
+      savedKeys: s.mistralKeys.length,
       vibeKeys: s.vibeKeys.map((k) => k.source),
       resultPending: s.resultPending,
       dismissed: s.dismissed,

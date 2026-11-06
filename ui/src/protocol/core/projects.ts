@@ -7,103 +7,103 @@
 
 import type { JsonValue } from "./index";
 
-export type ProjectsRequest = { "op": "list", } | { "op": "refresh", } | { "op": "create", 
+export type ProjectsRequest = { "op": "list", } | { "op": "refresh", } | { "op": "create",
 /**
  * Its name (1-120 characters after cleaning).
  */
-name: string, 
+name: string,
 /**
  * Its main folder: a folder a known session works in, or one picked in the native dialog.
  */
-mainFolder?: string, } | { "op": "rename", 
+mainFolder?: string, } | { "op": "rename",
 /**
  * Project id.
  */
-projectId: string, 
+projectId: string,
 /**
  * The new name.
  */
-name: string, } | { "op": "delete", 
+name: string, } | { "op": "delete",
 /**
  * Project id.
  */
-projectId: string, } | { "op": "move", 
+projectId: string, } | { "op": "move",
 /**
  * The sessions (1-500, each one Vibe Work has seen).
  */
-sessionIds: Array<string>, 
+sessionIds: Array<string>,
 /**
  * The target project; `null`: not in a project.
  */
-projectId: string | null, } | { "op": "place", 
+projectId: string | null, } | { "op": "place",
 /**
  * Project id.
  */
-projectId: string, 
+projectId: string,
 /**
  * The project it goes before.
  */
-before: string | null, } | { "op": "start", 
+before: string | null, } | { "op": "start",
 /**
  * Project id.
  */
-projectId: string, 
+projectId: string,
 /**
  * `AgentConfig` object (filtered by the gate; `worktree` is refused: copies start through `worktrees`).
  */
-agentConfig: JsonValue, } | { "op": "setFolder", 
+agentConfig: JsonValue, } | { "op": "setFolder",
 /**
  * Project id.
  */
-projectId: string, 
+projectId: string,
 /**
  * The folder, or `null` to clear.
  */
 folder: string | null, };
 
-export type ProjectsResult = { "type": "list", 
+export type ProjectsResult = { "type": "list",
 /**
  * Projects in the user's order.
  */
-projects: Array<ProjectView>, 
+projects: Array<ProjectView>,
 /**
  * Session id -> project id; `null` = seen, not in a project. A session missing here was never seen.
  */
-members: { [key in string]: string | null }, 
+members: { [key in string]: string | null },
 /**
  * True once this run reconciled with Vibe's full session list.
  */
-swept: boolean, } | { "type": "created", 
+swept: boolean, } | { "type": "created",
 /**
  * The new project.
  */
-project: ProjectView, } | { "type": "moved", 
+project: ProjectView, } | { "type": "moved",
 /**
  * Sessions re-filed.
  */
 moved: number, } | { "type": "done", };
 
-export type ProjectView = { 
+export type ProjectView = {
 /**
  * Project id.
  */
-id: string, 
+id: string,
 /**
  * The user's name for it.
  */
-name: string, 
+name: string,
 /**
  * The main folder; `null` for a name-only project.
  */
-mainFolder: string | null, 
+mainFolder: string | null,
 /**
  * The main folder's last name (`null` without a main folder).
  */
-folderName: string | null, 
+folderName: string | null,
 /**
  * Created by the filing rule for a folder.
  */
-auto: boolean, 
+auto: boolean,
 /**
  * Sessions filed in it (Vibe Work's count; archived ones included).
  */

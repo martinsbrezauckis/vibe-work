@@ -7,415 +7,415 @@
 
 import type { JsonValue } from "./index";
 
-export type SessionChange = { "kind": "removed", 
+export type SessionChange = { "kind": "removed",
 /**
  * Session.
  */
-sessionId: string, } | { "kind": "sessionPatched", 
+sessionId: string, } | { "kind": "sessionPatched",
 /**
  * Session.
  */
-sessionId: string, 
+sessionId: string,
 /**
  * Patch operations.
  */
-patch: Array<JsonValue>, } | { "kind": "entryUpserted", 
+patch: Array<JsonValue>, } | { "kind": "entryUpserted",
 /**
  * Session.
  */
-sessionId: string, 
+sessionId: string,
 /**
  * The entry as stored.
  */
-entry: JsonValue, 
+entry: JsonValue,
 /**
  * An entry with this id existed and was overwritten.
  */
-replaced: boolean, } | { "kind": "entryPatched", 
+replaced: boolean, } | { "kind": "entryPatched",
 /**
  * Session.
  */
-sessionId: string, 
+sessionId: string,
 /**
  * Entry id.
  */
-entryId: string, 
+entryId: string,
 /**
  * Patch operations.
  */
-patch: Array<JsonValue>, } | { "kind": "turnUpserted", 
+patch: Array<JsonValue>, } | { "kind": "turnUpserted",
 /**
  * Session.
  */
-sessionId: string, 
+sessionId: string,
 /**
  * The turn.
  */
-turn: JsonValue, } | { "kind": "queueReplaced", 
+turn: JsonValue, } | { "kind": "queueReplaced",
 /**
  * Session.
  */
-sessionId: string, 
+sessionId: string,
 /**
  * The new queue.
  */
-queue: JsonValue, } | { "kind": "tokenUsageSet", 
+queue: JsonValue, } | { "kind": "tokenUsageSet",
 /**
  * Session.
  */
-sessionId: string, 
+sessionId: string,
 /**
  * `{inputTokens, outputTokens, totalTokens}`.
  */
-tokenUsage: JsonValue, 
+tokenUsage: JsonValue,
 /**
  * `{contextTokens, contextWindow}` when the stats event carried both.
  */
-contextUsage: JsonValue | null, } | { "kind": "childUpserted", 
+contextUsage: JsonValue | null, } | { "kind": "childUpserted",
 /**
  * Session.
  */
-sessionId: string, 
+sessionId: string,
 /**
  * The child row.
  */
-child: JsonValue, } | { "kind": "callbacksChanged", 
+child: JsonValue, } | { "kind": "callbacksChanged",
 /**
  * Session.
  */
-sessionId: string, 
+sessionId: string,
 /**
  * Open callback ids.
  */
-openCallbackIds: Array<string>, } | { "kind": "runtimeUpdated", 
+openCallbackIds: Array<string>, } | { "kind": "runtimeUpdated",
 /**
  * Session.
  */
-sessionId: string, 
+sessionId: string,
 /**
  * `RuntimeSnapshot`.
  */
-runtime: JsonValue, 
+runtime: JsonValue,
 /**
  * The core's resolved access mode.
  */
-accessMode?: string, } | { "kind": "notice", 
+accessMode?: string, } | { "kind": "notice",
 /**
  * Session, when named.
  */
-sessionId: string | null, 
+sessionId: string | null,
 /**
  * Notification method.
  */
-method: string, 
+method: string,
 /**
  * Notification params.
  */
 params: JsonValue, };
 
-export type SessionSnapshot = { 
+export type SessionSnapshot = {
 /**
  * Session id.
  */
-sessionId: string, 
+sessionId: string,
 /**
  * The full `PublicSessionState` as wire JSON.
  */
-state: JsonValue, 
+state: JsonValue,
 /**
  * The resolved access mode for display, including the app's trusted record before attachment.
  */
-accessMode?: string, 
+accessMode?: string,
 /**
  * Highest event id applied.
  */
-lastEventId: number, 
+lastEventId: number,
 /**
  * We created it and the server's listing does not show it yet.
  */
-localOnly: boolean, 
+localOnly: boolean,
 /**
  * A gap or failed patch is waiting for a re-read.
  */
-resyncPending: boolean, 
+resyncPending: boolean,
 /**
  * Turns this store marked interrupted after a resume.
  */
 interruptedTurns: Array<string>, };
 
-export type SessionRowView = { 
+export type SessionRowView = {
 /**
  * The `PublicSession` object.
  */
-session: JsonValue, 
+session: JsonValue,
 /**
  * The resolved access mode for display before the session has a runtime.
  */
-accessMode?: string, 
+accessMode?: string,
 /**
  * Ownership from the existing parent's childSessions (a fork's parent id alone is not ownership).
  */
-ownedByParent?: boolean, 
+ownedByParent?: boolean,
 /**
  * The server's listing does not contain it yet.
  */
 localOnly: boolean, };
 
-export type SessionToolsRequest = { "op": "export", 
+export type SessionToolsRequest = { "op": "export",
 /**
  * The session.
  */
-sessionId: string, 
+sessionId: string,
 /**
  * Where to write the file (Debug API only).
  */
-destination?: string, } | { "op": "startTemporary", 
+destination?: string, } | { "op": "startTemporary",
 /**
  * `AgentConfig` object (filtered by the gate).
  */
-agentConfig?: JsonValue, } | { "op": "temporary", } | { "op": "holder", 
+agentConfig?: JsonValue, } | { "op": "temporary", } | { "op": "holder",
 /**
  * The session.
  */
-sessionId: string, } | { "op": "setSubagents", 
+sessionId: string, } | { "op": "setSubagents",
 /**
  * The new value.
  */
-enabled: boolean, } | { "op": "excerpt", 
+enabled: boolean, } | { "op": "excerpt",
 /**
  * The session.
  */
 sessionId: string, };
 
-export type SessionToolsResult = { "kind": "exported", 
+export type SessionToolsResult = { "kind": "exported",
 /**
  * What was written.
  */
-export: SessionExportView, } | { "kind": "started", 
+export: SessionExportView, } | { "kind": "started",
 /**
  * Its id.
  */
-sessionId: string, } | { "kind": "holder", 
+sessionId: string, } | { "kind": "holder",
 /**
  * The holding process's pid, when another process holds it.
  */
-holderPid: number | null, } | { "kind": "temporary", 
+holderPid: number | null, } | { "kind": "temporary",
 /**
  * The temporary sessions' ids.
  */
-sessionIds: Array<string>, } | { "kind": "subagentsSet", 
+sessionIds: Array<string>, } | { "kind": "subagentsSet",
 /**
  * The value a new chat starts with, as Vibe reported it through the short-lived chat; `null` when that
  * read failed (the caller reads the settings again).
  */
-enabled: boolean | null, 
+enabled: boolean | null,
 /**
  * The short-lived chat when it could not be deleted, even after one retry. It stays in the list as a
  * temporary chat and is deleted when Vibe Work quits; `null` when it is gone.
  */
-leftoverSessionId: string | null, } | { "kind": "excerpt", 
+leftoverSessionId: string | null, } | { "kind": "excerpt",
 /**
  * The excerpt.
  */
 excerpt: SessionExcerptView, };
 
-export type SessionExportView = { 
+export type SessionExportView = {
 /**
  * A file name to suggest (the title, made safe, with `.md`).
  */
-name: string, 
+name: string,
 /**
  * Size of the Markdown in bytes.
  */
-bytes: number, 
+bytes: number,
 /**
  * User and agent messages written.
  */
-messages: number, 
+messages: number,
 /**
  * Tool steps summarised.
  */
-steps: number, 
+steps: number,
 /**
  * File changes written as diffs.
  */
-diffs: number, 
+diffs: number,
 /**
  * Kinds of known secret values that were found and replaced (`mistralApiKey`, ...); empty when none.
  */
-secretsReplaced: Array<string>, 
+secretsReplaced: Array<string>,
 /**
  * The history was longer than the export reads (the oldest part is missing; the document says so too).
  */
-cut: boolean, 
+cut: boolean,
 /**
  * Where the file was written (a destination was given or chosen).
  */
-savedTo: string | null, 
+savedTo: string | null,
 /**
  * The Markdown itself, when no destination was given.
  */
 markdown: string | null, };
 
-export type SessionExcerptView = { 
+export type SessionExcerptView = {
 /**
  * The session's title (or its first-message preview, or the untitled-session label).
  */
-title: string, 
+title: string,
 /**
  * The first message the person sent, when there is one.
  */
-firstUser: string | null, 
+firstUser: string | null,
 /**
  * The last answer, when there is one.
  */
 lastAnswer: string | null, };
 
-export type SearchRequest = { "op": "messages", 
+export type SearchRequest = { "op": "messages",
 /**
  * The words to find.
  */
-query: string, 
+query: string,
 /**
  * Only this session (a conversation's own search); every session when absent.
  */
-sessionId?: string, 
+sessionId?: string,
 /**
  * Most hits returned (default 50, at most 200).
  */
-limit?: number, } | { "op": "files", 
+limit?: number, } | { "op": "files",
 /**
  * The words to find.
  */
-query: string, 
+query: string,
 /**
  * Match only file names, without reading content; an empty query lists names.
  */
-namesOnly?: boolean, 
+namesOnly?: boolean,
 /**
  * One exact known session folder or user-picked folder (also before a new chat starts).
  */
-folder?: string, 
+folder?: string,
 /**
  * Only this session's folders; the folders of every listed session when absent.
  */
-sessionId?: string, 
+sessionId?: string,
 /**
  * Most hits returned (default 50, at most 200).
  */
 limit?: number, } | { "op": "status", };
 
-export type SearchResult = { "kind": "messages", 
+export type SearchResult = { "kind": "messages",
 /**
  * Best first: phrase matches, then newer sessions, then newer messages.
  */
-hits: Array<MessageHit>, 
+hits: Array<MessageHit>,
 /**
  * Hits found in all (counted up to 1,000).
  */
-total: number, 
+total: number,
 /**
  * How far the index is.
  */
-index: IndexStatus, } | { "kind": "files", 
+index: IndexStatus, } | { "kind": "files",
 /**
  * Name matches first, then lines in file order.
  */
-hits: Array<FileHit>, 
+hits: Array<FileHit>,
 /**
  * Hits found in all (counted up to 1,000).
  */
-total: number, 
+total: number,
 /**
  * The folders searched.
  */
-folders: Array<string>, 
+folders: Array<string>,
 /**
  * Files read.
  */
-scanned: number, 
+scanned: number,
 /**
  * The search stopped early (time, file or size budget); there may be more.
  */
-truncated: boolean, } | { "kind": "status", 
+truncated: boolean, } | { "kind": "status",
 /**
  * How far the index is.
  */
 index: IndexStatus, };
 
-export type MessageHit = { 
+export type MessageHit = {
 /**
  * The session.
  */
-sessionId: string, 
+sessionId: string,
 /**
  * Its title (Vibe's), if any.
  */
-title: string | null, 
+title: string | null,
 /**
  * Its folder.
  */
-cwd: string | null, 
+cwd: string | null,
 /**
  * The history entry (the transcript row carries it as `data-entry-id`).
  */
-entryId: string, 
+entryId: string,
 /**
  * `user` or `assistant`.
  */
-role: string, 
+role: string,
 /**
  * The turn number in the session (1 = the first message you sent).
  */
-turn: number, 
+turn: number,
 /**
  * The text around the first match, on one line (at most about 160 characters, `…` where cut).
  */
-snippet: string, 
+snippet: string,
 /**
  * When the message was written (epoch ms), when known.
  */
-at: number | null, 
+at: number | null,
 /**
  * Every word was found as one phrase (ranked first).
  */
 phrase: boolean, };
 
-export type IndexStatus = { 
+export type IndexStatus = {
 /**
  * Sessions whose messages are in the index.
  */
-indexed: number, 
+indexed: number,
 /**
  * Sessions known (listed by Vibe, archived included).
  */
-total: number, 
+total: number,
 /**
  * The index is being filled or refreshed now (search again for more).
  */
-filling: boolean, 
+filling: boolean,
 /**
  * The last fill failed (the message), if it did.
  */
 error: string | null, };
 
-export type FileHit = { 
+export type FileHit = {
 /**
  * The searched folder that holds it (a session's folder).
  */
-folder: string, 
+folder: string,
 /**
  * The path relative to `folder`, with `/` separators.
  */
-path: string, 
+path: string,
 /**
  * The line (1-based); `null` when the file's name matched.
  */
-line: number | null, 
+line: number | null,
 /**
  * The line's text around the match (at most about 160 characters), or the path for a name match.
  */
-text: string, 
+text: string,
 /**
  * A session that works in `folder` (the newest), to open the file in.
  */

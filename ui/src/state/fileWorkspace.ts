@@ -3,7 +3,8 @@
  * its own baseline and requests; the existing file commands project the focused document.
  * Called by createFiles and editor tabs. Opening or hiding a document never discards its draft.
  */
-import { watchFileActivity } from "./fileActivity";
+import { createFileActivity } from "./fileActivity";
+import { createFileRefresh } from "./fileRefresh";
 import { toCallError } from "../protocol/client/types";
 import { fitFileTabs } from "./fileTabVisibility";
 import { createStore } from "./createStore";
@@ -143,7 +144,7 @@ export function createFileWorkspace(
   const ensure = (id: string, shown: Shown) => {
     let reader = document(id, shown.file);
     if (reader === null) {
-      reader = createFileReader(core);
+      reader = createFileReader(core, (id, file) => refresh.watch(id, file));
       readers.set(key(id, shown.file), reader);
       unsubscribers.set(key(id, shown.file), reader.store.subscribe(publish));
       update(id, (view) => ({
@@ -434,17 +435,30 @@ export function createFileWorkspace(
       }));
     },
   };
-  const stopActivity = watchFileActivity(
+  const refresh = createFileRefresh(
+    core,
+    () => [...new Set([...Object.keys(sessions.get()), ...Object.keys(base.store.get().refs)])],
+    (id) => [base, ...of(id).order.flatMap((file) => document(id, file) ?? [])],
+  );
+  const activity = createFileActivity(
     core,
     () => sessions.get(),
     (id, file) => {
       workspace.markChanged(id, file);
+      refresh.schedule(id, file);
     },
   );
+  const stopEvents = core.listen((event) => {
+    activity(event);
+    refresh.event(event);
+  });
   const stopPrune = core.onSessionsGone((ids) => {
+    refresh.forget(ids);
+    base.forgetSessions(ids);
     for (const id of ids) {
       for (const file of of(id).order) {
         const reader = document(id, file);
+        reader?.forgetSessions(ids);
         reader?.stop();
         unsubscribers.get(key(id, file))?.();
         readers.delete(key(id, file));
@@ -477,8 +491,10 @@ export function createFileWorkspace(
       takeDisk: (id: string) => current(id).edit.takeDisk(id),
     },
     poll: (id: string) => current(id).poll(id),
+    watch: (id: string) => current(id).watch(id),
     stop() {
-      stopActivity();
+      stopEvents();
+      refresh.stop();
       stopBase();
       stopPrune();
       base.stop();

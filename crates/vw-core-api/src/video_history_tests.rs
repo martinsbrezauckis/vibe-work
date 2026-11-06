@@ -112,6 +112,8 @@ fn owned_frames_feed_saved_cell_viewer() {
     let corpus = PathBuf::from(std::env::var_os("VW_VIDEO_CORPUS").expect("verified corpus"));
     let cwd = folder();
     let h = History::load(cwd.join("index.json")).unwrap();
+    let scene_file =
+        std::env::var("VW_VIDEO_SCENE_FIXTURE").unwrap_or_else(|_| "scene-cuts.webm".into());
     let mut fixtures = serde_json::Map::new();
     let mut cases: Vec<(&str, usize, &str, Value)> =
         [("1", 1), ("6", 6), ("24", 24), ("sheet", 12)]
@@ -131,18 +133,18 @@ fn owned_frames_feed_saved_cell_viewer() {
         ("scene-limit", 0, 4000, 2, 2),
         ("no-cuts", 0, 750, 24, 0),
     ] {
-        cases.push((scene,count,"scene-cuts.webm",json!({"kind":"scene_changes","start_ms":start,"end_ms":end,"step_ms":250,"max_frames":cap})));
+        cases.push((scene,count,&scene_file,json!({"kind":"scene_changes","start_ms":start,"end_ms":end,"step_ms":250,"max_frames":cap})));
     }
     cases.push((
         "overview-range",
         2,
-        "scene-cuts.webm",
+        &scene_file,
         json!({"kind":"uniform","start_ms":1000,"end_ms":3000,"count":2}),
     ));
     cases.push((
         "interval-range",
         3,
-        "scene-cuts.webm",
+        &scene_file,
         json!({"kind":"interval","start_ms":1000,"end_ms":4000,"every_ms":1000,"max_frames":3}),
     ));
     for (scene, count, file, selection) in cases {
@@ -216,5 +218,52 @@ fn deletion_forgets_missing_attachment_directories() {
     h.forget("chat").unwrap();
     let restarted = History::load(index).unwrap();
     assert_eq!(restarted.state.lock().unwrap().records.len(), 0);
+    std::fs::remove_dir_all(cwd).unwrap();
+}
+
+#[test]
+fn real_vibe_effect_shows_its_saved_frames_by_receipt_after_restart() {
+    // Vibe 3.1 names the effect `effect-<runtime action id>` while the hook's call id is the nested run_typescript
+    // id; the only shared key is the single-use receipt Vibe keeps in the effect input (observed on macOS 11-05).
+    let cwd = folder();
+    let index = cwd.join("index.json");
+    let h = History::load(index.clone()).unwrap();
+    let call = "typescript:8:BJgp3IIsK:0:tool:0";
+    h.bind_receipt("chat", call, "receipt-key");
+    h.save(&cwd, "chat", "chat", call, reply("job", 100))
+        .unwrap();
+    h.bind_receipt("chat", "typescript:9:x:0:tool:0", "other-key");
+    h.outcome("chat", "chat", "typescript:9:x:0:tool:0", json!({"planned_frames":2,"image_count":1,"source":"b.mp4","error":"The video worker failed."}))
+        .unwrap();
+    drop(h);
+    let h = History::load(index).unwrap();
+    let effect = |receipt: &str| {
+        json!({"history":[{"type":"effect","id":"effect-9a5f9216-65c2-5eae-aff0-2be036db1e8a","sessionId":"chat",
+            "detail":{"toolName":"mcp_vw.video_frames","input":{"path":"clip.mp4","_vwReceipt":receipt}}}]})
+    };
+    let mut shown = effect("receipt-key");
+    h.overlay(&mut shown);
+    assert_eq!(
+        shown["history"][0]["vwVideo"]["source"], "clip.mp4",
+        "{shown}"
+    );
+    assert!(
+        shown["history"][0]["vwVideo"]
+            .to_string()
+            .contains("video:job:"),
+        "{shown}"
+    );
+    let mut failed = effect("other-key");
+    h.overlay(&mut failed);
+    assert_eq!(
+        failed["history"][0]["vwVideo"]["error"], "The video worker failed.",
+        "{failed}"
+    );
+    for (session, receipt) in [("chat", "unknown-key"), ("other", "receipt-key")] {
+        let mut row = effect(receipt);
+        row["history"][0]["sessionId"] = json!(session);
+        h.overlay(&mut row);
+        assert!(row["history"][0].get("vwVideo").is_none(), "{row}");
+    }
     std::fs::remove_dir_all(cwd).unwrap();
 }

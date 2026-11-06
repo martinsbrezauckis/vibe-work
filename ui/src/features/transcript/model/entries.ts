@@ -6,11 +6,12 @@
  * generic step, never crash").
  * Depends on: protocol/core (`JsonValue`). Called by: the transcript model (`build.ts`, `callbacks.ts`,
  * `diff.ts`, `todos.ts`) and the row views.
- * Invariants: pure; never mutates its input; labels come from Vibe (`detail.display`, `state.display`),
- * with shared plain labels for built-in tool identifiers.
+ * Invariants: pure; never mutates its input; labels use Vibe's display fields and shared built-in names.
+ * Vibe's typed MCP authorization failure is shown as a sign-in state.
  */
 import { toolText } from "./toolLabels";
 import { connectorToolLabel } from "../../connectors/model/meta";
+import { TEXT } from "../../../vocabulary";
 import type { JsonValue } from "../../../protocol/core";
 import type { CodeRef } from "../../files/model/context";
 
@@ -35,6 +36,14 @@ export function num(value: JsonValue | undefined): number | null {
 /** `value` when it is an array, else an empty array. */
 export function arr(value: JsonValue | undefined): readonly JsonValue[] {
   return Array.isArray(value) ? value : [];
+}
+
+/** Vibe's explicit authorization failure; never infer sign-in from arbitrary error prose. */
+export function mcpSignInRequired(entry: Obj): boolean {
+  const state = stateOf(entry);
+  return (
+    state["status"] === "failed" && obj(state["error"])?.["code"] === "mcp_authorization_required"
+  );
 }
 
 /** The entry's `id` ("" for a malformed entry, which the model skips). */
@@ -182,8 +191,9 @@ export function effectView(entry: Obj): EffectView {
     toolText(toolName, label.target, str(obj(detail["input"])?.["command"]));
   const success = settled === null ? null : settled["success"] === true;
   const errorObj = obj(state["error"]);
-  const error =
-    status === "failed" || status === "cancelled"
+  const error = mcpSignInRequired(entry)
+    ? TEXT.connectorSignInRequired
+    : status === "failed" || status === "cancelled"
       ? (str(errorObj?.["message"]) ?? str(state["reason"]) ?? str(settled?.["message"]) ?? status)
       : null;
   return {

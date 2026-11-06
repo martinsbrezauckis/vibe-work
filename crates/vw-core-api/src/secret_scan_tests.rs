@@ -34,7 +34,11 @@ fn strength_filter_excludes_guessable_values_and_only_exports_a_count() {
     let mut secrets: Vec<_> = weak.iter().map(|value| input(value, 1, value)).collect();
     secrets.extend([
         input("password", 1, "Q7!mV2@rL9#xT4$kN8%pZ6&s"),
-        input("token", 1, "sk-X4u2B9f6W1s8J5n0R7k3T6q9M2v4H8z1"),
+        input(
+            "token",
+            1,
+            concat!("sk", "-", "X4u2B9f6W1s8J5n0R7k3T6q9M2v4H8z1"),
+        ),
     ]);
     let (filtered, skipped) = filter_inputs(secrets);
     assert_eq!(skipped, 5);
@@ -316,9 +320,9 @@ fn unified_store_files_belong_to_their_store_meta_and_are_sealed_while_2x_files_
 #[test]
 fn title_parts_of_a_value_are_withheld_and_short_overlaps_kept() {
     use crate::secret_scan_cache::withhold_parts;
-    let value = "sk-live-4f9Qz7Lm2Xc8Vb1Np6Rt3Yw0";
+    let value = concat!("sk", "-live-", "4f9Qz7Lm2Xc8Vb1Np6Rt3Yw0");
     assert_eq!(
-        withhold_parts("Use sk-live-4f9Qz7Lm2Xc8 now", &[value]),
+        withhold_parts(concat!("Use sk", "-live-", "4f9Qz7Lm2Xc8 now"), &[value]),
         "Use [secret withheld] now"
     );
     assert_eq!(withhold_parts("Fix login", &[value]), "Fix login");

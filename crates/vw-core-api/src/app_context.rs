@@ -16,7 +16,7 @@ use crate::core::Shared;
 
 pub(crate) struct Context {
     enabled: bool,
-    env: Vec<(OsString, OsString)>,
+    pub(crate) env: Vec<(OsString, OsString)>,
     cwd: PathBuf,
     facts: OnceCell<String>,
 }
@@ -108,7 +108,7 @@ impl Context {
 }
 
 /// Keeps machine facts out of the user's displayed message while sending them on every submission route.
-pub(crate) async fn append(shared: &Shared, method: &str, params: &mut Value) {
+pub(crate) async fn append(shared: &std::sync::Arc<Shared>, method: &str, params: &mut Value) {
     if !shared.app_context.enabled
         || !matches!(
             method,
@@ -127,8 +127,9 @@ pub(crate) async fn append(shared: &Shared, method: &str, params: &mut Value) {
         .await;
     let _ = shared.procmon.lease(id);
     let ports = shared.procmon.leases().of(id);
+    let network = crate::network_facts::read(shared).await;
     let text = format!(
-        "Vibe Work session facts. {facts}\nSession preview ports: {ports:?}. Call preview_list first for current canOpen/leasedFree ports; never assume a fixed port."
+        "Vibe Work session facts. {facts}\nNetwork settings for commands: {network}\nSession preview ports: {ports:?}. preview_list reports current canOpen/leasedFree ports."
     );
     if method.starts_with("session/") {
         if let Some(entries) = params.get_mut("entries").and_then(Value::as_array_mut) {

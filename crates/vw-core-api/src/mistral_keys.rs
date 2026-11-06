@@ -70,7 +70,7 @@ pub(crate) async fn execute(
             kept.register_as(vw_secrets::SecretKind::MistralKey);
             done
         }
-        KeyRequest::UseMistralKey { item_id } => {
+        KeyRequest::UseMistralKey { item_id } | KeyRequest::UseExistingKey { item_id } => {
             keys.use_mistral_key(item_id).await.map_err(map).and(done)
         }
         KeyRequest::RenameMistralKey { item_id, name } => keys

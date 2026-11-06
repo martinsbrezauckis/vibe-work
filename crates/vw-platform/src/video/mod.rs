@@ -41,6 +41,10 @@ mod macos;
 #[cfg(target_os = "macos")]
 pub use macos::Decoder;
 mod geometry;
+#[cfg(any(test, windows, target_os = "macos"))]
+mod native_values;
+/// Native helper isolation; called before reading any media or tool request.
+pub use crate::video_sandbox as isolation;
 #[cfg(target_os = "linux")]
 pub mod limits;
 #[cfg(test)]

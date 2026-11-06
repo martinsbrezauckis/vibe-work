@@ -55,6 +55,18 @@ impl ResyncBudget {
         Self::new(8, Duration::from_secs(5), Duration::from_secs(30))
     }
 
+    /// The scheduler's wakeup deadline while this session is paused.
+    #[must_use]
+    pub fn paused_until(&self, session_id: &str) -> Option<Instant> {
+        self.paused_until.get(session_id).copied()
+    }
+
+    /// Drops all budget state when a session is removed.
+    pub fn forget(&mut self, session_id: &str) {
+        self.recent.remove(session_id);
+        self.paused_until.remove(session_id);
+    }
+
     /// Asks to start a resync of `session_id` at `now`; counts it when allowed.
     pub fn spend(&mut self, session_id: &str, now: Instant) -> Budget {
         if let Some(until) = self.paused_until.get(session_id) {

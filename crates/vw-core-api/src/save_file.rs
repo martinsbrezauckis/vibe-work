@@ -40,65 +40,18 @@ pub(crate) async fn write_whole(bytes: Vec<u8>, destination: &Path) -> Result<St
     }
     let target: PathBuf = destination.to_path_buf();
     blocking(move || {
-        replace_file(&target, &bytes, None)
-            .map_err(|e| {
-                CoreError::new(
-                    ErrorCode::Internal,
-                    format!("the file could not be written: {e}"),
-                )
-            })
-            .map(|()| target.display().to_string())
+        vw_platform::atomic_file::replace_file(
+            &target,
+            &bytes,
+            vw_platform::atomic_file::MetadataPolicy::NewFile,
+        )
+        .map_err(|e| {
+            CoreError::new(
+                ErrorCode::Internal,
+                format!("the file could not be written: {e}"),
+            )
+        })
+        .map(|()| target.display().to_string())
     })
     .await?
-}
-
-/// Replaces `target` with `bytes` through a new temporary file in the same folder (random name, created with
-/// `create_new`, so never through a planted link), with `permissions` when given, then renamed over `target`.
-/// Blocking. The temporary file is removed on any failure.
-///
-/// # Errors
-/// The I/O error of the create, write, sync, permission change or rename.
-pub(crate) fn replace_file(
-    target: &Path,
-    bytes: &[u8],
-    permissions: Option<&std::fs::Permissions>,
-) -> std::io::Result<()> {
-    use std::io::Write as _;
-    let folder = target
-        .parent()
-        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidInput, "no folder"))?;
-    let name = target.file_name().unwrap_or_default().to_string_lossy();
-    for _ in 0..8 {
-        let mut random = [0_u8; 8];
-        getrandom::fill(&mut random)
-            .map_err(|e| std::io::Error::other(format!("no random name: {e}")))?;
-        let suffix = u64::from_le_bytes(random);
-        let temp = folder.join(format!(".{name}.vw-{suffix:016x}.tmp"));
-        let mut file = match std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&temp)
-        {
-            Ok(file) => file,
-            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
-            Err(e) => return Err(e),
-        };
-        let written = file
-            .write_all(bytes)
-            .and_then(|()| file.sync_all())
-            .and_then(|()| match permissions {
-                Some(p) => std::fs::set_permissions(&temp, p.clone()),
-                None => Ok(()),
-            });
-        drop(file);
-        let done = written.and_then(|()| std::fs::rename(&temp, target));
-        if done.is_err() {
-            let _ = std::fs::remove_file(&temp);
-        }
-        return done;
-    }
-    Err(std::io::Error::new(
-        std::io::ErrorKind::AlreadyExists,
-        "no free temporary name",
-    ))
 }

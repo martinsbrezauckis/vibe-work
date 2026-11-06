@@ -32,3 +32,29 @@ export async function openBrowserTabs(
   );
   if (browser !== undefined) await openChromeTabs(app, sessionId, origin, browser);
 }
+
+/** The three readiness states at the tab entry point; labels never decide connection behavior. */
+export function browserSignals(view: ChromeControlView | null | undefined): {
+  browser: "Chrome" | "Edge";
+  state: "missing" | "waiting" | "ready";
+  label: string;
+}[] {
+  if (view == null) return [];
+  return (["Chrome", "Edge"] as const).flatMap((browser) => {
+    const setup = browser === "Chrome" ? view.setup : view.edge;
+    if (setup === undefined || setup.state === "absent") return [];
+    const missing =
+      setup.browserIssue === "missing" ||
+      setup.browserIssue === "differentBrowser" ||
+      setup.addon?.state === "chromeMissing" ||
+      setup.addon?.state === "otherBrowser";
+    const ready = browser === "Chrome" ? chromeUsable(view) : edgeUsable(view);
+    return [
+      {
+        browser,
+        state: missing ? "missing" : ready ? "ready" : "waiting",
+        label: missing ? "Browser not installed" : ready ? "Ready" : "Extension not connected",
+      },
+    ];
+  });
+}

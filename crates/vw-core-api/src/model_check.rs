@@ -99,15 +99,10 @@ async fn bare_lobby(
         return Ok((lobby(shared).await?, original));
     }
     let read = lobby(shared).await;
-    let no_account_models = read.as_ref().is_ok_and(|reply| {
-        reply["config"]["models"].as_array().is_none_or(|rows| {
-            !rows
-                .iter()
-                .any(|row| matches!(row["source"].as_str(), Some("growthbook" | "catalog")))
-        })
-    });
-    if no_account_models
-        || read.is_err()
+    // A successful, settled read is authoritative even when it has no account models:
+    // facts-only overrides for absent experiments are orphans in Vibe. If the model returns,
+    // the next check can add its missing facts again. Only our explicitly marked rows were removed.
+    if read.is_err()
         || read
             .as_ref()
             .is_ok_and(|r| r["config"]["awaitingExperimentModel"] == true)

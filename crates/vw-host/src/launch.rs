@@ -18,8 +18,7 @@
 //! `config.toml` keeps user edits; relative extension entries are dropped and a session-title model is added when it
 //! names none ([`crate::title_model`]; both launches), and Vibe is set to verify HTTPS with the OS certificate store unless
 //! the config sets that itself ([`crate::trust_store`]; both launches), and Mistral's experiments cannot switch on
-//! PR monitoring, registry skills or the smart-approve default unless the config sets them itself
-//! ([`crate::experiment_pins`]; both launches). Config parsing never fails launch; the dev server runs unsandboxed, so
+//! unsupported features ([`crate::experiment_pins`]; both launches). The selected access mode is kept. Config parsing never fails launch; the dev server runs unsandboxed, so
 //! live development uses the same vault and proxy flow as a user build.
 
 use std::ffi::OsString;
@@ -329,7 +328,7 @@ fn log_trust_store(vibe_home: &Path) {
 }
 
 /// Pins the experiment-driven keys off in `vibe_home/config.toml` ([`crate::experiment_pins`]) and logs what happened,
-/// a person's own value by key name. Never fails the launch.
+/// by key name. Invalid config remains for Vibe to diagnose.
 fn log_experiment_pins(vibe_home: &Path) {
     match crate::experiment_pins::ensure(vibe_home) {
         Ok(outcome) => {
@@ -339,8 +338,8 @@ fn log_experiment_pins(vibe_home: &Path) {
             for key in &outcome.added {
                 tracing::info!(key, "experiments: pinned off");
             }
-            for key in &outcome.kept_on {
-                tracing::info!(key, "experiments: config sets the key, kept");
+            for key in &outcome.disabled {
+                tracing::info!(key, "experiments: unsupported feature pinned off");
             }
         }
         Err(error) => tracing::warn!(%error, "experiments: config.toml could not be updated"),

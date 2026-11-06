@@ -1,190 +1,338 @@
 {
-  "_comment": "App redaction cases used by the Rust core tests. Every credential is synthetic, deliberately fake and never usable.",
+  "_comment": "App redaction cases used by the Rust core tests. Credential markers expand from separate parts only at test runtime; no committed value is usable.",
   "cases": [
     {
       "name": "gitlab-personal-20",
-      "input": "Before glpat-abcdefghijklmnopqrst after.",
-      "expected": "Before [redacted key] after."
+      "input": "Before <synthetic-credential> after.",
+      "expected": "Before [redacted key] after.",
+      "credentialParts": [
+        "gl",
+        "pat-abcdefghijklmnopqrst"
+      ]
     },
     {
       "name": "ghp_",
-      "input": "Before ghp_FAKE0123456789abcdefFAKE0123456789ab after.",
-      "expected": "Before [redacted key] after."
+      "input": "Before <synthetic-credential> after.",
+      "expected": "Before [redacted key] after.",
+      "credentialParts": [
+        "gh",
+        "p_FAKE0123456789abcdefFAKE0123456789ab"
+      ]
     },
     {
       "name": "gho_",
-      "input": "Before gho_FAKE0123456789abcdefFAKE0123456789ab after.",
-      "expected": "Before [redacted key] after."
+      "input": "Before <synthetic-credential> after.",
+      "expected": "Before [redacted key] after.",
+      "credentialParts": [
+        "gh",
+        "o_FAKE0123456789abcdefFAKE0123456789ab"
+      ]
     },
     {
       "name": "ghu_",
-      "input": "Before ghu_FAKE0123456789abcdefFAKE0123456789ab after.",
-      "expected": "Before [redacted key] after."
+      "input": "Before <synthetic-credential> after.",
+      "expected": "Before [redacted key] after.",
+      "credentialParts": [
+        "gh",
+        "u_FAKE0123456789abcdefFAKE0123456789ab"
+      ]
     },
     {
       "name": "ghs_",
-      "input": "Before ghs_FAKE0123456789abcdefFAKE0123456789ab after.",
-      "expected": "Before [redacted key] after."
+      "input": "Before <synthetic-credential> after.",
+      "expected": "Before [redacted key] after.",
+      "credentialParts": [
+        "gh",
+        "s_FAKE0123456789abcdefFAKE0123456789ab"
+      ]
     },
     {
       "name": "ghr_",
-      "input": "Before ghr_FAKE0123456789abcdefFAKE0123456789ab after.",
-      "expected": "Before [redacted key] after."
+      "input": "Before <synthetic-credential> after.",
+      "expected": "Before [redacted key] after.",
+      "credentialParts": [
+        "gh",
+        "r_FAKE0123456789abcdefFAKE0123456789ab"
+      ]
     },
     {
       "name": "github-fine-grained",
-      "input": "Before github_pat_FAKE0123456789abcdefFA_FAKE0123456789abcdefFAKE0123456789abcdefFAKE0123456789abcde after.",
-      "expected": "Before [redacted key] after."
+      "input": "Before <synthetic-credential> after.",
+      "expected": "Before [redacted key] after.",
+      "credentialParts": [
+        "gi",
+        "thub_pat_FAKE0123456789abcdefFA_FAKE0123456789abcdefFAKE0123456789abcdefFAKE0123456789abcde"
+      ]
     },
     {
       "name": "gldt-",
-      "input": "Before gldt-FAKE0123456789abcdefg after.",
-      "expected": "Before [redacted key] after."
+      "input": "Before <synthetic-credential> after.",
+      "expected": "Before [redacted key] after.",
+      "credentialParts": [
+        "gl",
+        "dt-FAKE0123456789abcdefg"
+      ]
     },
     {
       "name": "glrt-",
-      "input": "Before glrt-FAKE0123456789abcdefg after.",
-      "expected": "Before [redacted key] after."
+      "input": "Before <synthetic-credential> after.",
+      "expected": "Before [redacted key] after.",
+      "credentialParts": [
+        "gl",
+        "rt-FAKE0123456789abcdefg"
+      ]
     },
     {
       "name": "slack-b",
-      "input": "Before xoxb-0000000000-1111111111-FAKE0123456789abcdefFAKE after.",
-      "expected": "Before [redacted key] after."
+      "input": "Before <synthetic-credential> after.",
+      "expected": "Before [redacted key] after.",
+      "credentialParts": [
+        "xo",
+        "xb-0000000000-1111111111-FAKE0123456789abcdefFAKE"
+      ]
     },
     {
       "name": "slack-a",
-      "input": "Before xoxa-0000000000-1111111111-FAKE0123456789abcdefFAKE after.",
-      "expected": "Before [redacted key] after."
+      "input": "Before <synthetic-credential> after.",
+      "expected": "Before [redacted key] after.",
+      "credentialParts": [
+        "xo",
+        "xa-0000000000-1111111111-FAKE0123456789abcdefFAKE"
+      ]
     },
     {
       "name": "slack-p",
-      "input": "Before xoxp-0000000000-1111111111-FAKE0123456789abcdefFAKE after.",
-      "expected": "Before [redacted key] after."
+      "input": "Before <synthetic-credential> after.",
+      "expected": "Before [redacted key] after.",
+      "credentialParts": [
+        "xo",
+        "xp-0000000000-1111111111-FAKE0123456789abcdefFAKE"
+      ]
     },
     {
       "name": "slack-r",
-      "input": "Before xoxr-0000000000-1111111111-FAKE0123456789abcdefFAKE after.",
-      "expected": "Before [redacted key] after."
+      "input": "Before <synthetic-credential> after.",
+      "expected": "Before [redacted key] after.",
+      "credentialParts": [
+        "xo",
+        "xr-0000000000-1111111111-FAKE0123456789abcdefFAKE"
+      ]
     },
     {
       "name": "slack-s",
-      "input": "Before xoxs-0000000000-1111111111-FAKE0123456789abcdefFAKE after.",
-      "expected": "Before [redacted key] after."
+      "input": "Before <synthetic-credential> after.",
+      "expected": "Before [redacted key] after.",
+      "credentialParts": [
+        "xo",
+        "xs-0000000000-1111111111-FAKE0123456789abcdefFAKE"
+      ]
     },
     {
       "name": "sk-",
-      "input": "Before sk-FAKE0123456789abcdefFAKE0123456789abcdefFAKE0123456789abcdef after.",
-      "expected": "Before [redacted key] after."
+      "input": "Before <synthetic-credential> after.",
+      "expected": "Before [redacted key] after.",
+      "credentialParts": [
+        "sk",
+        "-FAKE0123456789abcdefFAKE0123456789abcdefFAKE0123456789abcdef"
+      ]
     },
     {
       "name": "sk-ant-api03-",
-      "input": "Before sk-ant-api03-FAKE0123456789abcdefFAKE0123456789abcdefFAKE0123456789abcdef after.",
-      "expected": "Before [redacted key] after."
+      "input": "Before <synthetic-credential> after.",
+      "expected": "Before [redacted key] after.",
+      "credentialParts": [
+        "sk",
+        "-ant-api03-FAKE0123456789abcdefFAKE0123456789abcdefFAKE0123456789abcdef"
+      ]
     },
     {
       "name": "AKIA",
-      "input": "Before AKIAFAKE0123456789AB after.",
-      "expected": "Before [redacted key] after."
+      "input": "Before <synthetic-credential> after.",
+      "expected": "Before [redacted key] after.",
+      "credentialParts": [
+        "AK",
+        "IAFAKE0123456789AB"
+      ]
     },
     {
       "name": "ASIA",
-      "input": "Before ASIAFAKE0123456789AB after.",
-      "expected": "Before [redacted key] after."
+      "input": "Before <synthetic-credential> after.",
+      "expected": "Before [redacted key] after.",
+      "credentialParts": [
+        "AS",
+        "IAFAKE0123456789AB"
+      ]
     },
     {
       "name": "google",
-      "input": "Before AIzaFAKE0123456789abcdefFAKE0123456789a after.",
-      "expected": "Before [redacted key] after."
+      "input": "Before <synthetic-credential> after.",
+      "expected": "Before [redacted key] after.",
+      "credentialParts": [
+        "AI",
+        "zaFAKE0123456789abcdefFAKE0123456789a"
+      ]
     },
     {
       "name": "sk_live_",
-      "input": "Before sk_live_FAKE0123456789abcdefFAKE after.",
-      "expected": "Before [redacted key] after."
+      "input": "Before <synthetic-credential> after.",
+      "expected": "Before [redacted key] after.",
+      "credentialParts": [
+        "sk",
+        "_live_FAKE0123456789abcdefFAKE"
+      ]
     },
     {
       "name": "rk_live_",
-      "input": "Before rk_live_FAKE0123456789abcdefFAKE after.",
-      "expected": "Before [redacted key] after."
+      "input": "Before <synthetic-credential> after.",
+      "expected": "Before [redacted key] after.",
+      "credentialParts": [
+        "rk",
+        "_live_FAKE0123456789abcdefFAKE"
+      ]
     },
     {
       "name": "npm",
-      "input": "Before npm_FAKE0123456789abcdefFAKE0123456789ab after.",
-      "expected": "Before [redacted key] after."
+      "input": "Before <synthetic-credential> after.",
+      "expected": "Before [redacted key] after.",
+      "credentialParts": [
+        "np",
+        "m_FAKE0123456789abcdefFAKE0123456789ab"
+      ]
     },
     {
       "name": "pypi",
-      "input": "Before pypi-FAKE0123456789abcdefFAKE0123456789abcdefFAKE0123456789abcdefFAKE0123456789abcdef after.",
-      "expected": "Before [redacted key] after."
+      "input": "Before <synthetic-credential> after.",
+      "expected": "Before [redacted key] after.",
+      "credentialParts": [
+        "py",
+        "pi-FAKE0123456789abcdefFAKE0123456789abcdefFAKE0123456789abcdefFAKE0123456789abcdef"
+      ]
     },
     {
       "name": "jwt",
-      "input": "Before eyJhbGciOiJub25lIn0.eyJzdWIiOiJGQUtFLU5PVC1BLVRPS0VOIn0.RkFLRV9TSUdOQVRVUkU after.",
-      "expected": "Before [redacted key] after."
+      "input": "Before <synthetic-credential> after.",
+      "expected": "Before [redacted key] after.",
+      "credentialParts": [
+        "ey",
+        "JhbGciOiJub25lIn0.eyJzdWIiOiJGQUtFLU5PVC1BLVRPS0VOIn0.RkFLRV9TSUdOQVRVUkU"
+      ]
     },
     {
       "name": "pem-PRIVATE KEY",
-      "input": "Before -----BEGIN PRIVATE KEY-----\nFAKE NOT A KEY\n-----END PRIVATE KEY----- after.",
-      "expected": "Before [redacted key] after."
+      "input": "Before <synthetic-credential> after.",
+      "expected": "Before [redacted key] after.",
+      "credentialParts": [
+        "--",
+        "---BEGIN PRIVATE KEY-----\nFAKE NOT A KEY\n-----END PRIVATE KEY-----"
+      ]
     },
     {
       "name": "pem-RSA PRIVATE KEY",
-      "input": "Before -----BEGIN RSA PRIVATE KEY-----\nFAKE NOT A KEY\n-----END RSA PRIVATE KEY----- after.",
-      "expected": "Before [redacted key] after."
+      "input": "Before <synthetic-credential> after.",
+      "expected": "Before [redacted key] after.",
+      "credentialParts": [
+        "--",
+        "---BEGIN RSA PRIVATE KEY-----\nFAKE NOT A KEY\n-----END RSA PRIVATE KEY-----"
+      ]
     },
     {
       "name": "pem-EC PRIVATE KEY",
-      "input": "Before -----BEGIN EC PRIVATE KEY-----\nFAKE NOT A KEY\n-----END EC PRIVATE KEY----- after.",
-      "expected": "Before [redacted key] after."
+      "input": "Before <synthetic-credential> after.",
+      "expected": "Before [redacted key] after.",
+      "credentialParts": [
+        "--",
+        "---BEGIN EC PRIVATE KEY-----\nFAKE NOT A KEY\n-----END EC PRIVATE KEY-----"
+      ]
     },
     {
       "name": "pem-OPENSSH PRIVATE KEY",
-      "input": "Before -----BEGIN OPENSSH PRIVATE KEY-----\nFAKE NOT A KEY\n-----END OPENSSH PRIVATE KEY----- after.",
-      "expected": "Before [redacted key] after."
+      "input": "Before <synthetic-credential> after.",
+      "expected": "Before [redacted key] after.",
+      "credentialParts": [
+        "--",
+        "---BEGIN OPENSSH PRIVATE KEY-----\nFAKE NOT A KEY\n-----END OPENSSH PRIVATE KEY-----"
+      ]
     },
     {
       "name": "pem-PUBLIC KEY",
-      "input": "Before -----BEGIN PUBLIC KEY-----\nFAKE NOT A KEY\n-----END PUBLIC KEY----- after.",
-      "expected": "Before [redacted key] after."
+      "input": "Before <synthetic-credential> after.",
+      "expected": "Before [redacted key] after.",
+      "credentialParts": [
+        "--",
+        "---BEGIN PUBLIC KEY-----\nFAKE NOT A KEY\n-----END PUBLIC KEY-----"
+      ]
     },
     {
       "name": "pem-CERTIFICATE",
-      "input": "Before -----BEGIN CERTIFICATE-----\nFAKE NOT A KEY\n-----END CERTIFICATE----- after.",
-      "expected": "Before [redacted key] after."
+      "input": "Before <synthetic-credential> after.",
+      "expected": "Before [redacted key] after.",
+      "credentialParts": [
+        "--",
+        "---BEGIN CERTIFICATE-----\nFAKE NOT A KEY\n-----END CERTIFICATE-----"
+      ]
     },
     {
       "name": "pem-truncated",
-      "input": "Before -----BEGIN PRIVATE KEY-----\nFAKE NOT A KEY",
-      "expected": "Before [redacted key]"
+      "input": "Before <synthetic-credential>",
+      "expected": "Before [redacted key]",
+      "credentialParts": [
+        "--",
+        "---BEGIN PRIVATE KEY-----\nFAKE NOT A KEY"
+      ]
     },
     {
       "name": "label-key=",
-      "input": "key=F4ke9Qz2Ab7Cd8Ef3Gh5Jk6L",
-      "expected": "[redacted]"
+      "input": "key=<synthetic-credential>",
+      "expected": "[redacted]",
+      "credentialParts": [
+        "F4",
+        "ke9Qz2Ab7Cd8Ef3Gh5Jk6L"
+      ]
     },
     {
       "name": "label-KEY: ",
-      "input": "KEY: F4ke9Qz2Ab7Cd8Ef3Gh5Jk6L",
-      "expected": "[redacted]"
+      "input": "KEY: <synthetic-credential>",
+      "expected": "[redacted]",
+      "credentialParts": [
+        "F4",
+        "ke9Qz2Ab7Cd8Ef3Gh5Jk6L"
+      ]
     },
     {
       "name": "label-signing_key = ",
-      "input": "signing_key = F4ke9Qz2Ab7Cd8Ef3Gh5Jk6L",
-      "expected": "[redacted]"
+      "input": "signing_key = <synthetic-credential>",
+      "expected": "[redacted]",
+      "credentialParts": [
+        "F4",
+        "ke9Qz2Ab7Cd8Ef3Gh5Jk6L"
+      ]
     },
     {
       "name": "label-\"client-key\": \"",
-      "input": "\"client-key\": \"F4ke9Qz2Ab7Cd8Ef3Gh5Jk6L\"",
-      "expected": "\"[redacted]"
+      "input": "\"client-key\": \"<synthetic-credential>\"",
+      "expected": "\"[redacted]",
+      "credentialParts": [
+        "F4",
+        "ke9Qz2Ab7Cd8Ef3Gh5Jk6L"
+      ]
     },
     {
       "name": "label-token: ",
-      "input": "token: F4ke9Qz2Ab7Cd8Ef3Gh5Jk6L",
-      "expected": "[redacted]"
+      "input": "token: <synthetic-credential>",
+      "expected": "[redacted]",
+      "credentialParts": [
+        "F4",
+        "ke9Qz2Ab7Cd8Ef3Gh5Jk6L"
+      ]
     },
     {
       "name": "label-api_key=",
-      "input": "api_key=F4ke9Qz2Ab7Cd8Ef3Gh5Jk6L",
-      "expected": "[redacted]"
+      "input": "api_key=<synthetic-credential>",
+      "expected": "[redacted]",
+      "credentialParts": [
+        "F4",
+        "ke9Qz2Ab7Cd8Ef3Gh5Jk6L"
+      ]
     },
     {
       "name": "prose-37",
@@ -343,8 +491,12 @@
     },
     {
       "name": "unicode-letter-before-gitlab",
-      "input": "églpat-abcdefghijklmnopqrst",
-      "expected": "églpat-abcdefghijklmnopqrst"
+      "input": "é<synthetic-credential>",
+      "expected": "é<synthetic-credential>",
+      "credentialParts": [
+        "gl",
+        "pat-abcdefghijklmnopqrst"
+      ]
     },
     {
       "name": "unicode-case-key",

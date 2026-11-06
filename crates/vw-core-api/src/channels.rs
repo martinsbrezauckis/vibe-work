@@ -206,7 +206,7 @@ impl Channels {
     pub(crate) async fn request(&self, method: &str, mut params: Value) -> Result<Value, RpcError> {
         if loads_plugins(method, &params) {
             let _held = self.plugin_approvals.mutations.lock().await;
-            // One pinned-Python check per approved plugin (about 0.2 s each): on the blocking pool.
+            // Fresh pinned-Python identity batches run on the blocking pool.
             let approvals = self.plugin_approvals.clone();
             tokio::task::spawn_blocking(move || approvals.sweep())
                 .await

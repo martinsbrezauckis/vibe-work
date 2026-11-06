@@ -5,178 +5,178 @@
  * scripts/public/check.sh fails when this file and the Rust types disagree.
  */
 
-export type TerminalRequest = { "op": "open", 
+export type TerminalRequest = { "op": "open",
 /**
  * The session.
  */
-sessionId: string, 
+sessionId: string,
 /**
  * Initial columns (default 80).
  */
-cols?: number, 
+cols?: number,
 /**
  * Initial rows (default 24).
  */
-rows?: number, } | { "op": "list", 
+rows?: number, } | { "op": "list",
 /**
  * The session (all when absent).
  */
-sessionId?: string, } | { "op": "write", 
+sessionId?: string, } | { "op": "write",
 /**
  * The terminal.
  */
-terminalId: string, 
+terminalId: string,
 /**
  * The input text. With `binary`, each character (U+0000..U+00FF) is one byte (xterm's
  * `onBinary` mouse reports).
  */
-data: string, 
+data: string,
 /**
  * See `data`.
  */
-binary?: boolean, } | { "op": "resize", 
+binary?: boolean, } | { "op": "resize",
 /**
  * The terminal.
  */
-terminalId: string, 
+terminalId: string,
 /**
  * Columns.
  */
-cols: number, 
+cols: number,
 /**
  * Rows.
  */
-rows: number, } | { "op": "read", 
+rows: number, } | { "op": "read",
 /**
  * The terminal.
  */
-terminalId: string, 
+terminalId: string,
 /**
  * Start offset; absent: the newest `maxBytes`.
  */
-from?: number, 
+from?: number,
 /**
  * Most bytes to read (default 64 KiB, at most 1 MiB).
  */
-maxBytes?: number, 
+maxBytes?: number,
 /**
  * Remove escape sequences (colours, titles, links, clipboard requests).
  */
-plain?: boolean, } | { "op": "restart", 
+plain?: boolean, } | { "op": "restart",
 /**
  * The terminal.
  */
-terminalId: string, } | { "op": "close", 
+terminalId: string, } | { "op": "close",
 /**
  * The terminal.
  */
 terminalId: string, };
 
-export type TerminalResult = { "type": "terminal", 
+export type TerminalResult = { "type": "terminal",
 /**
  * The terminal.
  */
-terminal: TerminalView, } | { "type": "terminals", 
+terminal: TerminalView, } | { "type": "terminals",
 /**
  * Oldest first.
  */
-terminals: Array<TerminalView>, } | { "type": "output", 
+terminals: Array<TerminalView>, } | { "type": "output",
 /**
  * The text read.
  */
 output: TerminalOutputView, } | { "type": "done", };
 
-export type TerminalView = { 
+export type TerminalView = {
 /**
  * Its id.
  */
-terminalId: string, 
+terminalId: string,
 /**
  * Its session.
  */
-sessionId: string, 
+sessionId: string,
 /**
  * The folder it started in.
  */
-cwd: string, 
+cwd: string,
 /**
  * The shell program.
  */
-shell: string, 
+shell: string,
 /**
  * The shell's process id.
  */
-pid: number | null, 
+pid: number | null,
 /**
  * Running or exited.
  */
-state: TerminalStateView, 
+state: TerminalStateView,
 /**
  * Columns.
  */
-cols: number, 
+cols: number,
 /**
  * Rows.
  */
-rows: number, 
+rows: number,
 /**
  * Restarts so far.
  */
-generation: number, 
+generation: number,
 /**
  * Offset just past the newest output byte.
  */
-outputEnd: number, 
+outputEnd: number,
 /**
  * When it was opened (Unix milliseconds).
  */
 startedAtMs: number, };
 
-export type TerminalStateView = { "type": "running", } | { "type": "exited", 
+export type TerminalStateView = { "type": "running", } | { "type": "exited",
 /**
  * Exit code (Unix: 1 when killed by a signal).
  */
-exitCode: number | null, 
+exitCode: number | null,
 /**
  * Signal name (Unix).
  */
 signal: string | null, };
 
-export type TerminalOutputView = { 
+export type TerminalOutputView = {
 /**
  * Offset of the first byte returned.
  */
-start: number, 
+start: number,
 /**
  * Offset just past the last byte returned; ask `from` here next time.
  */
-end: number, 
+end: number,
 /**
  * The requested start was already dropped from the scrollback.
  */
-truncated: boolean, 
+truncated: boolean,
 /**
  * The text.
  */
 text: string, };
 
-export type TerminalEventView = { "kind": "opened", 
+export type TerminalEventView = { "kind": "opened",
 /**
  * The terminal.
  */
-terminal: TerminalView, } | { "kind": "exited", 
+terminal: TerminalView, } | { "kind": "exited",
 /**
  * The terminal.
  */
-terminal: TerminalView, } | { "kind": "restarted", 
+terminal: TerminalView, } | { "kind": "restarted",
 /**
  * The terminal.
  */
-terminal: TerminalView, } | { "kind": "closed", 
+terminal: TerminalView, } | { "kind": "closed",
 /**
  * The terminal.
  */
-terminalId: string, 
+terminalId: string,
 /**
  * Its session.
  */

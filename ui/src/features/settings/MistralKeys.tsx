@@ -5,15 +5,12 @@ import { useRef, useState } from "react";
 import { Badge, Button, LinkButton } from "../../components/Controls";
 import { useModalFocus } from "../../hooks/useModalFocus";
 import type { MistralKeyView } from "../../protocol/core";
-import { chatsWorking, savedTestText } from "../../state/mistralKeys";
+import { savedTestText } from "../../state/mistralKeys";
 import { KeyStep } from "../setup/KeyStep";
 import { PasswordAsk } from "../setup/PasswordAsk";
 import { Problem } from "../setup/fields";
 import { useKeyUi } from "../setup/useKeys";
 import { useApp } from "../shell/AppContext";
-import { useCoreState } from "../shell/hooks";
-
-const BUSY = "Wait until the chats finish, then switch keys.";
 
 /** The Account list, immediately above Mistral's website links. */
 export function MistralKeys() {
@@ -24,7 +21,6 @@ export function MistralKeys() {
   const busy = useKeyUi((s) => s.busy);
   const switching = useKeyUi((s) => s.switching);
   const problem = useKeyUi((s) => s.problem);
-  const working = useCoreState(chatsWorking);
   const ownProblem =
     problem?.operation !== undefined &&
     ["useMistralKey", "renameMistralKey", "removeMistralKey"].includes(problem.operation)
@@ -149,8 +145,7 @@ export function MistralKeys() {
                     <Button
                       data-testid="settings.mistral-keys-use"
                       shape="outlined"
-                      disabled={busy || working}
-                      title={working ? BUSY : undefined}
+                      disabled={busy}
                       onClick={() => {
                         void keys.useMistralKey(item.itemId).then(() => {
                           rowFocus(item.itemId);
@@ -187,9 +182,6 @@ export function MistralKeys() {
               </div>
             ))}
           </div>
-          {working && items.some((item) => !item.inUse) && (
-            <p className="key-field-hint ui-help">{BUSY}</p>
-          )}
           {!adding && (
             <Button
               data-testid="settings.mistral-keys-add"

@@ -24,6 +24,9 @@
   for (let i = 0; target && env.nodeIdentities?.get(target) !== check.node && i < 64; i += 1)
     target = target.parentElement || target.getRootNode()?.host;
   if (!target || !check.node || env.nodeIdentities?.get(target) !== check.node) return fail("node or frame under point changed");
+  const control = hit.closest?.("label")?.control || hit;
+  if (check.target && !REQ.nativeUser && control?.localName === "input" && control.type === "color")
+    return fail("native colour picker unsupported; use browser_read for the field ref, then browser_act type with #RRGGBB text");
   if (check.target && !REQ.nativeUser && (authorizationPage() || REQ.consent)) {
     if (!REQ.consent || REQ.consent.snapshot !== consentSnapshot(REQ.ref).snapshot) return fail("authorization changed");
   }

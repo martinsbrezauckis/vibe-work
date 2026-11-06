@@ -3,9 +3,9 @@
 //!
 //! Depends on: serde, ts-rs (feature `ts`). Called by: `command` (the `Command::Processes` variant), `left_running`
 //! (builds them), the UI (generated TypeScript in `status.ts`), the Debug API (`POST /commands`).
-//! Invariants: a view never carries a process's arguments or working folder (the same rule as vw-procmon's
-//! views); a process is named by an opaque `id` that the core parses back, so the start token never passes through
-//! a JavaScript number (Windows tokens exceed 2^53).
+//! Invariants: commands come only from the agent's recorded launch, never the OS command line or environment;
+//! no view carries a working folder. A process is named by an opaque `id` that the core parses back, so the start
+//! token never passes through a JavaScript number (Windows tokens exceed 2^53).
 
 use serde::{Deserialize, Serialize};
 
@@ -97,6 +97,9 @@ pub struct LeftRunningView {
     pub pid: u32,
     /// Executable name (never from the command line).
     pub name: Option<String>,
+    /// Command as the agent wrote it, when its launch record is still available.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub command: Option<String>,
     /// Ports it listened on when last seen.
     pub ports: Vec<u16>,
 }

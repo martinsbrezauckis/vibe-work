@@ -238,7 +238,7 @@
 }
 .q-opt input {
   align-self: start;
-  margin-top: 3px;
+  margin: 3px 0 0;
 }
 .q-opt input[type="radio"] {
   appearance: none;

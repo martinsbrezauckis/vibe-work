@@ -1,22 +1,20 @@
 //! A foreign app or CLI lease keeps a viewed chat read-only until its owner releases it.
-//! Uses app locks and Vibe's lease-subscription snapshot, refreshed by the core poll, before reopening, and at once
-//! when Vibe reports a lease change (`session/lease/updated`, via the pump): Vibe watches each holder's exit, so a
-//! crashed window's chat unlocks when the OS releases its lease, not one poll later.
-//! Each subscribe replaces the previous subscription and returns a fresh snapshot without taking a session.
-//! Errors preserve the last observed state, and our own server is excluded. A session's reads and their publication
-//! are serialized, so an older read never overwrites a newer one.
-//! Called by core, dispatch, pump and `session_tools`; every server read is bounded.
+//! Uses app OS locks and one generation-bound Vibe inventory (`lease_inventory`), whose events update all
+//! known chats. The bounded poll checks app locks/reconnects; errors preserve the last published state.
+//! Called by core, dispatch and session tools. Per-session reads/publication remain serialized.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
-use serde_json::{Value, json};
 use tokio::task::JoinHandle;
 
 use crate::core::{Core, Shared};
 use crate::error::{CoreError, ErrorCode};
 use crate::event::CoreEvent;
+
+#[path = "lease_inventory.rs"]
+mod inventory;
 
 /// How often viewed sessions are checked.
 pub(crate) const POLL: Duration = Duration::from_secs(2);
@@ -30,6 +28,9 @@ const RELEASE_WAIT: Duration = Duration::from_secs(3);
 /// Checked sessions and their current foreign holders, plus the poll task owned by the core.
 pub(crate) struct Holders {
     held: Mutex<BTreeMap<String, Option<(u32, String)>>>,
+    inventory: inventory::Inventory,
+    wake: Arc<tokio::sync::Notify>,
+    changed: Mutex<BTreeSet<String>>,
     poll: Mutex<Option<JoinHandle<()>>>,
     /// Counts Vibe's `session/lease/updated` reports; a read waiting for a release watches it.
     updates: tokio::sync::watch::Sender<u64>,
@@ -41,6 +42,9 @@ impl Default for Holders {
     fn default() -> Self {
         Self {
             held: Mutex::default(),
+            inventory: inventory::Inventory::default(),
+            wake: Arc::new(tokio::sync::Notify::new()),
+            changed: Mutex::default(),
             poll: Mutex::default(),
             updates: tokio::sync::watch::Sender::new(0),
             reading: Mutex::default(),
@@ -48,7 +52,28 @@ impl Default for Holders {
     }
 }
 
+impl Drop for Holders {
+    fn drop(&mut self) {
+        self.stop_poll();
+    }
+}
+
 impl Holders {
+    /// Coalesces event-driven checks. Ordinary polling visits only currently viewed chats.
+    fn changed(&self, id: Option<&str>) {
+        let held = self.held.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut changed = self.changed.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some(id) = id {
+            if held.contains_key(id) {
+                changed.insert(id.to_owned());
+            }
+        } else {
+            changed.extend(held.keys().cloned());
+        }
+        self.updates.send_modify(|count| *count += 1);
+        self.wake.notify_one();
+    }
+
     /// Serializes `session_id`'s reads (another session's read, or its wait for a release, never delays it).
     async fn reading(&self, session_id: &str) -> tokio::sync::OwnedMutexGuard<()> {
         let lock = self
@@ -74,6 +99,7 @@ impl Holders {
     }
     /// Aborts the poll task (core shutdown).
     pub(crate) fn stop_poll(&self) {
+        self.inventory.stop();
         let poll = self
             .poll
             .lock()
@@ -82,15 +108,6 @@ impl Holders {
         if let Some(poll) = poll {
             poll.abort();
         }
-    }
-
-    /// True while `session_id` is published as held by another process.
-    fn shown_held(&self, session_id: &str) -> bool {
-        self.held
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .get(session_id)
-            .is_some_and(Option::is_some)
     }
 
     /// Records `holder` for `session_id`; true when it changed.
@@ -121,7 +138,7 @@ pub(crate) fn held_refusal(pid: u32) -> CoreError {
 /// held only while the OS finishes that exit. A running holder, an unknown pid (0) and a lease still held at the
 /// deadline are returned as they are, so only the lock itself ever frees a chat.
 async fn read_holder(
-    shared: &Shared,
+    shared: &Arc<Shared>,
     session_id: &str,
     wait: bool,
 ) -> Result<Option<(u32, &'static str)>, CoreError> {
@@ -147,23 +164,18 @@ async fn exited(pid: u32) -> bool {
         .unwrap_or(false)
 }
 
-/// One read of both leases: this app's other windows first, then Vibe's snapshot. The snapshot is read even when
-/// another window holds the chat: that subscription is what makes Vibe report the release (the window's own server
-/// holds Vibe's lease as long as the window holds the chat).
+/// App locks are checked afresh; every chat shares the event-maintained Vibe inventory.
 async fn read_once(
-    shared: &Shared,
+    shared: &Arc<Shared>,
     session_id: &str,
 ) -> Result<Option<(u32, &'static str)>, CoreError> {
     let window = shared.leases.foreign(session_id)?;
-    let method = "session/lease/subscribe";
-    let reply = tokio::time::timeout(READ_WAIT, shared.gate.call(method, json!({}), None))
-        .await
-        .map_err(|_| CoreError::new(ErrorCode::Timeout, "the session's holder could not be read"))
-        .and_then(|reply| reply.map_err(|error| CoreError::from_gate(method, &error)));
+    let ready = inventory::ensure(shared).await;
     if let Some(pid) = window {
         return Ok(Some((pid, "window")));
     }
-    let Some(pid) = snapshot_holder(&reply?.result, session_id) else {
+    ready?;
+    let Some(pid) = shared.holders.inventory.holder(session_id) else {
         return Ok(None);
     };
     let ours = if let Some(leader) = shared.supervisor.server_pid() {
@@ -180,27 +192,8 @@ async fn read_once(
     Ok((!ours).then_some((pid, "terminal")))
 }
 
-/// A held lease without a readable diagnostic still locks the chat (pid 0 means unknown).
-fn snapshot_holder(snapshot: &Value, session_id: &str) -> Option<u32> {
-    let lease = snapshot
-        .get("held")?
-        .as_array()?
-        .iter()
-        .find(|lease| lease["sessionId"].as_str() == Some(session_id))?;
-    let holder = lease
-        .get("leaseHolder")
-        .filter(|holder| !holder.is_null())?;
-    Some(
-        holder
-            .get("processId")
-            .and_then(Value::as_u64)
-            .and_then(|pid| u32::try_from(pid).ok())
-            .unwrap_or(0),
-    )
-}
-
 /// Checks one session and publishes a change. Errors leave the last known state.
-async fn check(shared: &Shared, session_id: &str) {
+async fn check(shared: &Arc<Shared>, session_id: &str) {
     let _reading = shared.holders.reading(session_id).await;
     if shared.channels.has_channel(session_id) {
         // We hold it: never another process's.
@@ -210,17 +203,9 @@ async fn check(shared: &Shared, session_id: &str) {
     }
 }
 
-/// Vibe reported a lease change (`session/lease/updated` on the lobby): wake any read waiting for a release, and
-/// re-check the session now when it is shown held here. A new foreign holder of a free chat is still found by the
-/// poll and before any reopen.
-pub(crate) fn lease_updated(shared: &Arc<Shared>, session_id: Option<&str>) {
-    shared.holders.updates.send_modify(|count| *count += 1);
-    let Some(id) = session_id.filter(|id| shared.holders.shown_held(id)) else {
-        return;
-    };
-    let shared = shared.clone();
-    let id = id.to_owned();
-    tokio::spawn(async move { check(&shared, &id).await });
+/// Lobby reports can also wake app-lock checks; the inventory owns its separate ordered stream.
+pub(crate) fn lease_updated(shared: &Arc<Shared>, _session_id: Option<&str>) {
+    shared.holders.wake.notify_one();
 }
 
 fn publish(shared: &Shared, session_id: &str, holder: Option<(u32, &str)>) {
@@ -277,9 +262,38 @@ fn spawn_poll(shared: &Arc<Shared>) -> JoinHandle<()> {
         let mut interval = tokio::time::interval(every);
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {
-            interval.tick().await;
+            let Some((wake, retry)) = weak.upgrade().map(|shared| {
+                (
+                    shared.holders.wake.clone(),
+                    shared.holders.inventory.retry_at(),
+                )
+            }) else {
+                return;
+            };
+            // Do not keep the core alive while idle.
+            let notified = tokio::select! {
+                _ = interval.tick() => false,
+                () = wake.notified() => true,
+                () = async {
+                    if let Some(at) = retry { tokio::time::sleep_until(at).await; }
+                    else { std::future::pending().await }
+                } => true,
+            };
             let Some(shared) = weak.upgrade() else { return };
-            for id in shared.channels.viewed_ids() {
+            if notified || retry.is_some() {
+                let _ = inventory::ensure(&shared).await;
+            }
+            let mut ids = shared.channels.viewed_ids();
+            ids.extend(std::mem::take(
+                &mut *shared
+                    .holders
+                    .changed
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner),
+            ));
+            ids.sort();
+            ids.dedup();
+            for id in ids {
                 check(&shared, &id).await;
             }
         }
@@ -287,6 +301,31 @@ fn spawn_poll(shared: &Arc<Shared>) -> JoinHandle<()> {
 }
 
 impl Core {
+    /// A refused resume is newer than a cached free snapshot. Wait for the existing inventory's
+    /// next observation before publishing; keep an unknown holder if its diagnostic does not arrive.
+    pub(crate) async fn session_holder_after_refusal(
+        &self,
+        session_id: &str,
+    ) -> Result<(), CoreError> {
+        let _reading = self.shared.holders.reading(session_id).await;
+        let deadline = tokio::time::Instant::now() + READ_WAIT;
+        loop {
+            let mut updates = self.shared.holders.updates.subscribe();
+            if let Some(holder) = read_holder(&self.shared, session_id, false).await? {
+                publish(&self.shared, session_id, Some(holder));
+                return Ok(());
+            }
+            if tokio::time::Instant::now() >= deadline
+                || tokio::time::timeout_at(deadline, updates.changed())
+                    .await
+                    .is_err()
+            {
+                note_busy(&self.shared, session_id);
+                return Ok(());
+            }
+        }
+    }
+
     /// The foreign holder of `session_id`, read now (`sessionTools holder`, and before a call would reopen it).
     ///
     /// # Errors
@@ -299,24 +338,5 @@ impl Core {
         let holder = read_holder(&self.shared, session_id, true).await?;
         publish(&self.shared, session_id, holder);
         Ok(holder.map(|(pid, _)| pid))
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::snapshot_holder;
-    use serde_json::json;
-
-    #[test]
-    fn lease_snapshots_distinguish_free_known_and_unknown_holders() {
-        let snapshot = json!({"held":[
-            {"sessionId":"known","leaseHolder":{"processId":42}},
-            {"sessionId":"unknown","leaseHolder":{"processId":null}},
-            {"sessionId":"free","leaseHolder":null}
-        ]});
-        assert_eq!(snapshot_holder(&snapshot, "known"), Some(42));
-        assert_eq!(snapshot_holder(&snapshot, "unknown"), Some(0));
-        assert_eq!(snapshot_holder(&snapshot, "free"), None);
-        assert_eq!(snapshot_holder(&snapshot, "missing"), None);
     }
 }

@@ -66,7 +66,7 @@ pub(crate) async fn failed(
             return cancelled;
         }
     }
-    let mut failure = CoreError::from_gate(method, error);
+    let mut failure = crate::config_validation::from_gate(shared, method, error);
     if method == "session/compact" {
         failure.message = format!(
             "Context compaction failed: {}. Send another message to continue.",

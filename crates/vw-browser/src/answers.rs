@@ -35,6 +35,32 @@ fn page_text(text: &str) -> String {
     }
 }
 
+fn input_refusal(answer: &PageAnswer) -> Option<String> {
+    match answer.status.as_str() {
+        "invalidWidgetDate" => Some(format!(
+            "Not typed: this datepicker cannot represent the requested calendar date; the existing value was kept. Use YYYY-MM-DD or {:?} with browser_act type.",
+            page_text(answer.kind.as_deref().unwrap_or("the declared numeric date format"))
+        )),
+        "unsupportedWidgetDate" => Some("Not typed: ISO date conversion is unsupported for this datepicker's declared format; the existing value was kept. Use browser_act type with date text in the format the page accepts.".to_owned()),
+        "invalidValue" => {
+            let format = match answer.kind.as_deref() {
+                Some("range") => "a number within the slider's minimum, maximum and step",
+                Some("color") => "#RRGGBB (six hexadecimal digits)",
+                Some("time") => "HH:MM, optionally with seconds",
+                Some("datetime-local") => "YYYY-MM-DDTHH:MM, optionally with seconds",
+                Some("month") => "YYYY-MM",
+                Some("week") => "YYYY-Www (an ISO week)",
+                _ => "a valid calendar date in YYYY-MM-DD format",
+            };
+            Some(format!("Not typed: this control cannot represent the requested value; the existing value was kept. Use {format} with browser_act type."))
+        }
+        "unsupportedPicker" => Some("Clicking this native colour picker is unsupported because its panel cannot be controlled through page refs. Use browser_act type with this field's ref and text in #RRGGBB format to set the colour.".to_owned()),
+        "unsupportedInputSelect" => Some("Selecting an option is unsupported for this input because it is not a select box. Use browser_act type with this ref and the required value in text.".to_owned()),
+        "unsupportedNativeKey" => Some("This key is unsupported for the control's native editor because page key events do not perform its native editing action. Use browser_act type with this field's ref and the required value in text.".to_owned()),
+        _ => None,
+    }
+}
+
 /// `Ok` for a done action; the refusal or failure text otherwise.
 ///
 /// # Errors
@@ -45,6 +71,9 @@ pub(crate) fn interpret(answer: PageAnswer, action: &Action) -> Result<PageAnswe
         outcome: Outcome::Refused,
         text,
     };
+    if let Some(text) = input_refusal(&answer) {
+        return Err(refused(text));
+    }
     match answer.status.as_str() {
         "done" => Ok(answer),
         "unmet" => Err(ActError {
@@ -90,7 +119,7 @@ pub(crate) fn interpret(answer: PageAnswer, action: &Action) -> Result<PageAnswe
                     "visible" => "it is not visible".to_owned(),
                     "enabled" => "it is disabled".to_owned(),
                     "editable" => "it cannot be typed into".to_owned(),
-                    "stable" => "it kept moving for 2 s (an animation)".to_owned(),
+                    "stable" => "its position was not stable across the actionability samples; read the page and try again when it settles".to_owned(),
                     "receivesEvents" => match &answer.covering {
                         Some(c) => format!(
                             "it is covered by {} '{}' (ref {}): deal with that first (close it or scroll)",

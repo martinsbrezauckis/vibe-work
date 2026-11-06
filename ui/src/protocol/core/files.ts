@@ -7,264 +7,264 @@
 
 import type { ViewerView } from "./pages";
 import type { Rect } from "./preview";
-export type FilesRequest = { "op": "resolve", 
+export type FilesRequest = { "op": "resolve",
 /**
  * The session.
  */
-sessionId: string, 
+sessionId: string,
 /**
  * Path texts as the chat wrote them (`src/main.rs`, `/home/u/p/a.md`, `file:///...`, `~/p/x`).
  */
-paths: Array<string>, } | { "op": "read", 
+paths: Array<string>, } | { "op": "read",
 /**
  * The session.
  */
-sessionId: string, 
+sessionId: string,
 /**
  * The handle from `resolve`.
  */
-file: string, } | { "op": "readSaved", 
+file: string, } | { "op": "readSaved",
 /**
  * The session.
  */
-sessionId: string, 
+sessionId: string,
 /**
  * The handle from resolve.
  */
-file: string, } | { "op": "stat", 
+file: string, } | { "op": "stat",
 /**
  * The session.
  */
-sessionId: string, 
+sessionId: string,
 /**
  * The handle from `resolve`.
  */
-file: string, } | { "op": "view", 
+file: string, } | { "op": "view",
 /**
  * The session.
  */
-sessionId: string, 
+sessionId: string,
 /**
  * The handle from `resolve`.
  */
-file: string, } | { "op": "layout", 
+file: string, } | { "op": "layout",
 /**
  * The shown session (absent: hide).
  */
-sessionId?: string, 
+sessionId?: string,
 /**
  * The viewer's area in the main window's CSS pixels (absent: hide).
  */
-rect?: Rect, } | { "op": "reload", 
+rect?: Rect, } | { "op": "reload",
 /**
  * The session.
  */
-sessionId: string, } | { "op": "viewer", 
+sessionId: string, } | { "op": "viewer",
 /**
  * The session.
  */
-sessionId: string, } | { "op": "clearExternal", 
+sessionId: string, } | { "op": "clearExternal",
 /**
  * The session.
  */
-sessionId: string, } | { "op": "screenshot", 
+sessionId: string, } | { "op": "screenshot",
 /**
  * The session.
  */
-sessionId: string, } | { "op": "open", 
+sessionId: string, } | { "op": "open",
 /**
  * The session.
  */
-sessionId: string, 
+sessionId: string,
 /**
  * The handle from `resolve`.
  */
-file: string, } | { "op": "reveal", 
+file: string, } | { "op": "reveal",
 /**
  * The session.
  */
-sessionId: string, 
+sessionId: string,
 /**
  * The handle from `resolve`.
  */
-file: string, } | { "op": "write", 
+file: string, } | { "op": "write",
 /**
  * The session.
  */
-sessionId: string, 
+sessionId: string,
 /**
  * The handle from `resolve`.
  */
-file: string, 
+file: string,
 /**
  * The whole new text.
  */
-text: string, 
+text: string,
 /**
  * The fingerprint of the content the edit started from.
  */
-fingerprint: string, } | { "op": "panelAnswer", 
+fingerprint: string, } | { "op": "panelAnswer",
 /**
  * The session the request named.
  */
-sessionId: string, 
+sessionId: string,
 /**
  * The request's id.
  */
-requestId: string, 
+requestId: string,
 /**
  * The panel.
  */
 panel: PanelView, };
 
-export type FilesResult = { "kind": "resolved", 
+export type FilesResult = { "kind": "resolved",
 /**
  * The answers.
  */
-refs: Array<FileRefView>, } | { "kind": "content", 
+refs: Array<FileRefView>, } | { "kind": "content",
 /**
  * The file.
  */
-content: FileContent, } | { "kind": "saved", 
+content: FileContent, } | { "kind": "saved",
 /**
  * Complete text, never a truncated snapshot.
  */
-text: string | null, 
+text: string | null,
 /**
  * Why a comparison cannot be opened.
  */
-note: string | null, } | { "kind": "stat", 
+note: string | null, } | { "kind": "stat",
 /**
  * The file is still there (and still allowed).
  */
-exists: boolean, 
+exists: boolean,
 /**
  * Its fingerprint, when it exists.
  */
-fingerprint: string | null, } | { "kind": "viewer", 
+fingerprint: string | null, } | { "kind": "viewer",
 /**
  * The session's viewer, when it has one.
  */
-viewer: ViewerView | null, } | { "kind": "screenshot", 
+viewer: ViewerView | null, } | { "kind": "screenshot",
 /**
  * PNG, base64.
  */
-pngBase64: string, 
+pngBase64: string,
 /**
  * Width in pixels.
  */
-width: number, 
+width: number,
 /**
  * Height in pixels.
  */
-height: number, } | { "kind": "done", } | { "kind": "panelAnswered", 
+height: number, } | { "kind": "done", } | { "kind": "panelAnswered",
 /**
  * The agent got this answer.
  */
-accepted: boolean, } | { "kind": "written", 
+accepted: boolean, } | { "kind": "written",
 /**
  * The file's fingerprint now.
  */
-fingerprint: string, 
+fingerprint: string,
 /**
  * Its size now.
  */
 size: number, };
 
-export type FileRefView = { 
+export type FileRefView = {
 /**
  * The text as sent.
  */
-text: string, 
+text: string,
 /**
  * One file may be shown directly. Without choices, false keeps missing and refused paths indistinguishable.
  */
-ok: boolean, 
+ok: boolean,
 /**
  * The handle for the other requests.
  */
-file: string | null, 
+file: string | null,
 /**
  * How to name it: relative to the session's own working folder when the file lies in it, else the full path
  * (elsewhere in its project, or a picked folder).
  */
-display: string | null, 
+display: string | null,
 /**
  * The kind the name suggests (`read` decides from the bytes).
  */
-kind: FileKind | null, 
+kind: FileKind | null,
 /**
  * Size in bytes.
  */
-size: number | null, 
+size: number | null,
 /**
  * Several allowed files share the name; the user must choose. Absent for a single hit or a refusal.
  */
-choices?: Array<FileChoice>, 
+choices?: Array<FileChoice>,
 /**
  * Full count when more than 50 choices passed the scope check.
  */
 total?: number, };
 
-export type FileChoice = { 
+export type FileChoice = {
 /**
  * Session-bound handle, rechecked before every use.
  */
-file: string, 
+file: string,
 /**
  * As in [`FileRefView::display`].
  */
-display: string, 
+display: string,
 /**
  * Kind suggested by the file name.
  */
-kind: FileKind, 
+kind: FileKind,
 /**
  * Size in bytes.
  */
 size: number, };
 
-export type FileContent = { 
+export type FileContent = {
 /**
  * The handle.
  */
-file: string, 
+file: string,
 /**
  * As in [`FileRefView::display`].
  */
-display: string, 
+display: string,
 /**
  * The file name.
  */
-name: string, 
+name: string,
 /**
  * The kind, from the bytes.
  */
-kind: FileKind, 
+kind: FileKind,
 /**
  * Size in bytes.
  */
-size: number, 
+size: number,
 /**
  * Changes when the file does.
  */
-fingerprint: string, 
+fingerprint: string,
 /**
  * Text (text, Markdown, HTML source, SVG source): the start of the file, at most 256 KiB.
  */
-text: string | null, 
+text: string | null,
 /**
  * `text` is only the start of the file.
  */
-truncated: boolean, 
+truncated: boolean,
 /**
  * An image as a `data:` URL.
  */
-dataUrl: string | null, 
+dataUrl: string | null,
 /**
  * An image too large to show.
  */
-tooLarge: boolean, 
+tooLarge: boolean,
 /**
  * `passive` (opens directly), `active` (asks first: a browser runs it) or `refused` (never opened).
  */
@@ -272,89 +272,89 @@ openClass: string, };
 
 export type FileKind = "text" | "markdown" | "html" | "image" | "pdf" | "binary";
 
-export type PanelView = { 
+export type PanelView = {
 /**
  * The side panel is open.
  */
-open: boolean, 
+open: boolean,
 /**
  * Its tabs by label, in order (`Files`, `Changes`, `Terminal`, `Browser`, a file's short name).
  */
-tabs: Array<string>, 
+tabs: Array<string>,
 /**
  * The tab shown, by label.
  */
-active: string | null, 
+active: string | null,
 /**
  * The open editors.
  */
-editors: Array<PanelEditor>, 
+editors: Array<PanelEditor>,
 /**
  * The Files tab, when it is open and shows this session's folder.
  */
 files: PanelFiles | null, };
 
-export type PanelEditor = { 
+export type PanelEditor = {
 /**
  * The file's full path (the shown path while the session's folder is unknown).
  */
-path: string, 
+path: string,
 /**
  * The editor has focus (it receives the next opened file).
  */
-focused: boolean, 
+focused: boolean,
 /**
  * `left` or `right` while two editors are side by side.
  */
-side: string | null, 
+side: string | null,
 /**
  * A read-only comparison side: `saved` (the last commit) or `disk`.
  */
-savedVersion: string | null, 
+savedVersion: string | null,
 /**
  * The editor holds edits not saved to disk.
  */
-unsaved: boolean, 
+unsaved: boolean,
 /**
  * The editor's whole text, sent only when it differs from the file on disk (the user's own unsaved text).
  */
-unsavedText: string | null, 
+unsavedText: string | null,
 /**
  * The selected lines, when something is selected.
  */
-selection: PanelSelection | null, 
+selection: PanelSelection | null,
 /**
  * The cursor's line (1-based).
  */
-cursorLine: number | null, 
+cursorLine: number | null,
 /**
  * Lines marked as changed on disk while the file was open.
  */
 changedLines: Array<number>, };
 
-export type PanelSelection = { 
+export type PanelSelection = {
 /**
  * First selected line (1-based).
  */
-startLine: number, 
+startLine: number,
 /**
  * Last selected line.
  */
-endLine: number, 
+endLine: number,
 /**
  * The selected text.
  */
 text: string, };
 
-export type PanelFiles = { 
+export type PanelFiles = {
 /**
  * The folder it shows.
  */
-folder: string | null, 
+folder: string | null,
 /**
  * `files` or `history`.
  */
-view: string, 
+view: string,
 /**
  * The text in its search field.
  */

@@ -29,7 +29,7 @@ impl Platform {
 }
 
 const NO_SIGN_IN: &str = "deepwiki";
-/// What Vibe 3.0.4 sends to connect a connector that needs no sign-in (`_connect_without_credentials`).
+/// What Vibe 3.1.0 sends to connect a connector that needs no sign-in (`_connect_without_credentials`).
 fn connect_body() -> Value {
     json!({"name": "default", "is_default": true, "credentials": {"headers": {}}})
 }

@@ -8,7 +8,7 @@ use std::{fs, path::Path};
 use base64::{Engine, engine::general_purpose::STANDARD};
 use vw_logscan::{Encoding, Secret, SecretSkipReason, scan};
 
-const TOKEN: &str = "ghp_fixtureOnly012345";
+const TOKEN: &str = "synthetic-logscan-marker";
 const ESCAPED: &str = "fixture\"\\\nvalue+/?";
 
 fn secret(id: &str, value: &str) -> Secret {
@@ -84,7 +84,13 @@ fn report_and_debug_output_only_show_masked_values() {
     let input = secret("opaque-id", TOKEN);
     assert!(!format!("{input:?}").contains(TOKEN));
     let report = scan(root.path(), vec![input]).unwrap();
-    assert_eq!(report.secrets[0].masked_preview, "ghp_****");
+    assert_eq!(report.secrets[0].masked_preview, "****");
+    // Provider-shaped values exist only at runtime; prefix masking still has positive coverage.
+    for prefix in ["ghp_", "github_pat_", "sk-"] {
+        let value = [prefix, "synthetic-marker"].concat();
+        let masked = scan(root.path(), vec![secret("prefix", &value)]).unwrap();
+        assert_eq!(masked.secrets[0].masked_preview, format!("{prefix}****"));
+    }
     let serialized = serde_json::to_string(&report).unwrap();
     for text in [serialized, format!("{report:?}")] {
         assert!(!text.contains(TOKEN));
@@ -102,7 +108,7 @@ fn skips_short_values_and_does_not_match_similar_text() {
         vec![
             secret("short", "fixture"),
             secret("unicode-short", "ééééééé"),
-            secret("absent", "ghp_fixtureOnly012346"),
+            secret("absent", "synthetic-logscan-absent"),
         ],
     )
     .unwrap();

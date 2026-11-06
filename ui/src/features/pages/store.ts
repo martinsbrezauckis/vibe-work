@@ -149,6 +149,8 @@ export function createPages(core: CoreController) {
   let sending = false;
   const loadingPlans = new Set<string>();
   const queuedPlans = new Set<string>();
+  const loadingHubs = new Map<string, Promise<void>>();
+  const queuedHubs = new Set<string>();
   const flushLayout = async (): Promise<void> => {
     if (sending) return;
     sending = true;
@@ -174,17 +176,35 @@ export function createPages(core: CoreController) {
   const controller = {
     store,
     /** Reads the session's hub (and the page shown, when one is). */
-    async load(sessionId: string): Promise<void> {
-      try {
-        const result = await run({ op: "hub", sessionId });
-        if (result.type !== "hub") return;
-        set("hubs", sessionId, result);
-        const path = result.viewer?.path ?? null;
-        if (path !== null && result.viewer !== null) await controller.loadPage(sessionId, path);
-        else set("pages", sessionId, null);
-      } catch (thrown) {
-        fail(sessionId, thrown);
+    load(sessionId: string): Promise<void> {
+      if (store.get().unavailable !== null) return Promise.resolve();
+      const current = loadingHubs.get(sessionId);
+      if (current) {
+        queuedHubs.add(sessionId);
+        return current;
       }
+      const pending = (async () => {
+        try {
+          do {
+            queuedHubs.delete(sessionId);
+            try {
+              const result = await run({ op: "hub", sessionId });
+              if (result.type !== "hub") return;
+              set("hubs", sessionId, result);
+              set("error", sessionId, null);
+              const path = result.viewer?.path ?? null;
+              if (path !== null) await controller.loadPage(sessionId, path);
+              else set("pages", sessionId, null);
+            } catch (thrown) {
+              fail(sessionId, thrown);
+            }
+          } while (queuedHubs.has(sessionId) && store.get().unavailable === null);
+        } finally {
+          loadingHubs.delete(sessionId);
+        }
+      })();
+      loadingHubs.set(sessionId, pending);
+      return pending;
     },
     /** Reads one page's facts and comments, and the answers to its inputs. */
     async loadPage(sessionId: string, path: string): Promise<void> {
@@ -302,7 +322,22 @@ export function createPages(core: CoreController) {
     },
     back: (sessionId: string) => act(sessionId, { op: "back", sessionId }),
     forward: (sessionId: string) => act(sessionId, { op: "forward", sessionId }),
-    reload: (sessionId: string) => act(sessionId, { op: "reload", sessionId }),
+    /** Refreshes handbook health too; the hub has no native page to reload. */
+    async reload(sessionId: string): Promise<PagesResult | null> {
+      set("busy", sessionId, true);
+      try {
+        const state = store.get();
+        const onPage = state.hubs[sessionId]?.viewer?.path != null && !state.hubView[sessionId];
+        const result = onPage ? await run({ op: "reload", sessionId }) : null;
+        await controller.load(sessionId);
+        return result;
+      } catch (thrown) {
+        fail(sessionId, thrown);
+        return null;
+      } finally {
+        set("busy", sessionId, false);
+      }
+    },
     /** Forgets the external link the page tried to open. */
     clearExternal: (sessionId: string) => act(sessionId, { op: "clearExternal", sessionId }),
     /**

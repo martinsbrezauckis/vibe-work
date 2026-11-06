@@ -282,6 +282,9 @@ impl CoreError {
             RpcError::Timeout { id: 0, after, .. } => {
                 format!("{method}: no ready server within {after:?}")
             }
+            remote @ RpcError::Remote { error, .. } => {
+                crate::config_validation::detail(error).unwrap_or_else(|| remote.to_string())
+            }
             other => other.to_string(),
         };
         Self {

@@ -206,7 +206,7 @@ async fn populate(
             return Some(super::scripted_model::Reply {
                 tools: vec![super::scripted_model::Call {
                     name: "run_typescript".to_owned(),
-                    args: json!({"code":"async function main() { await tools.agents.spawn({name: 'seeded-child', message: 'Reply with the words seeded child, without using tools.'}); }"}),
+                    args: json!({"code":"async function main() { await tools.agents.spawn({instructions:'Complete the assigned task.',name: 'seeded-child', message: 'Reply with the words seeded child, without using tools.'}); }"}),
                 }],
                 ..super::scripted_model::Reply::default()
             });

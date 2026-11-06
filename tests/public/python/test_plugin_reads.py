@@ -59,7 +59,7 @@ class PluginReads(unittest.TestCase):
     def native(self):
         self.write("plugin.json", json.dumps({"$schema": SCHEMA, "name": "candidate"}))
 
-    def invoke(self, kind, audit=False, extra=""):
+    def invoke(self, kind, audit=False, extra="", folders=None):
         guard = SOURCE / "plugin_read_guard.py"
         script = guard.read_text() if guard.exists() else ""
         script += "\n" + (SOURCE / f"plugin_{kind}.py").read_text()
@@ -67,6 +67,8 @@ class PluginReads(unittest.TestCase):
             script = AUDIT + script + "\nassert not writes, f'Listing attempted filesystem writes: {writes}'\n"
         script = extra + "\n" + script
         args = [str(self.folder)] if kind == "identity" else [str(self.home), str(self.cwd), "{}"]
+        if folders is not None:
+            args = ["--batch", *(str(folder) for folder in folders)]
         result = subprocess.run(
             [sys.executable, "-I", "-B", "-c", script, *args],
             env={**os.environ, "VIBE_HOME": str(self.home)}, cwd=self.cwd,
@@ -74,6 +76,19 @@ class PluginReads(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stderr.decode(errors="replace"))
         return json.loads(result.stdout)
+
+    def test_batch_identity_checks_each_folder_independently(self):
+        self.native()
+        other = self.home / "plugins-off" / "other"
+        other.mkdir()
+        (other / "plugin.json").write_text(json.dumps({"$schema": SCHEMA, "name": "candidate"}))
+        self.assertEqual(self.invoke("identity", folders=[self.folder, other], audit=True),
+                         [["candidate"], ["candidate"]])
+        (other / "plugin.json").write_text(json.dumps({"$schema": SCHEMA, "name": "changed"}))
+        self.assertEqual(self.invoke("identity", folders=[self.folder, other]),
+                         [["candidate"], ["changed"]])
+        (other / "plugin.json").write_text("broken")
+        self.assertEqual(self.invoke("identity", folders=[self.folder, other]), [["candidate"], []])
 
     def refused(self):
         with self.subTest(helper="identity"):

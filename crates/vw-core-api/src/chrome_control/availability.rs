@@ -7,22 +7,27 @@ use std::fmt::Write;
 
 pub(super) fn reason(view: &AddonView, browser: Browser) -> String {
     let mut text = format!("Not run: {}", view.instruction);
-    // Agent text only (the card keeps its instruction): an agent once started the person's Edge itself as a chat
-    // background process, so Quit ended it with every tab the person had opened in it.
-    if view.state == AddonState::ChromeClosed {
-        text.push_str(&browser.text(
-            " Do not start Chrome yourself: Vibe Work ends programs the agent started when it quits, and the person's tabs would close with it.",
-        ));
-    }
     if !matches!(
         (browser, view.state),
-        (_, AddonState::Unavailable | AddonState::Connected)
-            | (Browser::Edge, AddonState::ChromeClosed)
+        (
+            _,
+            AddonState::Unavailable
+                | AddonState::Connected
+                | AddonState::ChromeMissing
+                | AddonState::ChromeSandboxed
+                | AddonState::OtherBrowser
+        ) | (Browser::Edge, AddonState::ChromeClosed)
     ) {
         let _ = write!(
             text,
             " Offer the {} card with addon_suggest (addon: {}).",
-            browser.text("Connect Chrome"),
+            if browser == Browser::Edge && view.state == AddonState::NotSetUp {
+                browser.words("{yourBrowser}")
+            } else if view.state == AddonState::OwnerCredentialMissing {
+                browser.name().to_owned()
+            } else {
+                browser.words("Connect {browser}")
+            },
             browser.id()
         );
     }
@@ -82,6 +87,49 @@ pub(super) fn gate(shared: &Shared, browser: Browser, live: bool) -> Option<Valu
     refusal(shared, browser, live)
 }
 
+/// The connection's current diagnosis after a read, without overwriting an uncertain action receipt.
+pub(super) fn after_call(
+    shared: &Shared,
+    browser: Browser,
+    tool: &str,
+    request: bool,
+    answer: &super::owner::Answer,
+) -> Option<Value> {
+    if tool == "chrome_status"
+        && let Some(refusal) = super::availability::refusal(
+            shared,
+            browser,
+            super::availability::live(shared, browser),
+        )
+    {
+        return Some(refusal);
+    }
+    // If the connection changed during the call, report the card's current diagnosis too; never for an unknown
+    // outcome (the connection ended mid-call): the action may have run, so it must not read as not run.
+    let error = &answer.value()["structuredContent"]["error"];
+    let reconnecting = browser.reconnectable(shared)
+        && browser.addon(shared).state == super::AddonState::Connecting;
+    if answer.value()["structuredContent"]["status"] != "unknown"
+        && ((reconnecting && error["code"] == "PROFILE_NOT_CONNECTED")
+            || (request && browser.reconnectable(shared) && error["code"] == "SESSION_NOT_READY"))
+    {
+        return Some(super::reconnect::pending(browser));
+    }
+    if !error.is_null()
+        && !reconnecting
+        && error["code"] != "TRANSPORT_LOST"
+        && answer.value()["structuredContent"]["status"] != "unknown"
+        && let Some(refusal) = super::availability::refusal(
+            shared,
+            browser,
+            super::availability::live(shared, browser),
+        )
+    {
+        return Some(refusal);
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -118,19 +166,18 @@ mod tests {
     }
 
     #[test]
-    fn a_closed_browser_tells_only_the_agent_not_to_start_it() {
-        let view = crate::chrome_control::addon::view(
-            AddonState::ChromeClosed,
-            crate::chrome_control::setup::ABSENT,
-        );
-        assert!(reason(&view, Browser::Chrome).contains(
-            "Do not start Chrome yourself: Vibe Work ends programs the agent started when it quits"
-        ));
-        assert!(reason(&view, Browser::Edge).contains("Do not start Edge yourself"));
-        assert!(
-            !view.instruction.contains("Do not start"),
-            "the card's text stays as it was"
-        );
+    fn a_closed_browser_keeps_the_reason_and_persons_next_step() {
+        for browser in [Browser::Chrome, Browser::Edge] {
+            let view = crate::chrome_control::addon::view_for(
+                AddonState::ChromeClosed,
+                crate::chrome_control::setup::ABSENT,
+                browser,
+            );
+            let text = reason(&view, browser);
+            assert!(text.contains("is not open") && text.contains("Ask the person to open"));
+            assert!(!text.contains("ends programs the agent started"));
+            assert!(!text.contains("Do not start"));
+        }
     }
 
     #[tokio::test]
@@ -183,7 +230,8 @@ mod tests {
             chrome
                 .set_enabled(state != AddonState::SwitchedOff)
                 .unwrap();
-            chrome.owner.pairing.lock().unwrap().0 = "Not connected".into();
+            chrome.owner.pairing.lock().unwrap().0 =
+                crate::chrome_control::PairingState::Disconnected;
             if state == AddonState::TurnedOffInChrome {
                 std::fs::create_dir_all(&extension).unwrap();
                 std::fs::write(profile.join("Preferences"), json!({"extensions":{"settings":{&chrome.config.extension_id:{"disable_reasons":[1]}}}}).to_string()).unwrap();
@@ -192,7 +240,8 @@ mod tests {
                 std::fs::remove_file(profile.join("Preferences")).unwrap();
                 std::fs::create_dir_all(extension.join("0.1.3_0")).unwrap();
                 // An old connected extension is still too old for this app: the live profile reports its version.
-                chrome.owner.pairing.lock().unwrap().0 = "Paired".into();
+                chrome.owner.pairing.lock().unwrap().0 =
+                    crate::chrome_control::PairingState::Paired;
                 chrome.owner.connected_profiles.observe(&json!({"profiles":[
                     {"profileId":"p","connected":true,"extensionVersion":"0.1.3"}]}));
             }

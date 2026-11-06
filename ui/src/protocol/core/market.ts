@@ -7,399 +7,399 @@
 
 import type { ToolsInstallOffer } from "./index";
 
-export type MarketRequest = { "op": "read", 
+export type MarketRequest = { "op": "read",
 /**
  * The session whose plugin and skill state is merged in.
  */
-sessionId?: string, 
+sessionId?: string,
 /**
  * The new-chat folder selected through the native picker, when no chat is open.
  */
-cwd?: string, } | { "op": "turnOffPlugin", 
+cwd?: string, } | { "op": "turnOffPlugin",
 /**
  * The installed folder shown by the board.
  */
-path: string, 
+path: string,
 /**
  * The open chat determines the opened project.
  */
-sessionId?: string, 
+sessionId?: string,
 /**
  * The new-chat folder picked natively, when no chat is open.
  */
-cwd?: string, } | { "op": "turnOnPlugin", 
+cwd?: string, } | { "op": "turnOnPlugin",
 /**
  * The installed folder shown by the board.
  */
-path: string, 
+path: string,
 /**
  * The open chat determines the opened project.
  */
-sessionId?: string, 
+sessionId?: string,
 /**
  * The new-chat folder picked natively, when no chat is open.
  */
-cwd?: string, } | { "op": "removePlugin", 
+cwd?: string, } | { "op": "removePlugin",
 /**
  * The installed folder shown by the board.
  */
-path: string, 
+path: string,
 /**
  * The open chat determines the opened project.
  */
-sessionId?: string, 
+sessionId?: string,
 /**
  * The new-chat folder picked natively, when no chat is open.
  */
-cwd?: string, } | { "op": "install", 
+cwd?: string, } | { "op": "install",
 /**
  * The catalog entry.
  */
-id: string, 
+id: string,
 /**
  * The id of the `offerInstall` offer the window showed.
  */
-offerId?: string, } | { "op": "offerInstall", 
+offerId?: string, } | { "op": "offerInstall",
 /**
  * The catalog entry.
  */
-id: string, } | { "op": "cancelInstall", } | { "op": "remove", 
+id: string, } | { "op": "cancelInstall", } | { "op": "remove",
 /**
  * The catalog entry.
  */
 id: string, };
 
-export type MarketResult = { "kind": "view", 
+export type MarketResult = { "kind": "view",
 /**
  * The marketplace (boxed: much larger than the other answer).
  */
-view: MarketView, 
+view: MarketView,
 /**
  * A successful removal's data folder could not be deleted.
  */
-notice?: string, } | { "kind": "installStarted", 
+notice?: string, } | { "kind": "installStarted",
 /**
  * The entry.
  */
-id: string, } | { "kind": "offer", 
+id: string, } | { "kind": "offer",
 /**
  * The single-use offer.
  */
 offer: ToolsInstallOffer, };
 
-export type MarketView = { 
+export type MarketView = {
 /**
  * The catalog's version (`null` when the catalog could not be read; `error` says why).
  */
-catalogVersion: string | null, 
+catalogVersion: string | null,
 /**
  * Why the catalog is unavailable.
  */
-error: string | null, 
+error: string | null,
 /**
  * Categories in display order (id, heading).
  */
-categories: Array<CategoryView>, 
+categories: Array<CategoryView>,
 /**
  * The entries in catalog order.
  */
-entries: Array<MarketEntryView>, 
+entries: Array<MarketEntryView>,
 /**
  * This computer's platform key (`linux-x64`, ...), `null` when the catalog has no runtimes for it.
  */
-platform: string | null, 
+platform: string | null,
 /**
  * The install running now.
  */
-installing: InstallProgress | null, 
+installing: InstallProgress | null,
 /**
  * The session whose state is merged in (`null`: none was open).
  */
-sessionId: string | null, 
+sessionId: string | null,
 /**
  * Plugin files Vibe could not load in that session (Vibe's sentences), ours or not.
  */
-dropped: Array<DroppedView>, 
+dropped: Array<DroppedView>,
 /**
  * Every resolved plugin without a marketplace receipt, plus app-managed off plugins.
  */
-discovered: Array<LocalPluginView>, 
+discovered: Array<LocalPluginView>,
 /**
  * Why the current discovery could not be read (pinned chat state can still be shown).
  */
 discoveryError: string | null, };
 
-export type LocalPluginView = { 
+export type LocalPluginView = {
 /**
  * Vibe's plugin name.
  */
-name: string, 
+name: string,
 /**
  * Vibe's description.
  */
-description: string, 
+description: string,
 /**
  * The version its manifest gives; `null` when it gives none.
  */
-version: string | null, 
+version: string | null,
 /**
  * The author its manifest gives; `null` when it gives none.
  */
-author: string | null, 
+author: string | null,
 /**
  * Its installed folder, including for restored chats with a separate pinned checkout.
  */
-path: string, 
+path: string,
 /**
  * Vibe's scope (`project`, `global`, `builtin`).
  */
-scope: string, 
+scope: string,
 /**
  * Only direct folders in the app's Vibe home or opened project may be changed.
  */
-managed: boolean, 
+managed: boolean,
 /**
  * Kept in the app's off folder, outside Vibe discovery.
  */
-off: boolean, 
+off: boolean,
 /**
  * Vibe selected this installed folder for new chats (false for shadows and retained pins).
  */
-available: boolean, 
+available: boolean,
 /**
  * Current discovered components (skills, MCP servers and other kinds).
  */
-components: Array<ComponentView>, 
+components: Array<ComponentView>,
 /**
  * MCP servers with the chat's known tool count (`null`: not connected in this chat).
  */
-servers: Array<PluginServerView>, 
+servers: Array<PluginServerView>,
 /**
  * The open chat's pinned state; `null` when unavailable.
  */
-inSession: SessionPluginView | null, 
+inSession: SessionPluginView | null,
 /**
  * Discovery issues and reasons Vibe selected another folder.
  */
 issues: Array<string>, };
 
-export type PluginServerView = { 
+export type PluginServerView = {
 /**
  * The source id Vibe gives it.
  */
-name: string, 
+name: string,
 /**
  * Known tools in the chat; absent when no live catalog was read.
  */
 tools: number | null, };
 
-export type CategoryView = { 
+export type CategoryView = {
 /**
  * Id.
  */
-id: string, 
+id: string,
 /**
  * Heading.
  */
 label: string, };
 
-export type MarketEntryView = { 
+export type MarketEntryView = {
 /**
  * The catalog entry as reviewed.
  */
-entry: CatalogEntry, 
+entry: CatalogEntry,
 /**
  * What is installed, when it is.
  */
-installed: InstalledView | null, 
+installed: InstalledView | null,
 /**
  * A folder of this name exists that the marketplace did not install (left alone; install refused).
  */
-foreign: boolean, 
+foreign: boolean,
 /**
  * The installed plugin folder (including the off folder), absent for uninstalled entries.
  */
-folder: string | null, 
+folder: string | null,
 /**
  * This catalog install is kept outside Vibe's discovery roots.
  */
-off: boolean, 
+off: boolean,
 /**
  * Packs and plugins: false when this computer's platform has no runtime for it.
  */
-installable: boolean, 
+installable: boolean,
 /**
  * The merged session's view of the plugin (`null`: no session state was read).
  */
 inSession: SessionPluginView | null, };
 
-export type InstalledView = { 
+export type InstalledView = {
 /**
  * The entry's version installed.
  */
-version: string, 
+version: string,
 /**
  * The catalog version it came from.
  */
-catalogVersion: string, 
+catalogVersion: string,
 /**
  * When (milliseconds since the Unix epoch).
  */
-installedAtMs: number, 
+installedAtMs: number,
 /**
  * The catalog now has a different version of it.
  */
-updateAvailable: boolean, 
+updateAvailable: boolean,
 /**
  * A file differs from what was installed (checked for packs; `null` for plugins with a runtime).
  */
 changed: boolean | null, };
 
-export type SessionPluginView = { 
+export type SessionPluginView = {
 /**
  * The session runs this plugin (Vibe pinned it at start or at the last reload).
  */
-loaded: boolean, 
+loaded: boolean,
 /**
  * Its components (`skill`, `tool`, `mcp`, ...) with Vibe's status when it reports one.
  */
-components: Array<ComponentView>, 
+components: Array<ComponentView>,
 /**
  * The plugin's skills (from the plugin's components) with their on/off state.
  */
-skills: Array<SkillStateView>, 
+skills: Array<SkillStateView>,
 /**
  * Vibe's sentences about this plugin in the session (an MCP server that could not be connected, ...).
  */
 issues: Array<string>, };
 
-export type ComponentView = { 
+export type ComponentView = {
 /**
  * Vibe's kind.
  */
-kind: string, 
+kind: string,
 /**
  * Its name.
  */
-name: string, 
+name: string,
 /**
  * Vibe's route status for a tool (`live`, ...), else `null`.
  */
 status: string | null, };
 
-export type SkillStateView = { 
+export type SkillStateView = {
 /**
  * The skill's name (what `/name` runs).
  */
-name: string, 
+name: string,
 /**
  * Its description.
  */
-description: string, 
+description: string,
 /**
  * On; `null` when this session does not offer the skill yet (the skills of a plugin installed
  * during a session are offered to new sessions, or after a plugin reload).
  */
-enabled: boolean | null, 
+enabled: boolean | null,
 /**
  * Vibe reports the skill as `locked` (set by configuration, not per session): it is on while
  * the plugin is installed.
  */
 locked: boolean, };
 
-export type DroppedView = { 
+export type DroppedView = {
 /**
  * The plugin it belongs to, when known (matched by Vibe's pinned folder).
  */
-plugin: string | null, 
+plugin: string | null,
 /**
  * The plugin folder (last path parts only, never a full path).
  */
-file: string, 
+file: string,
 /**
  * Vibe's sentence.
  */
 message: string, };
 
-export type InstallProgress = { 
+export type InstallProgress = {
 /**
  * The entry.
  */
-id: string, 
+id: string,
 /**
  * `download`, `unpack`, `setup`, `finish`, then the outcome `installed`, `failed` or `cancelled`.
  */
-phase: string, 
+phase: string,
 /**
  * What (a package, an archive, the setup step's words).
  */
-what: string, 
+what: string,
 /**
  * Bytes so far (downloads).
  */
-done: number | null, 
+done: number | null,
 /**
  * Bytes expected at most (downloads).
  */
-total: number | null, 
+total: number | null,
 /**
  * The error sentence when it failed.
  */
 message: string | null, };
 
-export type CatalogEntry = { 
+export type CatalogEntry = {
 /**
  * Stable id; also the plugin folder name for packs and plugins.
  */
-id: string, 
+id: string,
 /**
  * What kind it is.
  */
-kind: Kind, 
+kind: Kind,
 /**
  * Display name.
  */
-name: string, 
+name: string,
 /**
  * Who makes it (the vendor, not us).
  */
-publisher: string, 
+publisher: string,
 /**
  * Category id (see [`CATEGORIES`]).
  */
-category: string, 
+category: string,
 /**
  * One plain line: what it is for.
  */
-summary: string, 
+summary: string,
 /**
  * SPDX licence expression of what gets installed (`n/a` for a remote server).
  */
-licence: string, 
+licence: string,
 /**
  * The vendor's page.
  */
-homepage?: string, 
+homepage?: string,
 /**
  * How it was reviewed (shown in the detail).
  */
-review: string, 
+review: string,
 /**
  * Plain notes for the detail panel (what it sends where, what runs, limits).
  */
-notes: Array<string>, 
+notes: Array<string>,
 /**
  * A Vibe connector alias or a catalog server id this works with.
  */
-pairsWith?: Pairing, 
+pairsWith?: Pairing,
 /**
  * Kind `pack`.
  */
-pack?: Pack, 
+pack?: Pack,
 /**
  * Kind `server`.
  */
-server?: Server, 
+server?: Server,
 /**
  * Kind `plugin`.
  */
@@ -407,132 +407,132 @@ plugin?: PluginSpec, };
 
 export type Kind = "pack" | "server" | "plugin";
 
-export type Pairing = { 
+export type Pairing = {
 /**
  * A connector alias in Vibe's catalog (`atlassian`).
  */
-connector?: string, 
+connector?: string,
 /**
  * A `server` entry of this catalog.
  */
 server?: string, };
 
-export type Pack = { 
+export type Pack = {
 /**
  * Shown version (for vendor files: the short commit).
  */
-version: string, 
+version: string,
 /**
  * Where the vendor files come from (absent: a pack with only an `mcp.json`).
  */
-source?: RepoSource, 
+source?: RepoSource,
 /**
  * The vendor files taken, each pinned.
  */
-files: Array<FileSpec>, 
+files: Array<FileSpec>,
 /**
  * The vendor's licence file, copied as `LICENSE`.
  */
-licenceFile?: FileSpec, 
+licenceFile?: FileSpec,
 /**
  * Literal edits applied after the hash check (research 11 generic edits), each result pinned too.
  */
-edits: Array<Edit>, 
+edits: Array<Edit>,
 /**
  * Servers written into the pack's `mcp.json` (no sign-in, no headers).
  */
 mcpServers: Record<string, McpServerSpec>, };
 
-export type RepoSource = { 
+export type RepoSource = {
 /**
  * `owner/name`.
  */
-repo: string, 
+repo: string,
 /**
  * The full 40-character commit.
  */
-commit: string, 
+commit: string,
 /**
  * Where the tar.gz archive is fetched (absent: GitHub's archive of `repo` at `commit`). Test indexes point it
  * at a loopback server.
  */
-archiveUrl?: string, 
+archiveUrl?: string,
 /**
  * Largest archive accepted, in bytes.
  */
 maxBytes: number, };
 
-export type FileSpec = { 
+export type FileSpec = {
 /**
  * Path inside the archive, below its single top folder.
  */
-from: string, 
+from: string,
 /**
  * Path inside the installed plugin (packs: under `skills/`; the licence file's is ignored).
  */
-to: string, 
+to: string,
 /**
  * SHA-256 of the bytes, lowercase hex.
  */
 sha256: string, };
 
-export type Edit = { 
+export type Edit = {
 /**
  * The file (`to` of a [`FileSpec`]).
  */
-file: string, 
+file: string,
 /**
  * Text that must occur exactly once.
  */
-find: string, 
+find: string,
 /**
  * Its replacement.
  */
-replace: string, 
+replace: string,
 /**
  * SHA-256 of the file after all of its edits.
  */
 resultSha256: string, };
 
-export type McpServerSpec = { "type": "streamable-http", 
+export type McpServerSpec = { "type": "streamable-http",
 /**
  * `https://...` (or loopback `http://`).
  */
-url: string, } | { "type": "stdio", 
+url: string, } | { "type": "stdio",
 /**
  * `${RUNTIME}` (the plugin's runtime) or `./...` inside the plugin.
  */
-command: string, 
+command: string,
 /**
  * Arguments; `${DATA}` is expanded by us, `${PLUGIN_ROOT}`/`${PLUGIN_DATA}` by Vibe.
  */
-args: Array<string>, 
+args: Array<string>,
 /**
  * Environment; same expansion.
  */
 env: Record<string, string>, };
 
-export type Server = { 
+export type Server = {
 /**
  * The server's address.
  */
-url: string, 
+url: string,
 /**
  * Who can use it.
  */
-access: Access, 
+access: Access,
 /**
  * What was measured and when (`2026-10-10: asks for sign-in; offers app sign-up (DCR)`).
  */
-checked: string, 
+checked: string,
 /**
  * The vendor's own rule, quoted (approved-only and own-app servers).
  */
-rule?: string, 
+rule?: string,
 /**
  * Where the rule is written.
  */
-ruleSource?: string, 
+ruleSource?: string,
 /**
  * What the user can do instead.
  */
@@ -540,93 +540,93 @@ whatToDo?: string, };
 
 export type Access = "signIn" | "approvedOnly" | "ownApp" | "key";
 
-export type PluginSpec = { 
+export type PluginSpec = {
 /**
  * Shown version (the main package's).
  */
-version: string, 
+version: string,
 /**
  * The runtime, per platform.
  */
-runtime: Runtime, 
+runtime: Runtime,
 /**
  * npm packages, unpacked into `node_modules/<name>/` from their verified tarballs (no npm, no scripts).
  */
-npm: Array<NpmPackage>, 
+npm: Array<NpmPackage>,
 /**
  * One step run with the runtime after the files are in place (e.g. a browser download).
  */
-postInstall?: PostInstall, 
+postInstall?: PostInstall,
 /**
  * The plugin's `mcp.json` servers (templates).
  */
-mcpServers: Record<string, McpServerSpec>, 
+mcpServers: Record<string, McpServerSpec>,
 /**
  * Our own files written into the plugin (`to` -> bundled file name, see `assemble::bundled`).
  */
-bundled: Record<string, string>, 
+bundled: Record<string, string>,
 /**
  * Plain sentence for the consent dialog: what runs and what it downloads.
  */
-consent: string, 
+consent: string,
 /**
  * Approximate download size in MB (shown before installing).
  */
-downloadMb: number, 
+downloadMb: number,
 /**
  * Approximate disk use in MB.
  */
 diskMb: number, };
 
-export type Runtime = { 
+export type Runtime = {
 /**
  * `node`.
  */
-name: string, 
+name: string,
 /**
  * Its version.
  */
-version: string, 
+version: string,
 /**
  * Per platform key (`linux-x64`, ...).
  */
 targets: Record<string, RuntimeTarget>, };
 
-export type RuntimeTarget = { 
+export type RuntimeTarget = {
 /**
  * Archive address.
  */
-url: string, 
+url: string,
 /**
  * SHA-256 of the archive (the publisher's `SHASUMS256.txt`).
  */
-sha256: string, 
+sha256: string,
 /**
  * `tarGz` or `zip`.
  */
-format: ArchiveFormat, 
+format: ArchiveFormat,
 /**
  * Archive size in bytes (the download is refused beyond it).
  */
-bytes: number, 
+bytes: number,
 /**
  * Members taken (paths with the archive's top folder).
  */
-files: Array<Member>, 
+files: Array<Member>,
 /**
  * The runtime executable inside the plugin (`runtime/node`, `runtime/node.exe`).
  */
 executable: string, };
 
-export type Member = { 
+export type Member = {
 /**
  * Path inside the archive.
  */
-from: string, 
+from: string,
 /**
  * Path inside the plugin.
  */
-to: string, 
+to: string,
 /**
  * Mark executable (Unix).
  */
@@ -634,42 +634,42 @@ executable: boolean, };
 
 export type ArchiveFormat = "tarGz" | "zip";
 
-export type NpmPackage = { 
+export type NpmPackage = {
 /**
  * Package name (`@playwright/mcp`).
  */
-name: string, 
+name: string,
 /**
  * Exact version.
  */
-version: string, 
+version: string,
 /**
  * Tarball address.
  */
-url: string, 
+url: string,
 /**
  * The registry's SRI `sha512-<base64>`.
  */
-integrity: string, 
+integrity: string,
 /**
  * Largest tarball accepted, in bytes.
  */
 maxBytes: number, };
 
-export type PostInstall = { 
+export type PostInstall = {
 /**
  * Arguments after the runtime executable; `${ROOT}` = the plugin folder being built, `${DATA}` = the entry's
  * data folder.
  */
-args: Array<string>, 
+args: Array<string>,
 /**
  * Extra environment, same expansion.
  */
-env: Record<string, string>, 
+env: Record<string, string>,
 /**
  * Plain words for the progress line.
  */
-what: string, 
+what: string,
 /**
  * Longest it may run.
  */

@@ -35,9 +35,11 @@ async fn a_stopped_worker_is_woken_before_the_action_is_sent_once() {
         .unwrap();
         let chrome = &core.shared.chrome_control;
         if browser == Browser::Edge {
-            chrome.owner.edge_pairing.lock().unwrap().0 = "Connecting".into();
+            chrome.owner.edge_pairing.lock().unwrap().0 =
+                crate::chrome_control::PairingState::Connecting;
         } else {
-            chrome.owner.pairing.lock().unwrap().0 = "Connecting".into();
+            chrome.owner.pairing.lock().unwrap().0 =
+                crate::chrome_control::PairingState::Connecting;
         }
         let weak = Arc::downgrade(&core.shared);
         let observed = launches.clone();
@@ -100,7 +102,7 @@ async fn failed_wakes_do_not_open_another_tab_on_each_call() {
         .edge_pairing
         .lock()
         .unwrap()
-        .0 = "Connecting".into();
+        .0 = crate::chrome_control::PairingState::Connecting;
     core.shared
         .chrome_control
         .owner

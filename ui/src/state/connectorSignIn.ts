@@ -6,8 +6,8 @@
  *   every 5 s (at most 5 minutes of key-ready time, or at "Check now") until the connector is ready;
  * - an MCP server added by address: `signInServer` -> the `mcp_catalog/authUrl` notice -> link dialog ->
  *   the browser hands the code to Vibe's own loopback port -> the core's `connectorSignIn` event ends it.
- * A sign-in Vibe asks for during a session's turn (a connector the gateway refused) arrives as an address
- * nobody here asked for: it is kept as a prompt the page shows, with a toast pointing there.
+ * Sign-ins Vibe asks for during a turn arrive as a hosted auth URL or an MCP authRequired notice
+ * without a request here. They are kept as prompts on the page, with a toast pointing there.
  * Depends on: coreStore (`listen`), createStore, transcriptStore (link dialog), toastStore, model/view.
  * Called by: connectors.ts.
  * Invariants: the address is only ever shown in the link dialog (never opened directly); the wait is
@@ -17,6 +17,7 @@ import type { ConnectorsRequest, ConnectorsResult, CoreEvent, JsonValue } from "
 import { toCallError } from "../protocol/client/types";
 import { metaOf } from "../features/connectors/model/meta";
 import { tileStatus } from "../features/connectors/model/view";
+import { TEXT } from "../vocabulary";
 import type { ConnectorsState } from "./connectors";
 import type { CoreController } from "./coreStore";
 import type { Store } from "./createStore";
@@ -26,7 +27,7 @@ import type { Transcript } from "./transcriptStore";
 /** A sign-in on the page. */
 export interface SignIn {
   kind: "connector" | "server";
-  /** Alias (connector) or server name. */
+  /** Connector alias or server name; prompted servers use s:<name> to avoid alias collisions. */
   id: string;
   /** What the user knows it as. */
   name: string;
@@ -144,6 +145,32 @@ export function createSignIns(deps: {
     }
   };
 
+  /** Starts an added server's sign-in, including one requested by a running chat. */
+  const server = async (origin: "ui" | "debug-api", serverName: string): Promise<void> => {
+    stopPolling();
+    set({
+      kind: "server",
+      id: serverName,
+      name: serverName,
+      sessionId: null,
+      requestId: null,
+      url: null,
+      phase: "starting",
+      message: null,
+    });
+    try {
+      await request(origin, { op: "signInServer", name: serverName });
+      // The sign-in can finish before the command acknowledging its start reaches the window.
+      const current = store.get().signIn;
+      if (current?.kind === "server" && current.id === serverName && current.phase === "starting")
+        update({ phase: "waiting" });
+    } catch (thrown) {
+      const error = toCallError(thrown).error;
+      if (error.code === "confirmationDeclined") set(null);
+      else finish("failed", error.message);
+    }
+  };
+
   core.listen((event: CoreEvent) => {
     if (event.type === "change" && event.change.kind === "removed") {
       for (const prompt of store.get().prompts) {
@@ -157,6 +184,7 @@ export function createSignIns(deps: {
       return;
     }
     if (event.type === "connectorSignIn") {
+      if (event.outcome === "signedIn") clearPrompt(`s:${event.name}`);
       const current = store.get().signIn;
       if (current?.kind === "server" && current.id === event.name) {
         if (event.outcome === "signedIn") finish("done", `Signed in to ${current.name}.`);
@@ -170,7 +198,42 @@ export function createSignIns(deps: {
     const { method } = event.change;
     const params = obj(event.change.params);
     const current = store.get().signIn;
-    if (method === "mcp_catalog/authUrl") {
+    if (method === "mcp_catalog/authRequired") {
+      const name = str(params["name"]);
+      const revision = str(params["descriptorRevision"]);
+      if (name === null || revision === null) return;
+      const id = `s:${name}`;
+      const fingerprint = JSON.stringify([
+        params["sessionId"],
+        revision,
+        params["observedConnectionRevision"],
+      ]);
+      const seen = seenPrompts.get(id) ?? [];
+      if (seen.includes(fingerprint)) return;
+      seenPrompts.set(id, [...seen, fingerprint].slice(-32));
+      clearPrompt(id);
+      // Vibe supplies the authorization state, but this protocol notice has no expiry/revocation reason.
+      const prompt: SignIn = {
+        kind: "server",
+        id,
+        name,
+        sessionId: str(params["sessionId"]),
+        requestId: null,
+        url: null,
+        phase: "waiting",
+        message: TEXT.connectorSignInRequired,
+      };
+      store.set((s) => ({ ...s, prompts: [...s.prompts, prompt] }));
+      promptNotices.set(
+        id,
+        toasts.push({
+          kind: "warn",
+          bellKind: "approval",
+          text: `${name}: ${TEXT.connectorSignInRequired}`,
+        }),
+      );
+      void deps.reload();
+    } else if (method === "mcp_catalog/authUrl") {
       const name = str(params["name"]);
       const url = str(params["url"]);
       if (current?.kind === "server" && current.id === name && url !== null) {
@@ -284,31 +347,7 @@ export function createSignIns(deps: {
         } else finish("failed", error.message);
       }
     },
-    /** Starts an added server's sign-in. */
-    async server(origin: "ui" | "debug-api", serverName: string): Promise<void> {
-      stopPolling();
-      set({
-        kind: "server",
-        id: serverName,
-        name: serverName,
-        sessionId: null,
-        requestId: null,
-        url: null,
-        phase: "starting",
-        message: null,
-      });
-      try {
-        await request(origin, { op: "signInServer", name: serverName });
-        // The sign-in can finish before the command acknowledging its start reaches the window.
-        const current = store.get().signIn;
-        if (current?.kind === "server" && current.id === serverName && current.phase === "starting")
-          update({ phase: "waiting" });
-      } catch (thrown) {
-        const error = toCallError(thrown).error;
-        if (error.code === "confirmationDeclined") set(null);
-        else finish("failed", error.message);
-      }
-    },
+    server,
     /** Shows the current sign-in page in the link dialog again. */
     openPage(): void {
       const url = store.get().signIn?.url ?? null;
@@ -326,9 +365,10 @@ export function createSignIns(deps: {
       }
     },
     /** Opens a sign-in Vibe asked for during a turn. */
-    openPrompt(alias: string): void {
-      const prompt = store.get().prompts.find((p) => p.id === alias);
-      if (prompt?.url != null) transcript.askLink(prompt.url);
+    async openPrompt(origin: "ui" | "debug-api", id: string): Promise<void> {
+      const prompt = store.get().prompts.find((p) => p.id === id);
+      if (prompt?.kind === "server") await server(origin, prompt.id.slice(2));
+      else if (prompt?.url != null) transcript.askLink(prompt.url);
     },
   };
 }

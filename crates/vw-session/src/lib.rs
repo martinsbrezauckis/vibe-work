@@ -12,9 +12,12 @@
 //! Depends on: `serde_json`, `thiserror`. Called by: vw-gate, app (UI bridge, Debug API).
 //! Invariant: state is owned by this crate; other crates get read views or send commands.
 
+mod activity;
 mod anomaly;
 mod change;
 mod fanout;
+#[cfg(test)]
+mod fanout_tests;
 mod history;
 #[cfg(test)]
 mod history_tests;
@@ -28,6 +31,7 @@ mod session;
 mod stats_tests;
 mod store;
 
+pub use activity::Activity;
 pub use anomaly::{Anomalies, AnomalyCounts, AnomalyKind, AnomalyRecord};
 pub use change::{Action, Applied, Change, Notification, SessionView};
 pub use fanout::{Delivery, Subscription, Waker};

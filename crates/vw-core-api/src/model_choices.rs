@@ -1,11 +1,9 @@
-//! Pending chat model/thinking choices, until Vibe pins them at the next turn start.
+//! Saved chat model/thinking choices in one record, replayed until Vibe pins the next turn.
 //! Depends on the gated RPC, private atomic files and `sessions_dir`; called by sessions and restore.
 //! Vibe 3.0.2's sessionOnly writes only memory. Replay before publishing runtime; failed model
 //! restores alert without closing the chat. No user config or Vibe session files are edited here.
 
 use std::collections::BTreeMap;
-use std::io::Read;
-use std::path::PathBuf;
 use std::sync::{Mutex, PoisonError};
 
 use serde::{Deserialize, Serialize};
@@ -23,8 +21,14 @@ pub(crate) use restore::restore;
 pub(crate) fn unavailable_default_alias(config: &Value) -> Option<String> {
     restore::unavailable_default(config).map(|choice| choice.alias)
 }
+mod records;
+use records::Records;
+
 mod live;
 pub(crate) use live::{admission, before, pick, publish, selected};
+
+#[cfg(test)]
+mod persistence_tests;
 
 #[derive(Clone, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -68,85 +72,9 @@ impl Choice {
     }
 }
 
-/// Choices not yet made durable by Vibe. The desktop always supplies `sessions_dir`.
-struct Records {
-    pending: Mutex<BTreeMap<String, Choice>>,
-    file: Option<PathBuf>,
-}
-
-impl Records {
-    fn load(dir: Option<&std::path::Path>, name: &str) -> Self {
-        let file = dir.map(|dir| dir.join(name));
-        let pending = file
-            .as_ref()
-            .and_then(|file| match load(file) {
-                Ok(pending) => Some(pending),
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
-                Err(error) => {
-                    tracing::warn!(%error, "saved chat model choices ignored");
-                    None
-                }
-            })
-            .unwrap_or_default();
-        Self {
-            pending: Mutex::new(pending),
-            file,
-        }
-    }
-
-    fn change(&self, id: &str, choice: Option<Choice>) -> Result<(), CoreError> {
-        let mut pending = self.pending.lock().unwrap_or_else(PoisonError::into_inner);
-        if pending.get(id) == choice.as_ref() {
-            return Ok(());
-        }
-        let mut updated = pending.clone();
-        if let Some(choice) = choice {
-            updated.insert(id.into(), choice);
-        } else {
-            updated.remove(id);
-        }
-        if let Some(file) = &self.file {
-            let write = || -> Result<(), Box<dyn std::error::Error>> {
-                if let Some(dir) = file.parent() {
-                    vw_platform::ensure_private_dir(dir)?;
-                }
-                vw_platform::replace_private(file, &serde_json::to_vec(&updated)?)?;
-                Ok(())
-            };
-            write().map_err(|_| {
-                CoreError::new(
-                    ErrorCode::Internal,
-                    "The chat's model choice could not be saved. Try picking it again.",
-                )
-            })?;
-        }
-        *pending = updated;
-        Ok(())
-    }
-
-    pub(crate) fn forget(&self, id: &str) {
-        if let Err(error) = self.change(id, None) {
-            tracing::warn!(%error, "pending model record not removed");
-        }
-    }
-
-    fn get(&self, id: &str) -> Option<Choice> {
-        self.pending
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .get(id)
-            .cloned()
-    }
-}
-
 /// Accepted chat picks and recovery defaults awaiting Vibe's durable turn pins.
 pub(crate) struct Choices {
-    pending: Records,
-    // Keep the served model and display name after Vibe pins the alias. A hosted alias can be retargeted.
-    remembered: Records,
-    // Kept separately so a refused user pick is removed, even before the next turn.
-    // Without this, a second reopen could restore an older, still-valid Vibe pin.
-    fallbacks: Records,
+    records: Records,
     handed_off: Mutex<std::collections::BTreeSet<(String, String)>>,
     /// Display names by alias from the model lists seen in this run ([`Self::learn`]).
     names: Mutex<BTreeMap<String, String>>,
@@ -158,9 +86,7 @@ const MAX_NAMES: usize = 512;
 impl Choices {
     pub(crate) fn load(dir: Option<&std::path::Path>) -> Self {
         Self {
-            pending: Records::load(dir, "pending-models.json"),
-            remembered: Records::load(dir, "chat-models.json"),
-            fallbacks: Records::load(dir, "model-fallbacks.json"),
+            records: Records::load(dir),
             handed_off: Mutex::default(),
             names: Mutex::default(),
         }
@@ -194,24 +120,13 @@ impl Choices {
         if !choice.display_name.is_empty() {
             return choice;
         }
-        let saved = |records: &Records| {
-            records
-                .pending
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .values()
-                .find(|c| c.alias == choice.alias && !c.display_name.is_empty())
-                .map(|c| c.display_name.clone())
-        };
         let known = self
             .names
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .get(&choice.alias)
             .cloned()
-            .or_else(|| saved(&self.remembered))
-            .or_else(|| saved(&self.fallbacks))
-            .or_else(|| saved(&self.pending));
+            .or_else(|| self.records.named(&choice.alias));
         if let Some(name) = known {
             choice.display_name = name;
         }
@@ -219,9 +134,7 @@ impl Choices {
     }
 
     pub(crate) fn forget(&self, id: &str) {
-        self.pending.forget(id);
-        self.remembered.forget(id);
-        self.fallbacks.forget(id);
+        self.records.forget(id);
         self.handed_off
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
@@ -259,44 +172,8 @@ impl Choices {
                 "This configuration did not apply the chat's model or thinking choice.",
             ));
         }
-        self.pending.change(id, Some(choice.clone()))?;
-        self.remembered.change(id, Some(choice))?;
-        self.fallbacks.change(id, None)
+        self.records.update(id, |record| record.accepted(choice))
     }
-}
-
-fn load(file: &std::path::Path) -> std::io::Result<BTreeMap<String, Choice>> {
-    const MAX: u64 = 1024 * 1024;
-    let mut bytes = Vec::new();
-    std::fs::File::open(file)?
-        .take(MAX + 1)
-        .read_to_end(&mut bytes)?;
-    if bytes.len() as u64 > MAX {
-        return Err(std::io::Error::other("pending-models.json exceeds 1 MiB"));
-    }
-    let pending: BTreeMap<String, Value> = serde_json::from_slice(&bytes)?;
-    // Provider-defined levels are wire strings. A damaged record belongs to one chat,
-    // so it must not discard every other chat's saved model choice.
-    Ok(pending
-        .into_iter()
-        .filter_map(|(id, value)| {
-            let choice: Choice = serde_json::from_value(value).ok()?;
-            if id.is_empty()
-                || id.len() > 128
-                || choice.alias.is_empty()
-                || choice.alias.len() > 128
-                || choice.effort.is_empty()
-                || choice.effort.len() > 128
-                || choice
-                    .effort
-                    .chars()
-                    .any(|c| c.is_whitespace() || c.is_control())
-            {
-                return None;
-            }
-            Some((id, choice))
-        })
-        .collect())
 }
 
 /// Capture the stored alias before the resume/profile runtime replaces the store snapshot.
@@ -374,73 +251,42 @@ pub(crate) async fn turn_started(shared: &Shared, params: &Value) {
     let Some(id) = params["sessionId"].as_str() else {
         return;
     };
-    // Keep the provider identity as well as Vibe's alias, which can be retargeted later.
-    if let Some(runtime) = shared.store.runtime(id)
-        && let Some(choice) = actual(&json!({"runtime":runtime}))
-        && let Err(error) = shared.model_choices.remembered.change(id, Some(choice))
-    {
-        tracing::warn!(%error, "chat model identity could not be saved");
-    }
-    let choice = shared
-        .model_choices
-        .fallbacks
-        .get(id)
-        .or_else(|| shared.model_choices.pending.get(id));
-    let Some(choice) = choice else {
-        return;
+    // Remember the served identity and retire confirmed pending/fallback pins in one commit.
+    let served = shared
+        .store
+        .runtime(id)
+        .and_then(|runtime| actual(&json!({"runtime":runtime})));
+    let expected = shared.model_choices.records.get(id).replay();
+    let pinned = if let Some(choice) = &expected {
+        shared
+            .gate
+            .call(
+                "session/read",
+                json!({"sessionId":id,"history":{"limit":1},"turns":{"limit":1}}),
+                None,
+            )
+            .await
+            .is_ok_and(|reply| {
+                let session = &reply.result["state"]["session"];
+                session["model"].as_str() == Some(choice.alias.as_str())
+                    && session["reasoningEffort"].as_str() == Some(choice.effort.as_str())
+            })
+    } else {
+        false
     };
-    if let Ok(reply) = shared
-        .gate
-        .call(
-            "session/read",
-            json!({"sessionId":id,"history":{"limit":1},"turns":{"limit":1}}),
-            None,
-        )
-        .await
-    {
-        let session = &reply.result["state"]["session"];
-        if session["model"].as_str() == Some(choice.alias.as_str())
-            && session["reasoningEffort"].as_str() == Some(choice.effort.as_str())
-        {
-            shared.model_choices.pending.forget(id);
-            shared.model_choices.fallbacks.forget(id);
+    if let Err(error) = shared.model_choices.records.update(id, |record| {
+        // A newer pick made during session/read must not be retired by the older turn.
+        if record.replay() != expected {
+            return;
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::Records;
-    use serde_json::json;
-
-    #[test]
-    fn saved_choices_preserve_other_chats_and_unknown_provider_levels() {
-        let dir = std::env::temp_dir().join(format!("vw-choice-levels-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(
-            dir.join("choices.json"),
-            serde_json::to_vec(&json!({
-                "known": {"alias":"large-4", "effort":"high"},
-                "future": {"alias":"custom", "effort":"provider-future"},
-                "damaged": {"alias":"custom", "effort":17},
-                "blank": {"alias":"custom", "effort":" \t"},
-                "spaced": {"alias":"custom", "effort":"two words"}
-            }))
-            .unwrap(),
-        )
-        .unwrap();
-        let records = Records::load(Some(&dir), "choices.json");
-        std::fs::remove_dir_all(&dir).unwrap();
-        assert_eq!(
-            records.get("known").map(|choice| choice.effort),
-            Some("high".into())
-        );
-        assert_eq!(
-            records.get("future").map(|choice| choice.effort),
-            Some("provider-future".into())
-        );
-        for id in ["damaged", "blank", "spaced"] {
-            assert!(records.get(id).is_none(), "{id}");
+        if let Some(choice) = served {
+            record.remembered = Some(choice);
         }
+        if pinned {
+            record.pending = None;
+            record.fallback = None;
+        }
+    }) {
+        tracing::warn!(%error, "chat model identity could not be saved");
     }
 }

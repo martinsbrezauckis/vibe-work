@@ -7,7 +7,7 @@ use std::fs;
 
 use vw_logscan::{FileSkipReason, Secret, redact, scan};
 
-const TOKEN: &str = "ghp_fixtureOnly012345";
+const TOKEN: &str = "synthetic-logscan-marker";
 const ESCAPED: &str = "fixture\"\\\nvalue+/?";
 
 fn secrets() -> Vec<Secret> {
@@ -131,10 +131,14 @@ fn overlapping_secrets_and_duplicate_values_are_redacted_once() {
 #[test]
 fn invalid_json_or_syntax_matches_never_replace_the_original() {
     for (file, text, value) in [
-        ("meta.json", "{\"content\":\"ghp_fixtureOnly012345\"", TOKEN),
+        (
+            "meta.json",
+            "{\"content\":\"synthetic-logscan-marker\"",
+            TOKEN,
+        ),
         (
             "messages.jsonl",
-            "{\"content\":\"ghp_fixtureOnly012345\"} {}\n",
+            "{\"content\":\"synthetic-logscan-marker\"} {}\n",
             TOKEN,
         ),
         ("meta.json", "{\"count\":12345678}", "12345678"),

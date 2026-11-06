@@ -1,10 +1,10 @@
-//! Windows and macOS scan: `listeners` for the listening TCP sockets with their owner pid, `sysinfo` for the
+//! Windows and macOS scan: IP Helper listener-only tables on Windows, `listeners` on macOS; `sysinfo` for the
 //! process table (command line, cwd, parent, owner), and `vw-platform::process` for what `sysinfo` lacks or
 //! rounds: the precise start token, and on macOS the process group and owner uid.
 //!
-//! Depends on: listeners 0.6.1, sysinfo 0.39.6, vw-platform (`process_facts`), `types`. Called by:
-//! `os::snapshot`, `os::is_alive`. Only Windows and macOS builds compile this file; proven on Windows
-//! and macOS test machines, not on the Linux development machine.
+//! Depends on: listeners 0.6.1 (macOS), sysinfo 0.38.4, vw-platform (TCP tables and identity), `types`. Called by:
+//! `os::snapshot`, `os::is_alive`. Native execution requires Windows/macOS; the Windows table decoder
+//! also has synthetic tests that run on Linux.
 //! Invariants:
 //! - A process `sysinfo` cannot open has `same_user = None` (other users' processes, elevated ones).
 //! - macOS: the command line is the kernel's exact argv ([`vw_platform::process_argv`]): `sysinfo` drops empty
@@ -15,6 +15,7 @@
 use std::collections::BTreeMap;
 use std::time::Instant;
 
+#[cfg(target_os = "macos")]
 use listeners::{Protocol, SocketState};
 use sysinfo::{Pid, ProcessRefreshKind, ProcessStatus, ProcessesToUpdate, System, UpdateKind};
 
@@ -30,6 +31,7 @@ pub(crate) fn is_alive(process: ProcessRef) -> bool {
 /// One full scan.
 pub(crate) fn snapshot() -> Result<Snapshot, ScanError> {
     let started = Instant::now();
+    #[cfg(target_os = "macos")]
     let listeners: Vec<SocketListener> = listeners::get_all()
         .map_err(|e| ScanError::Unreadable(format!("socket table: {e}")))?
         .into_iter()
@@ -38,6 +40,17 @@ pub(crate) fn snapshot() -> Result<Snapshot, ScanError> {
             address: l.socket.ip(),
             port: l.socket.port(),
             pid: Some(l.process.pid),
+            same_user: None,
+        })
+        .collect();
+    #[cfg(windows)]
+    let listeners: Vec<SocketListener> = vw_platform::windows_tcp_listeners()
+        .map_err(|e| ScanError::Unreadable(format!("socket table: {e}")))?
+        .into_iter()
+        .map(|l| SocketListener {
+            address: l.address,
+            port: l.port,
+            pid: Some(l.pid),
             same_user: None,
         })
         .collect();

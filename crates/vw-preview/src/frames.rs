@@ -132,6 +132,7 @@ pub fn validate_frame_point(
                 "target is not actionable",
                 "transformed target",
                 "authorization changed",
+                "native colour picker unsupported; use browser_read for the field ref, then browser_act type with #RRGGBB text",
             ];
             return Err(if known.contains(&reason) {
                 reason

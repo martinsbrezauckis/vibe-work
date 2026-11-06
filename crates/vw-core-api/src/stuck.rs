@@ -158,7 +158,10 @@ impl Core {
         };
         // Not `serverUnavailable`: a restart in progress is no reason to give up on a session.
         let stuck = matches!(outcome.code, ErrorCode::Timeout | ErrorCode::ServerError)
-            && outcome.server_code.as_deref() != Some("not_found");
+            && !matches!(
+                outcome.server_code.as_deref(),
+                Some("not_found" | "invalid_params")
+            );
         if !stuck {
             return Err(outcome);
         }

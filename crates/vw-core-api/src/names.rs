@@ -41,9 +41,11 @@ impl Title {
 struct Inner {
     titles: HashMap<String, Title>,
     order: VecDeque<String>,
-    folders: BTreeSet<String>,
+    folders: HashMap<String, BTreeSet<String>>,
     /// The listed `cwd` of each session (bounded like `titles`).
     cwds: HashMap<String, String>,
+    /// Session ids never repeat. Ignore a listing already in flight when deletion finished.
+    deleted: BTreeSet<String>,
 }
 
 /// Titles and folders seen in `session/list` pages.
@@ -62,6 +64,9 @@ impl Names {
         let mut inner = self.lock();
         for item in items {
             if let Some(id) = item.get("id").and_then(Value::as_str) {
+                if inner.deleted.contains(id) {
+                    continue;
+                }
                 let title = item
                     .get("title")
                     .and_then(Value::as_str)
@@ -76,8 +81,10 @@ impl Names {
                 if let Some(cwd) = item.get("cwd").and_then(Value::as_str) {
                     inner.cwds.insert(id.to_owned(), cwd.to_owned());
                 }
+                let mut folders = BTreeSet::new();
+                note_folders(&mut folders, item);
+                inner.folders.insert(id.to_owned(), folders);
             }
-            note_folders(&mut inner.folders, item);
         }
         while inner.titles.len() > MAX_ENTRIES {
             for _ in 0..MAX_ENTRIES / 2 {
@@ -90,6 +97,19 @@ impl Names {
             // Forgotten folders are found again in the store or the next listing.
             inner.cwds.clear();
         }
+        if inner.folders.len() > MAX_ENTRIES {
+            inner.folders.clear();
+        }
+    }
+
+    /// A deleted chat grants no folder access, including through an earlier listing.
+    pub(crate) fn forget(&self, id: &str) {
+        let mut inner = self.lock();
+        inner.titles.remove(id);
+        inner.order.retain(|entry| entry != id);
+        inner.cwds.remove(id);
+        inner.folders.remove(id);
+        inner.deleted.insert(id.to_owned());
     }
 
     /// The folder session `id` works in: the loaded session's `cwd`, else the listed one.
@@ -159,16 +179,20 @@ impl Names {
 
     /// True when a listed or loaded session works in `path` (or has it as a workspace root).
     pub(crate) fn is_session_folder(&self, store: &SessionStore, path: &str) -> bool {
-        if self.lock().folders.contains(path) {
-            return true;
-        }
-        store.views().iter().any(|view| {
+        self.folders(store).contains(path)
+    }
+
+    /// Current session roots, with loaded state replacing any older listing for that session.
+    pub(crate) fn folders(&self, store: &SessionStore) -> BTreeSet<String> {
+        let mut folders = self.lock().folders.clone();
+        for view in store.views() {
             let mut found = BTreeSet::new();
             if let Some(session) = view.state.get("session") {
                 note_folders(&mut found, session);
             }
-            found.contains(path)
-        })
+            folders.insert(view.session_id, found);
+        }
+        folders.into_values().flatten().collect()
     }
 }
 
@@ -204,6 +228,37 @@ fn shorten(text: &str) -> String {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn deleted_sessions_cannot_be_restored_by_a_late_listing() {
+        let names = Names::default();
+        let store = SessionStore::new();
+        let row = json!({"id":"gone", "title":"Gone", "cwd":"/work", "workspaceRoots":["/extra"]});
+        names.note_listing(std::slice::from_ref(&row));
+        names.note_listing(&[json!({"id":"kept", "cwd":"/work"})]);
+        names.forget("gone");
+        names.note_listing(&[row]);
+        assert_eq!(names.cwd_of(&store, "gone"), None);
+        assert_eq!(names.title_of(&store, "gone"), None);
+        assert!(!names.is_session_folder(&store, "/extra"));
+        assert!(names.is_session_folder(&store, "/work"));
+        names.forget("kept");
+        assert!(names.folders(&store).is_empty());
+    }
+
+    #[test]
+    fn current_roots_replace_old_listing_and_loaded_state_wins() {
+        let names = Names::default();
+        let store = SessionStore::new();
+        names.note_listing(&[json!({"id":"s", "cwd":"/old", "workspaceRoots":["/old-extra"]})]);
+        names.note_listing(&[json!({"id":"s", "cwd":"/listed"})]);
+        assert_eq!(names.folders(&store), BTreeSet::from(["/listed".into()]));
+        let _ = store.load(json!({"session":{"id":"s", "cwd":"/live", "workspaceRoots":["/live-extra"]}, "eventId":0}), vw_session::LoadKind::New).unwrap();
+        assert_eq!(
+            names.folders(&store),
+            BTreeSet::from(["/live".into(), "/live-extra".into()])
+        );
+    }
 
     #[test]
     fn display_names_collapse_whitespace_while_confirmation_preserves_controls() {

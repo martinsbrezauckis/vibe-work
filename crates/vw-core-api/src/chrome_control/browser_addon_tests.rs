@@ -1,5 +1,6 @@
 //! Browser-local installation facts through Settings and the agent gateway, using real preference fixtures
 //! and the existing fake helper. Neither browser's dormant profiles may describe the other browser.
+use super::PairingState;
 use super::{AddonState, agent_browser::Browser, commands, edge_agent_tests::fixture, gateway};
 use serde_json::json;
 
@@ -30,9 +31,9 @@ async fn broken_helper_keeps_the_reinstall_reason_for_both_browsers() {
             std::fs::remove_file(&helper).unwrap();
         }
         // Neither an empty pairing report nor a stale successful one may hide the package diagnosis.
-        for pairing in ["", "Paired"] {
-            chrome.owner.pairing.lock().unwrap().0 = pairing.into();
-            chrome.owner.edge_pairing.lock().unwrap().0 = pairing.into();
+        for pairing in [PairingState::Unknown, PairingState::Paired] {
+            chrome.owner.pairing.lock().unwrap().0 = pairing;
+            chrome.owner.edge_pairing.lock().unwrap().0 = pairing;
             let view = commands::view(&core.shared);
             let edge = view.edge.unwrap();
             assert!(!view.setup.package && !edge.package);
@@ -81,8 +82,8 @@ async fn disconnected(name: &str, chrome_version: Option<&str>, chrome_off: bool
             .to_string(),
     )
     .unwrap();
-    chrome.owner.pairing.lock().unwrap().0 = "Not connected".into();
-    chrome.owner.edge_pairing.lock().unwrap().0 = "Not connected".into();
+    chrome.owner.pairing.lock().unwrap().0 = crate::chrome_control::PairingState::Disconnected;
+    chrome.owner.edge_pairing.lock().unwrap().0 = crate::chrome_control::PairingState::Disconnected;
     chrome
         .owner
         .tools
@@ -179,7 +180,7 @@ async fn disconnected(name: &str, chrome_version: Option<&str>, chrome_off: bool
             AddonState::SwitchedOff
         );
         chrome.set_enabled(true).unwrap();
-        chrome.owner.edge_pairing.lock().unwrap().0 = "Paired".into();
+        chrome.owner.edge_pairing.lock().unwrap().0 = crate::chrome_control::PairingState::Paired;
         assert_eq!(
             Browser::Edge.addon(&core.shared).state,
             AddonState::Connected
@@ -266,4 +267,61 @@ async fn status_reports_both_browser_versions_even_when_one_is_not_selected() {
     assert_eq!(body["addons"][1]["stateCode"], "connected");
     assert_eq!(body["addons"][1]["extensionVersion"], "0.1.4");
     core.shutdown().await;
+}
+
+#[tokio::test]
+async fn reworded_pairing_labels_keep_agent_diagnoses_and_actions() {
+    let core = fixture("browser-reworded-pairing", json!([])).await;
+    for (pairing, expected) in [
+        (PairingState::Paired, AddonState::Connected),
+        (PairingState::OtherOwner, AddonState::OtherOwner),
+        (PairingState::Waiting, AddonState::NotPaired),
+    ] {
+        core.shared
+            .chrome_control
+            .owner
+            .edge_pairing
+            .lock()
+            .unwrap()
+            .0 = pairing;
+        let mut setup = *commands::view(&core.shared).edge.unwrap();
+        let original = super::agent_browser::edge_addon(&core.shared, &setup);
+        assert_eq!(original.state, expected);
+        setup.pairing = "Completely different display words".into();
+        let reworded = super::agent_browser::edge_addon(&core.shared, &setup);
+        assert_eq!(original, reworded);
+    }
+    let dynamic = "Could not read a page titled Google Chrome in Chrome";
+    assert_eq!(Browser::Edge.text(dynamic), dynamic);
+    core.shutdown().await;
+}
+
+#[test]
+fn not_set_up_instructions_name_each_browsers_card_button() {
+    for (browser, button) in [
+        (Browser::Chrome, "Connect Chrome"),
+        (Browser::Edge, "Set up…"),
+    ] {
+        let view = super::addon::view_for(AddonState::NotSetUp, "", browser);
+        let location = if browser == Browser::Edge {
+            format!(" in Settings, Browser, {}", browser.name())
+        } else {
+            String::new()
+        };
+        assert_eq!(
+            view.instruction,
+            format!(
+                "{} is not set up. Ask the person to click {button}{location}.",
+                browser.words("{yourBrowser}")
+            )
+        );
+        let reason = super::availability::reason(&view, browser);
+        assert!(
+            reason.contains(&format!("click {button}{location}.")),
+            "{reason}"
+        );
+        if browser == Browser::Edge {
+            assert!(!reason.contains("Connect Edge"), "{reason}");
+        }
+    }
 }

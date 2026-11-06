@@ -69,22 +69,8 @@ impl GuardContext {
 }
 
 impl PageContext for GuardContext {
-    fn refused(&self, key: Option<&str>, reason: &str) {
-        let Some(shared) = self.shared.upgrade() else {
-            return;
-        };
-        let Some(session) = key.and_then(|key| {
-            shared.preview.as_ref().and_then(|hub| {
-                hub.service
-                    .page_for_mount(key)
-                    .and_then(|page| hub.service.owner_session_id(&page))
-            })
-        }) else {
-            return;
-        };
-        crate::guard_refusals::record(&shared, &session, crate::GuardKind::Network, None, reason);
-    }
-
+    // Background requests stay in NetGuard's bounded diagnostic log. Agent navigation refusals
+    // are published at the tool boundary, where they can be attributed to the requested action.
     fn loopback<'a>(&'a self, key: &'a str, port: u16) -> ScopeFuture<'a> {
         Box::pin(async move {
             let shared = self

@@ -93,3 +93,15 @@ fn main() -> ExitCode {
         ExitCode::FAILURE
     }
 }
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn generated_modules_have_no_trailing_whitespace() {
+        for (name, text) in vw_core_api::ts::typescript_modules(super::HEADER) {
+            for (index, line) in text.lines().enumerate() {
+                assert_eq!(line, line.trim_end(), "{name}:{}", index + 1);
+            }
+        }
+    }
+}

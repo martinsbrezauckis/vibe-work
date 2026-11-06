@@ -97,8 +97,7 @@ async fn an_identical_unmarked_replacement_survives_a_stale_record() {
 }
 
 /// The account's model list with Large 4 under `alias`, or (`None`) an account list that no longer offers Large 4.
-/// "Not offered" keeps another account model in the list: an empty list means discovery gave nothing (a locked
-/// vault), which keeps an installed facts entry as it is.
+/// "Not offered" keeps another account model in the list; a separate case covers a settled empty account list.
 fn offer(home: &std::path::Path, alias: Option<&str>) {
     let rows = alias.map_or_else(
         || {
@@ -143,7 +142,7 @@ async fn a_different_alias_with_our_prices_survives_the_launch_check_byte_for_by
             }
         }
     }
-    // An already installed facts row must survive a locked-vault read with no account rows.
+    // A settled read without account models must remove our marked facts row too: it is an orphan.
     let (original, written) = crate::model_facts::with(
         "# My own line\nactive_model = 'large-4'\n",
         "mistral-large-4-0-3",
@@ -158,9 +157,10 @@ async fn a_different_alias_with_our_prices_survives_the_launch_check_byte_for_by
         .unwrap();
     assert_eq!(
         std::fs::read_to_string(&file).unwrap(),
-        original,
-        "a locked-vault read stripped our installed facts"
+        crate::model_facts::without(&original, None).unwrap(),
+        "a settled empty account list kept an orphan override"
     );
+    assert!(crate::model_facts::recorded(&home).is_none());
     core.shutdown().await;
     std::fs::remove_dir_all(root).unwrap();
 }

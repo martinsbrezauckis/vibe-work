@@ -16,7 +16,9 @@ export function chromeUsable(view: ChromeControlView | null | undefined): boolea
     view.enabled &&
     view.setup.package &&
     view.setup.state === "extensionAdded" &&
-    view.setup.pairing === "Paired"
+    view.setup.pairingState === "paired" &&
+    view.setup.browserIssue === undefined &&
+    (view.setup.addon === undefined || view.setup.addon.state === "connected")
   );
 }
 export function setupLine(
@@ -29,8 +31,7 @@ export function setupLine(
       return wording(TEXT.browserPackageMissing, { browser: TEXT.edgeName });
     if (!view.setup.package && view.setup.pairing === TEXT.chromePackageChanged)
       return wording(TEXT.browserPackageChanged, { browser: TEXT.edgeName });
-    if (!view.setup.package || view.setup.pairing === "Blocked by your organization")
-      return view.setup.pairing;
+    if (!view.setup.package || view.setup.pairingState === "blocked") return view.setup.pairing;
     if (view.setup.addon) return view.setup.addon.label;
     return view.setup.state === "notSetUp" ? "Not set up" : view.setup.pairing;
   }
@@ -38,16 +39,15 @@ export function setupLine(
   if (view.setup.addon) return view.setup.addon.label;
   if (!view.setup.package) return view.setup.pairing;
   if (chromeUsable(view)) return "Connected";
-  if (view.setup.pairing === "Paired" && !view.enabled) return "Off";
-  if (view.setup.browserIssue === "missing") return "Google Chrome not found";
+  if (view.setup.pairingState === "paired" && !view.enabled) return "Off";
+  if (view.setup.browserIssue === "missing") return "Google Chrome is not installed";
   if (view.setup.browserIssue === "sandboxed") return "Snap or Flatpak Chrome is unsupported";
   if (view.setup.browserIssue === "differentBrowser") return "Google Chrome required";
   if (view.setup.storeReview) return "Extension in review";
   if (view.setup.state === "notSetUp") return "Not connected";
-  if (view.setup.pairing.includes("another Vibe Work"))
-    return "Different Vibe Work · pair in Chrome";
-  if (view.setup.pairing === "Waiting for you to pair in Chrome") return "Pair in Chrome";
-  if (view.setup.pairing === "Connecting") return "Connecting";
+  if (view.setup.pairingState === "otherOwner") return "Different Vibe Work · pair in Chrome";
+  if (view.setup.pairingState === "waiting") return "Pair in Chrome";
+  if (view.setup.pairingState === "connecting") return "Connecting";
   if (view.setup.installState === "restartChrome") return "Restart Chrome";
   if (view.setup.installState === "external") return "Enable in Chrome";
   if (view.setup.state === "waitingForExtension") return "Add to Chrome";
@@ -83,7 +83,9 @@ export function edgeUsable(view: ChromeControlView | null | undefined): boolean 
     view.enabled &&
     view.edge.package &&
     view.edge.state === "extensionAdded" &&
-    view.edge.pairing === "Paired"
+    view.edge.pairingState === "paired" &&
+    view.edge.browserIssue === undefined &&
+    (view.edge.addon === undefined || view.edge.addon.state === "connected")
   );
 }
 
@@ -94,7 +96,7 @@ export function firefoxUsable(view: ChromeControlView | null | undefined): boole
     view.enabled &&
     view.firefox.package &&
     view.firefox.state === "extensionAdded" &&
-    view.firefox.pairing === "Window open"
+    view.firefox.pairingState === "windowOpen"
   );
 }
 
@@ -106,6 +108,7 @@ export function stepAction(view: ChromeControlView | null): ChromeAddonAction | 
 }
 /** The button's words for a step. */
 export function stepLabel(action: ChromeAddonAction): string {
+  if (action === "remove") return "Remove…";
   if (action === "openPairingPage") return "Open pairing page";
   if (action === "setupAgain") return "Set up again";
   if (action === "turnOn") return "Turn on";
@@ -116,8 +119,5 @@ export function pairingStep(view: ChromeControlView | null): boolean {
   if (view === null) return false;
   const state = view.setup.addon?.state;
   if (state !== undefined) return state === "notPaired" || state === "otherOwner";
-  return (
-    view.setup.pairing === "Waiting for you to pair in Chrome" ||
-    view.setup.pairing.includes("another Vibe Work")
-  );
+  return view.setup.pairingState === "waiting" || view.setup.pairingState === "otherOwner";
 }

@@ -45,15 +45,15 @@ impl Wake {
 }
 
 pub(super) fn retry(browser: Browser) -> Value {
-    let mut view = super::addon::view(AddonState::Connecting, super::setup::ABSENT);
-    super::addon::reconnecting(&mut view, true);
-    let instruction = browser.text(&view.instruction);
+    let mut view = super::addon::view_for(AddonState::Connecting, super::setup::ABSENT, browser);
+    super::addon::reconnecting_for(&mut view, true, browser);
+    let instruction = view.instruction;
     let mut answer =
         super::owner::own(&format!("Not run: {instruction}"), "EXTENSION_UNRESPONSIVE")
             .into_value();
-    // Polling cannot wake a stopped worker or repair an older worker blocked in cleanup. A person must perform
-    // the recovery step; an endless sequence of agent retries would only repeat this same bounded wait.
-    answer["structuredContent"]["retryable"] = json!(false);
+    // No action was sent during the reconnect wait. A later retry can use the recovered connection;
+    // the instruction asks for the person's help only if the connection stays down.
+    answer["structuredContent"]["retryable"] = json!(true);
     answer["structuredContent"]["addon"] = json!({
         "state":view.label, "stateCode":view.state, "instruction":instruction,
     });
@@ -155,10 +155,11 @@ async fn wake(
         let Some(shared) = weak.upgrade() else {
             return;
         };
+        let config = &shared.chrome_control.config;
         if !injected
             && !match browser {
-                Browser::Chrome => super::browser::running(),
-                Browser::Edge => super::browser::edge_running(),
+                Browser::Chrome => super::browser::running(config),
+                Browser::Edge => super::browser::edge_running(config),
             }
         {
             return;

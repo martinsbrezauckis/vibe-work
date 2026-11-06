@@ -58,13 +58,14 @@ fn removing_another_toast_does_not_change_the_oldest_eviction_order() {
 }
 
 #[test]
-fn timeout_releases_the_toast_and_late_activation_cannot_take_it() {
+fn timeout_keeps_the_toast_for_notification_center_activation() {
     let mut store = ToastStore::new();
     let handle = Arc::new(());
     store.insert(1, handle.clone());
     drop(store.event(1, ToastEvent::TimedOut));
     assert!(store.event(1, ToastEvent::TimedOut).is_none());
-    assert_eq!(Arc::strong_count(&handle), 1);
+    assert_eq!(Arc::strong_count(&handle), 2);
+    assert!(store.event(1, ToastEvent::Activated).is_some());
     assert!(store.event(1, ToastEvent::Activated).is_none());
 }
 
@@ -74,7 +75,6 @@ fn terminal_events_remove_only_their_toast_and_release_its_handle() {
         ToastEvent::Activated,
         ToastEvent::UserCanceled,
         ToastEvent::Removed,
-        ToastEvent::TimedOut,
     ] {
         let mut store = ToastStore::new();
         let handle = Arc::new(());

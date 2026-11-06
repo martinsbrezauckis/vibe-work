@@ -7,95 +7,95 @@
 
 export type FeedbackKind = "bug" | "feature";
 
-export type FeedbackDraft = { 
+export type FeedbackDraft = {
 /**
  * Bug or feature request.
  */
-kind: FeedbackKind, 
+kind: FeedbackKind,
 /**
  * Short summary, at most 160 UTF-8 bytes.
  */
-title: string, 
+title: string,
 /**
  * Reproduction, expected and actual behavior, or the requested capability; at most 8000 bytes.
  */
-description: string, 
+description: string,
 /**
  * Optional plain text remarks; at most 2000 bytes.
  */
 remarks: string, };
 
-export type FeedbackSystem = { 
+export type FeedbackSystem = {
 /**
  * App release, to match regressions.
  */
-appVersion: string, 
+appVersion: string,
 /**
  * Running agent release, or unknown when no agent is running.
  */
-vibeVersion: string, 
+vibeVersion: string,
 /**
  * OS family, to identify the native implementation.
  */
-os: string, 
+os: string,
 /**
  * Native OS release or Linux distribution release, to reproduce platform issues.
  */
-osVersion: string, 
+osVersion: string,
 /**
  * CPU architecture, to identify the executable build.
  */
 arch: string, };
 
-export type FeedbackReport = { 
+export type FeedbackReport = {
 /**
  * Random report identifier; never a device or session identifier.
  */
-id: string, 
+id: string,
 /**
  * Redacted prose exactly as shown for review.
  */
-draft: FeedbackDraft, 
+draft: FeedbackDraft,
 /**
  * Present only with the person's sharing choice.
  */
 system: FeedbackSystem | null, };
 
-export type FeedbackView = { 
+export type FeedbackView = {
 /**
  * An open draft, absent when the panel is closed.
  */
-draft: FeedbackDraft | null, 
+draft: FeedbackDraft | null,
 /**
  * Ready for the separate Send click, absent before Review.
  */
-review: FeedbackReport | null, 
+review: FeedbackReport | null,
 /**
  * Read-only facts the person may include.
  */
-system: FeedbackSystem, 
+system: FeedbackSystem,
 /**
  * Remembered sharing choice, off by default.
  */
-shareSystem: boolean, 
+shareSystem: boolean,
 /**
  * Whether the release has a relay URL configured.
  */
 available: boolean, };
 
-export type FeedbackRequest = { "op": "read" } | { "op": "open", 
+export type FeedbackRequest = { "op": "read" } | { "op": "open",
 /**
  * Prose to offer for editing.
  */
-draft: FeedbackDraft, } | { "op": "review", 
+draft: FeedbackDraft, } | { "op": "review",
 /**
  * Prose deliberately entered by the person.
  */
-draft: FeedbackDraft, } | { "op": "share", 
+draft: FeedbackDraft, } | { "op": "share",
 /**
  * Whether to include the displayed diagnostic facts.
  */
-shareSystem: boolean, } | { "op": "send", 
+shareSystem: boolean, } | { "op": "send",
 /**
  * Identifier from the review result.
  */

@@ -28,6 +28,7 @@ use crate::core::Shared;
 use crate::error::CoreError;
 use crate::event::CoreEvent;
 use crate::preview_ports::{busy_ports, session_ports};
+use crate::preview_readiness;
 use crate::previews::{PreviewHub, core_error, hub, open_for_session};
 
 /// The short preview description the agent reads (`lan`: a local-network page the user opened; its title is not
@@ -41,6 +42,7 @@ fn preview_json(
     view: Option<&PreviewView>,
     lan: bool,
     session_id: &str,
+    pending: Option<&str>,
 ) -> Value {
     view.map_or(Value::Null, |v| {
         let unavailable = service.screenshot_unavailable_reason(session_id);
@@ -49,14 +51,14 @@ fn preview_json(
             "url": v.url,
             "title": if lan { None } else { v.title.clone() },
             "localNetwork": lan,
-            "state": v.state,
-            "stateMeans": unavailable.unwrap_or_else(|| match v.state {
+            "state": pending.map_or_else(|| json!(v.state), |_| json!("waitingForListener")),
+            "stateMeans": pending.map(str::to_owned).or(unavailable).unwrap_or_else(|| match v.state {
                 vw_preview::PreviewState::Live => "shown to the user now",
                 vw_preview::PreviewState::Hidden => "running, not visible",
                 vw_preview::PreviewState::Suspended => "paused to save memory",
                 vw_preview::PreviewState::Stopped => "server stopped",
             }.to_owned()),
-            "server": v.server,
+            "server": pending.map_or_else(|| json!(v.server), |_| json!("notDetected")),
             "loading": v.loading,
             "width": v.width,
             "refusedNavigations": v.refused,
@@ -187,15 +189,20 @@ async fn list(
             !leased_free.contains(p) && !ports.targets.iter().any(|t| t.port == *p && t.listening)
         })
         .collect();
+    let pending = hub
+        .service
+        .local_server_port(session_id)
+        .filter(|port| ports.pending.contains(port))
+        .map(preview_readiness::reason);
     Ok(json!({
         "tab": app_tab(session_id),
-        "preview": preview_json(&hub.service, hub.service.view(session_id).as_ref(), lan, session_id),
+        "preview": preview_json(&hub.service, hub.service.view(session_id).as_ref(), lan, session_id, pending.as_deref()),
         "canOpen": can_open,
         "leasedFree": leased_free,
         "leasedUnavailable": leased_unavailable,
         "leasedPorts": ports.leased,
         "portsInUse": busy,
-        "note": if let Some(view) = hub.service.view(session_id).filter(|view| view.server == Some(vw_preview::PreviewServerState::Stopped)) {
+        "note": if let Some(reason) = pending { reason } else if let Some(view) = hub.service.view(session_id).filter(|view| view.server == Some(vw_preview::PreviewServerState::Stopped)) {
             open_note(&view, hub.service.screenshot_unavailable_reason(session_id))
         } else { "the user sees the preview in Vibe Work's side panel; preview_open shows a page there. canOpen: \
                  this session's servers listening now. leasedFree: unassigned ports where binding succeeds; \
@@ -221,6 +228,11 @@ async fn open(
         ),
     };
     let path = args.get("path").and_then(Value::as_str).map(str::to_owned);
+    if let Some(port) = loopback_port(port, url.as_deref())
+        && let Some(reason) = preview_readiness::pending(shared, session_id, port).await?
+    {
+        return Err(format!("Not run: {reason}"));
+    }
     if let Some(silent) = loopback_port(port, url.as_deref()).filter(|p| !listens(*p)) {
         return Err(not_listening(silent));
     }
@@ -262,7 +274,7 @@ async fn open(
     let note = open_note(&view, unavailable);
     Ok(json!({
         "tab": app_tab(session_id),
-        "preview": preview_json(&hub.service, Some(&view), false, session_id),
+        "preview": preview_json(&hub.service, Some(&view), false, session_id, None),
         "note": note,
     }))
 }
@@ -283,6 +295,11 @@ pub(crate) async fn call(
         names::PREVIEW_LIST => list(shared, hub, session_id, lan).await,
         names::PREVIEW_OPEN => open(shared, hub, session_id, args).await,
         names::PREVIEW_SCREENSHOT => {
+            if let Some(port) = hub.service.local_server_port(session_id)
+                && let Some(reason) = preview_readiness::pending(shared, session_id, port).await?
+            {
+                return Err(format!("Not run: {reason}"));
+            }
             // A screenshot at a device width sets the preview to it first (the user's pane too).
             if let Some(width) = width_arg(args)? {
                 hub.service
@@ -340,57 +357,5 @@ pub(crate) async fn call(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::open_note;
-    use vw_preview::{DeviceWidth, PreviewServerState, PreviewState, PreviewView};
-
-    fn view() -> PreviewView {
-        PreviewView {
-            session_id: "s".into(),
-            url: Some("http://127.0.0.1:28100/".into()),
-            title: None,
-            state: PreviewState::Hidden,
-            server: None,
-            loading: false,
-            waiting_for_browser: false,
-            width: DeviceWidth::Fit,
-            downloads: Vec::new(),
-            refused: Vec::new(),
-            console_count: 0,
-        }
-    }
-
-    #[test]
-    fn window_visibility_precedes_a_retained_stopped_server_marker() {
-        let mut stopped = view();
-        stopped.state = PreviewState::Stopped;
-        stopped.server = Some(PreviewServerState::Stopped);
-        let reason = "The Vibe Work window is minimized or hidden, so App preview cannot be captured. Ask the user to show the window, or check App preview errors with preview_console.";
-        assert_eq!(
-            open_note(&stopped, Some(reason.to_owned())),
-            format!("screenshot unavailable: {reason}")
-        );
-    }
-
-    #[test]
-    fn open_answer_names_away_reasons_without_width_advice() {
-        for reason in [
-            "The Vibe Work window is minimized or hidden, so App preview cannot be captured. Ask the user to show it, or check App preview errors with preview_console.",
-            "The user is viewing another session, so App preview cannot be captured. Ask the user to open this session, or check App preview errors with preview_console.",
-        ] {
-            let answer = open_note(&view(), Some(reason.to_owned()));
-            assert_eq!(
-                answer,
-                format!("loaded, but screenshot unavailable: {reason}")
-            );
-            assert!(!answer.contains("preview_open with a width"));
-        }
-        let mut stopped = view();
-        stopped.state = PreviewState::Stopped;
-        stopped.server = Some(PreviewServerState::Stopped);
-        assert_eq!(
-            open_note(&stopped, None),
-            "The App preview remains stopped. Start its server if needed, then Reload."
-        );
-    }
-}
+#[path = "preview_tools_tests.rs"]
+mod tests;

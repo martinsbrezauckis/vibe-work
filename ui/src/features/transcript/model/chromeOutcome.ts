@@ -233,7 +233,14 @@ export function chromeOutcome(entry: Obj): string | null {
   if (!CHROME_TOOL.test(tool)) return null;
   const view = effectView(entry);
   if (view.live || view.status === "skipped") return null;
-  const answer = answerOf(entry);
+  const batch = answerOf(entry);
+  const steps = batch?.["steps"];
+  const last = Array.isArray(steps) ? obj(obj(steps.at(-1))?.["result"]) : null;
+  // The batch stopped because this step failed; keep that step's reason and uncertainty.
+  const answer =
+    field(batch, "status") === "stopped" && last !== null && field(last, "status") !== "completed"
+      ? last
+      : batch;
   const status = field(answer, "status")?.toLowerCase() ?? null;
   const failure = failureLine(answer, status);
   const reason = chromeErrorReason(answer, status, failure?.startsWith("Not known:") ?? false);

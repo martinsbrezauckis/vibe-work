@@ -66,24 +66,11 @@ export function useSendTo(client: CoreClient | null): SendToState {
   return state;
 }
 
-/** The status line under the switch when it is on, in the words of this system. */
-export function sendToStatus(view: SendToView): string | null {
-  if (!view.on) return null;
-  const files = "On. Right-click a file or folder and choose Send to Vibe Work.";
-  if (view.system === "windows")
-    return view.underMoreOptions ? `${files} It is under Show more options.` : files;
-  if (view.system === "macos")
-    return `${files} Select text, right-click and choose Services > Ask Vibe Work.`;
-  if (view.system === "linux")
-    return "On. Right-click a file or folder and choose Scripts > Send to Vibe Work (Files) or Send to Vibe Work (Dolphin).";
-  return files;
-}
-
-/** What the switch adds, per system. */
-export function sendToDescription(view: SendToView): string {
-  if (view.system === "windows")
-    return 'Adds "Send to Vibe Work" to the right-click menu of files and folders in File Explorer and to Send to.';
-  if (view.system === "macos")
-    return 'Adds "Send to Vibe Work" for files and folders in Finder and "Ask Vibe Work" for selected text in other apps.';
-  return 'Adds "Send to Vibe Work" to the right-click menu of your file manager (Files, Dolphin) and to Open with.';
+/** The current menu state, with the system's location when enabled. */
+export function sendToStatus(view: SendToView): string {
+  if (!view.on) return "Off";
+  if (view.system === "windows" && view.underMoreOptions) return "On · Show more options";
+  if (view.system === "macos") return "On · Finder and Services";
+  if (view.system === "linux") return "On · Files and Dolphin";
+  return "On";
 }

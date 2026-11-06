@@ -147,6 +147,27 @@ pub enum Change {
     },
 }
 
+impl Change {
+    /// Session affected by this change; `None` denotes a notice for every subscriber.
+    #[must_use]
+    pub fn session_id(&self) -> Option<&str> {
+        match self {
+            Self::Replaced { session_id }
+            | Self::Removed { session_id }
+            | Self::SessionPatched { session_id, .. }
+            | Self::EntryUpserted { session_id, .. }
+            | Self::EntryPatched { session_id, .. }
+            | Self::TurnUpserted { session_id, .. }
+            | Self::QueueReplaced { session_id, .. }
+            | Self::TokenUsageSet { session_id, .. }
+            | Self::ChildUpserted { session_id, .. }
+            | Self::CallbacksChanged { session_id, .. }
+            | Self::RuntimeUpdated { session_id, .. } => Some(session_id),
+            Self::Notice { session_id, .. } => session_id.as_deref(),
+        }
+    }
+}
+
 /// Something the caller (the transport owner) has to do; the store never calls Vibe itself.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Action {

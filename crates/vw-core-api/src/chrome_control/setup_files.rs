@@ -96,6 +96,29 @@ pub(super) fn plain_file(path: &Path) -> io::Result<bool> {
     Ok(open_at(&dir, Path::new(path.file_name().ok_or_else(refused)?))?.is_some())
 }
 
+/// Compares binary payloads through the checked parent without the registration JSON size limit.
+pub(super) fn matches(path: &Path, expected: &[u8]) -> io::Result<bool> {
+    let dir = parent(path, false)?;
+    let Some(mut file) = open_at(&dir, Path::new(path.file_name().ok_or_else(refused)?))? else {
+        return Ok(false);
+    };
+    if file.metadata()?.len() != expected.len() as u64 {
+        return Ok(false);
+    }
+    let mut offset = 0;
+    let mut chunk = [0; 8192];
+    loop {
+        let count = file.read(&mut chunk)?;
+        if count == 0 {
+            return Ok(offset == expected.len());
+        }
+        if expected.get(offset..offset + count) != Some(&chunk[..count]) {
+            return Ok(false);
+        }
+        offset += count;
+    }
+}
+
 pub(super) fn read(path: &Path) -> io::Result<Option<Vec<u8>>> {
     let dir = match parent(path, false) {
         Ok(dir) => dir,

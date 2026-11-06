@@ -549,23 +549,18 @@ impl Host {
         Ok(path.display().to_string())
     }
 
-    /// Shows a folder in the file manager only when a listed or loaded session works in it or a
-    /// saved project names it as its main folder. A picked folder alone is not enough.
+    /// Shows a folder in the file manager when its canonical path is inside a listed or loaded
+    /// session's folder or a saved project's main folder. A picked folder alone is not enough.
     ///
     /// # Errors
     /// `denied` for a path no session or project uses or a network path (Windows); `internal`
-    /// when the path is no existing folder or the file manager cannot start.
+    /// when the file manager cannot start.
     pub fn reveal_folder(&self, path: &str) -> Result<(), CoreError> {
         let Some(core) = &self.core else {
             return Err(self.unavailable());
         };
-        if !core.is_session_folder(path) && !core.is_project_main_folder(path) {
-            return Err(CoreError::new(
-                ErrorCode::Denied,
-                "that folder does not belong to any session or project",
-            ));
-        }
-        reveal_folder(Path::new(path)).map_err(|error| {
+        let target = core.reveal_folder_target(Path::new(path))?;
+        reveal_folder(&target).map_err(|error| {
             let error_code = match error {
                 // A network or device path is never opened (it would authenticate to a server).
                 vw_platform::RevealError::NotLocal(_) => ErrorCode::Denied,

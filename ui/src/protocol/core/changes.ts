@@ -102,64 +102,64 @@ plan: InitPlan,
  */
 identity?: CommitIdentity, };
 
-export type ChangesView = { 
+export type ChangesView = {
 /**
  * Session id.
  */
-sessionId: string, 
+sessionId: string,
 /**
  * Which view.
  */
-mode: ChangesMode, 
+mode: ChangesMode,
 /**
  * The session's folder.
  */
-folder: string | null, 
+folder: string | null,
 /**
  * The repository root (git mode).
  */
-repoRoot: string | null, 
+repoRoot: string | null,
 /**
  * The reviewed subtree relative to the root (`""` = the whole repository).
  */
-scope: string | null, 
+scope: string | null,
 /**
  * Why the review cannot run (`unavailable`), or why the baseline was lost (`baseline_lost`).
  */
-reason: string | null, 
+reason: string | null,
 /**
  * The session's starting point was lost or tampered with: `files` are against the last commit, read
  * only, until the user starts reviewing again (`restart`).
  */
-baselineLost: boolean, 
+baselineLost: boolean,
 /**
  * When the review started (ms since the epoch).
  */
-baselineAtMs: number | null, 
+baselineAtMs: number | null,
 /**
  * Changed files (git mode).
  */
-files: Array<FileChange>, 
+files: Array<FileChange>,
 /**
  * The diff's fingerprint, for `keep`/`revert` of everything.
  */
-fingerprint: string, 
+fingerprint: string,
 /**
  * Things to tell the user (files not shown and why).
  */
-notes: Array<string>, 
+notes: Array<string>,
 /**
  * File effects grouped by turn; includes child authors in Git mode.
  */
-turns: Array<TurnChanges>, 
+turns: Array<TurnChanges>,
 /**
  * Show the one-time "turn on version history" line (effects mode, code folder, not dismissed).
  */
-offerHistory: boolean, 
+offerHistory: boolean,
 /**
  * A file watcher refreshes this view live.
  */
-watching: boolean, 
+watching: boolean,
 /**
  * How long the refresh took (ms).
  */
@@ -167,174 +167,174 @@ tookMs: number, };
 
 export type ChangesMode = "none" | "git" | "uncommitted" | "effects" | "unavailable";
 
-export type TurnChanges = { 
+export type TurnChanges = {
 /**
  * Vibe's turn id.
  */
-turnId: string, 
+turnId: string,
 /**
  * 1-based turn number.
  */
-number: number, 
+number: number,
 /**
  * The user entry that opened the turn (the rewind anchor), when known.
  */
-anchorEntryId: string | null, 
+anchorEntryId: string | null,
 /**
  * Files the turn wrote or edited through Vibe's file tools.
  */
-files: Array<TurnFile>, 
+files: Array<TurnFile>,
 /**
  * The child session that owns these effects; absent for the shown session's own turns.
  */
 subagent?: ChangesSubagent, };
 
-export type ChangesSubagent = { 
+export type ChangesSubagent = {
 /**
  * The effect entries belong to this session's history.
  */
-sessionId: string, 
+sessionId: string,
 /**
  * Vibe's child-session name, or a generic label when absent.
  */
 name: string, };
 
-export type TurnFile = { 
+export type TurnFile = {
 /**
  * Path relative to the session folder when inside it, else as Vibe gave it.
  */
-path: string, 
+path: string,
 /**
  * The effect entries (render them with the transcript's diff view).
  */
-entryIds: Array<string>, 
+entryIds: Array<string>,
 /**
  * The turn created the file (a `file_write` of a file that did not exist).
  */
 created: boolean, };
 
-export type UndoPreview = { 
+export type UndoPreview = {
 /**
  * The turn.
  */
-turnId: string, 
+turnId: string,
 /**
  * The rewind anchor (`rewindSession` takes it as `entryId`).
  */
-anchorEntryId: string, 
+anchorEntryId: string,
 /**
  * Files Vibe will put back (relative to the session folder where possible).
  */
-restorable: Array<string>, 
+restorable: Array<string>,
 /**
  * Files changed in this turn or later that Vibe cannot put back (no copy from before).
  */
-notRestorable: Array<string>, 
+notRestorable: Array<string>,
 /**
  * Turns removed from the conversation (this one and every later one).
  */
 turnsRemoved: number, };
 
-export type FolderSession = { 
+export type FolderSession = {
 /**
  * Session id.
  */
-sessionId: string, 
+sessionId: string,
 /**
  * Its title, when it has one.
  */
-title: string | null, 
+title: string | null,
 /**
  * A turn is running.
  */
-running: boolean, 
+running: boolean,
 /**
  * Files it has changed (0 when unknown).
  */
 changedFiles: number, };
 
-export type Target = { "kind": "all", 
+export type Target = { "kind": "all",
 /**
  * `Diff::fingerprint` as shown.
  */
-fingerprint: string, } | { "kind": "file", 
+fingerprint: string, } | { "kind": "file",
 /**
  * Current path (or the old path of a rename).
  */
-path: string, 
+path: string,
 /**
  * `FileChange::blob` as shown.
  */
-blob: string | null, } | { "kind": "hunk", 
+blob: string | null, } | { "kind": "hunk",
 /**
  * Current path.
  */
-path: string, 
+path: string,
 /**
  * `FileChange::blob` as shown.
  */
-blob: string | null, 
+blob: string | null,
 /**
  * `Hunk::id` as shown.
  */
 hunkId: string, };
 
-export type FileChange = { 
+export type FileChange = {
 /**
  * Path relative to the repository root, `/`-separated, as shown: bytes that are not UTF-8 appear as
  * `\xNN` and a backslash as `\\` (one-to-one, so every file has its own name here).
  */
-path: string, 
+path: string,
 /**
  * The baseline path of a rename.
  */
-oldPath: string | null, 
+oldPath: string | null,
 /**
  * How it changed.
  */
-status: FileStatus, 
+status: FileStatus,
 /**
  * What it contains.
  */
-content: ContentKind, 
+content: ContentKind,
 /**
  * Added lines (0 when unknown, e.g. binary).
  */
-added: number, 
+added: number,
 /**
  * Removed lines.
  */
-removed: number, 
+removed: number,
 /**
  * Baseline mode when it differs from the current one (`100644`, `100755`, `120000`, ...).
  */
-oldMode: string | null, 
+oldMode: string | null,
 /**
  * Current mode when it differs from the baseline one.
  */
-newMode: string | null, 
+newMode: string | null,
 /**
  * The current blob id (`null` for a deleted file): actions carry it back to prove the user saw this
  * version.
  */
-blob: string | null, 
+blob: string | null,
 /**
  * Size in bytes, for `largeUntracked` files.
  */
-size: number | null, 
+size: number | null,
 /**
  * The hunks (empty unless `content` is `text`).
  */
-hunks: Array<Hunk>, 
+hunks: Array<Hunk>,
 /**
  * How many hunks the change has, also when they are not shown (`tooLarge`); 0 when not compared
  * (binary, or bigger than the comparison limit).
  */
-hunkCount: number, 
+hunkCount: number,
 /**
  * Which turn changed it, when known (filled by the core).
  */
-turn: TurnLabel | null, 
+turn: TurnLabel | null,
 /**
  * A rename whose two names differ only in case, on a case-insensitive file system (Windows, macOS):
  * both names are one file, so a revert renames it back and deletes nothing.
@@ -345,54 +345,54 @@ export type FileStatus = "added" | "modified" | "deleted" | "renamed" | "typeCha
 
 export type ContentKind = "text" | "binary" | "tooLarge" | "submodule" | "largeUntracked";
 
-export type Hunk = { 
+export type Hunk = {
 /**
  * Stable id within one diff: a hash of the path and the hunk's exact bytes. Actions name it, and a hunk
  * whose bytes changed has a new id (so an action on the old one is refused as stale).
  */
-id: string, 
+id: string,
 /**
  * First baseline line (1-based; 0 for an insertion at the top).
  */
-oldStart: number, 
+oldStart: number,
 /**
  * Baseline lines covered.
  */
-oldLines: number, 
+oldLines: number,
 /**
  * First current line.
  */
-newStart: number, 
+newStart: number,
 /**
  * Current lines covered.
  */
-newLines: number, 
+newLines: number,
 /**
  * The function/section text git prints after `@@ ... @@` (may be empty).
  */
-section: string, 
+section: string,
 /**
  * The lines.
  */
 lines: Array<DiffLine>, };
 
-export type DiffLine = { 
+export type DiffLine = {
 /**
  * `ctx`, `add` or `del` (the same names as the transcript diff's `DiffLine.kind`).
  */
-kind: LineKind, 
+kind: LineKind,
 /**
  * Line number in the baseline version, when the line is there.
  */
-oldNo: number | null, 
+oldNo: number | null,
 /**
  * Line number in the current version, when the line is there.
  */
-newNo: number | null, 
+newNo: number | null,
 /**
  * The line without its end-of-line characters.
  */
-text: string, 
+text: string,
 /**
  * The line has no newline at the end of the file (git's `\ No newline at end of file`).
  */
@@ -400,15 +400,15 @@ noEol: boolean, };
 
 export type LineKind = "ctx" | "add" | "del";
 
-export type TurnLabel = { 
+export type TurnLabel = {
 /**
  * 1-based turn number in the session.
  */
-number: number, 
+number: number,
 /**
  * Vibe's turn id.
  */
-turnId: string, 
+turnId: string,
 /**
  * `effect`: a completed file edit or write in that turn names the file; `observed`: the file changed
  * while that turn was running (e.g. through a command).
@@ -417,171 +417,171 @@ source: TurnSource, };
 
 export type TurnSource = "effect" | "observed";
 
-export type InitPlan = { 
+export type InitPlan = {
 /**
  * The folder.
  */
-folder: string, 
+folder: string,
 /**
  * Files the first commit would contain (counted up to 100 000).
  */
-files: number, 
+files: number,
 /**
  * Their total size in bytes.
  */
-bytes: number, 
+bytes: number,
 /**
  * Files left out for their size (relative paths).
  */
-large: Array<string>, 
+large: Array<string>,
 /**
  * Generated folders that would be committed (no `.gitignore` excludes them).
  */
-generated: Array<string>, 
+generated: Array<string>,
 /**
  * The commit author when git has no `user.name`/`user.email` configured.
  */
 fallbackAuthor: string | null, };
 
-export type LineCommentsRequest = { "op": "list", 
+export type LineCommentsRequest = { "op": "list",
 /**
  * Session id.
  */
-sessionId: string, } | { "op": "add", 
+sessionId: string, } | { "op": "add",
 /**
  * Session id.
  */
-sessionId: string, 
+sessionId: string,
 /**
  * The file as the review shows it.
  */
-path: string, 
+path: string,
 /**
  * The hunk the user saw (refused as stale when the diff moved on).
  */
-hunkId: string, 
+hunkId: string,
 /**
  * First commented line (index in the hunk).
  */
-from: number, 
+from: number,
 /**
  * Last commented line (index in the hunk, inclusive).
  */
-to: number, 
+to: number,
 /**
  * The comment.
  */
-text: string, } | { "op": "remove", 
+text: string, } | { "op": "remove",
 /**
  * Session id.
  */
-sessionId: string, 
+sessionId: string,
 /**
  * Comment id.
  */
-id: string, } | { "op": "markSent", 
+id: string, } | { "op": "markSent",
 /**
  * Session id.
  */
-sessionId: string, 
+sessionId: string,
 /**
  * Comment ids.
  */
 ids: Array<string>, };
 
-export type LineCommentsResult = { "type": "list", 
+export type LineCommentsResult = { "type": "list",
 /**
  * The session's comments, oldest first.
  */
-comments: Array<LineCommentView>, } | { "type": "added", 
+comments: Array<LineCommentView>, } | { "type": "added",
 /**
  * The new comment.
  */
 comment: LineCommentView, } | { "type": "done", };
 
-export type LineCommentState = { "state": "attached", 
+export type LineCommentState = { "state": "attached",
 /**
  * The hunk's id in the current diff.
  */
-hunkId: string, 
+hunkId: string,
 /**
  * Index of the first commented line in the hunk.
  */
-from: number, 
+from: number,
 /**
  * Index of the last commented line.
  */
-to: number, } | { "state": "outdated", 
+to: number, } | { "state": "outdated",
 /**
  * Why, in plain words.
  */
 reason: string, };
 
-export type LineCommentView = { 
+export type LineCommentView = {
 /**
  * The comment.
  */
-comment: LineComment, } & ({ "state": "attached", 
+comment: LineComment, } & ({ "state": "attached",
 /**
  * The hunk's id in the current diff.
  */
-hunkId: string, 
+hunkId: string,
 /**
  * Index of the first commented line in the hunk.
  */
-from: number, 
+from: number,
 /**
  * Index of the last commented line.
  */
-to: number, } | { "state": "outdated", 
+to: number, } | { "state": "outdated",
 /**
  * Why, in plain words.
  */
 reason: string, });
 
-export type LineComment = { 
+export type LineComment = {
 /**
  * Random id.
  */
-id: string, 
+id: string,
 /**
  * The file (repository-relative path as the review shows it).
  */
-path: string, 
+path: string,
 /**
  * The commented lines as the user saw them, with their numbers then.
  */
-lines: Array<DiffLine>, 
+lines: Array<DiffLine>,
 /**
  * Where it sits.
  */
-anchor: LineAnchor, 
+anchor: LineAnchor,
 /**
  * The comment.
  */
-text: string, 
+text: string,
 /**
  * Written at, ms since the Unix epoch.
  */
-createdMs: number, 
+createdMs: number,
 /**
  * Put into the composer to send at, ms (`None`: not sent yet).
  */
 sentMs: number | null, };
 
-export type LineAnchor = { 
+export type LineAnchor = {
 /**
  * `kind` + text hash of each commented line, in order.
  */
-lines: Array<string>, 
+lines: Array<string>,
 /**
  * Hash of the line before the first one in its hunk (`None`: it was the hunk's first line).
  */
-before: string | null, 
+before: string | null,
 /**
  * Hash of the line after the last one in its hunk (`None`: it was the hunk's last line).
  */
-after: string | null, 
+after: string | null,
 /**
  * The first line's baseline number, else its current number (0: unknown). Only breaks ties.
  */

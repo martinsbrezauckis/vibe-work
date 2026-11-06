@@ -27,6 +27,33 @@ fn call_count(seen: &Mutex<Vec<(String, Value)>>, tool: &str, request: &Value) -
 }
 
 #[tokio::test]
+async fn status_observes_a_reconnected_extension_before_repeating_an_old_refusal() {
+    let core = fixture("browser-reconnected-status", json!([])).await;
+    core.shared.chrome_control.mark_paired();
+    let weak = Arc::downgrade(&core.shared);
+    let calls = core.shared.chrome_control.owner.answering(move |tool, _| {
+        assert_eq!(tool, "chrome_status");
+        let reply = json!({"structuredContent":{"profiles":[{"profileId":"chrome:p","connected":true,"extensionVersion":"0.1.5"}],"sessions":[]}});
+        owner::update_pairing(&weak, &reply);
+        reply
+    });
+    let answer = gateway::call(&core.shared, "s", "chrome_status", json!({}))
+        .await
+        .unwrap();
+    assert_eq!(
+        calls.lock().unwrap().len(),
+        1,
+        "read the current connection once"
+    );
+    assert_eq!(
+        answer["vwMcpResult"]["structuredContent"]["untrustedPageContent"]["addon"]["stateCode"],
+        "connected",
+        "{answer}"
+    );
+    core.shutdown().await;
+}
+
+#[tokio::test]
 async fn a_session_still_reconnecting_offers_a_plain_retry_in_its_browser() {
     for (browser, profile) in [(Browser::Chrome, "chrome:p"), (Browser::Edge, "edge:p")] {
         let core = fixture(
@@ -98,7 +125,7 @@ async fn paired_navigation_flaps_wait_and_execute_once_without_an_owner_card() {
         } else {
             &chrome.owner.pairing
         };
-        pairing.lock().unwrap().0 = "Connecting".into();
+        pairing.lock().unwrap().0 = crate::chrome_control::PairingState::Connecting;
         let weak = Arc::downgrade(&core.shared);
         let polls = Arc::new(AtomicUsize::new(0));
         let sampled = polls.clone();
@@ -125,7 +152,9 @@ async fn paired_navigation_flaps_wait_and_execute_once_without_an_owner_card() {
             browser.name()
         );
         assert!(!result.to_string().contains("OWNER_REQUIRED"), "{result}");
-        assert_eq!(call_count(&seen, "chrome_execute", &args), 1);
+        let sent =
+            json!({"sessionId":"task","action":"page.read","args":{"maxBytes":2000,"limit":8}});
+        assert_eq!(call_count(&seen, "chrome_execute", &sent), 1);
         core.shutdown().await;
     }
 }
@@ -151,7 +180,7 @@ async fn paired_reconnect_timeout_gives_the_cards_recovery_step_without_resendin
         .edge_pairing
         .lock()
         .unwrap()
-        .0 = "Connecting".into();
+        .0 = crate::chrome_control::PairingState::Connecting;
     let seen =
         core.shared.chrome_control.owner.answering(|_, _| {
             owner::failure("Native port is reconnecting", "PROFILE_NOT_CONNECTED")
@@ -168,11 +197,11 @@ async fn paired_reconnect_timeout_gives_the_cards_recovery_step_without_resendin
     .unwrap();
     let text = result.to_string();
     let card = Browser::Edge.addon(&core.shared);
-    assert_eq!(card.label, "Extension not responding");
+    assert_eq!(card.label, "Turn on in Edge");
     assert!(card.action.is_none(), "recovery must not offer enrollment");
     assert!(text.contains(&card.instruction), "{result}");
     assert!(
-        text.contains("toolbar") && text.contains("restart Edge"),
+        text.contains("Extensions page") && text.contains("restart Edge"),
         "{result}"
     );
     assert_eq!(
@@ -181,7 +210,7 @@ async fn paired_reconnect_timeout_gives_the_cards_recovery_step_without_resendin
     );
     assert_eq!(
         result["vwMcpResult"]["structuredContent"]["retryable"],
-        false
+        true
     );
     assert!(
         seen.lock()
@@ -190,13 +219,11 @@ async fn paired_reconnect_timeout_gives_the_cards_recovery_step_without_resendin
             .all(|(tool, _)| tool == "chrome_status")
     );
     assert!(
-        !text.contains("OWNER_REQUIRED")
-            && !text.contains("addon_suggest")
-            && !text.contains("Ask the person"),
+        !text.contains("OWNER_REQUIRED") && !text.contains("addon_suggest"),
         "{result}"
     );
     assert!(
-        text.contains("Try again") || text.contains("try again"),
+        text.contains("Retry this step in a few seconds."),
         "{result}"
     );
     // Tokio's millisecond timer wheel rounds the five-second deadline up by one tick.
@@ -242,7 +269,7 @@ async fn another_chat_is_refused_before_waiting_for_a_reconnect() {
         .edge_pairing
         .lock()
         .unwrap()
-        .0 = "Connecting".into();
+        .0 = crate::chrome_control::PairingState::Connecting;
     let weak = Arc::downgrade(&core.shared);
     let seen = core.shared.chrome_control.owner.answering(move |_, _| {
         let status =
@@ -290,7 +317,7 @@ async fn an_ended_session_keeps_the_plain_retry_receipt_when_reopening_cannot_re
         .edge_pairing
         .lock()
         .unwrap()
-        .0 = "Connecting".into();
+        .0 = crate::chrome_control::PairingState::Connecting;
     core.shared
         .chrome_control
         .owner
@@ -314,7 +341,7 @@ async fn an_ended_session_keeps_the_plain_retry_receipt_when_reopening_cannot_re
     );
     assert_eq!(
         answer["vwMcpResult"]["structuredContent"]["retryable"],
-        false
+        true
     );
     assert!(!answer.to_string().contains("addon_suggest"));
     core.shutdown().await;
@@ -344,7 +371,7 @@ async fn a_disconnect_during_an_action_is_not_replayed_or_replaced_by_pairing_in
             } else {
                 &shared.chrome_control.owner.edge_pairing
             };
-            pairing.lock().unwrap().0 = "Connecting".into();
+            pairing.lock().unwrap().0 = crate::chrome_control::PairingState::Connecting;
             owner::failure("Native port is reconnecting", "PROFILE_NOT_CONNECTED")
         });
         let args = json!({"sessionId":"task","action":"page.read","args":{}});
@@ -361,8 +388,10 @@ async fn a_disconnect_during_an_action_is_not_replayed_or_replaced_by_pairing_in
         );
         // Exercise the background switch delivery that can race the action under suite load.
         super::send_local_network(&core.shared).await;
+        let sent =
+            json!({"sessionId":"task","action":"page.read","args":{"maxBytes":2000,"limit":8}});
         assert_eq!(
-            call_count(&seen, "chrome_execute", &args),
+            call_count(&seen, "chrome_execute", &sent),
             1,
             "an action already sent is never retried"
         );
@@ -388,7 +417,7 @@ async fn an_unknown_action_outcome_keeps_its_original_receipt_during_reconnect()
     .unwrap();
     let weak = Arc::downgrade(&core.shared);
     let seen = core.shared.chrome_control.owner.answering(move |_, _| {
-        weak.upgrade().unwrap().chrome_control.owner.edge_pairing.lock().unwrap().0 = "Connecting".into();
+        weak.upgrade().unwrap().chrome_control.owner.edge_pairing.lock().unwrap().0 = crate::chrome_control::PairingState::Connecting;
         json!({"structuredContent":{"status":"unknown","error":{"code":"ACTION_TIMEOUT","message":"Action outcome unknown"}}})
     });
     let args = json!({"sessionId":"task","action":"page.click","args":{"ref":"button"}});
@@ -427,7 +456,7 @@ async fn a_person_stop_received_during_reconnect_prevents_the_action() {
         .edge_pairing
         .lock()
         .unwrap()
-        .0 = "Connecting".into();
+        .0 = crate::chrome_control::PairingState::Connecting;
     let weak = Arc::downgrade(&core.shared);
     let seen = core.shared.chrome_control.owner.answering(move |_, _| {
         let shared = weak.upgrade().unwrap();
@@ -477,7 +506,7 @@ async fn connecting_before_the_first_pairing_keeps_the_owner_diagnosis() {
         } else {
             &chrome.owner.edge_pairing
         };
-        pairing.lock().unwrap().0 = "Connecting".into();
+        pairing.lock().unwrap().0 = crate::chrome_control::PairingState::Connecting;
         chrome
             .owner
             .answering(|_, _| owner::failure("Not registered yet", "PROFILE_NOT_CONNECTED"));
@@ -511,7 +540,7 @@ async fn a_new_pairing_request_is_not_hidden_by_old_connection_history() {
         &json!({}),
         super::enroll_browser::Browser::Chrome,
     );
-    chrome.owner.pairing.lock().unwrap().0 = "Connecting".into();
+    chrome.owner.pairing.lock().unwrap().0 = crate::chrome_control::PairingState::Connecting;
     chrome
         .owner
         .answering(|_, _| owner::failure("Not registered yet", "PROFILE_NOT_CONNECTED"));

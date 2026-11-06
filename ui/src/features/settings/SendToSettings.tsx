@@ -4,7 +4,7 @@
  * SettingsPage renders it. Hidden where the host has no such entries (browser dev mode, other systems).
  */
 import { SettingsRow, Switch } from "../../components/Controls";
-import { sendToDescription, sendToRequest, sendToStatus, useSendTo } from "../../state/sendTo";
+import { sendToRequest, sendToStatus, useSendTo } from "../../state/sendTo";
 import { useApp } from "../shell/AppContext";
 
 /** The section; the switch reflects what is on the system now. */
@@ -20,19 +20,13 @@ export function SendToSettings() {
       <SettingsRow data-setting="send-to">
         <span>
           <label htmlFor="send-to-switch">Right-click menus</label>
-          <span className="d" id="send-to-description">
-            {sendToDescription(view)}
+          <span className="d" role="status">
+            {status}
           </span>
-          {status !== null && (
-            <span className="d" role="status">
-              {status}
-            </span>
-          )}
         </span>
         <Switch
           data-testid="settings.send-to-enabled"
           id="send-to-switch"
-          aria-describedby="send-to-description"
           aria-checked={view.on}
           disabled={pending}
           onClick={() => {

@@ -134,40 +134,6 @@ fn run(
     status.send_modify(|view| view.status = Status::Idle);
 }
 
-/// A parent turn includes its subagents. Child rows also cover work that outlives the parent turn.
-pub(crate) fn state_working(state: &serde_json::Value, callback_pending: bool) -> bool {
-    let status = |value: &serde_json::Value| {
-        value
-            .get("type")
-            .unwrap_or(value)
-            .as_str()
-            .unwrap_or_default()
-            .to_owned()
-    };
-    let parent = status(&state["session"]["status"]);
-    if state["childSessions"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .any(|child| status(&child["status"]) == "running")
-    {
-        return true;
-    }
-    if callback_pending
-        || parent == "blocked"
-        || state["activeCallbacks"]
-            .as_array()
-            .is_some_and(|items| !items.is_empty())
-    {
-        return false;
-    }
-    parent == "running"
-        || (!matches!(parent.as_str(), "failed" | "archived")
-            && state["turns"]
-                .as_array()
-                .is_some_and(|turns| turns.iter().any(|turn| turn["status"] == "in_progress")))
-}
-
 pub(crate) fn reconcile(shared: &Shared) {
     let callbacks = shared.gate.open_callbacks();
     let working = shared.channels.open_channels().iter().any(|channel| {
@@ -178,8 +144,8 @@ pub(crate) fn reconcile(shared: &Shared) {
         });
         shared
             .store
-            .view(&channel.session_id)
-            .is_some_and(|view| state_working(&view.state, pending))
+            .activity(&channel.session_id)
+            .is_some_and(|activity| activity.working(pending))
     });
     shared.keep_awake.working(working);
 }

@@ -467,6 +467,13 @@ pub(super) async fn connect_edge(
     origin: crate::Origin,
 ) -> Result<(), String> {
     let chrome = &shared.chrome_control;
+    if chrome
+        .owner
+        .credential_missing
+        .load(std::sync::atomic::Ordering::SeqCst)
+    {
+        return Err(vw_vocabulary::texts::CHROME_OWNER_MISSING.into());
+    }
     if let Some(reason) = super::edge_policy::refusal(&chrome.config) {
         return Err(reason.to_owned());
     }
@@ -492,7 +499,7 @@ pub(super) async fn connect_edge(
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
         .0
-        .contains("another Vibe Work");
+        == super::PairingState::OtherOwner;
     let opened = if waiting || other_owner {
         browser
             .requested(shared)
@@ -504,6 +511,13 @@ pub(super) async fn connect_edge(
     };
     super::start_owner(shared).await;
     super::owner::publish(shared);
+    if chrome
+        .owner
+        .credential_missing
+        .load(std::sync::atomic::Ordering::SeqCst)
+    {
+        return Err(vw_vocabulary::texts::CHROME_OWNER_MISSING.into());
+    }
     opened
 }
 

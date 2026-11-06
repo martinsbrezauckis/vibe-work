@@ -9,6 +9,8 @@
  * the filter searches title, preview, folder and model across all loaded pages and asks Vibe for
  * older pages on demand (`useSessionWiring`); archived sessions show only while the archive toggle is on.
  */
+import { useVibeUi } from "../setup/VibeInstallStep";
+import { vibeCovers } from "../../state/vibeInstall";
 import { TEXT } from "../../vocabulary";
 import { useMemo, useRef } from "react";
 import { EmptyState } from "../../components/EmptyState";
@@ -47,7 +49,8 @@ export function SessionList() {
   const { shell, core, sessions } = app;
   const filter = useShellState((s) => s.filter);
   const index = useCoreState((s) => s.index);
-  const ready = useCoreState((s) => s.server.phase === "running");
+  const serverPhase = useCoreState((s) => s.server.phase);
+  const ready = serverPhase === "running";
   const layout = useLayout();
   const groups = useGroupActions();
   const data = useGroups((g) => g.data);
@@ -73,7 +76,9 @@ export function SessionList() {
         );
   const searching = filter.trim() !== "";
   const error = index.loading ? null : index.error;
+  const needsInstall = useVibeUi(vibeCovers) || serverPhase === "notInstalled";
   const loading =
+    !needsInstall &&
     error === null &&
     (!index.loaded ||
       (groups !== null && data === null && groupError === null) ||
@@ -258,7 +263,7 @@ export function SessionList() {
               />
             ))}
             {full.grouped && <UnfiledSection rows={full.unfiled} shown={model.unfiled} />}
-            {model.total === 0 && index.loaded && error === null && (
+            {model.total === 0 && (index.loaded || needsInstall) && error === null && (
               <EmptyState glyph="chat" small className="col-note">
                 {searching ? "No sessions match." : "No sessions yet."}
               </EmptyState>

@@ -17,7 +17,7 @@ required-features = ["helper"]
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-vw-platform = { path = "../vw-platform" }
+vw-platform = { path = "../vw-platform", features = ["video-sandbox"] }
 vw-preview = { path = "../vw-preview" }
 vw-agent-tools = { path = "../vw-agent-tools" }
 tokio = { version = "1.53", features = ["process", "rt", "macros", "sync", "time", "io-util"] }

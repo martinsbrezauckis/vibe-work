@@ -18,6 +18,8 @@ tauri-build = { version = "2.7.1", features = [] }
 # Upstream HTTP, HTTPS and SOCKS transports, included in release builds.
 proxy-transports = ["vw-core-api/proxy-transports"]
 feedback = ["vw-core-api/feedback"]
+# Bounded video review using installed system decoders and the packaged isolated helper.
+video = ["vw-core-api/video"]
 # Firefox remains optional; Edge ships in the default build.
 your-firefox = ["vw-core-api/your-firefox"]
 your-edge = ["vw-core-api/your-edge"]
@@ -34,7 +36,7 @@ vault-e2e = ["vw-debug-api/vault-e2e"]
 # (vw-webview `macos-proxy`, Network.framework's proxy API: macOS 14+, the release minimum in tauri.conf.json and
 # .cargo/config.toml). No effect on Linux and Windows. `--no-default-features` builds the macOS content-rules-only
 # previews (minimum 11), which no release ships.
-default = ["macos-proxy", "your-edge", "proxy-transports"]
+default = ["macos-proxy", "your-edge", "proxy-transports", "video"]
 # Optional input feedback, excluded from release builds.
 click-marker = ["vw-core-api/click-marker", "vw-webview/click-marker"]
 macos-proxy = ["vw-webview/macos-proxy"]
@@ -55,7 +57,7 @@ vw-host = { path = "../crates/vw-host" }
 vw-vibe-install = { path = "../crates/vw-vibe-install" }
 vw-core-api = { path = "../crates/vw-core-api" }
 vw-supervisor = { path = "../crates/vw-supervisor" }
-vw-platform = { path = "../crates/vw-platform" }
+vw-platform = { path = "../crates/vw-platform", features = ["desktop-tray", "startup-dialog"] }
 vw-gate = { path = "../crates/vw-gate" }
 tokio = { version = "1.53", features = ["rt", "sync", "time"] }
 vw-mistral = { path = "../crates/vw-mistral" }

@@ -46,7 +46,6 @@ use vw_core_api::CoreConfig;
 use vw_host::launch::DevLaunch;
 use vw_host::settings::HostSettings;
 use vw_host::{DEFAULT_UI_REPLY_TIMEOUT, HostConfig, SharedConfirmer};
-use vw_platform::DesktopNotifier;
 use vw_supervisor::{NoSecret, SecretProvider};
 
 /// The repository root of a development build: two levels above this crate's manifest folder.
@@ -135,10 +134,7 @@ fn without_data(reason: String, confirmer: SharedConfirmer, app: &AppHandle) -> 
         ui_reply_timeout: DEFAULT_UI_REPLY_TIMEOUT,
         picked_folders: Vec::new(),
         confirmer,
-        notifier: Arc::new(DesktopNotifier::new(
-            app.config().identifier.clone(),
-            !DEV_BUILD,
-        )),
+        notifier: Arc::new(crate::notifications::notifier(app, !DEV_BUILD)),
         keys: None,
         app_window: None,
     }
@@ -541,10 +537,7 @@ pub fn host_config(app: &AppHandle, confirmer: SharedConfirmer) -> HostConfig {
         ui_reply_timeout: DEFAULT_UI_REPLY_TIMEOUT,
         picked_folders: Vec::new(),
         confirmer,
-        notifier: Arc::new(DesktopNotifier::new(
-            app.config().identifier.clone(),
-            !DEV_BUILD,
-        )),
+        notifier: Arc::new(crate::notifications::notifier(app, !DEV_BUILD)),
         keys,
         app_window: Some(Arc::new(crate::window_api::TauriWindow::new(app.clone()))),
     }

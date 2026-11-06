@@ -3,7 +3,7 @@
 //! Responsibility: give each subscriber a bounded FIFO of [`Delivery`] items that the store fills
 //! while it holds its lock. `push` never blocks and never allocates beyond the capacity: when a
 //! subscriber falls behind by more than `capacity` items its queue is dropped and replaced, on its
-//! next read, by a fresh [`Delivery::Snapshot`] of every session (changes in between are covered
+//! next read, by a fresh [`Delivery::Snapshot`] of every followed session (changes in between are covered
 //! by those snapshots). Memory per subscriber is therefore bounded.
 //! Depends on: `change`, `store` (the handle, for the lagged rebuild).
 //! Called by: `store` (producer side), the UI bridge / Debug API (consumer side).
@@ -43,20 +43,22 @@ pub(crate) struct SubShared {
     queue: Mutex<Queue>,
     waker: Mutex<Option<Waker>>,
     capacity: usize,
+    pub(crate) session_id: Option<String>,
 }
 
 impl SubShared {
-    pub(crate) fn new(capacity: usize) -> Self {
+    pub(crate) fn new(capacity: usize, session_id: Option<&str>) -> Self {
         Self {
             queue: Mutex::new(Queue::default()),
             waker: Mutex::new(None),
             capacity: capacity.max(1),
+            session_id: session_id.map(str::to_owned),
         }
     }
 
     /// Queues an item. Over capacity, the queue is dropped and flagged lagged instead of
     /// growing. Returns true when something was queued (so the waker should run).
-    pub(crate) fn push(&self, item: Delivery) -> bool {
+    pub(crate) fn push(&self, item: impl FnOnce() -> Delivery) -> bool {
         let mut q = self.queue.lock().unwrap_or_else(PoisonError::into_inner);
         if q.lagged {
             return false;
@@ -67,7 +69,7 @@ impl SubShared {
             q.lag_events += 1;
             return true;
         }
-        q.items.push_back(item);
+        q.items.push_back(item());
         true
     }
 
@@ -81,7 +83,7 @@ impl SubShared {
         );
     }
 
-    /// Replaces the queue by snapshots of every session after a lag. Called under the store lock.
+    /// Replaces the queue by snapshots of followed sessions after a lag. Called under the store lock.
     pub(crate) fn rebuild(&self, snapshots: Vec<SessionView>) {
         let mut q = self.queue.lock().unwrap_or_else(PoisonError::into_inner);
         if q.lagged {
@@ -118,7 +120,7 @@ impl Subscription {
     }
 
     /// Next item, or `None` when the queue is empty. After an overflow the first call returns a
-    /// fresh snapshot of every session, then ordinary changes resume.
+    /// fresh snapshot of every followed session, then ordinary changes resume.
     #[must_use]
     pub fn try_next(&self) -> Option<Delivery> {
         let lagged = {

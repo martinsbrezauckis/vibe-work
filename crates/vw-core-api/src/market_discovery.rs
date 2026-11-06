@@ -119,7 +119,10 @@ impl Core {
     ) -> Result<Value, String> {
         let kept = {
             let _held = self.shared.plugin_approvals.mutations.lock().await;
-            self.shared.plugin_approvals.sweep_kept()
+            let approvals = self.shared.plugin_approvals.clone();
+            tokio::task::spawn_blocking(move || approvals.sweep_kept())
+                .await
+                .map_err(|error| error.to_string())?
         }
         .map_err(|error| error.to_string())?;
         let server = self.shared.supervisor.program();
@@ -149,6 +152,9 @@ impl Core {
 }
 
 /// The discovery process: the read guard and the discovery script on `python`, for Vibe home `home` and `cwd`.
+/// The script gets `cwd` as an argument and runs in `home`: the window reads the selected chat's folder every few
+/// seconds, and on Windows a process's current folder cannot be deleted, so a Temporary chat deleted during a read
+/// would keep its own folder.
 fn discovery_command(python: &Path, home: &Path, cwd: &Path, options: &Value) -> Command {
     let mut command = Command::new(python);
     command
@@ -165,7 +171,7 @@ fn discovery_command(python: &Path, home: &Path, cwd: &Path, options: &Value) ->
         .arg(options.to_string())
         .env_clear()
         .env("VIBE_HOME", home)
-        .current_dir(cwd)
+        .current_dir(home)
         .kill_on_drop(true);
     // The app has no console of its own: without this, Windows opens a console window for every read.
     #[cfg(windows)]

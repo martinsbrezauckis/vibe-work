@@ -29,7 +29,11 @@ import {
   retryPrompt,
   turnContent,
 } from "../features/composer/model/message";
-import { runningTurnId, waitingForInput } from "../features/composer/model/session";
+import {
+  lastTurnProblem,
+  runningTurnId,
+  waitingForInput,
+} from "../features/composer/model/session";
 import {
   type ComposerStore,
   type SentContent,
@@ -367,14 +371,20 @@ export function createSendActions(deps: {
       }
     },
     /**
-     * Retry: Vibe's continue prompt as an injected turn (`/retry`, see `retryPrompt`), optionally with
-     * the user's extra instructions.
+     * Retry an unfinished response with Vibe's continue prompt. Like Vibe's own /retry,
+     * a completed response has nothing to continue and must never receive this warning.
      */
     async retry(sessionId: string, instructions: string): Promise<SendOutcome> {
       const intent = classify(instructions, 0, 0);
       if (intent.kind === "command") return runCommand(sessionId, intent.name, intent.args);
       const blocked = deps.keyGuard?.() ?? null;
       if (blocked !== null) return { ok: false, kind: "key", message: blocked };
+      if (lastTurnProblem(entry(sessionId)?.state ?? null) === null) {
+        const message =
+          "No failed or interrupted response to retry. Send a new message to ask for another answer.";
+        composer.note(sessionId, message);
+        return { ok: false, kind: "retry", message };
+      }
       try {
         const result = await call("turn/start", {
           sessionId,

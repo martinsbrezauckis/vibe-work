@@ -90,3 +90,12 @@ third_party/lucide/LICENSE.
 
 Fonts and dependencies: the bundled fonts (Inter and Space Mono, SIL Open Font License 1.1) and the declared
 licences of every shipped npm and Cargo dependency are listed in THIRD-PARTY-NOTICES.txt.
+
+Linux media dependencies
+
+libcap (BSD-3-Clause) supplies process capability support.
+Bubblewrap (LGPL-2.0-or-later) supplies unprivileged process, network and filesystem isolation.
+GStreamer audio plugins (LGPL-2.1-or-later) support WebKit audio playback and microphone capture.
+The AppImage carries these audio plugins unmodified from the build system.
+License and attribution texts are in third_party/media/. Source distributions are available at
+https://github.com/containers/bubblewrap and https://gstreamer.freedesktop.org/src/.

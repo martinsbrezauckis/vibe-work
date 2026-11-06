@@ -1,6 +1,35 @@
 //! Typed video requests shared by the MCP catalog and the optional core adapter.
 //! Integer presentation times and preflight frame counts are validated before starting a decoder.
 use serde::{Deserialize, Serialize};
+/// Shipping availability; keep the Linux implementation compiled for its future release.
+pub const ENABLED: bool = cfg!(all(feature = "video", any(windows, target_os = "macos")));
+/// Reason and next action for a stale or direct call on an unsupported platform.
+pub const UNAVAILABLE: &str = if cfg!(target_os = "linux") {
+    "Not run: video review is not available on Linux yet. Ask for still images or review the video on Windows or macOS."
+} else {
+    "Not run: video review is not available in this build. Ask for still images."
+};
+/// Refuse before opening input, reserving images or starting a worker.
+///
+/// # Errors
+/// The platform's reason and instruction when video review is unavailable.
+pub fn require_available() -> Result<(), String> {
+    if ENABLED {
+        Ok(())
+    } else {
+        Err(UNAVAILABLE.into())
+    }
+}
+/// Check a named tool before forwarding it or consuming its saved approval.
+///
+/// # Errors
+/// The platform refusal for an unavailable video call; other tools are unaffected.
+pub fn check_tool(name: &str) -> Result<(), String> {
+    if name == "video_frames" {
+        require_available()?;
+    }
+    Ok(())
+}
 /// Maximum selected thumbnails in one bounded job (one MCP image).
 pub const MAX_FRAMES: usize = 24;
 /// Maximum selected range in milliseconds.
@@ -243,7 +272,7 @@ pub(crate) fn spec() -> serde_json::Value {
     scenes["required"] = json!(["kind", "start_ms", "end_ms", "step_ms", "max_frames"]);
     scenes["properties"]["step_ms"] = json!({"type":"integer","minimum":1,"maximum":MAX_RANGE_MS});
     scenes["properties"]["max_frames"] = json!({"type":"integer","minimum":1,"maximum":MAX_FRAMES});
-    json!({"name":"video_frames","description":"Extract selected video moments from a local file using the computer's media support. Returns a single frame or contact sheet as image content with requested and actual presentation times; metadata output sends no image. Reports the planned frame and image counts before extraction. Uniform gives an overview; uniform, interval and scene_changes use start_ms and exclusive end_ms, refused outside the video. Scene changes compare consecutive small pictures at step_ms (at most 240 samples), returning the earliest cuts up to max_frames and reporting sampled coverage and omitted cuts. Subtle cuts and events between samples may be missed; request a narrower range or smaller step for more detail. Audio is not processed. Unsupported system decoding is reported by codec.","annotations":{"readOnlyHint":true},"inputSchema":{"type":"object","additionalProperties":false,"required":["path","selection","output"],"properties":{
+    json!({"name":"video_frames","description":"Windows and macOS only: extract selected video moments from a regular local file up to 512 MiB and at most two hours long using Windows Media Foundation or macOS AVFoundation. Select at most 24 frames across ten minutes; frame output requires one frame. Images share this user turn's image allowance. Returns a single frame or contact sheet as image content with requested and actual presentation times; metadata output uses the same media support and sends no image. Reports the planned frame and image counts before extraction. Uniform gives an overview; uniform, interval and scene_changes use start_ms and exclusive end_ms, refused outside the video. Scene changes compare consecutive small pictures at step_ms (at most 240 samples), returning the earliest cuts up to max_frames and reporting sampled coverage and omitted cuts. Subtle cuts and events between samples may be missed; request a narrower range or smaller step for more detail. Audio is not processed. Unsupported formats or codecs are reported separately from worker failures and limits.","annotations":{"readOnlyHint":true},"inputSchema":{"type":"object","additionalProperties":false,"required":["path","selection","output"],"properties":{
         "path":{"type":"string","minLength":1,"maxLength":4096},
         "selection":{"oneOf":[uniform,interval,scenes,{"type":"object","additionalProperties":false,"required":["kind","times_ms"],"properties":{"kind":{"const":"timestamps"},"times_ms":{"type":"array","minItems":1,"maxItems":MAX_FRAMES,"items":integer}}}]},
         "output":{"enum":["frame","contact_sheet","metadata"]},"max_edge":{"type":"integer","minimum":64,"maximum":1280}
@@ -253,7 +282,8 @@ pub(crate) fn spec() -> serde_json::Value {
 #[cfg(feature = "video")]
 pub(crate) fn progress(message: &serde_json::Value) -> Option<serde_json::Value> {
     use serde_json::json;
-    if message["method"] != "tools/call" || message["params"]["name"] != "video_frames" {
+    if !ENABLED || message["method"] != "tools/call" || message["params"]["name"] != "video_frames"
+    {
         return None;
     }
     let mut args = message["params"]["arguments"].clone();

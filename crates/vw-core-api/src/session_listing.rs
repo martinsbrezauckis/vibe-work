@@ -2,15 +2,44 @@
 //! called by the dispatcher. The scanner is released only after the last listing page has loaded.
 //! CLI continuation is not advertised: Vibe no longer supplies its continuation target.
 
+use crate::session_ownership::OwnershipReads;
 use crate::{CommandResult, Core, CoreError, ErrorCode, Origin, SessionRowView};
 use serde_json::{Map, Value, json};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::sync::{
+    Mutex, PoisonError,
+    atomic::{AtomicU64, Ordering},
+};
 
 /// Empty child listings for inactive, unchanged parent rows, scoped to a server generation.
 /// Parents with children are always refreshed, including when all their children are archived.
 #[derive(Default)]
 pub(crate) struct ChildListings {
-    empty: tokio::sync::Mutex<BTreeMap<String, (u64, Value)>>,
+    empty: Mutex<BTreeMap<String, (u64, Value)>>,
+    request: AtomicU64,
+}
+
+impl ChildListings {
+    fn note(&self, generation: u64, request: u64, parent: Value, empty: bool) {
+        let id = parent["id"].as_str().unwrap_or_default().to_owned();
+        let mut cache = self.empty.lock().unwrap_or_else(PoisonError::into_inner);
+        // An older concurrent traversal cannot replace a newer discovery.
+        if self.request.load(Ordering::Relaxed) != request
+            || cache.get(&id).is_some_and(|(at, _)| *at > generation)
+        {
+            return;
+        }
+        if empty
+            && matches!(
+                parent["status"]["type"].as_str(),
+                Some("idle" | "archived" | "failed")
+            )
+        {
+            cache.insert(id, (generation, parent));
+        } else {
+            cache.remove(&id);
+        }
+    }
 }
 
 impl Core {
@@ -42,8 +71,9 @@ impl Core {
             .unwrap_or_default();
         // Vibe's default page contains roots only. Child sessions need explicit parent queries; reading them
         // from the lobby preserves their leases and gives the sidebar its stored descendants after a restart.
+        let mut ownership = OwnershipReads::default();
         items.extend(
-            self.listed_children(origin, &items, include_archived)
+            self.listed_children(origin, &items, include_archived, &mut ownership)
                 .await?,
         );
         self.shared.names.note_listing(&items);
@@ -58,7 +88,7 @@ impl Core {
                 .as_str()
                 .and_then(|id| crate::restore::display_mode(&self.shared, id, &row.session));
             row.owned_by_parent = Some(
-                crate::session_ownership::owned_by_parent(&self.shared, &row.session)
+                ownership.owned(&self.shared, &row.session)
                     .await
                     .unwrap_or_else(|error| {
                         tracing::warn!(session_id = ?row.session["id"], %error, "could not read parent ownership for chat listing");
@@ -92,15 +122,30 @@ impl Core {
         origin: Origin,
         roots: &[Value],
         include_archived: Option<bool>,
+        ownership: &mut OwnershipReads,
     ) -> Result<Vec<Value>, CoreError> {
         let generation = match &*self.shared.supervisor.state().borrow() {
             vw_supervisor::SupervisorState::Ready { generation, .. } => *generation,
             _ => 0,
         };
-        // Single flight: overlapping sidebar refreshes share the completed discoveries. Never cache a
-        // running/blocked parent: spawning happens in a turn, which advances the parent's public row.
-        let mut empty = self.shared.child_listings.empty.lock().await;
-        empty.retain(|_, (at, _)| *at == generation);
+        let request = self
+            .shared
+            .child_listings
+            .request
+            .fetch_add(1, Ordering::Relaxed)
+            + 1;
+        // Copy only cached empty discoveries. Never hold this mutex across external calls; overlapping
+        // listings may discover independently, while each request reuses its own complete ownership facts.
+        let empty = {
+            let mut cache = self
+                .shared
+                .child_listings
+                .empty
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner);
+            cache.retain(|_, (at, _)| *at >= generation);
+            cache.clone()
+        };
         let mut parents: VecDeque<Value> = roots.iter().cloned().collect();
         let mut seen: BTreeSet<String> = roots
             .iter()
@@ -116,7 +161,11 @@ impl Core {
                 let Some(id) = parent["id"].as_str() else {
                     continue;
                 };
-                if empty.get(id).is_some_and(|(_, row)| row == &parent) {
+                if empty
+                    .get(id)
+                    .is_some_and(|(at, row)| *at == generation && row == &parent)
+                {
+                    ownership.note_children(id, &[]);
                     continue;
                 }
                 let core = self.clone();
@@ -138,16 +187,10 @@ impl Core {
             })?;
             let rows = rows?;
             let id = parent["id"].as_str().unwrap_or_default().to_owned();
-            if rows.is_empty()
-                && matches!(
-                    parent["status"]["type"].as_str(),
-                    Some("idle" | "archived" | "failed")
-                )
-            {
-                empty.insert(id, (generation, parent));
-            } else {
-                empty.remove(&id);
-            }
+            ownership.note_children(&id, &rows);
+            self.shared
+                .child_listings
+                .note(generation, request, parent, rows.is_empty());
             for child in rows.into_iter().filter(|row| {
                 include_archived == Some(true) || row.get("archivedAt").is_none_or(Value::is_null)
             }) {

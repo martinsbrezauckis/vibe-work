@@ -6,83 +6,83 @@
  */
 
 import type { Step } from "./pages";
-export type ProjectCard = { 
+export type ProjectCard = {
 /**
  * The project folder.
  */
-project: string, 
+project: string,
 /**
  * Its folder name.
  */
-name: string, 
+name: string,
 /**
  * The handbook folder relative to the project.
  */
-folder: string, 
+folder: string,
 /**
  * What the folder holds.
  */
-state: HandbookState, 
+state: HandbookState,
 /**
  * The manifest head, when `index.html` is a manifest.
  */
-manifest: Manifest | null, 
+manifest: Manifest | null,
 /**
  * Active plans, newest first (at most [`MAX_ACTIVE`]).
  */
-plans: Array<PlanSummary>, 
+plans: Array<PlanSummary>,
 /**
  * Newest modification time seen (index, plans, the folder itself), ms since the epoch; 0 without a handbook.
  */
 changedMs: number, };
 
-export type Manifest = { 
+export type Manifest = {
 /**
  * `handbook.project`.
  */
-project: string | null, 
+project: string | null,
 /**
  * `description`.
  */
-description: string | null, 
+description: string | null,
 /**
  * `handbook.status` (`active`, `paused`, `maintenance`, `archived`).
  */
-status: string | null, 
+status: string | null,
 /**
  * `handbook.format`.
  */
-format: string | null, 
+format: string | null,
 /**
  * `dcterms.created`.
  */
-created: string | null, 
+created: string | null,
 /**
  * `dcterms.modified`.
  */
-modified: string | null, 
+modified: string | null,
 /**
  * `author` values.
  */
 authors: Array<string>, };
 
-export type PlanSummary = { 
+export type PlanSummary = {
 /**
  * Path inside the handbook (`plans/x.html`).
  */
-path: string, 
+path: string,
 /**
  * Title (the file name when the page has none).
  */
-title: string, 
+title: string,
 /**
  * `dcterms.modified`.
  */
-modified: string | null, 
+modified: string | null,
 /**
  * File modification time, ms since the epoch.
  */
-modifiedMs: number, 
+modifiedMs: number,
 /**
  * Steps in page order.
  */
@@ -90,158 +90,158 @@ steps: Array<Step>, };
 
 export type HandbookState = "none" | "handbook" | "lite" | "noManifest";
 
-export type Input = { 
+export type Input = {
 /**
  * The element id (answers, comments and links point at it).
  */
-id: string, 
+id: string,
 /**
  * `choice` (pick one), `checklist` (tick any), `rank` (order the options) or `text` (a short answer); a type
  * this reader does not know is kept as written (the validator reports it).
  */
-kind: string, 
+kind: string,
 /**
  * The question (`.hb-question` inside the input; empty when missing, HB-W17).
  */
-question: string, 
+question: string,
 /**
  * Options in page order (none for `text`).
  */
 options: Array<InputOption>, };
 
-export type InputOption = { 
+export type InputOption = {
 /**
  * The option id (`data-option`), unique in its input.
  */
-id: string, 
+id: string,
 /**
  * Its text (untrusted page text, at most 200 characters).
  */
 label: string, };
 
-export type Answer = { 
+export type Answer = {
 /**
  * The page (path inside the handbook folder).
  */
-page: string, 
+page: string,
 /**
  * The input id.
  */
-input: string, 
+input: string,
 /**
  * The question when the answer was given (shown for a detached answer).
  */
-question: string, 
+question: string,
 /**
  * The answer.
  */
-value: AnswerValue, 
+value: AnswerValue,
 /**
  * Last changed, ms since the Unix epoch.
  */
-updatedMs: number, 
+updatedMs: number,
 /**
  * Put into the composer at, ms (`None`: not sent since the last change).
  */
 sentMs: number | null, };
 
-export type AnswerValue = { "type": "choice", 
+export type AnswerValue = { "type": "choice",
 /**
  * The option id.
  */
-option: string, } | { "type": "checklist", 
+option: string, } | { "type": "checklist",
 /**
  * Option ids.
  */
-checked: Array<string>, } | { "type": "rank", 
+checked: Array<string>, } | { "type": "rank",
 /**
  * Option ids.
  */
-order: Array<string>, } | { "type": "text", 
+order: Array<string>, } | { "type": "text",
 /**
  * The answer.
  */
 text: string, };
 
-export type InputAnswer = { 
+export type InputAnswer = {
 /**
  * The input as the page file declares it.
  */
-input: Input, 
+input: Input,
 /**
  * The answer (`None`: not answered yet).
  */
-answer: Answer | null, 
+answer: Answer | null,
 /**
  * The answer in words: the chosen, ticked or ranked option labels in order, or the text.
  */
 words: Array<string>, };
 
-export type PageAnswers = { 
+export type PageAnswers = {
 /**
  * The page.
  */
-page: string, 
+page: string,
 /**
  * Its title.
  */
-title: string | null, 
+title: string | null,
 /**
  * Its inputs in page order.
  */
-inputs: Array<InputAnswer>, 
+inputs: Array<InputAnswer>,
 /**
  * Answers whose input is gone or no longer fits (type changed, an option removed).
  */
-detached: Array<Answer>, 
+detached: Array<Answer>,
 /**
  * Inputs answered.
  */
-answered: number, 
+answered: number,
 /**
  * Answered inputs not sent since their last change.
  */
 unsent: number, };
 
-export type VisualIssue = { 
+export type VisualIssue = {
 /**
  * One of [`ISSUE_KINDS`].
  */
-kind: string, 
+kind: string,
 /**
  * Where it shows: `desktop light`, `phone dark`, `desktop`, ...
  */
-views: Array<string>, 
+views: Array<string>,
 /**
  * A short CSS path of the element (empty for the whole page).
  */
-element: string, 
+element: string,
 /**
  * The start of the element's text (untrusted page text).
  */
-text: string, 
+text: string,
 /**
  * What is wrong, plain words with numbers.
  */
 detail: string, };
 
-export type VisualReport = { 
+export type VisualReport = {
 /**
  * The page (path inside the handbook folder).
  */
-page: string, 
+page: string,
 /**
  * When it was checked, ms since the Unix epoch.
  */
-checkedMs: number, 
+checkedMs: number,
 /**
  * The problems found (at most 40).
  */
-issues: Array<VisualIssue>, 
+issues: Array<VisualIssue>,
 /**
  * Remarks about the check itself (a width that did not load).
  */
-notes: Array<string>, 
+notes: Array<string>,
 /**
  * The check could not run (the reason); `issues` is then empty and says nothing.
  */

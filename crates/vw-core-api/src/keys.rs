@@ -153,9 +153,9 @@ pub enum KeyRequest {
         /// The key.
         api_key: SecretInput,
     },
-    /// Mistral credentials already in the vault (metadata).
+    /// Compatibility view of the saved-key catalog (metadata).
     ListKeyCandidates {},
-    /// Uses one of them instead of storing a copy.
+    /// Compatibility name for selecting a saved credential through the shared policy.
     UseExistingKey {
         /// Its vault item id.
         item_id: String,
@@ -515,12 +515,10 @@ pub(crate) async fn execute(
                 })
                 .collect(),
         }),
-        KeyRequest::UseExistingKey { item_id } => {
-            keys.use_existing(item_id).await.map_err(map).and(done)
-        }
         request @ (KeyRequest::ListMistralKeys {}
         | KeyRequest::AddMistralKey { .. }
         | KeyRequest::UseMistralKey { .. }
+        | KeyRequest::UseExistingKey { .. }
         | KeyRequest::RenameMistralKey { .. }
         | KeyRequest::RemoveMistralKey { .. }) => crate::mistral_keys::execute(keys, request).await,
         KeyRequest::TestKey {} => Ok(CommandResult::KeyTest {

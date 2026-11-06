@@ -580,7 +580,7 @@ fn heredoc_bypasses_through_grouping_quoting_and_forms_are_refused() -> std::io:
 }
 
 #[test]
-fn approval_refusal_names_the_approval_files_folder_instead_of_its_ancestor() {
+fn ancestor_refusal_names_the_requested_folder_and_app_data() {
     // The real path: macOS's temp folder is behind the /var -> /private/var link, and the refusal names real paths.
     let root = std::env::temp_dir()
         .canonicalize()
@@ -592,8 +592,43 @@ fn approval_refusal_names_the_approval_files_folder_instead_of_its_ancestor() {
         .check(&root, &root, Access::Unknown, &|_, _| Ok(()))
         .unwrap();
     assert!(
-        reason.contains(&format!("plugin approvals ({})", shown::shown(&data))),
+        reason.contains(&format!("app data ({})", shown::shown(&root))),
         "{reason}"
     );
-    assert!(reason.contains("change plugins in Tools"));
+    assert!(reason.contains("Work only in your own folder"));
+}
+
+#[test]
+fn ancestor_refusals_name_app_data_and_only_the_approval_file_names_plugins() -> std::io::Result<()>
+{
+    let root = std::fs::canonicalize(std::env::temp_dir())?;
+    let data = root.join(format!("vw-folder-wording-{}", std::process::id()));
+    let layout = Layout::new(&data.join("vibe-home"), &root)?;
+    for path in [&root, &data, &data.join("cache")] {
+        let text = layout
+            .check(path, &root, Access::Unknown, &|_, _| Ok(()))
+            .unwrap();
+        assert!(text.contains("app data"), "{text}");
+        assert!(!text.contains("plugin approvals"), "{text}");
+        assert!(text.contains("Work only in your own folder"), "{text}");
+    }
+    let text = layout
+        .check(
+            &data.join("plugin-approvals.json"),
+            &root,
+            Access::Write,
+            &|_, _| Ok(()),
+        )
+        .unwrap();
+    assert!(text.contains("plugin approvals"), "{text}");
+    assert_eq!(
+        check_command(
+            &layout,
+            "env | grep -iE 'git|gh_|github|credential|ssh'",
+            None,
+            &|_, _| Ok(())
+        ),
+        None
+    );
+    Ok(())
 }

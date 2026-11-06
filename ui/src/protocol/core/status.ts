@@ -5,423 +5,427 @@
  * scripts/public/check.sh fails when this file and the Rust types disagree.
  */
 
-export type AnomalyCountsView = { 
+export type AnomalyCountsView = {
 /**
  * Repeated event ids (benign after a reload).
  */
-duplicateEvents: number, 
+duplicateEvents: number,
 /**
  * Event ids that skipped ahead (a resync followed).
  */
-eventGaps: number, 
+eventGaps: number,
 /**
  * History entries announced again and upserted.
  */
-reannouncedEntries: number, 
+reannouncedEntries: number,
 /**
  * Patches to entries already completed.
  */
-completedEntryUpdates: number, 
+completedEntryUpdates: number,
 /**
  * Patches that could not be applied (a resync followed).
  */
-patchFailures: number, 
+patchFailures: number,
 /**
  * Failed patches covered by a clean session read; excluded from significant anomalies.
  */
-recoveredPatchFailures: number, 
+recoveredPatchFailures: number,
 /**
  * Notifications missing a field the reducer needs.
  */
-malformedPayloads: number, 
+malformedPayloads: number,
 /**
  * Snapshots that disagreed with their own envelope.
  */
-inconsistentEnvelopes: number, 
+inconsistentEnvelopes: number,
 /**
  * Turns marked interrupted locally after a resume.
  */
 interruptedTurns: number, };
 
-export type AnomalyRecordView = { 
+export type AnomalyRecordView = {
 /**
  * Kind, in camelCase (`eventGap`, `patchFailed`, ...).
  */
-kind: string, 
+kind: string,
 /**
  * Event id involved.
  */
-eventId: number | null, 
+eventId: number | null,
 /**
  * Description.
  */
 detail: string, };
 
-export type AnomalyReport = { 
+export type AnomalyReport = {
 /**
  * Session id.
  */
-sessionId: string, 
+sessionId: string,
 /**
  * Counters.
  */
-counts: AnomalyCountsView, 
+counts: AnomalyCountsView,
 /**
  * Sum of the counters except benign duplicates.
  */
-significant: number, 
+significant: number,
 /**
  * Recent records.
  */
 recent: Array<AnomalyRecordView>, };
 
-export type CoreStatus = { 
+export type CoreStatus = {
 /**
  * Vibe Work version.
  */
-appVersion: string, 
+appVersion: string,
 /**
  * Vibe (app-server) version of the running server, when known.
  */
-vibeVersion: string | null, 
+vibeVersion: string | null,
 /**
  * Milliseconds since the core started.
  */
-uptimeMs: number, 
+uptimeMs: number,
 /**
  * The supervisor.
  */
-server: ServerReport, 
+server: ServerReport,
 /**
  * The Debug API flag.
  */
-debugApi: DebugApiFlag, 
+debugApi: DebugApiFlag,
 /**
  * Sessions loaded in the store.
  */
-loadedSessions: Array<string>, 
+loadedSessions: Array<string>,
 /**
  * The session channels of the multiplexed server.
  */
-channels: ChannelsReport, 
+channels: ChannelsReport,
 /**
  * The latest per-minute rate-limit headroom a Mistral answer reported through the model proxy
  * ; `null` until one did, or without a key service.
  */
 rateLimits: RateLimitsView | null, };
 
-export type RateLimitsView = { 
+export type RateLimitsView = {
 /**
  * Tokens per minute the key may use.
  */
-tokensLimit: number | null, 
+tokensLimit: number | null,
 /**
  * Tokens left in the current minute.
  */
-tokensRemaining: number | null, 
+tokensRemaining: number | null,
 /**
  * Requests per minute.
  */
-requestsLimit: number | null, 
+requestsLimit: number | null,
 /**
  * Requests left in the current minute.
  */
-requestsRemaining: number | null, 
+requestsRemaining: number | null,
 /**
  * When that answer arrived, milliseconds since the Unix epoch. The numbers are per minute: after
  * about 60 s without a newer answer they are history, not the current headroom.
  */
 observedAtMs: number, };
 
-export type ChannelsReport = { 
+export type ChannelsReport = {
 /**
  * Open channels, by channel id.
  */
-open: Array<ChannelView>, 
+open: Array<ChannelView>,
 /**
  * Events or callbacks dropped because they named a session another channel carries (cross-talk;
  * never seen from Vibe, must stay 0).
  */
-foreignDropped: number, 
+foreignDropped: number,
 /**
  * `session/read` resyncs the core started on its own since it started (gaps, lag, failed
  * patches, restarts). Running sessions need none: their channels stream every event.
  */
-resyncReads: number, 
+resyncReads: number,
 /**
  * Sessions Vibe could not reopen after a restart (their commands are refused).
  */
 stuck: Array<StuckView>, };
 
-export type ChannelView = { 
+export type ChannelView = {
 /**
  * The session it carries.
  */
-sessionId: string, 
+sessionId: string,
 /**
  * The channel id on the current server process.
  */
-channelId: number, 
+channelId: number,
 /**
  * Milliseconds since the channel was last used (a request or an event).
  */
 idleMs: number, };
 
-export type StuckView = { 
+export type StuckView = {
 /**
  * The stuck session.
  */
-sessionId: string, 
+sessionId: string,
 /**
  * The session `continueInNewSession` started for it, when there is one.
  */
 continuedIn: string | null, };
 
-export type ServerReport = { 
+export type ServerReport = {
 /**
  * State.
  */
-status: ServerStatus, 
+status: ServerStatus,
 /**
  * OS process id of the server leader, when one runs.
  */
-pid: number | null, 
+pid: number | null,
 /**
  * Last stderr lines (oldest first), the API key replaced.
  */
 stderrTail: Array<string>, };
 
-export type ServerStatus = { "state": "starting", } | { "state": "notInstalled", 
+export type ServerStatus = { "state": "starting", } | { "state": "notInstalled",
 /**
  * Why, in plain words.
  */
-reason: string, } | { "state": "running", 
+reason: string, } | { "state": "running",
 /**
  * Starts so far.
  */
-generation: number, 
+generation: number,
 /**
  * Server name from `initialize`.
  */
-serverName: string, 
+serverName: string,
 /**
  * Server (Vibe) version.
  */
-serverVersion: string, 
+serverVersion: string,
 /**
  * Sessions that still need `session/resume` after a restart.
  */
-needsResume: Array<string>, 
+needsResume: Array<string>,
 /**
  * Resumes in progress.
  */
-recovering: Array<RecoveringView>, } | { "state": "restarting", 
+recovering: Array<RecoveringView>, } | { "state": "restarting",
 /**
  * Attempt number.
  */
-attempt: number, 
+attempt: number,
 /**
  * Delay before the attempt, in milliseconds.
  */
-retryInMs: number, 
+retryInMs: number,
 /**
  * How it died.
  */
-lastDeath: DeathView, } | { "state": "stopped", 
+lastDeath: DeathView, } | { "state": "stopped",
 /**
  * Exit code of the last server.
  */
-exitCode: number | null, } | { "state": "dead", 
+exitCode: number | null, } | { "state": "dead",
 /**
  * Restarts tried.
  */
-attempts: number, 
+attempts: number,
 /**
  * Last start error (no server output).
  */
-reason: string, 
+reason: string,
 /**
  * How the last server died.
  */
 lastDeath: DeathView | null, };
 
-export type RecoveringView = { 
+export type RecoveringView = {
 /**
  * Session id.
  */
-sessionId: string, 
+sessionId: string,
 /**
  * Milliseconds since the resume was sent.
  */
-elapsedMs: number, 
+elapsedMs: number,
 /**
  * Expected wait (about 31 s, measured).
  */
 expectedMs: number, };
 
-export type DeathView = { 
+export type DeathView = {
 /**
  * Stable cause name (`eof`, `wedged`, ...).
  */
-cause: string, 
+cause: string,
 /**
  * Human-readable cause (no server output).
  */
-detail: string, 
+detail: string,
 /**
  * Exit code, when known.
  */
-exitCode: number | null, 
+exitCode: number | null,
 /**
  * Terminating signal on Unix, when known.
  */
 signal: number | null, };
 
-export type DebugApiFlag = { 
+export type DebugApiFlag = {
 /**
  * The server is listening.
  */
-enabled: boolean, 
+enabled: boolean,
 /**
  * `dev-build`, `user-setting` or `off`.
  */
 reason: string, };
 
-export type ProcessesRequest = { "op": "leftRunning", } | { "op": "afterDelete", 
+export type ProcessesRequest = { "op": "leftRunning", } | { "op": "afterDelete",
 /**
  * The deleted session.
  */
-sessionId: string, } | { "op": "stop", 
+sessionId: string, } | { "op": "stop",
 /**
  * The process's `id` from the list.
  */
-id: string, } | { "op": "session", 
+id: string, } | { "op": "session",
 /**
  * The session.
  */
-sessionId: string, } | { "op": "output", 
+sessionId: string, } | { "op": "output",
 /**
  * The session.
  */
-sessionId: string, 
+sessionId: string,
 /**
  * The process's `id` from `session`.
  */
-id: string, } | { "op": "stopSession", 
+id: string, } | { "op": "stopSession",
 /**
  * The session.
  */
-sessionId: string, 
+sessionId: string,
 /**
  * The process's `id` from `session`.
  */
 id: string, };
 
-export type ProcessesResult = { "kind": "leftRunning", 
+export type ProcessesResult = { "kind": "leftRunning",
 /**
  * Oldest first.
  */
-items: Array<LeftRunningView>, } | { "kind": "afterDelete", 
+items: Array<LeftRunningView>, } | { "kind": "afterDelete",
 /**
  * The native dialog was shown (false: nothing was left running, or the Debug API asked).
  */
-asked: boolean, 
+asked: boolean,
 /**
  * Stopped on Continue.
  */
-stopped: Array<LeftRunningView>, 
+stopped: Array<LeftRunningView>,
 /**
  * Processes that could not be stopped, with the reason.
  */
-failed: Array<string>, 
+failed: Array<string>,
 /**
  * The session's processes still running now (Cancel, a failure, or the Debug API's answer).
  */
-left: Array<LeftRunningView>, } | { "kind": "session", 
+left: Array<LeftRunningView>, } | { "kind": "session",
 /**
  * The session's processes, running ones first.
  */
-items: Array<SessionProcessView>, } | { "kind": "output", 
+items: Array<SessionProcessView>, } | { "kind": "output",
 /**
  * The process.
  */
-id: string, 
+id: string,
 /**
  * The latest output (at most 16 KB; may start mid-line).
  */
-text: string, 
+text: string,
 /**
  * False when no output can be read (Vibe has none for it, or the log is gone).
  */
-available: boolean, } | { "kind": "stoppedSession", 
+available: boolean, } | { "kind": "stoppedSession",
 /**
  * The process.
  */
-id: string, } | { "kind": "stopped", 
+id: string, } | { "kind": "stopped",
 /**
  * The process.
  */
-item: LeftRunningView, 
+item: LeftRunningView,
 /**
  * It needed KILL after TERM.
  */
 escalated: boolean, };
 
-export type LeftRunningView = { 
+export type LeftRunningView = {
 /**
  * Opaque handle for `stop` (`<pid>-<start token>`).
  */
-id: string, 
+id: string,
 /**
  * The deleted session it belonged to.
  */
-sessionId: string, 
+sessionId: string,
 /**
  * That session's title when it was deleted (sanitized), if one was known.
  */
-sessionTitle: string | null, 
+sessionTitle: string | null,
 /**
  * Pid.
  */
-pid: number, 
+pid: number,
 /**
  * Executable name (never from the command line).
  */
-name: string | null, 
+name: string | null,
+/**
+ * Command as the agent wrote it, when its launch record is still available.
+ */
+command?: string | null,
 /**
  * Ports it listened on when last seen.
  */
 ports: Array<number>, };
 
-export type SessionProcessView = { 
+export type SessionProcessView = {
 /**
  * Opaque handle for `output` and `stopSession` (`vibe:<processId>`, `started:<pid>-<start token>` or
  * `terminal:<pid>-<start token>`).
  */
-id: string, 
+id: string,
 /**
  * `vibe` (Vibe's background process: it ends when Vibe or the session's channel ends), `started` (started
  * for the agent by Vibe Work: it keeps running until stopped, also across quit) or `terminal` (a server the
  * person started in the session's Terminal tab).
  */
-kind: string, 
+kind: string,
 /**
  * The command as the agent wrote it, when known; for a `terminal` one its program's executable name (never its
  * arguments).
  */
-command: string | null, 
+command: string | null,
 /**
  * `running`, `exited`, `orphaned`, ... (Vibe's word for its own; `running` for a live started one).
  */
-status: string, 
+status: string,
 /**
  * Pid (started ones).
  */
-pid: number | null, 
+pid: number | null,
 /**
  * Ports it listens on (started ones; Vibe does not report its own).
  */
-ports: Array<number>, 
+ports: Array<number>,
 /**
  * Re-attached after an app restart ("still running from last time").
  */

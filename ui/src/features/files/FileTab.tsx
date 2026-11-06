@@ -3,7 +3,7 @@
  * kind, size, recent files, Rendered/Source, Reload, Show in folder, Open with default app), notices (still
  * loading, only the start of a big file, deleted, refused link), and the body per kind; HTML pages and PDFs show in
  * the isolated viewer placed over a `NativeViewport`. While the tab is visible the shown file is checked every
- * `POLL_MS` and re-read when it changed (live reload).
+ * the workspace fallback and re-read when it changed (live reload).
  * Depends on: state/files, FileViews, components/NativeViewport, model/kinds, shell hooks, AppContext.
  * Called by: register.tsx (the panel tab body).
  * Find (Ctrl F, `FileFindBar`: the current match is the line the text view shows) and Edit (`FileEditor`,
@@ -23,7 +23,6 @@ import {
   type FileTab as Tab,
   type FileReader,
   type Files,
-  POLL_MS,
   tabOf,
   viewerKind,
 } from "../../state/files";
@@ -173,12 +172,12 @@ export function SessionFile({
     };
   }, [app, sessionId, canPoint, tab.shown?.file, focused]);
   useEffect(() => {
-    const timer = setInterval(() => void files.poll(sessionId), POLL_MS);
+    const stop = files.watch(sessionId);
     return () => {
-      clearInterval(timer);
+      stop();
       void files.layout(null);
     };
-  }, [files, sessionId]);
+  }, [files, sessionId, tab.shown?.file]);
   if (tab.shown === null)
     return (
       <>

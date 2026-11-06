@@ -24,6 +24,11 @@ pub(super) fn repair(
     if !files::plain_file(&helper).map_err(|e| e.to_string())? {
         return Err("Browser helper is missing".into());
     }
+    // Chrome can start this copy without the app's launch guard. A receipt alone cannot vouch for its bytes.
+    let (_, packaged) = super::packaged_helper(config)?;
+    if !files::matches(&helper, &packaged).map_err(|e| e.to_string())? {
+        return Err(vw_vocabulary::texts::CHROME_PACKAGE_CHANGED.into());
+    }
     let expected = host_manifest(&helper, &config.extension_id);
     let home = home_of(config)?;
     for target in targets(&home, config) {

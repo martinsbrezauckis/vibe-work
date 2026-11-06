@@ -425,8 +425,7 @@ struct AppHooks<R: Runtime> {
 impl<R: Runtime> UpdateHooks for AppHooks<R> {
     fn notify(&self, notice: UpdateNotice) {
         let (title, body) = notice.text();
-        let notifier =
-            vw_platform::DesktopNotifier::new(self.app.config().identifier.clone(), true);
+        let notifier = crate::notifications::notifier(&self.app, true);
         let app = self.app.clone();
         if let Err(error) = notifier.show(
             NotificationRequest { title, body },

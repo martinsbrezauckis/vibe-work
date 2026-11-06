@@ -42,7 +42,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
 use tracing::{error, info, warn};
@@ -54,6 +54,8 @@ use crate::event::{AlertKind, CoreEvent};
 
 /// Longest one deletion may take at quit or start.
 const DELETE_WAIT: Duration = Duration::from_secs(10);
+/// Short-lived readers can hold a scratch folder; give them at most this long before the next sweep takes over.
+const SCRATCH_REMOVE_WAIT: Duration = Duration::from_secs(2);
 /// The record's file name inside `sessions_dir`.
 const FILE: &str = "temporary.json";
 /// The folder beside `sessions_dir` that holds the scratch folders of temporary chats started without a folder.
@@ -581,23 +583,60 @@ impl Core {
 }
 
 /// Removes `dir` when it is a scratch folder directly in `root` and `root` is a real folder; a link in place of the
-/// folder is removed itself, never followed.
+/// folder is removed itself, never followed. Busy readers get a short, bounded retry on the calling blocking task.
 fn remove_scratch_in(root: &Path, dir: &Path) {
-    if !is_scratch_in(root, dir) || !is_real_folder(root) {
-        warn!(folder = ?dir, "temporary sessions: not a scratch folder; left alone");
-        return;
-    }
-    let removed = match std::fs::symlink_metadata(dir) {
-        // A link or junction in place of the folder: remove the link itself, never what it points to.
-        Ok(meta) if is_link(&meta) => remove_link(dir, &meta),
-        Ok(meta) if meta.is_dir() => std::fs::remove_dir_all(dir),
-        Ok(_) => std::fs::remove_file(dir),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(e) => Err(e),
+    remove_scratch_in_with(root, dir, |path| std::fs::remove_dir_all(path));
+}
+
+/// The directory-removal seam lets tests model EBUSY on hosts that can delete an open folder.
+fn remove_scratch_in_with(
+    root: &Path,
+    dir: &Path,
+    mut remove_dir: impl FnMut(&Path) -> std::io::Result<()>,
+) {
+    let deadline = Instant::now() + SCRATCH_REMOVE_WAIT;
+    let mut backoff = Duration::from_millis(20);
+    let removed = loop {
+        // A reader can release the folder while another actor replaces its root or the folder itself.
+        if !is_scratch_in(root, dir) || !is_real_folder(root) {
+            warn!(folder = ?dir, "temporary sessions: not a scratch folder; left alone");
+            return;
+        }
+        let attempt = match std::fs::symlink_metadata(dir) {
+            // A link or junction in place of the folder: remove the link itself, never what it points to.
+            Ok(meta) if is_link(&meta) => remove_link(dir, &meta),
+            Ok(meta) if meta.is_dir() => remove_dir(dir),
+            Ok(_) => std::fs::remove_file(dir),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(e),
+        };
+        match attempt {
+            Err(error) if folder_is_busy(&error) => {
+                let remaining = deadline.saturating_duration_since(Instant::now());
+                if remaining.is_zero() {
+                    break Err(error);
+                }
+                std::thread::sleep(backoff.min(remaining));
+                backoff = (backoff * 2).min(Duration::from_millis(100));
+            }
+            other => break other,
+        }
     };
     if let Err(error) = removed {
         // A process the chat left running can hold it (Windows); the next sweep tries again.
         warn!(folder = ?dir, %error, "temporary sessions: a scratch folder could not be removed");
+    }
+}
+
+/// Retry only sharing violations on Windows and EBUSY elsewhere, never general permission or I/O failures.
+fn folder_is_busy(error: &std::io::Error) -> bool {
+    #[cfg(windows)]
+    {
+        error.raw_os_error() == Some(32)
+    }
+    #[cfg(not(windows))]
+    {
+        error.kind() == std::io::ErrorKind::ResourceBusy
     }
 }
 
@@ -668,3 +707,7 @@ fn remove_link(path: &Path, meta: &std::fs::Metadata) -> std::io::Result<()> {
 #[cfg(test)]
 #[path = "temporary_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "temporary_removal_tests.rs"]
+mod removal_tests;

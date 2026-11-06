@@ -42,7 +42,9 @@ impl CoreSubscription {
         // Core events first: anything emitted after this point is received, and the store
         // snapshot taken next is at least as new as any event about it.
         let events = shared.events.subscribe();
-        let store = shared.store.subscribe(shared.config.subscriber_capacity);
+        let store = shared
+            .store
+            .subscribe_scoped(shared.config.subscriber_capacity, session.as_deref());
         let wake = Arc::new(Notify::new());
         let waker = wake.clone();
         store.set_waker(move || waker.notify_one());
@@ -158,14 +160,13 @@ impl CoreSubscription {
     fn snapshots(&self) -> Vec<CoreEvent> {
         let mut snapshots: Vec<_> = self
             .store_handle
-            .views()
+            .views_scoped(self.session.as_deref())
             .into_iter()
             .map(|v| {
                 self.with_access(CoreEvent::Snapshot {
                     snapshot: SessionSnapshot::from(v),
                 })
             })
-            .filter(|e| self.wanted(e))
             .collect();
         if let Some(shared) = self.shared.upgrade() {
             snapshots.extend(

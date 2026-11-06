@@ -465,6 +465,9 @@ pub struct PageAnswer {
     /// The element acted on (role and name: page text).
     #[serde(default)]
     pub target: Option<Target>,
+    /// The control that received a key, including when the request used the current focus without a ref.
+    #[serde(default, rename = "ref")]
+    pub reference: Option<String>,
     /// Failed actionability checks.
     #[serde(default)]
     pub failed: Vec<String>,

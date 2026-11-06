@@ -40,6 +40,7 @@
         "showGreeting": false,
         "autocopyToClipboard": false,
         "enableMouseCapture": true,
+        "enableFileAutocomplete": true,
         "fileWatcherForAutocomplete": false,
         "askConfirmationOnExit": false,
         "voiceModeEnabled": false,

@@ -15,13 +15,7 @@ export function ErrorDetailSetting() {
     <section aria-labelledby="error-detail-title">
       <h3 id="error-detail-title">Errors</h3>
       <div className="check" data-setting="error-detail">
-        <span>
-          Show the provider&apos;s own error text
-          <span className="d">
-            When the Mistral API fails, the thread shows its status code and message. Off: a plain
-            line that says what happened.
-          </span>
-        </span>
+        <span>Show the provider&apos;s own error text</span>
         <Switch
           data-testid="settings.error-detail-setting-set-error-detail"
           aria-label="Show the provider's own error text"

@@ -1,7 +1,7 @@
 /**
  * Settings › Browser: reads the browser pool and saves its live tab limit.
  * Depends on: AppContext and the typed browser command. Called by: SettingsPage.
- * Invariants: a failed save keeps the last confirmed selection; memory and cap come from the core
+ * Invariants: a failed save keeps the last confirmed selection; the cap comes from the core
  * and refresh while the section is open.
  */
 import { type ReactElement, useEffect, useState } from "react";
@@ -15,7 +15,7 @@ type Pool = Extract<BrowserResult, { type: "enginePool" }>["pool"];
 type Limit = "auto" | "1" | "2" | "3" | "4";
 const OPTIONS: readonly Limit[] = ["auto", "1", "2", "3", "4"];
 
-/** The live browser tab limit and memory estimate. */
+/** The live browser tab limit and current capacity. */
 export function BrowserPoolSettings({
   onError,
 }: {
@@ -91,10 +91,6 @@ export function BrowserPoolSettings({
       <div className="check" data-setting="parallel-browser-sessions">
         <span>
           Live browser tabs
-          <span className="d">
-            How many browser tabs can stay live at once. Background tabs pause when the limit is
-            reached. Auto adjusts to this computer&apos;s memory.
-          </span>
           {pool === null && error === null && (
             <span className="d" role="status">
               Reading browser capacity…
@@ -103,10 +99,6 @@ export function BrowserPoolSettings({
           {pool !== null && (
             <span className="d" role="status">
               Up to {pool.effectiveCap} live {pool.effectiveCap === 1 ? "tab" : "tabs"} at once.
-              Memory:{" "}
-              {pool.detectedRamGb === null ? "unavailable" : `${String(pool.detectedRamGb)} GB`};
-              free memory:{" "}
-              {pool.freeRamMb === null ? "unavailable" : `${String(pool.freeRamMb)} MB`}.
             </span>
           )}
         </span>

@@ -4,7 +4,7 @@
 //! hook's reason (its skipped step is left out).
 //! Depends on: `serde_json`. Called by: `export_md::render`.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 use serde_json::Value;
 
@@ -28,6 +28,9 @@ pub(crate) fn is_hook_notice(entry: &Value) -> bool {
 fn denial_reason<'a>(effect: Option<&'a Value>, hook: &str) -> Option<&'a str> {
     let effect = effect.filter(|e| e["type"] == "effect" && e["state"]["status"] == "skipped")?;
     let reason = text(&effect["state"], "reason");
+    if refused_placeholder(effect) {
+        return Some(reason);
+    }
     let tool = text(&effect["detail"], "toolName");
     reason
         .strip_prefix(&format!(
@@ -49,16 +52,158 @@ fn input_rewrite(content: &str) -> bool {
         })
 }
 
-/// History entries by id, for [`line`] and [`refused_calls`].
-pub(crate) fn by_id(entries: &[Value]) -> HashMap<&str, &Value> {
-    entries
+/// A nameless skipped call emitted after a refusal by newer Vibe versions.
+fn refused_placeholder(entry: &Value) -> bool {
+    entry["type"] == "effect"
+        && entry["state"]["status"] == "skipped"
+        && !entry["detail"]["input"].is_object()
+        && matches!(text(&entry["detail"], "toolName"), "" | "tool")
+}
+
+/// Pair explicit call ids first, then nameless placeholders in refusal order within a user-message boundary.
+fn refused_steps(entries: &[Value]) -> HashMap<&str, &Value> {
+    let by_id: HashMap<_, _> = entries
         .iter()
-        .filter_map(|e| e.get("id").and_then(Value::as_str).map(|id| (id, e)))
-        .collect()
+        .map(|entry| (text(entry, "id"), entry))
+        .collect();
+    let mut steps = HashMap::new();
+    let mut waiting: VecDeque<(&str, Vec<&str>)> = VecDeque::new();
+    for entry in entries {
+        let detail = &entry["detail"];
+        if entry["type"] == "message" && entry["role"] == "user" {
+            waiting.clear();
+        } else if is_hook_notice(entry)
+            && detail["kind"] == "hook_completed"
+            && detail["scope"] == "pre_tool"
+        {
+            let call = text(detail, "toolCallId");
+            if let Some(named) = by_id.get(call).filter(|entry| entry["type"] == "effect") {
+                steps.insert(text(entry, "id"), *named);
+            } else if !call.is_empty() && detail["status"] == "error" {
+                if let Some((_, notices)) = waiting.iter_mut().find(|(id, _)| *id == call) {
+                    notices.push(text(entry, "id"));
+                } else {
+                    waiting.push_back((call, vec![text(entry, "id")]));
+                }
+            }
+        } else if refused_placeholder(entry)
+            && let Some((_, notices)) = waiting.pop_front()
+        {
+            for notice in notices {
+                steps.insert(notice, entry);
+            }
+        }
+    }
+    steps
+}
+
+/// One projection for the export's hook lines and suppressed steps; raw history stays unchanged.
+pub(crate) struct Projection<'a> {
+    pub(crate) lines: HashMap<&'a str, String>,
+    pub(crate) refused: HashSet<&'a str>,
+}
+
+/// The shared fixture contract also runs against the transcript's projection.
+pub(crate) fn project(entries: &[Value]) -> Projection<'_> {
+    let steps = refused_steps(entries);
+    let mut projected = Projection {
+        lines: HashMap::new(),
+        refused: HashSet::new(),
+    };
+    for entry in entries.iter().filter(|entry| is_hook_notice(entry)) {
+        let id = text(entry, "id");
+        if let Some(effect) = steps.get(id)
+            && denial_reason(Some(effect), text(&entry["detail"], "hookName")).is_some()
+        {
+            projected.refused.insert(text(effect, "id"));
+        }
+        if let Some(line) = line(entry, &steps) {
+            projected.lines.insert(id, line);
+        }
+    }
+    projected
+}
+
+/// Plain action labels match the transcript's builtin-tool permissions, never a custom tool's guessed identity.
+fn tool_permission(detail: &Value, content: &str) -> &'static str {
+    let tool = Some(text(detail, "toolName"))
+        .filter(|tool| !tool.is_empty())
+        .or_else(|| {
+            content
+                .strip_prefix("Denied tool '")
+                .and_then(|tool| tool.strip_suffix("'"))
+        })
+        .unwrap_or_default();
+    let tool = tool
+        .strip_prefix("file_system.")
+        .or_else(|| tool.strip_prefix("ui."))
+        .unwrap_or(tool);
+    match tool {
+        "bash" | "shell" => "running commands",
+        "read_file" => "reading files",
+        "write_file" => "creating and changing files",
+        "edit" | "search_replace" => "changing files",
+        "grep" => "searching file contents",
+        "glob" => "finding files",
+        "list_directory" => "listing folders",
+        "web.fetch" | "web_fetch" => "reading web pages",
+        "web.search" | "web_search" => "searching the web",
+        "skill" | "skill.read" | "read_skill" => "reading skill instructions",
+        "task.create" | "task.update" | "task.list" | "task.get" => "managing tasks",
+        "todo" => "updating the task list",
+        "task" | "agents.spawn" | "subagent.spawn" | "agent" | "agent.run" => "running a subagent",
+        "self.wait" | "wait" | "self.sleep" => "waiting",
+        "agents.list_configs" => "listing agent configurations",
+        "agents.list" | "subagent.list" => "listing subagents",
+        "agents.send_message" | "subagent.send_message" => "sending messages to subagents",
+        "agents.interrupt" | "subagent.interrupt" => "interrupting subagents",
+        "subagent.stop" => "stopping subagents",
+        "subagent.wait" | "agent.wait" => "waiting for subagents",
+        "ask_user_question" | "ask_user" | "user_input" => "asking a question",
+        "exit_plan_mode" => "finishing a plan",
+        "mcp_vw.session_status"
+        | "mcp_vw.connectors_list"
+        | "mcp_vw.connector_suggest"
+        | "mcp_vw.addon_suggest"
+        | "mcp_vw.document_read"
+        | "mcp_vw.propose_protected_change"
+        | "mcp_vw.protected_change_status"
+        | "mcp_vw.read_aloud"
+        | "mcp_vw.processes_list"
+        | "mcp_vw.port_lease"
+        | "mcp_vw.process_start"
+        | "mcp_vw.process_stop"
+        | "mcp_vw.process_restart"
+        | "mcp_vw.use_headless_browser"
+        | "mcp_vw.secret_list"
+        | "mcp_vw.secret_run"
+        | "mcp_vw.secret_run_status"
+        | "mcp_vw.panel_read"
+        | "mcp_vw.preview_list"
+        | "mcp_vw.preview_open"
+        | "mcp_vw.preview_screenshot"
+        | "mcp_vw.preview_console"
+        | "mcp_vw.preview_close"
+        | "mcp_vw.browser_tabs"
+        | "mcp_vw.browser_open"
+        | "mcp_vw.browser_read"
+        | "mcp_vw.browser_act"
+        | "mcp_vw.browser_screenshot"
+        | "mcp_vw.browser_close"
+        | "mcp_vw.browser_fill_login"
+        | "mcp_vw.browser_check_view"
+        | "mcp_vw.browser_capture_secret"
+        | "mcp_vw.chrome_tool_list"
+        | "mcp_vw.browser_capture"
+        | "mcp_vw.chrome_status"
+        | "mcp_vw.chrome_session"
+        | "mcp_vw.chrome_execute" => "this action",
+        _ => "the call",
+    }
 }
 
 /// The line a hook notice is written as, or `None` when the window leaves it out.
-pub(crate) fn line(entry: &Value, by_id: &HashMap<&str, &Value>) -> Option<String> {
+pub(crate) fn line(entry: &Value, steps: &HashMap<&str, &Value>) -> Option<String> {
     let detail = &entry["detail"];
     if detail["kind"] != "hook_completed" {
         return None;
@@ -68,14 +213,19 @@ pub(crate) fn line(entry: &Value, by_id: &HashMap<&str, &Value>) -> Option<Strin
     let name = Some(text(detail, "hookName"))
         .filter(|n| !n.is_empty())
         .unwrap_or("Hook");
-    let effect = by_id.get(text(detail, "toolCallId")).copied();
+    let effect = steps.get(text(entry, "id")).copied();
     let pre_tool = detail["scope"] == "pre_tool";
     let reason = if pre_tool {
         denial_reason(effect, name)
     } else {
         None
     };
-    let refused = || format!("Not run: {name} refused the call.");
+    let refused = || {
+        format!(
+            "Not run: {name} refused {}.",
+            tool_permission(detail, content)
+        )
+    };
     if pre_tool && status == "error" {
         if content.ends_with(" (strict)") {
             return Some(format!("{name} failed; the call was not run."));
@@ -96,9 +246,22 @@ pub(crate) fn line(entry: &Value, by_id: &HashMap<&str, &Value>) -> Option<Strin
     {
         return None;
     }
+    // The decision note is appended for the agent; the person already made that decision.
+    if name == "vibe-work allowed note"
+        && detail["scope"] == "post_tool"
+        && status == "warning"
+        && content
+            .strip_prefix("Appended ")
+            .and_then(|rest| rest.strip_suffix(" chars to tool result"))
+            .is_some_and(|count| {
+                !count.is_empty() && count.bytes().all(|byte| byte.is_ascii_digit())
+            })
+    {
+        return None;
+    }
     if let Some(reason) = reason {
         return Some(if reason.is_empty() {
-            refused()
+            format!("Not run: {name} refused the call.")
         } else {
             reason.to_owned()
         });
@@ -117,22 +280,6 @@ pub(crate) fn line(entry: &Value, by_id: &HashMap<&str, &Value>) -> Option<Strin
             "reported a warning"
         });
     Some(format!("{name}: {message}"))
-}
-
-/// The tool calls a hook refused whose refusal its notice already says (their skipped steps are left out).
-pub(crate) fn refused_calls<'a>(
-    entries: &'a [Value],
-    by_id: &HashMap<&str, &Value>,
-) -> HashSet<&'a str> {
-    entries
-        .iter()
-        .filter(|e| is_hook_notice(e) && e["detail"]["kind"] == "hook_completed")
-        .filter(|e| e["detail"]["scope"] == "pre_tool")
-        .filter_map(|e| {
-            let call = text(&e["detail"], "toolCallId");
-            denial_reason(by_id.get(call).copied(), text(&e["detail"], "hookName")).map(|_| call)
-        })
-        .collect()
 }
 
 #[cfg(test)]

@@ -6,11 +6,12 @@
  * validated on read and capped; storage failures are ignored. Their author is recorded (unknown = the Debug API's,
  * fail closed).
  * Adapted from ShellX.
- * Depends on: nothing. Called by: state/composerStore.
+ * Depends on: pastes. Called by: state/composerStore.
  * Invariants: pure functions never mutate their input; `loadDrafts` never throws and returns only
  * string values; a draft is pruned only for sessions known to be gone (the session list is paged, so a
  * session missing from the loaded page may still exist).
  */
+import { type PasteItem, pastesIn } from "./pastes";
 
 /** Drafts by session id. */
 export type Drafts = Readonly<Record<string, string>>;
@@ -60,7 +61,28 @@ export type DraftBy = "user" | "debug-api" | "literal";
 export interface StoredDrafts {
   drafts: Drafts;
   by: Readonly<Record<string, DraftBy>>;
+  pastes: Readonly<Record<string, readonly PasteItem[]>>;
 }
+
+/** Validate the optional payload of a folded paste before restoring it as a clickable chip. */
+function readPastes(value: unknown): PasteItem[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((item: unknown): item is PasteItem => {
+    if (typeof item !== "object" || item === null) return false;
+    const paste = item as Record<string, unknown>;
+    return (
+      typeof paste["id"] === "string" &&
+      paste["id"] !== "" &&
+      typeof paste["text"] === "string" &&
+      typeof paste["n"] === "number" &&
+      Number.isSafeInteger(paste["n"]) &&
+      paste["n"] > 0
+    );
+  });
+}
+
+const size = (text: string, pastes: readonly PasteItem[]): number =>
+  text.length + pastes.reduce((total, item) => total + item.text.length, 0);
 
 /**
  * Reads the stored drafts; anything malformed is skipped. Format 2 is `{version: 2, drafts: {id: {text,
@@ -71,10 +93,11 @@ export interface StoredDrafts {
 export function loadDrafts(): StoredDrafts {
   const out: Record<string, string> = {};
   const by: Record<string, DraftBy> = {};
+  const pastes: Record<string, PasteItem[]> = {};
   try {
     const parsed: unknown = JSON.parse(localStorage.getItem(DRAFTS_KEY) ?? "{}");
     if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed))
-      return { drafts: {}, by: {} };
+      return { drafts: {}, by: {}, pastes: {} };
     const record = parsed as Record<string, unknown>;
     const v2 =
       record["version"] === 2 && typeof record["drafts"] === "object" && record["drafts"] !== null;
@@ -85,13 +108,16 @@ export function loadDrafts(): StoredDrafts {
         typeof value === "object" && value !== null ? (value as Record<string, unknown>) : null;
       const text = v2 ? item?.["text"] : value;
       if (typeof text !== "string" || text === "") continue;
+      const held = pastesIn(text, readPastes(item?.["pastes"]));
+      if (size(text, held) > MAX_DRAFT_CHARS) continue;
       const who = v2 ? item?.["by"] : undefined;
       out[id] = text;
       by[id] = who === "user" || who === "literal" || who === "debug-api" ? who : "debug-api";
+      if (held.length > 0) pastes[id] = held;
     }
-    return { drafts: out, by };
+    return { drafts: out, by, pastes };
   } catch {
-    return { drafts: {}, by: {} };
+    return { drafts: {}, by: {}, pastes: {} };
   }
 }
 
@@ -99,12 +125,19 @@ export function loadDrafts(): StoredDrafts {
  * Stores the drafts with who wrote each (the newest `MAX_DRAFTS`, each at most `MAX_DRAFT_CHARS`); a
  * draft without an entry in `by` is the user's. Failures are ignored.
  */
-export function saveDrafts(drafts: Drafts, by: Readonly<Record<string, DraftBy>> = {}): void {
+export function saveDrafts(
+  drafts: Drafts,
+  by: Readonly<Record<string, DraftBy>> = {},
+  pastes: StoredDrafts["pastes"] = {},
+): void {
   try {
     const kept = Object.entries(drafts)
-      .filter(([, text]) => text.length <= MAX_DRAFT_CHARS)
-      .slice(-MAX_DRAFTS)
-      .map(([id, text]) => [id, { text, by: by[id] ?? "user" }] as const);
+      .map(
+        ([id, text]) =>
+          [id, { text, by: by[id] ?? "user", pastes: pastesIn(text, pastes[id] ?? []) }] as const,
+      )
+      .filter(([, item]) => size(item.text, item.pastes) <= MAX_DRAFT_CHARS)
+      .slice(-MAX_DRAFTS);
     localStorage.setItem(
       DRAFTS_KEY,
       JSON.stringify({ version: 2, drafts: Object.fromEntries(kept) }),

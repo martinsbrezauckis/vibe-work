@@ -5,255 +5,255 @@
  * scripts/public/check.sh fails when this file and the Rust types disagree.
  */
 
-export type LibrariesRequest = { "op": "list", } | { "op": "create", 
+export type LibrariesRequest = { "op": "list", } | { "op": "create",
 /**
  * Its name (1-100 characters).
  */
-name: string, 
+name: string,
 /**
  * Optional description.
  */
-description: string | null, 
+description: string | null,
 /**
  * Who may use it.
  */
-scope: LibraryScope, } | { "op": "setScope", 
+scope: LibraryScope, } | { "op": "setScope",
 /**
  * The library.
  */
-libraryId: string, 
+libraryId: string,
 /**
  * The new scope.
  */
-scope: LibraryScope, } | { "op": "delete", 
+scope: LibraryScope, } | { "op": "delete",
 /**
  * The library.
  */
-libraryId: string, } | { "op": "documents", 
+libraryId: string, } | { "op": "documents",
 /**
  * The library.
  */
-libraryId: string, } | { "op": "upload", 
+libraryId: string, } | { "op": "upload",
 /**
  * The library.
  */
-libraryId: string, 
+libraryId: string,
 /**
  * The files.
  */
-files: Array<LibraryFile>, } | { "op": "deleteDocument", 
+files: Array<LibraryFile>, } | { "op": "deleteDocument",
 /**
  * The library.
  */
-libraryId: string, 
+libraryId: string,
 /**
  * The document.
  */
-documentId: string, } | { "op": "text", 
+documentId: string, } | { "op": "text",
 /**
  * The library.
  */
-libraryId: string, 
+libraryId: string,
 /**
  * The document.
  */
-documentId: string, } | { "op": "ask", 
+documentId: string, } | { "op": "ask",
 /**
  * The question (1-4,000 characters).
  */
-question: string, 
+question: string,
 /**
  * The libraries to search (empty: every library that is not off).
  */
 libraryIds: Array<string>, };
 
-export type LibrariesResult = { "kind": "list", 
+export type LibrariesResult = { "kind": "list",
 /**
  * The libraries.
  */
-libraries: Array<LibraryView>, 
+libraries: Array<LibraryView>,
 /**
  * Why this list is incomplete; `None` only after exhausting all API pages.
  */
-partial: string | null, 
+partial: string | null,
 /**
  * What uploading and asking sends, and the limits.
  */
-costs: WorkCosts, } | { "kind": "library", 
+costs: WorkCosts, } | { "kind": "library",
 /**
  * The library now.
  */
-library: LibraryView, } | { "kind": "deleted", } | { "kind": "documents", 
+library: LibraryView, } | { "kind": "deleted", } | { "kind": "documents",
 /**
  * The library.
  */
-libraryId: string, 
+libraryId: string,
 /**
  * Its documents.
  */
-documents: Array<LibraryDocumentView>, } | { "kind": "uploaded", 
+documents: Array<LibraryDocumentView>, } | { "kind": "uploaded",
 /**
  * Documents now in the library (processing on Mistral's side).
  */
-added: Array<LibraryDocumentView>, 
+added: Array<LibraryDocumentView>,
 /**
  * Files not uploaded.
  */
-refused: Array<LibraryUploadRefusal>, } | { "kind": "text", 
+refused: Array<LibraryUploadRefusal>, } | { "kind": "text",
 /**
  * The document's name.
  */
-name: string, 
+name: string,
 /**
  * Its extracted text (file content: show as text).
  */
-text: string, 
+text: string,
 /**
  * True when the text was cut.
  */
-truncated: boolean, } | { "kind": "answer", 
+truncated: boolean, } | { "kind": "answer",
 /**
  * The written answer (citing titles in square brackets; file content: show as text).
  */
-answer: string, 
+answer: string,
 /**
  * The sources, numbered.
  */
-sources: Array<LibrarySourceView>, 
+sources: Array<LibrarySourceView>,
 /**
  * The searches it ran.
  */
-queries: Array<string>, 
+queries: Array<string>,
 /**
  * The libraries searched.
  */
-libraryIds: Array<string>, 
+libraryIds: Array<string>,
 /**
  * Tokens used (all kinds), as reported by the service.
  */
 tokens: number, };
 
-export type LibraryScope = { "kind": "off", } | { "kind": "global", } | { "kind": "project", 
+export type LibraryScope = { "kind": "off", } | { "kind": "global", } | { "kind": "project",
 /**
  * The project.
  */
 projectId: string, };
 
-export type LibraryFile = { 
+export type LibraryFile = {
 /**
  * The file name (only the last segment is kept).
  */
-name: string, 
+name: string,
 /**
  * The bytes, base64 (at most 50 MB decoded).
  */
 data: string, };
 
-export type LibraryView = { 
+export type LibraryView = {
 /**
  * Mistral's id.
  */
-id: string, 
+id: string,
 /**
  * Its name (user text).
  */
-name: string, 
+name: string,
 /**
  * Its description (user text).
  */
-description: string | null, 
+description: string | null,
 /**
  * Documents in it.
  */
-documents: number, 
+documents: number,
 /**
  * Their total size in bytes.
  */
-totalSize: number, 
+totalSize: number,
 /**
  * Last change (ISO time).
  */
-updatedAt: string, 
+updatedAt: string,
 /**
  * Who may use it here.
  */
 scope: LibraryScope, };
 
-export type LibraryDocumentView = { 
+export type LibraryDocumentView = {
 /**
  * Mistral's id.
  */
-id: string, 
+id: string,
 /**
  * Its library.
  */
-libraryId: string, 
+libraryId: string,
 /**
  * File name (user text).
  */
-name: string, 
+name: string,
 /**
  * Size in bytes.
  */
-size: number | null, 
+size: number | null,
 /**
  * Mistral's processing state: `todo`, `in_progress`, `done`, `error`, ... (`done` = searchable).
  */
-status: string, 
+status: string,
 /**
  * Pages, when known.
  */
-pages: number | null, 
+pages: number | null,
 /**
  * Mistral's summary (file content: show as text).
  */
-summary: string | null, 
+summary: string | null,
 /**
  * Tokens processed during indexing.
  */
-tokens: number | null, 
+tokens: number | null,
 /**
  * Upload time (ISO).
  */
 createdAt: string, };
 
-export type LibrarySourceView = { 
+export type LibrarySourceView = {
 /**
  * 1-based number.
  */
-n: number, 
+n: number,
 /**
  * The library it is in (`None` when it is no longer in any searched library).
  */
-libraryId: string | null, 
+libraryId: string | null,
 /**
  * The document.
  */
-documentId: string, 
+documentId: string,
 /**
  * Its title (file name; file content: show as text).
  */
-title: string, 
+title: string,
 /**
  * The passage the search returned (file content: show as text).
  */
 snippet: string, };
 
-export type LibraryUploadRefusal = { 
+export type LibraryUploadRefusal = {
 /**
  * The file name.
  */
-name: string, 
+name: string,
 /**
  * Why (plain sentence).
  */
 reason: string, };
 
-export type WorkCosts = { 
+export type WorkCosts = {
 /**
  * One sentence about what leaves the computer.
  */
-leaves: string, 
+leaves: string,
 /**
  * One sentence about limits.
  */
@@ -261,11 +261,11 @@ limits: string, };
 
 export type ImagesRequest = { "op": "read", };
 
-export type ImagesResult = { 
+export type ImagesResult = {
 /**
  * The use facts (shown in Settings).
  */
-costs: WorkCosts, 
+costs: WorkCosts,
 /**
  * Image requests sent to Mistral in this run of the app (all sessions, including failed requests).
  */

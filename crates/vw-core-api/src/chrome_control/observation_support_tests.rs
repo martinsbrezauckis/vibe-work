@@ -125,7 +125,12 @@ async fn accepted_arguments_reach_capable_extension_verbatim() {
             .rfind(|(name, _)| name == "chrome_execute")
             .unwrap();
         assert_eq!(sent["action"], call["action"]);
-        assert_eq!(sent["args"], call["args"]);
+        let mut expected = call["args"].clone();
+        if call["action"] == "page.read" && expected.get("cursor").is_none() {
+            expected["maxBytes"] = json!(2000);
+            expected["limit"] = json!(8);
+        }
+        assert_eq!(sent["args"], expected);
     }
     core.shutdown().await;
 }

@@ -5,182 +5,182 @@
  * scripts/public/check.sh fails when this file and the Rust types disagree.
  */
 
-export type SpeechRequest = { "op": "promptSession", 
+export type SpeechRequest = { "op": "promptSession",
 /**
  * Active voice-chat session, only while voice answering is opted in.
  */
-sessionId: string | null, } | { "op": "promptPrepare", 
+sessionId: string | null, } | { "op": "promptPrepare",
 /**
  * The owned session.
  */
-sessionId: string, 
+sessionId: string,
 /**
  * Exact card callback.
  */
-callbackId: string, } | { "op": "promptStart", 
+callbackId: string, } | { "op": "promptStart",
 /**
  * Core-issued, single-prompt ticket.
  */
-ticket: string, 
+ticket: string,
 /**
  * Capture sample rate.
  */
-sampleRate: number, 
+sampleRate: number,
 /**
  * Recognition language; null is automatic.
  */
-language: string | null, } | { "op": "promptAnswer", 
+language: string | null, } | { "op": "promptAnswer",
 /**
  * Core-issued ticket.
  */
-ticket: string, 
+ticket: string,
 /**
  * Stream returned by promptStart.
  */
-streamId: string, } | { "op": "promptCancel", 
+streamId: string, } | { "op": "promptCancel",
 /**
  * Core-issued ticket.
  */
-ticket: string, } | { "op": "readingReady", 
+ticket: string, } | { "op": "readingReady",
 /**
  * The pending reading event's id.
  */
-requestId: string, 
+requestId: string,
 /**
  * False when speech could not be made; no bar or audio is added.
  */
-available: boolean, 
+available: boolean,
 /**
  * True with unavailable when the window already holds two requested readings.
  */
-busy?: boolean, } | { "op": "readAloud", 
+busy?: boolean, } | { "op": "readAloud",
 /**
  * The owner-selected session; session agents use the credential-scoped tool instead.
  */
-sessionId: string, 
+sessionId: string,
 /**
  * A requested part, or None for the last finished reply.
  */
-text: string | null, } | { "op": "start", 
+text: string | null, } | { "op": "start",
 /**
  * The rate the webview captures at (16,000 preferred; 8,000 to 96,000 accepted).
  */
-sampleRate: number, 
+sampleRate: number,
 /**
  * `null`: Auto (live text, realtime); an ISO code (`en`, `fr`, ...): batch on stop with that
  * language (the realtime model cannot force a language).
  */
-language: string | null, } | { "op": "append", 
+language: string | null, } | { "op": "append",
 /**
  * The stream.
  */
-streamId: string, 
+streamId: string,
 /**
  * Base64 PCM.
  */
-pcm: string, } | { "op": "stop", 
+pcm: string, } | { "op": "stop",
 /**
  * The stream.
  */
-streamId: string, } | { "op": "cancel", 
+streamId: string, } | { "op": "cancel",
 /**
  * The stream.
  */
-streamId: string, } | { "op": "speak", 
+streamId: string, } | { "op": "speak",
 /**
  * At most 2,000 characters.
  */
-text: string, 
+text: string,
 /**
  * A voice from `voices` (`null`: the default, `gb_jane_neutral`).
  */
 voice: string | null, } | { "op": "voices", } | { "op": "audioOutput", } | { "op": "screenReader", };
 
-export type SpeechResult = { "kind": "prompt", 
+export type SpeechResult = { "kind": "prompt",
 /**
  * Opaque lifetime bound to one card and voice-chat owner.
  */
-ticket: string | null, 
+ticket: string | null,
 /**
  * The allow-once number; null means only No is available.
  */
-number: number | null, } | { "kind": "promptAnswer", 
+number: number | null, } | { "kind": "promptAnswer",
 /**
  * allowed, refused, retry, repeat or card. Only the first two answered the card.
  */
-status: string, } | { "kind": "screenReader", 
+status: string, } | { "kind": "screenReader",
 /**
  * True while a screen reader is enabled.
  */
-active: boolean | null, } | { "kind": "reading", 
+active: boolean | null, } | { "kind": "reading",
 /**
  * started, nobodyListening, keyMissing, voiceUnavailable or noReply (accepted/expired for a window receipt).
  */
-status: string, 
+status: string,
 /**
  * One plain sentence explaining the outcome.
  */
-message: string, } | { "kind": "started", 
+message: string, } | { "kind": "started",
 /**
  * The new stream (random).
  */
-streamId: string, 
+streamId: string,
 /**
  * Realtime (Auto language) or batch (a fixed language).
  */
-mode: DictationMode, 
+mode: DictationMode,
 /**
  * The longest dictation, in seconds.
  */
-maxSeconds: number, } | { "kind": "appended", 
+maxSeconds: number, } | { "kind": "appended",
 /**
  * Seconds of audio so far.
  */
-seconds: number, 
+seconds: number,
 /**
  * True once the limit is reached: the UI stops and asks for the text.
  */
-atLimit: boolean, } | { "kind": "transcript", 
+atLimit: boolean, } | { "kind": "transcript",
 /**
  * The text (trimmed; empty when nothing was said).
  */
-text: string, 
+text: string,
 /**
  * Which path produced it.
  */
-via: DictationMode, 
+via: DictationMode,
 /**
  * The model Mistral answered with.
  */
-model: string, 
+model: string,
 /**
  * Seconds of audio.
  */
-seconds: number, 
+seconds: number,
 /**
  * Why the live text was not used, when the batch fallback ran.
  */
-note: string | null, } | { "kind": "cancelled", 
+note: string | null, } | { "kind": "cancelled",
 /**
  * False when there was no such stream.
  */
-cancelled: boolean, } | { "kind": "speech", 
+cancelled: boolean, } | { "kind": "speech",
 /**
  * `audio/wav`.
  */
-mime: string, 
+mime: string,
 /**
  * Base64 of the audio file.
  */
-audio: string, 
+audio: string,
 /**
  * Characters spoken.
  */
-chars: number, } | { "kind": "voices", 
+chars: number, } | { "kind": "voices",
 /**
  * Presets first, then the user's own.
  */
-voices: Array<VoiceView>, } | { "kind": "audioOutput", 
+voices: Array<VoiceView>, } | { "kind": "audioOutput",
 /**
  * False only when sound would play into nothing (the Linux `AppImage` without a sound server).
  */
@@ -188,37 +188,37 @@ available: boolean, };
 
 export type DictationMode = "realtime" | "batch";
 
-export type DictationUpdate = { "type": "partial", 
+export type DictationUpdate = { "type": "partial",
 /**
  * Text so far.
  */
-text: string, } | { "type": "liveLost", 
+text: string, } | { "type": "liveLost",
 /**
  * Why (Mistral's sentence or a network reason).
  */
-message: string, } | { "type": "ended", 
+message: string, } | { "type": "ended",
 /**
  * Why.
  */
 reason: string, };
 
-export type VoiceView = { 
+export type VoiceView = {
 /**
  * What `speak` takes as `voice`.
  */
-voiceId: string, 
+voiceId: string,
 /**
  * Display name.
  */
-name: string, 
+name: string,
 /**
  * Languages (`en_gb`, ...).
  */
-languages: Array<string>, 
+languages: Array<string>,
 /**
  * Gender label, when given.
  */
-gender: string | null, 
+gender: string | null,
 /**
  * Mistral's preset (true) or the user's own voice.
  */

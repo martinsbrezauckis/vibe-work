@@ -5,7 +5,7 @@
 // call (`REQ.textOffset`, `REQ.maxText`).
 // Hidden text is returned separately (bounded) for the prompt guard only.
 // REQ: { page, maxRefs, maxText, textOffset, find?, node? }. Synchronous; the answer is untrusted page data.
-/* global nodeIdentity, ENV, KEY_TEXT, REQ, actionableCandidate, clip, collect, controlSearchText, formControl, enabled, frameDoc, globalRect, hideKeys, inFrame, keyHolder, keyLike, labelOf, loginRole, refOf, rememberLabelledKeys, roleOf, secretKind, submitOrigins, vaultFilled, visible, visualCandidate -- Supplied by the Rust script assembler and its shared prelude. */
+/* global choiceContextFor, overlayChoiceRoots, nodeIdentity, ENV, KEY_TEXT, REQ, actionableCandidate, clip, collect, controlSearchText, formControl, enabled, frameDoc, globalRect, hideKeys, inFrame, keyHolder, keyLike, labelOf, labelledToggle, loginRole, refOf, rememberLabelledKeys, roleOf, secretKind, submitOrigins, vaultFilled, visible, visualCandidate -- Supplied by the Rust script assembler and its shared prelude. */
 (() => {
   __VW_COMMON__
   const everything = collect();
@@ -61,7 +61,7 @@
   };
   // Overlays first, then rendered form controls and main content, even below the fold, before navigation.
   const elements = everything.elements.filter(el => actionableCandidate(el) || visualCandidate(el))
-    .map((el) => ({ el, rank: Math.min(priority(el), frameLimit(el)) }))
+    .map((el) => ({ el, rank: refOf(el) === REQ.priorityRef ? 8 : Math.min(priority(el), frameLimit(el)) }))
     .sort((a, b) => b.rank - a.rank);
   const refs = [];
   const choiceGroups = new Map();
@@ -151,6 +151,7 @@
     } else {
       const checked = el.getAttribute("aria-checked");
       if (checked !== null) item.checked = checked === "true";
+      if (labelledToggle(el)) item.checked = Boolean(el.control.checked);
     }
     const expanded = el.getAttribute("aria-expanded");
     if (expanded !== null) item.expanded = expanded === "true";
@@ -164,7 +165,7 @@
       }
     }
     // Inventory is independent of find, viewport scrolling and the requested ref cap.
-    if (isVisible && (el.matches("button,a[href]") || ["button", "link"].includes(role))) {
+    if (isVisible && (el.matches("button,a[href]") || ["button", "link", "checkbox", "radio", "switch"].includes(role))) {
       const doc = el.ownerDocument;
       if (!choiceGroups.has(doc)) choiceGroups.set(doc, { choices: [], total: 0 });
       const group = choiceGroups.get(doc);
@@ -206,15 +207,19 @@
   }
   out.hiddenText = hideKeys(hidden.join("\n")).slice(0, 3000);
   out.coveringFrames = [];
+  out.choiceContext = [];
+  out.documentContext = choiceContextFor(document.body || document.documentElement);
   for (const [doc, group] of choiceGroups) {
     group.choices.sort((a, b) => a.el.compareDocumentPosition(b.el) & 2 ? 1 : -1);
     const choices = group.choices.map(({ item }) => item);
     if (doc === document) {
       out.choiceRefs = choices;
       out.choiceCount = group.total;
+      out.choiceContext.push(...overlayChoiceRoots(group.choices).slice(0, 4).map(choiceContextFor));
     } else if (group.choices.length && frameLimit(group.choices[0].el) === 7) {
       out.coveringFrames.push({ origin: hideKeys(doc.location.origin), choices,
         total: group.total, complete: !truncated && group.total === choices.length });
+      out.choiceContext.push(choiceContextFor(doc.body || doc.documentElement));
     }
   }
   refs.sort((a, b) => b.priority - a.priority);

@@ -58,6 +58,13 @@ export function usePagesTab(pages: Pages, sessionId: string) {
 
   useEffect(() => {
     void pages.load(sessionId);
+    // Hub files can be created before any viewer exists to emit pagesChanged.
+    const refresh = window.setInterval(() => {
+      if (!pages.store.get().busy[sessionId]) void pages.load(sessionId);
+    }, 1500);
+    return () => {
+      window.clearInterval(refresh);
+    };
   }, [pages, sessionId]);
 
   const viewer = hub?.viewer ?? null;

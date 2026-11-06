@@ -10,7 +10,7 @@ use tokio::task::JoinHandle;
 
 use crate::core::Shared;
 
-use super::{mapping, setup};
+use super::{PairingState, mapping, setup};
 
 #[path = "owner_pairing.rs"]
 mod pairing;
@@ -73,14 +73,16 @@ type SetupSnapshot = (setup::ChromeSetupView, Option<setup::ChromeSetupView>);
 pub(super) struct Owner {
     running: Mutex<Option<Running>>,
     pub(super) tools: Mutex<Vec<Value>>,
-    pub(super) pairing: Mutex<(String, Option<String>)>,
-    pub(super) firefox_pairing: Mutex<(String, Option<String>)>,
+    pub(super) pairing: Mutex<(PairingState, Option<String>)>,
+    pub(super) firefox_pairing: Mutex<(PairingState, Option<String>)>,
     pub(super) firefox_states: Mutex<Vec<String>>,
-    pub(super) edge_pairing: Mutex<(String, Option<String>)>,
+    pub(super) edge_pairing: Mutex<(PairingState, Option<String>)>,
     observed_setup: Mutex<Option<SetupSnapshot>>,
+    pub(super) credential_missing: std::sync::atomic::AtomicBool,
     pub(super) connected_profiles: super::addon::ConnectedProfiles,
     pub(super) profile_ids: super::profile_ids::ProfileIds,
     pub(super) wake: super::reconnect::Wake,
+    pub(super) connection_waiting: super::connection_notice::Waiting,
     /// The automatic-pairing attempt and what the current helper connection reported for it (`enroll`).
     pub(super) enroll: Mutex<super::enroll::Enroll>,
     /// Edge's waiting state and attempt never consume Chrome's Connect (or conversely).
@@ -187,11 +189,11 @@ impl Owner {
             .unwrap_or_else(PoisonError::into_inner)
             .clear();
         *self.pairing.lock().unwrap_or_else(PoisonError::into_inner) =
-            (vw_vocabulary::texts::CHROME_NOT_CONNECTED.to_owned(), None);
+            (PairingState::Disconnected, None);
         *self
             .firefox_pairing
             .lock()
-            .unwrap_or_else(PoisonError::into_inner) = (String::new(), None);
+            .unwrap_or_else(PoisonError::into_inner) = (PairingState::Unknown, None);
         self.firefox_states
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
@@ -199,7 +201,7 @@ impl Owner {
         *self
             .edge_pairing
             .lock()
-            .unwrap_or_else(PoisonError::into_inner) = (String::new(), None);
+            .unwrap_or_else(PoisonError::into_inner) = (PairingState::Unknown, None);
         // A helper that ended took its tickets with it; the next connection reports its own waiting state.
         self.enroll
             .lock()
@@ -346,8 +348,15 @@ pub(crate) async fn start(shared: &Arc<Shared>) -> Result<(), String> {
     let secret = keys
         .chrome_owner()
         .await
-        .map_err(|_| vw_vocabulary::texts::CHROME_OWNER_READ_FAILED)?
-        .ok_or(vw_vocabulary::texts::CHROME_OWNER_MISSING)?;
+        .map_err(|_| vw_vocabulary::texts::CHROME_OWNER_READ_FAILED)?;
+    chrome
+        .owner
+        .credential_missing
+        .store(secret.is_none(), std::sync::atomic::Ordering::SeqCst);
+    if secret.is_none() {
+        publish(shared);
+    }
+    let secret = secret.ok_or(vw_vocabulary::texts::CHROME_OWNER_MISSING)?;
 
     let (_, bytes) = setup::packaged_helper(&chrome.config)?;
     let expected = blake3::hash(&bytes);
@@ -420,6 +429,13 @@ fn pairing_result(params: &Value) -> Option<Value> {
 }
 
 pub(super) fn update_pairing(shared: &Weak<Shared>, result: &Value) {
+    update_pairing_state(shared, result);
+    if let Some(shared) = shared.upgrade() {
+        super::connection_notice::connected(&shared);
+    }
+}
+
+fn update_pairing_state(shared: &Weak<Shared>, result: &Value) {
     let Some(shared) = shared.upgrade() else {
         return;
     };
@@ -474,15 +490,7 @@ pub(super) fn update_pairing(shared: &Weak<Shared>, result: &Value) {
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
         .waiting_reported();
-    let state = match code {
-        "OWNER_IDENTITY_MISMATCH" | "OWNER_CONFLICT" => {
-            "Chrome is paired with another Vibe Work. Pair again in Chrome."
-        }
-        "OWNER_CONNECTING" => "Connecting",
-        _ if connected => "Paired",
-        _ if waiting => "Waiting for you to pair in Chrome",
-        _ => vw_vocabulary::texts::CHROME_NOT_CONNECTED,
-    };
+    let state = PairingState::observe(code, connected, waiting);
     // A status poll has no registered profile while an enabled extension holds another identity.
     // Keep its signed mismatch until a pairing report, live connection or helper reset replaces it.
     if !connected
@@ -494,7 +502,7 @@ pub(super) fn update_pairing(shared: &Weak<Shared>, result: &Value) {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .0
-            .contains("another Vibe Work")
+            == PairingState::OtherOwner
     {
         return;
     }
@@ -518,7 +526,7 @@ pub(super) fn update_pairing(shared: &Weak<Shared>, result: &Value) {
         .as_str()
         .map(|fingerprint| fingerprint.chars().take(16).collect())
         .or_else(|| current.1.clone());
-    let next = (state.to_owned(), fingerprint);
+    let next = (state, fingerprint);
     let changed = *current != next;
     *current = next;
     drop(current);
@@ -779,11 +787,12 @@ mod disconnect_tests {
     #[tokio::test]
     async fn explicit_stop_forgets_pairing_and_fingerprint() {
         let owner = Owner::default();
-        *owner.pairing.lock().unwrap() = ("Paired".to_owned(), Some("0123456789abcdef".to_owned()));
+        *owner.pairing.lock().unwrap() =
+            (PairingState::Paired, Some("0123456789abcdef".to_owned()));
         owner.stop().await;
         assert_eq!(
             *owner.pairing.lock().unwrap(),
-            (vw_vocabulary::texts::CHROME_NOT_CONNECTED.to_owned(), None)
+            (PairingState::Disconnected, None)
         );
     }
 }

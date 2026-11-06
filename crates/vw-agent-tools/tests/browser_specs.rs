@@ -28,6 +28,16 @@ fn browser_targets_offer_only_builtin() {
         if name == "browser_act" {
             assert_eq!(tool["inputSchema"]["properties"]["x"]["type"], "integer");
             assert_eq!(tool["inputSchema"]["properties"]["y"]["type"], "integer");
+            let description = tool["description"].as_str().unwrap();
+            assert!(description.contains("updatedRefs"));
+            assert!(description.contains("YYYY-MM-DD"));
+            assert!(description.len() <= 2_020);
+        }
+        if name == "browser_read" {
+            let description = tool["description"].as_str().unwrap();
+            assert!(description.contains("switches"));
+            assert!(description.contains("options"));
+            assert!(description.len() <= 960);
         }
     }
 }

@@ -34,6 +34,8 @@ pub(crate) struct SessionPorts {
     pub(crate) targets: Vec<PreviewTarget>,
     /// The session's leased ports.
     pub(crate) leased: Vec<u16>,
+    /// Leased ports of live session commands for which no socket listener was detected yet.
+    pub(crate) pending: Vec<u16>,
     /// Owner of every listening port (any session or app).
     owners: BTreeMap<u16, PortOwner>,
     /// Every port a listener attributed to any session holds (what a Local page may reach), as the re-check's
@@ -123,6 +125,7 @@ pub(crate) fn session_ports(shared: &Shared, session_id: &str) -> Result<Session
         }
     }
     Ok(SessionPorts {
+        pending: crate::preview_readiness::pending_ports(shared, session_id, &leased, &snapshot),
         targets,
         leased,
         owners,

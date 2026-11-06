@@ -116,6 +116,12 @@ pub(crate) async fn issue(shared: &Arc<Shared>, payload: &Value) -> Result<Value
         execution,
         stop,
     });
+    drop(pending);
+    #[cfg(feature = "video")]
+    if tool == "video_frames" {
+        // Vibe's effect entry carries this receipt, not the hook's call id: the saved frames are found by it.
+        tools.video_history.bind_receipt(source, call, &key);
+    }
     args[names::RECEIPT_FIELD] = json!(key);
     Ok(args)
 }
@@ -142,7 +148,7 @@ pub(super) fn verify(
     calls: &Calls,
     owner: &str,
     source: &str,
-    call: &str,
+    callback_id: &str,
     tool: &str,
     args: &Value,
 ) -> Result<(), String> {
@@ -151,7 +157,9 @@ pub(super) fn verify(
         .lock()
         .unwrap_or_else(PoisonError::into_inner);
     let receipt = &pending[index(&pending, owner, tool, args)?];
-    if receipt.source != source || receipt.call != call {
+    if receipt.source != source
+        || !crate::one_ask::callback_matches_call(callback_id, &receipt.call)
+    {
         return Err("This callback does not match its originating Vibe call.".into());
     }
     Ok(())
@@ -195,16 +203,61 @@ mod tests {
             stop: 0,
         });
         let args = json!({"command":"echo once","_vwReceipt":"decision"});
-        assert!(verify(&calls, "parent", "child", "call-1", "process_start", &args).is_ok());
+        assert!(
+            verify(
+                &calls,
+                "parent",
+                "child",
+                "approval-call-1",
+                "process_start",
+                &args
+            )
+            .is_ok()
+        );
+        assert!(
+            verify(
+                &calls,
+                "parent",
+                "child",
+                "approval-call-1-1a2b3c4d",
+                "process_start",
+                &args
+            )
+            .is_ok()
+        );
         for (owner, source, call, tool, input) in [
-            ("other", "child", "call-1", "process_start", args.clone()),
-            ("parent", "sibling", "call-1", "process_start", args.clone()),
-            ("parent", "child", "call-2", "process_start", args.clone()),
-            ("parent", "child", "call-1", "process_stop", args.clone()),
+            (
+                "other",
+                "child",
+                "approval-call-1",
+                "process_start",
+                args.clone(),
+            ),
+            (
+                "parent",
+                "sibling",
+                "approval-call-1",
+                "process_start",
+                args.clone(),
+            ),
             (
                 "parent",
                 "child",
-                "call-1",
+                "approval-call-2",
+                "process_start",
+                args.clone(),
+            ),
+            (
+                "parent",
+                "child",
+                "approval-call-1",
+                "process_stop",
+                args.clone(),
+            ),
+            (
+                "parent",
+                "child",
+                "approval-call-1",
                 "process_start",
                 json!({"command":"echo twice","_vwReceipt":"decision"}),
             ),
@@ -238,7 +291,17 @@ mod tests {
         let same = called(
             r#"{"steps":[{"action":"history.read","args":{"startTime":1793404800000.0,"limit":100.0}}],"_vwReceipt":"decision"}"#,
         );
-        assert!(verify(&calls, "chat", "chat", "call-1", "chrome_execute", &same).is_ok());
+        assert!(
+            verify(
+                &calls,
+                "chat",
+                "chat",
+                "approval-call-1",
+                "chrome_execute",
+                &same
+            )
+            .is_ok()
+        );
         for other in [
             r#"{"steps":[{"action":"history.read","args":{"startTime":1793404800001.0,"limit":100}}],"_vwReceipt":"decision"}"#,
             r#"{"steps":[{"action":"history.read","args":{"startTime":1793404800000.5,"limit":100}}],"_vwReceipt":"decision"}"#,
@@ -249,7 +312,7 @@ mod tests {
                     &calls,
                     "chat",
                     "chat",
-                    "call-1",
+                    "approval-call-1",
                     "chrome_execute",
                     &called(other)
                 )

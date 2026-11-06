@@ -360,7 +360,7 @@ impl Core {
         })
     }
 
-    async fn network_read(&self) -> NetworkResult {
+    pub(crate) async fn network_read(&self) -> NetworkResult {
         NetworkResult::Settings {
             view: Box::new(view_of(
                 &self.saved_settings().await,

@@ -157,3 +157,25 @@ fn a_linked_helper_is_not_published_in_a_repaired_registration() {
     );
     assert!(!path.exists());
 }
+
+#[test]
+fn changed_resource_or_installed_bytes_cannot_regain_native_registration() {
+    use sha2::{Digest, Sha256};
+    for resource in [false, true] {
+        let s = Scratch::new(&format!("repair-changed-{resource}"));
+        let mut config = s.config();
+        config.helper_sha256 = Some(format!("{:x}", Sha256::digest(b"helper")));
+        install(&config, &s.state(), &s.vibe_home()).unwrap();
+        let path = manifest(&s);
+        std::fs::remove_file(&path).unwrap();
+        let helper = if resource {
+            s.root.join("package/bin")
+        } else {
+            s.state().join("bin")
+        };
+        std::fs::write(helper.join(helper_name()), b"recorder").unwrap();
+        let error = repair_registrations(&config, &s.state(), None).unwrap_err();
+        assert!(error.contains("Reinstall Vibe Work."), "{error}");
+        assert!(!path.exists());
+    }
+}

@@ -39,13 +39,31 @@ pub(super) fn authorize(
     args: &Value,
 ) -> Result<Tier, String> {
     let browser = super::agent_browser::selected(shared, session, tool, args);
-    authorize_mode(shared, session, tool, args).map_err(|reason| browser.text(&reason))
+    authorize_mode(shared, session, tool, args, false).map_err(|reason| browser.text(&reason))
+}
+pub(super) fn authorize_read(
+    shared: &Shared,
+    session: &str,
+    tool: &str,
+    args: &Value,
+    consent: Option<&super::read_consent::ReadConsent>,
+) -> Result<Tier, String> {
+    let browser = super::agent_browser::selected(shared, session, tool, args);
+    authorize_mode(
+        shared,
+        session,
+        tool,
+        args,
+        consent.is_some() && super::read_consent::personal_read(tool, args),
+    )
+    .map_err(|reason| browser.text(&reason))
 }
 fn authorize_mode(
     shared: &Shared,
     session: &str,
     tool: &str,
     args: &Value,
+    read_consent: bool,
 ) -> Result<Tier, String> {
     let Some(view) = shared.store.view(session) else {
         return Err("Not run: this chat is not open.".into());
@@ -73,7 +91,7 @@ fn authorize_mode(
             _ => "Not run: unknown Chrome action. Use chrome_status to find supported actions.",
         }
     })?;
-    if required > tier {
+    if required > tier && !(tier == Tier::Ask && read_consent) {
         let label = if mode == "smart-approve" {
             vw_vocabulary::label("accessModes", "smart-approve")
         } else {
@@ -166,7 +184,11 @@ pub(super) fn annotate_modes(shared: &Shared, session: &str, tool: &str, result:
         };
         let allowed = tier.is_some_and(|tier| needed <= tier);
         row["allowedInThisMode"] = json!(allowed);
-        if !allowed {
+        let consent =
+            tier == Some(Tier::Ask) && matches!(action.as_str(), "history.read" | "bookmarks.read");
+        if consent {
+            row["approvalRequired"] = json!(true);
+        } else if !allowed {
             row["needs"] = json!(needed.required_label());
         }
         if action == "page.key" && tier.is_none_or(|tier| tier < Tier::AcceptEdits) {

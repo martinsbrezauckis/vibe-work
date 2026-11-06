@@ -291,8 +291,8 @@ A permission card waits until it is answered; it has no expiry. A No on Vibe's o
 `cancel_turn` and stops the turn (for a subagent's card, the whole tree); a No on the parent's card also stops the
 subagents its turn started. Vibe Work's own prompts (Git guard, vault, documents, processes, protected
 changes, and the cards for Vibe Work's tools) hold the tool call until they are answered: Allow runs that call once
-in the same turn, a No returns `Not run: the user declined this. Explain why it is needed for the user's delegated
-task.` as the tool's result and the turn goes on (a call held
+in the same turn, a No returns `Not run: the user declined this. Do not ask again for this in this task unless the user
+brings it up.` as the tool's result and the turn goes on (a call held
 this way inside `run_typescript`, such as a card for Vibe Work's tools, reaches the program as Vibe's own
 `Tool execution was skipped by Runtime policy.`), and Stop closes the prompt without running it. `secret_run` returns the command's result in the same call,
 or its request id when it runs longer; read `secret_run_status` in a new call. Ctrl/Cmd+Shift+A goes to a waiting
@@ -380,8 +380,9 @@ otherwise it quits. `show` and `focus` reveal and focus a hidden window. State i
 
 ### `POST /app`
 
-`{"action":"quit"}` explicitly quits Vibe Work and shuts down its sessions and child processes, including while
-its window is hidden. `{"action":"trayMenu","id":"open"}` and `{"action":"trayMenu","id":"quit"}` invoke the
+`{"action":"quit"}` explicitly quits Vibe Work and shuts down its sessions, including while its window is
+hidden. Agent processes started with `process_start` keep running until stopped; after their session is deleted,
+they appear under Left running. `{"action":"trayMenu","id":"open"}` and `{"action":"trayMenu","id":"quit"}` invoke the
 same handlers as the native tray menu's Open Vibe Work and Quit Vibe Work items. Unknown ids are refused.
 
 ### `GET /ui`
@@ -1116,8 +1117,8 @@ A protected-folder review is decided only through the owner command, for example
 equivalent. The agent has only `propose_protected_change` and `protected_change_status`. A proposal call waits up to
 25 seconds for the owner decision; a review still open then answers `{"status":"waiting","proposalId":...}` and stays
 open, and `protected_change_status` with that `proposalId` waits again the same way and returns the finished
-outcome. Reviews and final
-records are retained in the session history as `protected_change` entries; a review still pending at an app restart
+outcome. Settled answers include `proposalId` and `text`, including when the user declines during submission;
+that ID can be used to read the outcome again. Reviews and final records are retained in the session history as `protected_change` entries; a review still pending at an app restart
 is recorded as stopped (the chat shows Stopped) and cannot be applied. Stop declines all pending reviews in the stopped session.
 
 ## OS “Send to Vibe Work” hand-over tests

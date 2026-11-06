@@ -50,14 +50,20 @@ fn asks_inside(tool: &str, args: &Value) -> bool {
             && matches!(args["action"].as_str(), Some("fill" | "close_tab")))
 }
 
-/// Calls that only read what this chat can already see (its preview list and console, a picture of its preview, its
-/// folders). In Accept edits they run without a card, as reading does in other coding agents; the other modes keep the
-/// card. Opening, clicking, typing, every write and every call that could change what is shown
-/// keep their approval: a preview picture that sets a width, reading a browser page (it can open, switch or reload a
-/// tab) and reading the side panels (an editor there can hold a file the person's read rules exclude).
+/// Observation tools skip the default Accept edits card. File reads still obey the person's read rules.
+/// Port/process queries retain their existing internal lease and exited-process bookkeeping; browser reads may
+/// front or reload the selected page. Explicit new tabs, preview resizing and handbook repairs keep their card.
 fn reads_only(tool: &str, args: &Value) -> bool {
     match tool {
-        names::PREVIEW_LIST | names::PREVIEW_CONSOLE | names::SEARCH => true,
+        names::PREVIEW_LIST
+        | names::PREVIEW_CONSOLE
+        | names::SEARCH
+        | names::PROCESSES_LIST
+        | names::PORT_LEASE
+        | names::PANEL_READ
+        | names::HANDBOOK_ANSWERS => true,
+        names::BROWSER_READ => args["tab"] != "new",
+        names::HANDBOOK_CHECK => args.get("repair").is_none_or(Value::is_null),
         names::PREVIEW_SCREENSHOT => args.get("width").is_none_or(Value::is_null),
         _ => false,
     }
@@ -87,11 +93,16 @@ pub(crate) async fn permission(
     tool: &str,
     args: &Value,
 ) -> Result<(), String> {
+    // An unavailable tool returns its reason through the call, without offering an approval card.
+    if tool == "video_frames" && !vw_agent_tools::video::ENABLED {
+        return Ok(());
+    }
     let mode = shared.access.remembered(owner);
     if asks_inside(tool, args) || mode.as_deref() == Some("auto-approve") {
         return Ok(());
     }
-    if reads_only(tool, args)
+    if (reads_only(tool, args)
+        || (tool == names::BROWSER_ACT && crate::chrome_control::builtin::accepts_edits(args)))
         && mode.as_deref() == Some("accept-edits")
         && !stricter_rule(shared, owner, tool).await
     {
@@ -196,11 +207,7 @@ pub(crate) fn dispatch_transport(shared: &Arc<Shared>, entry: &Value, owner: &st
                 calls,
                 owner,
                 entry["sessionId"].as_str().unwrap_or_default(),
-                entry["id"]
-                    .as_str()
-                    .unwrap_or_default()
-                    .strip_prefix("approval-")
-                    .unwrap_or_default(),
+                entry["id"].as_str().unwrap_or_default(),
                 tool,
                 &entry["detail"]["effect"]["input"],
             )

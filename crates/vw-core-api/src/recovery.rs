@@ -89,7 +89,7 @@ impl Core {
             .gate
             .call(method, params.clone(), None)
             .await
-            .map_err(|e| CoreError::from_gate(method, &e))?;
+            .map_err(|e| crate::config_validation::from_gate(&self.shared, method, &e))?;
         if let Some(opening) = entry_project {
             opening.finish(&self.shared, &reply.result);
         }
@@ -139,9 +139,7 @@ impl Core {
             // The read-only read below goes through the dispatcher, which takes this chat's lock itself: holding
             // it here waited forever for a chat another Vibe holds (se1 H1).
             drop(held);
-            if self.session_holder(&id).await?.is_none() {
-                crate::session_holder::note_busy(&self.shared, &id);
-            }
+            self.session_holder_after_refusal(&id).await?;
             return self
                 .session_call(origin, "session/read", json!({"sessionId": id}))
                 .await;

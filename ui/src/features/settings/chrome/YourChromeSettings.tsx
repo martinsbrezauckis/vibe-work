@@ -21,8 +21,9 @@ export function YourChromeSettings({
   const [removeOpen, setRemoveOpen] = useState(false);
   const view = chrome.view;
   const recovering = view?.setup.addon?.state === "connecting" && view.setup.addon.action === null;
+  const removeRequired = view?.setup.addon?.action === "remove";
   const setUp = view !== null && view.setup.state !== "notSetUp";
-  const blocked = view?.setup.pairing === "Blocked by your organization";
+  const blocked = view?.setup.pairingState === "blocked";
   const busy = chrome.busy !== null || view === null;
   if (!chromeAvailable(view)) return null;
   return (
@@ -30,7 +31,9 @@ export function YourChromeSettings({
       <h3 id={`${prefix}-title`}>
         {browser === "Firefox" ? TEXT.firefoxName : edge ? TEXT.edgeName : TEXT.chromeName}
       </h3>
-      {browser !== "Firefox" && view?.setup.addon !== undefined ? (
+      {browser !== "Firefox" &&
+      view?.setup.browserIssue === undefined &&
+      view?.setup.addon !== undefined ? (
         <p className="key-line">
           {view.setup.addon.extensionVersion
             ? `Extension ${view.setup.addon.extensionVersion}`
@@ -60,20 +63,36 @@ export function YourChromeSettings({
                 data-testid="settings.firefox-window"
                 shape="outlined"
                 disabled={
-                  busy || blocked || !view.setup.package || view.setup.pairing === "Not installed"
+                  busy ||
+                  blocked ||
+                  !view.setup.package ||
+                  view.setup.pairingState === "notInstalled"
                 }
                 onClick={() => {
                   void chrome.run(
                     {
-                      op: view?.setup.pairing === "Window open" ? "closeFirefox" : "openFirefox",
+                      op:
+                        view?.setup.pairingState === "windowOpen" ? "closeFirefox" : "openFirefox",
                     },
                     "window",
                   );
                 }}
               >
-                {view?.setup.pairing === "Window open" ? "Close" : "Open window"}
+                {view?.setup.pairingState === "windowOpen" ? "Close" : "Open window"}
               </Button>
-            ) : !view?.setup.package ? null : setUp ? (
+            ) : removeRequired ? (
+              <Button
+                data-testid="settings.edge-remove-open"
+                shape="outlined"
+                variant="danger"
+                disabled={busy}
+                onClick={() => {
+                  setRemoveOpen(true);
+                }}
+              >
+                Remove…
+              </Button>
+            ) : !view?.setup.package || view.setup.browserIssue !== undefined ? null : setUp ? (
               <Button
                 data-testid="settings.edge-setup-open"
                 shape="outlined"
@@ -85,7 +104,7 @@ export function YourChromeSettings({
                   }
                   setSetupOpen(true);
                   if (
-                    view.setup.pairing !== "Paired" &&
+                    view.setup.pairingState !== "paired" &&
                     view.setup.addon?.state !== "chromeClosed" &&
                     view.setup.addon?.state !== "turnedOffInChrome" &&
                     !recovering &&
@@ -98,7 +117,7 @@ export function YourChromeSettings({
                 {view.setup.addon?.action === "setupAgain"
                   ? stepLabel(view.setup.addon.action)
                   : recovering ||
-                      view.setup.pairing === "Paired" ||
+                      view.setup.pairingState === "paired" ||
                       view.setup.addon?.state === "chromeClosed" ||
                       view.setup.addon?.state === "turnedOffInChrome"
                     ? "Details"
@@ -122,7 +141,7 @@ export function YourChromeSettings({
               </Button>
             )}
           </SettingsRow>
-          {browser === "Edge" && recovering && view.setup.addon?.step ? (
+          {browser === "Edge" && view?.setup.addon?.step ? (
             <p className="key-line">{view.setup.addon.step}</p>
           ) : null}
         </>
@@ -154,7 +173,7 @@ export function YourChromeSettings({
           {chrome.status?.text ?? ""}
         </p>
       ) : null}
-      {setUp && !edge ? (
+      {setUp && !edge && !removeRequired ? (
         <SettingsRow data-setting="chrome-control-remove">
           <span>Remove from Vibe Work</span>
           <Button

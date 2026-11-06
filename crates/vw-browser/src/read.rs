@@ -39,8 +39,46 @@ impl Browser {
         session_id: &str,
         options: ReadOptions,
     ) -> Result<(PageModel, guard::Verdict, String), String> {
-        self.observe_pass(session_id, options, None, true, true)
+        self.observe_pass(session_id, options, None, true, true, None)
             .await
+    }
+
+    /// Receipt observations reserve a slot for the target instead of losing its value on dense forms.
+    pub(crate) async fn observe_receipt(
+        &self,
+        session_id: &str,
+        reference: Option<&str>,
+    ) -> Result<(PageModel, guard::Verdict, String), String> {
+        self.observe_pass(
+            session_id,
+            ReadOptions {
+                max_refs: 25,
+                ..ReadOptions::default()
+            },
+            None,
+            true,
+            true,
+            reference,
+        )
+        .await
+    }
+
+    /// A retained target may not be in the latest narrow read, but its last observed state is still known.
+    pub(crate) fn receipt_baseline(
+        seen: Option<Box<crate::sessions::Seen>>,
+        reference: Option<&str>,
+    ) -> Option<PageModel> {
+        let seen = *seen?;
+        let mut model = seen.model;
+        if let Some(item) = seen
+            .items
+            .iter()
+            .find(|item| Some(item.id.as_str()) == reference)
+            && !model.observed_refs().any(|current| current.id == item.id)
+        {
+            model.refs.insert(0, item.clone());
+        }
+        Some(model)
     }
 
     pub(crate) async fn observe_dom(&self, session_id: &str) -> Result<PageModel, String> {
@@ -53,6 +91,7 @@ impl Browser {
             None,
             false,
             true,
+            None,
         )
         .await
         .map(|(model, _, _)| model)
@@ -75,6 +114,7 @@ impl Browser {
             node,
             false,
             false,
+            None,
         )
         .await
         .map(|(model, _, _)| model)
@@ -95,6 +135,7 @@ impl Browser {
         node: Option<u64>,
         pixels: bool,
         record: bool,
+        priority_ref: Option<&str>,
     ) -> Result<(PageModel, guard::Verdict, String), String> {
         let page = self.page(session_id).await?;
         let mount = self
@@ -111,14 +152,18 @@ impl Browser {
                 offset,
             )
         };
-        let script = scripts::observe_focused(
-            &page,
-            max_refs,
-            max_text,
-            offset,
-            options.find.as_deref(),
-            node,
-        );
+        let script = if let Some(reference) = priority_ref {
+            scripts::observe_receipt(&page, max_refs, max_text, reference)
+        } else {
+            scripts::observe_focused(
+                &page,
+                max_refs,
+                max_text,
+                offset,
+                options.find.as_deref(),
+                node,
+            )
+        };
         let loads_before = self.service.load_state(session_id).map(|l| l.loads);
         let mut model: PageModel = match self
             .observe_frames(session_id, &mount, &page, &script)
@@ -141,11 +186,11 @@ impl Browser {
         if self.service.page_mount(session_id).as_ref() != Some(&mount) {
             return Err(PAGE_CLOSED.to_owned());
         }
-        // Keep priority order (including page-covering consent dialogs), but reserve half the
+        // Keep the receipt's target first, then priority order (including page-covering consent dialogs), and reserve half the
         // slots for main-document candidates. Select before bound's absolute 200-ref cap too.
-        model
-            .refs
-            .sort_by_key(|item| std::cmp::Reverse(item.priority));
+        model.refs.sort_by_key(|item| {
+            std::cmp::Reverse((Some(item.id.as_str()) == priority_ref, item.priority))
+        });
         model.refs.retain(|item| crate::model::is_ref(&item.id));
         reserve_main_refs(&mut model.refs, max_refs);
         model.bound(max_text);

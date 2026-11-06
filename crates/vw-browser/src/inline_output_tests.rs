@@ -42,6 +42,44 @@ fn long_navigation_addresses_cannot_escape_the_whole_result_budget() {
 }
 
 #[test]
+fn choice_terms_fit_small_budgets_without_silently_rewriting_headings() {
+    let heading = format!("Subscription offer: {} per month", "€".repeat(120));
+    for budget in [
+        observe::MIN_BUDGET,
+        observe::READ_BUDGET,
+        observe::MAX_BUDGET,
+    ] {
+        let mut out = safety();
+        out["untrustedPageContent"]["choiceContext"] = json!(
+            (0..4)
+                .map(|_| {
+                    json!({"frameOrigin":"https://example.test", "headings":vec![&heading; 8],
+                "text":"Rendered terms. ".repeat(100), "complete":true})
+                })
+                .collect::<Vec<_>>()
+        );
+        observe::fit(&mut out, budget);
+        assert!(observe::size(&out) <= budget, "{out}");
+        assert!(serde_json::to_string_pretty(&out).unwrap().len() <= observe::PRETTY_BUDGET);
+        for context in out["untrustedPageContent"]["choiceContext"]
+            .as_array()
+            .unwrap()
+        {
+            assert_eq!(context["complete"], false);
+            assert!(
+                context["headings"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .all(|text| text == &heading)
+            );
+        }
+        assert_eq!(out["promptGuard"]["flagged"], true);
+        assert_eq!(out["snapshot"], "0123456789abcdef");
+    }
+}
+
+#[test]
 fn many_tabs_fit_and_keep_a_matching_inventory_and_cursor() {
     let mut out =
         json!({"action":"list_tabs","ok":true,"tabs":[],"untrustedPageContent":{"tabs":[]}});

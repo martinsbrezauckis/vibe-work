@@ -1,7 +1,7 @@
 /**
  * Plugs the Browser tab into the app: creates the preview and agent-browser controllers, registers
  * the tab body over the placeholder and the `ui/browser` route, and opens the tab when the agent starts using the
- * selected session's browser.
+ * session's browser. Requests for another session are remembered in its panel.
  * Depends on: store.ts, browser.ts, capture.ts, browserRoutes.ts, PreviewTab, pages/point (`insertChip`), AppContext types.
  * Called by: main.tsx (after the placeholders), the UI test rig.
  * Invariants: without a core nothing is registered (the placeholder stays); the returned function undoes the
@@ -53,15 +53,11 @@ export function registerPreviewTab(app: App): () => void {
     <PreviewTab previews={previews} browser={browser} capture={capture} />
   ));
   const stopPreviewRequests = core.listen((event) => {
-    if (
-      event.type === "previewShowRequested" &&
-      panelOwner(app.shell.store.get()) === event.sessionId
-    ) {
+    if (event.type === "previewShowRequested") {
       // A previous web tab can still be selected. Finish selecting App preview
       // before revealing the panel, including when the tool did not ask for a width.
       void browser.switchTab(event.sessionId, event.sessionId).then(() => {
-        if (panelOwner(app.shell.store.get()) === event.sessionId)
-          app.shell.actions.openTab("browser");
+        app.shell.actions.openTab("browser", event.sessionId);
       });
     }
   });

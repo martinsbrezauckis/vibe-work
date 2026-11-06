@@ -1,5 +1,6 @@
 //! Optional app-owned Firefox window commands. Uses the checked helper and existing owner key; no add-on setup.
 use super::{
+    PairingState,
     commands::{invalid, view},
     setup,
 };
@@ -22,12 +23,15 @@ pub(super) fn setup_view(shared: &crate::core::Shared) -> Option<Box<setup::Chro
             .firefox_pairing
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        setup.pairing = match pairing.0.as_str() {
-            "Window open" | "Window closed" | "Not installed" => pairing.0.clone(),
-            _ if installed() => "Window closed".into(),
-            _ => "Not installed".into(),
+        setup.pairing_state = match pairing.0 {
+            PairingState::WindowOpen | PairingState::WindowClosed | PairingState::NotInstalled => {
+                pairing.0
+            }
+            _ if installed() => PairingState::WindowClosed,
+            _ => PairingState::NotInstalled,
         };
-        setup.state = if setup.pairing == "Window open" {
+        setup.pairing = setup.pairing_state.label("Firefox");
+        setup.state = if setup.pairing_state == PairingState::WindowOpen {
             setup::SetupState::ExtensionAdded
         } else {
             setup::SetupState::NotSetUp
@@ -118,13 +122,13 @@ impl Core {
         let data = &answer.value()["structuredContent"];
         let state = data["firefoxWindow"]
             .as_str()
-            .filter(|s| matches!(*s, "Window open" | "Window closed" | "Not installed"));
+            .and_then(PairingState::firefox_window);
         if let Some(state) = state {
             *chrome
                 .owner
                 .firefox_pairing
                 .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner) = (state.into(), None);
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = (state, None);
         } else {
             return Err(invalid(data["error"]["message"].as_str().unwrap_or(
                 "The Firefox connection is unavailable. Try opening the window again.",

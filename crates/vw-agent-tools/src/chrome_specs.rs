@@ -11,7 +11,7 @@ pub(crate) fn tool_list() -> Vec<Value> {
 
 fn chrome_status() -> Value {
     json!({
-        "description": "Connected Chrome and Edge profiles, chat sessions and action IDs. Each profile names its browser. action returns one schema; actions returns up to eight compact schemas.",
+        "description": "Connected Chrome and Edge profiles, chat sessions and action IDs. profileId selects the browser for connection diagnostics. Each profile names its browser. action returns one schema; actions returns up to eight compact schemas.",
         "inputSchema": {
             "additionalProperties": false,
             "properties": {
@@ -27,6 +27,9 @@ fn chrome_status() -> Value {
                     "minItems": 1,
                     "type": "array",
                     "uniqueItems": true
+                },
+                "profileId": {
+                    "type": "string"
                 }
             },
             "required": [],

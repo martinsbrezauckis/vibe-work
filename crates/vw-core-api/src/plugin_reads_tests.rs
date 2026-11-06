@@ -230,6 +230,56 @@ async fn the_reader_skips_a_folder_copied_in_after_its_sweep() {
     assert!(home.join("plugins/late").exists());
 }
 
+/// The Tools reader is not started inside the project folder it reads. On Windows a process's current folder cannot
+/// be deleted, and the window reads the selected chat's folder every few seconds: a Temporary chat deleted during a
+/// read kept its own folder until Vibe Work quit.
+#[tokio::test]
+async fn the_reader_leaves_the_project_folder_deletable_while_it_runs() {
+    let scratch = Scratch::new("plugin-cwd");
+    let home = scratch.0.join("home");
+    let cwd = scratch.0.join("project");
+    std::fs::create_dir_all(&home).unwrap();
+    std::fs::create_dir_all(&cwd).unwrap();
+    let options = serde_json::json!({"builtinRoots": [], "workspaceRoots": [], "kept": []});
+    let mut command = discovery_command(&python(), &home, &cwd, &options);
+    let mut child = command.spawn().unwrap();
+    // Windows gives the new process its current folder while it starts; Python and Vibe's imports take far longer.
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let removed = std::fs::remove_dir(&cwd);
+    let _ = child.kill().await;
+    removed.expect("the project folder can be deleted while the reader runs");
+    // Linux and macOS delete a process's current folder anyway; the setting itself is what Windows depends on.
+    assert_eq!(command.as_std().get_current_dir(), Some(home.as_path()));
+}
+
+/// Running outside the project does not hide the project's own plugins: the reader takes the folder as an argument.
+#[tokio::test]
+async fn the_reader_lists_a_trusted_projects_plugins_from_outside_it() {
+    let scratch = Scratch::new("plugin-project");
+    let home = scratch.0.join("home");
+    let cwd = scratch.0.join("project");
+    let folder = cwd.join(".vibe/plugins/local");
+    std::fs::create_dir_all(&home).unwrap();
+    std::fs::create_dir_all(&folder).unwrap();
+    std::fs::write(folder.join("plugin.json"), r#"{"$schema":"https://agent-plugins.org/schemas/1.0.0/plugin.schema.json","name":"local"}"#).unwrap();
+    let trusted = toml::to_string(&serde_json::json!({"trusted": [cwd], "untrusted": []})).unwrap();
+    std::fs::write(home.join("trusted_folders.toml"), trusted).unwrap();
+    let options = serde_json::json!({"builtinRoots": [], "workspaceRoots": [], "kept": []});
+    let mut command = discovery_command(&python(), &home, &cwd, &options);
+    let output = inventory_output(&mut command, Duration::from_secs(30))
+        .await
+        .unwrap();
+    let view: serde_json::Value = serde_json::from_slice(&output).unwrap();
+    assert!(
+        view["plugins"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| row["name"] == "local" && row["scope"] == "project"),
+        "{view}"
+    );
+}
+
 /// The Tools reader gives each plugin's version and author from its manifest, so cards can tell plugins apart.
 #[tokio::test]
 async fn the_reader_reports_each_plugins_version_and_author() {
@@ -319,4 +369,58 @@ fn sweep_time_with_many_approved_plugins() {
             took.as_millis() / count as u128
         );
     }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn approval_discovery_does_not_stall_unrelated_core_commands() {
+    let core = crate::offline_core::start_with("plugin-discovery-scheduling", |config, _| {
+        config.market.resolver_python = Some(python());
+    })
+    .await;
+    let home = &core.shared.instructions.own_home;
+    for name in ["one", "two", "three"] {
+        let folder = home.join("plugins").join(name);
+        std::fs::create_dir_all(&folder).unwrap();
+        std::fs::write(folder.join("plugin.json"), format!(r#"{{"$schema":"https://agent-plugins.org/schemas/1.0.0/plugin.schema.json","name":"{name}"}}"#)).unwrap();
+        core.shared
+            .plugin_approvals
+            .set(&folder, Some(name))
+            .unwrap();
+    }
+    let started = std::time::Instant::now();
+    let (discovery, elapsed) = tokio::join!(
+        biased;
+        core.discover_plugins(None, None),
+        async {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+            core.execute(crate::Origin::Ui, crate::Command::PromptHistory { text: None }).await.unwrap();
+            started.elapsed()
+        }
+    );
+    core.shutdown().await;
+    assert!(discovery.is_ok(), "{discovery:?}");
+    assert!(
+        elapsed < Duration::from_millis(250),
+        "unrelated command stalled for {elapsed:?}"
+    );
+}
+
+#[test]
+fn changed_manifest_identity_revokes_an_existing_approval() {
+    let scratch = Scratch::new("plugin-renamed");
+    let home = scratch.0.join("home");
+    let folder = home.join("plugins/kept");
+    std::fs::create_dir_all(&folder).unwrap();
+    let manifest = |name: &str| {
+        std::fs::write(folder.join("plugin.json"), format!(r#"{{"$schema":"https://agent-plugins.org/schemas/1.0.0/plugin.schema.json","name":"{name}"}}"#)).unwrap();
+    };
+    manifest("original");
+    let approvals = crate::plugin_approvals::PluginApprovals::new(&home).unwrap();
+    approvals.set(&folder, Some("original")).unwrap();
+    approvals.before_launch(&server()).unwrap();
+    assert_eq!(approvals.sweep_kept().unwrap(), ["kept"]);
+    manifest("replaced");
+    assert_eq!(approvals.sweep_kept().unwrap(), Vec::<String>::new());
+    assert!(!folder.exists());
+    assert!(home.join("plugins-off/kept/plugin.json").is_file());
 }

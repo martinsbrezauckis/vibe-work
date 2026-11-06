@@ -18,7 +18,6 @@
 //!   write keeps it in front of the user's text, so the user only sees and edits their own instructions.
 
 use std::fs;
-use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use serde_json::json;
@@ -150,26 +149,11 @@ fn write_atomic(path: &Path, text: &str) -> std::io::Result<()> {
         .parent()
         .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidInput, "no parent folder"))?;
     fs::create_dir_all(dir)?;
-    let existing = fs::metadata(path).ok();
-    let tmp = dir.join(format!(".AGENTS.md.{}.tmp", std::process::id()));
-    // `create_new` refuses an existing name, a link included: the temporary file is always ours.
-    let mut file = fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&tmp)?;
-    let result = (|| {
-        file.write_all(text.as_bytes())?;
-        file.sync_all()?;
-        if let Some(meta) = &existing {
-            // Keep the file's permissions (a read-only or shared file stays that way).
-            fs::set_permissions(&tmp, meta.permissions())?;
-        }
-        fs::rename(&tmp, path)
-    })();
-    if result.is_err() {
-        let _ = fs::remove_file(&tmp);
-    }
-    result
+    vw_platform::atomic_file::replace_file(
+        path,
+        text.as_bytes(),
+        vw_platform::atomic_file::MetadataPolicy::PreservePermissions,
+    )
 }
 
 /// The comparable form of "what the user saw": a missing file and an empty one are the same.
@@ -394,3 +378,7 @@ async fn blocking<T: Send + 'static>(
         .await
         .map_err(|_| CoreError::new(ErrorCode::Internal, "file work was cancelled"))
 }
+
+#[cfg(test)]
+#[path = "instructions_write_tests.rs"]
+mod write_tests;

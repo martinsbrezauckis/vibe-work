@@ -15,13 +15,12 @@
 //! marker text stays visible in the editor. The start-up [`write`] replaces a leading block of ours from an earlier
 //! version (first line `BEGIN` up to the first `END` line).
 //!
-//! Depends on: std. Called by: `instructions` (personal read and write), `vw-host::agent_tools::prepare` (writes
-//! or removes the block at every start).
+//! Depends on: std, vw-platform (ordinary atomic replacement). Called by: `instructions` (personal read/write),
+//! `vw-host::agent_tools::prepare` (writes or removes the block at every start).
 //! Invariants: the block is the first thing in the file and appears at most once; text outside it is kept byte for
 //! byte; a link at the file's place is never written through.
 
 use std::fs;
-use std::io::Write;
 use std::path::Path;
 
 /// First line of the block.
@@ -190,19 +189,11 @@ pub fn write(vibe_home: &Path, note: bool) -> Result<bool, String> {
         return Ok(true);
     }
     fs::create_dir_all(vibe_home).map_err(|e| format!("{}: {e}", vibe_home.display()))?;
-    let tmp = vibe_home.join(format!(".AGENTS.md.note.{}.tmp", std::process::id()));
-    let result = (|| {
-        let mut file = fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&tmp)?;
-        file.write_all(updated.as_bytes())?;
-        file.sync_all()?;
-        fs::rename(&tmp, &path)
-    })();
-    if let Err(e) = result {
-        let _ = fs::remove_file(&tmp);
-        return Err(format!("{}: {e}", path.display()));
-    }
+    vw_platform::atomic_file::replace_file(
+        &path,
+        updated.as_bytes(),
+        vw_platform::atomic_file::MetadataPolicy::PreservePermissions,
+    )
+    .map_err(|e| format!("{}: {e}", path.display()))?;
     Ok(true)
 }

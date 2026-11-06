@@ -5,11 +5,17 @@ use serde_json::{Value, json};
 use std::time::Duration;
 use vw_agent_tools::wire::tools as names;
 
-const READS: [&str; 4] = [
+const READS: [&str; 10] = [
     names::PREVIEW_LIST,
     names::PREVIEW_SCREENSHOT,
     names::PREVIEW_CONSOLE,
     names::SEARCH,
+    names::PROCESSES_LIST,
+    names::HANDBOOK_CHECK,
+    names::HANDBOOK_ANSWERS,
+    names::PORT_LEASE,
+    names::PANEL_READ,
+    names::BROWSER_READ,
 ];
 
 /// True when the call waited on an approval card; false when it was allowed at once.
@@ -68,17 +74,14 @@ async fn reads_run_without_a_card_in_accept_edits_and_full_access_only() {
             (names::PREVIEW_OPEN, json!({"url":"http://localhost:5173/"})),
             (names::BROWSER_CAPTURE, json!({"kind":"screenshot"})),
             (names::PROCESS_START, json!({"command":"echo hello"})),
-            // Calls that can change what is shown keep their card: a browser page read can open, switch or reload a
-            // tab; a preview picture with a width resizes the person's preview; an editor in the side panel can hold
-            // a file the person's read rules exclude.
+            // Explicit tab creation, resizing and repairs keep their card.
             (names::BROWSER_READ, json!({"tab":"new"})),
-            (names::BROWSER_READ, json!({})),
             (names::PREVIEW_SCREENSHOT, json!({"width":900})),
-            (names::PANEL_READ, json!({})),
+            (names::HANDBOOK_CHECK, json!({"repair":"stylesheet"})),
         ] {
             assert_eq!(
                 asks(shared, tool, args).await,
-                mode != "auto-approve",
+                mode != "auto-approve" && !(tool == names::BROWSER_ACT && mode == "accept-edits"),
                 "{mode} {tool}"
             );
         }
@@ -106,6 +109,21 @@ async fn a_stricter_rule_the_person_set_keeps_the_card() {
     assert!(asks(shared, names::SEARCH, json!({"query":"x"})).await);
     assert!(asks(shared, names::PANEL_READ, json!({})).await);
     assert!(!asks(shared, names::PREVIEW_LIST, json!({})).await);
+    for tool in [
+        names::PROCESSES_LIST,
+        names::HANDBOOK_CHECK,
+        names::HANDBOOK_ANSWERS,
+        names::PORT_LEASE,
+        names::PANEL_READ,
+        names::BROWSER_READ,
+    ] {
+        std::fs::write(
+            &config,
+            format!("[tools.vw_{tool}]\npermission = \"ask\"\n"),
+        )
+        .unwrap();
+        assert!(asks(shared, tool, json!({})).await, "{tool}");
+    }
     std::fs::write(&config, "[tools.vw_preview_list]\npermission = \"ask\"\n").unwrap();
     assert!(asks(shared, names::PREVIEW_LIST, json!({})).await);
     std::fs::remove_file(&config).unwrap();
@@ -115,5 +133,55 @@ async fn a_stricter_rule_the_person_set_keeps_the_card() {
     std::fs::create_dir_all(project.parent().unwrap()).unwrap();
     std::fs::write(&project, "[tools.read_file]\npermission = \"ask\"\n").unwrap();
     assert!(asks(shared, names::SEARCH, json!({"query":"x"})).await);
+    fixture.finish().await;
+}
+
+#[tokio::test]
+async fn builtin_actions_match_chrome_in_accept_edits() {
+    let fixture = crate::feature_test_core::Fixture::new().await;
+    fixture.load("s", &fixture.root.join("work"), &[], true);
+    let shared = &fixture.core.shared;
+    shared.access.observe_request(
+        "session/agent/update",
+        "s",
+        &json!({"agentName":"accept-edits"}),
+    );
+    for action in [
+        "scroll",
+        "wait",
+        "list_tabs",
+        "navigate",
+        "back",
+        "forward",
+        "reload",
+        "click",
+        "hover",
+        "type",
+        "select",
+        "check",
+        "press",
+        "drag",
+        "upload",
+    ] {
+        assert!(
+            !asks(shared, names::BROWSER_ACT, json!({"action":action})).await,
+            "{action}"
+        );
+    }
+    for action in ["raw.execute", "cookies.read", "future.action", ""] {
+        assert!(
+            asks(shared, names::BROWSER_ACT, json!({"action":action})).await,
+            "{action}"
+        );
+    }
+    let config = shared.instructions.own_home.join("config.toml");
+    std::fs::create_dir_all(config.parent().unwrap()).unwrap();
+    std::fs::write(&config, "[tools.vw_browser_act]\npermission = \"ask\"\n").unwrap();
+    for action in ["scroll", "wait", "list_tabs", "click", "type"] {
+        assert!(
+            asks(shared, names::BROWSER_ACT, json!({"action":action})).await,
+            "explicit rule: {action}"
+        );
+    }
     fixture.finish().await;
 }

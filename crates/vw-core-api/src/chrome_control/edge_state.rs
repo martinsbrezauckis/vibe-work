@@ -1,4 +1,5 @@
 //! Separates trusted helper pairing observations by browser; used by the opt-in owner supervisor.
+use super::PairingState;
 use crate::core::Shared;
 use serde_json::Value;
 use std::sync::{Arc, PoisonError};
@@ -21,16 +22,11 @@ pub(super) fn chrome_profile(id: &str) -> bool {
     id.starts_with("chrome:") || super::enroll::uuid_shape(id)
 }
 
-fn state(data: &Value, browser: &str) -> Option<&'static str> {
+fn state(data: &Value, browser: &str) -> Option<PairingState> {
     if browser == "firefox:"
         && let Some(state) = data["firefoxWindow"].as_str()
     {
-        return match state {
-            "Window open" => Some("Window open"),
-            "Window closed" => Some("Window closed"),
-            "Not installed" => Some("Not installed"),
-            _ => None,
-        };
+        return PairingState::firefox_window(state);
     }
     if let Some(profile) = data["profileId"].as_str()
         && !profile.starts_with(browser)
@@ -51,25 +47,11 @@ fn state(data: &Value, browser: &str) -> Option<&'static str> {
     if data.get("profiles").is_none() && code.is_empty() {
         return None;
     }
-    Some(match (code, browser) {
-        ("OWNER_IDENTITY_MISMATCH" | "OWNER_CONFLICT", "edge:") => {
-            "Edge is paired with another Vibe Work. Pair again in Edge."
-        }
-        ("OWNER_IDENTITY_MISMATCH" | "OWNER_CONFLICT", "firefox:") => {
-            "Firefox is paired with another Vibe Work. Pair again in Firefox."
-        }
-        ("OWNER_IDENTITY_MISMATCH" | "OWNER_CONFLICT", _) => {
-            "Chrome is paired with another Vibe Work. Pair again in Chrome."
-        }
-        ("OWNER_APPROVAL_REQUIRED", "edge:") => "Waiting for you to pair in Edge",
-        ("OWNER_APPROVAL_REQUIRED", "firefox:") => "Waiting for you to pair in Firefox",
-        ("OWNER_APPROVAL_REQUIRED", _) => "Waiting for you to pair in Chrome",
-        ("OWNER_CONNECTING", _) => "Connecting",
-        _ if connected => "Paired",
-        (_, "edge:") => vw_vocabulary::texts::EDGE_NOT_CONNECTED,
-        (_, "firefox:") => vw_vocabulary::texts::FIREFOX_NOT_CONNECTED,
-        _ => vw_vocabulary::texts::CHROME_NOT_CONNECTED,
-    })
+    Some(PairingState::observe(
+        code,
+        connected,
+        code == "OWNER_APPROVAL_REQUIRED",
+    ))
 }
 
 pub(super) fn update(shared: &Arc<Shared>, data: &Value) {
@@ -84,17 +66,17 @@ pub(super) fn update(shared: &Arc<Shared>, data: &Value) {
         };
         let mut current = pairing.lock().unwrap_or_else(PoisonError::into_inner);
         // No registered profile is expected while an enabled extension holds another identity.
-        if current.0.contains("another Vibe Work")
+        if current.0 == PairingState::OtherOwner
             && data.get("error").is_none()
-            && state != "Paired"
+            && state != PairingState::Paired
         {
             continue;
         }
         // A signed pairing event precedes adapter registration. Empty status polls must not erase it.
         let prefix = browser;
         if (browser != "firefox:" || data.get("firefoxWindow").is_none())
-            && !current.0.is_empty()
-            && (browser != "edge:" || current.0 != "Paired")
+            && current.0 != PairingState::Unknown
+            && (browser != "edge:" || current.0 != PairingState::Paired)
             && data["profiles"].as_array().is_some_and(|profiles| {
                 !profiles.iter().any(|profile| {
                     profile["profileId"]
@@ -111,15 +93,13 @@ pub(super) fn update(shared: &Arc<Shared>, data: &Value) {
             .as_str()
             .map(|fp| fp.chars().take(16).collect())
             .or_else(|| current.1.clone());
-        let next = (state.to_owned(), fingerprint);
+        let next = (state, fingerprint);
         changed |= *current != next;
         *current = next;
         if browser == "edge:" && cfg!(feature = "your-edge") {
-            if state == "Paired" {
+            if state == PairingState::Paired {
                 remember_pairing(&shared.chrome_control, true);
-            } else if state.contains("another Vibe Work")
-                || state.contains("Waiting for you to pair")
-            {
+            } else if matches!(state, PairingState::OtherOwner | PairingState::Waiting) {
                 remember_pairing(&shared.chrome_control, false);
             }
         }
@@ -138,20 +118,17 @@ mod tests {
                 &json!({"profileId":"chrome:one", "error":{"code":"OWNER_CONNECTING"}}),
                 "chrome:"
             ),
-            Some("Connecting")
+            Some(PairingState::Connecting)
         );
     }
     #[test]
     fn an_edge_connection_never_pairs_chrome() {
         let data = json!({"profiles":[{"profileId":"edge:one", "connected":true}]});
-        assert_eq!(state(&data, "edge:"), Some("Paired"));
-        assert_eq!(
-            state(&data, "chrome:"),
-            Some(vw_vocabulary::texts::CHROME_NOT_CONNECTED)
-        );
+        assert_eq!(state(&data, "edge:"), Some(PairingState::Paired));
+        assert_eq!(state(&data, "chrome:"), Some(PairingState::Disconnected));
         let event = json!({"profileId":"edge:one", "profiles":[{"connected":true}]});
         assert_eq!(state(&event, "chrome:"), None);
-        assert_eq!(state(&event, "edge:"), Some("Paired"));
+        assert_eq!(state(&event, "edge:"), Some(PairingState::Paired));
     }
     #[test]
     fn unscoped_pairing_events_are_not_attributed_to_chrome() {
@@ -177,7 +154,7 @@ mod tests {
         );
         assert_eq!(
             shared.chrome_control.owner.edge_pairing.lock().unwrap().0,
-            "Waiting for you to pair in Edge"
+            PairingState::Waiting
         );
         update(
             shared,
@@ -185,7 +162,7 @@ mod tests {
         );
         assert_eq!(
             shared.chrome_control.owner.edge_pairing.lock().unwrap().0,
-            "Paired"
+            PairingState::Paired
         );
         update(
             shared,
@@ -193,7 +170,7 @@ mod tests {
         );
         assert_eq!(
             shared.chrome_control.owner.edge_pairing.lock().unwrap().0,
-            vw_vocabulary::texts::EDGE_NOT_CONNECTED
+            PairingState::Disconnected
         );
         fixture.finish().await;
     }
@@ -206,15 +183,9 @@ mod firefox_tests {
     #[test]
     fn a_firefox_connection_never_pairs_chrome_or_edge() {
         let data = json!({"profiles":[{"profileId":"firefox:same","connected":true}]});
-        assert_eq!(state(&data, "firefox:"), Some("Paired"));
-        assert_eq!(
-            state(&data, "chrome:"),
-            Some(vw_vocabulary::texts::CHROME_NOT_CONNECTED)
-        );
-        assert_eq!(
-            state(&data, "edge:"),
-            Some(vw_vocabulary::texts::EDGE_NOT_CONNECTED)
-        );
+        assert_eq!(state(&data, "firefox:"), Some(PairingState::Paired));
+        assert_eq!(state(&data, "chrome:"), Some(PairingState::Disconnected));
+        assert_eq!(state(&data, "edge:"), Some(PairingState::Disconnected));
     }
     #[tokio::test]
     async fn owned_window_state_has_no_addon_grants() {

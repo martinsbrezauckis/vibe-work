@@ -45,8 +45,7 @@ import { FileMentionMenu } from "./FileMentionMenu";
 import { usePromptHistory } from "./usePromptHistory";
 import { useFileMention } from "./useFileMention";
 import { ChromeTabPicker } from "./ChromeTabPicker";
-import { openBrowserTabs, usableBrowsers } from "./browserTabs";
-import { ChromeWorkNote } from "./ChromeWorkNote";
+import { BrowserTabEntry } from "./BrowserTabEntry";
 import { LoopsStrip } from "./LoopsStrip";
 import { useAutoHeight } from "./autoHeight";
 import { ComposerTools } from "./ComposerTools";
@@ -73,7 +72,6 @@ export default function Composer({ sessionId }: { sessionId: string }): ReactEle
   const app = useApp();
   const { composer, core, documents, market } = app;
   const key = useKeyReadiness();
-  const browserEnabled = useCoreState((s) => usableBrowsers(s.chromeControl).length > 0);
   const readOnly = useHeldBy(sessionId) !== null;
   const heldKind = useCoreState((s) => s.heldKind[sessionId]);
   const entry = useCoreState((s) => s.sessions[sessionId]);
@@ -308,7 +306,6 @@ export default function Composer({ sessionId }: { sessionId: string }): ReactEle
             onStop={() => void actions.stop(sessionId)}
           />
         ) : null}
-        <ChromeWorkNote sessionId={sessionId} />
         <ChromeTabPicker sessionId={sessionId} />
         <DocumentChips sessionId={sessionId} />
         <ChipsRow
@@ -429,18 +426,7 @@ export default function Composer({ sessionId }: { sessionId: string }): ReactEle
           }}
         />
         <ComposerTools
-          browserTab={
-            browserEnabled ? (
-              <Button
-                type="button"
-                appearance="choice"
-                data-testid="composer.browser-tabs-open"
-                onClick={() => void openBrowserTabs(app, sessionId, "window")}
-              >
-                {TEXT.addBrowserTab}
-              </Button>
-            ) : null
-          }
+          browserTab={<BrowserTabEntry sessionId={sessionId} />}
           {...(config === null
             ? {}
             : {

@@ -630,13 +630,7 @@ fn merge(
             }
         }
         if !main && prominent {
-            model.covering_frames.push(crate::model::FrameChoices {
-                origin: observation.origin.clone(),
-                complete: !observation.model.truncated
-                    && choices.len() == observation.model.choice_count as usize,
-                total: observation.model.choice_count,
-                choices,
-            });
+            append_choices(&mut model, observation, choices);
         }
         append_frame_content(&mut model, &observation.model, *main, visible);
     }
@@ -646,6 +640,24 @@ fn merge(
         );
     }
     Ok(model)
+}
+
+fn append_choices(
+    model: &mut PageModel,
+    observation: &Observation,
+    choices: Vec<crate::model::RefItem>,
+) {
+    if let Some(mut context) = observation.model.document_context.clone() {
+        context.frame_origin.clone_from(&observation.origin);
+        model.choice_context.push(context);
+    }
+    model.covering_frames.push(crate::model::FrameChoices {
+        origin: observation.origin.clone(),
+        complete: !observation.model.truncated
+            && choices.len() == observation.model.choice_count as usize,
+        total: observation.model.choice_count,
+        choices,
+    });
 }
 
 fn append_frame_content(model: &mut PageModel, child: &PageModel, main: bool, visible: bool) {

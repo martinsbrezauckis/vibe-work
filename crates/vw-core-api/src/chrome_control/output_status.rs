@@ -70,7 +70,10 @@ pub(super) fn compact(shared: &Shared, chat: &str, action: Option<&str>, result:
             if row["action"] == row["capability"] {
                 row.as_object_mut().map(|r| r.remove("capability"));
             }
-            if row["allowedInThisMode"] == true || row.get("needs").is_some() {
+            if row["allowedInThisMode"] == true
+                || row.get("needs").is_some()
+                || row["approvalRequired"] == true
+            {
                 row.as_object_mut().map(|r| r.remove("allowedInThisMode"));
             }
         }

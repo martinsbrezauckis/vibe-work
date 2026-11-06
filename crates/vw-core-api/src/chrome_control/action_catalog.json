@@ -199,7 +199,7 @@
       "id": "page.read",
       "tool": "chrome_page_read",
       "capability": "page.read",
-      "description": "Controls + preview. interactiveOnly:false: text/structure; options:true: options; ref: subtree; summary:true: DOM counts/coverage. maxChars: first preview. Continue with returned args; reassemble JSON details.",
+      "description": "Controls + preview. interactiveOnly:false: text/structure; options:true: options; ref: subtree; summary:true: counts. Cursor pages captured data. chrome_execute saveTo:file exports this read.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -228,7 +228,7 @@
             "type": "integer",
             "minimum": 1,
             "maximum": 500,
-            "default": 32
+            "default": 8
           },
           "find": {
             "type": "string",
@@ -239,7 +239,7 @@
             "type": "integer",
             "minimum": 1500,
             "maximum": 64000,
-            "default": 3000
+            "default": 2000
           },
           "textOffset": {
             "type": "integer",

@@ -1,4 +1,5 @@
 /** Marks open file tabs after a completed Vibe write. Uses existing history accessors; called by the file workspace. No buffer or disk content is changed. */
+import type { CoreEvent } from "../protocol/core";
 import type { CoreController } from "./coreStore";
 import type { FileWorkspace } from "./fileWorkspace";
 import { absoluteFilePath } from "../features/files/model/context";
@@ -13,14 +14,14 @@ import {
   str,
 } from "../features/transcript/model/entries";
 
-export function watchFileActivity(
+export function createFileActivity(
   core: CoreController,
   sessions: () => Readonly<Record<string, FileWorkspace>>,
   mark: (session: string, file: string) => void,
-): () => void {
+): (event: CoreEvent) => void {
   const seen = new Set<string>();
   const normalize = (path: string) => path.replaceAll("\\", "/");
-  return core.listen((event) => {
+  return (event) => {
     if (event.type === "snapshot") {
       const history = arr(obj(event.snapshot.state)?.["history"]);
       for (const item of history) {
@@ -70,5 +71,5 @@ export function watchFileActivity(
         )
           mark(session, file);
     }
-  });
+  };
 }

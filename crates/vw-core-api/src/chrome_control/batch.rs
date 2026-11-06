@@ -109,10 +109,12 @@ where
     json!({"vwMcpResult":result})
 }
 
-/// Settle vault decisions before running any step. Prepared writes still recheck the live mode.
+/// Settle consent before running any step. Prepared actions still recheck the live mode.
 pub(crate) async fn prepare(
     shared: &std::sync::Arc<crate::core::Shared>,
     chat: &str,
+    source: &str,
+    call: &str,
     args: Value,
 ) -> Result<crate::ask::tool_calls::receipts::Execution, String> {
     super::gateway::validate_public_args(&args)?;
@@ -123,6 +125,8 @@ pub(crate) async fn prepare(
         prepared.push_back(
             if ["auth.fill", "auth.basic"].contains(&step["action"].as_str().unwrap_or_default()) {
                 Some(super::login::prepare(shared, chat, step).await?)
+            } else if super::read_consent::needed(shared, chat, &step) {
+                Some(super::read_consent::prepare(shared, chat, source, call, step).await?)
             } else {
                 None
             },

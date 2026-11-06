@@ -34,6 +34,7 @@ pub fn default_initialize_params() -> InitializeParams {
             session_spawn: None,
             // Cross-chat tools need a separate design for VW's folder and vault boundaries.
             session_peers: None,
+            session_peer_restore: Some(false),
             disabled_notifications: None,
             // Vibe Work does not lend its sign-in tokens to Vibe, so Vibe never sends
             // `platformCredentials/resolve` and keeps its own sign-in.
@@ -74,5 +75,6 @@ mod tests {
     fn peers_stay_off_in_the_handshake() {
         let params = serde_json::to_value(super::default_initialize_params()).unwrap();
         assert!(params["capabilities"].get("sessionPeers").is_none());
+        assert_eq!(params["capabilities"]["sessionPeerRestore"], false);
     }
 }

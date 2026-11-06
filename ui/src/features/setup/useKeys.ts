@@ -11,7 +11,6 @@ import { useApp } from "../shell/AppContext";
 const NONE: Store<KeyUi> = createStore<KeyUi>({
   availability: "none",
   status: null,
-  candidates: [],
   vibeKeys: [],
   mistralKeys: [],
   switching: null,

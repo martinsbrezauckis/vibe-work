@@ -1,13 +1,11 @@
-//! Feeds channel notifications into the store, resyncs, maintains callbacks/model aliases, restores sessions,
-//! closes idle channels and answers `callback/call`. Lobby lease reports go to `session_holder`.
-//! Depends on vw-rpc, vw-session, vw-gate, `core::Shared`, channels, event, view and recovery.
-//! Called by core, which spawns `run` and installs `callback_handler` on the supervisor.
+//! Core spawns this notification pump and callback handler: store updates, resyncs, callbacks and idle channels.
+//! Uses vw-rpc/session/gate, Shared, channels, events, views and recovery; lobby leases go to `session_holder`.
 //! Invariants:
 //! - One pump holds a Weak to the core; one forwarder per channel feeds its bounded queue.
 //! - Events naming a session held by ANOTHER channel are dropped and counted (`Channels::foreign`).
 //!   Callbacks for a session with no channel (a subagent's card on its parent's channel) are kept;
 //!   answers return on the arriving channel (`Channels::note_callback`).
-//! - At most one resync per session runs; concurrent requests coalesce into one more read. No timer reads.
+//! - At most one resync per session runs; concurrent and deferred requests coalesce into one more read.
 //! - Closed callbacks leave the gate's book; server restart or channel death closes that channel's callbacks.
 //! - A lagged/gapped channel resyncs its session; a lagged/gapped lobby resyncs every loaded session.
 //! - `one_ask` approves a bash callback once when its guard was already approved; other cards are remembered.
@@ -15,7 +13,6 @@
 //!   follow hand-offs and survive a server restart.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::sync::atomic::Ordering;
 use std::sync::{Arc, OnceLock, Weak};
 use std::time::Duration;
 
@@ -25,18 +22,27 @@ use tokio::task::JoinSet;
 use tracing::{debug, warn};
 use vw_protocol::ProtocolErrorCode;
 use vw_rpc::{HandlerError, Inbound, ServerRequest, Subscription};
-use vw_session::{Action, Applied, Change, LoadKind};
+use vw_session::{Action, Applied, Change};
 use vw_supervisor::SupervisorState;
 
 use crate::channels::{ChannelKey, Feed};
 use crate::core::Shared;
-use crate::event::{AlertKind, CoreEvent};
+use crate::event::CoreEvent;
 use crate::recovery;
-use crate::resync_budget::{Budget, ResyncBudget};
+use crate::resync_budget::ResyncBudget;
 use crate::view::ServerStatus;
 
 #[path = "pump_warnings.rs"]
 mod warnings;
+
+#[path = "pump_resync.rs"]
+mod resync;
+use resync::next_deferred;
+pub(crate) use resync::refresh;
+
+#[cfg(test)]
+#[path = "pump_resync_tests.rs"]
+mod resync_tests;
 
 /// The `callback/call` handler: registers the callback with the gate, tells subscribers, and acks
 /// `{callbackId, accepted: true}` (the answer itself comes later as
@@ -290,10 +296,8 @@ struct Pump {
     resyncs: JoinSet<Resynced>,
     /// Browser releases after terminal turn updates; cancelled when the pump ends.
     browser_releases: JoinSet<()>,
-    /// Delayed re-reads the store asked for (`Action::NeedsResync { delayed: true }`): one per session at a time,
-    /// each a single resync through the budget after [`DELAYED_RESYNC`], never a loop.
-    later: JoinSet<String>,
-    later_ids: BTreeSet<String>,
+    /// One owned deadline per deferred request (store delay or budget expiry), never periodic reads.
+    later: BTreeMap<String, tokio::time::Instant>,
     in_flight: BTreeSet<String>,
     queued: BTreeSet<String>,
     open_callbacks: BTreeMap<String, Vec<String>>,
@@ -347,8 +351,7 @@ pub(crate) async fn run(
         items,
         resyncs: JoinSet::new(),
         browser_releases: JoinSet::new(),
-        later: JoinSet::new(),
-        later_ids: BTreeSet::new(),
+        later: BTreeMap::new(),
         in_flight: BTreeSet::new(),
         queued: BTreeSet::new(),
         open_callbacks: BTreeMap::new(),
@@ -380,8 +383,8 @@ pub(crate) async fn run(
                 pump.after_apply(&shared, &applied);
             }
             Some(_) = pump.browser_releases.join_next(), if !pump.browser_releases.is_empty() => {}
-            Some(Ok(id)) = pump.later.join_next(), if !pump.later.is_empty() => {
-                pump.later_ids.remove(&id);
+            id = next_deferred(&pump.later) => {
+                pump.later.remove(&id);
                 let Some(shared) = pump.weak.upgrade() else {
                     return;
                 };
@@ -540,6 +543,9 @@ impl Pump {
             && *generation != self.generation
         {
             self.generation = *generation;
+            self.later.clear();
+            self.queued.clear();
+            self.budget = ResyncBudget::standard();
             for view in shared.store.views() {
                 shared
                     .asks
@@ -633,6 +639,9 @@ impl Pump {
             }
             if let Change::Removed { session_id } = change {
                 shared.history_loading.stop(session_id);
+                self.later.remove(session_id);
+                self.queued.remove(session_id);
+                self.budget.forget(session_id);
             }
             crate::guard_refusals::observe(shared, change);
             self.browser_changed(shared, change);
@@ -687,104 +696,13 @@ impl Pump {
                 delayed,
             } = action;
             debug!(session_id, reason, delayed, "store asked for a resync");
-            if !*delayed {
+            if *delayed {
+                self.later
+                    .entry(session_id.clone())
+                    .or_insert_with(|| tokio::time::Instant::now() + DELAYED_RESYNC);
+            } else {
                 self.resync(shared, session_id);
-            } else if self.later_ids.insert(session_id.clone()) {
-                let id = session_id.clone();
-                self.later.spawn(async move {
-                    tokio::time::sleep(DELAYED_RESYNC).await;
-                    id
-                });
             }
-        }
-    }
-
-    fn resync_all(&mut self, shared: &Arc<Shared>) {
-        for view in shared.store.views() {
-            self.resync(shared, &view.session_id);
-        }
-    }
-
-    /// Starts a `session/read` for `session_id`, or queues one more if a read is in flight.
-    fn resync(&mut self, shared: &Arc<Shared>, session_id: &str) {
-        if self.in_flight.contains(session_id) {
-            self.queued.insert(session_id.to_owned());
-            return;
-        }
-        match self.budget.spend(session_id, std::time::Instant::now()) {
-            Budget::Allowed => {}
-            Budget::Paused { first } => {
-                if first {
-                    warn!(
-                        session_id,
-                        "too many resyncs; pausing re-reads of this session"
-                    );
-                    shared.emit(CoreEvent::Alert {
-                        session_id: Some(session_id.to_owned()),
-                        kind: AlertKind::ResyncPaused,
-                        message: "A session's data kept changing under the app, so it stopped re-reading it for a while. What you see may be out of date.".to_owned(),
-                    });
-                }
-                return;
-            }
-        }
-        self.in_flight.insert(session_id.to_owned());
-        let shared = shared.clone();
-        let session_id = session_id.to_owned();
-        self.resyncs.spawn(async move {
-            let applied = refresh(&shared, &session_id).await;
-            Resynced {
-                session_id,
-                applied,
-            }
-        });
-    }
-
-    /// A resync finished: apply its follow-up actions and run a queued one. Returns false when
-    /// the core is gone.
-    fn resynced(&mut self, done: &Resynced) -> bool {
-        let Some(shared) = self.weak.upgrade() else {
-            return false;
-        };
-        self.in_flight.remove(&done.session_id);
-        if let Some(applied) = &done.applied {
-            self.after_apply(&shared, applied);
-        }
-        if self.queued.remove(&done.session_id) {
-            self.resync(&shared, &done.session_id);
-        }
-        true
-    }
-}
-
-/// `session/read` through the gate, merged into the store (routed to the session's channel when it
-/// has one). `None` when the read failed (logged; the session stays marked for resync and the next
-/// event retries). Counted in `Shared::resync_reads` (the status report shows it: asserts no
-/// read happens while sessions merely run).
-pub(crate) async fn refresh(shared: &Shared, session_id: &str) -> Option<Applied> {
-    shared.resync_reads.fetch_add(1, Ordering::Relaxed);
-    let params = json!({"sessionId": session_id});
-    let reply = shared.gate.call("session/read", params, None).await;
-    let state = match reply {
-        Ok(reply) => reply.result.get("state").cloned(),
-        Err(error) => {
-            warn!(session_id, %error, "resync read failed");
-            return None;
-        }
-    };
-    let loaded = state.map(|mut s| {
-        crate::title_guard::withhold_in(shared, &mut s);
-        shared.store.load(s, LoadKind::Read)
-    });
-    match loaded {
-        Some(Ok(applied)) => Some(applied),
-        Some(Err(error)) => {
-            warn!(session_id, %error, "resync result could not be loaded");
-            None
-        }
-        None => {
-            warn!(session_id, "resync result has no state");
-            None
         }
     }
 }

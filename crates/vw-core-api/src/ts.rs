@@ -426,7 +426,7 @@ fn push_decls(out: &mut String, decls: &[String]) {
     for decl in decls {
         out.push('\n');
         out.push_str("export ");
-        out.push_str(decl);
+        out.push_str(&trim_decl_lines(decl));
         out.push('\n');
     }
 }

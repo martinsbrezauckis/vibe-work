@@ -219,6 +219,7 @@ pub(crate) async fn deleted(shared: &Shared, id: &str) {
     // A deleted session's terminals stop with it, before the store forgets it.
     crate::terminals::close_session(shared, id).await;
     let applied = shared.store.remove(id);
+    shared.names.forget(id);
     shared.saved_documents.forget(id);
     shared.supervisor.untrack_session(id);
     let _ = shared.loads.send(applied).await;

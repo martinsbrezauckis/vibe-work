@@ -19,7 +19,6 @@
 import type {
   CommandResult,
   CoreEvent,
-  KeyCandidateView,
   MistralKeyView,
   KeyRequest,
   KeyStatusView,
@@ -47,8 +46,6 @@ export interface KeyUi {
   /** `loading` until the first status; `none` when this run has no key service. */
   availability: "loading" | "none" | "ready" | "failed";
   status: KeyStatusView | null;
-  /** Mistral keys already in the open vault. */
-  candidates: readonly KeyCandidateView[];
   /** Places where Vibe itself holds a key (metadata only). */
   vibeKeys: readonly VibeKeyView[];
   /** Saved model credentials, metadata only. */
@@ -82,7 +79,6 @@ export interface KeyUi {
 const INITIAL: KeyUi = {
   availability: "loading",
   status: null,
-  candidates: [],
   vibeKeys: [],
   mistralKeys: [],
   switching: null,
@@ -224,7 +220,6 @@ export function createKeys(
     const step = stepOf(status);
     const unlocked = status.vaultState === "unlocked";
     const keyReady = status.keyState === "ready";
-    let candidates: readonly KeyCandidateView[] = [];
     let vibeKeys: readonly VibeKeyView[] = [];
     let mistralKeys: readonly MistralKeyView[] = [];
     if (unlocked) {
@@ -232,10 +227,6 @@ export function createKeys(
         .run({ type: "keys", request: { op: "listMistralKeys" } })
         .catch(() => null);
       if (saved?.type === "mistralKeys") mistralKeys = saved.keys;
-      const listed = await core
-        .run({ type: "keys", request: { op: "listKeyCandidates" } })
-        .catch(() => null);
-      if (listed?.type === "keyCandidates") candidates = listed.candidates;
     }
     if (step.kind === "create" || step.kind === "pickVault" || (unlocked && !keyReady)) {
       const found = await core
@@ -255,7 +246,6 @@ export function createKeys(
       availability: "ready",
       problem: s.problem?.operation === "readStatus" ? null : s.problem,
       status,
-      candidates,
       mistralKeys,
       vibeKeys,
       setupDone: s.setupDone || keyReady,
@@ -382,7 +372,7 @@ export function createKeys(
       change({ op: "renameMistralKey", itemId, name: name.trim() }, false),
     removeMistralKey: (itemId) => change({ op: "removeMistralKey", itemId }, false),
     saveKey: (key) => change({ op: "setupStoreKey", apiKey: key.trim() }, true),
-    useSaved: (itemId) => change({ op: "useExistingKey", itemId }, true),
+    useSaved: (itemId) => change({ op: "useMistralKey", itemId }, true),
     importVibeKey: (source) => change({ op: "importVibeKey", source }, true),
     async removeVibeCopy(source) {
       const ok = await change({ op: "removeVibeKeyOriginal", source }, false);

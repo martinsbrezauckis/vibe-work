@@ -7,8 +7,8 @@
 //! - **conflict check:** `fingerprint` is what the tab read; when the file's fingerprint differs now (the agent or
 //!   another program changed it), nothing is written and the answer is `stale`;
 //! - the file keeps its line endings (a text area gives `\n`; a file that used `\r\n` gets them back) and its UTF-8
-//!   byte-order mark; it is written whole, keeping its permissions, through `save_file::replace_file` (a new temporary
-//!   file under a random name, never through a link planted at a predictable name);
+//!   byte-order mark; it is written whole, keeping its permissions, through the platform atomic writer
+//!   (a new temporary file under a random name, never through a link planted at a predictable name);
 //! - hostile folders (a cloned repository): a file or folder that is a link leading out of the session's folders is
 //!   refused by the handle's scope check (canonical path inside a canonical root), and checked again right
 //!   before the write (the canonical path must still be the same).
@@ -18,6 +18,8 @@
 //!
 //! Depends on: `files` (`checked`), `files_read` (fingerprint, limit). Called by: `files` (`FilesRequest::Write`).
 //! Invariants: nothing is written unless every rule passed; a failed write leaves the old file and no temporary file.
+
+use vw_platform::atomic_file::{MetadataPolicy, replace_file};
 
 use crate::changes::Review;
 use crate::core::Core;
@@ -144,7 +146,7 @@ impl Core {
             } else {
                 None
             };
-            if let Err(error) = crate::save_file::replace_file(&path, &bytes, Some(&meta.permissions())) {
+            if let Err(error) = replace_file(&path, &bytes, MetadataPolicy::PreservePermissions) {
                 if let Some(undo) = undo
                     && let Some(guard) = review.as_mut()
                     && let Some(Review::Git { baseline, .. }) = &mut guard.review

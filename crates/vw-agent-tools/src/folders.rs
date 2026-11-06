@@ -431,7 +431,7 @@ impl Layout {
         }
         if access != Access::Read
             && let Some(data) = self.vibe_home.parent()
-            && (approval_path(&real, data) || access != Access::Context && data.starts_with(&real))
+            && approval_path(&real, data)
         {
             return Some(format!(
                 "Not run: Vibe Work's plugin approvals ({}); change plugins in Tools. {own}",

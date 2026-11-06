@@ -11,6 +11,38 @@ fn body(result: &Value) -> &Value {
 
 const CHROME: &str = "12345678-1234-1234-1234-123456789abc";
 
+#[tokio::test]
+async fn explicit_edge_requests_report_edges_connection_problem() {
+    let core = fixture("edge-request-diagnosis", json!([])).await;
+    core.shared
+        .chrome_control
+        .owner
+        .edge_pairing
+        .lock()
+        .unwrap()
+        .0 = crate::chrome_control::PairingState::OtherOwner;
+    for profile in ["edge", EDGE_NAME, "edge:p"] {
+        for (tool, args) in [
+            ("chrome_status", json!({"profileId":profile})),
+            (
+                "chrome_session",
+                json!({"action":"open","profileId":profile}),
+            ),
+        ] {
+            let result = gateway::call(&core.shared, "s", tool, args).await.unwrap();
+            let text = result["vwMcpResult"]["content"][0]["text"]
+                .as_str()
+                .unwrap();
+            assert!(
+                text.contains("another Vibe Work") && text.contains("Connect Edge"),
+                "{profile} {tool}: {text}"
+            );
+            assert!(!text.contains("Connect Chrome"), "{text}");
+        }
+    }
+    core.shutdown().await;
+}
+
 pub(super) async fn fixture(name: &str, profiles: Value) -> crate::Core {
     fixture_with(name, profiles, |_| {}).await
 }

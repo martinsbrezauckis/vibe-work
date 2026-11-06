@@ -6,6 +6,7 @@
   "permissions": [
     "allow-core-execute",
     "allow-desktop-settings",
+    "allow-desktop-attention",
     "allow-desktop-subscribe",
     "allow-app-quit",
     "allow-core-subscribe",

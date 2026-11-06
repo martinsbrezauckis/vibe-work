@@ -25,6 +25,11 @@ pub(super) struct Record {
     pub(super) digest: String,
     pub(super) bytes: usize,
     pub(super) metadata: Value,
+    /// Digest of the call's single-use receipt (never the receipt itself). Vibe keeps the receipt in the effect's
+    /// input, and it is the only key shared with the effect: a real effect id is `effect-<runtime action id>`,
+    /// not the hook's call id. Empty in indexes written before this field.
+    #[serde(default)]
+    pub(super) receipt: String,
 }
 impl Record {
     fn relative(&self) -> String {
@@ -72,6 +77,11 @@ impl Record {
 struct State {
     records: Vec<Record>,
     deleted: BTreeSet<String>,
+    /// Receipt digests of issued video calls not yet recorded, by (source, call); bounded.
+    receipts: std::collections::VecDeque<(String, String, String)>,
+}
+fn receipt_digest(receipt: &str) -> String {
+    blake3::hash(receipt.as_bytes()).to_hex().to_string()
 }
 pub(crate) struct History {
     path: PathBuf,
@@ -79,6 +89,15 @@ pub(crate) struct History {
 }
 fn safe(id: &str) -> bool {
     !id.is_empty() && id.len() <= 256 && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+}
+fn take_receipt(state: &mut State, source: &str, call: &str) -> String {
+    state
+        .receipts
+        .iter()
+        .position(|(s, c, _)| s == source && c == call)
+        .and_then(|at| state.receipts.remove(at))
+        .map(|(_, _, digest)| digest)
+        .unwrap_or_default()
 }
 impl History {
     pub(crate) fn load(path: PathBuf) -> Result<Self, String> {
@@ -108,7 +127,7 @@ impl History {
             path,
             state: Mutex::new(State {
                 records,
-                deleted: BTreeSet::new(),
+                ..State::default()
             }),
         })
     }
@@ -165,6 +184,7 @@ impl History {
             digest: blake3::hash(&bytes).to_hex().to_string(),
             bytes: bytes.len(),
             metadata: reply,
+            receipt: take_receipt(&mut state, source, call),
         };
         let mut next = state.records.clone();
         let mut removed = Vec::new();
@@ -218,6 +238,7 @@ impl History {
         if state.deleted.contains(session) {
             return Err("This chat was deleted.".into());
         }
+        let receipt = take_receipt(&mut state, source, call);
         let mut next = state.records.clone();
         let removed = if next.len() >= MAX_RECORDS {
             Some(next.remove(0))
@@ -233,6 +254,7 @@ impl History {
             digest: String::new(),
             bytes: 0,
             metadata,
+            receipt,
         });
         if let Some(old) = removed {
             old.remove()?;
@@ -262,17 +284,29 @@ impl History {
             .ok_or("Saved video frames are unavailable or were removed to make room.")?;
         crate::video_image::content(record, handle, cell)
     }
+    /// Remembers the receipt issued for a video call so its record can be found from Vibe's effect entry.
+    pub(crate) fn bind_receipt(&self, source: &str, call: &str, receipt: &str) {
+        let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        if state.receipts.len() >= 256 {
+            state.receipts.pop_front();
+        }
+        state
+            .receipts
+            .push_back((source.into(), call.into(), receipt_digest(receipt)));
+    }
     pub(crate) fn overlay(&self, value: &mut Value) {
         if value["type"] == "effect"
             && let (Some(source), Some(call)) = (value["sessionId"].as_str(), value["id"].as_str())
         {
+            let receipt = value["detail"]["input"][vw_agent_tools::wire::tools::RECEIPT_FIELD]
+                .as_str()
+                .map(receipt_digest);
             let state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
-            if let Some(record) = state
-                .records
-                .iter()
-                .rev()
-                .find(|r| r.source == source && r.call == call)
-            {
+            if let Some(record) = state.records.iter().rev().find(|r| {
+                r.source == source
+                    && (r.call == call
+                        || (!r.receipt.is_empty() && receipt.as_ref() == Some(&r.receipt)))
+            }) {
                 value["vwVideo"] = crate::video_image::projection(&record.metadata);
             }
         }

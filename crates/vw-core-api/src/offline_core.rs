@@ -59,6 +59,9 @@ pub(crate) async fn start_with(
     if config.chrome_control.launcher.is_none() {
         config.chrome_control.launcher = Some(Arc::new(|_| Ok(())));
     }
+    if config.chrome_control.edge_launcher.is_none() {
+        config.chrome_control.edge_launcher = Some(Arc::new(|_| Ok(())));
+    }
     // ... nor touch Chrome's real per-user registry keys (Windows): a test that keeps Chrome's default root gets a
     // disposable key of its own under the shared test parent.
     if config.chrome_control.windows_registry_root

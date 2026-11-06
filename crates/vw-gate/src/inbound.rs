@@ -13,6 +13,8 @@ pub enum InboundKind {
     /// `clientTool/*`: runs in our process, outside Vibe's sandbox, so the handler must contain it.
     /// The unified harness does not send these.
     ClientTool,
+    /// Known but not offered by the desktop handshake; the core rejects it like any unsupported request.
+    Denied,
     /// Not a method this version knows.
     Unknown,
 }
@@ -22,6 +24,7 @@ pub enum InboundKind {
 pub fn classify_server_request(method: &str) -> InboundKind {
     match method {
         "callback/call" => InboundKind::CallbackCall,
+        "session/peer/restore" => InboundKind::Denied,
         m if m.starts_with("clientTool/") && vw_protocol::SERVER_REQUEST_METHODS.contains(&m) => {
             InboundKind::ClientTool
         }

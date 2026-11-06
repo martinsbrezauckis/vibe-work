@@ -16,18 +16,10 @@ pub(crate) fn handed_off(choices: &Choices, old: &str, new: &str) {
     {
         return;
     }
-    for records in [&choices.fallbacks, &choices.pending, &choices.remembered] {
-        if let Some(choice) = records.get(old)
-            && let Err(error) = records.change(new, Some(choice.clone()))
-        {
-            tracing::warn!(%error, "model choice could not be saved for the replacement chat");
-            // Keep the choice in memory when its disk write fails.
-            records
-                .pending
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .insert(new.into(), choice);
-        }
+    if let Err(error) = choices.records.copy(old, new) {
+        tracing::warn!(%error, "model choice could not be saved for the replacement chat");
+        // The live replacement must retain the whole choice even if its disk commit fails.
+        choices.records.copy_in_memory(old, new);
     }
 }
 
@@ -44,19 +36,14 @@ pub(crate) fn forked(
         return;
     };
     let choices = &shared.model_choices;
-    let choice = choices
-        .fallbacks
-        .get(source)
-        .or_else(|| choices.pending.get(source))
-        .or_else(|| choices.remembered.get(source))
-        .or_else(|| {
-            shared
-                .store
-                .view(source)
-                .and_then(|view| super::recorded(&view.state["session"]))
-        });
+    let choice = choices.records.get(source).expected().or_else(|| {
+        shared
+            .store
+            .view(source)
+            .and_then(|view| super::recorded(&view.state["session"]))
+    });
     if let Some(choice) = choice
-        && let Err(error) = choices.pending.change(id, Some(choice))
+        && let Err(error) = choices.records.update(id, |record| record.accepted(choice))
     {
         tracing::warn!(%error, "branch model choice could not be saved");
     }
@@ -79,6 +66,6 @@ mod tests {
         handed_off(&choices, "old", "new");
         pick("new", "large");
         handed_off(&choices, "old", "new");
-        assert_eq!(choices.pending.get("new").unwrap().alias, "large");
+        assert_eq!(choices.records.get("new").pending.unwrap().alias, "large");
     }
 }

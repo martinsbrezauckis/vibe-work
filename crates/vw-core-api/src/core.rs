@@ -633,8 +633,8 @@ impl Core {
         self.shared.gate.is_picked_folder(path)
     }
 
-    /// True when a session (listed or loaded) works in `path` or has it as a workspace root. The
-    /// host uses it to refuse "reveal in file manager" for any other path.
+    /// True when a session (listed or loaded) works in exactly `path` or has it as a workspace root.
+    /// Folder reveal uses [`Self::reveal_folder_target`] to admit contained subfolders too.
     #[must_use]
     pub fn is_session_folder(&self, path: &str) -> bool {
         self.shared

@@ -1,5 +1,5 @@
 //! Bounded ownership of live Windows toasts, independent of `WinRT` for portable lifetime tests.
-//! Called by the Windows notifier; every known event, including expiry, transfers ownership out.
+//! Called by the Windows notifier; banner timeout keeps ownership for Notification Center; other events transfer it out.
 
 use std::collections::VecDeque;
 
@@ -34,7 +34,10 @@ impl<T> ToastStore<T> {
         }
     }
 
-    pub(super) fn event(&mut self, id: u64, _event: ToastEvent) -> Option<T> {
+    pub(super) fn event(&mut self, id: u64, event: ToastEvent) -> Option<T> {
+        if event == ToastEvent::TimedOut {
+            return None;
+        }
         let index = self.entries.iter().position(|(key, _)| *key == id)?;
         self.entries.remove(index).map(|(_, toast)| toast)
     }

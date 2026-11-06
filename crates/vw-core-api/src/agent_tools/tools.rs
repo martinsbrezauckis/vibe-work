@@ -31,6 +31,7 @@ pub(crate) async fn call(
     tool: &str,
     mut args: Value,
 ) -> Result<Value, String> {
+    vw_agent_tools::video::check_tool(tool)?;
     if let Some(execution) =
         crate::ask::tool_calls::receipts::take(shared, session_id, tool, &mut args)?
     {

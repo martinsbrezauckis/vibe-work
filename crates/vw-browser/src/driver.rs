@@ -7,7 +7,8 @@
 //! Called by: vw-core-api (agent tools, the `browser` command), tests.
 //! Invariants:
 //! - A ref action needs a retained observation in this document and the same node, fingerprint and label;
-//!   gone, replaced or ambiguous targets require another read. Receipt and coordinate baselines stay latest-only.
+//!   gone, replaced or ambiguous targets require another read. Receipts retain the target's last observed state;
+//!   coordinate baselines stay latest-only.
 //! - The agent never types into a password, one-time-code or payment-card field (refused, nothing typed).
 //! - Local-network reads and actions require the person's current switch in addition to ordinary page ownership
 //!   and action permissions. With that switch off, the agent may navigate away to an allowed page.
@@ -25,10 +26,9 @@ use vw_preview::{HistoryStep, PreviewError, PreviewService, Shot};
 use crate::act::{Action, PageAnswer};
 use crate::consent::ConsentConfirmer;
 use crate::delegation::DelegationAuthorizer;
-use crate::model::PageModel;
 use crate::observe;
 use crate::refs::PAGE_CLOSED;
-use crate::sessions::{Actor, Outcome, Sessions};
+use crate::sessions::{Actor, Outcome, Seen, Sessions};
 use crate::{guard, receipt, scripts};
 
 /// The agent's refusal on a local-network page the user opened.
@@ -62,7 +62,6 @@ const SETTLE_MAX: Duration = Duration::from_millis(1500);
 const SETTLE_QUIET: Duration = Duration::from_millis(300);
 const LOAD_WAIT: Duration = Duration::from_secs(8);
 const POLL: Duration = Duration::from_millis(60);
-const RECEIPT_REFS: usize = 25;
 
 /// How a read is shaped (token budget: `observe` module docs).
 #[derive(Clone, Debug)]
@@ -130,7 +129,8 @@ pub(crate) fn preview_text(error: &PreviewError) -> String {
 
 /// The page before an action, for its receipt.
 struct Baseline {
-    before: Option<PageModel>,
+    before: Option<Box<Seen>>,
+    reference: Option<String>,
     loads: u64,
     console: Option<u64>,
     refused: u64,
@@ -344,7 +344,8 @@ impl Browser {
         native_sent: Arc<std::sync::atomic::AtomicBool>,
     ) -> Result<Value, ActError> {
         self.check_ref(session_id, action)?;
-        let before = self.current_seen(session_id).map(|s| s.model);
+        let before = self.current_seen(session_id).map(Box::new);
+        let mut reference = action.reference().map(str::to_owned);
         let load0 = self.service.load_state(session_id);
         let console0 = self.service.console_mark(session_id).await.ok();
         let refused0 = self.service.refusal_mark(session_id);
@@ -404,6 +405,7 @@ impl Browser {
                     .page_act(session_id, action, consent, by, native_sent.clone())
                     .await?;
                 self.scroll_shown(session_id, action, &answer, by).await?;
+                reference = reference.or(answer.reference.clone());
                 page_target = json!(answer.target);
                 if let Some(value) = answer.value {
                     page_target["valueNow"] = json!(value);
@@ -426,6 +428,7 @@ impl Browser {
         }
         let base = Baseline {
             before,
+            reference,
             loads: load0.as_ref().map_or(0, |l| l.loads),
             console: console0,
             refused: refused0,
@@ -450,10 +453,12 @@ impl Browser {
     ) -> Result<Value, ActError> {
         let Baseline {
             before,
+            reference,
             loads,
             console: console0,
             refused: refused0,
         } = base;
+        let before = Self::receipt_baseline(before, reference.as_deref());
         self.await_action_navigation(session_id, action, loads, refused0)
             .await;
         let dialogs = self.settle(session_id, loads).await;
@@ -462,15 +467,7 @@ impl Browser {
         }
         self.prove_receipt(session_id, action, &mut result, &mut page_target)
             .await?;
-        let after = self
-            .observe(
-                session_id,
-                ReadOptions {
-                    max_refs: RECEIPT_REFS,
-                    ..ReadOptions::default()
-                },
-            )
-            .await;
+        let after = self.observe_receipt(session_id, reference.as_deref()).await;
         if let Some(outcome) = self.navigation_outcome(session_id, loads, refused0, &result) {
             return outcome;
         }

@@ -58,7 +58,7 @@ export function ChromeSetupDialog({
   }, [open, setUp, run]);
 
   useEffect(() => {
-    if (!open || !setUp || view.setup.pairing === "Paired") return;
+    if (!open || !setUp || view.setup.pairingState === "paired") return;
     const timer = setInterval(() => {
       void app.core?.run({ type: "chromeControl", request: { op: "read" } }).catch(() => undefined);
     }, POLL_MS);

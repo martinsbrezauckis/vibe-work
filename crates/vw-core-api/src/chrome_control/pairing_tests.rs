@@ -15,7 +15,7 @@ async fn a_pairing_click_is_not_a_live_browser_connection() {
     .unwrap();
     assert_ne!(
         core.shared.chrome_control.owner.pairing.lock().unwrap().0,
-        "Paired"
+        PairingState::Paired
     );
     core.shutdown().await;
 }
@@ -124,7 +124,7 @@ async fn connect_opens_the_extensions_pair_page_once_without_pairing_for_the_per
     );
     assert_ne!(
         core.shared.chrome_control.owner.pairing.lock().unwrap().0,
-        "Paired"
+        PairingState::Paired
     );
     core.shutdown().await;
 }

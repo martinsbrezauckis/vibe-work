@@ -1,6 +1,6 @@
 //! `WinRT` toast creation and subscription ownership for `DesktopNotifier`, including short-lived callers.
 //! Depends on windows and the portable store; OS callback threads take entries before invoking a click.
-//! Expiry removes the toast: this unpackaged app has no COM activator for Notification Center clicks.
+//! Installed toasts survive banner timeout; their COM activator takes the same callback as `WinRT`.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, MutexGuard, OnceLock};
@@ -22,6 +22,7 @@ pub(super) const POWERSHELL_APP_ID: &str =
 struct LiveToast {
     app_id: HSTRING,
     tag: HSTRING,
+    activation: String,
     history_id: Option<u32>,
     notifier: ToastNotifier,
     notification: ToastNotification,
@@ -38,7 +39,7 @@ impl Drop for LiveToast {
         if let Some(token) = self.dismissed {
             let _ = self.notification.RemoveDismissed(token);
         }
-        // Expired or evicted entries cannot reopen the app. Use the original notifier/app id
+        // Dismissed or evicted entries cannot reopen the app. Use the original notifier/app id
         // to remove them from Notification Center too, after revoking their subscriptions.
         let _ = self.notifier.Hide(&self.notification);
         if let Ok(history) = ToastNotificationManager::History() {
@@ -71,7 +72,10 @@ fn event(id: u64, reason: ToastEvent, open: bool) {
     }
 }
 
-fn notification(request: &NotificationRequest) -> windows::core::Result<ToastNotification> {
+fn notification(
+    request: &NotificationRequest,
+    activation: &str,
+) -> windows::core::Result<ToastNotification> {
     let xml = XmlDocument::new()?;
     xml.LoadXml(h!(
         "<toast duration=\"short\"><visual><binding template=\"ToastGeneric\">\
@@ -79,6 +83,15 @@ fn notification(request: &NotificationRequest) -> windows::core::Result<ToastNot
          <audio silent=\"true\"/><actions><action content=\"Open\" arguments=\"default\"/>\
          </actions></toast>"
     ))?;
+    xml.DocumentElement()?
+        .SetAttribute(h!("launch"), &HSTRING::from(activation))?;
+    xml.GetElementsByTagName(h!("action"))?
+        .Item(0)?
+        .Attributes()?
+        .GetNamedItem(h!("arguments"))?
+        .SetNodeValue(&windows::Foundation::PropertyValue::CreateString(
+            &HSTRING::from(activation),
+        )?)?;
     let text = xml.GetElementsByTagName(h!("text"))?;
     // Text nodes preserve plain text (including XML metacharacters and Unicode).
     text.Item(0)?
@@ -94,6 +107,9 @@ pub(super) fn show_toast(
     request: &NotificationRequest,
     on_click: Box<dyn FnOnce() + Send>,
 ) -> Result<(), NotifyError> {
+    if app_id != POWERSHELL_APP_ID {
+        super::activation::register(app_id).map_err(NotifyError)?;
+    }
     show(app_id, history_id, request, on_click).map_err(|error| NotifyError(error.to_string()))
 }
 
@@ -110,16 +126,29 @@ fn show(
     request: &NotificationRequest,
     on_click: Box<dyn FnOnce() + Send>,
 ) -> windows::core::Result<()> {
+    static RUN: OnceLock<String> = OnceLock::new();
     static NEXT_ID: AtomicU64 = AtomicU64::new(0);
     let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
     let notifier = ToastNotificationManager::CreateToastNotifierWithId(&HSTRING::from(app_id))?;
-    let notification = notification(request)?;
+    let run = RUN.get_or_init(|| {
+        format!(
+            "{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        )
+    });
+    let activation = format!("open:{run}:{id}");
+    let notification = notification(request, &activation)?;
     let tag = HSTRING::from(format!("{id:x}"));
     notification.SetTag(&tag)?;
     notification.SetGroup(h!("vibe-work"))?;
     let mut live = LiveToast {
         app_id: HSTRING::from(app_id),
         tag,
+        activation: activation.clone(),
         history_id,
         notifier: notifier.clone(),
         notification,
@@ -140,10 +169,11 @@ fn show(
         event(
             id,
             ToastEvent::Activated,
-            is_open_activation(arguments.as_deref()),
+            is_open_activation(arguments.as_deref()) || arguments.as_deref() == Some(&activation),
         );
         Ok(())
     }))?);
+    let installed = app_id != POWERSHELL_APP_ID;
     live.dismissed = Some(live.notification.Dismissed(&TypedEventHandler::<
         ToastNotification,
         ToastDismissedEventArgs,
@@ -151,8 +181,16 @@ fn show(
         match args.as_ref().and_then(|args| args.Reason().ok()) {
             Some(ToastDismissalReason::UserCanceled) => event(id, ToastEvent::UserCanceled, false),
             Some(ToastDismissalReason::ApplicationHidden) => event(id, ToastEvent::Removed, false),
-            // No COM activator is registered, so a saved Notification Center entry cannot open us.
-            Some(ToastDismissalReason::TimedOut) => event(id, ToastEvent::TimedOut, false),
+            // Development runs borrow PowerShell’s identity and have no COM registration.
+            Some(ToastDismissalReason::TimedOut) => event(
+                id,
+                if installed {
+                    ToastEvent::TimedOut
+                } else {
+                    ToastEvent::Removed
+                },
+                false,
+            ),
             _ => {}
         }
         Ok(())
@@ -166,4 +204,17 @@ fn show(
         event(id, ToastEvent::Removed, false);
     }
     result
+}
+
+/// COM body/action activation uses a process-unique token; stale toasts cannot open another chat.
+pub(super) fn activate(app_id: &str, arguments: &str) {
+    let app_id = HSTRING::from(app_id);
+    let pending = store().remove_where(|t| t.app_id == app_id && t.activation == arguments);
+    for mut toast in pending {
+        let click = toast.on_click.take();
+        drop(toast);
+        if let Some(click) = click {
+            click();
+        }
+    }
 }

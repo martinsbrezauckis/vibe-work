@@ -43,6 +43,7 @@
 //!   Nothing the window sends can claim the Debug API origin.
 
 pub mod agent_tools;
+pub mod attention;
 mod bridge;
 pub mod cli_sharing;
 pub mod commit_signature;
@@ -53,6 +54,8 @@ mod documents;
 mod events;
 pub mod exit;
 pub mod experiment_pins;
+#[cfg(test)]
+mod experiment_pins_tests;
 mod export;
 mod extension_paths;
 mod files_routes;
@@ -116,3 +119,5 @@ pub fn version() -> &'static str {
 
 #[cfg(test)]
 mod config_comments_tests;
+
+pub mod uninstall;

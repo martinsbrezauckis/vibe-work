@@ -10,7 +10,7 @@ use std::collections::HashSet;
 
 use serde_json::{Value, json};
 
-use crate::model::PageModel;
+use crate::model::{PageModel, RefItem};
 use crate::{guard, observe};
 
 /// The receipt's outcome in Vibe Work's own words only (nothing page-made outside the untrusted
@@ -119,10 +119,11 @@ pub fn diff(before: Option<&PageModel>, after: &PageModel) -> (Value, Value) {
     let new_refs: HashSet<&str> = after.refs.iter().map(|r| r.id.as_str()).collect();
     let refs_added = new_refs.difference(&old_refs).count();
     let refs_removed = old_refs.difference(&new_refs).count();
-    let changed_state = after.refs.iter().any(|r| {
-        before.refs.iter().find(|b| b.id == r.id).is_some_and(|b| {
-            b.value != r.value || b.checked != r.checked || b.expanded != r.expanded
-        })
+    let changed_state = after.observed_refs().any(|r| {
+        before
+            .observed_refs()
+            .find(|b| b.id == r.id)
+            .is_some_and(|b| state_changed(b, r))
     });
     if refs_added + refs_removed > 0 {
         parts.push("elements changed");
@@ -156,10 +157,47 @@ pub fn delta(before: Option<&PageModel>, after: &PageModel) -> Value {
         .collect();
     let same = new.is_empty() && before.is_some_and(|b| b.refs.len() == after.refs.len());
     let shown: Vec<Value> = new.iter().take(16).map(|r| observe::agent_ref(r)).collect();
-    json!({
+    let mut content = json!({
         "url": after.displayed_url().chars().take(300).collect::<String>(),
         "title": after.title.chars().take(crate::observe::ITEM_CHARS).collect::<String>(),
         "refsUnchanged": same,
         "newRefs": shown,
-    })
+    });
+    let mut seen = HashSet::new();
+    let updated: Vec<Value> = after
+        .observed_refs()
+        .filter(|r| seen.insert(&r.id))
+        .filter(|r| {
+            before.is_some_and(|b| {
+                b.observed_refs()
+                    .find(|old| old.id == r.id)
+                    .is_some_and(|old| state_changed(old, r))
+            })
+        })
+        .map(observe::agent_ref)
+        .collect();
+    if !updated.is_empty() {
+        content["updatedRefs"] = json!(updated.iter().take(16).collect::<Vec<_>>());
+    }
+    let omitted = new.len().saturating_sub(16) + updated.len().saturating_sub(16);
+    if omitted > 0 {
+        content["refsOmitted"] = json!(omitted);
+        content["continuation"] = json!(
+            "More controls changed than fit in this receipt. Use browser_read with find for the needed control; do not replay the action."
+        );
+    }
+    crate::choices::include(&mut content, after);
+    crate::choice_context::include(&mut content, after);
+    content
+}
+
+fn state_changed(before: &RefItem, after: &RefItem) -> bool {
+    before.name != after.name
+        || before.value != after.value
+        || before.checked != after.checked
+        || before.expanded != after.expanded
+        || before.pressed != after.pressed
+        || before.disabled != after.disabled
+        || before.visible != after.visible
+        || before.options != after.options
 }

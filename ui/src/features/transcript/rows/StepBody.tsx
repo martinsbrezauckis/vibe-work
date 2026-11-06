@@ -4,15 +4,17 @@
  * the tail of its output; `file_edit` / `file_write` an inline diff; `file_read` the head of what was
  * read; `todo` the list; `subagent` the agent and task; anything else (including kinds newer than
  * this build) the input and output as text. File steps name their file as a File tab reference, and paths in
- * tool output are clickable once the core said they name a file the app may show. Failures show Vibe's error text; Vibe's warnings and
+ * tool output are clickable once the core said they name a file the app may show. Typed MCP auth failures offer sign-in; other failures keep Vibe's text. Its warnings and
  * approval note are listed.
- * Depends on: model (entries, diff, todos), DiffView, ShowAll. Called by: StepItem.
+ * Depends on: model (entries, diff, todos), DiffView, ShowAll, connector actions. Called by: StepItem.
  * Invariants: everything untrusted is plain text in `<pre>`/text nodes (no Markdown here: tool output
  * is not the model's prose); long output is cut (`ShowAll`).
  */
 import type { ReactElement } from "react";
 
 import type { JsonValue } from "../../../protocol/core";
+import { LinkButton } from "../../../components/Controls";
+import { useConnectorActions } from "../../connectors/hooks";
 import { term } from "../../../vocabulary";
 import { editDiff, writeDiff } from "../model/diff";
 import {
@@ -21,6 +23,7 @@ import {
   arr,
   entryId,
   inputOf,
+  mcpSignInRequired,
   obj,
   num,
   outputOf,
@@ -171,6 +174,8 @@ function filePathOf(entry: Obj, view: EffectView): string | null {
 /** The body of one effect step. */
 export function StepBody({ entry, view }: { entry: Obj; view: EffectView }): ReactElement {
   const file = filePathOf(entry, view);
+  const connectors = useConnectorActions();
+  const needsSignIn = mcpSignInRequired(entry);
   return (
     <div className="step-b">
       {file !== null && file !== "" ? (
@@ -182,11 +187,25 @@ export function StepBody({ entry, view }: { entry: Obj; view: EffectView }): Rea
         </p>
       ) : null}
       {view.error !== null ? (
-        <p className="key-problem" role="alert">
+        <p
+          className={needsSignIn ? "server-note" : "key-problem"}
+          role={needsSignIn ? "status" : "alert"}
+        >
           {view.error}
         </p>
       ) : null}
-      <KindBody entry={entry} view={view} />
+      {needsSignIn ? (
+        <LinkButton
+          data-testid="transcript.step-body-sign-in"
+          type="button"
+          disabled={connectors === null}
+          onClick={() => void connectors?.open()}
+        >
+          Open Tools
+        </LinkButton>
+      ) : (
+        <KindBody entry={entry} view={view} />
+      )}
       {view.warnings.length > 0 ? (
         <ul className="server-note" role="status">
           {view.warnings.map((w, i) => (

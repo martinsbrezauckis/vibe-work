@@ -94,6 +94,23 @@ fn own_call(tool: &str, input: &Value) -> Own {
         })
     };
     match name {
+        "chrome_execute" => {
+            if !crate::chrome_control::read_consent::personal_read(name, input) {
+                return Own::Nothing;
+            }
+            let label = if input["action"] == "history.read" {
+                "Read browser history"
+            } else {
+                "Read browser bookmarks"
+            };
+            key(
+                input.clone(),
+                label.into(),
+                vec![CoversPart::words(
+                    "only this browser read with the same arguments",
+                )],
+            )
+        }
         names::PROCESS_START => text("command").map_or(Own::Nothing, |command| {
             key(
                 json!({"command": command, "cwd": field("cwd")}),

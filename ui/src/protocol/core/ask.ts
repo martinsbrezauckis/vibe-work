@@ -392,7 +392,11 @@ storeUrl: string,
  */
 storeReview: boolean,
 /**
- * Pairing state reported by the owned helper, in plain words.
+ * Typed helper observation; unknown in views saved before this field existed.
+ */
+pairingState: ChromePairingState,
+/**
+ * Display-only pairing label. Connection decisions use `pairing_state`.
  */
 pairing: string,
 /**
@@ -428,6 +432,8 @@ extensionRestart?: boolean, };
 
 export type ChromeSetupState = "absent" | "notSetUp" | "repairRequired" | "waitingForExtension" | "extensionAdded";
 
+export type ChromePairingState = "unknown" | "disconnected" | "waiting" | "connecting" | "paired" | "otherOwner" | "blocked" | "windowOpen" | "windowClosed" | "notInstalled";
+
 export type ChromeBrowserIssue = "missing" | "sandboxed" | "differentBrowser";
 
 export type ChromeAddonView = {
@@ -457,6 +463,6 @@ instruction: string,
  */
 step?: string, };
 
-export type ChromeAddonState = "unavailable" | "notSetUp" | "chromeMissing" | "chromeSandboxed" | "otherBrowser" | "switchedOff" | "inReview" | "otherOwner" | "connecting" | "notPaired" | "helperNotRunning" | "helperSetupRequired" | "turnedOffInChrome" | "restartChrome" | "updateNeeded" | "chromeClosed" | "enableInChrome" | "extensionNotInstalled" | "notConnected" | "connected";
+export type ChromeAddonState = "unavailable" | "notSetUp" | "chromeMissing" | "chromeSandboxed" | "otherBrowser" | "switchedOff" | "inReview" | "otherOwner" | "connecting" | "notPaired" | "helperNotRunning" | "ownerCredentialMissing" | "helperSetupRequired" | "turnedOffInChrome" | "restartChrome" | "updateNeeded" | "chromeClosed" | "enableInChrome" | "extensionNotInstalled" | "notConnected" | "connected";
 
-export type ChromeAddonAction = "connect" | "setupAgain" | "openPairingPage" | "turnOn";
+export type ChromeAddonAction = "connect" | "setupAgain" | "remove" | "openPairingPage" | "turnOn";

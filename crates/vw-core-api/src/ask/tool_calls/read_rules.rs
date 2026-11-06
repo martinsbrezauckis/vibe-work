@@ -21,7 +21,9 @@ fn governing(tool: &str) -> Vec<String> {
     let mut list = vec![format!("{SERVER_NAME}_{tool}")];
     match tool {
         names::SEARCH => list.extend(["read_file".to_owned(), "grep".to_owned()]),
-        names::PANEL_READ => list.push("read_file".to_owned()),
+        names::PANEL_READ | names::HANDBOOK_CHECK | names::HANDBOOK_ANSWERS => {
+            list.push("read_file".to_owned());
+        }
         _ => {}
     }
     list

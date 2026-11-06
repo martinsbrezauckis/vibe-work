@@ -69,6 +69,14 @@ pub(super) fn for_model(
 ) -> Value {
     let mut result = super::content::for_model(answer);
     super::receipt::stamp(shared, tool, request, &mut result);
+    if tool == "chrome_execute"
+        && super::output_file::requested(request)
+        && result["structuredContent"]["status"] == "completed"
+        && result["isError"] != true
+        && result["structuredContent"]["error"].is_null()
+    {
+        return save(shared, chat, &result["structuredContent"]);
+    }
     if tool != "chrome_execute" || !observation(&result) {
         return super::output::finish(result, tool, clamped);
     }
@@ -178,10 +186,30 @@ pub(super) fn resume(
         if offset >= entry.encoded.len() || !entry.encoded.is_char_boundary(offset) {
             return Err(invalid.into());
         }
+        if super::output_file::requested(request) {
+            if entry.request["action"] != "page.read" {
+                return Err("Not saved: this buffer belongs to another action; omit saveTo to read its receipt inline. Only page.read results support export.".into());
+            }
+            if entry.is_error == true {
+                return Err(
+                    "Not saved: this read failed; omit saveTo to read its diagnostic inline."
+                        .into(),
+                );
+            }
+            let original: Value = serde_json::from_str(&entry.encoded).map_err(|_| invalid)?;
+            drop(cache);
+            return super::output_file::save(shared, chat, &original);
+        }
         let mut result = json!({"isError":entry.is_error,"structuredContent":page(entry, offset)});
         super::output::sync_text(&mut result);
         Ok(json!({"vwMcpResult":result}))
     })())
+}
+
+fn save(shared: &Shared, chat: &str, body: &Value) -> Value {
+    super::output_file::save(shared, chat, body).unwrap_or_else(
+        |reason| json!({"vwMcpResult":super::owner::failure(&reason, "SAVE_FAILED")}),
+    )
 }
 
 fn page(entry: &Entry, offset: usize) -> Value {

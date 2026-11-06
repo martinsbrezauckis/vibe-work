@@ -250,3 +250,33 @@ fn the_apps_own_context_is_not_noted_as_an_attachment() {
     assert!(!md.contains("vw://app/context"), "{md}");
     assert!(md.contains("*[attached: Selection]*"), "{md}");
 }
+
+/// Both renderers read these same histories and expected lines; upstream shape changes cannot fix just one.
+#[test]
+fn shared_hook_outcome_vectors_match_export() {
+    let vectors: Vec<Value> = serde_json::from_str(include_str!(
+        "../../../tests/public/fixtures/hook-outcomes.json"
+    ))
+    .unwrap();
+    for vector in vectors {
+        let history = vector["history"].as_array().unwrap();
+        let (md, counts) = render(&ExportHead::default(), history);
+        let actual: Vec<&str> = md
+            .lines()
+            .filter_map(|line| line.strip_prefix("> "))
+            .collect();
+        let expected: Vec<&str> = vector["lines"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|line| line["text"].as_str().unwrap())
+            .collect();
+        assert_eq!(actual, expected, "{}: {md}", vector["name"]);
+        assert_eq!(
+            counts.steps as usize,
+            vector["effects"].as_array().unwrap().len(),
+            "{}: {md}",
+            vector["name"]
+        );
+    }
+}

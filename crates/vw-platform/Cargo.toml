@@ -22,11 +22,16 @@ unwrap_used = "deny"
 expect_used = "deny"
 
 [features]
+# A startup failure must be visible before a window or Tauri handle exists.
+startup-dialog = ["dep:gtk"]
+# Native tray attention and menu ownership for the desktop app.
+desktop-tray = ["dep:gtk", "dep:libappindicator", "dep:png"]
 # Optional native input markers; renderers and their tests compile only with this switch.
 click-marker = []
 # Native system proxy/PAC discovery for the opt-in guard transports.
 proxy-resolver = ["dep:libloading", "windows/Win32_Networking_WinHttp", "dep:core-foundation-sys"]
-video = ["dep:gstreamer", "dep:gstreamer-app", "dep:gstreamer-video", "windows/Win32_Media_MediaFoundation", "windows/Win32_System_Com_StructuredStorage", "windows/Win32_System_Variant", "dep:objc2-av-foundation", "dep:objc2-core-foundation", "dep:objc2-core-media", "dep:objc2-core-graphics"]
+video-sandbox = ["windows/Win32_Security_Isolation", "windows/Win32_System_Registry"]
+video = ["video-sandbox","dep:gstreamer", "dep:gstreamer-app", "dep:gstreamer-video", "windows/Win32_Media_MediaFoundation", "windows/Win32_Security_Isolation", "windows/Win32_System_Com_StructuredStorage", "windows/Win32_System_Variant", "dep:objc2-av-foundation", "dep:objc2-core-foundation", "dep:objc2-core-media", "dep:objc2-core-graphics"]
 # Native webview calls for the preview engine (`webview.rs`); only vw-webview turns it on.
 webview = [
     "dep:webview2-com",
@@ -41,6 +46,8 @@ webview = [
 ]
 
 [dependencies]
+# Random exclusive sibling names for ordinary atomic replacement.
+getrandom = "0.3"
 libloading = { version = "0.7.4", optional = true }
 # Handle-relative cleanup of immutable Vibe package copies; never follow links while changing modes.
 cap-std = "4.0.3"
@@ -103,12 +110,16 @@ base64 = { version = "0.22", optional = true }
 # The Git Bash wrapper's kill-on-close job (`kill_job.rs`): job objects, the command line, the standard handles.
 # The person's pointer watch (`native_click/person/windows.rs`): the low-level mouse hook, button state.
 # Toast objects and subscriptions (`notify/windows.rs`) stay alive for banner clicks, then are removed.
-windows = { version = "0.62", features = ["Data_Xml_Dom", "Foundation", "UI_Notifications", "Win32_Globalization", "Win32_Foundation", "Win32_System_Threading", "Win32_Graphics_Gdi", "Win32_Storage_Xps", "Win32_UI_WindowsAndMessaging", "Win32_UI_ColorSystem", "Win32_UI_HiDpi", "Win32_Security", "Win32_Security_Authorization", "Win32_Storage_FileSystem", "Win32_UI_Shell", "Win32_System_Com", "Win32_UI_Controls", "Win32_System_JobObjects", "Win32_System_Environment", "Win32_System_Console", "Win32_UI_Input_KeyboardAndMouse", "Win32_System_LibraryLoader"] }
+windows = { version = "0.62", features = ["Data_Xml_Dom", "Foundation", "UI_Notifications", "Win32_NetworkManagement_IpHelper", "Win32_Networking_WinSock", "Win32_Globalization", "Win32_Foundation", "Win32_System_Threading", "Win32_System_WindowsProgramming", "Win32_Graphics_Gdi", "Win32_Storage_Xps", "Win32_UI_WindowsAndMessaging", "Win32_UI_ColorSystem", "Win32_UI_HiDpi", "Win32_Security", "Win32_Security_Authorization", "Win32_Storage_FileSystem", "Win32_UI_Shell", "Win32_System_Com", "Win32_UI_Controls", "Win32_System_JobObjects", "Win32_System_Environment", "Win32_System_Console", "Win32_UI_Input_KeyboardAndMouse", "Win32_System_LibraryLoader", "Win32_UI_Notifications", "Win32_Security_Credentials"] }
 # The "Send to Vibe Work" Explorer verbs under HKCU (`send_to_windows.rs`) and the WebView2 UserDataFolder policy
 # lookup (webview.rs `user_data_folder_override`); already in the lockfile (0.6.1).
 windows-registry = "0.6"
+# COM implementation macros for toast activation (same version as windows).
+windows-core = "0.62"
 
 [target.'cfg(target_os = "linux")'.dependencies]
+libappindicator = { version = "0.9", optional = true }
+png = { version = "0.18", optional = true }
 # Bounded StatusNotifier watcher/host detection; same pure-Rust bus transport as notify-rust.
 zbus = "5.19"
 futures-util = { version = "0.3", default-features = false, features = ["std"] }

@@ -96,7 +96,8 @@ async fn a_live_connected_profile_decides_while_the_card_lags() {
             json!({"structuredContent":{"status":"completed","data":{"text":"fixture"}}})
         }
     });
-    shared.chrome_control.owner.pairing.lock().unwrap().0 = "Connecting".into();
+    shared.chrome_control.owner.pairing.lock().unwrap().0 =
+        crate::chrome_control::PairingState::Connecting;
     assert_eq!(super::commands::addon(shared).state, AddonState::Connecting);
     let args = json!({"sessionId":"t","action":"clipboard.read","args":{}});
     let answer = super::gateway::call(shared, "s", "chrome_execute", args.clone())
@@ -149,7 +150,8 @@ async fn while_connecting_the_helper_decides_and_the_card_words_its_refusal() {
             json!({"structuredContent":{"status":"failed","error":{"code":"ADAPTER_UNAVAILABLE","message":"not yet"}}})
         }
     });
-    shared.chrome_control.owner.pairing.lock().unwrap().0 = "Connecting".into();
+    shared.chrome_control.owner.pairing.lock().unwrap().0 =
+        crate::chrome_control::PairingState::Connecting;
     assert_eq!(super::commands::addon(shared).state, AddonState::Connecting);
     let args = json!({"sessionId":"t","action":"page.read","args":{}});
     let answer = super::gateway::call(shared, "s", "chrome_execute", args.clone())
@@ -200,7 +202,7 @@ async fn a_lost_connection_keeps_its_unknown_outcome() {
             .pairing
             .lock()
             .unwrap()
-            .0 = vw_vocabulary::texts::CHROME_NOT_CONNECTED.to_owned();
+            .0 = crate::chrome_control::PairingState::Disconnected;
         panic!("the helper's pipe closed during the call");
     });
     let answer = super::gateway::call(

@@ -99,9 +99,8 @@ fn count(n: usize) -> u32 {
 }
 
 impl Core {
-    /// True when `path` is exactly a saved project's main folder. The host uses this alongside
-    /// [`Self::is_session_folder`] to admit "reveal in file manager" for a project without a
-    /// session; a picked folder alone does not qualify until a project uses it.
+    /// True when `path` is exactly a saved project's main folder. Folder reveal uses
+    /// [`Self::reveal_folder_target`] to admit contained subfolders too.
     #[must_use]
     pub fn is_project_main_folder(&self, path: &str) -> bool {
         self.shared.projects.store.read(|store| {

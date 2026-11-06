@@ -130,6 +130,37 @@ async fn focused_read_without_a_usable_ref_gives_a_different_next_step() {
 }
 
 #[tokio::test]
+async fn cookie_banner_without_headings_keeps_the_rendered_offer_and_choices() {
+    let rig = banner().await;
+    rig.engine.eval("document.querySelector('#CybotCookiebotDialogBody p').textContent='Cookies personalise advertising. Rejecting optional cookies is free.'").await;
+    rig.engine.eval("document.querySelector('#CybotCookiebotDialog').style.cssText='position:fixed;bottom:0;left:0;inset:auto auto 0 0;width:300px;height:60px;background:white'").await;
+    let (answer, _) = rig
+        .browser
+        .read(
+            SESSION,
+            ReadOptions {
+                find: Some("absent label".into()),
+                ..ReadOptions::default()
+            },
+            false,
+            Actor::Agent,
+        )
+        .await
+        .unwrap();
+    let context = answer["untrustedPageContent"]["choiceContext"].to_string();
+    assert!(
+        context.contains("Rejecting optional cookies is free."),
+        "{answer}"
+    );
+    assert!(context.contains("Noraidīt"), "{answer}");
+    assert!(context.contains("Atļaut visu"), "{answer}");
+    assert!(
+        !context.contains("Local vendor"),
+        "hidden vendor tables are excluded"
+    );
+}
+
+#[tokio::test]
 async fn banner_in_open_shadow_root_of_a_zero_size_host_is_still_clickable() {
     let rig = banner().await;
     rig.engine

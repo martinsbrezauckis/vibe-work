@@ -19,6 +19,7 @@ pub(super) fn prepare(
     call_id: &str,
     args: Value,
 ) -> Result<crate::ask::tool_calls::receipts::Execution, String> {
+    vw_agent_tools::video::require_available()?;
     let request: Request =
         serde_json::from_value(args.clone()).map_err(|e| format!("Invalid video request: {e}. Supply integer millisecond times, a supported selection and output mode."))?;
     let frames = request.frame_limit()?;
@@ -96,6 +97,7 @@ pub(super) async fn call(
     owner: &str,
     args: Value,
 ) -> Result<Value, String> {
+    vw_agent_tools::video::require_available()?;
     let request: Request =
         serde_json::from_value(args).map_err(|e| format!("decode_failed: invalid video request: {e}. Supply integer millisecond times, a supported selection and output mode."))?;
     request.times()?;
@@ -235,6 +237,47 @@ mod tests {
     use super::*;
     use base64::Engine as _;
     use serde_json::json;
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn linux_video_refuses_before_request_validation_or_file_access() {
+        let f = crate::feature_test_core::Fixture::new().await;
+        let tools = f.core.shared.agent_tools.as_ref().unwrap();
+        let reason = call(&f.core.shared, tools, "missing-chat", Value::Null)
+            .await
+            .unwrap_err();
+        assert!(reason.starts_with("Not run: video review is not available on Linux yet."));
+        assert!(reason.contains("Ask for still images"));
+        let prepared = prepare(
+            &f.core.shared,
+            "missing-chat",
+            "source",
+            "call",
+            Value::Null,
+        );
+        assert_eq!(prepared.err(), Some(reason.clone()));
+        let direct = super::super::tools::call(
+            &f.core.shared,
+            tools,
+            "missing-chat",
+            "video_frames",
+            Value::Null,
+        )
+        .await;
+        assert_eq!(direct, Err(reason));
+        // A stale cached tool must not open an approval control in Ask mode.
+        let permission = crate::ask::tool_calls::permission(
+            &f.core.shared,
+            "missing-chat",
+            "source",
+            "call",
+            "video_frames",
+            &Value::Null,
+        )
+        .await;
+        assert_eq!(permission, Ok(()));
+        assert_eq!(f.core.asks().len(), 0);
+        f.finish().await;
+    }
     #[tokio::test]
     async fn video_snapshot_refuses_a_hard_link_to_app_state() {
         let f = crate::feature_test_core::Fixture::new().await;

@@ -5,131 +5,131 @@
  * scripts/public/check.sh fails when this file and the Rust types disagree.
  */
 
-export type NetworkRequest = { "op": "read", } | { "op": "test", 
+export type NetworkRequest = { "op": "read", } | { "op": "test",
 /**
  * The values being tried.
  */
-changes: NetworkChanges, } | { "op": "save", 
+changes: NetworkChanges, } | { "op": "save",
 /**
  * The values to save.
  */
 changes: NetworkChanges, };
 
-export type NetworkChanges = { 
+export type NetworkChanges = {
 /**
  * `HTTP_PROXY`: the proxy for http requests, `http://host:port` (a sign-in may precede the host).
  */
-httpProxy?: string, 
+httpProxy?: string,
 /**
  * `HTTPS_PROXY`: the proxy for https requests, which is nearly all of Vibe's traffic.
  */
-httpsProxy?: string, 
+httpsProxy?: string,
 /**
  * `ALL_PROXY`: the proxy for any request the two above do not cover.
  */
-allProxy?: string, 
+allProxy?: string,
 /**
  * `NO_PROXY`: comma-separated hosts, domains, addresses and ranges that skip the proxy. This computer's own
  * addresses are always added.
  */
-noProxy?: string, 
+noProxy?: string,
 /**
  * `SSL_CERT_FILE`: a PEM file of extra trusted certificates (a company's own certificate authority).
  */
-certificateFile?: string, 
+certificateFile?: string,
 /**
  * `SSL_CERT_DIR`: a folder of extra trusted certificates.
  */
 certificateFolder?: string, };
 
-export type NetworkResult = { "kind": "settings", 
+export type NetworkResult = { "kind": "settings",
 /**
  * The settings.
  */
-view: NetworkView, 
+view: NetworkView,
 /**
  * `save` only: the settings were written.
  */
-saved: boolean, 
+saved: boolean,
 /**
  * A short-lived chat the core used and could not delete (its id); it stays in the list as a temporary chat
  * until Vibe Work quits. `null` otherwise.
  */
-leftoverSessionId: string | null, } | { "kind": "tested", 
+leftoverSessionId: string | null, } | { "kind": "tested",
 /**
  * What the test found.
  */
-outcome: NetworkTestView, } | { "kind": "refused", 
+outcome: NetworkTestView, } | { "kind": "refused",
 /**
  * One problem per field.
  */
 problems: Array<NetworkProblem>, };
 
-export type NetworkView = { 
+export type NetworkView = {
 /**
  * `HTTP_PROXY`.
  */
-httpProxy: NetworkFieldView, 
+httpProxy: NetworkFieldView,
 /**
  * `HTTPS_PROXY`.
  */
-httpsProxy: NetworkFieldView, 
+httpsProxy: NetworkFieldView,
 /**
  * `ALL_PROXY`.
  */
-allProxy: NetworkFieldView, 
+allProxy: NetworkFieldView,
 /**
  * `NO_PROXY`.
  */
-noProxy: NetworkFieldView, 
+noProxy: NetworkFieldView,
 /**
  * `SSL_CERT_FILE`.
  */
-certificateFile: NetworkFieldView, 
+certificateFile: NetworkFieldView,
 /**
  * `SSL_CERT_DIR`.
  */
-certificateFolder: NetworkFieldView, 
+certificateFolder: NetworkFieldView,
 /**
  * The addresses that always skip the proxy because Vibe reaches Vibe Work through them.
  */
-alwaysDirect: Array<string>, 
+alwaysDirect: Array<string>,
 /**
  * What is saved differs from what this run of Vibe Work connects with: it applies the next time Vibe Work
  * starts (Vibe and the app read the settings once, at their start).
  */
-restartNeeded: boolean, 
+restartNeeded: boolean,
 /**
  * How many certificates the saved file holds, when it is readable.
  */
 certificateCount: number | null, };
 
-export type NetworkFieldView = { 
+export type NetworkFieldView = {
 /**
  * The saved value; an address with its sign-in hidden. Empty when nothing is saved. For the no-proxy list, only
  * what the user entered (this computer's own addresses are not listed).
  */
-value: string, 
+value: string,
 /**
  * The saved address has a user name and password (hidden in `value`). Typing a new address replaces them.
  */
-hasSignIn: boolean, 
+hasSignIn: boolean,
 /**
  * This computer's environment sets the same key and wins over the saved value: this is what is in use
  * (a proxy address with its sign-in hidden); `null` when the environment does not set it.
  */
-environmentValue: string | null, 
+environmentValue: string | null,
 /**
  * What is wrong with the saved value right now (a certificate file that is gone or unreadable, an address
  * that no longer parses), in plain words; `null` when nothing is.
  */
 problem: string | null, };
 
-export type NetworkProblem = { 
+export type NetworkProblem = {
 /**
  * The request field it is about (`httpsProxy`, `certificateFile`, ...).
  */
-field: string, 
+field: string,
 /**
  * A plain sentence that never repeats the value.
  */
@@ -137,27 +137,27 @@ message: string, };
 
 export type NetworkTestKind = "reached" | "proxyUnreachable" | "proxyRefused" | "proxySignInNeeded" | "certificateNotTrusted" | "nameNotFound" | "connectFailed" | "timedOut" | "failed";
 
-export type NetworkTestView = { 
+export type NetworkTestView = {
 /**
  * What happened.
  */
-kind: NetworkTestKind, 
+kind: NetworkTestKind,
 /**
  * True when `kind` is `reached`.
  */
-reached: boolean, 
+reached: boolean,
 /**
  * One plain sentence.
  */
-summary: string, 
+summary: string,
 /**
  * What to check next; `null` when the test passed.
  */
-nextStep: string | null, 
+nextStep: string | null,
 /**
  * The request went through a proxy.
  */
-throughProxy: boolean, 
+throughProxy: boolean,
 /**
  * The settings this computer's environment overrides, which the test used as they are there (for example
  * `HTTPS proxy`); empty when none.

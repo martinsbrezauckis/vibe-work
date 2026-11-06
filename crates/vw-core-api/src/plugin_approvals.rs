@@ -147,6 +147,7 @@ impl PluginApprovals {
             _ => return Err(error("the plugins root is not a plain folder")),
         }
         let approved = self.read()?;
+        let mut candidates = Vec::new();
         for entry in std::fs::read_dir(&root).map_err(error)? {
             let entry = entry.map_err(error)?;
             let kind = entry.file_type().map_err(error)?;
@@ -155,15 +156,24 @@ impl PluginApprovals {
             }
             let folder = entry.path();
             let expected = entry.file_name().to_str().and_then(|key| approved.get(key));
-            let allowed = if kind.is_symlink() {
-                false
-            } else if let Some(name) = expected {
-                self.identity.name(&folder, &self.home)?.as_ref() == Some(name)
+            if !kind.is_symlink()
+                && let Some(name) = expected
+            {
+                candidates.push((folder, name));
             } else {
-                false
-            };
-            if allowed {
-                kept.extend(entry.file_name().to_str().map(str::to_owned));
+                crate::market_controls::move_plugin(&folder, false)?;
+            }
+        }
+        let folders: Vec<PathBuf> = candidates.iter().map(|(path, _)| path.clone()).collect();
+        let names = self.identity.names(&folders, &self.home)?;
+        for ((folder, expected), actual) in candidates.into_iter().zip(names) {
+            if actual.as_ref() == Some(expected) {
+                kept.extend(
+                    folder
+                        .file_name()
+                        .and_then(|name| name.to_str())
+                        .map(str::to_owned),
+                );
             } else {
                 crate::market_controls::move_plugin(&folder, false)?;
             }

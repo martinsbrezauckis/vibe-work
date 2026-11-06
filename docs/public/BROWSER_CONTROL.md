@@ -27,7 +27,7 @@ Each call and batch step checks the current mode. Above-tier actions return a pl
 ## Windows and work state
 
 The vault prompt waits until you answer; saying No answers only that call and the turn goes on, and the agent is
-told you declined and to explain why it is needed for your task.
+told you declined and not to ask again for it in this task unless you bring it up.
 
 Each chat opens an unfocused Chrome window. New tabs go there and are selected by default; your own tabs can also be used. Chat windows stay ungrouped, so closing one leaves no automatically saved tab group. While a chat's agent works in one of your windows, that window is the chat's until its session ends: another chat's agent is refused there. Stop ends work and leaves the window open. Deleting a chat closes its window. Quitting the app leaves windows open and ends sessions. After Stop, the chat's Chrome calls are refused for the rest of that turn. A chat's session ends with its turn; the same chat can continue it in the next turn, in the same window. After a Chrome restart or extension reload, the next call opens a fresh session.
 

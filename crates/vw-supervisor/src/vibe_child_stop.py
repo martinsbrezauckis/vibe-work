@@ -1,4 +1,4 @@
-"""Vibe Work's 3.0.4 Stop, process-start, configuration and plugin-hook guards, loaded by the server launcher.
+"""Vibe Work's audited Stop, process-start, configuration and plugin-hook guards, loaded by the server launcher.
 
 A Stop of an owned child session goes through Vibe's subagent controller and its
 durable interrupt operation. Access-mode switches wait for configuration reads
@@ -224,7 +224,9 @@ def install_process_start_guard():
 
 
 def install():
-    if importlib.metadata.version("mistral-vibe") != "3.0.4":
+    # These releases share the guarded runtime boundaries. Keep the previous pin
+    # usable during upgrades; a new release still needs its own compatibility audit.
+    if importlib.metadata.version("mistral-vibe") not in {"3.0.4", "3.1.0"}:
         return
     from vibe.app_server import _unified_harness_backend_adapter as adapter
     from mistralai_vibe_local_harness.vibe._subagents._models import IdleChild, RunningChild, TurnFailedChild

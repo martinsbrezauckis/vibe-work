@@ -13,7 +13,6 @@
 import { useCallback, useEffect, useState } from "react";
 
 import type { NetworkResult, NetworkTestView, NetworkView } from "../../protocol/core";
-import { TEXT } from "../../vocabulary";
 import {
   FIELD_NAMES,
   type FieldName,
@@ -134,11 +133,7 @@ export function useNetwork() {
           } else {
             setView(result.view);
             setForm(formOf(result.view));
-            setNote(
-              result.saved
-                ? `Saved. It applies the next time Vibe Work starts. ${TEXT.quitVibeWork} and open it again.`
-                : "Nothing to save: these are already the saved settings.",
-            );
+            setNote(result.saved ? "Saved · Restart required" : "Already saved");
             leftover(result.leftoverSessionId);
           }
         })

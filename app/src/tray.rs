@@ -80,6 +80,28 @@ pub(crate) fn setup(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+#[cfg(target_os = "linux")]
+fn build(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
+    let normal = tauri::include_image!("icons/tray-linux.png");
+    let marked =
+        vw_host::attention::tray(normal.rgba(), normal.width(), normal.height(), false, true);
+    let open = app.clone();
+    let quit = app.clone();
+    vw_platform::tray::indicator::create(
+        &crate::startup::data_dir(app)?.join("tray"),
+        include_bytes!("../icons/tray-linux.png"),
+        (&marked, normal.width(), normal.height()),
+        texts::OPEN_VIBE_WORK,
+        texts::QUIT_VIBE_WORK,
+        move || {
+            let _ = reveal_main_window(&open);
+        },
+        move || quit.exit(0),
+    )
+    .map_err(Into::into)
+}
+
+#[cfg(not(target_os = "linux"))]
 fn build(app: &AppHandle) -> tauri::Result<()> {
     use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
     use tauri::tray::TrayIconBuilder;
@@ -217,10 +239,7 @@ fn first_notice(app: &AppHandle) {
     let app = app.clone();
     // OS calls and notification actions never block the UI thread.
     std::thread::spawn(move || {
-        let notifier = vw_platform::DesktopNotifier::new(
-            app.config().identifier.clone(),
-            !crate::startup::DEV_BUILD,
-        );
+        let notifier = crate::notifications::notifier(&app, !crate::startup::DEV_BUILD);
         #[cfg(target_os = "macos")]
         let body = texts::TRAY_NOTICE_MAC;
         #[cfg(not(target_os = "macos"))]

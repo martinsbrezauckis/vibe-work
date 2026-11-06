@@ -479,9 +479,9 @@ Function un.ConfirmShow ; Add add a `Delete app data` check box
   IntOp $5 $5 / 96
   IntOp $6 $6 / 96
   IntOp $7 $7 / 96
-  System::Call 'user32::CreateWindowEx(i r3, w "${__NSD_CheckBox_CLASS}", w "Clear user data (settings, preferences and caches only). Sessions, browser sign-ins and vault stay. The next page offers a separate choice to clear sessions and vault secrets.", i ${__NSD_CheckBox_STYLE} | ${BS_MULTILINE}, i r4, i r5, i r6, i r7, p r1, i0, i0, i0) i .s'
+  System::Call 'user32::CreateWindowEx(i r3, w "${__NSD_CheckBox_CLASS}", w "Clear user data (settings, preferences, caches and Vibe installed by this app). Sessions, browser sign-ins and vault stay. The next page offers a separate choice to clear sessions and vault secrets.", i ${__NSD_CheckBox_STYLE} | ${BS_MULTILINE}, i r4, i r5, i r6, i r7, p r1, i0, i0, i0) i .s'
   Pop $DeleteAppDataCheckbox
-  SendMessage $DeleteAppDataCheckbox ${BM_SETCHECK} ${BST_UNCHECKED} 0
+  SendMessage $DeleteAppDataCheckbox ${BM_SETCHECK} $DeleteAppDataCheckboxState 0
   SendMessage $HWNDPARENT ${WM_GETFONT} 0 0 $1
   SendMessage $DeleteAppDataCheckbox ${WM_SETFONT} $1 1
 FunctionEnd
@@ -496,7 +496,6 @@ FunctionEnd
 UninstPage custom un.SessionsVaultPage un.SessionsVaultPageLeave
 Function un.SessionsVaultPage
   Call un.SkipDataPages
-  StrCpy $DeleteSessionsVaultCheckboxState 0
   nsDialogs::Create 1018
   Pop $0
   ${If} $0 == error
@@ -504,12 +503,17 @@ Function un.SessionsVaultPage
   ${EndIf}
   ${NSD_CreateCheckbox} 0 0 100% 12u "Also clear sessions and vault secrets"
   Pop $DeleteSessionsVaultCheckbox
-  ${NSD_SetState} $DeleteSessionsVaultCheckbox ${BST_UNCHECKED}
+  ${NSD_SetState} $DeleteSessionsVaultCheckbox $DeleteSessionsVaultCheckboxState
+  ${NSD_OnClick} $DeleteSessionsVaultCheckbox un.SessionsVaultChanged
   ${NSD_CreateLabel} 0 22u 100% 65u "This deletes your Vibe Work chat history, browser sign-ins (cookies and signed-in account sessions), and your private Vibe Work vault (Mistral key and project secrets). This cannot be undone. Other apps' browser data and ShellX and Vault app vaults are never touched."
   Pop $0
   ${NSD_CreateLabel} 0 94u 100% 35u "Vibe Work's managed session home, including its settings and instructions, is removed. Project files and Vibe CLI history (including shared sessions) stay. Leave unchecked to keep sessions, browser sign-ins and vault."
   Pop $0
   nsDialogs::Show
+FunctionEnd
+Function un.SessionsVaultChanged
+  Pop $DeleteSessionsVaultCheckbox
+  Call un.SessionsVaultPageLeave
 FunctionEnd
 Function un.SessionsVaultPageLeave
   ${NSD_GetState} $DeleteSessionsVaultCheckbox $DeleteSessionsVaultCheckboxState
@@ -837,6 +841,10 @@ Section Uninstall
   !endif
 
   !insertmacro CheckIfAppIsRunning "$INSTDIR\${MAINBINARYNAME}.exe" "${PRODUCTNAME}"
+
+  !ifmacrodef NSIS_HOOK_CLEAN_CREDENTIALS
+    !insertmacro NSIS_HOOK_CLEAN_CREDENTIALS
+  !endif
 
   ; Delete the app directory and its content from disk
   ; Copy main executable

@@ -147,6 +147,9 @@ fn handle(
         }
         "tools/call" => {
             let name = params.get("name").and_then(Value::as_str).unwrap_or("");
+            if let Err(reason) = crate::video::check_tool(name) {
+                return Some(reply(&id, &tool_result(Err(reason))));
+            }
             if !package && tools::is_chrome(name) {
                 return Some(reply(
                     &id,

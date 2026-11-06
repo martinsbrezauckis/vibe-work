@@ -694,23 +694,23 @@ result: SessionToolsResult, } | { "type": "search",
  */
 result: SearchResult, };
 
-export type CoreError = { 
+export type CoreError = {
 /**
  * What kind of failure.
  */
-code: ErrorCode, 
+code: ErrorCode,
 /**
  * Human-readable description.
  */
-message: string, 
+message: string,
 /**
  * The JSON-RPC method involved, when there is one.
  */
-method: string | null, 
+method: string | null,
 /**
  * For `confirmationRequired`: what the native dialog would ask.
  */
-summary: string | null, 
+summary: string | null,
 /**
  * For `serverError`: Vibe's own error code (`not_found`, `stale_turn`, ...); for `keyService`:
  * the key service's reason word.
@@ -721,39 +721,39 @@ export type ErrorCode = "denied" | "invalidParams" | "confirmationRequired" | "c
 
 export type Origin = "ui" | "debug-api";
 
-export type ToolsInstallOffer = { 
+export type ToolsInstallOffer = {
 /**
  * Single-use id the click sends back.
  */
-offerId: string, 
+offerId: string,
 /**
  * `skill`, `skillUpdate` or `marketplace`.
  */
-kind: string, 
+kind: string,
 /**
  * The name shown.
  */
-name: string, 
+name: string,
 /**
  * Who publishes it, when known.
  */
-publisher: string | null, 
+publisher: string | null,
 /**
  * Where it comes from (the skill registry and its id, or the reviewed Tools catalog).
  */
-source: string, 
+source: string,
 /**
  * Its licence, when the source states one.
  */
-licence: string | null, 
+licence: string | null,
 /**
  * What it adds or runs, in plain words.
  */
-runs: string, 
+runs: string,
 /**
  * The version installed by the click, when known.
  */
-version: number | null, 
+version: number | null,
 /**
  * Unix milliseconds after which the click is refused (ask the window for a fresh offer).
  */
@@ -761,15 +761,15 @@ expiresAt: number, };
 
 export type AlertKind = "bypassToolPermissions" | "resyncPaused" | "accessModeLowered" | "accessModeUnverified" | "turnsInterrupted" | "reopenFailed" | "modelChoiceNotRestored" | "temporaryCleanupFailed" | "temporaryCleanupRecovered" | "remoteFileCleanupFailed" | "libraryListPartial" | "pluginReloadFailed" | "networkSettingsRejected" | "toolsUnavailable";
 
-export type CallbackInfo = { 
+export type CallbackInfo = {
 /**
  * Callback id.
  */
-callbackId: string, 
+callbackId: string,
 /**
  * Session it belongs to.
  */
-sessionId: string, 
+sessionId: string,
 /**
  * `approval`, `user_input`, `connector_auth` or a newer kind.
  */

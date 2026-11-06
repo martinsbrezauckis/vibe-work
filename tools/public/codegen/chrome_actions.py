@@ -10,7 +10,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[3] / "crates/vw-core-api/src/chrome_control"
 GATED = ("clipboard.read", "clipboard.write", "network.intercept", "tabs.emulate", "files.wait_download")
 DESCRIPTIONS = {
-    "page.read": "Controls + preview. interactiveOnly:false: text/structure; options:true: options; ref: subtree; summary:true: DOM counts/coverage. maxChars: first preview. Continue with returned args; reassemble JSON details.",
+    "page.read": "Controls + preview. interactiveOnly:false: text/structure; options:true: options; ref: subtree; summary:true: counts. Cursor pages captured data. chrome_execute saveTo:file exports this read.",
     "page.find": "Find by label, role, text or placeholder with deterministic ranking (five matches by default). summary:true returns captured match counts and coverage without refs; scope:viewport limits matching to the viewport. Tied matches are ambiguous; inspect them before choosing a ref. Continue with the returned cursor for remaining candidates.",
     "page.click": "Click an observed element in the active tab; POST needs sending permission. Partial observation does not mean input failed: inspect the receipt before retrying.",
     "page.type": "Type into an observed editable element, excluding passwords, and return its live state plus bounded observations. Input needs the tab active in its window. Partial observation does not mean input failed: inspect the result before retrying.",
@@ -38,6 +38,9 @@ def outputs(catalog):
                     prop["description"] = "Required for a new search; omit with cursor."
         if action == "page.find":
             row["inputSchema"]["properties"]["limit"]["default"] = 5
+        if action == "page.read":
+            row["inputSchema"]["properties"]["limit"]["default"] = 8
+            row["inputSchema"]["properties"]["maxBytes"]["default"] = 2000
         overrides.append(row)
     fixture = "{\n" + ",\n".join(
         f"  {json.dumps(key)}: " + (

@@ -27,6 +27,7 @@ fn reason(args: &Value) -> Result<&str, String> {
 /// `addon_suggest`: the add-on's own control as a card for the person. Refused, with the reason and what to do,
 /// when there is nothing for the person to set up.
 fn addon_suggest(shared: &Shared, args: &Value) -> Result<Value, String> {
+    use crate::chrome_control::AddonState as S;
     let addon = args
         .get("addon")
         .and_then(Value::as_str)
@@ -48,16 +49,33 @@ fn addon_suggest(shared: &Shared, args: &Value) -> Result<Value, String> {
         crate::chrome_control::AddonState::Unavailable => {
             Err(format!("Not shown: {}", view.instruction))
         }
-        _ => Ok(json!({"addonSuggestion":{
-            "addon": browser.id(),
-            "name": browser.name(),
-            "reason": reason,
-            "state": view.label,
-            "stateCode": view.state,
-            "label": view.label,
-            "instruction": view.instruction,
-            "extensionVersion": view.extension_version,
-        }})),
+        _ => {
+            let instruction = if browser == Browser::Edge
+                && !matches!(
+                    view.state,
+                    S::ChromeMissing
+                        | S::ChromeSandboxed
+                        | S::OtherBrowser
+                        | S::OwnerCredentialMissing
+                ) {
+                format!(
+                    "This chat's Connect Edge button opens Settings, Browser. {}",
+                    view.instruction
+                )
+            } else {
+                view.instruction
+            };
+            Ok(json!({"addonSuggestion":{
+                "addon": browser.id(),
+                "name": browser.name(),
+                "reason": reason,
+                "state": view.label,
+                "stateCode": view.state,
+                "label": view.label,
+                "instruction": instruction,
+                "extensionVersion": view.extension_version,
+            }}))
+        }
     }
 }
 use crate::{Core, Origin, core::Shared};
@@ -71,9 +89,10 @@ pub(super) async fn call(
     tool: &str,
     args: &Value,
 ) -> Result<Value, String> {
-    if shared.store.view(session).is_none() {
-        return Err("this session is not open in Vibe Work right now".into());
-    }
+    let view = shared
+        .store
+        .view(session)
+        .ok_or("this session is not open in Vibe Work right now")?;
     let core = Core {
         shared: shared.clone(),
     };
@@ -85,9 +104,12 @@ pub(super) async fn call(
         return Ok(json!({
             "accessMode":mode,
             "accessModeName":label,
+            "model":view.state["session"]["model"],
+            "thinkingLevel":view.state["session"]["reasoningEffort"],
             "vibeVersion":core.status().vibe_version,
             "chromeExtensionStore":crate::chrome_control::commands::extension_store(shared),
             "addons":addons(shared),
+            "network":crate::network_facts::read(shared).await,
         }));
     }
     if tool == tools::ADDON_SUGGEST {
@@ -125,6 +147,24 @@ pub(super) async fn call(
 mod tests {
     use super::*;
     use vw_vibe_install::{ExtensionStore, InstallerConfig, Limits, Sources, VibeInstaller};
+
+    #[tokio::test]
+    async fn session_status_reports_this_sessions_model_and_thinking_without_inventing_defaults() {
+        let core = crate::offline_core::start("session-model-facts").await;
+        for (id, model, thinking) in [
+            ("known", json!("my-model"), json!("high")),
+            ("unknown", Value::Null, Value::Null),
+            ("off", json!("other-model"), json!("off")),
+        ] {
+            let _ = core.shared.store.load(json!({"session":{"id":id,"cwd":"/project","model":model,"reasoningEffort":thinking,"status":{"type":"idle"}},"entries":[],"turns":[]}), vw_session::LoadKind::New).unwrap();
+            let status = call(&core.shared, id, tools::SESSION_STATUS, &json!({}))
+                .await
+                .unwrap();
+            assert_eq!(status.get("model"), Some(&model), "{status}");
+            assert_eq!(status.get("thinkingLevel"), Some(&thinking), "{status}");
+        }
+        core.shutdown().await;
+    }
 
     #[tokio::test]
     async fn session_status_reports_the_recorded_extension_store_without_a_chrome_package() {
@@ -274,17 +314,23 @@ mod tests {
                 .iter()
                 .find(|row| row["id"] == addon)
                 .unwrap();
-            assert_eq!(shown["state"], "Extension not responding");
+            assert_eq!(shown["stateCode"], "connecting");
+            assert_eq!(
+                shown["state"],
+                if addon == "edge" {
+                    "Turn on in Edge"
+                } else {
+                    "Turn on in Chrome"
+                }
+            );
             let instruction = shown["instruction"].as_str().unwrap();
-            assert!(instruction.contains("Check connection"), "{shown}");
-            assert!(instruction.contains("restart"), "{shown}");
+            assert!(instruction.contains("Extensions page"), "{shown}");
             assert!(
-                !shown["instruction"]
-                    .as_str()
-                    .unwrap()
-                    .contains("Ask the person"),
+                instruction.contains("turn on Vibe Work if it is off"),
                 "{shown}"
             );
+            assert!(instruction.contains("restart"), "{shown}");
+            assert!(!instruction.contains("Vibe Work icon"), "{shown}");
             let suggested = call(
                 &core.shared,
                 "s",
@@ -323,11 +369,14 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(shown["addonSuggestion"]["addon"], "edge");
+        let instruction = shown["addonSuggestion"]["instruction"].as_str().unwrap();
+        assert!(instruction.contains("This chat's Connect Edge button opens Settings, Browser."));
+        assert!(instruction.contains("click Set up… in Settings, Browser,"));
         assert!(
             shown["addonSuggestion"]["instruction"]
                 .as_str()
                 .unwrap()
-                .contains("Connect Edge")
+                .contains("click Set up…")
         );
         core.shutdown().await;
     }

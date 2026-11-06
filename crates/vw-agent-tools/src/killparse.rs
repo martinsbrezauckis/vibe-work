@@ -91,12 +91,26 @@ pub(crate) fn command_name(word: &str) -> String {
 #[must_use]
 pub fn scan(command: &str) -> KillScan {
     let mut out = KillScan::default();
-    // Process targets retain the conservative literal reading: a quoted PID still asks the user.
-    let literal = crate::command_segments::segments(command)
+    // Preserve conservative quoting checks while keeping redirections out of process arguments.
+    let literal = crate::killparse_shell::segments(command)
         .into_iter()
-        .map(|segment| segment.into_iter().map(str::to_owned).collect::<Vec<_>>())
+        .map(|segment| {
+            segment
+                .words
+                .into_iter()
+                .map(|word| {
+                    if word.quoted {
+                        format!("'{}'", word.text)
+                    } else {
+                        word.text
+                    }
+                })
+                .collect::<Vec<_>>()
+        })
         .collect::<Vec<_>>();
-    for reading in std::iter::once(literal).chain(crate::gitparse::readings(command)) {
+    for reading in
+        std::iter::once(literal).chain(crate::gitparse::readings(command).into_iter().skip(1))
+    {
         for segment in &reading {
             let segment: Vec<&str> = segment.iter().map(String::as_str).collect();
             scan_segment(&segment, &mut out);

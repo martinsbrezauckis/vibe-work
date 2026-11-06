@@ -52,6 +52,7 @@ export function createTauriClient(): CoreClient {
   return {
     kind: "tauri",
     desktop: {
+      attention: (count) => call("desktop_attention", { count }),
       settings: (enabled) => call("desktop_settings", { enabled: enabled ?? null }),
       async quit() {
         await call<null>("app_quit", {});

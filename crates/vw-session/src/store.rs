@@ -83,11 +83,13 @@ impl SessionStore {
     /// Copies of every session, ordered by id.
     #[must_use]
     pub fn views(&self) -> Vec<SessionView> {
-        self.lock()
-            .sessions
-            .values()
-            .map(SessionEntry::view)
-            .collect()
+        self.views_scoped(None)
+    }
+
+    /// Copies only the followed session, or every session when no id is given.
+    #[must_use]
+    pub fn views_scoped(&self, session_id: Option<&str>) -> Vec<SessionView> {
+        self.lock().views_scoped(session_id)
     }
 
     /// Every loaded session's id with its status type (`idle`, `running`, `blocked`,...), without
@@ -130,14 +132,38 @@ impl SessionStore {
         self.lock().sessions.get(session_id)?.runtime.clone()
     }
 
+    /// Observed child identifiers without copying the parent's history.
+    #[must_use]
+    pub fn child_ids(&self, session_id: &str) -> Vec<String> {
+        let inner = self.lock();
+        inner
+            .sessions
+            .get(session_id)
+            .into_iter()
+            .flat_map(|entry| {
+                entry.state["childSessions"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+            })
+            .filter_map(|row| row["id"].as_str().map(str::to_owned))
+            .collect()
+    }
+
     /// Subscribes: the first items are a snapshot per session, then ordered changes. At most
     /// `capacity` undelivered items are kept; beyond that the subscriber is resnapshotted.
     #[must_use]
     pub fn subscribe(&self, capacity: usize) -> Subscription {
-        let shared = Arc::new(SubShared::new(capacity));
+        self.subscribe_scoped(capacity, None)
+    }
+
+    /// Subscribes to one session (including future loads) and global notices, or all sessions.
+    #[must_use]
+    pub fn subscribe_scoped(&self, capacity: usize, session_id: Option<&str>) -> Subscription {
+        let shared = Arc::new(SubShared::new(capacity, session_id));
         {
             let mut g = self.lock();
-            shared.push_initial(g.all_views());
+            shared.push_initial(g.views_scoped(session_id));
             g.subs.push(Arc::downgrade(&shared));
         }
         Subscription {
@@ -146,16 +172,24 @@ impl SessionStore {
         }
     }
 
-    /// Refills a lagged subscriber with snapshots of every session (see `fanout`).
+    /// Refills a lagged subscriber with snapshots of followed sessions (see `fanout`).
     pub(crate) fn rebuild_subscriber(&self, shared: &Arc<SubShared>) {
         let g = self.lock();
-        shared.rebuild(g.all_views());
+        shared.rebuild(g.views_scoped(shared.session_id.as_deref()));
     }
 }
 
 impl Inner {
-    pub(crate) fn all_views(&self) -> Vec<SessionView> {
-        self.sessions.values().map(SessionEntry::view).collect()
+    fn views_scoped(&self, session_id: Option<&str>) -> Vec<SessionView> {
+        match session_id {
+            Some(id) => self
+                .sessions
+                .get(id)
+                .map(SessionEntry::view)
+                .into_iter()
+                .collect(),
+            None => self.sessions.values().map(SessionEntry::view).collect(),
+        }
     }
 
     pub(crate) fn apply(&mut self, n: Notification) -> Applied {
@@ -292,15 +326,25 @@ impl Inner {
             return;
         }
         for change in changes {
-            let delivery = match change {
-                Change::Replaced { session_id } => match self.sessions.get(session_id) {
-                    Some(entry) => Delivery::Snapshot(Box::new(entry.view())),
-                    None => continue,
-                },
-                other => Delivery::Change(other.clone()),
-            };
             for sub in self.subs.iter().filter_map(Weak::upgrade) {
-                if sub.push(delivery.clone()) && !self.touched.iter().any(|t| Arc::ptr_eq(t, &sub))
+                if sub
+                    .session_id
+                    .as_deref()
+                    .is_some_and(|id| change.session_id().is_some_and(|changed| changed != id))
+                {
+                    continue;
+                }
+                let snapshot = match change {
+                    Change::Replaced { session_id } => match self.sessions.get(session_id) {
+                        Some(entry) => Some(entry),
+                        None => continue,
+                    },
+                    _ => None,
+                };
+                if sub.push(|| match snapshot {
+                    Some(entry) => Delivery::Snapshot(Box::new(entry.view())),
+                    None => Delivery::Change(change.clone()),
+                }) && !self.touched.iter().any(|t| Arc::ptr_eq(t, &sub))
                 {
                     self.touched.push(sub);
                 }

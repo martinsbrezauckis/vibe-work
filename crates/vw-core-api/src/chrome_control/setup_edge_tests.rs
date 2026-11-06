@@ -146,15 +146,11 @@ fn edge_store_uses_its_own_launcher_and_the_existing_store_id() {
     };
     open_store_for(&config, true).unwrap();
     assert_eq!(*opened.lock().unwrap(), [store_url(EXTENSION_ID)]);
-    let command = store_command(true, &store_url(EXTENSION_ID));
-    let args: Vec<_> = command.get_args().collect();
-    if cfg!(target_os = "macos") {
-        assert!(args.contains(&std::ffi::OsStr::new("Microsoft Edge")));
-    } else if cfg!(windows) {
-        assert!(args.contains(&std::ffi::OsStr::new("msedge")));
-    } else {
-        assert_eq!(command.get_program(), "microsoft-edge");
-    }
+    let url = store_url(EXTENSION_ID);
+    assert_eq!(
+        crate::chrome_control::browser::launch_args(&url),
+        [std::ffi::OsString::from(url)]
+    );
 }
 
 #[cfg(unix)]

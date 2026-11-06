@@ -39,6 +39,11 @@
       "title": "Disablewelcomebanneranimation",
       "type": "boolean"
     },
+    "enableFileAutocomplete": {
+      "default": true,
+      "title": "Enablefileautocomplete",
+      "type": "boolean"
+    },
     "enableMouseCapture": {
       "default": true,
       "title": "Enablemousecapture",

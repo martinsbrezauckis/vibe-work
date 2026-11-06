@@ -10,6 +10,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 
 import { AppProvider, type App } from "./features/shell/AppContext";
+import { AppErrorBoundary } from "./features/shell/AppErrorBoundary";
 import { createApp } from "./features/shell/createApp";
 import { registerChangesTab } from "./features/changes/register";
 import { registerGitBrowser } from "./features/git-browser/register";
@@ -80,8 +81,10 @@ void app.newChat?.start();
 
 createRoot(container).render(
   <StrictMode>
-    <AppProvider app={app}>
-      <Shell />
-    </AppProvider>
+    <AppErrorBoundary app={app}>
+      <AppProvider app={app}>
+        <Shell />
+      </AppProvider>
+    </AppErrorBoundary>
   </StrictMode>,
 );

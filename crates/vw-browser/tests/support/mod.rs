@@ -273,6 +273,11 @@ impl PageEngine {
             .unwrap()
     }
 
+    /// Opt-in public-page benchmarks remove the offline fixture route in this disposable browser.
+    pub async fn public_pages(&self) {
+        self.rpc(json!({"op":"publicPages"})).await.unwrap();
+    }
+
     /// Runs `script` as page script in every frame's own world (cross-origin frames included).
     pub async fn eval_in_frame_pages(&self, script: &str) {
         self.rpc(json!({"op":"framesPageWorld", "script":script}))

@@ -109,20 +109,12 @@ async fn a_refused_write_is_an_error_and_the_short_lived_chat_is_still_deleted()
     let r = &s.r;
     let before = listed(r).await;
     let error = set_subagents(r, true).await.unwrap_err();
-    assert_eq!(error.server_code.as_deref(), Some("internal_error"));
+    // Vibe reports a failed persistence through ConfigWriteResponse.failures.
+    // The core already turns that body into a refusal and still removes its helper chat.
+    assert_eq!(error.code, vw_core_api::ErrorCode::ServerError);
+    assert_eq!(error.server_code, None);
     assert_eq!(error.method.as_deref(), Some("config/write"));
-    assert_eq!(
-        error.message,
-        format!(
-            "config/write failed: Layer 'user-toml': cannot read config file at {} (internal_error)",
-            s.sessions_dir
-                .parent()
-                .unwrap()
-                .join("vibe-home")
-                .join("config.toml")
-                .display()
-        )
-    );
+    assert_eq!(error.message, "Vibe could not save the change.");
     let helper = named(r, "config/write").remove(0);
     assert_eq!(named(r, "session/delete"), [helper]);
     assert_eq!(listed(r).await, before);

@@ -125,17 +125,14 @@ pub(super) async fn fallback(shared: &Shared, id: &str, choice: &Choice, last: V
     };
     let message = notice(&choice, default.as_ref(), &runtime, why, problem);
     // Remember what runs until Vibe records the next turn, so the older pin does not repeat the alert.
-    if let Some(current) = actual(&json!({"runtime":runtime})) {
-        for records in [
-            &shared.model_choices.fallbacks,
-            &shared.model_choices.remembered,
-        ] {
-            if let Err(error) = records.change(id, Some(current.clone())) {
-                tracing::warn!(%error, "replacement model could not be saved");
-            }
-        }
+    if let Some(current) = actual(&json!({"runtime":runtime}))
+        && let Err(error) = shared
+            .model_choices
+            .records
+            .update(id, |record| record.replaced(current))
+    {
+        tracing::warn!(%error, "replacement model could not be saved");
     }
-    shared.model_choices.pending.forget(id);
     shared.emit(crate::CoreEvent::Alert {
         session_id: Some(id.into()),
         kind: crate::AlertKind::ModelChoiceNotRestored,
@@ -211,9 +208,10 @@ pub(crate) async fn restore(
     last: Value,
     recorded: Option<Choice>,
 ) -> Value {
-    let replacement = shared.model_choices.fallbacks.get(id);
+    let record = shared.model_choices.records.get(id);
+    let replacement = record.fallback;
     let is_replacement = replacement.is_some();
-    if let Some(choice) = replacement.or_else(|| shared.model_choices.pending.get(id)) {
+    if let Some(choice) = replacement.or(record.pending) {
         if is_replacement
             && actual(&json!({"runtime":last})).is_some_and(|current| choice.matches(&current))
         {
@@ -227,10 +225,8 @@ pub(crate) async fn restore(
         return fallback(shared, id, &choice, last).await;
     }
     let recorded = recorded.map(|choice| {
-        shared
-            .model_choices
+        record
             .remembered
-            .get(id)
             .filter(|saved| saved.alias == choice.alias)
             .map_or(choice.clone(), |mut saved| {
                 saved.effort = choice.effort;

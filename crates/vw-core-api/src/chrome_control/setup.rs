@@ -28,6 +28,8 @@ type AfterHelperCheck = Arc<dyn Fn(&Path) + Send + Sync>;
 /// Where Chrome Control comes from and where Chrome looks for it.
 #[derive(Clone)]
 pub struct ChromeControlConfig {
+    /// Native Chrome/Edge facts cached independently of pairing; probes run away from async workers.
+    pub browser_detection: vw_platform::browser::Detection,
     /// The trusted native package shipped with Vibe Work (`bin/chrome-control`, `.exe` on Windows).
     /// `None`: this build has none, and Set up says so.
     pub package: Option<PathBuf>,
@@ -63,6 +65,7 @@ pub struct ChromeControlConfig {
 impl Default for ChromeControlConfig {
     fn default() -> Self {
         Self {
+            browser_detection: vw_platform::browser::Detection::default(),
             package: None,
             #[cfg(test)]
             after_helper_check: None,
@@ -164,7 +167,10 @@ pub struct ChromeSetupView {
     /// The store listing is in Google's review (the last accepted signed release manifest says so): the setup shows
     /// that in place of the store button. False when no manifest stated it (the store link).
     pub store_review: bool,
-    /// Pairing state reported by the owned helper, in plain words.
+    /// Typed helper observation; unknown in views saved before this field existed.
+    #[serde(default)]
+    pub pairing_state: super::PairingState,
+    /// Display-only pairing label. Connection decisions use `pairing_state`.
     pub pairing: String,
     /// Short public identity to compare with Chrome (never the owner secret).
     pub fingerprint: Option<String>,
@@ -314,6 +320,7 @@ pub(super) fn view_for(
             profiles: Vec::new(),
             store_url: String::new(),
             store_review: false,
+            pairing_state: super::PairingState::Unknown,
             pairing: ABSENT.to_owned(),
             fingerprint: None,
             browser_issue: None,
@@ -360,6 +367,7 @@ pub(super) fn view_for(
         profiles,
         store_url: store_url(&config.extension_id),
         store_review: false,
+        pairing_state: super::PairingState::Unknown,
         pairing: if repair_failed {
             "Helper setup required".into()
         } else {
@@ -368,11 +376,15 @@ pub(super) fn view_for(
                 .unwrap_or_else(|| vw_vocabulary::texts::CHROME_NOT_CONNECTED.to_owned())
         },
         fingerprint: None,
-        browser_issue: (browser == "Google Chrome")
-            .then(|| super::browser::issue(config))
-            .flatten(),
+        browser_issue: match browser {
+            "Google Chrome" => super::browser::issue(config),
+            "Microsoft Edge" => {
+                super::browser::issue_for(config, vw_platform::browser::Browser::Edge)
+            }
+            _ => None,
+        },
         install_state: (browser == "Google Chrome")
-            .then(|| state.and_then(super::extension_install::status))
+            .then(|| state.and_then(|state| super::extension_install::status(config, state)))
             .flatten(),
         states: None,
         // `commands::view` decides it from the live connection too.
@@ -554,68 +566,7 @@ pub(super) fn open_store_for(config: &ChromeControlConfig, edge: bool) -> Result
     if !edge {
         return super::browser::open(config, &store_url(&config.extension_id));
     }
-    if !cfg!(feature = "your-edge") {
-        return Err(absent_for(true).to_owned());
-    }
-    let url = store_url(&config.extension_id);
-    if let Some(launcher) = if edge {
-        &config.edge_launcher
-    } else {
-        &config.launcher
-    } {
-        return launcher(&url);
-    }
-    let mut command = store_command(edge, &url);
-    command
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .spawn()
-        .map(drop)
-        .map_err(|e| {
-            format!(
-                "{} could not be started: {e}",
-                if edge {
-                    "Microsoft Edge"
-                } else {
-                    "Google Chrome"
-                }
-            )
-        })
-}
-
-fn store_command(edge: bool, url: &str) -> std::process::Command {
-    if cfg!(target_os = "macos") {
-        let mut c = std::process::Command::new("open");
-        c.args([
-            "-a",
-            if edge {
-                "Microsoft Edge"
-            } else {
-                "Google Chrome"
-            },
-            url,
-        ]);
-        c
-    } else if cfg!(windows) {
-        let mut c = std::process::Command::new("cmd");
-        c.args([
-            "/C",
-            "start",
-            "",
-            if edge { "msedge" } else { "chrome" },
-            url,
-        ]);
-        c
-    } else {
-        let mut c = std::process::Command::new(if edge {
-            "microsoft-edge"
-        } else {
-            "google-chrome"
-        });
-        c.arg(url);
-        c
-    }
+    super::browser::open_edge(config, &store_url(&config.extension_id))
 }
 
 fn registry_set(key: &str, file: &Path) -> Result<(), String> {

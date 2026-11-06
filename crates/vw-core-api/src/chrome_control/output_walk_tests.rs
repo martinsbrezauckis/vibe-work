@@ -187,7 +187,7 @@ async fn fixture() -> crate::Core {
             .owner
             .edge_pairing
             .lock()
-            .unwrap() = ("Paired".into(), None);
+            .unwrap() = (crate::chrome_control::PairingState::Paired, None);
         core.shared
             .chrome_control
             .chat_profiles

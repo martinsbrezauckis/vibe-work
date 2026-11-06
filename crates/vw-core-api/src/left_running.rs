@@ -14,7 +14,7 @@
 //!   the Debug API returns the list, and the client stops what it wants with `stop` (its explicit request is the
 //!   user's action).
 //! - `stop` accepts only an `id` of the list; vw-procmon refuses anything else before a signal.
-//! - Views never carry arguments or folders (vw-procmon's view rule).
+//! - Only a recorded agent launch supplies a command; OS arguments and working folders are never exposed.
 
 use std::collections::BTreeSet;
 
@@ -47,8 +47,9 @@ fn parse_id(id: &str) -> Option<ProcessRef> {
 /// "node on port 5173" / "python3 on ports 8000, 8001" / "pid 4242", for the dialog.
 fn describe(view: &LeftRunningView) -> String {
     let name = view
-        .name
+        .command
         .as_deref()
+        .or(view.name.as_deref())
         .map_or_else(|| format!("pid {}", view.pid), vw_gate::dialog_quote);
     match view.ports.as_slice() {
         [] => name,
@@ -73,6 +74,13 @@ impl Core {
             session_id,
             pid: entry.process.pid,
             name: entry.name.clone(),
+            command: self
+                .shared
+                .agent_tools
+                .as_ref()
+                .and_then(|tools| tools.launches.of(entry.process))
+                .filter(|launch| Some(launch.session_id.as_str()) == entry.session_id.as_deref())
+                .map(|launch| launch.command),
             ports: entry.ports.clone(),
         }
     }
@@ -187,7 +195,7 @@ impl Core {
             params: json!({
                 "processes": left
                     .iter()
-                    .map(|i| json!({"name": i.name, "pid": i.pid, "ports": i.ports}))
+                    .map(|i| json!({"name": i.name, "command": i.command, "pid": i.pid, "ports": i.ports}))
                     .collect::<Vec<_>>(),
             }),
             always: None,

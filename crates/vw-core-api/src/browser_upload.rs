@@ -1,5 +1,6 @@
-//! Loads the files of a `browser_act upload` from the chat's folders, as the agent named them (relative to the
-//! chat's folder, or absolute inside one of its folders). Each file is opened through a directory handle of its
+//! Loads the files of a `browser_act upload` from the chat's first folder, as the agent named them (relative to it,
+//! or absolute inside it). Like Your Chrome's upload, which is bound to the chat folder at session open, a file in
+//! one of the chat's other workspace folders is refused. Each file is opened through a directory handle of its
 //! folder (cap-std), without following any links or reparse points; at most 16 files and 32 MB together.
 //!
 //! Depends on: `agent_tools::session::folders`, vw-browser (`Action::Upload`). Called by: the agent's
@@ -54,20 +55,27 @@ fn read_all(
     Ok(files)
 }
 
-/// The folder a path lies in and the path inside it (relative paths: the chat's first folder).
+/// The chat's first folder and the path inside it; uploads never read from the chat's other workspace folders.
 fn locate<'a>(folders: &'a [PathBuf], path: &str) -> Option<(&'a Path, PathBuf)> {
+    let folder = folders.first()?;
     let named = Path::new(path);
     if named.is_absolute() {
-        return folders.iter().find_map(|folder| {
-            named
-                .strip_prefix(folder)
-                .ok()
-                .map(|inside| (folder.as_path(), inside.to_path_buf()))
-        });
+        return named
+            .strip_prefix(folder)
+            .ok()
+            .map(|inside| (folder.as_path(), inside.to_path_buf()));
     }
-    folders
-        .first()
-        .map(|folder| (folder.as_path(), named.to_path_buf()))
+    Some((folder.as_path(), named.to_path_buf()))
+}
+
+/// True when an absolute path lies in one of the chat's other workspace folders (not its first one).
+fn in_other_folder(folders: &[PathBuf], path: &str) -> bool {
+    let named = Path::new(path);
+    named.is_absolute()
+        && folders
+            .iter()
+            .skip(1)
+            .any(|folder| named.starts_with(folder))
 }
 
 fn read(
@@ -82,6 +90,14 @@ fn read(
              file into the chat's folder first if you need it."
         )
     };
+    if in_other_folder(folders, path) {
+        return Err(format!(
+            "{path} is in another of this chat's folders: upload attaches files from the chat's first folder only, \
+             as {} does. Copy the file into {} first if you need it.",
+            vw_vocabulary::texts::CHROME_NAME,
+            folders[0].display()
+        ));
+    }
     let (folder, inside) = locate(folders, path).ok_or_else(outside)?;
     if inside
         .components()
@@ -353,6 +369,30 @@ mod tests {
                 .unwrap_err()
                 .contains("was not found")
         );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn upload_reads_only_the_first_folder_of_a_multi_root_chat() {
+        let root = folder("roots");
+        std::fs::create_dir_all(root.join("extra")).unwrap();
+        std::fs::write(root.join("extra/other.txt"), b"other root").unwrap();
+        let chat = vec![root.join("chat"), root.join("extra")];
+        let first = root.join("chat/docs/note.txt").display().to_string();
+        assert_eq!(read_all(&chat, &[first]).unwrap()[0].data, b"hello");
+        assert_eq!(
+            read_all(&chat, &["docs/note.txt".to_owned()]).unwrap()[0].data,
+            b"hello"
+        );
+        let later = root.join("extra/other.txt").display().to_string();
+        let refused = read_all(&chat, &[later]).unwrap_err();
+        assert!(
+            refused.contains("another of this chat's folders")
+                && refused.contains("first folder only"),
+            "{refused}"
+        );
+        let refused = read_all(&chat, &["../extra/other.txt".to_owned()]).unwrap_err();
+        assert!(refused.contains("outside this chat's folders"), "{refused}");
         let _ = std::fs::remove_dir_all(&root);
     }
 

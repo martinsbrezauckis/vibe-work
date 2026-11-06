@@ -109,7 +109,7 @@ Production dependency notices
 -----------------------------
 
 The npm closure below contains 176 production packages of the user interface. The Cargo rows
-contain 627 unique package/version/licence/source records of the shipped binaries; each lists the
+contain 648 unique package/version/licence/source records of the shipped binaries; each lists the
 supported target graphs that include it. Build-only and test-only dependencies are excluded.
 
 npm production dependency closure
@@ -327,6 +327,7 @@ Cargo normal dependency graphs
 - atk-sys@0.18.2 — MIT; crates.io; linux
 - atoi_simd@0.18.1 — MIT OR Apache-2.0; crates.io; linux,macos,windows
 - atomic-waker@1.1.2 — Apache-2.0 OR MIT; crates.io; linux,macos,windows
+- atomic_refcell@0.1.14 — Apache-2.0 OR MIT; crates.io; linux
 - axum@0.8.9 — MIT; crates.io; linux,macos,windows
 - axum-core@0.5.6 — MIT; crates.io; linux,macos,windows
 - base64@0.22.1 — MIT OR Apache-2.0; crates.io; linux,macos,windows
@@ -496,12 +497,25 @@ Cargo normal dependency graphs
 - getrandom@0.4.3 — MIT OR Apache-2.0; crates.io; linux,macos,windows
 - gio@0.18.4 — MIT; crates.io; linux
 - gio-sys@0.18.1 — MIT; crates.io; linux
+- gio-sys@0.21.5 — MIT; crates.io; linux
 - glib@0.18.5 — MIT; crates.io; linux
+- glib@0.21.5 — MIT; crates.io; linux
 - glib-macros@0.18.5 — MIT; crates.io; linux
+- glib-macros@0.21.5 — MIT; crates.io; linux
 - glib-sys@0.18.1 — MIT; crates.io; linux
+- glib-sys@0.21.5 — MIT; crates.io; linux
 - glob@0.3.4 — MIT OR Apache-2.0; crates.io; linux,macos,windows
 - globset@0.4.21 — Unlicense OR MIT; crates.io; linux,macos,windows
 - gobject-sys@0.18.0 — MIT; crates.io; linux
+- gobject-sys@0.21.5 — MIT; crates.io; linux
+- gstreamer@0.24.5 — MIT OR Apache-2.0; crates.io; linux
+- gstreamer-app@0.24.5 — MIT OR Apache-2.0; crates.io; linux
+- gstreamer-app-sys@0.24.5 — MIT; crates.io; linux
+- gstreamer-base@0.24.5 — MIT OR Apache-2.0; crates.io; linux
+- gstreamer-base-sys@0.24.5 — MIT; crates.io; linux
+- gstreamer-sys@0.24.5 — MIT; crates.io; linux
+- gstreamer-video@0.24.5 — MIT OR Apache-2.0; crates.io; linux
+- gstreamer-video-sys@0.24.5 — MIT; crates.io; linux
 - gtk@0.18.2 — MIT; crates.io; linux
 - gtk-sys@0.18.2 — MIT; crates.io; linux
 - gtk3-macros@0.18.2 — MIT; crates.io; linux
@@ -564,6 +578,7 @@ Cargo normal dependency graphs
 - keepawake@0.6.1 — MIT; crates.io; linux,macos,windows
 - keyboard-types@0.8.3 — MIT OR Apache-2.0; crates.io; linux,macos,windows
 - keyring-core@1.0.0 — MIT OR Apache-2.0; crates.io; linux,macos,windows
+- kstring@2.0.5 — MIT OR Apache-2.0; crates.io; linux
 - lazy_static@1.5.1 — MIT OR Apache-2.0; crates.io; linux,macos,windows
 - libappindicator@0.9.0 — Apache-2.0 OR MIT; crates.io; linux
 - libappindicator-sys@0.9.0 — Apache-2.0 OR MIT; crates.io; linux
@@ -571,7 +586,7 @@ Cargo normal dependency graphs
 - libdbus-sys@0.2.7 — Apache-2.0/MIT; crates.io; linux
 - libloading@0.7.4 — ISC; crates.io; linux,macos,windows
 - linux-raw-sys@0.12.1 — Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT; crates.io; linux
-- listeners@0.6.1 — MIT; crates.io; macos,windows
+- listeners@0.6.1 — MIT; crates.io; macos
 - litemap@0.8.3 — Unicode-3.0; crates.io; linux,macos,windows
 - lock_api@0.4.14 — MIT OR Apache-2.0; crates.io; linux,macos,windows
 - log@0.4.34 — MIT OR Apache-2.0; crates.io; linux,macos,windows
@@ -596,6 +611,7 @@ Cargo normal dependency graphs
 - mio@1.2.4 — MIT; crates.io; linux,macos,windows
 - moxcms@0.9.1 — BSD-3-Clause OR Apache-2.0; crates.io; linux,macos,windows
 - muda@0.20.0 — Apache-2.0 OR MIT; crates.io; linux,macos,windows
+- muldiv@1.0.1 — MIT; crates.io; linux
 - multiversion_no_op@1.0.0 — Apache-2.0 OR MIT; crates.io; linux,macos,windows
 - native-tls@0.2.18 — MIT OR Apache-2.0; crates.io; macos,windows
 - new_debug_unreachable@1.0.6 — MIT; crates.io; linux,macos,windows
@@ -616,8 +632,10 @@ Cargo normal dependency graphs
 - num-traits@0.2.19 — MIT OR Apache-2.0; crates.io; linux,macos,windows
 - objc2@0.6.5 — MIT; crates.io; macos
 - objc2-app-kit@0.3.2 — Zlib OR Apache-2.0 OR MIT; crates.io; macos
+- objc2-av-foundation@0.3.2 — Zlib OR Apache-2.0 OR MIT; crates.io; macos
 - objc2-core-foundation@0.3.2 — Zlib OR Apache-2.0 OR MIT; crates.io; macos
 - objc2-core-graphics@0.3.2 — Zlib OR Apache-2.0 OR MIT; crates.io; macos
+- objc2-core-media@0.3.2 — Zlib OR Apache-2.0 OR MIT; crates.io; macos
 - objc2-encode@4.1.0 — MIT; crates.io; macos
 - objc2-exception-helper@0.1.1 — Zlib OR Apache-2.0 OR MIT; crates.io; macos
 - objc2-foundation@0.3.2 — MIT; crates.io; macos
@@ -629,6 +647,7 @@ Cargo normal dependency graphs
 - opaque-debug@0.3.1 — MIT OR Apache-2.0; crates.io; linux,macos,windows
 - openssl-probe@0.2.1 — MIT OR Apache-2.0; crates.io; linux
 - option-ext@0.2.0 — MPL-2.0; crates.io; linux,macos,windows
+- option-operations@0.6.1 — MIT/Apache-2.0; crates.io; linux
 - ordered-stream@0.2.0 — MIT OR Apache-2.0; crates.io; linux
 - os_pipe@1.2.3 — MIT; crates.io; linux
 - osakit@0.3.1 — MIT OR Apache-2.0; crates.io; macos
@@ -638,6 +657,7 @@ Cargo normal dependency graphs
 - parking_lot@0.12.5 — MIT OR Apache-2.0; crates.io; linux,macos,windows
 - parking_lot_core@0.9.12 — MIT OR Apache-2.0; crates.io; linux,macos,windows
 - password-hash@0.5.0 — MIT OR Apache-2.0; crates.io; linux,macos,windows
+- pastey@0.2.3 — MIT OR Apache-2.0; crates.io; linux
 - pdf-extract@0.12.1 — MIT; crates.io; linux
 - percent-encoding@2.3.2 — MIT OR Apache-2.0; crates.io; linux,macos,windows
 - petgraph@0.8.3 — MIT OR Apache-2.0; crates.io; linux
@@ -746,6 +766,7 @@ Cargo normal dependency graphs
 - soup3-sys@0.5.0 — MIT; crates.io; linux
 - spin@0.9.9 — MIT; crates.io; linux,macos,windows
 - stable_deref_trait@1.2.1 — MIT OR Apache-2.0; crates.io; linux,macos,windows
+- static_assertions@1.1.0 — MIT OR Apache-2.0; crates.io; linux
 - string_cache@0.11.0 — MIT OR Apache-2.0; crates.io; linux,macos,windows
 - string_cache@0.9.0 — MIT OR Apache-2.0; crates.io; linux,macos,windows
 - stringprep@0.1.5 — MIT/Apache-2.0; crates.io; linux

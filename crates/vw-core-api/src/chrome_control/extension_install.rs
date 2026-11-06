@@ -59,32 +59,26 @@ fn permitted(config: &ChromeControlConfig, registration: &Registration) -> Resul
     Ok(())
 }
 
-fn chrome_pids() -> Vec<String> {
+fn chrome_pids(config: &ChromeControlConfig) -> Option<Vec<String>> {
     if !cfg!(target_os = "macos") {
-        return Vec::new();
+        return Some(Vec::new());
     }
-    std::process::Command::new("/usr/bin/pgrep")
-        .args(["-x", "Google Chrome"])
-        .output()
-        .ok()
-        .filter(|o| o.status.success())
-        .map(|o| {
-            String::from_utf8_lossy(&o.stdout)
-                .lines()
-                .map(str::to_owned)
-                .collect()
-        })
-        .unwrap_or_default()
+    super::browser::snapshot(config, vw_platform::browser::Browser::Chrome)?
+        .process_ids
+        .map(|ids| ids.into_iter().map(|id| id.to_string()).collect())
 }
 
-pub(super) fn status(state: &Path) -> Option<String> {
+pub(super) fn status(config: &ChromeControlConfig, state: &Path) -> Option<String> {
     let registration = read(state)?;
-    let live = chrome_pids();
+    let live = chrome_pids(config);
     Some(
-        if registration
-            .chrome_pids
-            .iter()
-            .any(|pid| live.contains(pid))
+        if !registration.chrome_pids.is_empty()
+            && live.as_ref().is_none_or(|live| {
+                registration
+                    .chrome_pids
+                    .iter()
+                    .any(|pid| live.contains(pid))
+            })
         {
             "restartChrome"
         } else {
@@ -115,6 +109,16 @@ fn create_file(path: &Path) -> Result<bool, String> {
     Ok(true)
 }
 
+/// Run setup's OS/file work away from async request workers, after the first native observation.
+pub(super) async fn begin_async(config: &ChromeControlConfig, state: &Path) -> Result<(), String> {
+    super::browser::refresh(config).await;
+    let config = config.clone();
+    let state = state.to_owned();
+    tokio::task::spawn_blocking(move || begin(&config, &state))
+        .await
+        .map_err(|_| "The browser setup task ended".to_owned())?
+}
+
 /// Use a native consent prompt where supported. An existing registration uses the Store for recovery,
 /// including after a person removed an externally installed extension in Chrome (Chrome remembers that).
 pub(super) fn begin(config: &ChromeControlConfig, state: &Path) -> Result<(), String> {
@@ -124,7 +128,7 @@ pub(super) fn begin(config: &ChromeControlConfig, state: &Path) -> Result<(), St
     let mut registration = Registration {
         file: None,
         key: None,
-        chrome_pids: chrome_pids(),
+        chrome_pids: chrome_pids(config).unwrap_or_default(),
     };
     if cfg!(target_os = "macos") {
         let path = manifest_path(config)?;
@@ -146,7 +150,7 @@ pub(super) fn begin(config: &ChromeControlConfig, state: &Path) -> Result<(), St
         undo(&registration)?;
         return Err("Chrome registration failed".to_owned());
     }
-    prompt(config, super::browser::running())
+    prompt(config, super::browser::running(config))
 }
 
 fn prompt(config: &ChromeControlConfig, running: bool) -> Result<(), String> {

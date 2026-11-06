@@ -26,6 +26,7 @@ mod action_loop;
 pub mod annotate;
 mod answers;
 pub mod capture;
+pub mod choice_context;
 mod choices;
 pub mod consent;
 mod consent_driver;

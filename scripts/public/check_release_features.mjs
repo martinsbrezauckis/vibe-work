@@ -6,14 +6,15 @@ import { REPO_ROOT } from "./lib_files.mjs";
 
 const targets = ["x86_64-unknown-linux-gnu", "x86_64-pc-windows-msvc", "aarch64-apple-darwin"];
 const required = new Map([
-  ["app", ["macos-proxy", "your-edge", "proxy-transports"]],
-  ["vw-core-api", ["your-edge", "proxy-transports"]],
+  ["app", ["macos-proxy", "your-edge", "proxy-transports", "video"]],
+  ["vw-core-api", ["your-edge", "proxy-transports", "video"]],
+  ["vw-agent-tools", ["video"]],
   ["vw-netguard", ["proxy-transports"]],
   ["vw-mistral", ["proxy-transports"]],
   ["vw-gate", ["proxy-transports"]],
   ["tauri", ["tray-icon"]],
 ]);
-const forbidden = new Set(["your-firefox", "video", "video-test", "feedback", "click-marker"]);
+const forbidden = new Set(["your-firefox", "video-test", "feedback", "click-marker"]);
 const errors = [];
 for (const target of targets) {
   const tree = execFileSync("cargo", ["tree", "--color", "never", "--locked", "-p", "app", "--target", target,
@@ -31,16 +32,16 @@ for (const target of targets) {
   }
   for (const [name, features] of packages) {
     if (name !== "app" && !name.startsWith("vw-")) continue;
-    if (name === "vw-video") errors.push(`${target}: video module is linked`);
     for (const feature of features) {
       if (forbidden.has(feature)) errors.push(`${target}: ${name}/${feature} is on`);
     }
   }
+  if (!packages.has("vw-video")) errors.push(`${target}: video module is missing`);
   if (!packages.get("vw-webview")?.has("macos-proxy")) errors.push(`${target}: preview guard is off`);
 }
 if (errors.length) {
   for (const error of errors) console.error(error);
   process.exitCode = 1;
 } else {
-  console.log("Release features: Edge, proxies and tray on; Firefox, video, feedback and click markers off (all OSes)");
+  console.log("Release features: Edge, proxies, tray and video on; Firefox, feedback and click markers off (all OSes)");
 }

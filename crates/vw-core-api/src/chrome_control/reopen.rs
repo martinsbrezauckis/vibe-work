@@ -626,7 +626,7 @@ mod tests {
         .await;
         assert_eq!(
             refused.unwrap_err(),
-            "Not run: this Chrome session was stopped."
+            "Not run: this Chrome session was stopped; open a new one with chrome_session."
         );
         assert_eq!(opens(&seen).len(), 1);
         core.shutdown().await;

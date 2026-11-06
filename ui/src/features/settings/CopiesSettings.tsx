@@ -25,10 +25,7 @@ function Row({ worktrees }: { worktrees: Worktrees }) {
   const count = useCopyCount(worktrees);
   return (
     <div className="check" data-setting="session-copies">
-      <span>
-        Session copies
-        <span className="d">Review or remove session copies no chat uses anymore.</span>
-      </span>
+      <span>Session copies</span>
       {count === 0 ? (
         <span className="d" data-testid="settings.copies-settings-none">
           None right now

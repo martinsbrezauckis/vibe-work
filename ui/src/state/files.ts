@@ -14,7 +14,6 @@
  */
 import { createFileWorkspace } from "./fileWorkspace";
 import type {
-  CoreEvent,
   FileContent,
   FileKind,
   FileChoice,
@@ -127,7 +126,10 @@ export function viewerKind(kind: FileKind | null | undefined): boolean {
 }
 
 /** Creates the controller. */
-export function createFileReader(core: CoreController) {
+export function createFileReader(
+  core: CoreController,
+  watch: (sessionId: string, file: string) => () => void = () => () => undefined,
+) {
   const store = createStore<FilesState>({ refs: {}, tabs: {}, drops: {}, edits: {} });
   const queue = new Map<string, Set<string>>();
   let timer: ReturnType<typeof setTimeout> | null = null;
@@ -556,7 +558,7 @@ export function createFileReader(core: CoreController) {
   });
 
   /** Checks the shown file; reloads when it changed, marks it gone when it was deleted. */
-  const poll = async (sessionId: string): Promise<void> => {
+  const checkDisk = async (sessionId: string): Promise<void> => {
     const tab = store.get().tabs[sessionId];
     if (tab?.shown == null || tab.status === "loading") return;
     const gen = tab.gen;
@@ -574,6 +576,18 @@ export function createFileReader(core: CoreController) {
     const draft = store.get().edits[sessionId];
     if (draft !== undefined && draft.base.file !== tabOf(store.get(), sessionId).shown?.file)
       await refreshDraft("ui", sessionId);
+  };
+
+  // A fallback tick and an event can meet while a stat/read is pending; share that work.
+  const polling = new Map<string, Promise<void>>();
+  const poll = (id: string): Promise<void> => {
+    const pending = polling.get(id);
+    if (pending) return pending;
+    const work = checkDisk(id).finally(() => {
+      polling.delete(id);
+    });
+    polling.set(id, work);
+    return work;
   };
 
   /** Where the viewer goes (null: hidden). Serialized; only the newest placement is sent. */
@@ -601,33 +615,9 @@ export function createFileReader(core: CoreController) {
   };
 
   // a deleted session's entries go with it.
-  const stopPrune = core.onSessionsGone((ids) => {
+  const forgetSessions = (ids: readonly string[]) => {
     store.set((s) => pruneSessions(s, ["refs", "tabs", "drops", "edits"], ids));
-  });
-  /** Reads `sessionId`'s viewer state again (after `filesChanged`, or a missed one). */
-  const readViewer = (sessionId: string): void => {
-    void run("ui", { op: "viewer", sessionId })
-      .then((r) => {
-        if (r.kind === "viewer") setTab(sessionId, (t) => ({ ...t, viewer: r.viewer }));
-      })
-      .catch(() => undefined);
   };
-  const stop = core.listen((event: CoreEvent) => {
-    if (event.type === "changesUpdated") {
-      invalidate(event.sessionId);
-      void poll(event.sessionId);
-    } else if (event.type === "filesChanged" && event.sessionId !== null) {
-      readViewer(event.sessionId);
-    } else if (event.type === "lagged") {
-      // after `lagged` the core's events for this were missed: read again what is shown.
-      for (const sessionId of Object.keys(store.get().tabs)) {
-        invalidate(sessionId);
-        void poll(sessionId);
-        readViewer(sessionId);
-      }
-    }
-  });
-
   /** Keeps the report of the last drop on `sessionId`'s composer (the `ui/files` route reads it). */
   const noteDrop = (sessionId: string, report: DropReport): void => {
     store.set((s) => ({ ...s, drops: { ...s.drops, [sessionId]: report } }));
@@ -640,11 +630,19 @@ export function createFileReader(core: CoreController) {
     image,
     noteDrop,
     invalidate,
+    forgetSessions,
     poll,
     layout,
+    watch(sessionId: string) {
+      const file = tabOf(store.get(), sessionId).shown?.file;
+      return file === undefined ? () => undefined : watch(sessionId, file);
+    },
+    setViewer(sessionId: string, viewer: ViewerView | null) {
+      setTab(sessionId, (tab) => ({ ...tab, viewer }));
+    },
     stop() {
-      stop();
-      stopPrune();
+      if (timer !== null) clearTimeout(timer);
+      queue.clear();
     },
     actions: actions("ui"),
     debugApi: actions("debug-api"),

@@ -358,12 +358,11 @@ pub(crate) fn render(head: &ExportHead, entries: &[Value]) -> (String, ExportCou
     let mut body = String::new();
     let mut last_section: Option<&str> = None;
     let mut in_steps = false;
-    let by_id = crate::export_hooks::by_id(entries);
-    let refused = crate::export_hooks::refused_calls(entries, &by_id);
+    let hooks = crate::export_hooks::project(entries);
     for entry in entries {
         if entry.pointer("/outcome/type").and_then(Value::as_str) == Some("discarded")
             || s(entry, "id")
-                .is_some_and(|id| s(entry, "type") == Some("effect") && refused.contains(id))
+                .is_some_and(|id| s(entry, "type") == Some("effect") && hooks.refused.contains(id))
         {
             continue;
         }
@@ -405,9 +404,9 @@ pub(crate) fn render(head: &ExportHead, entries: &[Value]) -> (String, ExportCou
             }
             (Some("notice"), _) => {
                 let hook = crate::export_hooks::is_hook_notice(entry)
-                    .then(|| crate::export_hooks::line(entry, &by_id));
+                    .then(|| hooks.lines.get(s(entry, "id").unwrap_or_default()));
                 let line = match &hook {
-                    Some(line) => line.as_deref(),
+                    Some(line) => line.map(String::as_str),
                     None => s(entry, "message").or_else(|| s(entry, "text")),
                 };
                 if let Some(text) = nonempty(line) {

@@ -328,7 +328,7 @@ export function createConnectors(deps: {
         ),
       /** Opens a sign-in Vibe asked for in a session (link dialog). */
       openPrompt: (alias: string) => {
-        signIns.openPrompt(alias);
+        void signIns.openPrompt(origin, alias);
       },
     };
   };

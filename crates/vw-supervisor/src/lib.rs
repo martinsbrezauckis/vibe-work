@@ -35,8 +35,9 @@ pub use discovery::{
     is_executable,
 };
 pub use env::{
-    API_KEY_VAR, ApiKey, EnvError, EnvPlan, EnvSecretProvider, INHERITED, LOOPBACK_NO_PROXY,
-    MCP_TOKEN_VAR, NoSecret, SecretError, SecretProvider, build_env, is_hijack_var,
+    API_KEY_VAR, ApiKey, EXPERIMENT_CONFIG_KEYS, EnvError, EnvPlan, EnvSecretProvider, INHERITED,
+    LOOPBACK_NO_PROXY, MCP_TOKEN_VAR, NoSecret, SecretError, SecretProvider, build_env,
+    is_hijack_var,
 };
 pub use handshake::{default_initialize_params, handshake};
 pub use launch::{CHILD_STOP_ADAPTER, adapter_python};

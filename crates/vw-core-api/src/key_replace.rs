@@ -24,7 +24,8 @@ pub(crate) async fn execute(
         error.server_code = Some("notConfigured".to_owned());
         return Err(error);
     };
-    if let KeyRequest::UseMistralKey { item_id } = &request {
+    if let KeyRequest::UseMistralKey { item_id } | KeyRequest::UseExistingKey { item_id } = &request
+    {
         confirm_switch(shared, keys, item_id).await?;
         refuse_busy(shared)?;
     } else {
@@ -100,7 +101,16 @@ async fn confirm_switch(
         .iter()
         .find(|k| k.item_id == item_id)
         .ok_or_else(|| crate::keys::key_error(&vw_keys::KeyError::NotACandidate))?;
-    if row.in_use {
+    // First setup has no credential to replace. The command name never grants an exception.
+    if row.in_use
+        || matches!(
+            keys.status()
+                .await
+                .map_err(|e| crate::keys::key_error(&e))?
+                .key,
+            KeyPresence::Missing
+        )
+    {
         return Ok(());
     }
     let request = ConfirmationRequest {

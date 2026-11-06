@@ -79,3 +79,6 @@ pub async fn watch_host(on_change: impl Fn(bool) + Send) {
         tokio::time::sleep(Duration::from_secs(1)).await;
     }
 }
+
+#[cfg(all(target_os = "linux", feature = "desktop-tray"))]
+pub mod indicator;

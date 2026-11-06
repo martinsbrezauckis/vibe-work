@@ -89,7 +89,7 @@ fn trim_text(value: &mut Value, minimum: usize) -> Option<usize> {
 }
 
 fn trim_refs(content: &mut Value, minimum: usize) -> bool {
-    for key in ["refs", "newRefs"] {
+    for key in ["refs", "newRefs", "updatedRefs"] {
         if let Some(refs) = content.get_mut(key).and_then(Value::as_array_mut)
             && refs.len() > minimum
         {
@@ -108,7 +108,7 @@ fn trim_refs(content: &mut Value, minimum: usize) -> bool {
 }
 
 fn trim_links(content: &mut Value) -> bool {
-    for key in ["refs", "newRefs"] {
+    for key in ["refs", "newRefs", "updatedRefs"] {
         if let Some(refs) = content.get_mut(key).and_then(Value::as_array_mut)
             && refs.len() > 8
         {
@@ -180,7 +180,7 @@ fn trim_detail(value: &mut Value) -> bool {
             }
             // Choice names are an inventory, not a preview: keep them exact or mark omissions.
             map.iter_mut()
-                .filter(|(key, _)| key.as_str() != "coveringFrames")
+                .filter(|(key, _)| !matches!(key.as_str(), "coveringFrames" | "choiceContext"))
                 .any(|(_, value)| trim_detail(value))
         }
         Value::Array(items) => items.iter_mut().any(trim_detail),
@@ -265,7 +265,8 @@ pub(crate) fn fit(out: &mut Value, budget: usize) {
             .and_then(|text| trim_text(text, 200))
         {
             ("textChars", cut)
-        } else if trim_extras(content)
+        } else if crate::choice_context::trim(content, false)
+            || trim_extras(content)
             || trim_detail(content)
             || crate::choices::trim_incomplete(content)
         {
@@ -274,7 +275,7 @@ pub(crate) fn fit(out: &mut Value, budget: usize) {
             ("refs", 1)
         } else if let Some(cut) = content.get_mut("text").and_then(|text| trim_text(text, 0)) {
             ("textChars", cut)
-        } else if crate::choices::bound(content, 0) {
+        } else if crate::choice_context::trim(content, true) || crate::choices::bound(content, 0) {
             ("otherItems", 1)
         } else {
             break;

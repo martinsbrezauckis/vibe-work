@@ -103,7 +103,7 @@ export function PagesToolbar({
         testId="pages.toolbar-reload"
         icon="refresh-cw"
         label="Reload"
-        disabled={!onPage || busy}
+        disabled={busy}
         onClick={actions.reload}
       />
       <span className="pages-path" title={path === null ? folder : `${folder}/${path}`}>

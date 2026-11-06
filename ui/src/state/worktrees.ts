@@ -270,11 +270,14 @@ export function createWorktrees(deps: {
       if (end === null || inspection === null || inspection === undefined) return;
       store.set((s) => ({ ...s, end: s.end === null ? null : { ...s.end, busy: true } }));
       try {
-        await run({
+        const result = await run({
           op: "remove",
           sessionId: end.sessionId,
           fingerprint: inspection.fingerprint,
         });
+        if (result.kind !== "removed" || !result.outcome.removed) {
+          throw new Error("The copy was not removed.");
+        }
         if (shell.store.get().selected === end.sessionId) shell.actions.selectSession(null);
         store.set((s) => ({
           ...s,

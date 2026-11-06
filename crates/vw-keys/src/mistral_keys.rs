@@ -70,8 +70,24 @@ impl KeyService {
     /// # Errors
     /// Vault locked or unreadable.
     pub async fn mistral_keys(&self) -> Result<Vec<MistralKey>, KeyError> {
-        let vault = self.vault();
         let selected = self.settings.key_item_id();
+        Ok(self
+            .key_catalog()
+            .await?
+            .into_iter()
+            .map(|(candidate, last_test)| MistralKey {
+                in_use: candidate.item_id == selected,
+                item_id: candidate.item_id,
+                label: candidate.label,
+                last_test,
+            })
+            .collect())
+    }
+
+    pub(super) async fn key_catalog(
+        &self,
+    ) -> Result<Vec<(mistral_key::Candidate, Option<StoredKeyTest>)>, KeyError> {
+        let vault = self.vault();
         blocking(move || {
             let mut items = vault.list_items_strict()?;
             items.sort_by(|a, b| {
@@ -87,12 +103,7 @@ impl KeyService {
                         .find(|i| i.id == c.item_id)
                         .and_then(|i| i.extra.get(TEST_FIELD))
                         .and_then(|v| serde_json::from_value(v.clone()).ok());
-                    MistralKey {
-                        in_use: c.item_id == selected,
-                        item_id: c.item_id,
-                        label: c.label,
-                        last_test,
-                    }
+                    (c, last_test)
                 })
                 .collect())
         })

@@ -24,6 +24,12 @@ pub(crate) fn include(content: &mut Value, model: &PageModel) {
                         if let Some(expanded) = r.expanded {
                             choice["expanded"] = json!(expanded);
                         }
+                        if let Some(checked) = r.checked {
+                            choice["checked"] = json!(checked);
+                        }
+                        if let Some(pressed) = r.pressed {
+                            choice["pressed"] = json!(pressed);
+                        }
                         choice
                     })
                     .collect();

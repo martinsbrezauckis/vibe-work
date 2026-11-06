@@ -1,6 +1,6 @@
 // Bounded form label/context discovery for the shared page scripts. Depends on common.js helpers;
 // used by observation, labelOf and form prioritization. Context never reads input values.
-/* global clip, fieldLabelText, hideKeys, matches, visible -- Shared script helpers. */
+/* global REQ, clip, fieldLabelText, hideKeys, matches, secretKind, vaultFilled, visible -- Shared script helpers. */
 /* exported formControl, nearbyLabel, controlSearchText, labelledToggle */
 const labelledToggle = el => el.localName === "label" && el.control &&
   matches(el.control, 'input[type=checkbox],input[type=radio]') ? el.control : null;
@@ -41,6 +41,18 @@ const controlSearchText = original => {
   const el = labelledToggle(original) || original;
   if (!formControl(el)) return '';
   const parts = [fieldLabelText(el), el.getAttribute('placeholder'), nearbyLabel(el)];
+  if (el.localName === 'select' && !vaultFilled(el) && !secretKind(el)) {
+    // Selected text is already the readable value. Also find by its underlying value, or by an
+    // offered option beyond the short preview. Only matching display evidence crosses the cap.
+    const options = Array.from(el.options || []).filter(option => !option.hidden &&
+      !option.closest('[hidden]') && getComputedStyle(option).display !== 'none');
+    parts.unshift(...options.filter(option => option.selected).map(option => option.value));
+    if (typeof REQ.find === 'string') {
+      const needle = REQ.find.toLowerCase();
+      const option = options.find(option => String(option.label || option.text).toLowerCase().includes(needle));
+      if (option) parts.unshift(clip(option.label || option.text, 300));
+    }
+  }
   // React-select places its placeholder and selected display value next to its empty text input.
   // These selectors describe display nodes, not a container's entire text or hidden options.
   if (el.getAttribute('role') === 'combobox') {

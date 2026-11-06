@@ -1,4 +1,4 @@
-//! One pinned real-Vibe selector and version check for Rust, browser and bench rigs.
+//! Pinned real-Vibe selector with an explicit candidate option for launcher upgrade tests.
 //! Uses the selected launcher's associated Python; called before any test session or model starts.
 
 use std::collections::HashMap;
@@ -40,10 +40,27 @@ pub fn selected() -> Result<Runtime, String> {
     ]
     .into_iter()
     .find_map(|name| std::env::var_os(name).filter(|v| !v.is_empty()));
-    checked(&explicit.map_or_else(|| default_server(&repo_root()), PathBuf::from))
+    let candidate = std::env::var("VW_TEST_VIBE_CANDIDATE").ok();
+    let expected = selected_version(explicit.is_some(), candidate.as_deref())?;
+    checked_version(
+        &explicit.map_or_else(|| default_server(&repo_root()), PathBuf::from),
+        expected,
+    )
 }
 
 pub fn checked(server: &Path) -> Result<Runtime, String> {
+    checked_version(server, PIN.trim())
+}
+
+fn selected_version(explicit: bool, candidate: Option<&str>) -> Result<&str, String> {
+    match candidate {
+        None => Ok(PIN.trim()),
+        Some(version @ ("3.0.4" | "3.1.0")) if explicit => Ok(version),
+        _ => Err("VW_TEST_VIBE_CANDIDATE requires an explicit server and an audited version (3.0.4 or 3.1.0)".into()),
+    }
+}
+
+fn checked_version(server: &Path, expected: &str) -> Result<Runtime, String> {
     static CHECKED: OnceLock<Mutex<HashMap<PathBuf, Runtime>>> = OnceLock::new();
     if !server.is_absolute() || !server.is_file() {
         return Err(format!(
@@ -55,6 +72,12 @@ pub fn checked(server: &Path) -> Result<Runtime, String> {
     }
     let mut cache = CHECKED.get_or_init(Mutex::default).lock().unwrap();
     if let Some(runtime) = cache.get(server) {
+        require_version(
+            server,
+            &runtime.vibe_version,
+            &runtime.python_version,
+            expected,
+        )?;
         return Ok(runtime.clone());
     }
     let python = vw_supervisor::server_python(server).ok_or_else(|| {
@@ -82,7 +105,7 @@ pub fn checked(server: &Path) -> Result<Runtime, String> {
             output.status
         )
     })?;
-    require_version(server, &vibe_version, &python_version)?;
+    require_version(server, &vibe_version, &python_version, expected)?;
     let runtime = Runtime {
         server: server.to_path_buf(),
         python,
@@ -93,12 +116,12 @@ pub fn checked(server: &Path) -> Result<Runtime, String> {
     Ok(runtime)
 }
 
-fn require_version(server: &Path, vibe: &str, python: &str) -> Result<(), String> {
-    if vibe != PIN.trim() {
+fn require_version(server: &Path, vibe: &str, python: &str, expected: &str) -> Result<(), String> {
+    if vibe != expected {
         return Err(format!(
             "Selected Vibe server {} has Vibe {vibe} / Python {python}; required Vibe {}. Refusing to run tests against another runtime.",
             server.display(),
-            PIN.trim()
+            expected
         ));
     }
     Ok(())
@@ -109,13 +132,31 @@ mod tests {
     use super::*;
     #[test]
     fn old_and_future_versions_are_refused_with_the_found_version() {
-        for found in ["2.26.1", "3.1.0"] {
-            let error =
-                require_version(Path::new("selected-server"), found, "3.12.13").unwrap_err();
+        for found in ["2.26.1", "3.0.4", "3.1.1"] {
+            let error = require_version(Path::new("selected-server"), found, "3.12.13", PIN.trim())
+                .unwrap_err();
             assert!(
                 error.contains(found) && error.contains(PIN.trim()) && error.contains("3.12.13")
             );
         }
-        assert!(require_version(Path::new("selected-server"), PIN.trim(), "3.14.8").is_ok());
+        assert!(
+            require_version(
+                Path::new("selected-server"),
+                PIN.trim(),
+                "3.14.8",
+                PIN.trim()
+            )
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn candidate_requires_explicit_selection_and_still_checks_the_installed_version() {
+        assert_eq!(selected_version(true, None).unwrap(), PIN.trim());
+        assert_eq!(selected_version(true, Some("3.1.0")).unwrap(), "3.1.0");
+        assert!(selected_version(false, Some("3.1.0")).is_err());
+        assert!(selected_version(true, Some("3.1.1")).is_err());
+        assert!(require_version(Path::new("candidate"), "3.1.0", "3.14.8", "3.1.0").is_ok());
+        assert!(require_version(Path::new("candidate"), "3.0.4", "3.14.8", "3.1.0").is_err());
     }
 }

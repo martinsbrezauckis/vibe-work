@@ -7,7 +7,7 @@
 // Adapted from ShellX control script (native value setter, beforeinput/input/
 // change, contenteditable insertText) and actionability checks; changed: Enter submits the form the way a
 // browser does for a real key press, select uses the native setter.
-/* global authorizationPage, ENV, MAX_FRAME_DEPTH, MAX_SHADOW_DEPTH, REQ, actionRef, candidates, clip, composedParent, consentSnapshot, describe, editable, enabled, globalRect, labelOf, nativeClickPoint, observedTarget, refOf, roleOf, secretKind, viewOf, visibilityState, visible -- Supplied by the Rust script assembler and its shared prelude. */
+/* global authorizationPage, ENV, MAX_FRAME_DEPTH, MAX_SHADOW_DEPTH, REQ, actionRef, candidates, clip, composedParent, consentSnapshot, describe, editable, enabled, globalRect, labelOf, labelledToggle, nativeClickPoint, observedTarget, refOf, roleOf, secretKind, viewOf, visibilityState, visible -- Supplied by the Rust script assembler and its shared prelude. */
 (() => {
   /* global dragTo -- Inserted by the script assembler. */
   __VW_COMMON__;
@@ -203,8 +203,15 @@
     if (setter && setter.set) setter.set.call(el, value);
     else el.value = value;
   };
-  const checkedState = (el) => el.localName === "input"
-    ? Boolean(el.checked) : el.getAttribute("aria-checked") === "true";
+  const checkedState = (el) => {
+    const control = labelledToggle(el) || el;
+    return control.localName === "input" ? Boolean(control.checked) : control.getAttribute("aria-checked") === "true";
+  };
+  /* global requestedValue, rangeKey -- Inserted by the script assembler. */
+  // eslint-disable-next-line no-undef -- Expanded by the Rust script assembler.
+  __VW_WIDGET_DATES__;
+  // eslint-disable-next-line no-undef -- Expanded by the Rust script assembler.
+  __VW_FORM_VALUES__;
   const requestedOption = (el) => {
     const want = String(REQ.value || ""), options = Array.from(el.options || []);
     return options.find((o) => o.value === want) ||
@@ -224,7 +231,8 @@
     }
     if (REQ.action === "type") {
       const actual = String(el.isContentEditable ? el.innerText : el.value);
-      return result(actual === String(REQ.text || "") ? "done" : "unmet", { target, value: clip(actual, 300) });
+      const wanted = requestedValue(el, String(REQ.text || ""));
+      return result(!wanted.status && actual === wanted.value ? "done" : "unmet", { target, value: clip(actual, 300) });
     }
     return result("error", { message: "this action has no requested control state" });
   };
@@ -293,7 +301,10 @@
       const type = String(
         (el.getAttribute && el.getAttribute("type")) || "",
       ).toLowerCase();
-      if (key === "Enter" && !init.shiftKey && el.form && (tag === "input" || tag === "select")) {
+      const rangeEffect = rangeKey(el, key);
+      if (rangeEffect !== null) {
+        effect = rangeEffect;
+      } else if (key === "Enter" && !init.shiftKey && el.form && (tag === "input" || tag === "select")) {
         if (el.form.requestSubmit) el.form.requestSubmit();
         else el.form.submit();
         effect = "submitted the form";
@@ -373,6 +384,19 @@
     }
     // A second host call reads the settled state. It sends no input, focus or scroll events.
     if (REQ.postconditionOnly) return postcondition(el, target);
+    if (action === "type") {
+      const wanted = requestedValue(el, String(REQ.text || ""));
+      if (wanted.status) return result(wanted.status, { target, kind: wanted.kind });
+    }
+    // Native colour panels have no page refs and can block WKWebView evaluation. The value setter is
+    // the supported route; reject before synthetic events or native click geometry can open the panel.
+    const control = el.closest?.("label")?.control || el;
+    if (!REQ.nativeUser && action === "click" && control?.localName === "input" && control.type === "color")
+      return result("unsupportedPicker", { target });
+    if (action === "press" && el.localName === "input" &&
+        ["color", "date", "time", "datetime-local", "month", "week"].includes(el.type) &&
+        !["Tab", "Escape"].includes(REQ.key) && (el.type === "color" || REQ.key !== "Enter"))
+      return result("unsupportedNativeKey", { target });
     if (el.scrollIntoView && !["press", "upload"].includes(action) && !REQ.nativeValidateOnly)
       el.scrollIntoView({
         block: "center",
@@ -385,10 +409,7 @@
     if (REQ.nativeClick && ["click", "check"].includes(action)) {
       if (
         action === "check" &&
-        (el.localName === "input"
-          ? Boolean(el.checked)
-          : el.getAttribute("aria-checked") === "true") ===
-          (REQ.checked !== false)
+        checkedState(el) === (REQ.checked !== false)
       ) {
         return result("done", { target, checked: REQ.checked !== false });
       }
@@ -436,12 +457,17 @@
         viewport: [innerWidth, innerHeight] });
     }
     if (action === "type") {
-      typeInto(el, String(REQ.text || ""));
+      const wanted = requestedValue(el, String(REQ.text || ""));
+      if (wanted.status) return result(wanted.status, { target, kind: wanted.kind });
+      if (typeInto(el, wanted.value) && wanted.widgetDate)
+        fire(el, "keyup", "KeyboardEvent", { key: wanted.value.slice(-1), bubbles: true });
       const answer = JSON.parse(postcondition(el, target));
       if (answer.status === "done" && REQ.submit) answer.effect = press(el, "Enter");
       return JSON.stringify(answer);
     }
     if (action === "select") {
+      if (["input", "textarea"].includes(el.localName))
+        return result("unsupportedInputSelect", { target });
       if (el.localName !== "select")
         return result("error", {
           message: "this element is not a select box (use click)",
@@ -472,7 +498,7 @@
       if (REQ.expectedText !== undefined && String(el.isContentEditable ? el.innerText : el.value) !== REQ.expectedText)
         return result("unmet", { target });
       const key = String(REQ.key || "Enter");
-      return result("done", { target, effect: press(el, key) });
+      return result("done", { target, effect: press(el, key), ref: refOf(el) });
     }
     return result("error", { message: `unknown action ${clip(action, 40)}` });
   } catch (error) {

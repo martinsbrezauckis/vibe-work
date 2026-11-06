@@ -1,0 +1,22 @@
+<!-- Form value fixtures for native WebKit and browser-driver tests; no network or submissions. -->
+<!doctype html><html lang="en"><title>Form values</title><body>
+<form onsubmit="event.preventDefault()">
+<label>Range<input id="range" type="range" min="0" max="10" step="1" value="5"></label>
+<label>Colour<input id="color" type="color" value="#112233"></label>
+<label>Date<input id="date" type="date" value="2026-11-04"></label>
+<label>Time<input id="time" type="time" value="09:30"></label>
+<label>Local date and time<input id="datetime-local" type="datetime-local" value="2026-11-04T09:30"></label>
+<label>Month<input id="month" type="month" value="2026-11"></label>
+<label>Week<input id="week" type="week" value="2026-W45"></label>
+<label>City<input id="city" list="cities"></label>
+<datalist id="cities"><option value="Seattle"><option value="Riga"></datalist>
+<label>Text date<input id="text-date" placeholder="mm/dd/yyyy"></label>
+<button type="button">Other control</button>
+</form>
+<script>
+window.events = [];
+for (const kind of ['input', 'change']) document.addEventListener(kind, event => {
+  window.events.push([event.target.id, kind, event.target.value]);
+});
+</script>
+</body></html>

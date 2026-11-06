@@ -606,3 +606,23 @@
   margin-top: 8px;
   text-align: center;
 }
+/* Browser readiness stays beside the tab entry point; the tooltip names each browser and state. */
+.browser-signals {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-inline-start: 5px;
+}
+.browser-signal {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-round);
+  background: var(--orange-3);
+}
+.browser-signal[data-state="missing"] {
+  background: var(--red);
+}
+.browser-signal[data-state="ready"] {
+  background: var(--green);
+}
