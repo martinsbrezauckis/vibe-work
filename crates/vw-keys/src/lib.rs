@@ -10,6 +10,7 @@
 //! vw-host (construction). Invariant: client-facing commands never return a key; the proxy and scanner read values only in Rust.
 
 mod chrome;
+mod debug_token;
 mod entry_defaults;
 mod entry_permissions;
 mod error;
@@ -31,6 +32,7 @@ mod vault_settings;
 mod vibe_env;
 mod work;
 
+pub use debug_token::DEBUG_TOKEN_ITEM;
 pub use error::KeyError;
 pub use existing::{ExistingKey, ExistingKeys, ExistingSource};
 pub use logins::{LoginCounts, StoredLogin};
@@ -50,3 +52,8 @@ pub use vw_vault::login::Login;
 pub use vw_vault::mcp_binding::McpBinding;
 pub use vw_vault::project_secret::{ProjectSecret, SecretLabel};
 pub use work::WorkFailure;
+
+#[cfg(feature = "agent-vault")]
+mod capture;
+#[cfg(feature = "agent-vault")]
+pub use capture::{CaptureChoice, CapturePlan, CaptureStored};

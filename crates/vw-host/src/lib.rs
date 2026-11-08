@@ -49,6 +49,7 @@ pub mod cli_sharing;
 pub mod commit_signature;
 mod config_comments;
 mod confirm;
+mod debug_token;
 pub mod default_model;
 mod documents;
 mod events;
@@ -121,3 +122,5 @@ pub fn version() -> &'static str {
 mod config_comments_tests;
 
 pub mod uninstall;
+
+mod vault_plugin;

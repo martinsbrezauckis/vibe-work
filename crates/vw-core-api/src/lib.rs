@@ -32,15 +32,8 @@ compile_error!(
 #[cfg(all(feature = "e2e-script", not(debug_assertions)))]
 compile_error!("the e2e-script feature is for debug test builds only");
 
-#[cfg(all(
-    not(debug_assertions),
-    any(
-        feature = "your-firefox",
-        feature = "feedback",
-        feature = "click-marker"
-    )
-))]
-compile_error!("Firefox, feedback and click markers are not available in release builds");
+#[cfg(all(not(debug_assertions), feature = "your-firefox"))]
+compile_error!("Firefox is not available in release builds");
 
 mod access;
 mod agent_access;
@@ -81,8 +74,8 @@ mod read_exclusions;
 #[cfg(test)]
 mod release_modules_tests;
 pub use chrome_control::{
-    ChromeControlConfig, ChromeControlRequest, ChromeControlView, ChromeSelection, ChromeSetupView,
-    ChromeTab, ChromeWorkView,
+    BROWSER_PAIRING_DIALOG_METHOD, ChromeControlConfig, ChromeControlRequest, ChromeControlView,
+    ChromeSelection, ChromeSetupView, ChromeTab, ChromeWorkView, SafariView,
 };
 mod command_decode;
 mod config_validation;
@@ -92,10 +85,14 @@ mod connectors;
 mod connectors_config;
 mod connectors_project;
 mod connectors_view;
+#[cfg(feature = "context-composition")]
+mod context_composition;
 mod core;
 mod core_config;
 mod core_viewers;
 mod default_model;
+mod detached_reads;
+mod detached_runtime;
 mod dialog_texts;
 mod dictation;
 mod dispatch;
@@ -144,6 +141,7 @@ mod git_publish;
 mod git_settings;
 mod git_view;
 mod guard_refusals;
+mod interrupted_send;
 mod model_check;
 mod model_choices;
 mod model_facts;
@@ -248,6 +246,7 @@ mod pump;
 mod queue_return;
 mod read_aloud;
 mod recovery;
+mod recovery_schedules;
 mod restore;
 mod resync_budget;
 mod routing;
@@ -499,6 +498,8 @@ mod video_image;
 mod video_files;
 
 #[cfg(all(test, feature = "feedback"))]
+mod feedback_screenshot_tests;
+#[cfg(all(test, feature = "feedback"))]
 mod feedback_tests;
 
 #[cfg(all(test, feature = "feedback"))]
@@ -506,9 +507,11 @@ mod feedback_redaction_tests;
 
 mod feedback;
 mod feedback_redact;
+mod feedback_screenshot;
 mod feedback_system;
 mod feedback_transport;
 mod feedback_view;
 pub use feedback_view::{
-    FeedbackDraft, FeedbackKind, FeedbackReport, FeedbackRequest, FeedbackSystem, FeedbackView,
+    FeedbackDraft, FeedbackKind, FeedbackReport, FeedbackRequest, FeedbackScreenshot,
+    FeedbackSystem, FeedbackView,
 };

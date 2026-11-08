@@ -372,7 +372,14 @@ async fn edge_person_stop_interrupts_only_its_chat_once() {
 
 #[tokio::test]
 async fn refusal_names_your_stop_and_ends_browser_calls() {
-    for profile in ["chrome:p", "edge:p"] {
+    // Edge only with its feature, as the Edge test above: without it the gateway refuses Edge as not in this
+    // version before any Stop check (`cargo test -p vw-core-api` alone builds no `your-edge`).
+    let profiles: &[&str] = if cfg!(feature = "your-edge") {
+        &["chrome:p", "edge:p"]
+    } else {
+        &["chrome:p"]
+    };
+    for &profile in profiles {
         let browser = Browser::from_profile(profile);
         let core = fixture(&format!("person-stop-refusal-{profile}"), profile).await;
         status(&core, "stopping", Instant::now());

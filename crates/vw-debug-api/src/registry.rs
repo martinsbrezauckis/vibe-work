@@ -43,7 +43,10 @@ pub enum RegistryError {
 
 /// Shared table of UI routes. Clone it into every block that registers hooks.
 #[derive(Clone, Default)]
-pub struct UiRoutes(Arc<RwLock<BTreeMap<String, UiRoute>>>);
+pub struct UiRoutes {
+    routes: Arc<RwLock<BTreeMap<String, UiRoute>>>,
+    pub(crate) shots: Arc<tokio::sync::Mutex<()>>,
+}
 
 fn valid_name(name: &str) -> bool {
     name.len() <= 64
@@ -74,7 +77,7 @@ impl UiRoutes {
         if !valid_name(name) {
             return Err(RegistryError::InvalidName(name.chars().take(80).collect()));
         }
-        let mut routes = self.0.write().unwrap_or_else(PoisonError::into_inner);
+        let mut routes = self.routes.write().unwrap_or_else(PoisonError::into_inner);
         if routes.contains_key(name) {
             return Err(RegistryError::Duplicate(name.to_owned()));
         }
@@ -92,7 +95,7 @@ impl UiRoutes {
     /// Registered names with their descriptions, sorted by name.
     #[must_use]
     pub fn list(&self) -> Vec<(String, String)> {
-        self.0
+        self.routes
             .read()
             .unwrap_or_else(PoisonError::into_inner)
             .iter()
@@ -101,7 +104,7 @@ impl UiRoutes {
     }
 
     pub(crate) fn get(&self, name: &str) -> Option<UiHandler> {
-        self.0
+        self.routes
             .read()
             .unwrap_or_else(PoisonError::into_inner)
             .get(name)

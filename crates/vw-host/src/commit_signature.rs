@@ -103,7 +103,7 @@ pub fn ensure(vibe_home: &Path) -> Result<CommitSignature, String> {
         Ok(text) => text,
         Err(outcome) => {
             if matches!(outcome, CommitSignature::Kept(false)) {
-                crate::config_comments::restore(&path, &existing, &NOTE)?;
+                crate::config_comments::restore(&path, &existing, None, KEY, &NOTE)?;
             }
             return Ok(outcome);
         }

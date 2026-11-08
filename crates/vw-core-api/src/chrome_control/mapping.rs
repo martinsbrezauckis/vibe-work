@@ -101,7 +101,7 @@ const ACTIONS: &[(&str, &str, Need)] = &[
     (
         "tabs.close_owned",
         "tabs.close_owned",
-        Need::Group(Group::Navigate),
+        Need::Group(Group::Forms),
     ),
     // Typing and choosing require interaction authority.
     ("page.click", "page.interact", Need::Group(Group::Navigate)),
@@ -286,7 +286,6 @@ mod tier_tests {
             "page.read",
             "page.click",
             "page.hover",
-            "tabs.close_owned",
             "page.errors",
             "recording.start",
             "recording.stop",
@@ -301,6 +300,7 @@ mod tier_tests {
             "page.type",
             "page.select",
             "tabs.close_user",
+            "tabs.close_owned",
             "files.upload",
             "page.commit",
         ] {

@@ -378,6 +378,11 @@ pub(crate) async fn switch(
     let deadline = Instant::now() + QUIET_WAIT;
     let held = loop {
         let held = shared.plugin_refresh.lock(&id).await;
+        // A restart's interrupted projection can wake this turn-end worker. Its old channel died:
+        // leave the switch pending for a person's next action instead of recovering the old turn.
+        if wait && !shared.channels.has_channel(&id) {
+            return Ok(());
+        }
         if ready(&shared, &id) {
             break held;
         }

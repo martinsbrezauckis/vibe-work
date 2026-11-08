@@ -759,7 +759,7 @@ version: number | null,
  */
 expiresAt: number, };
 
-export type AlertKind = "bypassToolPermissions" | "resyncPaused" | "accessModeLowered" | "accessModeUnverified" | "turnsInterrupted" | "reopenFailed" | "modelChoiceNotRestored" | "temporaryCleanupFailed" | "temporaryCleanupRecovered" | "remoteFileCleanupFailed" | "libraryListPartial" | "pluginReloadFailed" | "networkSettingsRejected" | "toolsUnavailable";
+export type AlertKind = "bypassToolPermissions" | "resyncPaused" | "accessModeLowered" | "accessModeUnverified" | "turnsInterrupted" | "reopenFailed" | "modelChoiceNotRestored" | "temporaryCleanupFailed" | "temporaryCleanupRecovered" | "remoteFileCleanupFailed" | "libraryListPartial" | "pluginReloadFailed" | "networkSettingsRejected" | "toolsUnavailable" | "browserPairingFailed";
 
 export type CallbackInfo = {
 /**

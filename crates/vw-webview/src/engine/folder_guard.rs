@@ -5,12 +5,9 @@
 //! arguments; `WebKitGTK` keeps it on the web context, which Tauri keeps one per folder (the last webview's setting
 //! carries every page of the folder). So the guard gets one listener per folder (`store_key`, a store listener: it
 //! grants only what every mount on that folder may reach), never one listener per mount or for every preview: a
-//! request then carries only the rights its own folder's pages share. The folders: the shared public-web folder
-//! (web pages: nothing on this computer or the local network), each session's folder (its own-server pages, which
-//! all have the same rights), and for the local-network page the user opened a folder of its own inside the
-//! session's folder (`with_own_folder`), per host, so its host is never shared with the session's own-server pages
-//! and theirs never with it. Cost: such a page runs in a browser process (Windows) or web context (Linux) of its own
-//! while it is open.
+//! request carries the live mounts' shared scope. Browser mounts allow local addresses. Storage remains split
+//! between the shared public-web folder, each session's own-server folder and per-host local-network folders.
+//! Such a separate folder runs in its own browser process (Windows) or web context (Linux) while open.
 //!
 //! Depends on: vw-preview (`MountSpec`, `StorageKey`), vw-netguard (`rules::RulePage`), vw-platform (user-only
 //! folders). Called by: the engine (`proxy_for`, `mount_inner`, `wipe`) and the account anchor.

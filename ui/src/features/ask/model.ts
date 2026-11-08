@@ -17,10 +17,10 @@ import { type Decision, approvalEffect, offeredDecisions } from "../transcript/m
 import { type Obj, arr, detailOf, obj, str } from "../transcript/model/entries";
 
 /** One answer a card can offer, in the fixed order used by every card. */
-export type AskChoice = "once" | "session" | "always" | "no";
+export type AskChoice = "once" | "session" | "always" | "keepBoth" | "no";
 
 /** The fixed button order. */
-export const CHOICE_ORDER: readonly AskChoice[] = ["once", "session", "always", "no"];
+export const CHOICE_ORDER: readonly AskChoice[] = ["once", "session", "always", "keepBoth", "no"];
 
 /** A visible button: its answer, its text, its key (= its position, 1-based). */
 export interface AskButton {
@@ -65,6 +65,7 @@ const CHOICE_LABEL: Readonly<Record<Exclude<AskChoice, "always">, string>> = {
   once: "Allow once",
   session: "Allow for this session",
   no: "No",
+  keepBoth: "Keep both",
 };
 
 /** The text of `choice`'s button ("Always: {action}" names the control it sets). */
@@ -76,9 +77,21 @@ function choiceLabel(choice: AskChoice, always: AlwaysControl | null = null): st
 export function buttonsFor(
   offered: readonly AskChoice[],
   always: AlwaysControl | null,
+  entry?: Obj,
 ): AskButton[] {
   return CHOICE_ORDER.filter((c) => offered.includes(c) && (c !== "always" || always !== null)).map(
-    (choice, i) => ({ choice, label: choiceLabel(choice, always), key: i + 1 }),
+    (choice, i) => ({
+      choice,
+      label:
+        entry?.["vwVaultSave"] !== undefined && (choice === "once" || choice === "no")
+          ? choice === "no"
+            ? "Cancel"
+            : obj(entry["vwVaultSave"])?.["duplicate"] === true
+              ? "Replace"
+              : "Save"
+          : choiceLabel(choice, always),
+      key: i + 1,
+    }),
   );
 }
 
@@ -88,6 +101,7 @@ export const DECISION_OF: Record<AskChoice, Decision> = {
   session: "approve_for_session",
   always: "approve",
   no: "deny",
+  keepBoth: "keep_both",
 };
 
 /**
@@ -113,6 +127,12 @@ export function approvalChoices(
   )
     out.push("session");
   if (decisions.includes("approve") && alwaysControl(alwaysSetting) !== null) out.push("always");
+  if (
+    entry["vwToolAsk"] === true &&
+    entry["vwVaultSave"] !== undefined &&
+    decisions.includes("keep_both")
+  )
+    out.push("keepBoth");
   if (decisions.includes("deny")) out.push("no");
   return out;
 }
@@ -139,6 +159,7 @@ function toolName(entry: Obj): string {
 
 /** The card's question. */
 export function approvalQuestion(entry: Obj): string {
+  if (entry["vwToolAsk"] === true && entry["vwVaultSave"] !== undefined) return "Save to vault?";
   const effect = approvalEffect(entry);
   const kind = str(effect["kind"]);
   const tool = str(effect["toolName"]) ?? "";

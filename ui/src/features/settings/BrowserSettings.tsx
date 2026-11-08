@@ -5,11 +5,13 @@ import { BrowserShieldsSettings } from "./BrowserShieldsSettings";
 import { BrowserPoolSettings } from "./BrowserPoolSettings";
 import { BrowserDelegationSettings } from "./BrowserDelegationSettings";
 import { YourChromeSettings } from "./chrome/YourChromeSettings";
+import { YourSafariSettings } from "./chrome/YourSafariSettings";
 
 /** Errors belong to the Browser page rather than to both section cards. */
 export function BrowserSettings() {
   const firefox = useCoreState((s) => s.chromeControl?.firefox !== undefined);
   const edge = useCoreState((s) => s.chromeControl?.edge !== undefined);
+  const safari = useCoreState((s) => s.chromeControl?.safari !== undefined);
   const [poolError, setPoolError] = useState<string | null>(null);
   const [shieldsError, setShieldsError] = useState<string | null>(null);
   const error = poolError ?? shieldsError;
@@ -28,6 +30,7 @@ export function BrowserSettings() {
       <YourChromeSettings />
       {edge ? <YourChromeSettings browser="Edge" /> : null}
       {firefox ? <YourChromeSettings browser="Firefox" /> : null}
+      {safari ? <YourSafariSettings /> : null}
       <section aria-labelledby="all-browsers-title">
         <h3 id="all-browsers-title">All browsers</h3>
         <BrowserDelegationSettings />

@@ -39,7 +39,7 @@ fn user_data_uses_receipt_identity_then_vendor_paths_and_never_guesses_chrome() 
     )
     .unwrap();
     assert_eq!(
-        user_data(Some(&s.state()), "Google Chrome"),
+        user_data(&s.config(), Some(&s.state()), "Google Chrome"),
         ["/custom/microsoft-edge"]
             .into_iter()
             .chain(chrome)
@@ -47,7 +47,7 @@ fn user_data_uses_receipt_identity_then_vendor_paths_and_never_guesses_chrome() 
             .collect::<Vec<_>>()
     );
     assert_eq!(
-        user_data(Some(&s.state()), "Microsoft Edge"),
+        user_data(&s.config(), Some(&s.state()), "Microsoft Edge"),
         ["/custom/google-chrome"]
             .into_iter()
             .chain(edge)
@@ -90,6 +90,8 @@ impl Scratch {
     }
     fn config(&self) -> ChromeControlConfig {
         ChromeControlConfig {
+            // Compatibility file tests use the Windows/Linux flow; macos_data overrides this seam.
+            macos: Some(false),
             package: Some(self.root.join("package")),
             user_home: Some(self.root.join("home")),
             firefox_registry_root: format!(r"{}\FirefoxNativeMessagingHosts", self.registry.key()),
@@ -194,7 +196,7 @@ fn set_up_and_remove_use_the_configured_key_and_leave_real_chrome_untouched() {
     assert!(!host["path"].as_str().unwrap().contains('/'));
     assert_eq!(registration(&real), before);
     assert_eq!(registration(&real_edge), edge_before);
-    let receipt = read_receipt(&s.state()).unwrap();
+    let receipt = read_receipt(&s.config(), &s.state()).unwrap();
     let mut expected = vec![key.clone()];
     if cfg!(feature = "your-edge") {
         let edge_key = format!(r"{}\{HOST_NAME}", config.edge_registry_root);
@@ -259,7 +261,7 @@ fn set_up_registers_for_this_user_only_and_points_chrome_at_the_copied_helper() 
     );
     assert_eq!(view.state, SetupState::WaitingForExtension);
     assert_eq!(view.browsers, vec!["Google Chrome".to_owned()]);
-    let hosts = if cfg!(target_os = "macos") {
+    let hosts = if s.config().is_macos() {
         s.root
             .join("home/Library/Application Support/Google/Chrome/NativeMessagingHosts")
     } else {
@@ -281,7 +283,7 @@ fn set_up_registers_for_this_user_only_and_points_chrome_at_the_copied_helper() 
     // A Chrome profile that has the extension's folder: "extension added".
     std::fs::create_dir_all(
         s.root
-            .join(if cfg!(target_os = "macos") {
+            .join(if s.config().is_macos() {
                 "home/Library/Application Support/Google/Chrome"
             } else {
                 "home/.config/google-chrome"
@@ -300,7 +302,7 @@ fn set_up_registers_for_this_user_only_and_points_chrome_at_the_copied_helper() 
 fn a_failed_host_registration_leaves_nothing_behind() {
     let s = Scratch::new("fail");
     // Chrome's host folder cannot be made: a file stands where its parent folder would be.
-    let blocker = if cfg!(target_os = "macos") {
+    let blocker = if s.config().is_macos() {
         s.root
             .join("home/Library/Application Support/Google/Chrome")
     } else {
@@ -392,7 +394,7 @@ fn readonly_session_packages_survive_chrome_remove_and_rollback() {
     install(&s.config(), &s.state(), &s.vibe_home()).unwrap();
     remove(&s.config(), &s.state()).unwrap();
     assert!(checkout.join("skills/example/SKILL.md").is_file());
-    let blocker = if cfg!(target_os = "macos") {
+    let blocker = if s.config().is_macos() {
         s.root
             .join("home/Library/Application Support/Google/Chrome/NativeMessagingHosts")
     } else {
@@ -451,3 +453,7 @@ fn owned_firefox_never_registers_a_native_addon_host() {
 #[cfg(unix)]
 #[path = "setup_repair_tests.rs"]
 mod repair_tests;
+
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[path = "macos_data_tests.rs"]
+mod macos_data;

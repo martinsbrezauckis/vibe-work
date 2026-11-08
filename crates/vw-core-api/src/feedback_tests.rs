@@ -84,7 +84,7 @@ async fn feedback_requires_review_and_rejects_automation_confirmation() {
     core.shutdown().await;
 }
 #[tokio::test]
-async fn feedback_consent_is_optional_remembered_and_cannot_change_facts() {
+async fn feedback_consent_is_per_report_and_cannot_change_facts() {
     use crate::{FeedbackRequest as R, Origin};
     let dir = std::env::var_os("VW_TEST_ROOT")
         .map_or_else(std::env::temp_dir, std::path::PathBuf::from)
@@ -111,7 +111,7 @@ async fn feedback_consent_is_optional_remembered_and_cannot_change_facts() {
     assert_eq!(reviewed.system, Some(shown.system));
     let saved: serde_json::Value =
         serde_json::from_slice(&std::fs::read(dir.join("settings.json")).unwrap()).unwrap();
-    assert_eq!(saved["feedbackShareSystem"], true);
+    assert!(saved.get("feedbackShareSystem").is_none());
     assert_eq!(saved["unrelated"], true);
     assert!(!saved.to_string().contains("Tab disappeared"));
     core.shutdown().await;
@@ -120,7 +120,8 @@ async fn feedback_consent_is_optional_remembered_and_cannot_change_facts() {
     })
     .await;
     assert!(
-        core.feedback(Origin::Ui, R::Read)
+        !core
+            .feedback(Origin::Ui, R::Read)
             .await
             .unwrap()
             .share_system
@@ -195,6 +196,23 @@ async fn feedback_delivery_sends_only_the_reviewed_payload_and_requires_a_storag
     let mut input = draft();
     let secret = ["gl", "pat-", "abcdefghijklmnopqrst"].concat();
     input.remarks = secret.clone();
+    core.set_feedback_capture(|| async {
+        vw_preview::encode(&vw_preview::canvas(40, 20, [128, 128, 128, 255]))
+    });
+    core.feedback(
+        crate::Origin::Ui,
+        crate::FeedbackRequest::Open {
+            draft: input.clone(),
+        },
+    )
+    .await
+    .unwrap();
+    core.feedback(
+        crate::Origin::Ui,
+        crate::FeedbackRequest::Screenshot { include: true },
+    )
+    .await
+    .unwrap();
     let report = core
         .feedback(
             crate::Origin::Ui,
@@ -281,4 +299,23 @@ fn feedback_redaction_masks_unquoted_home_paths_for_unknown_accounts() {
     for text in ["Person", "person", "Specimen", "file.txt"] {
         assert!(!redacted.contains(text), "{redacted}");
     }
+}
+
+#[tokio::test]
+async fn feedback_new_reports_reset_sharing_consent() {
+    use crate::{FeedbackRequest as R, Origin};
+    let core = crate::offline_core::start("feedback-reset").await;
+    core.feedback(Origin::Ui, R::Open { draft: draft() })
+        .await
+        .unwrap();
+    core.feedback(Origin::Ui, R::Share { share_system: true })
+        .await
+        .unwrap();
+    core.feedback(Origin::Ui, R::Close).await.unwrap();
+    let next = core
+        .feedback(Origin::Ui, R::Open { draft: draft() })
+        .await
+        .unwrap();
+    assert!(!next.share_system, "Each report needs a fresh opt-in");
+    core.shutdown().await;
 }

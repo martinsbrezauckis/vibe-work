@@ -2,6 +2,7 @@
  * Depends on vocabulary and transcript JSON accessors; called by the AskCard model, card and bell. Raw input stays below.
  */
 import { TEXT, wording } from "../../vocabulary";
+import type { JsonValue } from "../../protocol/core";
 import { approvalEffect } from "../transcript/model/callbacks";
 import { type Obj, arr, obj, str } from "../transcript/model/entries";
 import { BROWSER_ACTIONS, BUILTIN_ACTIONS, SESSION_ACTIONS } from "./browserApprovalActions";
@@ -16,7 +17,10 @@ export function browserApprovalName(entry: Obj): string | null {
   if (/^mcp_vw\.browser_(read|act)$/.test(tool)) return "the built-in browser";
   if (!/^mcp_vw\.chrome_(execute|session|task|status)$/.test(tool)) return null;
   const browser = str(entry["vwBrowser"]);
-  return browser === TEXT.chromeName || browser === TEXT.edgeName || browser === TEXT.firefoxName
+  return browser === TEXT.chromeName ||
+    browser === TEXT.edgeName ||
+    browser === TEXT.safariName ||
+    browser === TEXT.firefoxName
     ? browser
     : "your browser";
 }
@@ -52,7 +56,35 @@ function keyOf(args: Obj): string {
   );
 }
 
-function describe(action: string, input: Obj, args: Obj, browser: string, session = false): string {
+/** Page-provided labels stay a short quotation inside the action, never an instruction or extra card note. */
+function clickTarget(value: JsonValue | undefined): string {
+  const target = obj(value);
+  const name = str(target?.["name"]);
+  if (name === null) return "an unknown target";
+  const clean = name
+    .replace(/[\p{Cc}\p{Cf}]/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (clean === "") return "an unknown target";
+  const role = str(target?.["role"]);
+  const kind =
+    role !== null && ["button", "link", "checkbox", "radio", "menuitem", "tab"].includes(role)
+      ? role
+      : "element";
+  const letters = Array.from(clean);
+  const quoted =
+    letters.slice(0, 80).join("").replace(/[“”]/g, '"') + (letters.length > 80 ? "…" : "");
+  return `${kind} “${quoted}”`;
+}
+
+function describe(
+  action: string,
+  input: Obj,
+  args: Obj,
+  browser: string,
+  target: JsonValue | undefined = null,
+  session = false,
+): string {
   const table = session ? SESSION_ACTIONS : BROWSER_ACTIONS;
   const template = Object.hasOwn(table, action) ? table[action] : undefined;
   if (template === undefined)
@@ -60,7 +92,7 @@ function describe(action: string, input: Obj, args: Obj, browser: string, sessio
   const limit = args["limit"];
   const page = pageOf(action, input, args, session);
   if (action === "tabs.create" && page === "this page") return `Open a new tab in ${browser}`;
-  const line = wording(template, {
+  let line = wording(template, {
     page,
     in: ` in ${browser}`,
     your: browser.replace(/^Your /, "your "),
@@ -71,6 +103,17 @@ function describe(action: string, input: Obj, args: Obj, browser: string, sessio
     submit: args["submit"] === true ? " and submit it" : "",
     key: keyOf(args),
   });
+  if (
+    [
+      "page.click",
+      "page.double_click",
+      "page.triple_click",
+      "page.right_click",
+      "page.middle_click",
+    ].includes(action)
+  )
+    line = line.replace("an element", clickTarget(target));
+  if (action === "page.commit") line = line.replace("a form", `with ${clickTarget(target)}`);
   return action === "network.headers" && args["unredacted"] === true
     ? `${line}, including unredacted values`
     : line;
@@ -115,5 +158,28 @@ export function browserApprovalSummary(entry: Obj): string | null {
           ? "page.uncheck"
           : ((Object.hasOwn(BUILTIN_ACTIONS, action) ? BUILTIN_ACTIONS[action] : undefined) ?? "");
   }
-  return describe(action, input, args, browser, /^mcp_vw\.chrome_(session|task)$/.test(tool));
+  if (["tabs.close_owned", "tabs.close_user"].includes(action)) {
+    const tab = obj(obj(approvalEffect(entry)["display"])?.["tab"]);
+    const id = args["tabId"];
+    if (tab && tab["tabId"] === id && typeof id === "number" && Number.isSafeInteger(id)) {
+      const title = (str(tab["title"]) ?? "")
+        .replace(/[\p{Cc}\p{Cf}]/gu, "")
+        .replace(/\s+/g, " ")
+        .trim()
+        .slice(0, 120);
+      const kind = str(tab["kind"]);
+      const label =
+        title ||
+        (kind === "blank tab" ? "blank tab" : kind === "browser page" ? "browser page" : "tab");
+      return `Close ${label} (tab ${String(id)}) in ${browser}`;
+    }
+  }
+  return describe(
+    action,
+    input,
+    args,
+    browser,
+    entry["vwClickTarget"],
+    /^mcp_vw\.chrome_(session|task)$/.test(tool),
+  );
 }

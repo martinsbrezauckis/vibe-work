@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: MIT
 
 mod drag_drop;
+mod proxy_auth;
 mod util;
 
 use std::{
@@ -470,6 +471,10 @@ impl InnerWebView {
     // are registered for the life of the webview, but if we wanted to be able to remove them later
     // we would hold onto them in self.
     let mut token = EventRegistrationToken::default();
+
+    if let Some(ProxyConfig::Http(endpoint)) = &attributes.proxy_config {
+      proxy_auth::install(&webview, endpoint)?;
+    }
 
     // Webview Settings
     unsafe { Self::set_webview_settings(&webview, &attributes, &pl_attrs)? };

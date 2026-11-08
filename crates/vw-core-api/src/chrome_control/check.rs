@@ -46,7 +46,7 @@ pub(super) fn authorize_read(
     session: &str,
     tool: &str,
     args: &Value,
-    consent: Option<&super::read_consent::ReadConsent>,
+    consent: Option<&super::read_consent::Consent>,
 ) -> Result<Tier, String> {
     let browser = super::agent_browser::selected(shared, session, tool, args);
     authorize_mode(
@@ -54,7 +54,7 @@ pub(super) fn authorize_read(
         session,
         tool,
         args,
-        consent.is_some() && super::read_consent::personal_read(tool, args),
+        consent.is_some() && super::read_consent::card_action(tool, args),
     )
     .map_err(|reason| browser.text(&reason))
 }
@@ -76,7 +76,7 @@ fn authorize_mode(
             shared, session, tool, args,
         )));
     }
-    if !shared.chrome_control.enabled() {
+    if !super::agent_browser::selected(shared, session, tool, args).enabled(shared) {
         let browser = super::agent_browser::selected(shared, session, tool, args);
         return Err(super::availability::reason(&browser.addon(shared), browser));
     }
@@ -141,6 +141,10 @@ pub(super) fn annotate_modes(shared: &Shared, session: &str, tool: &str, result:
         super::mapping::required("chrome_execute", &json!({"action":action})).is_some()
     };
     if let Some(profiles) = result["structuredContent"]["profiles"].as_array_mut() {
+        // The helper retains disconnected identities for silent reconnect. They are not current choices;
+        // a deleted Chrome profile cannot reconnect, and its old ID must not confuse the agent's list.
+        // This is a projection only: never erase a pairing just because a browser is not running.
+        profiles.retain(|profile| profile["connected"] != false);
         for profile in profiles {
             if let Some(features) = profile["features"].as_array_mut() {
                 features.retain(known);
@@ -148,7 +152,7 @@ pub(super) fn annotate_modes(shared: &Shared, session: &str, tool: &str, result:
         }
     }
 
-    // The person's Local network switch, and whether Chrome has it yet.
+    // Always-on legacy address policy, and whether the running helper acknowledged it.
     if result["structuredContent"].is_object() {
         if shared.chrome_control.config.available() {
             let browser = super::agent_browser::selected(shared, session, tool, &json!({}));
@@ -184,8 +188,11 @@ pub(super) fn annotate_modes(shared: &Shared, session: &str, tool: &str, result:
         };
         let allowed = tier.is_some_and(|tier| needed <= tier);
         row["allowedInThisMode"] = json!(allowed);
-        let consent =
-            tier == Some(Tier::Ask) && matches!(action.as_str(), "history.read" | "bookmarks.read");
+        let consent = tier == Some(Tier::Ask)
+            && matches!(
+                action.as_str(),
+                "history.read" | "bookmarks.read" | "tabs.close_owned" | "tabs.close_user"
+            );
         if consent {
             row["approvalRequired"] = json!(true);
         } else if !allowed {

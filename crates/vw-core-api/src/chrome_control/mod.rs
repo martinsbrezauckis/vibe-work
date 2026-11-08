@@ -1,6 +1,11 @@
 //! App-owned Chrome connection. The chat access mode owns permissions.
 //! Used by agent tools and Settings; pairing is independent of action authority.
+#[cfg(feature = "click-marker")]
+mod action_tracking;
 mod addon;
+pub(crate) mod safari;
+mod safari_package;
+pub use safari::SafariView;
 pub(crate) mod agent_browser;
 pub(crate) mod approval;
 #[cfg(all(test, feature = "your-edge"))]
@@ -8,6 +13,9 @@ mod approval_tests;
 mod availability;
 pub(crate) mod batch;
 mod browser;
+pub(crate) mod browser_start;
+#[cfg(all(test, feature = "your-edge"))]
+mod browser_start_tests;
 mod browser_text;
 pub(crate) mod builtin;
 mod capabilities;
@@ -33,6 +41,8 @@ mod extension_registry;
 mod firefox_commands;
 pub(crate) mod gateway;
 mod helper_refresh;
+#[cfg(all(test, feature = "your-edge"))]
+mod inactive_profile_tests;
 #[cfg(test)]
 mod live_tests;
 pub(crate) mod login;
@@ -61,8 +71,16 @@ mod output_walk_tests;
 mod owner;
 #[cfg(test)]
 mod owner_credential_tests;
+#[cfg(test)]
+mod page_tool_output_tests;
 mod pairing;
+mod pairing_approval;
+pub use pairing_approval::BROWSER_PAIRING_DIALOG_METHOD;
+#[cfg(test)]
+mod pairing_approval_tests;
 pub use pairing::PairingState;
+#[cfg(test)]
+mod close_consent_tests;
 mod person_stop;
 #[cfg(test)]
 mod person_stop_tests;
@@ -70,7 +88,10 @@ mod pipe;
 mod probe;
 #[cfg(test)]
 mod profile_alias_tests;
+mod profile_folders;
 mod profile_ids;
+#[cfg(all(test, feature = "your-edge"))]
+mod profile_scope_tests;
 pub(crate) mod read_consent;
 #[cfg(test)]
 mod read_consent_tests;
@@ -85,6 +106,8 @@ mod reconnect_tests;
 #[cfg(test)]
 mod registry_native_tests;
 mod reopen;
+#[cfg(all(test, feature = "your-safari"))]
+mod safari_tests;
 #[cfg(test)]
 mod security_tests;
 mod selection;
@@ -117,7 +140,7 @@ use std::sync::{
 };
 pub use work::ChromeWorkView;
 
-/// The local-network switch with the number of the change that set it. The number grows with every change in this
+/// The always-enabled legacy network policy and its delivery generation. The number grows with every change in this
 /// run of the app; it goes with each delivery (`generation`), so the app records an acknowledgement only for the
 /// current change and a helper that knows it refuses a change older than the one it holds.
 #[derive(Clone, Copy)]
@@ -126,15 +149,22 @@ struct LocalNetwork {
     generation: u64,
 }
 pub(crate) struct ChromeControl {
+    /// Headless fallback; a configured native browser owns the shared tracker instead.
+    #[cfg(feature = "click-marker")]
+    actions: std::sync::OnceLock<vw_preview::action_tracking::ActionTracker>,
     dir: Option<PathBuf>,
-    local_network_dir: PathBuf,
-    enabled: AtomicBool,
-    /// The person's local-network switch and its change number (see [`LocalNetwork`]).
+    switches: Mutex<store::Switches>,
+    chrome_generation: AtomicU64,
+    edge_generation: AtomicU64,
+    switch_generation: AtomicU64,
+    /// Legacy network-policy delivery state (see [`LocalNetwork`]).
     local_network: Mutex<LocalNetwork>,
     pub(crate) config: ChromeControlConfig,
     owner: owner::Owner,
     lifecycle: tokio::sync::Mutex<()>,
     generation: AtomicU64,
+    /// Revokes Safari replies across an off/on switch cycle without invalidating Chrome work.
+    safari_generation: AtomicU64,
     /// A Connect Chrome click may open the unchanged extension's pairing page once.
     connect_requested: AtomicBool,
     /// An Edge setup/store click may open Edge's own pairing page once.
@@ -155,14 +185,15 @@ pub(crate) struct ChromeControl {
     selections: Mutex<selection::Selections>,
     tasks: Mutex<std::collections::HashMap<String, String>>,
     output_cache: Mutex<output_cache::Cache>,
+    click_refs: Mutex<approval::ClickRefs>,
     chat_profiles: Mutex<std::collections::HashMap<String, String>>,
     /// Per chat, its session ids that ended because a turn ended (`reopen`): that chat may use them again.
     turn_ended: Mutex<std::collections::HashMap<String, std::collections::VecDeque<String>>>,
-    /// The switch change the running helper acknowledged (`None`: not yet, or a new helper connection). A
+    /// The compatibility generation the running helper acknowledged (`None`: not yet, or a new helper connection). A
     /// change stays pending, and is sent again, until the helper acknowledges that very change.
     local_network_acked: Mutex<Option<u64>>,
-    /// One switch delivery at a time, from reading the switch to the helper's answer: a later delivery reads the
-    /// switch only after an earlier one was answered, so an older value can never reach the helper after a newer one.
+    /// One compatibility delivery at a time, from reading the state to the helper's answer: a later delivery reads the
+    /// state only after an earlier one was answered, so an older value can never reach the helper after a newer one.
     local_network_delivery: tokio::sync::Mutex<()>,
     /// A delivery retry is running (one at a time).
     local_network_retry: AtomicBool,
@@ -178,29 +209,30 @@ pub(crate) struct ChromeControl {
     >,
 }
 impl ChromeControl {
-    pub(crate) fn new(vibe_home: &Path, config: ChromeControlConfig) -> Self {
+    pub(crate) fn new(_vibe_home: &Path, config: ChromeControlConfig) -> Self {
         let dir = owner::state_dir(&config);
-        let enabled = dir.as_deref().is_none_or(store::enabled);
-        let local_network_dir = dir
-            .clone()
-            .unwrap_or_else(|| vibe_home.join("browser-settings"));
-        let local_network = store::local_network(&local_network_dir);
+        let switches = store::Switches::load(dir.as_deref());
         let paired_once = dir.as_deref().is_some_and(store::paired_once);
         let edge_paired_once = dir
             .as_deref()
             .is_some_and(|dir| store::paired_once(&dir.join("edge")));
         Self {
+            #[cfg(feature = "click-marker")]
+            actions: std::sync::OnceLock::new(),
             dir,
-            local_network_dir,
-            enabled: AtomicBool::new(enabled),
+            switches: Mutex::new(switches),
+            chrome_generation: AtomicU64::new(0),
+            edge_generation: AtomicU64::new(0),
+            switch_generation: AtomicU64::new(0),
             local_network: Mutex::new(LocalNetwork {
-                on: local_network,
+                on: true,
                 generation: 0,
             }),
             config,
             owner: owner::Owner::default(),
             lifecycle: tokio::sync::Mutex::new(()),
             generation: AtomicU64::new(0),
+            safari_generation: AtomicU64::new(0),
             connect_requested: AtomicBool::new(false),
             edge_connect_requested: AtomicBool::new(false),
             paired_once: AtomicBool::new(paired_once),
@@ -213,6 +245,7 @@ impl ChromeControl {
             selections: Mutex::new(selection::Selections::default()),
             tasks: Mutex::new(std::collections::HashMap::new()),
             output_cache: Mutex::new(output_cache::Cache::default()),
+            click_refs: Mutex::new(approval::ClickRefs::default()),
             chat_profiles: Mutex::new(std::collections::HashMap::new()),
             turn_ended: Mutex::new(std::collections::HashMap::new()),
             stopped_by_person: Mutex::new(std::collections::HashMap::new()),
@@ -236,20 +269,10 @@ impl ChromeControl {
             let _ = release.await;
         }
     }
-    pub(crate) fn enabled(&self) -> bool {
-        self.enabled.load(Ordering::SeqCst)
-    }
     pub(crate) fn dir(&self) -> Option<&Path> {
         self.dir.as_deref()
     }
-    pub(crate) fn set_enabled(&self, enabled: bool) -> Result<(), String> {
-        if let Some(dir) = self.dir() {
-            store::save_enabled(dir, enabled)?;
-        }
-        self.enabled.store(enabled, Ordering::SeqCst);
-        Ok(())
-    }
-    /// Settings > Developer > Local network pages for the agent (off by default; Chrome Control only).
+    /// Always enabled for compatibility with extensions that still use the legacy address policy.
     pub(crate) fn local_network(&self) -> bool {
         self.local_network_state().on
     }
@@ -274,22 +297,34 @@ impl ChromeControl {
             .lock()
             .unwrap_or_else(PoisonError::into_inner) = None;
     }
-    /// Saves and sets the switch as a new change (also when the value is the same: it is delivered again).
-    pub(crate) fn set_local_network(&self, on: bool) -> Result<(), String> {
-        // Saved and set under one lock, so the saved value and the live one end on the same change.
+    /// Refreshes the enabled compatibility policy; old callers cannot reinstate address restrictions.
+    pub(crate) fn set_local_network(&self, _on: bool) {
+        // Advance under one lock so acknowledgements bind the current delivery.
         let mut state = self
             .local_network
             .lock()
             .unwrap_or_else(PoisonError::into_inner);
-        store::save_local_network(&self.local_network_dir, on)?;
         *state = LocalNetwork {
-            on,
+            on: true,
             generation: state.generation + 1,
         };
-        Ok(())
+    }
+    /// A New-chat context window follows its draft to the newly started chat before the first turn.
+    pub(crate) async fn adopt_tab_context(&self, old: &str, new: &str) {
+        if !self.config.available() || self.owner.connected_profiles.snapshot().is_empty() {
+            return;
+        }
+        let _ = self
+            .owner
+            .call(
+                "chrome_status",
+                serde_json::json!({"_adoptChat":{"old":old,"new":new}}),
+            )
+            .await;
     }
     /// A profile is connected now: remembered for the setup's lifetime (`paired_once`).
     pub(super) fn mark_paired(&self) {
+        installation::remember_directory(self, agent_browser::Browser::Chrome);
         if !self.paired_once.swap(true, Ordering::SeqCst)
             && let Some(dir) = self.dir()
             && let Err(reason) = store::save_paired_once(dir, true)
@@ -299,6 +334,7 @@ impl ChromeControl {
     }
     /// Chrome holds another owner: the earlier pairing no longer holds.
     pub(super) fn forget_paired(&self) {
+        installation::forget_directory(self, agent_browser::Browser::Chrome);
         if self.paired_once.swap(false, Ordering::SeqCst)
             && let Some(dir) = self.dir()
         {
@@ -479,6 +515,7 @@ pub(crate) fn declarations(config: &ts_rs::Config) -> Vec<String> {
     vec![
         ChromeControlRequest::decl(config),
         ChromeControlView::decl(config),
+        SafariView::decl(config),
         ChromeWorkView::decl(config),
         ChromeSelection::decl(config),
         ChromeTab::decl(config),
@@ -523,11 +560,15 @@ async fn refresh_helper_held(chrome: &ChromeControl) {
 
 /// Starts the installed helper without giving startup errors any secret-bearing details.
 pub(crate) async fn start_owner(shared: &std::sync::Arc<crate::core::Shared>) {
+    start_owner_for(shared, None).await;
+}
+
+async fn start_owner_for(shared: &std::sync::Arc<crate::core::Shared>, browser: Option<&str>) {
     let chrome = &shared.chrome_control;
     browser::refresh(&chrome.config).await;
     if chrome.config.available()
         && let Some(state) = chrome.dir()
-        && let Err(reason) = setup::repair_registrations(&chrome.config, state, None)
+        && let Err(reason) = setup::repair_registrations(&chrome.config, state, browser)
     {
         tracing::warn!(%reason, "Browser helper registration needs setup");
     }
@@ -535,11 +576,11 @@ pub(crate) async fn start_owner(shared: &std::sync::Arc<crate::core::Shared>) {
         tracing::warn!(%reason, "Chrome Control could not start");
         return;
     }
-    // A new helper learns the person's switch at once (it reports it to Chrome with every poll).
+    // A new helper receives the compatibility allowance before dispatching browser work.
     send_local_network(shared).await;
 }
 
-/// Tells the helper the person's local-network switch: it sends it to Chrome, which applies it to every
+/// Sends the always-enabled compatibility allowance to the helper and older extensions for every
 /// tab the agent controls, and holds new actions until Chrome confirms. Without a running helper there is nothing
 /// live to change.
 /// The change counts only when the helper acknowledges it (its answer carries the new revision); otherwise
@@ -576,8 +617,8 @@ pub(crate) async fn send_local_network(shared: &std::sync::Arc<crate::core::Shar
     });
 }
 
-/// Sends the switch's current change once; true when the helper acknowledged that change while it is still the
-/// current one. Deliveries run one at a time from reading the switch to the helper's answer
+/// Sends the current compatibility generation once; true when the helper acknowledged that change while it is still the
+/// current one. Deliveries run one at a time from reading the state to the helper's answer
 /// (`local_network_delivery`), in a task of their own: a caller that stops waiting does not end a delivery early,
 /// so the next one is never sent while an older one may still reach the helper.
 async fn deliver_local_network(shared: &std::sync::Arc<crate::core::Shared>) -> bool {
@@ -607,7 +648,7 @@ async fn deliver_local_network(shared: &std::sync::Arc<crate::core::Shared>) -> 
             return true;
         }
         drop(acked);
-        tracing::debug!("Chrome Control did not take the local-network switch now");
+        tracing::debug!("Chrome Control did not acknowledge network compatibility now");
         false
     })
     .await
@@ -666,3 +707,11 @@ mod status_actions;
 mod schema_budget_tests;
 #[cfg(test)]
 mod summary_support_tests;
+
+#[cfg(all(test, feature = "your-edge"))]
+mod browser_switch_tests;
+
+mod switches;
+
+#[cfg(any(target_os = "macos", all(test, unix)))]
+mod safari_registration;

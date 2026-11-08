@@ -118,6 +118,12 @@ pub(crate) async fn prepare(
     args: Value,
 ) -> Result<crate::ask::tool_calls::receipts::Execution, String> {
     super::gateway::validate_public_args(&args)?;
+    let (args, reopened) = match super::reopen::resolve(shared, chat, "chrome_execute", args)
+        .await?
+    {
+        super::reopen::Resolved::Ready(args, reopened) => (args, reopened),
+        super::reopen::Resolved::Refused(answer) => return Ok(Box::pin(async move { Ok(answer) })),
+    };
     super::gateway::validate_session(shared, chat, "chrome_execute", &args)?;
     let mut prepared = std::collections::VecDeque::new();
     for mut step in steps(&args)? {
@@ -161,6 +167,9 @@ pub(crate) async fn prepare(
             },
         )
         .await;
+        if let Some(reopened) = reopened {
+            super::reopen::note(&mut answer, &reopened);
+        }
         if super::output_cache::observation(&answer["vwMcpResult"]) {
             super::output_cache::bound(&shared, &chat, &args, &mut answer["vwMcpResult"]);
         }

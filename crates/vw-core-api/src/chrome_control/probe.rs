@@ -10,7 +10,7 @@
 //!   Windows: opened with `FILE_FLAG_OPEN_REPARSE_POINT` and full sharing; the handle's information must show a
 //!   disk file without directory or reparse attributes (a pipe or device has no such information and is refused).
 //! - At most 16 MiB is read (one byte more refuses the file); JSON nests at most 128 deep (serde's limit). Only
-//!   `extensions.settings.<id>.disable_reasons` is read: a non-zero number or a non-empty list means off; Chrome's
+//!   `extensions.settings.<id>.disable_reasons` and unpacked `location` are read: a non-zero number or a non-empty list means off; Chrome's
 //!   external-extension reason (bit 13, value 8192, as a bit or a list item) means it still waits for consent.
 //! - At most one probe runs, on its own thread. A caller waits at most 500 ms; while one runs, a caller gets the last
 //!   result (or Unknown) and no second probe starts.
@@ -63,6 +63,8 @@ struct Key {
 #[derive(Default)]
 struct State {
     running: bool,
+    profiles: Vec<PathBuf>,
+    extension_id: String,
     last: Option<(Probe, Instant)>,
     /// The cached positive result, its file key and when it was read.
     positive: Option<(Key, Instant, Probe)>,
@@ -109,7 +111,7 @@ fn extension_dir(profile: &Dir, extension_id: &str) -> Option<Dir> {
     directory(profile, &Path::new("Extensions").join(extension_id)).ok()
 }
 
-/// The profile folders (direct, real child folders of `user_data`) that hold the extension's folder.
+/// Real profile folders with a Store copy or Chrome's own record of an unpacked copy.
 pub(crate) fn profiles(user_data: &Path, extension_id: &str) -> Vec<PathBuf> {
     let Some(root) = user_data_dir(user_data) else {
         return Vec::new();
@@ -122,12 +124,46 @@ pub(crate) fn profiles(user_data: &Path, extension_id: &str) -> Vec<PathBuf> {
         .filter_map(|entry| {
             let name = entry.file_name();
             let profile = directory(&root, Path::new(&name)).ok()?;
-            extension_dir(&profile, extension_id)?;
+            if extension_dir(&profile, extension_id).is_none()
+                && !unpacked_profile(&profile, &user_data.join(&name), extension_id)
+            {
+                return None;
+            }
             Some(user_data.join(name))
         })
         .collect();
     found.sort();
     found
+}
+
+/// Unpacked copies have no Extensions/<id> folder. Only read Chrome's bounded metadata;
+/// never follow the unpacked path or treat its presence as a pairing grant.
+fn unpacked_profile(profile: &Dir, path: &Path, extension_id: &str) -> bool {
+    if let Ok(meta) = profile.symlink_metadata("Extensions") {
+        if linked(&meta) || !meta.is_dir() {
+            return false;
+        }
+        let Ok(extensions) = directory(profile, Path::new("Extensions")) else {
+            return false;
+        };
+        if extensions
+            .symlink_metadata(extension_id)
+            .is_ok_and(|meta| linked(&meta) || !meta.is_dir())
+        {
+            return false;
+        }
+    }
+    for name in FILES {
+        if let Some((file, _)) = open_regular_at(profile, &path.join(name)) {
+            match read_entry(file, extension_id) {
+                Ok(None) => {}
+                // Chromium ManifestLocation: unpacked UI installation or --load-extension.
+                Ok(Some(entry)) => return matches!(entry["location"].as_u64(), Some(4 | 8)),
+                Err(()) => return false,
+            }
+        }
+    }
+    false
 }
 
 /// The newest installed extension version in a profile (`Extensions/<id>/<version>_<n>`), read from folder names.
@@ -218,7 +254,7 @@ pub(super) fn read_regular(path: &Path, limit: u64) -> Option<Vec<u8>> {
 
 /// What one opened file says; `None` when it does not name the extension, `Err` for a file that cannot be read or
 /// parsed (the probe answers Unknown).
-fn read_file(file: std::fs::File, extension_id: &str) -> Result<Option<Probe>, ()> {
+fn read_entry(file: std::fs::File, extension_id: &str) -> Result<Option<serde_json::Value>, ()> {
     use std::io::Read;
     let mut bytes = Vec::new();
     file.take(MAX_BYTES + 1)
@@ -228,11 +264,15 @@ fn read_file(file: std::fs::File, extension_id: &str) -> Result<Option<Probe>, (
         return Err(());
     }
     let value: serde_json::Value = serde_json::from_slice(&bytes).map_err(|_| ())?;
-    let Some(entry) = value
+    Ok(value
         .get("extensions")
         .and_then(|e| e.get("settings"))
         .and_then(|s| s.get(extension_id))
-    else {
+        .cloned())
+}
+
+fn read_file(file: std::fs::File, extension_id: &str) -> Result<Option<Probe>, ()> {
+    let Some(entry) = read_entry(file, extension_id)? else {
         return Ok(None);
     };
     let (off, external) = match entry.get("disable_reasons") {
@@ -264,7 +304,9 @@ fn probe_once(profiles: &[PathBuf], extension_id: &str) -> (Probe, Option<Key>) 
         let Some(dir) = profile_dir(profile) else {
             continue;
         };
-        if extension_dir(&dir, extension_id).is_none() {
+        if extension_dir(&dir, extension_id).is_none()
+            && !unpacked_profile(&dir, profile, extension_id)
+        {
             continue;
         }
         for name in FILES {
@@ -288,7 +330,11 @@ fn probe_once(profiles: &[PathBuf], extension_id: &str) -> (Probe, Option<Key>) 
 
 fn key_now(key: &Key, extension_id: &str) -> Option<Key> {
     let profile = profile_dir(key.path.parent()?)?;
-    extension_dir(&profile, extension_id)?;
+    if extension_dir(&profile, extension_id).is_none()
+        && !unpacked_profile(&profile, key.path.parent()?, extension_id)
+    {
+        return None;
+    }
     open_regular_at(&profile, &key.path).map(|(_, key)| key)
 }
 
@@ -298,6 +344,16 @@ impl Prober {
         let started = Instant::now();
         let receiver = {
             let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+            if state.profiles != profiles || state.extension_id != extension_id {
+                // A worker or positive result for another profile cannot diagnose this selection.
+                if state.running {
+                    return Probe::Unknown;
+                }
+                state.profiles.clone_from(&profiles);
+                extension_id.clone_into(&mut state.extension_id);
+                state.last = None;
+                state.positive = None;
+            }
             if let Some((key, read, answer)) = &state.positive {
                 if now.duration_since(*read) < POSITIVE_FOR
                     && key_now(key, extension_id).as_ref() == Some(key)
@@ -357,6 +413,56 @@ impl Prober {
     #[cfg(test)]
     pub(super) fn started_for_test(&self) -> usize {
         self.state.lock().unwrap().started
+    }
+}
+
+/// Profile observation through the platform permission boundary.
+pub(super) fn profiles_for(
+    config: &super::setup::ChromeControlConfig,
+    user_data: &Path,
+    extension_id: &str,
+) -> Vec<PathBuf> {
+    if config.is_macos() {
+        return Vec::new();
+    }
+    if super::setup::files::access(config, super::setup::files::Access::ReadDir, user_data).is_err()
+    {
+        return Vec::new();
+    }
+    profiles(user_data, extension_id)
+}
+
+pub(super) fn version_for(
+    config: &super::setup::ChromeControlConfig,
+    profile: &Path,
+    extension_id: &str,
+) -> Option<String> {
+    if config.is_macos() {
+        return None;
+    }
+    super::setup::files::access(config, super::setup::files::Access::ReadDir, profile).ok()?;
+    installed_version(profile, extension_id)
+}
+
+impl Prober {
+    pub(super) fn probe_for(
+        &self,
+        config: &super::setup::ChromeControlConfig,
+        profiles: Vec<PathBuf>,
+        extension_id: &str,
+        now: Instant,
+    ) -> Probe {
+        if config.is_macos() {
+            return Probe::Unknown;
+        }
+        for profile in &profiles {
+            if super::setup::files::access(config, super::setup::files::Access::ReadDir, profile)
+                .is_err()
+            {
+                return Probe::Unknown;
+            }
+        }
+        self.probe(profiles, extension_id, now)
     }
 }
 

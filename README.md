@@ -14,7 +14,7 @@ An independent open-source project, part of the ShellX family of apps
   <img src="docs/public/images/vibe-work-016-dark.webp" alt="Vibe Work with three projects, a pending one-line edit to approve, and the Changes panel." width="1920">
 </picture>
 
-Version 0.1.7 adds local video review and a badge when a chat needs you, and runs on Vibe 3.1.0.
+Version 0.1.8 adds Your Safari on macOS, Send feedback, your monthly plan usage and a context breakdown.
 Something specific you want Vibe Work to do? Post it in
 [Discussions](https://github.com/martinsbrezauckis/vibe-work/discussions). Changes per version: `CHANGELOG.md`.
 Questions and reports: `CONTRIBUTING.md`.
@@ -39,7 +39,7 @@ Questions and reports: `CONTRIBUTING.md`.
   [docs/public/VOCABULARY.md](docs/public/VOCABULARY.md#access-modes). A card says what Allow once or Allow for this
   session covers. Saying No on a card for Vibe's own tools (commands, file edits) stops the turn. A No in Vibe Work's
   own prompts (Git guard, processes, vault, documents, protected folders, cards for Vibe Work's tools) answers only
-  that call and the turn goes on; the agent is told you declined and not to ask again for it in this task unless you bring it up.
+  that call and the turn goes on; the agent receives: `Not run: the user declined this. Explain why it is needed for the user's delegated task.`
   Unanswered cards wait until you answer; Stop or closing the chat counts as No. A new card waits until you stop
   typing, and a held key does not answer it.
   Review and revoke permissions in Settings > Allowed without asking.
@@ -66,12 +66,12 @@ Questions and reports: `CONTRIBUTING.md`.
   such as sign-in boxes. It clicks canvas and image controls, and controls that only accept a real mouse click, only
   while the page still shows what it checked. On Windows, macOS and Linux, Settings > Browser blocks ads and trackers
   (Off, Balanced, Strict).
-- **Your Chrome and Your Edge.** Connect the extension in Settings > Browser > Your Chrome or Your Edge
-  (Connect Chrome or Connect Edge). The agent works in your own Chrome or Microsoft Edge: each chat in its own
-  window, as far as the chat's access mode allows, with Stop in the extension and on the page.
-  Local-network pages stay off for the agent until you turn on Settings > Developer > Local network pages for
-  the agent; this applies to Your Chrome, Your Edge and the built-in Browser. While that is off, the agent opens
-  named sites in Your Chrome and Your Edge over https only. Manual:
+- **Your Chrome, Your Edge and Your Safari.** Connect the extension in Settings > Browser > Your Chrome or Your Edge
+  (Connect Chrome or Connect Edge), or on macOS in Settings > Browser > Your Safari. The agent works in your own
+  Chrome, Microsoft Edge or Safari: each chat in its own window, as far as the chat's access mode allows, with Stop
+  in the extension and on the page.
+  Local pages open like in a normal browser in the built-in Browser and Your Safari; Your Chrome and Your Edge open
+  private-network pages and the chat's own servers until the next extension version. Manual:
   [docs/public/BROWSER_CONTROL.md](docs/public/BROWSER_CONTROL.md).
 - **Capture from a page.** A page's design system, structure, assets, text, full-page pictures and before/after
   differences, saved under `capture/`. The Browser tab's Capture menu also saves a PDF or one HTML file with pictures
@@ -98,7 +98,10 @@ Questions and reports: `CONTRIBUTING.md`.
 - **Accessibility.** Settings > Accessibility: text size from 100 to 200%, the system theme, contrast and motion.
   Windows contrast themes are followed, and screen readers find the chat's regions, speakers and messages.
 - **Usage.** Settings > Usage and plan shows a chat's cost, steps, cached tokens and tool calls, also for
-  each subagent.
+  each subagent, and your monthly plan usage when Mistral reports it. Context in the status bar opens a breakdown
+  of the last model call.
+- **Send feedback.** Report a bug or a suggestion from Settings > About, the tray menu or `/feedback`, with an
+  optional screenshot that leaves out your secrets.
 - **Tools.** A marketplace of reviewed skill packs, MCP servers and plugins, each pinned to a checksum, and
   connectors you sign in to or, when they need no sign-in, connect with one click. Tools > Skills browses,
   installs, turns on, turns off and removes skills, and shows when each skill you added last changed. When a task
@@ -110,7 +113,7 @@ Questions and reports: `CONTRIBUTING.md`.
   images with Mistral's image generation. Both are billed by Mistral on your API key.
 - **Work skills.** Deep research reports, meeting briefs and data analysis into handbook reports.
 - **Debug API.** A local API that lets a test or another agent use the app as you do; off until you turn it on in
-  Settings. Manual: `docs/public/DEBUG_API.md`.
+  Settings > Developer. Tools need its token, kept in your vault. Manual: `docs/public/DEBUG_API.md`.
 
 Sessions are Vibe's own sessions and are shared with the Vibe CLI by default.
 
@@ -167,7 +170,7 @@ store while unlocked. After updating from 0.1.1 or 0.1.0 with Remember on this c
 
 Permission cards show the action and wait until you answer. Saying No on a card for Vibe's own tools stops the
 turn; write what to do instead in the chat. A No in Vibe Work's own prompts answers only that call and the turn
-goes on; the agent is told you declined and not to ask again for it in this task unless you bring it up. Ctrl/Cmd+Shift+A goes to a waiting prompt. The session header lists its permissions; Settings > Allowed without asking lists permissions
+goes on; the agent receives: `Not run: the user declined this. Explain why it is needed for the user's delegated task.` Ctrl/Cmd+Shift+A goes to a waiting prompt. The session header lists its permissions; Settings > Allowed without asking lists permissions
 you can revoke and links to the controls for lasting choices.
 
 ## What leaves your computer
@@ -177,8 +180,10 @@ you can revoke and links to the controls for lasting choices.
 - **Vibe's usage telemetry** follows Vibe's own setting, shown and changed in Settings > Privacy and data.
 - **Installing Vibe:** downloads from PyPI and GitHub, each checked against a pinned checksum.
 - **GitHub Releases:** the update check, once after start.
-- **What you open:** pages in the preview, the Browser, Your Chrome or Your Edge, connectors, tools you install,
-  and your git remotes when you push or open a pull request.
+- **What you open:** pages in the preview, the Browser, Your Chrome, Your Edge or Your Safari, connectors, tools you
+  install, and your git remotes when you push or open a pull request.
+- **Send feedback:** only when you press Send: the report you reviewed, and the screenshot and app and system
+  info if you added them.
 
 Vibe Work sends no telemetry of its own. Sessions are stored by Vibe; settings and records stay in Vibe Work's data
 folder; keys stay in the encrypted vault.
@@ -217,6 +222,10 @@ VW_DEV_SERVER_BIN="$PWD/data/vibe-3.1.0/venv/bin/vibe-app-server" VW_DEV_KEYS=1 
 `VW_DEV_SERVER_BIN`, `VW_DEV_HOME_TEMPLATE` and `VW_DEV_RUN_DIR` (absolute paths) override the Vibe program, the
 `config.toml` and the run folder (default `.scratch/dev-app`). `VW_DEV_KEYS=1` runs the key service (setup screen,
 vault, local proxy) in the run folder.
+
+For browser development with `VW_DEBUG_DESCRIPTOR`, open the private `Browser dev UI` link printed by Vite.
+It authorizes that browser for this run; reopen the new link after restarting Vite. Keep the link private.
+The browser receives a session cookie; the Debug API bearer stays in the dev server.
 
 When updating an older development environment, create a fresh Python 3.14.8 venv and install the
 hash-locked requirements above; upgrading packages inside a Python 3.12 venv cannot upgrade Python.

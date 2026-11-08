@@ -114,7 +114,7 @@ pub(super) fn compact(shared: &Shared, chat: &str, action: Option<&str>, result:
         status.remove("owner");
     }
     status["capabilities"]["availability"] = json!(
-        "needs/typingKeysNeed index modes; needs means unavailable in this mode. Profile feature lists define support. Use chrome_status({action}) for schema."
+        "needs/typingKeysNeed: modes index (blocked); approvalRequired asks. Support: features. Schema: chrome_status({action})."
     );
     status["capabilities"]["execution"] =
         json!("Receipts report outcomes. Never replay an unknown outcome.");
@@ -125,10 +125,43 @@ pub(super) fn compact(shared: &Shared, chat: &str, action: Option<&str>, result:
         let capabilities = &mut body["untrustedPageContent"]["capabilities"];
         share_capability_names(capabilities);
         capabilities["availability"] = json!(
-            "capability indexes capabilityNames; needs/typingKeysNeed index modes; needs means unavailable in this mode. Profile feature lists define support. Use chrome_status({action}) for schema."
+            "capability: capabilityNames index; needs/typingKeysNeed: modes index (blocked); approvalRequired asks. Support: features. Schema: chrome_status({action})."
         );
     }
+    super::safari::compact_overview(body);
+    share_catalog_features(body);
     super::output::sync_text(result);
+}
+
+// Crowded optional builds can refer to the catalog's action keys instead of repeating the same support set.
+// Partial profile lists stay explicit: a catalog entry alone never establishes that a browser supports it.
+fn share_catalog_features(body: &mut Value) {
+    if !cfg!(all(feature = "your-firefox", feature = "your-safari"))
+        || super::output::fits(body, 6000)
+    {
+        return;
+    }
+    let status = &mut body["untrustedPageContent"];
+    let Some(actions) = status["capabilities"]["actions"].as_object() else {
+        return;
+    };
+    let names: Vec<Value> = actions.keys().map(|id| json!(id)).collect();
+    let mut shared = false;
+    if let Some(lists) = status["featureLists"].as_array_mut() {
+        for list in lists {
+            if list.as_array().is_some_and(|list| {
+                list.len() == names.len() && names.iter().all(|name| list.contains(name))
+            }) {
+                *list = json!({"allActions":true});
+                shared = true;
+            }
+        }
+    }
+    if shared && let Some(instruction) = status["capabilities"]["availability"].as_str() {
+        status["capabilities"]["availability"] = json!(format!(
+            "{instruction} allActions means every capabilities.actions key."
+        ));
+    }
 }
 
 // Chrome and Edge use the same permission names. Keep every action's binding, naming each permission once.

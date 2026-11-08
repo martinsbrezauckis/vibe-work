@@ -29,8 +29,7 @@
     return reply("captured", { value, element });
   };
   if (REQ.mode === "selection") {
-    const chosen = window.getSelection();
-    return finish(chosen && chosen.toString(), "selected text");
+    return finish(ENV.selection?.()?.quote, "selected text");
   }
   if (REQ.mode === "contextSelection") {
     const choice = ENV.takeContextChoice && ENV.takeContextChoice();

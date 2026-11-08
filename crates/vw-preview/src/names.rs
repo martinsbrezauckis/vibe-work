@@ -1,27 +1,6 @@
-//! Where a host NAME points, for the navigation hooks and the request barrier (following ShellX's
-//! baseline `browser_host_resolves_to_private_network`): a name is refused unless every answer is public, failing
-//! closed on errors and timeouts. The engine's callbacks run on its UI thread, so a lookup NEVER blocks there for
-//! long (a hanging resolver can freeze the window): [`NameCheck::quick`] answers from the cache or
-//! within [`UI_WAIT`], else "pending" while the lookup goes on in the background; [`NameCheck::when_done`] calls back
-//! when it ends (the Windows barrier holds the request with a `WebView2` deferral until then); the core waits fully
-//! with [`NameCheck::resolve`] before an open, which fills the cache the hooks then read.
-//!
-//! Depends on: vw-netguard (address classes). Called by: `hooks`, `service` (`check_name`), tests (scripted
-//! resolver).
-//! Invariants:
-//! - A lookup takes at most [`LOOKUP_LIMIT`] (a helper thread; a resolver that hangs is abandoned) and every
-//!   registered callback is called exactly once when it ends.
-//! - One lookup per name at a time (callers join the one in flight).
-//! - Answers are reused for [`TTL`]; failed or timed-out lookups only for [`RETRY_AFTER`]. At most [`CACHE_CAP`]
-//!   names are cached (oldest dropped).
-//! - Bounded under a flood of unique names: at most [`MAX_LOOKUPS`] resolver threads live
-//!   (a hung one keeps its slot, so the bound fails closed), at most [`MAX_QUEUED`] names waiting for a slot, at most
-//!   [`MAX_WAITERS`] callbacks per name; anything beyond is refused at once without caching. A thread that cannot be
-//!   created refuses too.
-//! - Every waiter is answered within about [`LOOKUP_LIMIT`] of asking: a running lookup is abandoned
-//!   at the limit; a queued name is refused at its deadline by the keeper thread even when every slot is held by a
-//!   hung resolver, so a later name is never starved (it is answered or refused with the reason). Answers for a mount
-//!   that closed meanwhile go to its closed webview's held request (dropped with it) or are recorded nowhere.
+//! Bounded host classification for backend media fetching and legacy compatibility metadata.
+//! Browser navigation and page requests do not consult these verdicts. Resolver queues, cache bounds,
+//! public-address checks and private-answer classification remain available to backend fetch callers.
 
 use std::collections::HashMap;
 use std::net::{IpAddr, ToSocketAddrs};

@@ -112,7 +112,7 @@ pub fn selection_script_from(page: Option<&str>) -> String {
     format!(
         r#"(() => {{
 {DESCRIBE_JS}
-  const saved = window[{page}]?.takePointChoice?.();
+  const saved = window[{page}]?.takePointChoice?.() ?? window[{page}]?.selection?.();
   if (saved) {{
     let node = saved.node;
     if (node?.nodeType !== 1) node = node?.parentElement;

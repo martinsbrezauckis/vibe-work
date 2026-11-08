@@ -47,6 +47,24 @@ osVersion: string,
  */
 arch: string, };
 
+export type FeedbackScreenshot = {
+/**
+ * Native captures are PNG; the relay also accepts JPEG.
+ */
+mimeType: string,
+/**
+ * Canonical base64 of at most 1 MiB of image bytes.
+ */
+dataBase64: string,
+/**
+ * Image width, at most 4096 pixels.
+ */
+width: number,
+/**
+ * Image height, at most 4096 pixels.
+ */
+height: number, };
+
 export type FeedbackReport = {
 /**
  * Random report identifier; never a device or session identifier.
@@ -59,7 +77,11 @@ draft: FeedbackDraft,
 /**
  * Present only with the person's sharing choice.
  */
-system: FeedbackSystem | null, };
+system: FeedbackSystem | null,
+/**
+ * Present only after an explicit, successful app-window capture.
+ */
+screenshot?: FeedbackScreenshot | null, };
 
 export type FeedbackView = {
 /**
@@ -67,7 +89,7 @@ export type FeedbackView = {
  */
 draft: FeedbackDraft | null,
 /**
- * Ready for the separate Send click, absent before Review.
+ * Core-owned redacted payload prepared for Send.
  */
 review: FeedbackReport | null,
 /**
@@ -75,7 +97,19 @@ review: FeedbackReport | null,
  */
 system: FeedbackSystem,
 /**
- * Remembered sharing choice, off by default.
+ * A captured image the person can inspect before sending.
+ */
+screenshot: FeedbackScreenshot | null,
+/**
+ * Whether the screenshot checkbox is selected, including after a failed capture.
+ */
+addScreenshot: boolean,
+/**
+ * A safe, short reason when a screenshot could not be attached.
+ */
+screenshotError: string | null,
+/**
+ * Per-report sharing choice, always off on opening.
  */
 shareSystem: boolean,
 /**
@@ -95,7 +129,11 @@ draft: FeedbackDraft, } | { "op": "share",
 /**
  * Whether to include the displayed diagnostic facts.
  */
-shareSystem: boolean, } | { "op": "send",
+shareSystem: boolean, } | { "op": "screenshot",
+/**
+ * Whether to attach a new capture. Callers cannot supply image data or a file path.
+ */
+include: boolean, } | { "op": "send",
 /**
  * Identifier from the review result.
  */

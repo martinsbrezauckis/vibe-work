@@ -785,4 +785,16 @@ impl Vault {
             items::delete_item_when(repo, master, device, id, accept)
         })
     }
+    /// Checks and writes a set of items against one sealed head (value and permission together).
+    /// # Errors
+    /// Locked vault, corrupt storage or a repeatedly moving head.
+    #[cfg(feature = "agent-vault")]
+    pub fn update_items_checked(
+        &self,
+        change: impl Fn(&[VaultItem]) -> Option<Vec<VaultItem>>,
+    ) -> Result<bool, VaultError> {
+        self.with_session(|repo, master, device| {
+            items::update_items_checked(repo, master, device, change)
+        })
+    }
 }

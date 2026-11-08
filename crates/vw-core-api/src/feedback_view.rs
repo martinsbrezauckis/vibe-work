@@ -41,6 +41,20 @@ pub struct FeedbackSystem {
     /// CPU architecture, to identify the executable build.
     pub arch: String,
 }
+/// A secret-safe app-window image, created only by the host's native capture provider.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct FeedbackScreenshot {
+    /// Native captures are PNG; the relay also accepts JPEG.
+    pub mime_type: String,
+    /// Canonical base64 of at most 1 MiB of image bytes.
+    pub data_base64: String,
+    /// Image width, at most 4096 pixels.
+    pub width: u32,
+    /// Image height, at most 4096 pixels.
+    pub height: u32,
+}
 /// Immutable preview and outbound payload. Its random id is also the relay's retry key.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
@@ -52,6 +66,9 @@ pub struct FeedbackReport {
     pub draft: FeedbackDraft,
     /// Present only with the person's sharing choice.
     pub system: Option<FeedbackSystem>,
+    /// Present only after an explicit, successful app-window capture.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub screenshot: Option<FeedbackScreenshot>,
 }
 /// The feedback panel's current core-owned state.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -60,11 +77,17 @@ pub struct FeedbackReport {
 pub struct FeedbackView {
     /// An open draft, absent when the panel is closed.
     pub draft: Option<FeedbackDraft>,
-    /// Ready for the separate Send click, absent before Review.
+    /// Core-owned redacted payload prepared for Send.
     pub review: Option<FeedbackReport>,
     /// Read-only facts the person may include.
     pub system: FeedbackSystem,
-    /// Remembered sharing choice, off by default.
+    /// A captured image the person can inspect before sending.
+    pub screenshot: Option<FeedbackScreenshot>,
+    /// Whether the screenshot checkbox is selected, including after a failed capture.
+    pub add_screenshot: bool,
+    /// A safe, short reason when a screenshot could not be attached.
+    pub screenshot_error: Option<String>,
+    /// Per-report sharing choice, always off on opening.
     pub share_system: bool,
     /// Whether the release has a relay URL configured.
     pub available: bool,
@@ -91,10 +114,15 @@ pub enum FeedbackRequest {
         /// Prose deliberately entered by the person.
         draft: FeedbackDraft,
     },
-    /// Remember consent; changes the preview too.
+    /// Set consent for this report; changes the preview too.
     Share {
         /// Whether to include the displayed diagnostic facts.
         share_system: bool,
+    },
+    /// Capture the app's own window using the host's secret-safe provider, or discard the image.
+    Screenshot {
+        /// Whether to attach a new capture. Callers cannot supply image data or a file path.
+        include: bool,
     },
     /// Send exactly one reviewed payload. Only an undriven window can call this.
     Send {

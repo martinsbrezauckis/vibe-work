@@ -1,5 +1,5 @@
 //! Native guard prompts stay with their connected caller until answered.
-//! Uses the shared confirmer; identical pending Git calls share one sheet, and its answer answers each of them.
+//! Uses the shared confirmer; every invocation keeps its own one-use decision.
 use crate::core::Shared;
 use std::{
     collections::HashMap,
@@ -53,34 +53,19 @@ fn pending(
     shared: &Arc<Shared>,
     mut request: ConfirmationRequest,
 ) -> Result<(String, String, watch::Receiver<Option<Confirmation>>), String> {
-    let git = request.method == "vibe-work/gitGuard";
-    let mut exact = if git {
-        serde_json::json!({"sessionId":request.params["sessionId"], "cwd":request.params["cwd"], "command":request.params["command"]})
-    } else {
-        request.params.clone()
-    };
-    if let Some(fields) = exact.as_object_mut() {
-        fields.remove("toolCallId");
-    }
-    let mut key = format!("{}:{exact}", request.method);
+    let mut key = format!("{}:{}", request.method, request.params);
     let (id, result) = {
         let mut calls = shared
             .guard_asks
             .0
             .lock()
             .unwrap_or_else(PoisonError::into_inner);
-        // Git duplicates join the exact pending command and all get its answer.
-        // Other guards retain their existing per-call policy.
-        if !git && calls.get(&key).is_some_and(|p| p.result.borrow().is_none()) {
+        // Concurrent calls must never reuse one native Allow, even when their text is identical.
+        if calls.contains_key(&key) {
             key = format!(
                 "{key}:concurrent:{}",
                 NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
             );
-        }
-        // An answered sheet answers only the calls that joined it while it was open; a later identical call gets
-        // its own sheet (the earlier waiters keep their own copy of the answer).
-        if git && calls.get(&key).is_some_and(|p| p.result.borrow().is_some()) {
-            calls.remove(&key);
         }
         if let Some(pending) = calls.get_mut(&key) {
             pending.waiters += 1;
@@ -164,7 +149,7 @@ async fn decision(
         }
     }
     owner.cancel = false;
-    // Every call that joined this sheet gets its answer: an Allow lets each joined duplicate run, a No refuses each.
+    // Only this invocation receives the native decision.
     if answer.approved() || include_refusal {
         let record = shared.asks.outcome(&id);
         Ok((
@@ -176,5 +161,31 @@ async fn decision(
             || answer.agent_text(what),
             |r| vw_ask::agent_text(&r.outcome, what),
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn simultaneous_git_calls_have_separate_decisions() {
+        let fixture = crate::feature_test_core::Fixture::new().await;
+        let request = |call| ConfirmationRequest {
+            method: "vibe-work/gitGuard".into(),
+            requester: vw_gate::Requester::Agent,
+            summary: "git reset --hard HEAD~1".into(),
+            params: serde_json::json!({"sessionId":"s", "cwd":"/project",
+                "command":"git reset --hard HEAD~1", "toolCallId":call}),
+            always: None,
+        };
+        let first = pending(&fixture.core.shared, request("first")).unwrap();
+        let second = pending(&fixture.core.shared, request("second")).unwrap();
+        // Abort before polling the server-free fixture's native presenter.
+        for call in fixture.core.shared.guard_asks.0.lock().unwrap().values() {
+            call.task.abort();
+        }
+        assert_ne!(first.1, second.1, "one Allow must cover only one tool call");
+        fixture.finish().await;
     }
 }

@@ -9,6 +9,7 @@ import { useLayoutEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 
 import { Button, IconButton } from "../../components/Controls";
+import { FeedbackAction } from "../feedback/FeedbackAction";
 import { EmptyState } from "../../components/EmptyState";
 import { reserve } from "../../components/nativeLayer";
 import { useStore } from "../../state/createStore";
@@ -295,6 +296,16 @@ export function NotificationsPanel() {
                   >
                     {term("workNames", "session").tooltip}
                   </Button>
+                )}
+                {toast.feedback && (
+                  <FeedbackAction
+                    core={app.core}
+                    title="Temporary chat cleanup failed"
+                    text={toast.text}
+                    onOpen={() => {
+                      toasts.close();
+                    }}
+                  />
                 )}
                 <Button
                   data-testid="shell.notifications-panel-closest"

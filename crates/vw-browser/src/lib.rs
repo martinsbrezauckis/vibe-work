@@ -69,8 +69,7 @@ pub use act::{
 };
 pub use action_loop::POST_INPUT_FAILED;
 pub use driver::{
-    ActError, Browser, HEADLINE_KEY, LOCAL_NETWORK, NOTHING_OPEN, NavFuture, Navigate, ReadOptions,
-    STOPPED,
+    ActError, Browser, HEADLINE_KEY, NOTHING_OPEN, NavFuture, Navigate, ReadOptions, STOPPED,
 };
 pub use login_fill::{FillRefusal, FillTarget, LoginRole};
 pub use output::filter_agent_output;
@@ -78,3 +77,8 @@ pub use secret_capture::CapturedSecret;
 pub use sessions::{
     ACTIVE_FOR_MS, Actor, BrowserState, LOG_CAP, LogEntry, Outcome, Sessions, now_ms,
 };
+
+#[cfg(feature = "agent-vault")]
+mod agent_secret;
+#[cfg(feature = "agent-vault")]
+pub use agent_secret::AgentSecret;

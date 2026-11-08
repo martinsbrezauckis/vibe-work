@@ -70,7 +70,7 @@ pub struct PreviewConfig {
     pub shot_timeout: Duration,
     /// Downloads above this size are dropped. Default 2 GiB.
     pub max_download_bytes: u64,
-    /// How host names are looked up for the navigation hooks and the request barrier (`None`: the system resolver;
+    /// How host names are looked up for backend media scope metadata (`None`: the system resolver;
     /// development test runs slow some names down, `VW_DEV_SLOW_NAMES`).
     pub name_resolver: Option<crate::names::NameResolver>,
     /// Exact loopback test origin treated as a public browser profile (test feature only).
@@ -145,6 +145,8 @@ pub struct OpenRequest {
 /// The previews of all sessions.
 #[derive(Clone)]
 pub struct PreviewService {
+    #[cfg(feature = "click-marker")]
+    pub(crate) actions: Arc<crate::action_tracking::ActionTracker>,
     pub(crate) inner: Arc<Inner>,
     pub(crate) engine: Arc<dyn PreviewEngine>,
     config: Arc<PreviewConfig>,
@@ -188,7 +190,6 @@ impl PreviewService {
         let inner = Arc::new(Inner {
             popup: std::sync::Mutex::new(None),
             shields: std::sync::Mutex::new(crate::shields::Saved::load(&config.storage_root)),
-            engine: Arc::downgrade(&engine),
             guard_refused: std::sync::Mutex::new(None),
             state: std::sync::Mutex::new(State::default()),
             policy: config.policy.clone(),
@@ -206,6 +207,8 @@ impl PreviewService {
         let pool = PoolState::load(&config.storage_root, config.memory_probe.clone());
         let adoptions = service_adopt::Adoptions::load(&config.storage_root);
         Self {
+            #[cfg(feature = "click-marker")]
+            actions: Arc::default(),
             adoptions: Arc::new(std::sync::Mutex::new(adoptions)),
             inner,
             engine,

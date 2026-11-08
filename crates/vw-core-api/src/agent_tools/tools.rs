@@ -178,7 +178,6 @@ async fn small_tool(
 /// command.
 pub(super) async fn guard_start(
     shared: &Arc<Shared>,
-    tools: &Arc<AgentTools>,
     session_id: &str,
     tool: &str,
     args: &Value,
@@ -186,29 +185,15 @@ pub(super) async fn guard_start(
     // The core starts these commands itself, so Vibe's bash hook never sees them: the same kill-guard
     // decision runs here first. A restart re-checks its stored command.
     let to_check = match tool {
-        names::PROCESS_START => args
+        names::PROCESS_START | names::PROCESS_RESTART => args
             .get("command")
             .and_then(Value::as_str)
             .map(str::to_owned),
-        names::PROCESS_RESTART => {
-            let (s, t, id) = (shared.clone(), tools.clone(), session_id.to_owned());
-            let pid = pid_arg(args).ok();
-            tokio::task::spawn_blocking(move || {
-                let target = known_ref(&s, &t, &id, pid?)?;
-                t.launches
-                    .of(target)
-                    .filter(|l| l.session_id == id)
-                    .map(|l| l.command)
-            })
-            .await
-            .map_err(|e| format!("the tool failed: {e}"))?
-        }
         _ => None,
     };
     if let Some(command) = to_check {
-        // Vibe's card for this exact `process_start` call (it shows the command) came before this call;
-        // the user's yes there answers the guards' "may this command run" question. A restart's card shows only a
-        // pid, not the command, so it does not count.
+        // Keep the existing guard policy: a start's command card can answer its guards;
+        // restarts retain their separate Git/process guard checks.
         let card = tool == names::PROCESS_START
             && crate::one_ask::of(shared).is_some_and(|ledger| {
                 ledger.card_said_yes(
@@ -594,13 +579,12 @@ fn stop(
     }
 }
 
-fn process_restart(
+pub(crate) fn restart_launch(
     shared: &Shared,
     tools: &AgentTools,
     session_id: &str,
     args: &Value,
-    spawned: tokio::sync::oneshot::Sender<Value>,
-) -> Result<Value, String> {
+) -> Result<Launch, String> {
     let pid = pid_arg(args)?;
     let target = known_ref(shared, tools, session_id, pid)
         .ok_or_else(|| format!("pid {pid} is not running"))?;
@@ -620,6 +604,24 @@ fn process_restart(
             ),
         ));
     };
+    Ok(launch)
+}
+
+fn process_restart(
+    shared: &Shared,
+    tools: &AgentTools,
+    session_id: &str,
+    args: &Value,
+    spawned: tokio::sync::oneshot::Sender<Value>,
+) -> Result<Value, String> {
+    let pid = pid_arg(args)?;
+    let target = known_ref(shared, tools, session_id, pid)
+        .ok_or_else(|| format!("pid {pid} is not running"))?;
+    let launch: Launch = serde_json::from_value(args["_vwRestart"].clone())
+        .map_err(|_| "The restart's approved launch is unavailable.".to_owned())?;
+    if launch.process != target || launch.session_id != session_id {
+        return Err("The process changed since its restart was approved.".into());
+    }
     let reservation = launch
         .port
         .map(|port| {

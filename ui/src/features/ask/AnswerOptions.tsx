@@ -6,6 +6,7 @@
  * Invariant: each option's accessible name is its visible label then its number key ("Red 1", see the input), its
  * description the accessible description, the key also `aria-keyshortcuts`.
  */
+import { visibleText } from "./visibleText";
 import { type KeyboardEvent, type MouseEvent, type ReactElement, useId } from "react";
 import type { Picked, Question } from "../transcript/model/callbacks";
 
@@ -125,7 +126,7 @@ export function AnswerOptions({
               id={labelId}
               aria-hidden={key === undefined ? "true" : undefined}
             >
-              {option.label}
+              {visibleText(option.label)}
             </span>
             {key === undefined ? null : (
               <kbd className="q-key" id={`${labelId}-k`}>
@@ -134,7 +135,7 @@ export function AnswerOptions({
             )}
             {descId === undefined ? null : (
               <span className="q-desc" id={descId} aria-hidden="true">
-                {option.description}
+                {visibleText(option.description)}
               </span>
             )}
           </label>

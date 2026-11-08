@@ -113,9 +113,17 @@ pub(crate) struct Seen {
     pub(crate) loads: Option<u64>,
 }
 
+#[derive(Default, PartialEq, Eq)]
+enum Activity {
+    #[default]
+    Active,
+    Released,
+}
+
 #[derive(Default)]
 struct Session {
     ended: bool,
+    activity: Activity,
     seen: Option<Seen>,
     stopped: bool,
     in_flight: u32,
@@ -181,15 +189,16 @@ impl Sessions {
         let sessions = self.lock();
         let s = sessions.get(session_id).filter(|session| !session.ended);
         let last = s.and_then(|s| s.last_agent_at);
-        let in_flight = s.is_some_and(|s| s.in_flight > 0);
+        let in_flight = s.is_some_and(|s| s.activity == Activity::Active && s.in_flight > 0);
         BrowserState {
             session_id: session_id.to_owned(),
             agent_active: in_flight
-                || s.and_then(|s| s.last_agent_clock)
+                || s.filter(|s| s.activity == Activity::Active)
+                    .and_then(|s| s.last_agent_clock)
                     .is_some_and(|at| at.elapsed() < Duration::from_millis(ACTIVE_FOR_MS)),
             in_flight,
             pending_native_click: s
-                .filter(|s| s.pending_native_click)
+                .filter(|s| s.activity == Activity::Active && s.pending_native_click)
                 .map(|_| crate::native_focus::FOCUS_REQUEST.to_owned()),
             stopped: s.is_some_and(|s| s.stopped),
             last_agent_at_ms: last,
@@ -255,6 +264,7 @@ impl Sessions {
                 };
             }
             s.in_flight += 1;
+            s.activity = Activity::Active;
             s.last_agent_at = Some((self.wall_now)());
             s.last_agent_clock = Some(Instant::now());
             drop(sessions);
@@ -403,15 +413,20 @@ impl Sessions {
         }
     }
 
-    /// A finished turn abandons its outstanding native question, while bounded input already running may finish.
+    /// A finished turn releases activity and abandons its native question; bounded input may still finish.
     pub fn cancel_confirmations(&self, session_id: &str) {
-        if self
-            .lock()
-            .get(session_id)
-            .is_some_and(|session| session.authorizing > 0)
-        {
+        let authorizing = {
+            let mut sessions = self.lock();
+            let Some(session) = sessions.get_mut(session_id) else {
+                return;
+            };
+            session.activity = Activity::Released;
+            session.authorizing > 0
+        };
+        if authorizing {
             self.cancel_actions(session_id);
         }
+        self.changed(session_id);
     }
 
     /// Marks a host-held decision or queued tab close so turn end cancels its pending work.

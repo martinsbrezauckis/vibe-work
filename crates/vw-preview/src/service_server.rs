@@ -10,6 +10,9 @@ impl PreviewService {
     #[must_use]
     pub fn local_server_port(&self, page: &str) -> Option<u16> {
         let state = self.inner.lock();
+        if state.page_owners.contains_key(page) {
+            return None;
+        }
         let entry = state.entries.get(page)?;
         if entry.lan_host.is_some() {
             return None;
@@ -29,6 +32,9 @@ impl PreviewService {
     pub fn set_local_server_listening(&self, page: &str, port: u16, listening: bool) -> bool {
         let changed = {
             let mut state = self.inner.lock();
+            if state.page_owners.contains_key(page) {
+                return false;
+            }
             let Some(entry) = state.entries.get_mut(page) else {
                 return false;
             };

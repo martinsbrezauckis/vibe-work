@@ -82,7 +82,7 @@ fn repair_refuses_a_manifest_link_and_a_forged_receipt_path() {
     assert_eq!(view.state, SetupState::RepairRequired);
     assert_eq!(std::fs::read(&outside).unwrap(), b"keep");
     std::fs::remove_file(&path).unwrap();
-    let mut receipt = read_receipt(&s.state()).unwrap();
+    let mut receipt = read_receipt(&s.config(), &s.state()).unwrap();
     receipt.files.push(outside.clone());
     std::fs::write(
         s.state().join(RECEIPT),

@@ -3,7 +3,7 @@
  * and key type in plain words and who the key belongs to; `part="usage"` (Settings › Usage and plan) shows the open
  * conversation's tokens and context fill, and the per-minute rate limit.
  * Depends on: AppContext, hooks, state/account, state/modelChoice. Called by: SettingsPage.
- * Invariants: only what Vibe reports is shown. There is no plan quota (Mistral does not share it).
+ * Invariants: only what Vibe reports is shown. The optional PlanUsageSettings owns monthly billing.
  * The rate headroom comes from the model proxy's view of Mistral's
  * answers: shown once an answer reported it, as "last seen" after a minute, nothing before.
  * The screen says so for the quota instead of leaving a blank. Context fill is "of N tokens until Vibe
@@ -27,6 +27,7 @@ import { useKeyUi } from "../setup/useKeys";
 import { KeyNotice, useKeyReadiness } from "../shell/KeyNotice";
 import { useCoreState, useShellState } from "../shell/hooks";
 import { SessionUsageFacts } from "./SessionUsageFacts";
+import { PLAN_USAGE_ENABLED } from "../../state/planUsageEnabled";
 
 const STATUS_TEXT: Record<string, string> = {
   ready: "Connected",
@@ -170,10 +171,12 @@ export function AccountSettings({ part }: { part: "account" | "usage" }) {
           </div>
         </dl>
       )}
-      <p className="key-field-hint ui-help">
-        Mistral shows how much of your plan is left on its website, not to apps (see the links
-        below). Vibe compacts the session on its own before the context is full.
-      </p>
+      {!PLAN_USAGE_ENABLED && (
+        <p className="key-field-hint ui-help">
+          Mistral shows how much of your plan is left on its website, not to apps (see the links
+          below). Vibe compacts the session on its own before the context is full.
+        </p>
+      )}
     </section>
   );
 }

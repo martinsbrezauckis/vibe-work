@@ -35,6 +35,17 @@ async fn button_in_world(isolated: bool) -> (Rig, String) {
     (rig, id)
 }
 #[tokio::test(flavor = "multi_thread")]
+async fn approval_uses_the_observed_button_name() {
+    let (rig, id) = button().await;
+    assert_eq!(
+        rig.browser.observed_target(SESSION, &id),
+        Some(("button".into(), "Press".into()))
+    );
+    assert_eq!(rig.browser.observed_target(SESSION, "unlisted"), None);
+    rig.browser.sessions().forget_refs(SESSION);
+    assert_eq!(rig.browser.observed_target(SESSION, &id), None);
+}
+#[tokio::test(flavor = "multi_thread")]
 async fn point_click_uses_native_input() {
     let (rig, id) = button().await;
     let action =

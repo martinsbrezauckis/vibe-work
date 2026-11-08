@@ -14,6 +14,7 @@ import { TEXT } from "../../vocabulary";
 import { MISTRAL_LINKS } from "./mistralLinks";
 import { accessibilityCatalog } from "./accessibilityCatalog";
 import { chromeCatalog } from "./chrome/chromeRows";
+import { PLAN_USAGE_ENABLED } from "../../state/planUsageEnabled";
 
 /** A category of the Settings page. */
 export interface SettingsCategory {
@@ -60,6 +61,17 @@ export interface SettingEntry {
 
 /** Every setting, in page order. */
 export const SETTINGS_INDEX: readonly SettingEntry[] = [
+  ...(PLAN_USAGE_ENABLED
+    ? [
+        {
+          id: "plan-usage",
+          category: "usage",
+          label: "This month",
+          description: "",
+          keywords: "monthly plan usage allowance budget left pay as you go reset",
+        },
+      ]
+    : []),
   ...accessibilityCatalog,
   {
     id: "close-to-tray",
@@ -352,6 +364,13 @@ export const SETTINGS_INDEX: readonly SettingEntry[] = [
   },
   ...chromeCatalog(),
   {
+    id: "safari-control",
+    category: "browser",
+    label: TEXT.safariName,
+    description: "",
+    keywords: "safari extension browser setup connection",
+  },
+  {
     id: "firefox-control",
     category: "browser",
     label: TEXT.firefoxName,
@@ -535,19 +554,11 @@ export const SETTINGS_INDEX: readonly SettingEntry[] = [
     keywords: "debug api agent automation script localhost developer",
   },
   {
-    id: "chrome-local-network",
-    category: "developer",
-    label: "Local network pages for the agent",
-    description:
-      "Lets the agent open and use local network pages in the built-in browser and your Chrome.",
-    keywords: "local network lan router nas intranet private address chrome agent developer",
-  },
-  {
     id: "debug-token",
     category: "developer",
-    label: "Debug API token file",
-    description: "Agents read the token from this file; regenerate it to lock old ones out.",
-    keywords: "debug token secret regenerate file",
+    label: "Debug API token",
+    description: "In vault · Copy · Regenerate",
+    keywords: "debug token secret vault copy regenerate",
   },
   {
     id: "data-retention",
@@ -624,6 +635,7 @@ export function searchSettings(
   chromeAvailable = true,
   edgeAvailable = false,
   firefoxAvailable = false,
+  safariAvailable = false,
 ): SettingEntry[] {
   const words = queryWords(query);
   if (words.length === 0) return [];
@@ -631,6 +643,7 @@ export function searchSettings(
     if (!chromeAvailable && e.id.startsWith("chrome-control")) return false;
     if (!firefoxAvailable && e.id.startsWith("firefox-control")) return false;
     if (!edgeAvailable && e.id.startsWith("edge-control")) return false;
+    if (!safariAvailable && e.id.startsWith("safari-control")) return false;
     const hay =
       `${e.label} ${e.description} ${e.keywords} ${categoryOf(e.category).label}`.toLowerCase();
     return words.every((w) => hay.includes(w));

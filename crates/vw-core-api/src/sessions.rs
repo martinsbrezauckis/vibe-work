@@ -22,6 +22,17 @@ use crate::core::Shared;
 use crate::error::CoreError;
 use crate::view::SessionSnapshot;
 
+/// Final client-only projections, after the store has observed the real result. Git credentials
+/// never leave the core; a send-time recovery keeps the old Interrupted row while Stop settles.
+pub(crate) fn project_client(shared: &Shared, method: &str, params: &Value, result: &mut Value) {
+    *result = crate::secret_scrub::git_listing(method, std::mem::take(result));
+    if let Some(id) = params["sessionId"].as_str()
+        && let Some(state) = result.get_mut("state")
+    {
+        shared.interrupted_send.project(id, state);
+    }
+}
+
 /// How a method's result touches the store.
 enum Effect {
     Load(LoadKind),
@@ -84,6 +95,7 @@ pub(crate) async fn observe(
         Effect::None => Ok(None),
         Effect::Archive => {
             crate::session_end::archive_decision(shared, params).await;
+            crate::worktrees_restore::unarchived(shared, params).await?;
             Ok(None)
         }
         Effect::Delete => {
@@ -181,6 +193,7 @@ pub(crate) fn snapshot(shared: &Shared, id: &str) -> Result<SessionSnapshot, Cor
             crate::ask::tool_calls::overlay(shared, id, &mut snapshot.state);
             snapshot.access_mode =
                 crate::restore::display_mode(shared, id, &snapshot.state["session"]);
+            shared.interrupted_send.project(id, &mut snapshot.state);
             snapshot
         })
         .ok_or_else(|| CoreError::not_loaded(id))

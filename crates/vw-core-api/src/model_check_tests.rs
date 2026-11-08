@@ -28,6 +28,8 @@ for line in sys.stdin:
         continue
     if message['method'] == 'initialize':
         result = {'serverInfo': {'name': 'model-check-test', 'version': '0'}}
+    elif message['method'] == 'session/list':
+        result = {'items': [], 'nextCursor': None}
     elif message['method'] == 'config/read':
         (home / 'read-config.toml').write_bytes((home / 'config.toml').read_bytes())
         result = {'config': {'models': json.loads((home / 'rows.json').read_text())}}
@@ -74,7 +76,8 @@ async fn check(core: &crate::Core) {
 /// A stale side record cannot distinguish a person's identical replacement from our former entry.
 #[tokio::test]
 async fn an_identical_unmarked_replacement_survives_a_stale_record() {
-    let (core, root, home) = start("replacement").await;
+    // Boxed (clippy large_futures): the start future exceeds 16 KiB on aarch64.
+    let (core, root, home) = Box::pin(start("replacement")).await;
     let file = home.join("config.toml");
     std::fs::write(&file, "active_model = 'large-4'\n").unwrap();
     offer(&home, Some("mistral-large-4-0"));
@@ -114,7 +117,8 @@ fn offer(home: &std::path::Path, alias: Option<&str>) {
 
 #[tokio::test]
 async fn a_different_alias_with_our_prices_survives_the_launch_check_byte_for_byte() {
-    let (core, root, home) = start("alias").await;
+    // Boxed (clippy large_futures): the start future exceeds 16 KiB on aarch64.
+    let (core, root, home) = Box::pin(start("alias")).await;
     let file = home.join("config.toml");
     for offered in [false, true] {
         offer(&home, offered.then_some("mistral-large-4-0-3"));
@@ -170,7 +174,8 @@ async fn a_different_alias_with_our_prices_survives_the_launch_check_byte_for_by
 /// second entry for that alias (Vibe keeps only the last entry of an alias, which would replace theirs).
 #[tokio::test]
 async fn a_persons_same_alias_entry_with_our_prices_survives_the_launch_check_byte_for_byte() {
-    let (core, root, home) = start("same-alias").await;
+    // Boxed (clippy large_futures): the start future exceeds 16 KiB on aarch64.
+    let (core, root, home) = Box::pin(start("same-alias")).await;
     let file = home.join("config.toml");
     for alias in [
         "mistral-large-4",
@@ -206,7 +211,8 @@ async fn a_persons_same_alias_entry_with_our_prices_survives_the_launch_check_by
 /// Vibe strips comments, leaving ownership ambiguous. Keep the entry once, offered or retired.
 #[tokio::test]
 async fn our_entry_that_lost_its_mark_is_preserved_without_a_record() {
-    let (core, root, home) = start("record").await;
+    // Boxed (clippy large_futures): the start future exceeds 16 KiB on aarch64.
+    let (core, root, home) = Box::pin(start("record")).await;
     let file = home.join("config.toml");
     let base = "active_model = \"large-4\"\n";
     for alias in [

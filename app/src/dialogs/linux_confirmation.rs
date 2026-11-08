@@ -391,6 +391,7 @@ mod tests {
             ]),
             labels(&["Continue", "Cancel"]),
             labels(&["Keep", "Pick again"]),
+            labels(&[vw_vocabulary::texts::CONNECTOR_CONNECT, "Not now"]),
         ];
         for (names, label) in layouts
             .iter()
@@ -466,6 +467,65 @@ mod tests {
         }
     }
 
+    fn browser_pairing_dialogs(app: &tauri::App<tauri::test::MockRuntime>) {
+        let settings = gtk::Settings::default().unwrap();
+        settings.set_gtk_enable_animations(false);
+        for dark in [false, true] {
+            settings.set_gtk_theme_name(Some("Adwaita"));
+            settings.set_gtk_application_prefer_dark_theme(dark);
+            pump_for(500);
+            for browser in ["Chrome", "Edge"] {
+                let request = vw_gate::ConfirmationRequest {
+                    requester: vw_gate::Requester::Core,
+                    method: vw_core_api::BROWSER_PAIRING_DIALOG_METHOD.into(),
+                    params: serde_json::json!({}),
+                    summary: format!(
+                        "Connect {browser} to Vibe Work?\n\n{browser} needs your approval. Choose Connect to allow this connection."
+                    ),
+                    always: None,
+                };
+                let names = vw_host::dialog_buttons(&request);
+                let mut waiting = Box::pin(show_dialog(
+                    app.handle(),
+                    vw_host::dialog_text(&request).unwrap(),
+                    &names,
+                    true,
+                    None,
+                ));
+                assert_eq!(poll_once(&mut waiting), Poll::Pending);
+                pump_for(300);
+                let dialog = only_window();
+                assert_eq!(
+                    dialog.text().as_deref(),
+                    Some(format!("Connect {browser} to Vibe Work?").as_str())
+                );
+                assert_eq!(
+                    button_labels(&dialog),
+                    [vw_vocabulary::texts::CONNECTOR_CONNECT, "Not now"]
+                );
+                if let Ok(dir) = std::env::var("VW_PAIRING_SCREENSHOTS") {
+                    dialog.queue_draw();
+                    pump_for(1000);
+                    gtk::gdk::Display::default().unwrap().sync();
+                    let theme = if dark { "dark" } else { "light" };
+                    let output = std::path::Path::new(&dir).join(format!("{browser}-{theme}.png"));
+                    assert!(
+                        std::process::Command::new("import")
+                            .args(["-window", "root"])
+                            .arg(output)
+                            .status()
+                            .unwrap()
+                            .success()
+                    );
+                }
+                dialog.response(gtk::ResponseType::Other(2));
+                pump();
+                assert_eq!(poll_once(&mut waiting), Poll::Ready(Some("Not now".into())));
+            }
+        }
+        settings.set_gtk_application_prefer_dark_theme(false);
+    }
+
     /// One test, because GTK may only be used from the thread that started it.
     #[test]
     #[ignore = "needs an X display: run with xvfb-run -a cargo test -p app --lib -- --ignored linux_confirmation"]
@@ -508,6 +568,7 @@ mod tests {
         if let Ok(probe) = std::env::var("VW_ATSPI_PROBE") {
             screen_reader_presses(&app, &text, &probe);
         }
+        browser_pairing_dialogs(&app);
 
         // Closing the window declines.
         let mut waiting = Box::pin(show_dialog(app.handle(), text.clone(), &names, true, None));

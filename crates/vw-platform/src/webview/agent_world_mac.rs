@@ -241,6 +241,42 @@ pub fn install_agent_world(webview: *mut c_void) -> Result<WorldFacts, String> {
     Ok(facts)
 }
 
+/// Installs a mount's trusted bridge at document start in the existing isolated world, in every frame.
+/// Called once before the mount's first navigation so focus loss cannot precede selection tracking.
+///
+/// # Errors
+/// Missing webview or a call outside the main thread.
+pub fn install_agent_initializer(webview: *mut c_void, source: &str) -> Result<(), String> {
+    install_agent_world(webview)?;
+    let world = WORLDS
+        .with(|worlds| {
+            worlds
+                .borrow()
+                .get(&(webview as usize))
+                .map(|entry| entry.world.clone())
+        })
+        .ok_or_else(|| "the agent world is not available".to_owned())?;
+    let mtm = MainThreadMarker::new()
+        .ok_or_else(|| "the agent bridge is installed on the main thread only".to_owned())?;
+    // SAFETY: install_agent_world validated the live WKWebView and main thread.
+    let view = (unsafe { webview.cast::<WKWebView>().as_ref() })
+        .ok_or_else(|| "the preview webview is not available".to_owned())?;
+    // SAFETY: the validated webview's controller retains the script in the existing isolated world.
+    unsafe {
+        let script = WKUserScript::initWithSource_injectionTime_forMainFrameOnly_inContentWorld(
+            WKUserScript::alloc(mtm),
+            &NSString::from_str(source),
+            WKUserScriptInjectionTime::AtDocumentStart,
+            false,
+            &world,
+        );
+        view.configuration()
+            .userContentController()
+            .addUserScript(&script);
+    }
+    Ok(())
+}
+
 /// Forgets a closed webview's world (`WebKit` releases the scripts with the webview).
 pub fn forget_agent_world(webview: *mut c_void) {
     WORLDS.with(|w| w.borrow_mut().remove(&(webview as usize)));

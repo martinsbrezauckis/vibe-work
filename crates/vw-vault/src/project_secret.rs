@@ -176,7 +176,18 @@ pub fn value_of(item: &VaultItem, field: Option<&str>) -> Option<SecretString> {
                 .flatten()
         })?,
     };
-    let value = SecretString::new(raw.clone());
+    // Direct captures can be passwords: their spaces remain part of the value on later use.
+    // Existing entries retain their historical pasted-key normalization.
+    let value = if resource
+        .public_fields
+        .get("preserveWhitespace")
+        .and_then(Value::as_bool)
+        == Some(true)
+    {
+        SecretString::exact(raw.clone())
+    } else {
+        SecretString::new(raw.clone())
+    };
     if value.is_empty() {
         return None;
     }

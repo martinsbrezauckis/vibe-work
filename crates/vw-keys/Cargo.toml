@@ -34,3 +34,7 @@ getrandom = "0.3"
 
 # Lowercase owner-scalar encoding; already present in the workspace lock.
 hex = "0.4"
+
+[features]
+# Optional agent capture directly into the vault. Off in default builds.
+agent-vault = ["vw-vault/agent-vault"]

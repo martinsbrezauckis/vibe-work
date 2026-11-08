@@ -222,9 +222,8 @@ pub trait PreviewHooks: Send + Sync {
     /// such as content rules. An engine without a guard never calls it.
     fn network_guard(&self, label: &str, check: GuardCheck);
     /// May mount `label`'s page send a sub-request (script, image, `fetch`, ...) to `url`? Asked by an engine
-    /// whose traffic does not pass the network guard (`WebView2`), before the request is sent: loopback
-    /// by owner, private literals only from the Lan page's own host, host names through the cached resolver (fail
-    /// closed). Never records anything.
+    /// before the request is sent. The live mount and URL scheme are checked; local addresses are allowed.
+    /// Never records anything.
     fn request_allowed(&self, label: &str, url: &Url) -> bool;
     /// [`Self::navigation_allowed`] (`document`) or [`Self::request_allowed`] for an engine that can hold a request:
     /// a host name whose lookup is still running answers [`RequestCheck::Later`] instead of waiting on the UI thread
@@ -341,9 +340,9 @@ pub trait PreviewEngine: Send + Sync {
     fn show_input_marker(
         &self,
         id: &MountId,
-        point: crate::NativeClickPoint,
+        marker: crate::action_tracking::ActionMarker,
     ) -> EngineFuture<'_, ()> {
-        let _ = (id, point);
+        let _ = (id, marker);
         Box::pin(async { Ok(()) })
     }
 

@@ -12,6 +12,73 @@ fn body(result: &Value) -> &Value {
 const CHROME: &str = "12345678-1234-1234-1234-123456789abc";
 
 #[tokio::test]
+async fn a_missing_session_does_not_borrow_the_other_connected_browsers_name() {
+    let core = fixture(
+        "missing-browser-session",
+        json!([{"profileId":"edge:p","connected":true}]),
+    )
+    .await;
+    let error = gateway::call(
+        &core.shared,
+        "s",
+        "chrome_execute",
+        json!({"sessionId":"previous-chrome-session","action":"page.read","args":{}}),
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(
+        error,
+        "Not run: no browser session with this id; open one with chrome_session."
+    );
+    core.shutdown().await;
+    let core = fixture(
+        "missing-known-browser-session",
+        json!([
+            {"profileId":"edge:p","connected":true}, {"profileId":"chrome:p","connected":true}
+        ]),
+    )
+    .await;
+    core.shared
+        .chrome_control
+        .chat_profiles
+        .lock()
+        .unwrap()
+        .insert("s".into(), "edge:p".into());
+    let error = gateway::call(
+        &core.shared,
+        "s",
+        "chrome_execute",
+        json!({"sessionId":"previous-chrome-session","action":"page.read","args":{}}),
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(
+        error,
+        "Not run: no browser session with this id; open one with chrome_session."
+    );
+    core.shared.chrome_control.work.lock().unwrap().open(
+        "previous-chrome-session",
+        "s",
+        "stopped",
+        "chrome:p",
+        None,
+    );
+    let error = gateway::call(
+        &core.shared,
+        "s",
+        "chrome_execute",
+        json!({"sessionId":"previous-chrome-session","action":"page.read","args":{}}),
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(
+        error,
+        "Not run: this Chrome session was stopped; open a new one with chrome_session."
+    );
+    core.shutdown().await;
+}
+
+#[tokio::test]
 async fn explicit_edge_requests_report_edges_connection_problem() {
     let core = fixture("edge-request-diagnosis", json!([])).await;
     core.shared
@@ -110,6 +177,14 @@ pub(super) async fn fixture_with(
         owner::update_pairing(&weak, &answer);
         answer
     });
+    // Model the helper's completed tools handshake, as Chrome's shared state table requires.
+    shared
+        .chrome_control
+        .owner
+        .tools
+        .lock()
+        .unwrap()
+        .push(json!({"name":"chrome_status"}));
     std::fs::write(
         shared.chrome_control.dir().unwrap().join("setup.json"),
         json!({"files":[],"browsers":["Google Chrome","Microsoft Edge"],"userData":[]}).to_string(),
@@ -229,7 +304,7 @@ async fn selected_disconnected_edge_keeps_its_reason_and_offer_while_chrome_is_c
     .unwrap();
     let text = result.to_string();
     assert!(
-        text.contains("Edge is not connected")
+        text.contains("not in Edge yet")
             && text.contains("Ask the person")
             && text.contains("addon: edge"),
         "{text}"

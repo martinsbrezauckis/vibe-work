@@ -16,8 +16,8 @@
 //! - a call of one of Vibe Work's own tools that runs a command (`mcp_vw.process_start`, `mcp_vw.secret_run`): only
 //!   that exact command in that working folder, so a grant covers only what the user saw.
 //!   Vibe would grant the whole tool (every background command); the key is
-//!   the call's own arguments instead, compared as exact text. `mcp_vw.process_restart` names only a pid, whose
-//!   command the card does not show: no session answer.
+//!   the call's own arguments instead, compared as exact text. `mcp_vw.process_restart` authorizes one
+//!   resolved launch snapshot: no session answer.
 //!
 //! A malformed permission (missing or non-text field, blank pattern) keeps nothing either: fail closed.
 //!
@@ -57,7 +57,7 @@ const OWN_CALL_SCOPE: &str = "vibe_work_call";
 enum Own {
     /// Not one of our command-running tools: Vibe's rules apply.
     Other,
-    /// No session answer: nothing on the card names what would run.
+    /// No session answer: this action requires its own decision.
     Nothing,
     /// Only calls with exactly this key (and its label for the list, and what it covers in words).
     Key(GrantPermission, String, Vec<CoversPart>),

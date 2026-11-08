@@ -67,13 +67,24 @@ impl TauriEngine {
         .await
     }
 
-    /// Native frame registries and the person's pointer watch of a new mount, before its first navigation.
+    /// Native frame registries, trusted initialization and pointer watches before the first navigation.
     pub(super) async fn native_watches(
         &self,
         webview: &tauri::Webview<tauri::Wry>,
         label: &str,
     ) -> Result<(), EngineError> {
         crate::agent_frames::install(webview).await?;
+        #[cfg(target_os = "macos")]
+        {
+            let source = self
+                .initializers
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .get(label)
+                .cloned()
+                .ok_or(EngineError::NotMounted)?;
+            crate::mac_agent::install_initializer(webview, source).await?;
+        }
         #[cfg(windows)]
         {
             let label = label.to_owned();

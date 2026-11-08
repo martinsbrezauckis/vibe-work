@@ -464,6 +464,14 @@ impl<R: Runtime> UpdateHooks for AppHooks<R> {
     }
 }
 
+/// Test builds: use the actual ready-notification hook, including its native click callback.
+#[cfg(feature = "e2e-script")]
+pub(crate) fn test_notice(app: &AppHandle) {
+    AppHooks { app: app.clone() }.notify(UpdateNotice::Ready {
+        version: "0.1.6".to_owned(),
+    });
+}
+
 /// The release manifest format: what `make-latest-json` writes must parse with the updater plugin's own
 /// `RemoteRelease` and resolve every shipped target, so a release can never publish a manifest the app cannot read.
 #[cfg(test)]
@@ -599,12 +607,4 @@ mod manifest_format {
             assert_eq!(shipped, expected, "target {target}");
         }
     }
-}
-
-/// Test builds: use the actual ready-notification hook, including its native click callback.
-#[cfg(feature = "e2e-script")]
-pub(crate) fn test_notice(app: &AppHandle) {
-    AppHooks { app: app.clone() }.notify(UpdateNotice::Ready {
-        version: "0.1.6".to_owned(),
-    });
 }

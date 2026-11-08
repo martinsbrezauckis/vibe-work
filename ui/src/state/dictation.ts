@@ -237,6 +237,10 @@ export function createDictation(deps: {
       by: as,
       lastText: store.get().lastText,
     });
+    // Preparing an AudioContext can synchronously open the system audio device. Let a synthetic
+    // click finish its down/up sequence first, so that work is never counted as a held press.
+    await Promise.resolve();
+    if (ticket !== attempt) return;
     let prepared;
     try {
       prepared = await deps.prepare();

@@ -34,6 +34,8 @@ compile_error!(
 mod attention;
 mod commands;
 mod dialogs;
+#[cfg(feature = "feedback")]
+mod feedback_entry;
 mod in_front;
 mod instance;
 mod live_profile;

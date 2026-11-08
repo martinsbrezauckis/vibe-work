@@ -329,8 +329,8 @@ pub async fn no_vibe_core_with(
     }
 }
 
-/// Reads a descriptor file and then the token file it names, the way an agent does. The
-/// descriptor itself must not carry the token.
+/// Reads an explicitly opted-in fixture descriptor and its disposable bearer export.
+/// Normal vault-backed descriptors do not have a token-file pointer.
 pub fn read_descriptor(path: &Path) -> (u16, String) {
     let text = std::fs::read_to_string(path).unwrap();
     let json: Value = serde_json::from_str(&text).unwrap();
@@ -353,6 +353,7 @@ pub fn read_descriptor(path: &Path) -> (u16, String) {
 /// descriptor under `dir/debug-api`, and returns a client built from the descriptor.
 pub async fn debug_api(core: &Core, dir: &Path) -> (DebugApi, Client) {
     let mut config = DebugApiConfig::new(dir.join("debug-api"));
+    config.test_token_file = true;
     config.user_setting = Some(true);
     let api = DebugApi::start(core.clone(), config)
         .await

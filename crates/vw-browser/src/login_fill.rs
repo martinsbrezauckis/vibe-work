@@ -20,7 +20,7 @@ use serde_json::json;
 use url::Url;
 use zeroize::Zeroizing;
 
-use crate::driver::{Browser, LOCAL_NETWORK, STOPPED};
+use crate::driver::{Browser, STOPPED};
 use crate::model::{is_ref, parse_answer};
 use crate::sessions::{Actor, Outcome};
 
@@ -62,7 +62,7 @@ pub struct FillTarget {
 /// Why a fill was refused: the check that failed (a stable word) and the reason the agent reads.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FillRefusal {
-    /// `stopped`, `localNetwork`, `observation`, `currentObservation`, `credentialField`, `securePage`, `formTarget`,
+    /// `stopped`, `observation`, `currentObservation`, `credentialField`, `securePage`, `formTarget`,
     /// `formMethod`, `pageOrigin`, `frameOrigin`, `notActionable`, `page`, plus the core's own (`login`, `grant`, `vault`).
     pub check: &'static str,
     /// The reason.
@@ -157,9 +157,7 @@ impl Browser {
         if by == Actor::Agent && self.sessions.stopped(session_id) {
             return Err(refusal("stopped", STOPPED));
         }
-        if by == Actor::Agent && self.local_network_blocked(session_id) {
-            return Err(refusal("localNetwork", LOCAL_NETWORK));
-        }
+
         if !is_ref(reference) {
             return Err(refusal(
                 "observation",

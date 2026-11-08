@@ -1,5 +1,5 @@
 //! macOS parts of a preview's network check: the content rules before the first page and, with the feature
-//! `macos-proxy` ([`MAC_PROXY`]), WebTransport off, the plain refusal when the check is not in place (fail closed)
+//! `macos-proxy` ([`MAC_PROXY`]), the plain refusal when the check is not in place (fail closed)
 //! and the development-build fault switch the Mac review runs use. The feature is on in every app build since 0.1.7
 //! (minimum macOS 14). Without it (0.1.2-0.1.6, minimum macOS 11; now only `--no-default-features` on the app) all
 //! previews use content rules only, including required previews; failed rule installs refuse the mount.
@@ -16,16 +16,13 @@ use vw_preview::EngineError;
 use vw_preview::{GuardCheck, MountSpec, PreviewHooks};
 
 use super::TauriEngine;
-#[cfg(target_os = "macos")]
-use crate::platform;
 
 /// macOS previews go through the guard's proxy (the store's listener, `WKWebsiteDataStore.proxyConfigurations`,
 /// Network.framework's macOS 14 API): only in builds with the feature `macos-proxy`.
 pub(super) const MAC_PROXY: bool = cfg!(all(target_os = "macos", feature = "macos-proxy"));
 
-/// `VW_DEV_MAC_GUARD_FAULT=<listener|webtransport|canary|rules>` (macOS development builds only; review runs):
-/// pretends that the store's guard listener did not start, that WebTransport could not be turned off, or that the
-/// canary was not seen, so the real app shows what a preview does in each failure.
+/// `VW_DEV_MAC_GUARD_FAULT=<listener|canary|rules>` (macOS development builds only; review runs):
+/// pretends that the store's guard listener did not start, that the canary was not seen, so the real app shows what a preview does in each failure.
 pub(crate) fn mac_fault(kind: &str) -> bool {
     cfg!(all(target_os = "macos", debug_assertions))
         && std::env::var("VW_DEV_MAC_GUARD_FAULT").is_ok_and(|v| v == kind)
@@ -64,17 +61,14 @@ pub(super) fn own_store_key(label: &str) -> String {
 }
 
 impl TauriEngine {
-    /// macOS, before the first page: the mount's content rules (the mount waits for the compile) and, for a mount
-    /// behind the guard's proxy (`proxied`), WebTransport off (it ignores the store's proxy). WebTransport that
-    /// cannot be turned off refuses the mount (fail closed).
-    /// A missing content-rule layer refuses the mount, including in development fault runs.
+    /// Installs credential URL rules before the first page. Native WebTransport behavior is unchanged.
     #[cfg(target_os = "macos")]
     pub(super) async fn macos_layers(
         &self,
         webview: &Webview<Wry>,
         spec: &MountSpec,
         hooks: &Arc<dyn PreviewHooks>,
-        proxied: bool,
+        _proxied: bool,
     ) -> Result<(), EngineError> {
         if let Some(page) = spec.rules.as_ref() {
             content_rules_result(
@@ -86,16 +80,7 @@ impl TauriEngine {
                 GuardCheck::Layer(vw_preview::GuardLayer::ContentRules),
             );
         }
-        if !proxied {
-            return Ok(());
-        }
-        if mac_fault("webtransport") {
-            return Err(not_checked("WebTransport could not be turned off"));
-        }
-        platform::web_transport_off(webview).await.map_err(|error| {
-            tracing::warn!(%error, "WebTransport could not be turned off");
-            not_checked("WebTransport could not be turned off")
-        })
+        Ok(())
     }
 }
 

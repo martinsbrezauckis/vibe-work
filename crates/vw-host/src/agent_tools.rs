@@ -62,7 +62,19 @@ fn shell_quote(path: &Path) -> String {
 fn hook_command(binary: &Path, endpoint: &Path, guard: Guard, windows: bool) -> String {
     if windows {
         use base64::Engine as _;
-        let quote = |path: &Path| format!("'{}'", path.to_string_lossy().replace('\'', "''"));
+        // PowerShell ends a single-quoted string at ' and at the typographic quotes U+2018-U+201B; each is
+        // escaped by doubling it, or a folder such as `O’Neil` breaks every hook.
+        let quote = |path: &Path| {
+            let mut out = String::from("'");
+            for c in path.to_string_lossy().chars() {
+                if matches!(c, '\'' | '\u{2018}' | '\u{2019}' | '\u{201a}' | '\u{201b}') {
+                    out.push(c);
+                }
+                out.push(c);
+            }
+            out.push('\'');
+            out
+        };
         let script = format!(
             "& {} guard {} --endpoint-file {}; exit $LASTEXITCODE",
             quote(binary),
@@ -260,6 +272,11 @@ pub fn prepare(
     )?;
     core.agent_tools = Some(config);
     let plugin = plugin_root.filter(|r| r.join("vw").join("plugin.json").is_file());
+    let staged = match (plugin, vw_core_api::working_note::vault_capture_line()) {
+        (Some(root), Some(line)) => Some(crate::vault_plugin::stage(root, data_dir, line)?),
+        _ => None,
+    };
+    let plugin = staged.as_deref().or(plugin);
     if let Some(root) = plugin {
         supervisor
             .extra_args
@@ -310,6 +327,33 @@ mod tests {
         assert!(
             line.bytes()
                 .all(|c| c.is_ascii_alphanumeric() || b" -+/=.".contains(&c))
+        );
+    }
+
+    /// PowerShell also ends a single-quoted string at the typographic quotes U+2018–U+201B, so a user folder
+    /// such as `O’Neil` must have each of them doubled like the ASCII apostrophe.
+    #[test]
+    fn windows_hooks_double_typographic_apostrophes_too() {
+        let line = hook_command(
+            Path::new("C:\\Users\\O\u{2019}Neil\\a\u{2018}b\u{201a}c\u{201b}d\\vw-agent-tools.exe"),
+            Path::new("C:\\Users\\O\u{2019}Neil\\hook.json"),
+            Guard::Receipt,
+            true,
+        );
+        let encoded = line.split_whitespace().last().unwrap();
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(encoded)
+            .unwrap();
+        let units: Vec<u16> = bytes
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|b| u16::from_le_bytes([b[0], b[1]]))
+            .collect();
+        let script = String::from_utf16(&units).unwrap();
+        assert_eq!(
+            script,
+            "& 'C:\\Users\\O\u{2019}\u{2019}Neil\\a\u{2018}\u{2018}b\u{201a}\u{201a}c\u{201b}\u{201b}d\\vw-agent-tools.exe' guard receipt --endpoint-file 'C:\\Users\\O\u{2019}\u{2019}Neil\\hook.json'; exit $LASTEXITCODE"
         );
     }
 }

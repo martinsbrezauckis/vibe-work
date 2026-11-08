@@ -21,6 +21,7 @@
  * `outcome.started`; no action exists here that the composer's UI does not offer.
  */
 import type { App } from "../shell/AppContext";
+import { feedbackFor } from "../../state/feedback";
 
 /** Registers the route and the palette entries; returns the function that removes them. */
 export function registerComposerRoutes(app: App): () => void {
@@ -37,10 +38,14 @@ export function registerComposerRoutes(app: App): () => void {
       removers.push(
         app.commands.register({
           id: `composer.${row.name}`,
-          label: `/${row.name}: ${row.description}`,
+          label: row.name === "feedback" ? "Send feedback…" : `/${row.name}: ${row.description}`,
           section: "Composer",
-          keywords: row.runs,
+          keywords: row.name === "feedback" ? "/feedback bug suggestion" : row.runs,
           run: () => {
+            if (row.name === "feedback" && app.core) {
+              void feedbackFor(app.core).open();
+              return;
+            }
             const selected = app.shell.store.get().selected;
             if (selected !== null) void app.composer.actions?.runCommand(selected, row.name, "");
           },

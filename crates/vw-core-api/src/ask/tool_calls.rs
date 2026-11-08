@@ -10,6 +10,8 @@ use vw_ask::{AnsweredBy, Outcome, Scope};
 const PREFIX: &str = "vw-tool-";
 mod read_rules;
 pub(crate) mod receipts;
+#[cfg(feature = "agent-vault")]
+pub(crate) mod vault_save;
 struct Call {
     session: String,
     entry: Value,
@@ -45,15 +47,16 @@ fn asks_inside(tool: &str, args: &Value) -> bool {
             | names::DOCUMENT_READ
             | names::READ_ALOUD
             | names::USE_HEADLESS_BROWSER
-    ) || names::is_chrome(tool)
+    ) || (cfg!(feature = "agent-vault") && tool == names::SECRET_CAPTURE_COMMAND)
+        || names::is_chrome(tool)
         || (tool == names::BROWSER_ACT
             && matches!(args["action"].as_str(), Some("fill" | "close_tab")))
 }
 
-/// Observation tools skip the default Accept edits card. File reads still obey the person's read rules.
-/// Port/process queries retain their existing internal lease and exited-process bookkeeping; browser reads may
-/// front or reload the selected page. Explicit new tabs, preview resizing and handbook repairs keep their card.
-fn reads_only(tool: &str, args: &Value) -> bool {
+/// Tools that skip the default Accept edits card. Explicit read and tool rules still apply.
+/// Port/process queries retain their internal bookkeeping; browser reads may open, front or reload a page,
+/// and captures save output. Preview resizing and handbook repairs keep their card.
+fn accepts_edits(tool: &str, args: &Value) -> bool {
     match tool {
         names::PREVIEW_LIST
         | names::PREVIEW_CONSOLE
@@ -61,8 +64,9 @@ fn reads_only(tool: &str, args: &Value) -> bool {
         | names::PROCESSES_LIST
         | names::PORT_LEASE
         | names::PANEL_READ
-        | names::HANDBOOK_ANSWERS => true,
-        names::BROWSER_READ => args["tab"] != "new",
+        | names::HANDBOOK_ANSWERS
+        | names::BROWSER_READ
+        | names::BROWSER_CAPTURE => true,
         names::HANDBOOK_CHECK => args.get("repair").is_none_or(Value::is_null),
         names::PREVIEW_SCREENSHOT => args.get("width").is_none_or(Value::is_null),
         _ => false,
@@ -101,7 +105,7 @@ pub(crate) async fn permission(
     if asks_inside(tool, args) || mode.as_deref() == Some("auto-approve") {
         return Ok(());
     }
-    if (reads_only(tool, args)
+    if (accepts_edits(tool, args)
         || (tool == names::BROWSER_ACT && crate::chrome_control::builtin::accepts_edits(args)))
         && mode.as_deref() == Some("accept-edits")
         && !stricter_rule(shared, owner, tool).await
@@ -236,6 +240,10 @@ pub(crate) fn answer_by(
     output: &Value,
     by: AnsweredBy,
 ) -> Result<CommandResult, CoreError> {
+    #[cfg(feature = "agent-vault")]
+    if vault_save::is_card(shared, session, id) {
+        return vault_save::answer(shared, origin, session, id, output, by);
+    }
     let refused = || {
         CoreError::new(
             ErrorCode::CallbackRefused,
@@ -321,7 +329,9 @@ pub(crate) fn overlay(shared: &Shared, session: &str, state: &mut Value) {
     for call in lock(calls).iter().filter(|c| c.session == session) {
         let mut entry = call.entry.clone();
         let id = entry["id"].as_str().unwrap_or_default();
-        if let Some(record) = shared.asks.outcome(&format!("callback:{id}")) {
+        if let Some(record) = shared.asks.outcome(&format!("callback:{id}"))
+            && entry["state"]["status"] != "answered"
+        {
             entry["state"] = json!({"status":"answered","output":{"type":"approval","decision":{"type":if matches!(record.outcome, Outcome::Allowed{..}) {"approve"} else {"deny"}}}});
         }
         let next = history

@@ -527,7 +527,7 @@ impl Pump {
     }
 
     /// Follows the supervisor. A new generation means a new server: subscribe to its lobby, close
-    /// the callbacks of the old one, and resume (on new channels) the sessions that had a channel.
+    /// the callbacks of the old one, and read the sessions whose channels died, leaving them detached.
     /// Returns false when the core is gone.
     fn server_state(&mut self, state: &SupervisorState) -> bool {
         let Some(shared) = self.weak.upgrade() else {
@@ -563,7 +563,7 @@ impl Pump {
                 "pump follows a new server"
             );
             let inflight = recovery::in_progress_turns(&shared, reopen);
-            recovery::reopen(&shared, inflight);
+            recovery::restore_detached(&shared, inflight);
         }
         true
     }

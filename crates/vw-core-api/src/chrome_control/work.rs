@@ -34,7 +34,9 @@ pub(super) fn view(chrome: &super::ChromeControl) -> Vec<ChromeWorkView> {
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     for row in &mut rows {
         row.browser = profiles.get(&row.session_id).map(|profile| {
-            if cfg!(feature = "your-firefox") && profile.starts_with("firefox:") {
+            if cfg!(feature = "your-safari") && profile.starts_with("safari:") {
+                "Safari"
+            } else if cfg!(feature = "your-firefox") && profile.starts_with("firefox:") {
                 "Firefox"
             } else if cfg!(feature = "your-edge") && profile.starts_with("edge:") {
                 "Edge"

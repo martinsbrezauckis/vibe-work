@@ -35,7 +35,7 @@ pub(crate) fn folder_label(place: &Place) -> String {
     vw_gate::dialog_quote(&place.root.file_name().unwrap_or_default().to_string_lossy())
 }
 
-/// Full, sanitized push target for a native confirmation (the plan's `target` can hold credentials).
+/// Full resolved push target and commit for a native confirmation.
 pub(crate) fn push_consent(plan: &PushPlan) -> String {
     let commits = match plan.commits {
         0 => "no new commits".to_owned(),

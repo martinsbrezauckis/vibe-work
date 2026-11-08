@@ -315,7 +315,7 @@ fn labels_states() {
     }
 }
 
-/// Every instruction names what the person does; Connected needs none.
+/// Every instruction names the recovery step; a paired closed browser is opened by the app.
 #[test]
 fn every_instruction_gives_the_reason_and_the_step() {
     use AddonState as S;
@@ -341,7 +341,9 @@ fn every_instruction_gives_the_reason_and_the_step() {
     ] {
         let text = view(s, "x").instruction;
         assert!(
-            text.contains("Ask the person") || text.contains("Tell the person"),
+            (s == S::ChromeClosed && text.contains("Call chrome_session"))
+                || text.contains("Ask the person")
+                || text.contains("Tell the person"),
             "{s:?}: {text}"
         );
         assert!(text.len() <= 300, "{s:?}: one line");
@@ -495,7 +497,16 @@ fn update_label_follows_the_connected_profile_and_disconnected_oldest_profile() 
     ] {
         let facts = Facts {
             connected,
-            installed_version: installed_version(&profiles, "id", connected, &live),
+            installed_version: installed_version(
+                &super::super::setup::ChromeControlConfig {
+                    macos: Some(false),
+                    ..super::super::setup::ChromeControlConfig::default()
+                },
+                &profiles,
+                "id",
+                connected,
+                &live,
+            ),
             min_version: Some("0.1.6".into()),
             ..ready()
         };
@@ -520,7 +531,13 @@ fn live_profile_versions_follow_status_and_clear_on_disconnect() {
     profiles.observe(&serde_json::json!({"profiles":[{"profileId":"unknown","connected":true}]}));
     assert_eq!(profiles.snapshot(), vec![("unknown".into(), None)]);
     assert_eq!(
-        installed_version(&[], "id", true, &profiles.snapshot()),
+        installed_version(
+            &super::super::setup::ChromeControlConfig::default(),
+            &[],
+            "id",
+            true,
+            &profiles.snapshot()
+        ),
         None
     );
     profiles.observe(&serde_json::json!({"profiles":[]}));

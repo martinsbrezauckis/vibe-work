@@ -37,18 +37,16 @@ pub struct CoreConfig {
     pub trusted_ui_shell: bool,
     /// How long a session's channel stays open after its last use when the session is quiet and no
     /// client views it (`recovery.rs`). Closing releases the session's lease in Vibe, so the
-    /// Vibe CLI can take the session, and frees the channel's memory in the server; the next command
-    /// for the session reopens it (`session/resume`, usually well under a second).
+    /// Vibe CLI can take the session, and frees the channel's memory in the server; the next action
+    /// in the session reopens it (`session/resume`, usually well under a second).
     /// Default 5 minutes: long enough that switching between a few sessions never reopens them, short
     /// enough that a session left alone is free for the CLI soon.
     pub channel_idle_close: Duration,
-    /// Longest wait for reopening a session after a server restart; past it (or on an error) the
-    /// session is stuck: its commands are refused until the user acts (no automatic retries, a user must
-    /// never wait minutes mid-work). Default 60 s: room for a slow reopen right after a restart.
+    /// Longest wait for an implicit attach before a person's action, a plugin reopen, or a detached read
+    /// after server restart. Default 60 s. A failed attach is marked stuck until the person retries.
     pub reopen_timeout: Duration,
-    /// The same wait for a session whose turn was cut off by the restart: Vibe re-runs that turn inside
-    /// `session/resume` (model rounds and the interrupted command) and answers only after it, so a healthy reopen can
-    /// take minutes. Default 150 s, the supervisor's own resume bound.
+    /// Retained for configuration compatibility. Server restarts now read detached chats and never
+    /// resume their in-flight turns, so this former automatic-recovery bound is unused.
     pub inflight_reopen_timeout: Duration,
     /// Longest wait for one `retryReopen` attempt. Default 60 s.
     pub retry_reopen_timeout: Duration,

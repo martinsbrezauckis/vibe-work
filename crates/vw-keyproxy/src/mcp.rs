@@ -40,6 +40,15 @@ use zeroize::Zeroizing;
 /// Path prefix of forwarded MCP servers.
 pub const MCP_PREFIX: &str = "/vw-mcp/";
 
+/// Shared MCP requests cannot prove which chat is using the Debug bearer.
+#[must_use]
+pub fn debug_token_chat_required() -> String {
+    format!(
+        "Not run: shared MCP connections have no chat mode. Use the Debug API token through secret_run in a {} chat.",
+        vw_vocabulary::label("accessModes", "auto-approve"),
+    )
+}
+
 /// Longest binding id.
 const MAX_ID: usize = 64;
 
@@ -74,6 +83,8 @@ pub enum McpRefusal {
     AgentAccessLocked,
     /// The secret is gone or unreadable.
     SecretMissing,
+    /// The Debug bearer needs an identified Full access chat, which a shared connection cannot supply.
+    DebugTokenRequiresChat,
 }
 
 /// What [`McpResolver::resolve`] returns.
@@ -161,6 +172,11 @@ fn refusal_response(refusal: McpRefusal) -> Response {
             StatusCode::SERVICE_UNAVAILABLE,
             "vibe_work_mcp_secret_missing",
             "The secret this MCP server uses is no longer in Vibe Work's vault. Add the server again.",
+        ),
+        McpRefusal::DebugTokenRequiresChat => error(
+            StatusCode::FORBIDDEN,
+            "vibe_work_debug_token_requires_chat",
+            &debug_token_chat_required(),
         ),
     }
 }

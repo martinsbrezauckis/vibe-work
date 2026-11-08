@@ -25,7 +25,7 @@ use tokio::sync::watch;
 use tracing::info;
 
 use crate::layout::Layout;
-use crate::manager::{InstallError, VibeInstaller};
+use crate::manager::{InstallError, State, VibeInstaller};
 use crate::pin::{Sources, UvAsset};
 use crate::support::{
     MAX_MANIFEST_BYTES, MAX_SIGNATURE_BYTES, Manifest, Running, SIGNATURE_FILE, SeenSequence,
@@ -88,6 +88,35 @@ fn sibling(manifest_url: &str, name: &str) -> Result<String, SupportError> {
         .map_err(|e| SupportError::Fetch(e.to_string()))
 }
 
+fn running_phase(phase: &InstallPhase) -> Running {
+    match phase {
+        InstallPhase::Installed {
+            version,
+            source: InstallSource::Private,
+            ..
+        } => Running::Private(version.clone()),
+        InstallPhase::Installed {
+            version,
+            source: InstallSource::Existing,
+            ..
+        } => Running::Existing(version.clone()),
+        _ => Running::None,
+    }
+}
+
+fn store_support(state: &mut State, support: SupportState, waiting_for_install: bool) {
+    if waiting_for_install {
+        state.support = SupportState {
+            checked_at: support.checked_at,
+            ..Default::default()
+        };
+        state.deferred_support = Some(support);
+    } else {
+        state.deferred_support = None;
+        state.support = support;
+    }
+}
+
 /// Fetches and verifies the manifest (signature, file name, schema, rollback).
 async fn fetch_verified(
     config: &SupportConfig,
@@ -113,19 +142,7 @@ async fn fetch_verified(
 
 impl VibeInstaller {
     fn running(&self) -> Running {
-        match &self.inner.lock().phase {
-            InstallPhase::Installed {
-                version,
-                source: InstallSource::Private,
-                ..
-            } => Running::Private(version.clone()),
-            InstallPhase::Installed {
-                version,
-                source: InstallSource::Existing,
-                ..
-            } => Running::Existing(version.clone()),
-            _ => Running::None,
-        }
+        running_phase(&self.inner.lock().phase)
     }
 
     /// Checks the supported-Vibe manifest on the release channel and updates the view's `update` part. Called by
@@ -136,7 +153,6 @@ impl VibeInstaller {
     pub async fn check_support(&self, config: &SupportConfig) -> Result<(), SupportError> {
         let seen = SeenSequence::new(&self.inner.config.root);
         let outcome = fetch_verified(config, &seen).await;
-        let running = self.running();
         let checked_at = Some(now());
         // Signed, well formed and not a rollback: its Chrome store state is the one that holds from now on.
         let extension = outcome
@@ -150,6 +166,8 @@ impl VibeInstaller {
             info!(%error, "the Chrome store state could not be recorded (it applies to this run)");
         }
         let mut state = self.inner.lock();
+        let running = running_phase(&state.phase);
+        let waiting_for_install = running == Running::None;
         if let Some(record) = extension {
             state.extension_store = record.as_ref().and_then(|c| c.store);
             state.extension_min_version = record.and_then(|c| c.min_version);
@@ -160,7 +178,11 @@ impl VibeInstaller {
                     &manifest,
                     &config.app_version,
                     &config.target,
-                    &running,
+                    &if waiting_for_install {
+                        Running::Private(self.inner.pinned.clone())
+                    } else {
+                        running
+                    },
                     &self.inner.pinned,
                 );
                 // An update already installed in this run (starts next time) is not offered again.
@@ -192,13 +214,14 @@ impl VibeInstaller {
                             upcoming = ?eval.upcoming,
                             "supported-Vibe list checked"
                         );
-                        state.support = crate::update::SupportState {
+                        let support = crate::update::SupportState {
                             checked_at,
                             error: None,
                             available,
                             upcoming: eval.upcoming,
                             mismatch: eval.mismatch,
                         };
+                        store_support(&mut state, support, waiting_for_install);
                         Ok(())
                     }
                     Err(error) => Err(error),
@@ -208,6 +231,7 @@ impl VibeInstaller {
         };
         if let Err(error) = &result {
             info!(%error, "supported-Vibe list gave no offer");
+            state.deferred_support = None;
             state.support = crate::update::SupportState {
                 checked_at,
                 error: Some(error.to_string()),

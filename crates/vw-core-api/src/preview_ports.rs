@@ -334,34 +334,3 @@ pub(crate) fn navigation_text(
         )),
     }
 }
-
-/// Where a public-looking host name points.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum Points {
-    /// Every answer is public.
-    Public,
-    /// Some answers are private-network or carrier-grade-NAT addresses (the rest public): a local-network page.
-    LocalNetwork,
-}
-
-/// Where a host NAME points (the baseline every platform has; Linux checks every request again in the
-/// network guard), through the preview service's shared, bounded lookup (the navigation hooks then answer this page
-/// from its cache). A lookup that fails or times out refuses the open (fail closed: the page would not load anyway).
-/// Loopback, link-local and other special answers refuse it for everyone; private-network answers make it a
-/// local-network page (the caller decides who may open those).
-pub(crate) async fn names_public(
-    service: &vw_preview::PreviewService,
-    url: &url::Url,
-) -> Result<Points, CoreError> {
-    let Some(url::Host::Domain(name)) = url.host() else {
-        return Ok(Points::Public);
-    };
-    match service.check_name(name).await {
-        vw_preview::NameVerdict::Public => Ok(Points::Public),
-        vw_preview::NameVerdict::LocalNetwork(_) => Ok(Points::LocalNetwork),
-        vw_preview::NameVerdict::Refused(why) => Err(CoreError::new(
-            ErrorCode::Denied,
-            format!("{why}: not opened"),
-        )),
-    }
-}

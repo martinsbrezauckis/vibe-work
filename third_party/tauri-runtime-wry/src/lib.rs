@@ -4395,12 +4395,24 @@ fn parse_proxy_url(url: &Url) -> Result<ProxyConfig> {
   let host = url.host().map(|h| h.to_string()).unwrap_or_default();
   let port = url.port().map(|p| p.to_string()).unwrap_or_default();
 
+  // Local listener credentials use URL-safe ASCII; keep them out of browser arguments.
+  let credentials = url
+    .password()
+    .map(|password| (url.username().to_owned(), password.to_owned()));
   if url.scheme() == "http" {
-    let config = ProxyConfig::Http(ProxyEndpoint { host, port });
+    let config = ProxyConfig::Http(ProxyEndpoint {
+      host,
+      port,
+      credentials,
+    });
 
     Ok(config)
   } else if url.scheme() == "socks5" {
-    let config = ProxyConfig::Socks5(ProxyEndpoint { host, port });
+    let config = ProxyConfig::Socks5(ProxyEndpoint {
+      host,
+      port,
+      credentials,
+    });
 
     Ok(config)
   } else {

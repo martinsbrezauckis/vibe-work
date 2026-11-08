@@ -29,6 +29,8 @@ import { AboutSettings } from "./AboutSettings";
 import { BrowserSettings } from "./BrowserSettings";
 import { AgentDefaultsSettings } from "./AgentDefaultsSettings";
 import { AccountSettings } from "./AccountSettings";
+import { PlanUsageSettings } from "./PlanUsageSettings";
+import { PLAN_USAGE_ENABLED } from "../../state/planUsageEnabled";
 import { AccessibilitySettings } from "./AccessibilitySettings";
 import { AppearanceSettings } from "./AppearanceSettings";
 import { CliSharingSettings } from "./CliSharingSettings";
@@ -88,6 +90,7 @@ function sections(category: string): ReactElement {
     case "usage":
       return (
         <>
+          {PLAN_USAGE_ENABLED && <PlanUsageSettings />}
           {/* This conversation's tokens and context; the per-minute rate limit joins here with. */}
           <AccountSettings part="usage" />
           <MistralLinks category="usage" />
@@ -238,6 +241,7 @@ export function SettingsPage(): ReactElement {
     chromeAvailable(chrome),
     chrome?.edge !== undefined,
     chrome?.firefox !== undefined,
+    chrome?.safari !== undefined,
   ).filter((r) => offered.some((c) => c.id === r.category));
   return (
     <div className="settings-page ui-body" role="region" aria-label="Settings" ref={root}>

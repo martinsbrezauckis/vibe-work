@@ -45,6 +45,8 @@ export interface ToastSpec {
   plugin?: { name: string; path: string; managed: boolean };
   /** Rust-owned session-log finding; the bell action uses its opaque handle. */
   secretLeak?: { findingId: string };
+  /** Explicit app-owned failure; severity or upstream error prose alone never offers feedback. */
+  feedback?: true;
 }
 
 /** Retained counts include decisions beyond the disclosure's visible lines. */
@@ -146,6 +148,7 @@ export function notificationFor(event: CoreEvent, core?: CoreState): ToastSpec |
             ? "security"
             : "failure",
         text: event.message,
+        ...(event.kind === "temporaryCleanupFailed" ? { feedback: true as const } : {}),
         ...(event.sessionId === null ? {} : { sessionId: event.sessionId }),
       };
     case "refused":

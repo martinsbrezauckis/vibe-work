@@ -436,6 +436,24 @@ impl<T: Transport, C: Confirmer> Gate<T, C> {
         result
     }
 
+    /// Reuses the person's earlier Full access choice for this exact session. The core must have
+    /// that choice in its own access record, never from caller params or Vibe's writable history.
+    /// This fixed resume shape cannot add config, tools, endpoints or a different profile; ordinary
+    /// session/resume requests still require the native dialog. The returned token is single use.
+    ///
+    /// # Errors
+    /// The same validation and token-allocation refusals as [`Gate::request_confirmation`].
+    pub fn confirm_restored_full_access(
+        &self,
+        session_id: &str,
+    ) -> Result<(Value, ConfirmationToken), GateError> {
+        let method = "session/resume";
+        let params = json!({"sessionId":session_id,"agentConfig":{"agent":"auto-approve"}});
+        self.plan(method, &params)?;
+        let token = self.state().vault.mint(method, &params, self.clock.now())?;
+        Ok((params, token))
+    }
+
     /// Mints the confirmation token for one exact install WITHOUT the native dialog, for a window click that
     /// confirmed an install offer the window showed first. Only [`OFFERED_INSTALL_METHODS`] qualify; the
     /// core vouches that the offer was shown and taken (`vw-core-api` `install_offers`). Bound to the exact

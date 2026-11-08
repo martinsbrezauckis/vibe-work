@@ -3,7 +3,14 @@
 //! Values go only to the child's environment; tool output passes the registered-secret scrubber.
 //! Permission holds in the hook; running commands retain their job result for later status reads.
 
+#[cfg(feature = "agent-vault")]
+mod capture;
 mod consent;
+mod scope;
+#[cfg(feature = "agent-vault")]
+pub(super) use capture::prepare_capture;
+#[cfg(feature = "agent-vault")]
+pub(super) use scope::check_inputs;
 mod status;
 use status::wait;
 
@@ -235,11 +242,7 @@ fn bind(spec: &RunSpec, secrets: &[ProjectSecret]) -> Result<Vec<Bound>, String>
     spec.bindings
         .iter()
         .map(|b| {
-            let wanted = b.secret.to_lowercase();
-            let secret = secrets
-                .iter()
-                .find(|s| s.id == b.secret)
-                .or_else(|| secrets.iter().find(|s| s.name.to_lowercase() == wanted))
+            let secret = find_secret(secrets, &b.secret)
                 .cloned()
                 .ok_or_else(|| missing_secret(&b.secret))?;
             if let Some(field) = &b.field
@@ -261,6 +264,13 @@ fn bind(spec: &RunSpec, secrets: &[ProjectSecret]) -> Result<Vec<Bound>, String>
         .collect()
 }
 
+fn find_secret<'a>(secrets: &'a [ProjectSecret], wanted: &str) -> Option<&'a ProjectSecret> {
+    secrets.iter().find(|s| s.id == wanted).or_else(|| {
+        let name = wanted.to_lowercase();
+        secrets.iter().find(|s| s.name.to_lowercase() == name)
+    })
+}
+
 fn missing_secret(name: &str) -> String {
     format!(
         "no secret named '{}'; ask the user to add it in Vibe Work (Settings > Project secrets)",
@@ -269,7 +279,7 @@ fn missing_secret(name: &str) -> String {
 }
 
 /// A plain shell-like rendering of the command, for the guards and the log (arguments with spaces quoted).
-fn command_text(program: &str, args: &[String]) -> String {
+pub(super) fn command_text(program: &str, args: &[String]) -> String {
     std::iter::once(program)
         .chain(args.iter().map(String::as_str))
         .map(|w| {
@@ -326,8 +336,36 @@ pub(super) async fn prepare(
              secret_run_status first"
         ));
     }
+    let (id, job) = checked_job(shared, tools, session_id, args, spec).await?;
+    let policies = job.permission().await?;
+    let tools = Arc::downgrade(tools);
+    let session_id = session_id.to_owned();
+    Ok(Box::pin(async move {
+        let tools = tools.upgrade().ok_or("Tools closed.")?;
+        let (sender, receiver) = watch::channel(RunState::Running);
+        tools.secret_runs.lock().insert(
+            id.clone(),
+            Run {
+                session_id: session_id.clone(),
+                state: receiver,
+                handed_off: false,
+            },
+        );
+        spawn_job(job, policies, sender, id.clone());
+        wait(&tools, &session_id, &id).await
+    }))
+}
+
+async fn checked_job(
+    shared: &Arc<Shared>,
+    tools: &Arc<AgentTools>,
+    session_id: &str,
+    args: &Value,
+    mut spec: RunSpec,
+) -> Result<(String, Job), String> {
     let secrets = visible_secrets(shared, session_id).await?;
     let bound = bind(&spec, &secrets)?;
+    scope::check_bound(shared, session_id, &bound)?;
     let folders = folders(shared, session_id)?;
     let cwd =
         crate::guard_refusals::folder(shared, session_id, inside(&folders, spec.cwd.as_deref()))?;
@@ -367,6 +405,8 @@ pub(super) async fn prepare(
         project: &project,
         cwd: &cwd,
     };
+    // Consent and execution name the same canonical PATH resolution, retained by this job.
+    spec.program = program_text;
     let dialog = dialog_request(shared, session_id, &spec, &bound, &place);
     let id = vw_agent_tools::credential::new_credential()
         .map(|c| format!("secret-run-{}", &c[..16]))
@@ -385,23 +425,7 @@ pub(super) async fn prepare(
         dialog,
         env,
     };
-    let policies = job.permission().await?;
-    let tools = Arc::downgrade(tools);
-    let session_id = session_id.to_owned();
-    Ok(Box::pin(async move {
-        let tools = tools.upgrade().ok_or("Tools closed.")?;
-        let (sender, receiver) = watch::channel(RunState::Running);
-        tools.secret_runs.lock().insert(
-            id.clone(),
-            Run {
-                session_id: session_id.clone(),
-                state: receiver,
-                handed_off: false,
-            },
-        );
-        spawn_job(job, policies, sender, id.clone());
-        wait(&tools, &session_id, &id).await
-    }))
+    Ok((id, job))
 }
 
 fn spawn_job(

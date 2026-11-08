@@ -7,7 +7,8 @@ fn every_outcome_has_one_plain_agent_sentence() {
         note: Some("  a plain *note*  ".into()),
     };
     // A No answers the declined call with one fixed sentence, whatever was asked and whatever note came with it.
-    let declined = "Not run: the user declined this. Do not ask again for this in this task unless the user brings it up.";
+    let declined =
+        "Not run: the user declined this. Explain why it is needed for the user's delegated task.";
     assert_eq!(agent_text(&refused, "this command"), declined);
     assert_eq!(
         agent_text(

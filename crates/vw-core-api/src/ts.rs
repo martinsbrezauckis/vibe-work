@@ -9,6 +9,7 @@
 
 use ts_rs::{Config, TS};
 
+mod feedback;
 mod git;
 mod network;
 mod new_chat;
@@ -671,17 +672,7 @@ pub fn typescript_modules(header: &str) -> Vec<(String, String)> {
             "keep_awake",
         ),
         (new_chat::decls(&cfg), "new_chat"),
-        (
-            vec![
-                crate::FeedbackKind::decl(&cfg),
-                crate::FeedbackDraft::decl(&cfg),
-                crate::FeedbackSystem::decl(&cfg),
-                crate::FeedbackReport::decl(&cfg),
-                crate::FeedbackView::decl(&cfg),
-                crate::FeedbackRequest::decl(&cfg),
-            ],
-            "feedback",
-        ),
+        (feedback::decls(&cfg), "feedback"),
         (
             vec![
                 crate::SecretScanSettings::decl(&cfg),

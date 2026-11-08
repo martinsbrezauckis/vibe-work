@@ -244,7 +244,8 @@ pub(crate) async fn park_browser_overlay(
     }
     #[cfg(not(target_os = "linux"))]
     {
-        webview.hide().map_err(platform)?;
+        crate::overlay_visibility::cover(cfg!(target_os = "macos"), || webview.hide())
+            .map_err(platform)?;
         // macOS: at the placement's own top, never above the window (see `outside_at`: a frame above the content
         // layout rect gets a top inset larger than its height).
         let top = if cfg!(target_os = "macos") {
@@ -695,23 +696,6 @@ pub(crate) async fn screenshot_sharp(
                     let _ = reply.send(result);
                 }),
             );
-        },
-    )
-    .await
-}
-
-/// macOS: turns WebTransport off for the webview's next documents (`vw_platform::web_transport`): `WebKit` opens
-/// WebTransport sessions around the data store's proxy. Call before the first page.
-#[cfg(target_os = "macos")]
-pub(crate) async fn web_transport_off(webview: &Webview<Wry>) -> Result<(), EngineError> {
-    with_native(
-        webview,
-        "turning WebTransport off",
-        Duration::from_secs(4),
-        |native, reply| {
-            let _ = reply.send(vw_platform::web_transport::turn_off_web_transport(
-                native.inner(),
-            ));
         },
     )
     .await

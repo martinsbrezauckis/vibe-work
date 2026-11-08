@@ -297,9 +297,15 @@ impl Dictations {
     /// Removes a stream for `stop`, telling its realtime task to finish.
     pub(crate) fn take_for_stop(&self, id: &str) -> Result<Stopped, StreamError> {
         let mut stream = self.lock().remove(id).ok_or(StreamError::Unknown)?;
-        let live = match stream.feed.take() {
-            Some(feed) if feed.try_send(Feed::Finish).is_ok() => stream.outcome.take(),
-            _ => None,
+        // Voxtral rejects a flush before any audio bytes. An empty stream is cancelled locally;
+        // the stop handler returns the usual empty transcript and aborts its connection task.
+        let live = if stream.samples.is_empty() {
+            None
+        } else {
+            match stream.feed.take() {
+                Some(feed) if feed.try_send(Feed::Finish).is_ok() => stream.outcome.take(),
+                _ => None,
+            }
         };
         // The task must outlive the stream until the outcome arrives: the handler owns it from here.
         let task = stream.task.take();
@@ -410,4 +416,37 @@ async fn run_live(
         lost(message.clone());
     }
     let _ = done.send(outcome);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn stopping_without_samples_never_queues_a_realtime_flush() {
+        let (events, _) = broadcast::channel(8);
+        let registry = Dictations::new(events, SpeechConfig::default());
+        for with_audio in [false, true] {
+            let (id, _) = registry.start(Origin::Ui, Resampler::new(16_000).unwrap(), None, None);
+            let (feed, mut pending) = mpsc::channel(8);
+            {
+                let mut streams = registry.lock();
+                let stream = streams.get_mut(&id).unwrap();
+                stream.feed = Some(feed);
+            }
+            if with_audio {
+                registry.append(&id, &[1, 2]).unwrap();
+                assert!(matches!(pending.recv().await, Some(Feed::Audio(_))));
+            }
+            let _stopped = registry.take_for_stop(&id).unwrap();
+            if with_audio {
+                assert!(matches!(pending.recv().await, Some(Feed::Finish)));
+            } else {
+                assert!(
+                    pending.recv().await.is_none(),
+                    "empty dictation queued a flush"
+                );
+            }
+        }
+    }
 }

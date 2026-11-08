@@ -113,7 +113,7 @@ export function createSessionControls(deps: {
     },
     retryPluginRefresh: (sessionId: string): Promise<void> =>
       retryPluginRefresh(core, composer, sessionId),
-    /** Reads the session's runtime (models, profiles, active ones). Opens its channel if needed. */
+    /** Reads an attached session's runtime; a detached chat keeps its saved composer values. */
     async loadRuntime(sessionId: string): Promise<boolean> {
       if (owned(sessionId)) return false;
       try {

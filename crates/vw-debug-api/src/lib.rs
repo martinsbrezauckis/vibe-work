@@ -12,8 +12,8 @@
 //! - Bound to `127.0.0.1` on a random port; off means not bound at all ([`DebugApiConfig`]).
 //! - Every route is guarded in this order: Host, Origin (and browser fetch metadata), bearer token
 //!   (constant-time). There are no exempt routes and no query-string tokens.
-//! - The token is one stable, user-only file per user (`debug-api.token`, reused across runs,
-//!   rotatable); the per-run descriptor holds the port and the token file's path, never the token.
+//! - The token lives in the vault and the running server's memory; descriptors carry no credentials.
+//!   Disposable development fixtures may explicitly opt into a plaintext token export.
 //! - No route returns a secret.
 
 // the end-to-end runs' in-page channel exists only in debug builds made for them. A release build that
@@ -31,6 +31,7 @@ compile_error!(
 
 mod ask_routes;
 mod auth;
+mod body_limit;
 mod config;
 /// Test builds only (feature `e2e-script`): `POST /e2e/script`, `GET /e2e/windows`.
 #[cfg(feature = "e2e-script")]
@@ -42,6 +43,8 @@ mod secret_guard;
 mod server;
 mod sse;
 mod terminal_routes;
+#[cfg(debug_assertions)]
+mod test_token;
 mod token;
 mod trace_routes;
 /// Private test builds only (feature `vault-e2e`): the vault test switch's routes; the source is outside
@@ -51,14 +54,20 @@ mod trace_routes;
 #[rustfmt::skip]
 #[path = "../../../private/vault-e2e/routes.rs"]
 mod vault_e2e;
+mod window_capture;
+#[cfg(test)]
+mod window_capture_tests;
 mod window_routes;
+pub use window_capture::{WindowCaptureError, capture_main};
 
 pub use auth::{constant_time_eq, host_allowed, origin_allowed, token_present};
 pub use config::{DEV_BUILD, DebugApiConfig, EnabledReason, enablement};
 pub use registry::{RegistryError, UiRoutes};
 pub use reply::status_of;
 pub use server::{DebugApi, DebugApiError};
-pub use token::{TOKEN_FILE, rotate_token_file};
+#[cfg(debug_assertions)]
+pub use test_token::rotate_token_file;
+pub use token::{TOKEN_FILE, remove_legacy_token};
 pub use window_routes::{
     AppRequest, AppWindow, BoxFuture, SharedAppWindow, WindowRequest, WindowState, WindowView,
     listed_dialog,

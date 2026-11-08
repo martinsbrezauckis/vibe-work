@@ -1,6 +1,5 @@
-//! On the app side: a tab the person picks in a chat's composer is only read for it
-//! (no grant: the agent reaches the person's tabs); the local-network switch reaches Chrome's live tabs; the agent
-//! cannot send the app-only helper arguments; the agent's tab metadata never shows a local-network page's title.
+//! Person-picked tab context carries its receiving chat so a previously chat-owned window can transfer.
+//! Legacy callers may read context without a handoff; agent tools cannot send these private helper arguments.
 use serde_json::{Value, json};
 
 use crate::{ChromeControlRequest, Origin};
@@ -29,11 +28,9 @@ fn calls(seen: &std::sync::Mutex<Vec<(String, Value)>>) -> Vec<(String, Value)> 
     seen.lock().unwrap().clone()
 }
 
-/// A pick in a chat's composer gives the chat the tab through the helper's grant
-/// (`_grantTab`). After the owner's rule (no tab restriction: the agent reaches the person's tabs anyway) the picker
-/// only reads the picked tab's context for the composer: nothing is granted, whatever chat the window names.
+/// Picking includes the receiving chat; it does not open a browser session or execute agent work.
 #[tokio::test]
-async fn a_picked_tab_is_only_read_for_the_composer() {
+async fn a_picked_tab_carries_the_receiving_chat_with_its_context_read() {
     let core = core_with_chrome("tab-pick").await;
     let shared = &core.shared;
     open_chat(shared, "s", "auto-approve");
@@ -44,8 +41,7 @@ async fn a_picked_tab_is_only_read_for_the_composer() {
             json!({"structuredContent":{"tabs":[{"profileId":"p","profileName":"Chrome","tab":{"tabId":7,"title":"Example","url":"https://example.com/"}}]}})
         }
     });
-    // The window as it sent these in earlier 0.1.4 builds (naming the chat; now not a valid request), and as it sends
-    // them now.
+    // A legacy read-only caller may omit the chat; the current picker names its receiving chat.
     for (tabs, pick) in [
         (
             json!({"op":"tabs","sessionId":"s"}),
@@ -72,12 +68,16 @@ async fn a_picked_tab_is_only_read_for_the_composer() {
         sent.iter().any(|args| args.get("_tabContext").is_some()),
         "{sent:?}"
     );
+    assert!(
+        sent.iter()
+            .any(|args| args["_tabContext"]["clientSessionId"] == "s")
+    );
     core.shutdown().await;
 }
 
 /// PREDICT (before the change): the switch is saved for the next call only; nothing reaches Chrome's live tabs.
 #[tokio::test]
-async fn turning_local_network_pages_off_reaches_chrome() {
+async fn legacy_network_requests_keep_browser_addresses_enabled() {
     let core = core_with_chrome("tab-switch").await;
     let shared = &core.shared;
     let seen = shared
@@ -101,7 +101,7 @@ async fn turning_local_network_pages_off_reaches_chrome() {
             ),
             (
                 "chrome_status".to_owned(),
-                json!({"_netPolicyChange":{"localNetwork":false,"generation":2}})
+                json!({"_netPolicyChange":{"localNetwork":true,"generation":2}})
             ),
         ]
     );
@@ -159,9 +159,9 @@ async fn the_agent_cannot_send_the_app_only_helper_arguments() {
     core.shutdown().await;
 }
 
-/// PREDICT (before the change): the agent's tabs.list shows a local-network page's title.
+/// Local addresses have the same title visibility as other permitted sites.
 #[tokio::test]
-async fn the_agents_tab_list_shows_no_local_network_title() {
+async fn the_agents_tab_list_keeps_local_network_titles() {
     let core = core_with_chrome("tab-titles").await;
     let shared = &core.shared;
     open_chat(shared, "s", "ask");
@@ -186,7 +186,7 @@ async fn the_agents_tab_list_shows_no_local_network_title() {
     .await
     .unwrap();
     let text = value.to_string();
-    assert!(!text.contains("Router admin secrets"), "{text}");
+    assert!(text.contains("Router admin secrets"), "{text}");
     assert!(text.contains("172.20.3.4"), "the address stays: {text}");
     assert!(text.contains("Example Domain"), "{text}");
     core.shutdown().await;
@@ -261,61 +261,101 @@ async fn non_web_tabs_and_their_refusal_reach_the_agent() {
     core.shutdown().await;
 }
 
-/// The same projection for any tab metadata a Chrome answer carries (`tabs.list`, `tabs.inspect_other`, a created or
-/// opened tab, a session's target), with a name that resolves to the local network.
+/// Exercise every helper answer shape through the real gateway projection.
 #[tokio::test]
-async fn every_tab_record_in_an_answer_drops_a_local_title() {
-    let names = |name: String| async move {
-        if name == "nas.example" {
-            vw_preview::NameVerdict::LocalNetwork("private".into())
-        } else {
-            vw_preview::NameVerdict::Public
+async fn local_titles_survive_nested_text_and_pending_tab_records() {
+    let core = core_with_chrome("tab-title-shapes").await;
+    let shared = &core.shared;
+    open_chat(shared, "s", "ask");
+    shared
+        .chrome_control
+        .tasks
+        .lock()
+        .unwrap()
+        .insert("t".into(), "s".into());
+    let payloads = [
+        json!({"structuredContent":{"data":{"tabs":[{"tabId":1,"url":"https://nas.local/files","title":"NAS files"},{"tabId":2,"url":"http://[fd00::1]/","title":"ULA"}],"tab":{"tabId":3,"url":"http://10.0.0.2/","title":"Ten"},"target":{"tabId":4,"url":"https://example.com/","title":"Public"}}}}),
+        json!({"content":[{"type":"text","text":json!({"tabs":[{"tabId":1,"url":"http://172.20.3.4/","title":"Router admin"}]}).to_string()}]}),
+        json!({"structuredContent":{"data":{"opened":{"url":"http://10.0.0.2/","title":"NAS"},"pending":{"pendingUrl":"http://[fd00::2]/","url":"","title":"ULA"}}}}),
+        json!({"structuredContent":{"data":{"tab":{"tabId":1,"url":"https://example.com/","title":"Public","openerTab":{"tabId":2,"url":"http://10.0.0.9/","title":"Opener on the LAN"},"group":{"tabs":[{"tabId":3,"url":"http://172.20.3.9/","title":"Grouped LAN"}]}}}}}),
+    ];
+    for (payload, titles) in payloads.into_iter().zip([
+        vec!["NAS files", "ULA", "Ten", "Public"],
+        vec!["Router admin"],
+        vec!["NAS", "ULA"],
+        vec!["Opener on the LAN", "Grouped LAN"],
+    ]) {
+        let _seen = super::test_support::answering(shared, move |_, _| payload.clone());
+        let answer = super::gateway::call(
+            shared,
+            "s",
+            "chrome_execute",
+            json!({"sessionId":"t","action":"tabs.list","args":{}}),
+        )
+        .await
+        .unwrap();
+        for title in titles {
+            assert!(answer.to_string().contains(title), "{answer}");
         }
+    }
+    core.shutdown().await;
+}
+
+#[tokio::test]
+async fn picked_context_follows_the_draft_reset_and_first_message() {
+    let core = core_with_chrome("picked-draft-window").await;
+    let shared = &core.shared;
+    open_chat(shared, "s", "auto-approve");
+    shared.chrome_control.owner.connected_profiles.observe(
+        &json!({"profiles":[{"profileId":"chrome:p","connected":true,"extensionVersion":"0.1.6"}]}),
+    );
+    let seen = shared.chrome_control.owner.answering(|_, _| json!({"structuredContent":{"requestId":"r","status":"completed","data":{"url":"https://example.com/","title":"Example","text":"Hello"}}}));
+    let crate::CommandResult::NewChat { view } = core
+        .new_chat(Origin::Ui, crate::NewChatRequest::State {})
+        .await
+        .unwrap()
+    else {
+        panic!("expected draft state")
     };
-    let mut answer = json!({"structuredContent":{"data":{
-        "tabs":[{"tabId":1,"url":"https://nas.example/files","title":"NAS files"},{"tabId":2,"url":"http://[fd00::1]/","title":"ULA"}],
-        "tab":{"tabId":3,"url":"http://10.0.0.2/","title":"Ten"},
-        "target":{"tabId":4,"url":"https://example.com/","title":"Public"}
-    }}});
-    super::tabs::hide_local_titles(&mut answer, names).await;
-    let data = &answer["structuredContent"]["data"];
-    assert_eq!(data["tabs"][0]["title"], "");
-    assert_eq!(data["tabs"][1]["title"], "");
-    assert_eq!(data["tab"]["title"], "");
-    assert_eq!(data["target"]["title"], "Public");
-    assert_eq!(data["tabs"][0]["url"], "https://nas.example/files");
-}
-
-/// PREDICT (before the change): a helper answer that carries the tab list only as text (no structuredContent), or a
-/// record without a tabId or with a pendingUrl, keeps the local title.
-#[tokio::test]
-async fn a_local_title_in_the_text_part_or_a_loose_record_is_hidden_too() {
-    let names = |_: String| async { vw_preview::NameVerdict::Public };
-    let mut text_only = json!({"content":[{"type":"text","text":json!({"tabs":[{"tabId":1,"url":"http://172.20.3.4/","title":"Router admin secrets"}]}).to_string()}]});
-    super::tabs::hide_local_titles(&mut text_only, names).await;
+    let draft = view.owner_id;
+    core.chrome_control(
+        Origin::Ui,
+        ChromeControlRequest::TabContext {
+            profile_id: "chrome:p".into(),
+            tab_id: 7,
+            session_id: Some(draft.clone()),
+        },
+    )
+    .await
+    .unwrap();
+    let crate::CommandResult::NewChat { view } = core
+        .new_chat(Origin::Ui, crate::NewChatRequest::CloseAll {})
+        .await
+        .unwrap()
+    else {
+        panic!("expected renewed draft")
+    };
+    let renewed = view.owner_id;
+    core.new_chat(
+        Origin::Ui,
+        crate::NewChatRequest::Adopt {
+            session_id: "s".into(),
+        },
+    )
+    .await
+    .unwrap();
+    let sent = calls(&seen);
     assert!(
-        !text_only.to_string().contains("Router admin secrets"),
-        "{text_only}"
+        sent.iter()
+            .any(|(_, args)| args["_tabContext"]["clientSessionId"] == draft)
     );
-    let mut loose = json!({"structuredContent":{"data":{"opened":{"url":"http://10.0.0.2/","title":"NAS"},"pending":{"pendingUrl":"http://[fd00::2]/","url":"","title":"ULA"}}}});
-    super::tabs::hide_local_titles(&mut loose, names).await;
-    assert!(!loose.to_string().contains("\"NAS\""), "{loose}");
-    assert!(!loose.to_string().contains("\"ULA\""), "{loose}");
-}
-
-/// PREDICT (before the change): a matched record is not searched further, so a tab record nested in it (an opener
-/// tab, a window's or group's tabs) keeps its local title.
-#[tokio::test]
-async fn a_tab_record_nested_in_another_loses_its_local_title() {
-    let names = |_: String| async { vw_preview::NameVerdict::Public };
-    let mut answer = json!({"structuredContent":{"data":{"tab":{"tabId":1,"url":"https://example.com/","title":"Public",
-        "openerTab":{"tabId":2,"url":"http://10.0.0.9/","title":"Opener on the LAN"},
-        "group":{"tabs":[{"tabId":3,"url":"http://172.20.3.9/","title":"Grouped LAN"}]}}}}});
-    super::tabs::hide_local_titles(&mut answer, names).await;
-    let text = answer.to_string();
-    assert!(text.contains("\"Public\""), "{text}");
     assert!(
-        !text.contains("Opener on the LAN") && !text.contains("Grouped LAN"),
-        "{text}"
+        sent.iter()
+            .any(|(_, args)| args["_adoptChat"] == json!({"old":draft,"new":renewed}))
     );
+    assert!(
+        sent.iter()
+            .any(|(_, args)| args["_adoptChat"] == json!({"old":renewed,"new":"s"}))
+    );
+    core.shutdown().await;
 }

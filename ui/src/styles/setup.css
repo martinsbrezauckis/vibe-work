@@ -204,6 +204,10 @@ fieldset.key-offer {
   display: grid;
   gap: 10px;
 }
+/* Pairing identities keep their full value inside narrow Settings and chat cards. */
+[data-chrome-fingerprint] code {
+  overflow-wrap: anywhere;
+}
 .key-line {
   margin: 0 0 8px;
   font-size: var(--text-13);

@@ -30,6 +30,12 @@ type AfterHelperCheck = Arc<dyn Fn(&Path) + Send + Sync>;
 pub struct ChromeControlConfig {
     /// Native Chrome/Edge facts cached independently of pairing; probes run away from async workers.
     pub browser_detection: vw_platform::browser::Detection,
+    /// Browser-local permission failures; reset only after successful setup or removal.
+    pub setup_problems: SetupProblems,
+    #[cfg(test)]
+    pub(crate) macos: Option<bool>,
+    #[cfg(test)]
+    pub(super) file_access: Option<files::AccessCheck>,
     /// The trusted native package shipped with Vibe Work (`bin/chrome-control`, `.exe` on Windows).
     /// `None`: this build has none, and Set up says so.
     pub package: Option<PathBuf>,
@@ -66,6 +72,11 @@ impl Default for ChromeControlConfig {
     fn default() -> Self {
         Self {
             browser_detection: vw_platform::browser::Detection::default(),
+            setup_problems: SetupProblems::default(),
+            #[cfg(test)]
+            macos: None,
+            #[cfg(test)]
+            file_access: None,
             package: None,
             #[cfg(test)]
             after_helper_check: None,
@@ -88,6 +99,16 @@ impl Default for ChromeControlConfig {
 }
 
 impl ChromeControlConfig {
+    // The instance supplies the permission-test platform; production uses the build target.
+    #[allow(clippy::unused_self)]
+    pub(super) fn is_macos(&self) -> bool {
+        #[cfg(test)]
+        if let Some(macos) = self.macos {
+            return macos;
+        }
+        cfg!(target_os = "macos")
+    }
+
     /// Package presence is the feature gate; a damaged shipped package remains present and reports its error.
     #[must_use]
     pub fn available(&self) -> bool {
@@ -178,7 +199,7 @@ pub struct ChromeSetupView {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "ts", ts(optional))]
     pub browser_issue: Option<super::browser::BrowserIssue>,
-    /// External installation is waiting for Chrome, or a macOS restart.
+    /// Installation route: external consent/restart, or Store with extension facts reported after pairing.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "ts", ts(optional))]
     pub install_state: Option<String>,
@@ -233,8 +254,12 @@ impl Receipt {
 
 const RECEIPT: &str = "setup.json";
 
+#[path = "setup_problem.rs"]
+mod problem;
+pub use problem::SetupProblems;
+
 #[path = "setup_files.rs"]
-mod files;
+pub(super) mod files;
 #[path = "setup_registration.rs"]
 mod registration;
 
@@ -251,7 +276,12 @@ pub(super) fn repair_registrations(
     browser: Option<&str>,
 ) -> Result<(), String> {
     let _held = registration_lock();
-    registration::repair(config, state, browser)
+    let result = registration::repair(config, state, browser);
+    if let Some(browser) = browser {
+        problem::finish(config, state, browser, result)
+    } else {
+        result
+    }
 }
 
 pub(super) fn helper_name() -> &'static str {
@@ -277,19 +307,33 @@ pub(super) fn home_of(config: &ChromeControlConfig) -> Result<PathBuf, String> {
         .ok_or_else(|| "your home folder could not be found".to_owned())
 }
 
-fn read_receipt(state: &Path) -> Option<Receipt> {
-    let bytes = files::read(&state.join(RECEIPT)).ok()??;
+fn read_receipt(config: &ChromeControlConfig, state: &Path) -> Option<Receipt> {
+    let bytes = files::read(config, &state.join(RECEIPT)).ok()??;
     serde_json::from_slice(&bytes).ok()
 }
 
+pub(super) fn registered(
+    config: &ChromeControlConfig,
+    state: Option<&Path>,
+    browser: &str,
+) -> bool {
+    state
+        .and_then(|state| read_receipt(config, state))
+        .is_some_and(|r| r.browsers.iter().any(|name| name == browser))
+}
+
 /// The files Set up wrote (helper copy and manifests); `None` before Set up.
-pub(super) fn receipt_files(state: &Path) -> Option<Vec<PathBuf>> {
-    read_receipt(state).map(|receipt| receipt.files)
+pub(super) fn receipt_files(config: &ChromeControlConfig, state: &Path) -> Option<Vec<PathBuf>> {
+    read_receipt(config, state).map(|receipt| receipt.files)
 }
 
 /// The Chrome profiles under `user_data` that have the extension's folder.
-fn profiles_with(user_data: &Path, extension_id: &str) -> Vec<String> {
-    let mut found: Vec<String> = super::probe::profiles(user_data, extension_id)
+fn profiles_with(
+    config: &ChromeControlConfig,
+    user_data: &Path,
+    extension_id: &str,
+) -> Vec<String> {
+    let mut found: Vec<String> = super::probe::profiles_for(config, user_data, extension_id)
         .iter()
         .filter_map(|p| p.file_name()?.to_str().map(str::to_owned))
         .collect();
@@ -334,17 +378,21 @@ pub(super) fn view_for(
             extension_restart: None,
         };
     }
-    let receipt = state.and_then(read_receipt).filter(|receipt| {
-        !cfg!(any(feature = "your-edge", feature = "your-firefox"))
-            || receipt.browsers.iter().any(|name| name == browser)
-    });
-    let profiles: Vec<String> = user_data(state, browser)
+    let receipt = state
+        .and_then(|state| read_receipt(config, state))
+        .filter(|receipt| {
+            (!config.is_macos() && !cfg!(any(feature = "your-edge", feature = "your-firefox")))
+                || receipt.browsers.iter().any(|name| name == browser)
+        });
+    let profiles: Vec<String> = user_data(config, state, browser)
         .iter()
-        .flat_map(|dir| profiles_with(dir, &config.extension_id))
+        .flat_map(|dir| profiles_with(config, dir, &config.extension_id))
         .collect();
     let package = packaged_helper(config);
-    let repair_failed = package.is_ok()
-        && state.is_some_and(|state| repair_registrations(config, state, Some(browser)).is_err());
+    let blocked = problem::blocked(config, state, browser);
+    let repair_failed = blocked
+        || package.is_ok()
+            && state.is_some_and(|state| needs_repair(config, state, browser, receipt.is_some()));
     ChromeSetupView {
         state: match (&receipt, profiles.is_empty()) {
             (Some(_), _) if repair_failed => SetupState::RepairRequired,
@@ -358,7 +406,8 @@ pub(super) fn view_for(
                 r.browsers
                     .into_iter()
                     .filter(|name| {
-                        !cfg!(any(feature = "your-edge", feature = "your-firefox"))
+                        (!config.is_macos()
+                            && !cfg!(any(feature = "your-edge", feature = "your-firefox")))
                             || name == browser
                     })
                     .collect()
@@ -383,21 +432,55 @@ pub(super) fn view_for(
             }
             _ => None,
         },
-        install_state: (browser == "Google Chrome")
-            .then(|| state.and_then(|state| super::extension_install::status(config, state)))
-            .flatten(),
+        install_state: if config.is_macos() {
+            Some("store".into())
+        } else {
+            (browser == "Google Chrome")
+                .then(|| state.and_then(|state| super::extension_install::status(config, state)))
+                .flatten()
+        },
         states: None,
-        // `commands::view` decides it from the live connection too.
-        addon: None,
+        // A refused attempt stays visible without retrying it on every status poll.
+        addon: (blocked || problem::blocked(config, state, browser)).then(|| {
+            super::addon::view_for(
+                super::addon::AddonState::AccessBlocked,
+                "",
+                if browser == "Microsoft Edge" {
+                    super::agent_browser::Browser::Edge
+                } else {
+                    super::agent_browser::Browser::Chrome
+                },
+            )
+        }),
         extension_left: None,
         extension_restart: None,
     }
 }
 
+fn needs_repair(
+    config: &ChromeControlConfig,
+    state: &Path,
+    browser: &str,
+    receipted: bool,
+) -> bool {
+    if config.is_macos() {
+        // Every command renders both cards. A status read must not touch the other browser.
+        receipted
+            && (problem::repair_failed(config, state, browser)
+                || registration::check_helper(config, state).is_err())
+    } else {
+        repair_registrations(config, state, Some(browser)).is_err()
+    }
+}
+
 /// Only this browser's registered folders. Receipt identities take precedence over known vendor paths.
-pub(super) fn user_data(state: Option<&Path>, browser: &str) -> Vec<PathBuf> {
+pub(super) fn user_data(
+    config: &ChromeControlConfig,
+    state: Option<&Path>,
+    browser: &str,
+) -> Vec<PathBuf> {
     state
-        .and_then(read_receipt)
+        .and_then(|state| read_receipt(config, state))
         .map(|receipt| receipt.data_for(browser))
         .unwrap_or_default()
 }
@@ -450,19 +533,25 @@ struct Made {
 }
 
 impl Made {
-    fn undo(&self) {
+    fn undo(&self, config: &ChromeControlConfig) {
         for (key, file) in self.keys.iter().rev() {
             let _ = registry_delete(key, file);
         }
         for (file, bytes) in self.written.iter().rev() {
-            let _ = files::remove(file, bytes);
+            let _ = files::remove(config, file, bytes);
         }
     }
 }
 
-fn write_file(made: &mut Made, path: &Path, bytes: &[u8]) -> Result<(), String> {
-    let before = files::read(path).map_err(|e| e.to_string())?;
-    files::write(path, before.as_deref(), bytes).map_err(|e| e.to_string())?;
+fn write_file(
+    config: &ChromeControlConfig,
+    made: &mut Made,
+    path: &Path,
+    bytes: &[u8],
+) -> Result<(), String> {
+    let before = files::read(config, path).map_err(|e| problem::io_message(config, &e))?;
+    files::write(config, path, before.as_deref(), bytes)
+        .map_err(|e| problem::io_message(config, &e))?;
     made.files.push(path.to_path_buf());
     made.written.push((path.to_path_buf(), bytes.to_vec()));
     Ok(())
@@ -485,73 +574,11 @@ pub(super) fn host_manifest(helper: &Path, extension_id: &str) -> Vec<u8> {
     serde_json::to_vec_pretty(&manifest).unwrap_or_default()
 }
 
-/// Sets up Chrome Control (see the module docs). On error nothing stays changed.
-pub(crate) fn install(
-    config: &ChromeControlConfig,
-    state: &Path,
-    vibe_home: &Path,
-) -> Result<ChromeSetupView, String> {
-    let held = registration_lock();
-    let (_, bytes) = packaged_helper(config)?;
-    let home = home_of(config)?;
-    let mut made = Made::default();
-    let result = (|| -> Result<Receipt, String> {
-        for target in targets(&home, config) {
-            if target.name == "Mozilla Firefox" {
-                firefox::require_unregistered(&target)?;
-            }
-        }
-        let helper = state.join("bin").join(helper_name());
-        write_file(&mut made, &helper, &bytes)?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&helper, std::fs::Permissions::from_mode(0o700))
-                .map_err(|e| e.to_string())?;
-        }
-        let mut receipt = Receipt::default();
-        for target in targets(&home, config) {
-            let manifest = manifest_for(&helper, config, target.name);
-            match (&target.hosts, target.registry) {
-                (Some(hosts), _) => {
-                    let file = hosts.join(format!("{HOST_NAME}.json"));
-                    registration::ensure_manifest(&file, &manifest, false)?;
-                    made.written.push((file.clone(), manifest.clone()));
-                    made.files.push(file);
-                }
-                (None, Some(root)) => {
-                    let file = manifest_path(state, target.name);
-                    if !made.files.contains(&file) {
-                        registration::ensure_manifest(&file, &manifest, false)?;
-                        made.written.push((file.clone(), manifest.clone()));
-                        made.files.push(file.clone());
-                    }
-                    let key = format!(r"{root}\{HOST_NAME}");
-                    registry_set(&key, &file)?;
-                    made.keys.push((key.clone(), file.clone()));
-                    receipt.registry_keys.push(key);
-                }
-                (None, None) => {}
-            }
-            receipt.browsers.push(target.name.to_owned());
-            receipt.user_data.push(target.user_data);
-        }
-        receipt.files.clone_from(&made.files);
-        let bytes = serde_json::to_vec_pretty(&receipt).map_err(|e| e.to_string())?;
-        write_file(&mut made, &state.join(RECEIPT), &bytes)?;
-        Ok(receipt)
-    })();
-    match result {
-        Ok(_) => {
-            drop(held);
-            Ok(view(config, Some(state), vibe_home))
-        }
-        Err(problem) => {
-            made.undo();
-            Err(problem)
-        }
-    }
-}
+#[path = "setup_install.rs"]
+mod installing;
+#[cfg(test)]
+pub(crate) use installing::install;
+pub(super) use installing::install_for;
 
 #[path = "setup_remove.rs"]
 mod removal;

@@ -255,11 +255,10 @@ export interface CoreClient {
   /** Turns the Debug API on or off and remembers it; unsupported where the host cannot. */
   setDebugApi(enabled: boolean): Promise<void>;
   /**
-   * The Debug API token file's PATH (for Settings), regenerating the token first when `rotate` is
-   * true (the old token stops working at once). Never the token itself: it does not cross the
-   * bridge. Unsupported where the host cannot.
+   * The existing Debug API vault item id, or null when absent (historical method name).
+   * Creates or regenerates only when requested. Never returns the value; copy uses the ordinary user-only vault command.
    */
-  debugApiTokenFile(rotate: boolean): Promise<string>;
+  debugApiTokenFile(rotate: boolean): Promise<string | null>;
   /**
    * Streams a terminal's output into `onChunk` (scrollback first). Tauri: raw bytes on a Channel
    * with acknowledgements; browser dev mode: polls the `read` command (no flow control).

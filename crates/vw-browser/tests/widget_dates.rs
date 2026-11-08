@@ -190,3 +190,178 @@ async fn unrelated_datepicker_data_does_not_reinterpret_plain_text() {
         json!([["input", "2026-03-14"], ["change", "2026-03-14"]])
     );
 }
+
+#[tokio::test]
+async fn a_committed_widget_date_closes_its_calendar_without_submitting_or_blurring_other_fields() {
+    let (rig, reference) = page(json!("mm/dd/yyyy")).await;
+    rig.engine
+        .eval(
+            r"
+        const input=document.getElementById('date');
+        const calendar=document.createElement('div');
+        calendar.id='calendar';calendar.textContent='Calendar';
+        input.addEventListener('focus',()=>document.body.append(calendar));
+        window.widgetDate=null;window.hidden=0;window.submitted=0;
+        window.jQuery=()=>({data:()=>({o:{format:window.widgetFormat},hide(){
+            window.hidden++;calendar.remove();
+        }})});
+        input.addEventListener('keyup',()=>window.widgetDate=input.value);
+        document.addEventListener('submit',e=>{e.preventDefault();window.submitted++});
+    ",
+        )
+        .await;
+    let receipt = type_date(&rig, &reference, "2026-03-14").await.unwrap();
+    assert_eq!(
+        receipt["untrustedPageContent"]["target"]["valueNow"],
+        "03/14/2026"
+    );
+    assert_eq!(rig.engine.eval("window.widgetDate").await, "03/14/2026");
+    assert_eq!(
+        rig.engine
+            .eval("Boolean(document.getElementById('calendar'))")
+            .await,
+        false
+    );
+    assert_eq!(rig.engine.eval("window.hidden").await, 1);
+    assert_eq!(rig.engine.eval("window.submitted").await, 0);
+    assert_eq!(rig.engine.eval("document.activeElement.id").await, "date");
+}
+
+#[tokio::test]
+async fn an_invalid_widget_date_keeps_an_open_calendar_and_does_not_commit() {
+    let (rig, reference) = page(json!("mm/dd/yyyy")).await;
+    rig.engine.eval("window.hidden=0;window.jQuery=()=>({data:()=>({o:{format:window.widgetFormat},hide(){window.hidden++}})})").await;
+    type_date(&rig, &reference, "2026-02-30").await.unwrap_err();
+    assert_eq!(rig.engine.eval("window.hidden").await, 0);
+    assert_eq!(rig.engine.eval("window.events").await, json!([]));
+}
+
+#[tokio::test]
+async fn component_and_singleton_calendars_commit_then_close_without_blur_or_submit() {
+    for kind in ["bootstrap", "jqueryUi"] {
+        let (rig, _) = page(Value::Null).await;
+        rig.engine
+            .eval(&format!(
+                "window.fixtureDateKind={};{}",
+                json!(kind),
+                include_str!("support/date_widgets.js")
+            ))
+            .await;
+        let (model, _, _) = rig
+            .browser
+            .observe(SESSION, ReadOptions::default())
+            .await
+            .unwrap();
+        let reference = &model.refs.iter().find(|r| r.name == "Date").unwrap().id;
+        let receipt = type_date(&rig, reference, "2027-04-15").await.unwrap();
+        assert_eq!(
+            receipt["untrustedPageContent"]["target"]["valueNow"], "04/15/2027",
+            "{kind}"
+        );
+        assert_eq!(
+            rig.engine.eval("window.widgetDate").await,
+            "04/15/2027",
+            "{kind}"
+        );
+        assert_eq!(
+            rig.engine
+                .eval("Boolean(document.getElementById('calendar'))")
+                .await,
+            false,
+            "{kind}"
+        );
+        assert_eq!(
+            rig.engine
+                .eval("[window.hidden,window.blurs,window.submitted,document.activeElement.id]")
+                .await,
+            json!([1, 0, 0, "date"]),
+            "{kind}"
+        );
+    }
+}
+
+/// Holds the type action's focus back from the page (every focus of the field until `window.released`), as a page
+/// without focus does: `WKWebView` whose view is not focused, or a field in a frame that is not the focused one.
+/// With `deliver_ms` the page gets that focus later, as such a page does once it is focused.
+async fn held_focus_widget(kind: &str, deliver_ms: Option<u64>) -> (Rig, String) {
+    let (rig, _) = page(Value::Null).await;
+    rig.engine
+        .eval(&format!(
+            "window.fixtureDateKind={};{}",
+            json!(kind),
+            include_str!("support/date_widgets.js")
+        ))
+        .await;
+    let deliver = deliver_ms.map_or_else(String::new, |ms| {
+        format!("setTimeout(()=>{{window.released=true;date.dispatchEvent(new FocusEvent('focus'));}},{ms});")
+    });
+    rig.engine
+        .eval(&format!(
+            "const date=document.getElementById('date');window.order=[];\
+             window.addEventListener('focus',e=>{{if(e.target===date&&!window.released){{e.stopImmediatePropagation();{deliver}}}}},true);\
+             date.addEventListener('focus',()=>window.order.push('focus'));\
+             date.addEventListener('input',()=>window.order.push('input'));"
+        ))
+        .await;
+    let (model, _, _) = rig
+        .browser
+        .observe(SESSION, ReadOptions::default())
+        .await
+        .unwrap();
+    let reference = model
+        .refs
+        .iter()
+        .find(|r| r.name == "Date")
+        .unwrap()
+        .id
+        .clone();
+    (rig, reference)
+}
+
+/// The date is committed and the calendar closed only after the page has seen the field's focus, so that focus
+/// cannot open the calendar over the committed date; the receipt describes that final state.
+#[tokio::test]
+async fn a_widget_date_is_committed_only_after_the_page_saw_the_fields_focus() {
+    for kind in ["bootstrap", "jqueryUi"] {
+        let (rig, reference) = held_focus_widget(kind, Some(250)).await;
+        let receipt = type_date(&rig, &reference, "2027-04-15").await.unwrap();
+        assert_eq!(
+            receipt["untrustedPageContent"]["target"]["valueNow"], "04/15/2027",
+            "{kind}"
+        );
+        assert_eq!(
+            rig.engine.eval("window.order").await,
+            json!(["focus", "input"]),
+            "{kind}: the date was typed before the page saw the field's focus"
+        );
+        assert_eq!(
+            rig.engine
+                .eval("[Boolean(document.getElementById('calendar')),window.hidden,window.blurs,window.submitted]")
+                .await,
+            json!([false, 1, 0, 0]),
+            "{kind}"
+        );
+        assert!(
+            !receipt.to_string().contains("Calendar"),
+            "{kind}: the receipt shows a calendar: {receipt}"
+        );
+    }
+}
+
+/// A page that cannot take focus (its window is not active) never sends it: the date is still typed and closed.
+#[tokio::test]
+async fn a_page_that_never_sees_the_focus_still_gets_the_date() {
+    let (rig, reference) = held_focus_widget("jqueryUi", None).await;
+    let receipt = type_date(&rig, &reference, "2027-04-15").await.unwrap();
+    assert_eq!(
+        receipt["untrustedPageContent"]["target"]["valueNow"],
+        "04/15/2027"
+    );
+    assert_eq!(rig.engine.eval("window.order").await, json!(["input"]));
+    assert_eq!(
+        rig.engine
+            .eval("[Boolean(document.getElementById('calendar')),window.blurs,window.submitted]")
+            .await,
+        json!([false, 0, 0])
+    );
+}

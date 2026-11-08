@@ -66,7 +66,7 @@ async fn read_during_an_endless_load_answers_truthfully_in_bounded_time() {
 }
 
 #[tokio::test]
-async fn read_refuses_a_local_network_page_the_user_opened_during_the_wait() {
+async fn read_uses_the_current_local_page_after_a_navigation_during_the_wait() {
     let rig = reloading(None).await;
     let service = rig.service.clone();
     tokio::spawn(async move {
@@ -83,10 +83,17 @@ async fn read_refuses_a_local_network_page_the_user_opened_during_the_wait() {
             .await
             .unwrap();
     });
-    let error = rig
+    let (answer, _) = rig
         .browser
         .read(SESSION, ReadOptions::default(), false, Actor::Agent)
         .await
-        .unwrap_err();
-    assert_eq!(error, vw_browser::LOCAL_NETWORK);
+        .unwrap();
+    assert_eq!(answer["untrustedPageContent"]["url"], "http://10.20.30.40/");
+    assert_eq!(answer["loading"], false);
+    assert!(
+        answer["networkGuard"]
+            .as_str()
+            .unwrap()
+            .contains("local addresses")
+    );
 }

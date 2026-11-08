@@ -1,16 +1,18 @@
 /** Available browsers and per-chat picker choice. Composer and its Debug API share these actions and core state. */
+import { browserView } from "../settings/chrome/browserView";
 import type { ChromeControlView } from "../../protocol/core";
-import { chromeUsable, edgeUsable, firefoxUsable } from "../settings/chrome/chromeRows";
+import { chromeUsable, edgeUsable, firefoxUsable, setupLine } from "../settings/chrome/chromeRows";
 import type { App } from "../shell/AppContext";
 import { openChromeTabs } from "./chromeTabs";
 
-export type ComposerBrowser = "Chrome" | "Edge" | "Firefox";
+export type ComposerBrowser = "Chrome" | "Edge" | "Safari" | "Firefox";
 
 /** Only connected browsers whose module is present can supply tab context. */
 export function usableBrowsers(view: ChromeControlView | null | undefined): ComposerBrowser[] {
   return [
     ...(chromeUsable(view) ? ["Chrome" as const] : []),
     ...(edgeUsable(view) ? ["Edge" as const] : []),
+    ...(chromeUsable(browserView(view, "Safari")) ? ["Safari" as const] : []),
     ...(firefoxUsable(view) ? ["Firefox" as const] : []),
   ];
 }
@@ -35,25 +37,25 @@ export async function openBrowserTabs(
 
 /** The three readiness states at the tab entry point; labels never decide connection behavior. */
 export function browserSignals(view: ChromeControlView | null | undefined): {
-  browser: "Chrome" | "Edge";
+  browser: "Chrome" | "Edge" | "Safari";
   state: "missing" | "waiting" | "ready";
   label: string;
 }[] {
   if (view == null) return [];
-  return (["Chrome", "Edge"] as const).flatMap((browser) => {
-    const setup = browser === "Chrome" ? view.setup : view.edge;
-    if (setup === undefined || setup.state === "absent") return [];
+  return (["Chrome", "Edge", "Safari"] as const).flatMap((browser) => {
+    const selected = browserView(view, browser);
+    if (selected === null || selected.setup.state === "absent") return [];
+    const setup = selected.setup;
     const missing =
       setup.browserIssue === "missing" ||
       setup.browserIssue === "differentBrowser" ||
       setup.addon?.state === "chromeMissing" ||
       setup.addon?.state === "otherBrowser";
-    const ready = browser === "Chrome" ? chromeUsable(view) : edgeUsable(view);
     return [
       {
         browser,
-        state: missing ? "missing" : ready ? "ready" : "waiting",
-        label: missing ? "Browser not installed" : ready ? "Ready" : "Extension not connected",
+        state: missing ? "missing" : chromeUsable(selected) ? "ready" : "waiting",
+        label: setupLine(selected, browser),
       },
     ];
   });

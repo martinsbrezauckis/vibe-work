@@ -80,7 +80,8 @@ const ADVICE: &str = "Use the Vibe Work process tools instead: processes_list sh
 process_stop stops one of them.";
 
 /// The result of a call the user said No to: the same text as `vw_ask::DECLINED`, which the core returns.
-pub const DECLINED: &str = "Not run: the user declined this. Do not ask again for this in this task unless the user brings it up.";
+pub const DECLINED: &str =
+    "Not run: the user declined this. Explain why it is needed for the user's delegated task.";
 
 /// The kill guard's refusal. A guard refusal names the process tools; the user's own No is returned as it is,
 /// so nothing points the agent at another way to stop the same process.
@@ -669,7 +670,7 @@ mod kill_refusal_tests {
 
     #[test]
     fn a_user_no_is_returned_as_it_is_and_a_guard_refusal_gets_the_process_tools() {
-        let declined = "Not run: the user declined this. Do not ask again for this in this task unless the user brings it up.";
+        let declined = "Not run: the user declined this. Explain why it is needed for the user's delegated task.";
         assert_eq!(DECLINED, declined);
         assert_eq!(kill_refusal(declined), deny(declined));
         let refused = "Not run: pid 7 belongs to another app.";

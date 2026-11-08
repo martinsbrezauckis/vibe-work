@@ -115,22 +115,14 @@ export function AboutSettings(): ReactElement {
       {FEEDBACK_ENABLED && (
         <div className="key-line">
           <Button
-            data-testid="settings.report-bug"
+            data-testid="settings.send-feedback"
             shape="outlined"
+            disabled={core === null}
             onClick={() => {
-              if (core) void feedbackFor(core).open("bug");
+              if (core) void feedbackFor(core).open();
             }}
           >
-            Report a bug…
-          </Button>
-          <Button
-            data-testid="settings.request-feature"
-            shape="outlined"
-            onClick={() => {
-              if (core) void feedbackFor(core).open("feature");
-            }}
-          >
-            Ask for a feature…
+            Send feedback…
           </Button>
         </div>
       )}

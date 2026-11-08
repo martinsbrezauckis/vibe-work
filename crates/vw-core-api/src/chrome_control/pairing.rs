@@ -28,6 +28,8 @@ pub enum PairingState {
     WindowClosed,
     /// The optional owned Firefox browser is absent.
     NotInstalled,
+    /// The installed Firefox lacks the required remote commands.
+    BrowserOutdated,
 }
 
 impl PairingState {
@@ -57,6 +59,7 @@ impl PairingState {
             Self::WindowOpen => "Window open".into(),
             Self::WindowClosed => "Window closed".into(),
             Self::NotInstalled => "Not installed".into(),
+            Self::BrowserOutdated => "Update Firefox".into(),
         }
     }
 
@@ -66,6 +69,8 @@ impl PairingState {
             "Window open" => Some(Self::WindowOpen),
             "Window closed" => Some(Self::WindowClosed),
             "Not installed" => Some(Self::NotInstalled),
+            "Starting" => Some(Self::Connecting),
+            "Update Firefox" => Some(Self::BrowserOutdated),
             _ => None,
         }
     }

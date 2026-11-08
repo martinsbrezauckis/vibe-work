@@ -39,6 +39,15 @@ pub(crate) async fn start_with(
     name: &str,
     edit: impl FnOnce(&mut crate::CoreConfig, &std::path::Path),
 ) -> crate::Core {
+    start_with_confirmer(name, edit, NoPrompt).await
+}
+
+/// An offline core with a controllable native presenter for person-only permission tests.
+pub(crate) async fn start_with_confirmer(
+    name: &str,
+    edit: impl FnOnce(&mut crate::CoreConfig, &std::path::Path),
+    confirmer: impl Confirmer + 'static,
+) -> crate::Core {
     let root = std::env::var_os("VW_TEST_ROOT").map_or_else(
         || std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/tmp"),
         std::path::PathBuf::from,
@@ -52,6 +61,11 @@ pub(crate) async fn start_with(
         ..crate::CoreConfig::default()
     };
     edit(&mut config, &dir);
+    // Legacy file-backed fixtures model Windows/Linux. The macOS permission fixtures opt in explicitly,
+    // on every host OS, so native macOS runs never expect protected profile discovery.
+    if config.chrome_control.macos.is_none() {
+        config.chrome_control.macos = Some(false);
+    }
     // Chrome fixtures never discover or launch the person's browser.
     if config.chrome_control.user_home.is_none() {
         config.chrome_control.user_home = Some(dir.join("chrome-home"));
@@ -78,7 +92,7 @@ pub(crate) async fn start_with(
             dir.clone(),
         ),
         Arc::new(vw_supervisor::NoSecret),
-        NoPrompt,
+        confirmer,
         config,
     ))
     .await

@@ -16,6 +16,13 @@ pub(crate) fn endpoint() -> Option<url::Url> {
         && url.path() == "/v1/reports")
         .then_some(url)
 }
+pub(crate) fn within_limits(report: &FeedbackReport) -> bool {
+    let mut text = report.clone();
+    text.screenshot = None;
+    serde_json::to_vec(&text).is_ok_and(|bytes| bytes.len() <= 16384)
+        && serde_json::to_vec(report)
+            .is_ok_and(|bytes| bytes.len() <= 16384 + 4 * 1_048_576_usize.div_ceil(3) + 512)
+}
 fn failed() -> CoreError {
     CoreError::new(
         ErrorCode::Internal,
@@ -24,7 +31,7 @@ fn failed() -> CoreError {
 }
 pub(crate) async fn send(url: url::Url, report: &FeedbackReport) -> Result<(), CoreError> {
     let bytes = serde_json::to_vec(report).map_err(|_| failed())?;
-    if bytes.len() > 16384 {
+    if !within_limits(report) {
         return Err(CoreError::new(
             ErrorCode::InvalidParams,
             "The report is too long. Shorten it and review again.",

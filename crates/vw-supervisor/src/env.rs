@@ -39,6 +39,11 @@ pub const EXPERIMENT_CONFIG_KEYS: [&str; 8] = [
     "experimental_enable_tab_status",
 ];
 
+/// Vibe settings a runtime layer (`GrowthBook`) can switch on that Vibe never reads from the person's files, pinned off in
+/// the server environment only (Vibe's environment layer beats `GrowthBook` and both TOML layers). The managed-shell
+/// rollout gives `bash_stdin`/`bash_sessions` Vibe `ALWAYS` with input the per-command guards cannot see.
+pub const RUNTIME_PINNED_OFF: [&str; 1] = ["VIBE_MANAGED_SHELL_TOOLS_ENABLED"];
+
 /// Names copied from the parent environment when present. Locale, terminal, proxy and CA settings
 /// make HTTPS and tools work; the Linux session block reaches the keyring; the Windows block is what Python and a console child need to start.
 /// Matched case-insensitively on Windows (its env names are case-insensitive).
@@ -272,7 +277,11 @@ pub struct EnvPlan<'a> {
 /// [`EnvError`] when an explicit variable is refused.
 pub fn build_env(plan: &EnvPlan<'_>) -> Result<Vec<(OsString, OsString)>, EnvError> {
     for (name, value) in plan.extra {
-        if name.to_ascii_uppercase().starts_with("VIBE_EXPERIMENTAL_") {
+        if name.to_ascii_uppercase().starts_with("VIBE_EXPERIMENTAL_")
+            || RUNTIME_PINNED_OFF
+                .iter()
+                .any(|pinned| name.eq_ignore_ascii_case(pinned))
+        {
             return Err(EnvError::Experiment(name.clone()));
         }
         if name.eq_ignore_ascii_case(API_KEY_VAR) || name.eq_ignore_ascii_case(MCP_TOKEN_VAR) {
@@ -301,6 +310,9 @@ pub fn build_env(plan: &EnvPlan<'_>) -> Result<Vec<(OsString, OsString)>, EnvErr
             &format!("VIBE_{}", key.to_ascii_uppercase()),
             "false".into(),
         );
+    }
+    for name in RUNTIME_PINNED_OFF {
+        set(name, "false".into());
     }
     set("VIBE_HOME", plan.vibe_home.as_os_str().to_owned());
     set(
@@ -434,5 +446,33 @@ mod tests {
                 "{name} must not override the pin"
             );
         }
+    }
+
+    /// Vibe 3.1.0's managed-shell rollout (`GrowthBook`) gives `bash_stdin` and `bash_sessions` Vibe `ALWAYS`; their
+    /// input has no `command`, so the app's per-command guards cannot see it. It stays off.
+    #[test]
+    fn the_managed_shell_rollout_is_pinned_off() {
+        let name = "VIBE_MANAGED_SHELL_TOOLS_ENABLED";
+        let extra = [(name.to_owned(), OsString::from("true"))];
+        let mut plan = EnvPlan {
+            parent: vec![(name.into(), "true".into())],
+            extra: &[],
+            vibe_home: Path::new("vibe-home"),
+            home: None,
+            key: None,
+            mcp_token: None,
+        };
+        let env = build_env(&plan).unwrap();
+        assert!(
+            env.iter()
+                .any(|(key, value)| key == name && value == "false")
+                && env.iter().filter(|(key, _)| key == name).count() == 1,
+            "the rollout must be off even when the parent turns it on"
+        );
+        plan.extra = &extra;
+        assert!(
+            build_env(&plan).is_err(),
+            "an explicit variable must not override the pin"
+        );
     }
 }

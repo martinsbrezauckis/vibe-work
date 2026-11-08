@@ -50,6 +50,7 @@ export function SessionList() {
   const filter = useShellState((s) => s.filter);
   const index = useCoreState((s) => s.index);
   const serverPhase = useCoreState((s) => s.server.phase);
+  const replacingVibe = useVibeUi((s) => s.view?.replacing !== undefined);
   const ready = serverPhase === "running";
   const layout = useLayout();
   const groups = useGroupActions();
@@ -77,6 +78,7 @@ export function SessionList() {
   const searching = filter.trim() !== "";
   const error = index.loading ? null : index.error;
   const needsInstall = useVibeUi(vibeCovers) || serverPhase === "notInstalled";
+  const loadingSavedChats = replacingVibe && serverPhase === "notInstalled" && full.total === 0;
   const loading =
     !needsInstall &&
     error === null &&
@@ -255,17 +257,24 @@ export function SessionList() {
               )}
             </div>
             {creating && <NewProjectField />}
-            {full.projects.map((group) => (
-              <ProjectGroupView
-                key={group.key}
-                group={group}
-                shown={shownGroups.get(group.key) ?? null}
-              />
-            ))}
-            {full.grouped && <UnfiledSection rows={full.unfiled} shown={model.unfiled} />}
+            {!loadingSavedChats &&
+              full.projects.map((group) => (
+                <ProjectGroupView
+                  key={group.key}
+                  group={group}
+                  shown={shownGroups.get(group.key) ?? null}
+                />
+              ))}
+            {!loadingSavedChats && full.grouped && (
+              <UnfiledSection rows={full.unfiled} shown={model.unfiled} />
+            )}
             {model.total === 0 && (index.loaded || needsInstall) && error === null && (
               <EmptyState glyph="chat" small className="col-note">
-                {searching ? "No sessions match." : "No sessions yet."}
+                {loadingSavedChats
+                  ? "Loading saved chats…"
+                  : searching
+                    ? "No sessions match."
+                    : "No sessions yet."}
               </EmptyState>
             )}
             {error !== null && (

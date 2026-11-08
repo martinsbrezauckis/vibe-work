@@ -30,6 +30,7 @@ mod linux_layout;
 pub mod mac_agent;
 mod media;
 mod native_click;
+mod overlay_visibility;
 mod page_origin;
 mod pdf;
 mod person_watch;

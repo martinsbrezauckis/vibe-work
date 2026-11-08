@@ -28,6 +28,10 @@ use std::sync::Arc;
 
 use vw_gate::{Confirmation, ConfirmationRequest, Confirmer, Requester};
 
+#[cfg(test)]
+#[path = "confirm_pairing_tests.rs"]
+mod pairing_tests;
+
 /// Longest caller text a confirmation dialog shows. Longer requests are declined or paged, never clipped.
 pub const DIALOG_PARAMS_MAX_CHARS: usize = 1200;
 
@@ -165,7 +169,7 @@ fn long_text(request: &ConfirmationRequest) -> Option<Vec<char>> {
 /// The first line naming who asks, from the request's structured `requester` (empty for a click in this window).
 fn lead(request: &ConfirmationRequest) -> String {
     match request.requester {
-        // `Core` is never shown: the core answers its own requests (`vw-core-api` confirmer).
+        // Core's person-only requests (such as browser pairing) also use fixed native text without an agent label.
         Requester::Window | Requester::Core => String::new(),
         Requester::DebugApi => format!("{DEBUG_API_LINE}\n\n"),
         Requester::Agent => format!("{AGENT_LINE}\n\n"),
@@ -314,6 +318,12 @@ pub const CONTINUE: &str = "Continue";
 /// The pressed label decides the answer ([`dialog_answer`]), so the order never changes what a label means.
 #[must_use]
 pub fn dialog_buttons(request: &ConfirmationRequest) -> Vec<String> {
+    if request.method == vw_core_api::BROWSER_PAIRING_DIALOG_METHOD {
+        return vec![
+            vw_vocabulary::texts::CONNECTOR_CONNECT.to_owned(),
+            "Not now".to_owned(),
+        ];
+    }
     if request.method == vw_core_api::NEW_CHAT_RESTORE_DIALOG_METHOD {
         return vec!["Keep".to_owned(), "Pick again".to_owned()];
     }
@@ -384,6 +394,13 @@ pub fn dialog_heading(text: &str) -> (String, String) {
 /// closed: anything that is not exactly an approving label of this request declines.
 #[must_use]
 pub fn dialog_answer(request: &ConfirmationRequest, pressed: Option<&str>) -> Confirmation {
+    if request.method == vw_core_api::BROWSER_PAIRING_DIALOG_METHOD {
+        return if pressed == Some(vw_vocabulary::texts::CONNECTOR_CONNECT) {
+            Confirmation::Approved
+        } else {
+            Confirmation::Declined
+        };
+    }
     if matches!(
         request.method.as_str(),
         vw_core_api::NEW_CHAT_RESTORE_DIALOG_METHOD

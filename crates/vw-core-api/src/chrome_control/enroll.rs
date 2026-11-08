@@ -479,10 +479,12 @@ pub(super) async fn connect_edge(
     }
     super::refresh_helper_held(chrome).await;
     if let Some(state) = chrome.dir() {
-        super::setup::repair_registrations(&chrome.config, state, Some("Microsoft Edge"))
-            .map_err(|_| "Helper setup required")?;
+        super::setup::repair_registrations(&chrome.config, state, Some("Microsoft Edge"))?;
     }
-    chrome.set_enabled(true)?;
+    chrome.set_browser_enabled(super::agent_browser::Browser::Edge, true)?;
+    super::switches::deliver(shared)
+        .await
+        .map_err(|error| error.message)?;
     let browser = Browser::Edge;
     let attempt = begin(shared, origin, browser).await;
     browser
@@ -509,7 +511,7 @@ pub(super) async fn connect_edge(
     } else {
         super::setup::open_store_for(&chrome.config, true)
     };
-    super::start_owner(shared).await;
+    super::start_owner_for(shared, Some("Microsoft Edge")).await;
     super::owner::publish(shared);
     if chrome
         .owner

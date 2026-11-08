@@ -67,6 +67,8 @@ mod plugin_pins;
 mod quiet;
 #[path = "channels_resume.rs"]
 mod resume;
+#[path = "channels_sweep.rs"]
+mod sweep;
 #[cfg(test)]
 #[path = "channels_test_peer.rs"]
 mod test_peer;
@@ -205,17 +207,8 @@ impl Channels {
     /// caller's own `mcpServers`), and its credential is bound to the session the answer names.
     pub(crate) async fn request(&self, method: &str, mut params: Value) -> Result<Value, RpcError> {
         if loads_plugins(method, &params) {
-            let _held = self.plugin_approvals.mutations.lock().await;
-            // Fresh pinned-Python identity batches run on the blocking pool.
-            let approvals = self.plugin_approvals.clone();
-            tokio::task::spawn_blocking(move || approvals.sweep())
+            self.sweep_plugins()
                 .await
-                .map_err(|join| {
-                    local_error(
-                        method,
-                        crate::error::CoreError::new(crate::ErrorCode::Internal, join.to_string()),
-                    )
-                })?
                 .map_err(|e| local_error(method, e))?;
         }
         let ticket = self
@@ -652,7 +645,7 @@ impl Channels {
     }
 
     /// A new server generation: every binding of an older one is dead. Returns the sessions that
-    /// had a channel (to be resumed on the new server).
+    /// had a channel (to be read on the new server, without attaching).
     pub(crate) fn reset(&self, generation: u64) -> Vec<String> {
         // guest callbacks died with the old server (and channel ids start again).
         locked(&self.guest_callbacks).clear();

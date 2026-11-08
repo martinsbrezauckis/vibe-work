@@ -32,6 +32,8 @@ impl Rig {
     }
     fn config(&self) -> ChromeControlConfig {
         ChromeControlConfig {
+            // Registration repair here exercises the compatibility file flow on either Unix host.
+            macos: Some(false),
             windows_registry_root: self.registry.key().into(),
             package: Some(self.root.join("package")),
             user_home: Some(self.root.join("home")),
@@ -48,7 +50,7 @@ impl Rig {
         if cfg!(windows) {
             self.state().join("host")
         } else {
-            self.root.join(if cfg!(target_os = "macos") {
+            self.root.join(if self.config().is_macos() {
                 "home/Library/Application Support/Google/Chrome/NativeMessagingHosts"
             } else {
                 "home/.config/google-chrome/NativeMessagingHosts"

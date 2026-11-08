@@ -77,8 +77,11 @@ fn compose(
     };
     let mut sheet = vw_preview::canvas(edge, cell_h * rows, [24, 24, 24, 255]);
     let mut unique = Vec::new();
+    // A contact sheet never displays a source frame wider than one cell. Let native decoders
+    // scale at extraction time where supported, and avoid large intermediate RGBA copies.
+    let frame_edge = decode_edge(edge, cols, job.request.output);
     for (index, ms) in times.into_iter().enumerate() {
-        let frame = decoder.frame(ms * 1_000_000, edge)?;
+        let frame = decoder.frame(ms * 1_000_000, frame_edge)?;
         let frame_id = if let Some(i) = unique.iter().position(|p| *p == frame.pts_ns) {
             i
         } else {
@@ -131,6 +134,14 @@ fn compose(
     reply.png = shot.base64();
     Ok(reply)
 }
+
+fn decode_edge(edge: u32, cols: u32, output: Output) -> u32 {
+    if output == Output::ContactSheet {
+        edge / cols
+    } else {
+        edge
+    }
+}
 // Small built-in decimal glyphs avoid font, network and filesystem access in the helper.
 #[allow(
     clippy::cast_possible_truncation,
@@ -169,5 +180,20 @@ fn stamp(image: &mut Rgba, x: u32, y: u32, ms: u64) {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn contact_sheet_decodes_at_cell_size() {
+        assert_eq!(
+            super::decode_edge(1280, 4, vw_agent_tools::video::Output::ContactSheet),
+            320
+        );
+        assert_eq!(
+            super::decode_edge(1280, 1, vw_agent_tools::video::Output::Frame),
+            1280
+        );
     }
 }

@@ -9,13 +9,14 @@ use serde_json::Value;
 /// Methods that need the session on a channel: Vibe answers them only for the session a channel has
 /// attached (`_handler.py` calls `_require_attached` / `_require_session` for them;
 /// `turn/start` for a session from a channel that does not hold it answers `not_found`). Before one
-/// of these, a session without a channel is resumed on a new one (`Core::open_session` in
-/// `recovery.rs`, after the gate has checked the call itself). Everything else that names a session
+/// of these, only a person's action may resume a detached session (`attaches_session`). Reads
+/// use an existing channel or let Vibe answer from the lobby; they never recover old work.
+/// Everything else that names a session
 /// works from the lobby for a stored session (read, rename, pin, archive, markAsSeen) or is not
 /// used yet. Session-channel methods include `turn/start`, `callback/result`, and
 /// `session/agent/update`; the others follow Vibe's handler requirements.
 const NEEDS_CHANNEL: &[&str] = &[
-    // Runtime reads back the attached session, including after a deferred key refresh closed its channel.
+    // Runtime reads use an attached session; a deferred key refresh may leave the chat detached.
     "runtime/read",
     "loops/list",
     "loops/create",
@@ -55,8 +56,8 @@ const NEEDS_CHANNEL: &[&str] = &[
     "config/model/write",
     // `account/read` from the lobby for a session whose channel had closed
     // answered `conflict`, "Start, resume, or continue a session before using this method"): the
-    // settings screens read and write config and the account through a session, so a session without a
-    // channel is reopened first. `config/reload` is the `/reload` command's call.
+    // settings screens use a session's channel when attached. Reads cannot open one; a person's write can.
+    // `config/reload` is the `/reload` command's call.
     "config/write",
     "config/reload",
     "config/fields/read",
@@ -83,6 +84,30 @@ pub(crate) fn needs_channel<'a>(method: &str, params: &'a Value) -> Option<&'a s
         "sessionId"
     };
     params.get(key).and_then(Value::as_str)
+}
+
+/// Reads from a mounted composer or settings panel must not implicitly resume an unfinished turn.
+/// `detached_reads` answers runtime-only reads from saved data or empty lists without opening a channel.
+pub(crate) fn attaches_session<'a>(method: &str, params: &'a Value) -> Option<&'a str> {
+    if matches!(
+        method,
+        "runtime/read"
+            | "loops/list"
+            | "skills/list"
+            | "skills/installed"
+            | "skills/catalog"
+            | "skills/detail"
+            | "skills/versions"
+            | "skills/updates"
+            | "session/turn/queue/read"
+            | "config/fields/read"
+            | "config/proxy/read"
+            | "account/read"
+            | "identity/read"
+    ) {
+        return None;
+    }
+    needs_channel(method, params)
 }
 
 /// Whether a successful `method` may hand the channel's session to the id its result names (the result's

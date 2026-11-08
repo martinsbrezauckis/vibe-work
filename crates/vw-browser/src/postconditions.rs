@@ -69,7 +69,7 @@ impl Browser {
             .service
             .load_state(session)
             .map_or(0, |state| state.loads);
-        self.wait_quiet(session, loads).await;
+        self.wait_quiet(session, loads, action.reference()).await;
         let mut proved = self.prove_state(session, action).await?;
         let mount = self.ref_mount(session)?;
         let mut press = request.clone();

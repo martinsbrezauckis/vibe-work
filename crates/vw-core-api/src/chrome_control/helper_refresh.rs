@@ -53,7 +53,7 @@ pub(super) fn refresh_with(
     state: &Path,
     replace: &mut Replace,
 ) -> Result<Refreshed, String> {
-    let Some(files) = setup::receipt_files(state) else {
+    let Some(files) = setup::receipt_files(config, state) else {
         return Ok(Refreshed::NotSetUp);
     };
     let bin = state.join("bin");
@@ -83,7 +83,9 @@ pub(super) fn refresh_with(
         }
         Refreshed::Replaced
     };
-    setup::repair_registrations(config, state, None)?;
+    if !config.is_macos() {
+        setup::repair_registrations(config, state, None)?;
+    }
     Ok(outcome)
 }
 

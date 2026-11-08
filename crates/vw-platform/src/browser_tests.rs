@@ -179,3 +179,18 @@ async fn explicit_read_waits_for_pending_refresh_instead_of_returning_stale_fact
     assert_eq!(facts.executable, Ok(PathBuf::from("/native/google-chrome")));
     assert_eq!(facts.process, ProcessState::Running);
 }
+
+#[test]
+fn remembered_profile_is_a_single_launch_argument_before_the_address() {
+    let command = super::launch::native_command(
+        std::path::Path::new("chrome.exe"),
+        "https://example.test/",
+        Some("Profile 2"),
+    );
+    assert_eq!(
+        command.get_args().collect::<Vec<_>>(),
+        ["--profile-directory=Profile 2", "https://example.test/"]
+    );
+    let unknown = super::launch::native_command(std::path::Path::new("chrome.exe"), "", None);
+    assert_eq!(unknown.get_args().count(), 0);
+}

@@ -225,6 +225,10 @@
     "allBrowsersRemoveQuestion": "Remove your browser connections?",
     "allBrowsersRemoveEffect": "Removes the browser setup. Remove the Vibe Work extension in each browser too.",
     "edgeName": "Your Edge",
+    "safariName": "Your Safari",
+    "browserUse": "Use my {browser}",
+    "safariRemoveQuestion": "Remove Your Safari?",
+    "safariRemoveEffect": "Removes the Safari connection from Vibe Work.",
     "edgeUnavailable": "Your Edge is not in this version of Vibe Work.",
     "edgeNotConnected": "Your Edge is not connected.",
     "edgeSetupQuestion": "Set up Your Edge?",
@@ -302,6 +306,16 @@
       "name": "Your Chrome",
       "description": "Use your Google Chrome from Vibe Work.",
       "tooltip": "Set up Your Chrome"
+    },
+    "yourEdge": {
+      "name": "Your Edge",
+      "description": "Use your Microsoft Edge from Vibe Work.",
+      "tooltip": "Set up Your Edge"
+    },
+    "yourSafari": {
+      "name": "Your Safari",
+      "description": "Use your Safari from Vibe Work.",
+      "tooltip": "Set up Your Safari"
     },
     "chromeExtension": {
       "name": "the Vibe Work extension",

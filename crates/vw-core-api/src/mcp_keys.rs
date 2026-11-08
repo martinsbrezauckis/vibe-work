@@ -143,6 +143,16 @@ fn invalid(message: impl Into<String>) -> CoreError {
     CoreError::new(ErrorCode::InvalidParams, message)
 }
 
+fn check_item(id: &str) -> Result<(), CoreError> {
+    if id == vw_keys::DEBUG_TOKEN_ITEM {
+        return Err(CoreError::new(
+            ErrorCode::Denied,
+            vw_keyproxy::debug_token_chat_required(),
+        ));
+    }
+    Ok(())
+}
+
 fn config_error(error: &ConfigEditError) -> CoreError {
     let code = match error {
         ConfigEditError::NameTaken => ErrorCode::InvalidParams,
@@ -296,6 +306,7 @@ async fn choose(
 ) -> Result<Chosen, CoreError> {
     match (secret_id, new_secret) {
         (Some(id), None) => {
+            check_item(&id)?;
             let list = keys
                 .project_secrets()
                 .await
@@ -417,6 +428,7 @@ pub(crate) async fn allow(shared: &Shared, origin: Origin, name: &str) -> Result
     let binding = list.into_iter().find(|b| b.server == name).ok_or_else(|| {
         CoreError::new(ErrorCode::NotFound, "no MCP server with a key of that name")
     })?;
+    check_item(&binding.secret_id)?;
     let current_name = keys
         .project_secrets()
         .await
@@ -626,6 +638,10 @@ impl McpResolver for Resolver {
                 Err(e) if vw_keys::is_locked(&e) => return Err(McpRefusal::Locked),
                 Err(_) => return Err(McpRefusal::NotAllowed),
             };
+            // This connection is shared across chats, so even an existing Always grant cannot prove Full access.
+            if binding.secret_id == vw_keys::DEBUG_TOKEN_ITEM {
+                return Err(McpRefusal::DebugTokenRequiresChat);
+            }
             if shared.connectors.mcp_keys.grant_word(&binding) == "none" {
                 return Err(McpRefusal::NotAllowed);
             }

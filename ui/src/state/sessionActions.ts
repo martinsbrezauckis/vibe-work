@@ -13,8 +13,8 @@
  * - The folder picker is native and owned by Rust; a path typed or sent by the webview never
  *   reaches the gate as "picked".
  * - Failures become one toast with the core's message; actions never throw to the caller.
- * - The core always knows which session the main view shows (`watchViewed`): that
- *   session's channel to Vibe stays open while it is shown.
+ * - The core always knows which session the main view shows (`watchViewed`): it reads a detached
+ *   session and keeps an already live channel open while it is shown.
  */
 import type { Command, JsonValue, ProcessesResult } from "../protocol/core";
 import { CoreCallError, toCallError } from "../protocol/client/types";
@@ -400,8 +400,8 @@ export function createSessionActions(deps: {
 
     /**
      * Tells the core which session the main view shows whenever the selection changes, so the core
-     * attaches and verifies its access mode immediately (`viewSession`), then keeps its channel open
-     * however long it is idle. Failures use the usual toast. Returns a stop function.
+     * reads a detached session (`viewSession`) or keeps its live channel open however long it is idle.
+     * Failures use the usual toast. Returns a stop function.
      */
     watchViewed(): () => void {
       let last: string | null | undefined;

@@ -4,7 +4,7 @@
 //!
 //! Every request opens a value-free ask before presentation. The service records the first answer or cancellation; dropping the presentation ends its permission wait and makes late answers ineffective.
 //! The Debug API acts as the user outside the vault, and Core may complete an earlier user choice without
-//! another dialog. Vault policy always requires the person's native answer, regardless of requester.
+//! another dialog. Person-only policies (vault and browser pairing) always require the native answer.
 //! Dialogs retain their complete feature explanations and existing offered scopes. Records use policy labels,
 //! never request parameters or dialog bodies. An unoffered lasting answer is reduced to Allow once.
 

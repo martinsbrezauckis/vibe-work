@@ -1,68 +1,70 @@
 /**
- * Settings › Developer: the Debug API switch and its token file (moved from the old Settings dialog), and the
- * shared switch for agent access to local-network pages.
- * Depends on: AppContext, hooks, protocol/client types, useChromeControl. Called by: SettingsPage.
- * Invariants: the switch calls the host (Tauri command) and the indicator follows the core's flag event, never the
- * click; in browser dev mode the switch is disabled with the reason; the token never crosses the bridge, only the
- * path of the file that holds it.
+ * Developer settings: Debug API enablement and its ordinary vault secret.
+ * Uses the typed host client for metadata/regeneration and the core's user-only native clipboard command.
+ * No token value enters React state, the bridge or Debug API UI replies.
  */
-import { Button, Switch } from "../../components/Controls";
-import { PathLine } from "../../components/PathLine";
+import { Button, IconButton, Switch } from "../../components/Controls";
 import { type ReactElement, useEffect, useState } from "react";
 
 import { toCallError } from "../../protocol/client/types";
+import { useKeyUi } from "../setup/useKeys";
 import { useApp } from "../shell/AppContext";
 import { useCoreState } from "../shell/hooks";
-import { useChromeControl } from "./chrome/useChromeControl";
 
 /** The Developer section. */
 export function DeveloperSettings(): ReactElement {
   const { core, toasts } = useApp();
   const debugOn = useCoreState((s) => s.debugApi.enabled);
   const reason = useCoreState((s) => s.debugApi.reason);
+  const debugRequested = debugOn || reason === "vault-unavailable";
+  const vaultState = useKeyUi((s) => s.status?.vaultState);
   const canSwitch = core?.client.kind === "tauri";
-  const [tokenFile, setTokenFile] = useState<string | null>(null);
-  const chrome = useChromeControl();
-  const localNetwork = chrome.view?.localNetwork ?? false;
-  // A paired Chrome that has not taken the switch's current value yet (the core keeps sending it).
-  const notApplied =
-    chrome.view?.setup.pairingState === "paired" && !chrome.view.localNetworkApplied;
+  const [tokenState, setTokenState] = useState("Reading…");
+  const [busy, setBusy] = useState(false);
   useEffect(() => {
     if (core === null || !canSwitch) return;
     let live = true;
-    core.client
-      .debugApiTokenFile(false)
-      .then((path) => {
-        if (live) setTokenFile(path);
-      })
-      .catch(() => undefined);
+    // The lookup settles inside the tracked promise: a refusal (locked vault, or the Debug API
+    // driving the window, which never reads vault data) is a shown state, not the error of the
+    // action that opened Developer.
+    void core
+      .trackAction(
+        core.client.debugApiTokenFile(false).then(
+          (id) => (id === null ? "Not set" : "In vault"),
+          () => "Vault unavailable" as const,
+        ),
+      )
+      .then((state) => {
+        if (live) {
+          setTokenState(state);
+        }
+      });
     return () => {
       live = false;
     };
-  }, [core, canSwitch]);
-  const regenerate = () => {
+  }, [core, canSwitch, vaultState, debugOn]);
+  const tokenAction = async (rotate: boolean) => {
     if (core === null) return;
-    core.client
-      .debugApiTokenFile(true)
-      .then((path) => {
-        setTokenFile(path);
-        toasts.push({
-          kind: "info",
-          bellKind: "security",
-          text: "New Debug API token written. The old one no longer works.",
-        });
-      })
-      .catch((thrown: unknown) => {
-        toasts.push({
-          kind: "error",
-          bellKind: "failure",
-          text: toCallError(thrown).error.message,
-        });
+    setBusy(true);
+    try {
+      const id = await core.client.debugApiTokenFile(rotate);
+      setTokenState(id === null ? "Not set" : "In vault");
+      if (id === null) return;
+      if (!rotate) await core.run({ type: "secrets", request: { op: "copy", id } });
+      toasts.push({
+        kind: "info",
+        bellKind: "security",
+        text: rotate ? "Token regenerated" : "Token copied",
       });
+    } catch (thrown: unknown) {
+      toasts.push({ kind: "error", bellKind: "failure", text: toCallError(thrown).error.message });
+    } finally {
+      setBusy(false);
+    }
   };
   const flip = () => {
     if (core === null) return;
-    core.client.setDebugApi(!debugOn).catch((thrown: unknown) => {
+    core.client.setDebugApi(!debugRequested).catch((thrown: unknown) => {
       toasts.push({ kind: "error", bellKind: "failure", text: toCallError(thrown).error.message });
     });
   };
@@ -73,61 +75,54 @@ export function DeveloperSettings(): ReactElement {
         <span>
           Debug API
           <span className="d">
-            Lets a local agent do what you can do in Vibe Work, terminal and files included, and
-            answers the app&apos;s confirmations for you; only your vault stays yours. It hides
-            known secrets where it can, but that is no guarantee. 127.0.0.1 only, with a token in a
-            file only you can read. Off by default; developer builds start with it on. While it
-            runs, the status bar says &quot;Debug API&quot; (developer builds also show a badge in
-            the title bar).
-            {debugOn && ` Now on (${reason}).`}
-            {!canSwitch && " The switch works in the app window."}
+            {debugOn ? "On" : reason === "vault-unavailable" ? "Vault unavailable" : "Off"}
+            {!canSwitch && " · App window only"}
           </span>
         </span>
-        <Switch
-          data-testid="settings.developer-settings-switch"
-          aria-label="Debug API"
-          aria-checked={debugOn}
-          disabled={!canSwitch}
-          onClick={flip}
-        />
-      </div>
-      {chrome.view !== null && (
-        <div className="check" data-setting="chrome-local-network">
-          <span>
-            Local network pages for the agent
-            {notApplied && <span className="d">Not applied in Chrome yet</span>}
-          </span>
+        <div className="set-actions">
+          {canSwitch && debugOn && (
+            <IconButton
+              data-testid="settings.developer-copy-token"
+              data-user-only="true"
+              icon="copy"
+              label="Copy token"
+              title={vaultState === "unlocked" ? "Copy token" : "Unlock the vault to copy"}
+              disabled={busy || vaultState !== "unlocked"}
+              onClick={() => {
+                void core.trackAction(tokenAction(false));
+              }}
+            />
+          )}
           <Switch
-            data-testid="settings.developer-settings-local-network"
-            aria-label="Local network pages for the agent"
-            aria-checked={localNetwork}
-            disabled={chrome.busy !== null}
-            onClick={() => {
-              void chrome.run({ op: "setLocalNetwork", enabled: !localNetwork }, "setLocalNetwork");
-            }}
+            data-testid="settings.developer-settings-switch"
+            aria-label="Debug API"
+            aria-checked={debugRequested}
+            disabled={!canSwitch}
+            onClick={flip}
           />
         </div>
-      )}
+      </div>
       {canSwitch && (
         <div className="check" data-setting="debug-token">
           <span>
-            Token file
-            <span className="d" data-testid="token-file">
-              {tokenFile === null ? "…" : <PathLine path={tokenFile} />}
-            </span>
-            <span className="d">
-              Agents read the token from this file. It stays the same across restarts until you
-              regenerate it.
+            Debug API token
+            <span className="d" data-testid="token-vault">
+              {tokenState}
             </span>
           </span>
-          <Button
-            data-testid="settings.developer-settings-tb-btn"
-            type="button"
-            shape="outlined"
-            onClick={regenerate}
-          >
-            Regenerate token
-          </Button>
+          <div className="set-actions">
+            <Button
+              data-testid="settings.developer-settings-tb-btn"
+              type="button"
+              shape="outlined"
+              disabled={busy}
+              onClick={() => {
+                void core.trackAction(tokenAction(true));
+              }}
+            >
+              Regenerate token
+            </Button>
+          </div>
         </div>
       )}
     </section>

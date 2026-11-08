@@ -27,6 +27,7 @@ import { editPreview } from "../transcript/model/editPreview";
 import { type Obj, detailOf, entryId, obj, str } from "../transcript/model/entries";
 import { DiffView } from "../transcript/rows/DiffView";
 import { ShowAll } from "../transcript/rows/ShowAll";
+import { visibleText, visibleDiff } from "./visibleText";
 import { AskCard } from "./AskCard";
 import { AuditRow } from "./AuditRow";
 import { useCardClose } from "./useCardClose";
@@ -56,9 +57,13 @@ function Payload({ entry }: { entry: Obj }): ReactElement | null {
   const whole = useTranscriptUi((s) => s.open[wholeKey] === true);
   switch (effect["kind"]) {
     case "shell":
-      return <pre className="cmd">$ {str(input?.["command"]) ?? ""}</pre>;
+      return <pre className="cmd">$ {visibleText(str(input?.["command"]) ?? "")}</pre>;
     case "file_search":
-      return <pre className="cmd">$ {str(effect["vwCommand"]) ?? "Command unavailable"}</pre>;
+      return (
+        <pre className="cmd">
+          $ {visibleText(str(effect["vwCommand"]) ?? "Command unavailable")}
+        </pre>
+      );
     case "file_write":
     case "file_edit": {
       // The core's preview numbers the lines in the file as it was when the card opened; without one the card
@@ -69,7 +74,7 @@ function Payload({ entry }: { entry: Obj }): ReactElement | null {
       if (preview !== null)
         return (
           <DiffView
-            diff={preview.diff}
+            diff={visibleDiff(preview.diff)}
             id={id}
             both
             footer={
@@ -95,7 +100,7 @@ function Payload({ entry }: { entry: Obj }): ReactElement | null {
           />
         );
       const diff = effect["kind"] === "file_write" ? writeDiff(asEntry) : editDiff(asEntry);
-      return diff === null ? null : <DiffView diff={diff} id={id} />;
+      return diff === null ? null : <DiffView diff={visibleDiff(diff)} id={id} />;
     }
     default: {
       const display = obj(effect["display"]);
@@ -103,7 +108,7 @@ function Payload({ entry }: { entry: Obj }): ReactElement | null {
       const text =
         str(display?.["content"]) ||
         (input === null || Object.keys(input).length === 0 ? "" : JSON.stringify(input, null, 2));
-      return text === "" ? null : <ShowAll id={`${id}:payload`} text={text} />;
+      return text === "" ? null : <ShowAll id={`${id}:payload`} text={visibleText(text)} />;
     }
   }
 }
@@ -184,7 +189,7 @@ export function ApprovalAsk({
 
   const always = alwaysControl(ask?.alwaysSetting);
   const choices = approvalChoices(entry, ask?.offers, ask?.alwaysSetting, covers);
-  const buttons = buttonsFor(choices, always);
+  const buttons = buttonsFor(choices, always, entry);
   const disabled =
     held || !offered || sending || native === "waiting" || problem?.kind === "refused";
   const choose = (choice: AskChoice) => {

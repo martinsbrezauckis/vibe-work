@@ -23,34 +23,32 @@ export function chromeUsable(view: ChromeControlView | null | undefined): boolea
 }
 export function setupLine(
   view: ChromeControlView | null,
-  browser: "Chrome" | "Edge" = "Chrome",
+  browser: "Chrome" | "Edge" | "Safari" = "Chrome",
 ): string {
+  if (view === null) return "Reading…";
+  if (view.setup.addon) return view.setup.addon.label;
   if (browser === "Edge") {
-    if (view === null) return "Reading…";
     if (!view.setup.package && view.setup.pairing === TEXT.chromePackageMissing)
       return wording(TEXT.browserPackageMissing, { browser: TEXT.edgeName });
     if (!view.setup.package && view.setup.pairing === TEXT.chromePackageChanged)
       return wording(TEXT.browserPackageChanged, { browser: TEXT.edgeName });
     if (!view.setup.package || view.setup.pairingState === "blocked") return view.setup.pairing;
-    if (view.setup.addon) return view.setup.addon.label;
-    return view.setup.state === "notSetUp" ? "Not set up" : view.setup.pairing;
   }
-  if (view === null) return "Reading…";
-  if (view.setup.addon) return view.setup.addon.label;
   if (!view.setup.package) return view.setup.pairing;
   if (chromeUsable(view)) return "Connected";
   if (view.setup.pairingState === "paired" && !view.enabled) return "Off";
-  if (view.setup.browserIssue === "missing") return "Google Chrome is not installed";
-  if (view.setup.browserIssue === "sandboxed") return "Snap or Flatpak Chrome is unsupported";
-  if (view.setup.browserIssue === "differentBrowser") return "Google Chrome required";
+  const fullBrowser = browser === "Edge" ? "Microsoft Edge" : "Google Chrome";
+  if (view.setup.browserIssue === "missing") return `${fullBrowser} is not installed`;
+  if (view.setup.browserIssue === "sandboxed") return `Snap or Flatpak ${browser} is unsupported`;
+  if (view.setup.browserIssue === "differentBrowser") return `${fullBrowser} required`;
   if (view.setup.storeReview) return "Extension in review";
   if (view.setup.state === "notSetUp") return "Not connected";
-  if (view.setup.pairingState === "otherOwner") return "Different Vibe Work · pair in Chrome";
-  if (view.setup.pairingState === "waiting") return "Pair in Chrome";
+  if (view.setup.pairingState === "otherOwner") return `Different Vibe Work · pair in ${browser}`;
+  if (view.setup.pairingState === "waiting") return `Pair in ${browser}`;
   if (view.setup.pairingState === "connecting") return "Connecting";
-  if (view.setup.installState === "restartChrome") return "Restart Chrome";
-  if (view.setup.installState === "external") return "Enable in Chrome";
-  if (view.setup.state === "waitingForExtension") return "Add to Chrome";
+  if (view.setup.installState === "restartChrome") return `Restart ${browser}`;
+  if (view.setup.installState === "external") return `Enable in ${browser}`;
+  if (view.setup.state === "waitingForExtension") return `Add to ${browser}`;
   return "Connecting";
 }
 export function safetyLine(view: ChromeControlView | null): string | null {
@@ -76,11 +74,11 @@ export function chromeCatalog(): SettingEntry[] {
   ];
 }
 
-/** Edge has its own pairing state; the shared browser connection must also be enabled. */
+/** Edge's pairing and its own availability switch must both be ready. */
 export function edgeUsable(view: ChromeControlView | null | undefined): boolean {
   return (
     view?.edge !== undefined &&
-    view.enabled &&
+    (view.edgeEnabled ?? view.enabled) &&
     view.edge.package &&
     view.edge.state === "extensionAdded" &&
     view.edge.pairingState === "paired" &&
@@ -107,12 +105,15 @@ export function stepAction(view: ChromeControlView | null): ChromeAddonAction | 
   return chromeUsable(view) ? null : "connect";
 }
 /** The button's words for a step. */
-export function stepLabel(action: ChromeAddonAction): string {
+export function stepLabel(
+  action: ChromeAddonAction,
+  browser: "Chrome" | "Edge" | "Safari" = "Chrome",
+): string {
   if (action === "remove") return "Remove…";
   if (action === "openPairingPage") return "Open pairing page";
   if (action === "setupAgain") return "Set up again";
   if (action === "turnOn") return "Turn on";
-  return "Connect Chrome";
+  return `Connect ${browser}`;
 }
 /** The compare code belongs to the pairing step only. */
 export function pairingStep(view: ChromeControlView | null): boolean {

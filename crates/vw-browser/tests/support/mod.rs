@@ -77,7 +77,7 @@ pub struct PageEngine {
     pub on_pin: Mutex<Option<Box<dyn FnOnce() + Send>>>,
     pub on_click: Mutex<Option<Box<dyn FnOnce() + Send>>>,
     pub native_clicks: AtomicU64,
-    pub input_markers: Mutex<Vec<vw_preview::NativeClickPoint>>,
+    pub input_markers: Mutex<Vec<vw_preview::action_tracking::ActionMarker>>,
     pub reverse_frames: AtomicBool,
     pub after_verify: Mutex<Option<String>>,
     pub after_point_validation: Mutex<Option<String>>,
@@ -454,7 +454,7 @@ impl PreviewEngine for PageEngine {
     fn show_input_marker(
         &self,
         _: &MountId,
-        point: vw_preview::NativeClickPoint,
+        point: vw_preview::action_tracking::ActionMarker,
     ) -> EngineFuture<'_, ()> {
         self.input_markers.lock().unwrap().push(point);
         Box::pin(async { Ok(()) })
@@ -787,7 +787,7 @@ impl PageEngine {
                 && self.unreadable_receipt.load(Ordering::Relaxed)
             {
                 for answer in &mut answers {
-                    answer.url = "http://127.0.0.1:9/private".into();
+                    answer.url = "file:///private".into(); // A web surface cannot read file frames.
                 }
             }
             self.lag_frames(&mut answers);

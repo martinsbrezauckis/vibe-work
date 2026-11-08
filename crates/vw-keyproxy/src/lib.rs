@@ -47,7 +47,10 @@ mod token;
 
 pub use key::{KeyCell, KeyNeed, KeyState};
 pub use limits::{LIMITS_EVERY, RateLimits};
-pub use mcp::{MCP_PREFIX, McpFuture, McpRefusal, McpResolver, McpResolverSlot, McpTarget};
+pub use mcp::{
+    MCP_PREFIX, McpFuture, McpRefusal, McpResolver, McpResolverSlot, McpTarget,
+    debug_token_chat_required,
+};
 pub use routes::{ALLOWLIST, RouteSpec, Upstream, match_route};
 pub use server::{LimitsHook, ProxyConfig, ProxyError, ProxyHandle, ProxyStats, Upstreams};
 pub use token::{PLACEHOLDER_LEN, ProxySecretProvider, TokenSlot, new_placeholder};

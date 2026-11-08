@@ -42,7 +42,7 @@ use axum::http::header::{ACCEPT_ENCODING, AUTHORIZATION, CONTENT_LENGTH, HeaderN
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use futures_util::{StreamExt, TryStreamExt};
-use tokio::sync::oneshot;
+use tokio::sync::{oneshot, watch};
 use tokio::task::JoinHandle;
 use tracing::{debug, warn};
 
@@ -132,6 +132,8 @@ pub struct ProxyStats {
     pub no_key: AtomicU64,
     /// Requests that had to wait for a key.
     pub waited: AtomicU64,
+    /// Requests answered immediately because the owner is stopping.
+    pub stopping: AtomicU64,
 }
 
 /// Why the proxy could not start.
@@ -155,6 +157,7 @@ struct Shared {
     key: KeyCell,
     client: vw_mistral::ClientSlot,
     stats: Arc<ProxyStats>,
+    stopping: watch::Receiver<bool>,
     limits: Arc<LimitsGate>,
 }
 
@@ -164,6 +167,7 @@ pub struct ProxyHandle {
     tokens: Arc<TokenSlot>,
     key: KeyCell,
     stats: Arc<ProxyStats>,
+    stopping: watch::Sender<bool>,
     stop: Option<oneshot::Sender<()>>,
     task: Option<JoinHandle<()>>,
     limits: Arc<LimitsGate>,
@@ -186,6 +190,7 @@ impl ProxyHandle {
             .map_err(ProxyError::Bind)?;
         let addr = listener.local_addr().map_err(ProxyError::Bind)?;
         let stats = Arc::new(ProxyStats::default());
+        let (stopping, stopping_rx) = watch::channel(false);
         let limits = LimitsGate::new(Arc::clone(&config.on_rate_limits));
         let shared = Arc::new(Shared {
             limits: Arc::clone(&limits),
@@ -196,6 +201,7 @@ impl ProxyHandle {
             key: key.clone(),
             client: client.clone(),
             stats: Arc::clone(&stats),
+            stopping: stopping_rx,
         });
         let app = axum::Router::new().fallback(handle).with_state(shared);
         let (stop, stopped) = oneshot::channel::<()>();
@@ -211,6 +217,7 @@ impl ProxyHandle {
             tokens,
             key,
             stats,
+            stopping,
             stop: Some(stop),
             task: Some(task),
             limits,
@@ -254,8 +261,15 @@ impl ProxyHandle {
         &self.stats
     }
 
+    /// Answers requests waiting for a key before the owner closes Vibe's stdin. A 422 tells Vibe
+    /// the stopped request must not be retried during its server cleanup.
+    pub fn begin_shutdown(&self) {
+        self.stopping.send_replace(true);
+    }
+
     /// Stops accepting requests and waits for the server task (in-flight streams end).
     pub async fn shutdown(mut self) {
+        self.begin_shutdown();
         self.tokens.clear();
         if let Some(stop) = self.stop.take() {
             let _ = stop.send(());
@@ -376,6 +390,15 @@ fn key_unavailable(need: KeyNeed) -> &'static str {
     }
 }
 
+fn stopping(shared: &Shared) -> Refusal {
+    shared.stats.stopping.fetch_add(1, Ordering::Relaxed);
+    refuse(
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "vibe_work_proxy_stopping",
+        "Vibe Work is closing. This model request was stopped; try again after restart.",
+    )
+}
+
 /// Step 3: the key as a sensitive `Authorization` value, waiting for it when needed.
 ///
 /// `wait` false (startup discovery): one snapshot of the key decides, never a wait and never the owner's
@@ -384,6 +407,10 @@ fn key_unavailable(need: KeyNeed) -> &'static str {
 /// connectors, and it caches only a successful catalog, so the next chat after an unlock loads them. One snapshot, not
 /// a check before a wait: a vault that locks between the two can no longer send the catalog into the wait.
 async fn authorization(shared: &Shared, wait: bool) -> Result<HeaderValue, Refusal> {
+    let mut stopping_rx = shared.stopping.clone();
+    if *stopping_rx.borrow() {
+        return Err(stopping(shared));
+    }
     let unavailable = |need: KeyNeed| {
         shared.stats.no_key.fetch_add(1, Ordering::Relaxed);
         refuse(
@@ -395,20 +422,23 @@ async fn authorization(shared: &Shared, wait: bool) -> Result<HeaderValue, Refus
     let key = if wait {
         let stats = Arc::clone(&shared.stats);
         let hook = Arc::clone(&shared.config.on_wait);
-        shared
-            .key
-            .wait_ready(shared.config.key_wait, move |need| {
+        tokio::select! {
+            biased;
+            _ = stopping_rx.wait_for(|stopping| *stopping) => return Err(stopping(shared)),
+            result = shared.key.wait_ready(shared.config.key_wait, move |need| {
                 stats.waited.fetch_add(1, Ordering::Relaxed);
                 hook(need);
-            })
-            .await
-            .map_err(unavailable)?
+            }) => result.map_err(unavailable)?,
+        }
     } else {
         match shared.key.current() {
             KeyState::Ready(key) => key,
             KeyState::Missing(need) => return Err(unavailable(need)),
         }
     };
+    if *stopping_rx.borrow() {
+        return Err(stopping(shared));
+    }
     let value = zeroize::Zeroizing::new(format!("Bearer {}", key.as_str()));
     let mut auth = HeaderValue::from_str(&value).map_err(|_| {
         refuse(
@@ -544,6 +574,8 @@ fn startup_discovery(route: &RouteSpec) -> bool {
         route.template,
         crate::connectors::BOOTSTRAP_TEMPLATE
             | "/v1/users/me"
+            | "/v1/billing/subscription"
+            | "/v1/billing/budget"
             | "/console/api/vibe/whoami"
             | "/chat/api/v1/code/managed-config"
     )

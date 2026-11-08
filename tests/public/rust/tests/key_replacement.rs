@@ -342,3 +342,107 @@ async fn agent_requester_cannot_reach_key_storage_through_the_method_gate() {
     assert!(rig.transport.frames().is_empty());
     assert!(rig.confirmer.shown().is_empty());
 }
+
+#[tokio::test]
+async fn a_rejected_key_can_be_replaced_by_a_saved_key_without_an_extra_confirmation() {
+    for (status, op) in [(401, "useMistralKey"), (403, "useExistingKey")] {
+        let rig = Rig::new(&format!("key-rejected-saved-{status}")).await;
+        rig.core.core.execute(Origin::Ui, serde_json::from_value(json!({
+            "type":"keys", "request":{"op":"addMistralKey","name":"Other key","apiKey":REPLACEMENT}
+        })).unwrap()).await.unwrap();
+        let listed = rig.keys.mistral_keys().await.unwrap();
+        let item_id = &listed
+            .iter()
+            .find(|row| row.label == "Other key")
+            .unwrap()
+            .item_id;
+        rig.check(status).await;
+        rig.core.confirmer.then(Confirmation::Declined);
+        let result = rig
+            .core
+            .core
+            .execute(
+                Origin::Ui,
+                serde_json::from_value(json!({
+                    "type":"keys", "request":{"op":op,"itemId":item_id}
+                }))
+                .unwrap(),
+            )
+            .await;
+        assert!(
+            result.is_ok(),
+            "a rejected key needs no extra confirmation: {result:?}"
+        );
+        assert!(rig.core.confirmer.shown().is_empty());
+        assert!(
+            !rig.keys.key_was_rejected(),
+            "the new key cannot inherit the old rejection"
+        );
+        rig.check(200).await;
+        assert!(
+            rig.requests
+                .lock()
+                .unwrap()
+                .last()
+                .unwrap()
+                .contains(REPLACEMENT)
+        );
+        // The queued decline was not consumed. Switching away from the new working key must ask again.
+        let error = rig
+            .core
+            .core
+            .execute(
+                Origin::Ui,
+                serde_json::from_value(json!({
+                    "type":"keys", "request":{"op":op,"itemId":vw_vault::mistral_key::RESOURCE_ID}
+                }))
+                .unwrap(),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, ErrorCode::ConfirmationDeclined);
+        assert_eq!(rig.core.confirmer.shown().len(), 1);
+        rig.shutdown().await;
+    }
+}
+
+#[tokio::test]
+async fn a_recorded_auth_failure_survives_selection_and_skips_replacement_confirmation() {
+    for status in [401, 403] {
+        let rig = Rig::new(&format!("key-recorded-rejection-{status}")).await;
+        rig.status.store(status, Ordering::SeqCst);
+        rig.keys
+            .add_mistral_key("Rejected key".into(), SecretString::new(REPLACEMENT))
+            .await
+            .unwrap();
+        let rows = rig.keys.mistral_keys().await.unwrap();
+        let rejected = rows.iter().find(|row| row.label == "Rejected key").unwrap();
+        assert_eq!(rejected.last_test.as_ref().unwrap().code, Some(status));
+        rig.core.confirmer.then(Confirmation::Approved);
+        let select = |id: &str| {
+            serde_json::from_value(json!({
+                "type":"keys", "request":{"op":"useMistralKey","itemId":id}
+            }))
+            .unwrap()
+        };
+        rig.core
+            .core
+            .execute(Origin::Ui, select(&rejected.item_id))
+            .await
+            .unwrap();
+        assert!(
+            rig.keys.key_was_rejected(),
+            "the selected key retains its recorded authentication failure"
+        );
+        let shown = rig.core.confirmer.shown().len();
+        rig.core.confirmer.then(Confirmation::Declined);
+        rig.core
+            .core
+            .execute(Origin::Ui, select(vw_vault::mistral_key::RESOURCE_ID))
+            .await
+            .unwrap();
+        assert_eq!(rig.core.confirmer.shown().len(), shown);
+        assert!(!rig.keys.key_was_rejected());
+        rig.shutdown().await;
+    }
+}

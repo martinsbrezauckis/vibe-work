@@ -5,6 +5,50 @@ use super::{AddonState, agent_browser::Browser, commands, edge_agent_tests::fixt
 use serde_json::json;
 
 #[tokio::test]
+async fn missing_extension_uses_the_same_step_for_chrome_and_edge() {
+    let core = fixture("browser-shared-missing-extension", json!([])).await;
+    // The helper answers, but neither registered browser contains the extension.
+    core.shared
+        .chrome_control
+        .owner
+        .tools
+        .lock()
+        .unwrap()
+        .push(json!({"name":"chrome_status"}));
+    let view = commands::view(&core.shared);
+    let chrome = view.setup.addon.unwrap();
+    let edge = view.edge.unwrap().addon.unwrap();
+    assert_eq!(chrome.state, AddonState::ExtensionNotInstalled);
+    assert_eq!(edge.state, chrome.state, "{edge:?}");
+    assert_eq!(edge.action, chrome.action);
+    let facts = super::installation::addons(&core.shared);
+    let edge_facts = &facts.as_array().unwrap()[1];
+    assert_eq!(edge_facts["stateCode"], "extensionNotInstalled");
+    assert_eq!(edge_facts["instruction"], edge.instruction);
+    assert!(
+        edge.instruction.contains("not in Edge yet")
+            && edge
+                .instruction
+                .contains("Ask the person to click Connect Edge"),
+        "{edge:?}"
+    );
+    core.shared
+        .chrome_control
+        .edge_paired_once
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    assert_eq!(
+        commands::view(&core.shared)
+            .edge
+            .unwrap()
+            .addon
+            .unwrap()
+            .state,
+        AddonState::ExtensionNotInstalled
+    );
+    core.shutdown().await;
+}
+
+#[tokio::test]
 async fn broken_helper_keeps_the_reinstall_reason_for_both_browsers() {
     use vw_vocabulary::texts::{CHROME_PACKAGE_CHANGED, CHROME_PACKAGE_MISSING};
     for (name, bytes, reason) in [
@@ -174,12 +218,12 @@ async fn disconnected(name: &str, chrome_version: Option<&str>, chrome_off: bool
             answer["vwMcpResult"]["structuredContent"]["addon"]["stateCode"],
             "turnedOffInChrome"
         );
-        chrome.set_enabled(false).unwrap();
+        chrome.set_browser_enabled(Browser::Edge, false).unwrap();
         assert_eq!(
             Browser::Edge.addon(&core.shared).state,
             AddonState::SwitchedOff
         );
-        chrome.set_enabled(true).unwrap();
+        chrome.set_browser_enabled(Browser::Edge, true).unwrap();
         chrome.owner.edge_pairing.lock().unwrap().0 = crate::chrome_control::PairingState::Paired;
         assert_eq!(
             Browser::Edge.addon(&core.shared).state,
@@ -300,28 +344,20 @@ async fn reworded_pairing_labels_keep_agent_diagnoses_and_actions() {
 fn not_set_up_instructions_name_each_browsers_card_button() {
     for (browser, button) in [
         (Browser::Chrome, "Connect Chrome"),
-        (Browser::Edge, "Set up…"),
+        (Browser::Edge, "Connect Edge"),
     ] {
         let view = super::addon::view_for(AddonState::NotSetUp, "", browser);
-        let location = if browser == Browser::Edge {
-            format!(" in Settings, Browser, {}", browser.name())
-        } else {
-            String::new()
-        };
         assert_eq!(
             view.instruction,
             format!(
-                "{} is not set up. Ask the person to click {button}{location}.",
+                "{} is not set up. Ask the person to click {button}.",
                 browser.words("{yourBrowser}")
             )
         );
         let reason = super::availability::reason(&view, browser);
-        assert!(
-            reason.contains(&format!("click {button}{location}.")),
-            "{reason}"
-        );
+        assert!(reason.contains(&format!("click {button}.")), "{reason}");
         if browser == Browser::Edge {
-            assert!(!reason.contains("Connect Edge"), "{reason}");
+            assert!(!reason.contains("Set up…"), "{reason}");
         }
     }
 }

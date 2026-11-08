@@ -56,10 +56,6 @@ pub struct DelegationReceipt {
 
 /// Core-owned page admission and tab-close receipt storage.
 pub trait DelegationAuthorizer: Send + Sync {
-    /// The person's Developer setting, read at the time of each browser operation. Absent authority denies it.
-    fn local_network_allowed(&self) -> bool {
-        false
-    }
     /// Rechecks the concrete page's actor rights at the final native input boundary.
     fn page_authorized(&self, _page_key: &str, _actor: Actor) -> bool {
         true

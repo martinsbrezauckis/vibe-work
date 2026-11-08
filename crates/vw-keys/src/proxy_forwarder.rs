@@ -1,5 +1,5 @@
 //! Vault-owned proxy forwarding reuses netguard's HTTP/CONNECT, TLS and SOCKS transports and address policy.
-//! Vibe, Python probes and core clients receive credential-free URLs. A lock cancels all forwarded connections.
+//! Vibe, Python probes and core clients receive per-run local credentials, never the upstream sign-in. A lock cancels all forwarded connections.
 
 use crate::{KeyError, KeyService, proxy_credentials::PROXIES};
 use std::ffi::OsString;
@@ -74,7 +74,7 @@ pub(crate) fn configure(guard: &NetGuard, settings: &NetworkSettings) {
 }
 
 impl KeyService {
-    /// Credential-free settings for Vibe's file and helpers. Does not enable or change the running forwarder.
+    /// Locally authenticated settings for Vibe's private file and helpers. Does not enable or change the running forwarder.
     #[must_use]
     pub fn child_network_settings(&self, settings: &NetworkSettings) -> NetworkSettings {
         public(settings, &self.vibe_forwarder)

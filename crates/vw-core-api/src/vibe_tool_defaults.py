@@ -3,12 +3,11 @@
 Called by vibe_rules.rs in Vibe's isolated Python. Read-only: it only imports Vibe's builtin tools and instantiates
 their default configs (no config file is read or written, no server starts).
 
-Several classes can share one tool name (Vibe 2.26.1: `Bash` and `ExperimentalBash` are both "bash") and the server
-uses one that is available on this machine. Vibe's own `discover_tool_defaults` keeps whichever class it met last: on
-Windows that is `ExperimentalBash`, which is never available there and lists cmd's commands (`dir`, `type`), while the
-server's `Bash` with Git Bash lists the POSIX ones (`cat`, `ls`, `find`), which are Vibe's own defaults, not earlier
-"Always allow" answers. So the classes a machine cannot use are skipped (`is_available`), and a name
-with several usable classes gets the union of their defaults: an entry any of them ships is Vibe's own.
+Several classes can share one tool name (`Bash` and `ExperimentalBash` both use "bash" in pinned Vibe).
+Vibe's `discover_tool_defaults` keeps the last class it encounters, without checking availability. This display
+helper probes `is_available` without a server config and unions the defaults of available variants; if none report
+available, it uses every variant as a fallback. Availability can differ from the server's configured shell rollout.
+These defaults distinguish shipped allowlists from earlier "Always allow" answers; they do not grant permission.
 """
 import inspect
 import json

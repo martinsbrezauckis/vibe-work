@@ -57,6 +57,25 @@ define_class!(
 /// # Errors
 /// No webview, not on the main thread, or a point outside the view.
 pub fn show(webview: *mut c_void, point: (f64, f64)) -> Result<(), String> {
+    show_for(
+        webview,
+        point,
+        std::time::Duration::from_secs_f64(SHOWN_SECONDS),
+    )
+}
+
+/// Paints the shared action marker for its remaining host-clock lifetime.
+///
+/// # Errors
+/// No webview, not on the main thread, or a point outside the view.
+pub fn show_for(
+    webview: *mut c_void,
+    point: (f64, f64),
+    remaining: std::time::Duration,
+) -> Result<(), String> {
+    if remaining.is_zero() {
+        return Ok(());
+    }
     let mtm = MainThreadMarker::new().ok_or("the click marker is drawn on the main thread")?;
     if !(0.0..=1.0).contains(&point.0) || !(0.0..=1.0).contains(&point.1) {
         return Err("the click marker point is outside the view".to_owned());
@@ -91,7 +110,7 @@ pub fn show(webview: *mut c_void, point: (f64, f64)) -> Result<(), String> {
             &*marker,
             performSelector: sel!(removeFromSuperview),
             withObject: std::ptr::null::<AnyObject>(),
-            afterDelay: SHOWN_SECONDS
+            afterDelay: remaining.as_secs_f64().min(SHOWN_SECONDS)
         ];
     }
     Ok(())

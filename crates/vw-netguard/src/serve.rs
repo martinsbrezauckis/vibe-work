@@ -19,7 +19,7 @@ use std::time::Duration;
 
 use tokio::io::{AsyncWriteExt, copy_bidirectional};
 use tokio::net::{TcpListener, TcpStream};
-use tokio::task::JoinHandle;
+use tokio::task::{JoinHandle, JoinSet};
 
 use crate::decide::decide;
 use crate::guard::{CANARY_SUFFIX, Inner, LOOPBACK_CANARY_PATH, ListenerScope, Who};
@@ -31,26 +31,33 @@ const HEAD_LIMIT: Duration = Duration::from_secs(15);
 const CONNECT_LIMIT: Duration = Duration::from_secs(10);
 
 /// Accepts connections on `listener` with `who`'s rights until aborted.
-pub(crate) fn accept_loop(inner: Arc<Inner>, listener: TcpListener, who: Who) -> JoinHandle<()> {
+pub(crate) fn accept_loop(
+    inner: Arc<Inner>,
+    listener: TcpListener,
+    who: Who,
+    credential: Arc<crate::credential::Credential>,
+) -> JoinHandle<()> {
     tokio::spawn(async move {
+        // Dropping the accept task aborts every accepted connection, including pending heads and tunnels.
+        let mut connections = JoinSet::new();
         loop {
-            let Ok((stream, _)) = listener.accept().await else {
+            let accepted = tokio::select! {
+                accepted = listener.accept() => accepted,
+                _ = connections.join_next(), if !connections.is_empty() => continue,
+            };
+            let Ok((stream, _)) = accepted else {
                 tokio::time::sleep(Duration::from_millis(50)).await;
                 continue;
             };
             let (inner, who) = (inner.clone(), who.clone());
             let mut enabled = inner.enabled.subscribe();
-            tokio::spawn(async move {
-                let active = *enabled.borrow_and_update();
-                if !active {
-                    let mut stream = stream;
-                    answer(&mut stream, "503 Service Unavailable", "Unlock the vault.").await;
-                    return;
-                }
+            let credential = credential.clone();
+            connections.spawn(async move {
+                enabled.borrow_and_update();
                 tokio::select! {
                     biased;
                     _ = enabled.changed() => {},
-                    () = serve_one(inner, stream, who) => {},
+                    () = serve_one(inner, stream, who, &credential) => {},
                 }
             });
         }
@@ -181,7 +188,12 @@ async fn tunnelled_head(stream: &mut TcpStream, mut already: Vec<u8>) {
     }
 }
 
-async fn serve_one(inner: Arc<Inner>, mut stream: TcpStream, who: Who) {
+async fn serve_one(
+    inner: Arc<Inner>,
+    mut stream: TcpStream,
+    who: Who,
+    credential: &crate::credential::Credential,
+) {
     let Ok(_slot) = inner.slots.clone().try_acquire_owned() else {
         answer(
             &mut stream,
@@ -191,13 +203,29 @@ async fn serve_one(inner: Arc<Inner>, mut stream: TcpStream, who: Who) {
         .await;
         return;
     };
-    let head = match tokio::time::timeout(HEAD_LIMIT, head::read(&mut stream)).await {
+    let (raw, rest) = match tokio::time::timeout(HEAD_LIMIT, head::read_raw(&mut stream)).await {
         Ok(Ok(head)) => head,
         Ok(Err(reason)) => {
             answer(&mut stream, "400 Bad Request", &reason).await;
             return;
         }
         Err(_) => return,
+    };
+    if !credential.accepts(&raw) {
+        let _ = stream.write_all(b"HTTP/1.1 407 Proxy Authentication Required\r\nProxy-Authenticate: Basic realm=\"Vibe Work proxy\"\r\nContent-Length: 0\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n").await;
+        let _ = stream.shutdown().await;
+        return;
+    }
+    if !*inner.enabled.borrow() {
+        answer(&mut stream, "503 Service Unavailable", "Unlock the vault.").await;
+        return;
+    }
+    let head = match head::parse(&raw) {
+        Ok(target) => head::Head { target, rest },
+        Err(reason) => {
+            answer(&mut stream, "400 Bad Request", &reason).await;
+            return;
+        }
     };
     if let Target::Direct { token } = &head.target {
         inner.saw(&format!("direct:{token}"));
@@ -232,6 +260,7 @@ async fn serve_one(inner: Arc<Inner>, mut stream: TcpStream, who: Who) {
         who: who.clone(),
     };
     let decided = Decided {
+        browser_addresses: crate::decide::Scope::browser_addresses(&scope),
         inner: &inner,
         who: &who,
         host: &host,
@@ -250,6 +279,7 @@ async fn serve_one(inner: Arc<Inner>, mut stream: TcpStream, who: Who) {
 
 /// A request the policy has judged: who asked, for which host and port.
 struct Decided<'a> {
+    browser_addresses: bool,
     inner: &'a Inner,
     who: &'a Who,
     /// The host as the request wrote it (IPv6 in brackets).
@@ -365,7 +395,9 @@ async fn relay(
         .iter()
         .all(|a| crate::ip::classify(a.ip()).is_public());
     // Who may open a WebSocket here: pages on this computer, or (the user's local-network page) that host only.
-    let rule = if local {
+    let rule = if decided.browser_addresses {
+        None
+    } else if local {
         Some(crate::ws_origin::Rule::ThisComputer)
     } else if public {
         None

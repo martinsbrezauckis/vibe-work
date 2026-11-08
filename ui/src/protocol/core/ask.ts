@@ -243,13 +243,21 @@ profileId: string,
 /**
  * Exact tab identity.
  */
-tabId: number, } | { "op": "setEnabled",
+tabId: number,
+/**
+ * Receiving chat or New chat's draft owner; omitted for a read-only context lookup.
+ */
+sessionId?: string, } | { "op": "setEnabled",
 /**
  * Whether Chrome tools are available.
  */
+enabled: boolean, } | { "op": "setEdgeEnabled",
+/**
+ * Whether Edge tools are available.
+ */
 enabled: boolean, } | { "op": "setLocalNetwork",
 /**
- * Whether local-network pages are allowed for the agent in Chrome.
+ * Ignored legacy value; browser address access is always enabled.
  */
 enabled: boolean, } | { "op": "offerSetup", } | { "op": "setup",
 /**
@@ -263,7 +271,11 @@ offerId: string, } | { "op": "openEdgeStore", } | { "op": "offerFirefoxSetup", }
 /**
  * The offer shown to the person.
  */
-offerId: string, } | { "op": "openFirefoxStore", } | { "op": "openFirefox", } | { "op": "closeFirefox", } | { "op": "remove", };
+offerId: string, } | { "op": "openFirefoxStore", } | { "op": "openFirefox", } | { "op": "closeFirefox", } | { "op": "openSafariSetup", } | { "op": "setSafariEnabled",
+/**
+ * Whether the optional Safari connection is enabled.
+ */
+enabled: boolean, } | { "op": "removeSafari", } | { "op": "remove", };
 
 export type ChromeControlView = {
 /**
@@ -271,7 +283,11 @@ export type ChromeControlView = {
  */
 enabled: boolean,
 /**
- * Settings > Developer: local-network pages are allowed for the agent in Chrome.
+ * Edge's independent switch, omitted while its module is off.
+ */
+edgeEnabled?: boolean,
+/**
+ * Legacy compatibility status; browser address access is always enabled.
  */
 localNetwork: boolean,
 /**
@@ -301,7 +317,29 @@ edge?: ChromeSetupView,
 /**
  * Firefox setup, omitted while the optional module is off.
  */
-firefox?: ChromeSetupView, };
+firefox?: ChromeSetupView,
+/**
+ * Safari is omitted while its optional module is off.
+ */
+safari?: SafariView, };
+
+export type SafariView = {
+/**
+ * The person's independent, initially off switch.
+ */
+enabled: boolean,
+/**
+ * Whether this app contains the Safari extension, setup utility and native helper.
+ */
+package: boolean,
+/**
+ * Same short connection states as the Chrome card.
+ */
+addon: ChromeAddonView,
+/**
+ * The helper’s own pairing identity, only while a live Safari pairing event supplies it.
+ */
+fingerprint: string | null, };
 
 export type ChromeWorkView = {
 /**
@@ -408,7 +446,7 @@ fingerprint: string | null,
  */
 browserIssue?: ChromeBrowserIssue,
 /**
- * External installation is waiting for Chrome, or a macOS restart.
+ * Installation route: external consent/restart, or Store with extension facts reported after pairing.
  */
 installState?: string,
 /**
@@ -432,7 +470,7 @@ extensionRestart?: boolean, };
 
 export type ChromeSetupState = "absent" | "notSetUp" | "repairRequired" | "waitingForExtension" | "extensionAdded";
 
-export type ChromePairingState = "unknown" | "disconnected" | "waiting" | "connecting" | "paired" | "otherOwner" | "blocked" | "windowOpen" | "windowClosed" | "notInstalled";
+export type ChromePairingState = "unknown" | "disconnected" | "waiting" | "connecting" | "paired" | "otherOwner" | "blocked" | "windowOpen" | "windowClosed" | "notInstalled" | "browserOutdated";
 
 export type ChromeBrowserIssue = "missing" | "sandboxed" | "differentBrowser";
 
@@ -463,6 +501,6 @@ instruction: string,
  */
 step?: string, };
 
-export type ChromeAddonState = "unavailable" | "notSetUp" | "chromeMissing" | "chromeSandboxed" | "otherBrowser" | "switchedOff" | "inReview" | "otherOwner" | "connecting" | "notPaired" | "helperNotRunning" | "ownerCredentialMissing" | "helperSetupRequired" | "turnedOffInChrome" | "restartChrome" | "updateNeeded" | "chromeClosed" | "enableInChrome" | "extensionNotInstalled" | "notConnected" | "connected";
+export type ChromeAddonState = "unavailable" | "notSetUp" | "chromeMissing" | "chromeSandboxed" | "otherBrowser" | "switchedOff" | "inReview" | "otherOwner" | "connecting" | "notPaired" | "helperNotRunning" | "ownerCredentialMissing" | "helperSetupRequired" | "accessBlocked" | "turnedOffInChrome" | "restartChrome" | "updateNeeded" | "chromeClosed" | "enableInChrome" | "extensionNotInstalled" | "notConnected" | "connected";
 
 export type ChromeAddonAction = "connect" | "setupAgain" | "remove" | "openPairingPage" | "turnOn";

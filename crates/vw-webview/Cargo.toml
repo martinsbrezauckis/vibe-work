@@ -16,7 +16,7 @@ workspace = true
 click-marker = ["vw-platform/click-marker", "vw-preview/click-marker"]
 # The macOS preview network guard: every preview's website data store sends its traffic through the guard's listener
 # (`WKWebsiteDataStore.proxyConfigurations`, wry's `mac-proxy`: Network.framework's HTTP CONNECT proxy, linked
-# directly, macOS 14+), WebTransport off per preview, and a preview without a working check is refused. On in every
+# directly, macOS 14+), and a preview without a working check is refused. On in every
 # app build (the app crate's default feature; the release minimum is macOS 14.0). Off (`--no-default-features` on the
 # app): macOS previews, including required previews, retain per-mount content rules and refuse failed rule installs.
 # No effect on Linux/Windows.

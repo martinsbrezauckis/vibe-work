@@ -81,7 +81,13 @@ pub fn ensure(vibe_home: &Path) -> Result<TitleModel, String> {
         Ok(text) => text,
         Err(outcome) => {
             if matches!(&outcome, TitleModel::Kept(alias) if alias == TITLE_MODEL_ALIAS) {
-                crate::config_comments::restore(&path, &existing, &NOTE)?;
+                crate::config_comments::restore(
+                    &path,
+                    &existing,
+                    Some("[utility_models]"),
+                    "title",
+                    &NOTE,
+                )?;
             }
             return Ok(outcome);
         }

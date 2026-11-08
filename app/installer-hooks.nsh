@@ -35,6 +35,8 @@ Var DeleteSessionsVaultIncomplete
   Delete "$INSTDIR\licenses\remend\LICENSE"
   ; 0.1.0: bytecode from the build machine, never shipped again (package_resources.reject_bytecode).
   Delete "$INSTDIR\plugin\vw\skills\data-analysis\scripts\__pycache__\xlsx_to_csv.cpython-312.pyc"
+  ; 0.1.7: the GStreamer plugins-bad notice; 0.1.8 ships no plugins-bad code.
+  Delete "$INSTDIR\licenses\third_party\media\COPYRIGHT-gstreamer-plugins-bad"
   RMDir "$INSTDIR\licenses\jsdiff"
   RMDir "$INSTDIR\licenses\remend"
   RMDir "$INSTDIR\plugin\vw\skills\data-analysis\scripts\__pycache__"
@@ -43,6 +45,8 @@ Var DeleteSessionsVaultIncomplete
   RMDir "$INSTDIR\plugin\vw\skills"
   RMDir "$INSTDIR\plugin\vw"
   RMDir "$INSTDIR\plugin"
+  RMDir "$INSTDIR\licenses\third_party\media"
+  RMDir "$INSTDIR\licenses\third_party"
   RMDir "$INSTDIR\licenses"
 !macroend
 
@@ -129,6 +133,10 @@ Var DeleteSessionsVaultIncomplete
   !insertmacro VIBE_NOTIFICATION_ICON_REMOVE
   DeleteRegKey HKCU "Software\Classes\CLSID\{E9D28628-47A6-45A7-80C2-2BDC64107A50}"
   DeleteRegKey HKCU "Software\Classes\AppUserModelId\${BUNDLEID}"
+  ${If} $UpdateMode <> 1
+    ; Program integration can be the last occupant even when all personal data is kept.
+    !insertmacro VIBE_REMOVE_EMPTY_DATA_PATH "$LOCALAPPDATA" "${BUNDLEID}"
+  ${EndIf}
   ${If} $UpdateMode <> 1
   ${AndIf} $PassiveMode <> 1
   ${AndIfNot} ${Silent}
@@ -233,6 +241,17 @@ FunctionEnd
   Pop $R8
 !macroend
 
+; Tier 2 owns these runtimes, including uv's directory junction entries, never their external targets.
+; The checked root and every ancestor must still be ordinary directories.
+!macro VIBE_DELETE_RUNTIME ROOT
+  Push $R8
+  StrCpy $R8 4
+  Push "${ROOT}"
+  Push "${BUNDLEID}\vibe"
+  Call un.DeleteDataPath
+  Pop $R8
+!macroend
+
 ; Run after both choices: retained data keeps its parents, and linked ancestors are never traversed.
 !macro VIBE_REMOVE_EMPTY_APP_DATA ROOT
   ${If} $DeleteSessionsVaultCheckboxState = 1
@@ -314,8 +333,8 @@ FunctionEnd
   Push "${BUNDLEID}"
   Call un.DeleteSettingsAndCaches
   ; Installed runtimes belong to the app. Never follow choice.json to an existing install the person selected.
-  !insertmacro VIBE_DELETE_DATA_PATH "$APPDATA" "${BUNDLEID}\vibe"
-  !insertmacro VIBE_DELETE_DATA_PATH "$LOCALAPPDATA" "${BUNDLEID}\vibe"
+  !insertmacro VIBE_DELETE_RUNTIME "$APPDATA"
+  !insertmacro VIBE_DELETE_RUNTIME "$LOCALAPPDATA"
   Push "$LOCALAPPDATA"
   Push "${BUNDLEID}"
   Call un.DeleteSettingsAndCaches
@@ -623,6 +642,7 @@ Function un.DeleteDataPath
   ; Two inputs: OS data root, then a relative literal from the lists above.
   ; $R9 = 1 only when absence is verified; missing ancestors also prove absence.
   ; R8 modes: 0 deletes a tree, 1 an empty folder, 2 empty descendants, 3 a file only.
+  ; Mode 4 deletes owned runtimes and unlinks child directory junctions without following them.
   ; All modes share the ancestor/reparse checks; macros save/restore R8.
   Exch $1
   Exch 1
@@ -693,7 +713,15 @@ Function un.DeleteTreeNoReparse
   System::Call 'kernel32::GetFileAttributesW(w r3) i .r4'
   IntCmp $4 -1 tree_done tree_done
   IntOp $5 $4 & 0x400
-  IntCmp $5 0 0 tree_done tree_done
+  IntCmp $5 0 tree_plain tree_link tree_link
+  tree_link:
+    StrCmp $R8 4 0 tree_done
+    IntOp $5 $4 & 0x10
+    IntCmp $5 0 tree_done
+    ; RemoveDirectory unlinks the junction itself, even if its target is nonempty. Never enumerate the target.
+    System::Call 'kernel32::RemoveDirectoryW(w r0) i .r5'
+    Goto tree_done
+  tree_plain:
   IntOp $5 $4 & 0x10
   IntCmp $5 0 tree_file tree_dir tree_dir
   tree_file:

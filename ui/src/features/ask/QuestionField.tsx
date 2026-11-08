@@ -3,6 +3,7 @@
  * checkboxes when it is multi-select) and free text ("Other") unless hidden.
  * Depends on: Badge, AnswerOptions, the callbacks model. Called by: QuestionAsk.
  */
+import { visibleText } from "./visibleText";
 import { type ReactElement, useId } from "react";
 import { Badge } from "../../components/Controls";
 import type { Picked, Question } from "../transcript/model/callbacks";
@@ -28,9 +29,9 @@ export function QuestionField({
       <legend id={legend}>
         <span className="q-prompt" tabIndex={0} data-testid="transcript.question-prompt">
           {question.header !== "" ? (
-            <Badge presentation="question-label">{question.header}</Badge>
+            <Badge presentation="question-label">{visibleText(question.header)}</Badge>
           ) : null}
-          {question.question}
+          {visibleText(question.question)}
         </span>
       </legend>
       <AnswerOptions

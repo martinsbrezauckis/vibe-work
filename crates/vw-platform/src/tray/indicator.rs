@@ -8,6 +8,9 @@ thread_local! {
     static ICON: RefCell<Option<AppIndicator>> = const { RefCell::new(None) };
 }
 
+/// One app-owned native menu action; the final action follows a separator.
+pub type MenuAction<'a> = (&'a str, Box<dyn Fn()>);
+
 /// Creates the indicator on GTK's main thread with normal and attention artwork.
 /// # Errors
 /// Artwork could not be saved in the app's own directory.
@@ -15,10 +18,7 @@ pub fn create(
     directory: &Path,
     normal: &[u8],
     attention: (&[u8], u32, u32),
-    open_label: &str,
-    quit_label: &str,
-    open: impl Fn() + 'static,
-    quit: impl Fn() + 'static,
+    actions: Vec<MenuAction<'_>>,
 ) -> Result<(), String> {
     crate::ensure_private_dir(directory).map_err(|error| error.to_string())?;
     let ordinary = directory.join("normal.png");
@@ -33,13 +33,15 @@ pub fn create(
         .and_then(|mut writer| writer.write_image_data(attention.0))
         .map_err(|error| error.to_string())?;
     let mut menu = gtk::Menu::new();
-    let open_item = gtk::MenuItem::with_label(open_label);
-    open_item.connect_activate(move |_| open());
-    let quit_item = gtk::MenuItem::with_label(quit_label);
-    quit_item.connect_activate(move |_| quit());
-    menu.append(&open_item);
-    menu.append(&gtk::SeparatorMenuItem::new());
-    menu.append(&quit_item);
+    let last = actions.len().saturating_sub(1);
+    for (index, (label, action)) in actions.into_iter().enumerate() {
+        if index == last && index > 0 {
+            menu.append(&gtk::SeparatorMenuItem::new());
+        }
+        let item = gtk::MenuItem::with_label(label);
+        item.connect_activate(move |_| action());
+        menu.append(&item);
+    }
     menu.show_all();
     let mut icon = AppIndicator::new("vibe-work", &ordinary.to_string_lossy());
     icon.set_attention_icon_full(&marked.to_string_lossy(), "Needs your answer");

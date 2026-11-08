@@ -1,12 +1,48 @@
-//! Finds the live on-screen target after scripted input, using the existing isolated frame observation.
-//! Called by the action driver; reports coordinates to the host only, never adds page nodes or events.
+//! Adapts completed scripted input to the common host action timeline, using isolated frame observations.
+//! Called by the action driver; no marker nodes or events enter the page and no typed values enter the timeline.
 
 use crate::{ActError, Action, Actor, Browser, PageAnswer};
 use serde_json::Value;
 #[cfg(feature = "click-marker")]
-use vw_preview::NativeClickPoint;
+use vw_preview::action_tracking::{ActionBox, ActionGeometry, ActionKind};
 
 impl Browser {
+    #[cfg(feature = "click-marker")]
+    pub(crate) async fn mark_native_input(
+        &self,
+        seen: &crate::sessions::Seen,
+        item: &crate::model::RefItem,
+        point: (u32, u32),
+    ) {
+        use vw_preview::action_tracking::ActionPoint;
+        let (Some(frame), Some(loads), Some(viewport)) =
+            (&item.frame_id, seen.loads, seen.model.viewport)
+        else {
+            return;
+        };
+        self.service
+            .record_input(
+                &seen.mount,
+                &format!("{}:{}", frame.id, frame.document),
+                loads,
+                ActionKind::Click,
+                ActionGeometry {
+                    point: Some(ActionPoint {
+                        x: f64::from(point.0),
+                        y: f64::from(point.1),
+                    }),
+                    target_box: item.bounds.map(|bounds| ActionBox {
+                        x: f64::from(bounds.x),
+                        y: f64::from(bounds.y),
+                        width: f64::from(bounds.width),
+                        height: f64::from(bounds.height),
+                    }),
+                    viewport: Some((f64::from(viewport.0), f64::from(viewport.1))),
+                },
+            )
+            .await;
+    }
+
     pub(crate) async fn finish_input(
         &self,
         session: &str,
@@ -32,6 +68,9 @@ impl Browser {
 
     #[cfg(feature = "click-marker")]
     pub(crate) async fn mark_input(&self, session: &str, action: &Action) {
+        let Some(load) = self.service.load_state(session) else {
+            return;
+        };
         let Some(seen) = self.current_seen(session) else {
             return;
         };
@@ -57,21 +96,28 @@ impl Browser {
         let (Some(bounds), Some((width, height))) = (after.bounds, model.viewport) else {
             return;
         };
-        let left = f64::from(bounds.x).max(0.0);
-        let top = f64::from(bounds.y).max(0.0);
-        let right = (f64::from(bounds.x) + f64::from(bounds.width)).min(f64::from(width));
-        let bottom = (f64::from(bounds.y) + f64::from(bounds.height)).min(f64::from(height));
-        if right <= left || bottom <= top {
+        let Some(frame) = &after.frame_id else {
             return;
-        }
+        };
         self.service
-            .show_input_marker(
+            .record_input(
                 &seen.mount,
-                NativeClickPoint {
-                    x: left.midpoint(right),
-                    y: top.midpoint(bottom),
-                    viewport_width: f64::from(width),
-                    viewport_height: f64::from(height),
+                &format!("{}:{}", frame.id, frame.document),
+                load.loads,
+                if matches!(action, Action::Type { .. }) {
+                    ActionKind::Type
+                } else {
+                    ActionKind::Click
+                },
+                ActionGeometry {
+                    point: None,
+                    target_box: Some(ActionBox {
+                        x: f64::from(bounds.x),
+                        y: f64::from(bounds.y),
+                        width: f64::from(bounds.width),
+                        height: f64::from(bounds.height),
+                    }),
+                    viewport: Some((f64::from(width), f64::from(height))),
                 },
             )
             .await;

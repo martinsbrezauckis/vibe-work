@@ -71,9 +71,14 @@ type SetupSnapshot = (setup::ChromeSetupView, Option<setup::ChromeSetupView>);
 
 #[derive(Default)]
 pub(super) struct Owner {
+    pub(super) approvals: super::pairing_approval::Approvals,
     running: Mutex<Option<Running>>,
     pub(super) tools: Mutex<Vec<Value>>,
     pub(super) pairing: Mutex<(PairingState, Option<String>)>,
+    pub(super) safari_pairing: Mutex<(String, Option<String>)>,
+    /// Safari pairing states received from the helper; a change means an extension port is open.
+    pub(super) safari_seen: std::sync::atomic::AtomicU64,
+    pub(super) safari_error: Mutex<Option<super::safari::ConnectionError>>,
     pub(super) firefox_pairing: Mutex<(PairingState, Option<String>)>,
     pub(super) firefox_states: Mutex<Vec<String>>,
     pub(super) edge_pairing: Mutex<(PairingState, Option<String>)>,
@@ -82,6 +87,7 @@ pub(super) struct Owner {
     pub(super) connected_profiles: super::addon::ConnectedProfiles,
     pub(super) profile_ids: super::profile_ids::ProfileIds,
     pub(super) wake: super::reconnect::Wake,
+    pub(super) starts: super::browser_start::Attempts,
     pub(super) connection_waiting: super::connection_notice::Waiting,
     /// The automatic-pairing attempt and what the current helper connection reported for it (`enroll`).
     pub(super) enroll: Mutex<super::enroll::Enroll>,
@@ -145,6 +151,7 @@ impl Owner {
     }
 
     pub(super) async fn stop(&self) {
+        self.approvals.clear();
         // Turning Use my Chrome off, removing and quitting drop every ticket: the helper also loses them when it
         // ends, the revoke makes that explicit while it still runs (bounded; an older helper ignores it).
         let knows = [&self.enroll, &self.edge_enroll].iter().any(|enroll| {
@@ -181,7 +188,13 @@ impl Owner {
     }
 
     fn clear_connection(&self) {
+        self.approvals.clear();
+        *self
+            .safari_pairing
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = (String::new(), None);
         self.wake.clear();
+        self.starts.clear();
         self.profile_ids.clear();
         self.connected_profiles.clear();
         self.tools
@@ -214,7 +227,7 @@ impl Owner {
     }
 
     /// One owner request on the private pipe (`method` is not a tool). `None` when the helper is not connected,
-    /// the connection ended, or the helper answered a JSON-RPC error (an older helper without the method).
+    /// the request timed out, the connection ended, or the helper answered a JSON-RPC error (an older helper).
     pub(super) async fn rpc(&self, method: &str, params: Value) -> Option<Value> {
         let send = self
             .running
@@ -222,16 +235,7 @@ impl Owner {
             .unwrap_or_else(PoisonError::into_inner)
             .as_ref()
             .map(|run| run.send.clone())?;
-        let (reply, answer) = oneshot::channel();
-        send.send(Call {
-            name: method.to_owned(),
-            args: params,
-            reply,
-            rpc: true,
-        })
-        .await
-        .ok()?;
-        match answer.await.ok()? {
+        match Self::request(send, method, params, true).await? {
             Answer::Helper(value) if value.get("rpcError").is_none() => Some(value),
             _ => None,
         }
@@ -257,22 +261,33 @@ impl Owner {
         let Some(send) = send else {
             return own(vw_vocabulary::texts::CHROME_NOT_RUNNING, "OWNER_REQUIRED");
         };
-        let (reply, answer) = oneshot::channel();
-        if send
-            .send(Call {
+        Self::request(send, name, args, false)
+            .await
+            .unwrap_or_else(|| own(UNKNOWN, "TRANSPORT_LOST"))
+    }
+
+    /// Bound queue admission and the answer together: startup may never reach the request dispatcher.
+    async fn request(
+        send: mpsc::Sender<Call>,
+        name: &str,
+        args: Value,
+        rpc: bool,
+    ) -> Option<Answer> {
+        tokio::time::timeout(Duration::from_secs(35), async {
+            let (reply, answer) = oneshot::channel();
+            send.send(Call {
                 name: name.to_owned(),
                 args,
                 reply,
-                rpc: false,
+                rpc,
             })
             .await
-            .is_err()
-        {
-            return own(UNKNOWN, "TRANSPORT_LOST");
-        }
-        answer
-            .await
-            .unwrap_or_else(|_| own(UNKNOWN, "TRANSPORT_LOST"))
+            .ok()?;
+            answer.await.ok()
+        })
+        .await
+        .ok()
+        .flatten()
     }
 }
 
@@ -319,7 +334,7 @@ pub(super) fn state_dir(config: &setup::ChromeControlConfig) -> Option<PathBuf> 
 
 pub(crate) async fn start(shared: &Arc<Shared>) -> Result<(), String> {
     let chrome = &shared.chrome_control;
-    if !chrome.enabled() {
+    if !chrome.any_enabled() && !super::safari::enabled(shared) {
         return Ok(());
     }
     let Some(dir) = chrome.dir() else {
@@ -328,6 +343,7 @@ pub(crate) async fn start(shared: &Arc<Shared>) -> Result<(), String> {
     if setup::view(&chrome.config, Some(dir), &shared.instructions.own_home).state
         == setup::SetupState::NotSetUp
         && !(cfg!(feature = "your-firefox") && dir.join("firefox-window").is_file())
+        && !super::safari::enabled(shared)
     {
         return Ok(());
     }
@@ -391,6 +407,14 @@ pub(super) fn observe(shared: &Weak<Shared>, message: &Value) -> Result<(), ()> 
     let Some(shared) = shared.upgrade() else {
         return Err(());
     };
+    if message["method"] == "notifications/owner/safari"
+        && let Some(state) = message["params"]["state"].as_str()
+    {
+        super::safari::connection(&shared, state);
+    }
+    if message["method"] == "notifications/owner/pairingApproval" {
+        super::pairing_approval::observe(&shared, &message["params"]);
+    }
     if message["method"] == "notifications/client/selection" {
         let changed = shared
             .chrome_control
@@ -405,6 +429,7 @@ pub(super) fn observe(shared: &Weak<Shared>, message: &Value) -> Result<(), ()> 
     if message["method"] == "notifications/owner/pairing"
         && let Some(result) = pairing_result(&message["params"])
     {
+        super::safari::observe(&shared, &message["params"]);
         pairing::observe(&shared, &message["params"], result);
     }
     Ok(())
@@ -431,6 +456,7 @@ fn pairing_result(params: &Value) -> Option<Value> {
 pub(super) fn update_pairing(shared: &Weak<Shared>, result: &Value) {
     update_pairing_state(shared, result);
     if let Some(shared) = shared.upgrade() {
+        shared.chrome_control.owner.starts.connected(&shared);
         super::connection_notice::connected(&shared);
     }
 }
@@ -614,69 +640,72 @@ async fn supervise(
                     .unwrap_or_else(PoisonError::into_inner)
                     .clear();
             }
-            let mut sent_policy = Value::Null;
-            if synchronize(&shared, &mut pipe, &mut sent_policy)
-                .await
-                .is_err()
-            {
-                pipe.abort().await;
-                continue;
-            }
-            // A new helper connection has acknowledged no switch value yet: send the current one (retried
-            // until acknowledged).
-            if let Some(core) = shared.upgrade() {
-                core.chrome_control.forget_local_network_ack();
-                tokio::spawn(async move { super::send_local_network(&core).await });
-            }
-            let mut pending = std::collections::HashMap::<
-                u64,
-                (Option<oneshot::Sender<Answer>>, tokio::time::Instant),
-            >::new();
-            let mut poll = tokio::time::interval(Duration::from_secs(2));
-            let mut expiry = tokio::time::interval(Duration::from_millis(100));
-            // Diagnostics: why this connection ended (a fixed word; no helper or page text).
-            let mut ended = "stopped";
-            loop {
-                tokio::select! {
-                    biased;
-                    _ = stop.changed() => { break; }
-                    reply = pipe.next() => {
-                        let Ok((id, result)) = reply else { ended = "helper pipe closed"; break };
-                        let Some((reply, started)) = pending.remove(&id) else { ended = "unexpected reply"; break };
-                        update_pairing(&shared, &result);
-                        update_work(&shared, &result, started);
-                        if let Some(reply) = reply { let _ = reply.send(Answer::Helper(result)); }
-                    }
-                    call = requests.recv() => {
-                        let Some(call) = call else { ended = "requests closed"; break };
-                        if call.reply.is_closed() && !(call.name == "chrome_session" && matches!(call.args["action"].as_str(), Some("stop" | "delete" | "cancel"))) { continue; }
-                        if pending.len() >= 32 && call.name != "chrome_session" {
-                            let _ = call.reply.send(own("Not run: Chrome is busy.", "BUSY"));
-                            continue;
+            'connection: {
+                let mut sent_policy = Value::Null;
+                let synchronized = tokio::select! {
+                    _ = stop.changed() => false,
+                    result = synchronize(&shared, &mut pipe, &mut sent_policy) => result.is_ok(),
+                };
+                if !synchronized {
+                    // Failed startup needs the same disconnect, queue rejection and backoff as a lost pipe.
+                    break 'connection;
+                }
+                // A new helper connection has acknowledged no switch value yet: send the current one (retried
+                // until acknowledged).
+                if let Some(core) = shared.upgrade() {
+                    core.chrome_control.forget_local_network_ack();
+                    tokio::spawn(async move { super::send_local_network(&core).await });
+                }
+                let mut pending = std::collections::HashMap::<
+                    u64,
+                    (Option<oneshot::Sender<Answer>>, tokio::time::Instant),
+                >::new();
+                let mut poll = tokio::time::interval(Duration::from_secs(2));
+                let mut expiry = tokio::time::interval(Duration::from_millis(100));
+                // Diagnostics: why this connection ended (a fixed word; no helper or page text).
+                let mut ended = "stopped";
+                loop {
+                    tokio::select! {
+                        biased;
+                        _ = stop.changed() => { break; }
+                        reply = pipe.next() => {
+                            let Ok((id, result)) = reply else { ended = "helper pipe closed"; break };
+                            let Some((reply, started)) = pending.remove(&id) else { ended = "unexpected reply"; break };
+                            update_pairing(&shared, &result);
+                            update_work(&shared, &result, started);
+                            if let Some(reply) = reply { let _ = reply.send(Answer::Helper(result)); }
                         }
-                        let begun = if call.rpc {
-                            pipe.begin_tolerant(&call.name, call.args).await
-                        } else {
-                            pipe.begin("tools/call", json!({"name":call.name,"arguments":call.args})).await
-                        };
-                        if let Ok(id) = begun {
-                            pending.insert(id, (Some(call.reply), tokio::time::Instant::now()));
-                        } else { let _ = call.reply.send(own(UNKNOWN, "TRANSPORT_LOST")); ended = "send failed"; break; }
-                    }
-                    _ = poll.tick(), if !pending.values().any(|(reply, _)| reply.is_none()) => {
-                        if let Ok(id) = pipe.begin("tools/call", json!({"name":"chrome_status","arguments":{}})).await {
-                            pending.insert(id, (None, tokio::time::Instant::now()));
-                        } else { ended = "status poll send failed"; break }
-                    }
-                    _ = expiry.tick() => {
-                        if pending.values().any(|(_, start)| start.elapsed() >= Duration::from_secs(35)) { ended = "a call outlived 35 s"; break; }
+                        call = requests.recv() => {
+                            let Some(call) = call else { ended = "requests closed"; break };
+                            if call.reply.is_closed() && !(call.name == "chrome_session" && matches!(call.args["action"].as_str(), Some("stop" | "delete" | "cancel"))) { continue; }
+                            if pending.len() >= 32 && call.name != "chrome_session" {
+                                let _ = call.reply.send(own("Not run: Chrome is busy.", "BUSY"));
+                                continue;
+                            }
+                            let begun = if call.rpc {
+                                pipe.begin_tolerant(&call.name, call.args).await
+                            } else {
+                                pipe.begin("tools/call", json!({"name":call.name,"arguments":call.args})).await
+                            };
+                            if let Ok(id) = begun {
+                                pending.insert(id, (Some(call.reply), tokio::time::Instant::now()));
+                            } else { let _ = call.reply.send(own(UNKNOWN, "TRANSPORT_LOST")); ended = "send failed"; break; }
+                        }
+                        _ = poll.tick(), if !pending.values().any(|(reply, _)| reply.is_none()) => {
+                            if let Ok(id) = pipe.begin("tools/call", json!({"name":"chrome_status","arguments":{}})).await {
+                                pending.insert(id, (None, tokio::time::Instant::now()));
+                            } else { ended = "status poll send failed"; break }
+                        }
+                        _ = expiry.tick() => {
+                            if pending.values().any(|(_, start)| start.elapsed() >= Duration::from_secs(35)) { ended = "a call outlived 35 s"; break; }
+                        }
                     }
                 }
-            }
-            tracing::warn!(reason = ended, "Chrome Control connection ended");
-            for (_, (reply, _)) in pending {
-                if let Some(reply) = reply {
-                    let _ = reply.send(own(UNKNOWN, "TRANSPORT_LOST"));
+                tracing::warn!(reason = ended, "Chrome Control connection ended");
+                for (_, (reply, _)) in pending {
+                    if let Some(reply) = reply {
+                        let _ = reply.send(own(UNKNOWN, "TRANSPORT_LOST"));
+                    }
                 }
             }
 
@@ -695,6 +724,9 @@ async fn supervise(
                 .unwrap_or_else(PoisonError::into_inner)
                 .clear();
             publish(&core);
+        }
+        if *stop.borrow() {
+            return;
         }
         // Refuse queued and new work for the whole backoff; traffic cannot shorten it or replay work.
         let until = tokio::time::Instant::now() + Duration::from_millis(backoff);
@@ -720,7 +752,7 @@ async fn synchronize(
     // Read trusted lowerings before sending any policy. An unchanged policy is never re-applied over one.
     pipe.notify("notifications/owner/drain", json!({})).await?;
     pipe.rpc("ping", json!({})).await?;
-    shared.upgrade().ok_or(())?;
+    super::switches::synchronize(shared.upgrade().ok_or(())?.as_ref(), pipe).await?;
     let next = mapping::policy();
     if *sent != next {
         pipe.notify("notifications/owner/policy", next.clone())
@@ -732,67 +764,9 @@ async fn synchronize(
 }
 
 #[cfg(test)]
-mod pairing_tests {
-    use super::pairing_result;
-    use serde_json::json;
-
-    const OURS: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
-    const OTHER: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
-
-    #[test]
-    fn waiting_and_paired_show_our_fingerprint() {
-        let waiting =
-            pairing_result(&json!({"profileId":"p","state":"waiting","fingerprint":OURS})).unwrap();
-        assert_eq!(
-            waiting["structuredContent"]["error"]["code"],
-            "OWNER_APPROVAL_REQUIRED"
-        );
-        assert_eq!(waiting["structuredContent"]["ownerFingerprint"], OURS);
-        let paired =
-            pairing_result(&json!({"profileId":"p","state":"paired","fingerprint":OURS})).unwrap();
-        assert_eq!(
-            paired["structuredContent"]["error"]["code"],
-            "OWNER_CONNECTING"
-        );
-        assert_eq!(paired["structuredContent"]["ownerFingerprint"], OURS);
-    }
-
-    #[test]
-    fn mismatch_says_pair_again_and_never_takes_the_other_fingerprint() {
-        let mismatch =
-            pairing_result(&json!({"profileId":"p","state":"mismatch","fingerprint":OTHER}))
-                .unwrap();
-        assert_eq!(
-            mismatch["structuredContent"]["error"]["code"],
-            "OWNER_IDENTITY_MISMATCH"
-        );
-        assert!(
-            mismatch["structuredContent"]
-                .get("ownerFingerprint")
-                .is_none()
-        );
-    }
-
-    #[test]
-    fn unknown_or_missing_state_is_ignored() {
-        assert!(pairing_result(&json!({"state":"admit"})).is_none());
-        assert!(pairing_result(&json!({})).is_none());
-    }
-}
+#[path = "owner_pairing_tests.rs"]
+mod pairing_tests;
 
 #[cfg(test)]
-mod disconnect_tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn explicit_stop_forgets_pairing_and_fingerprint() {
-        let owner = Owner::default();
-        *owner.pairing.lock().unwrap() =
-            (PairingState::Paired, Some("0123456789abcdef".to_owned()));
-        owner.stop().await;
-        assert_eq!(
-            *owner.pairing.lock().unwrap(),
-            (PairingState::Disconnected, None)
-        );
-    }
-}
+#[path = "owner_disconnect_tests.rs"]
+mod disconnect_tests;

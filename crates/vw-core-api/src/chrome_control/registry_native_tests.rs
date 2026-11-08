@@ -4,7 +4,9 @@
 //! Invariants:
 //! - Every test key lives under `HKCU\Software\VibeWorkTests`, never under Chrome's own keys.
 //! - Each [`TestRoot`] owns one key of its own (`<name>-<process id>`, the name unique within the test process) and
-//!   deletes only that key when it is dropped, also when the test panics. The shared parent is never deleted: other
+//!   creates it before Connect's registry transaction. Concurrent tests otherwise race to create the shared parent
+//!   inside separate transactions, which Windows can reject as a transactional conflict. The root is deleted when
+//!   dropped, also when the test panics. The shared parent is never deleted: other
 //!   tests, in this process or in another test process, may be working below it at the same moment, and deleting it
 //!   would mark their keys for deletion under them. Test roots therefore need no turn-taking.
 //!
@@ -25,6 +27,10 @@ impl TestRoot {
     pub(super) fn new(name: &str) -> Self {
         let key = format!(r"{PARENT}\{name}-{}", std::process::id());
         let _ = reg(&["delete", &key, "/f"]);
+        assert!(
+            reg(&["add", &key, "/f"]),
+            "cannot create the disposable Chrome registry root"
+        );
         Self { key }
     }
 

@@ -61,6 +61,14 @@ pub struct Head {
 /// # Errors
 /// A short reason (closed early, too long, malformed).
 pub async fn read(reader: &mut (impl AsyncRead + Unpin)) -> Result<Head, String> {
+    let (text, rest) = read_raw(reader).await?;
+    parse(&text).map(|target| Head { target, rest })
+}
+
+/// Read bytes before interpreting the target so ingress authentication precedes all routing.
+pub(crate) async fn read_raw(
+    reader: &mut (impl AsyncRead + Unpin),
+) -> Result<(String, Vec<u8>), String> {
     let mut buf = Vec::with_capacity(4096);
     let mut chunk = [0u8; 4096];
     let end = loop {
@@ -82,7 +90,7 @@ pub async fn read(reader: &mut (impl AsyncRead + Unpin)) -> Result<Head, String>
     let rest = buf.split_off(end + 4);
     buf.truncate(end);
     let text = String::from_utf8(buf).map_err(|_| "request head is not UTF-8".to_owned())?;
-    parse(&text).map(|target| Head { target, rest })
+    Ok((text, rest))
 }
 
 fn find_end(buf: &[u8]) -> Option<usize> {

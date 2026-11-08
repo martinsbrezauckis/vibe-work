@@ -89,5 +89,21 @@ fn marker_is_visible_replaced_passes_input_and_expires() {
         1,
         "a hidden surface cannot retain feedback"
     );
+    view.show();
+    pump(Duration::from_millis(40));
+    show_for(view.upcast_ref(), (0.5, 0.5), Duration::ZERO).unwrap();
+    assert_eq!(
+        overlay.children().len(),
+        1,
+        "expired feedback must not paint"
+    );
+    show_for(view.upcast_ref(), (0.5, 0.5), Duration::from_millis(40)).unwrap();
+    assert_eq!(overlay.children().len(), 2);
+    pump(Duration::from_millis(100));
+    assert_eq!(
+        overlay.children().len(),
+        1,
+        "the native timer must keep the remaining lifetime"
+    );
     window.close();
 }

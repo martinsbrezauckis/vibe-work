@@ -1,32 +1,9 @@
-//! Which URLs a session's browser may show:
-//! public `http`/`https` hosts, and on the loopback interface only plain `http` on ports of its own session; never
-//! private or special addresses, other schemes, or the app's own origins.
-//!
-//! Depends on: url, vw-netguard (address classes, canary suffix). Called by: `service` (open, navigation checks),
-//! `hooks`, vw-core-api (the agent tools' refusals, the address bar).
-//! Invariants:
-//! - Loopback means exactly `127.0.0.1`, `localhost` or `[::1]` after URL normalisation; other spellings
-//!   (`localhost.`, `[::ffff:127.0.0.1]`, `127.0.0.2`) are refused. Loopback is `http` only and needs a port of the
-//!   session (the caller's owner check) and is never the app's development origin.
-//! - An IP literal must be public (vw-netguard classes), or a private-network address (RFC 1918 / ULA / carrier-grade
-//!   NAT) the USER typed (Lan: never the agent, never an in-page navigation; the Debug API acts as
-//!   the user by design). Link-local (`169.254.0.0/16`, `fe80::/10`, cloud metadata) is refused for
-//!   every origin; a host NAME is checked against DNS on every navigation
-//!   (the hooks' cached resolver; the core before an open) and again at request time by the network guard where it
-//!   runs; `*.localhost` is the app's own and is refused.
-//! - Public pages open on every platform (the baseline, ShellX's level: private, LAN, file and app-own targets refused
-//!   here, names checked against DNS by the core before an open). Where the network guard runs (Linux) it checks
-//!   every request again at request time; it is an extra layer, never a condition for loading. A canary URL
-//!   (`*.vw-guard.invalid`, RFC 6761 `.invalid`) is allowed only as the one the engine announced for the mount's
-//!   pending guard check (the hooks decide that); any other is refused.
-//! - `file:`, `data:`, `blob:`, `javascript:`, `about:` other than `about:blank`, every custom scheme and any URL with
-//!   user info are refused. The exception, inside a frame only ([`UrlPolicy::frame_navigation`]): the documents a page
-//!   makes itself, `about:srcdoc` (its `<iframe srcdoc>`), `data:` and `blob:`; they load nothing from the network
-//!   and are never a page of their own (an open and a top-level navigation refuse them).
+//! Browser URL admission: web schemes and credentials are checked independently of address space.
+//! Local and private destinations use ordinary browser permissions. Backend capture uses `fetch_policy`.
 
 use url::{Host, Url};
 use vw_netguard::CANARY_SUFFIX;
-use vw_netguard::ip::{IpClass, classify};
+use vw_netguard::ip::classify;
 
 /// Who a port belongs to, as seen by the asking session (computed by the core from attribution and leases).
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -40,8 +17,8 @@ pub enum PortOwner {
     /// Nothing listens there and no session holds it.
     Nobody,
     /// Something in this session's folder listens there, but Vibe Work did not start it and the port is not
-    /// leased to the session: the owner is only inferred (confidence `inferred`). Refused for the agent;
-    /// the user may still open it from the app's own window.
+    /// leased to the session: the owner is only inferred (confidence `inferred`). Pinned App previews require
+    /// proven ownership; browser navigation does not consult port ownership.
     NotProven,
 }
 
@@ -50,33 +27,27 @@ pub enum PortOwner {
 pub enum Destination {
     /// `about:blank`.
     Blank,
-    /// This computer, on `port` (session ownership checks apply).
+    /// This computer, on `port`.
     Loopback {
         /// The port.
         port: u16,
     },
-    /// A public host (checked again at request time by the network guard).
+    /// A host name or public address.
     Public,
-    /// A private-network literal (RFC 1918 / ULA, carrier-grade NAT; never link-local): opened only when the user
-    /// typed it (the address bar; the Debug API acts as the user by design), never by the agent or an
-    /// in-page navigation.
+    /// A non-public literal address; ordinary browser admission applies.
     Lan,
     /// The network guard's canary (`http://<token>.vw-guard.invalid/`).
     Canary,
 }
 
-/// What kind of page a webview mount holds for its whole life (Private Network Access model): a
-/// page from the web never shares a mount with a page of the session's own local server, so the network guard can
-/// judge every request by the mount it came from (a mount's listener) instead of by a page that may be on its way
-/// out.
+/// Original mount address class. Used for storage and the separate backend capture policy.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PageClass {
-    /// Public pages (and `about:blank`): nothing on this computer is reachable.
+    /// A host name or public address.
     Web,
-    /// Pages of this session's own servers: their ports and other sessions' servers (background) are reachable.
+    /// A loopback address.
     Local,
-    /// A page on the user's local network the USER opened (a router's admin page): its own host is reachable; the
-    /// agent neither reads nor acts on it.
+    /// A non-public literal address.
     Lan,
 }
 
@@ -110,18 +81,15 @@ pub enum UrlRefusal {
     /// A host that is not allowed (the text names the class).
     #[error("{0} is not opened: {1}")]
     Host(String, &'static str),
-    /// A private-network address for the agent or an in-page navigation (only the user opens those).
-    #[error(
-        "{0} is on your local network: the agent does not open local-network pages (you can, from the address bar)"
-    )]
+    /// A backend fetch outside the current page's existing local-media scope.
+    #[error("the backend media fetch cannot reach local-network address {0} from this page")]
     Lan(String),
     /// A name reserved for this computer or the app.
     #[error("{0} is reserved for this computer and is not opened")]
     ReservedName(String),
-    /// A navigation inside a mount to the other page class (from a web page to a local server or back, top level
-    /// or in a frame): only a fresh load from the address bar or the agent's navigate opens it.
+    /// A backend fetch or pinned App preview operation outside its existing resource scope.
     #[error(
-        "pages from the web and this session's local servers do not share a page: open {0} from the address bar"
+        "this operation is limited to the current page's resource scope: open {0} in a browser tab instead"
     )]
     OtherClass(String),
     /// The app's own development origin.
@@ -151,12 +119,12 @@ pub enum UrlRefusal {
 /// The fixed part of the policy (no session data).
 #[derive(Clone, Debug, Default)]
 pub struct UrlPolicy {
-    /// The app's development origin (`devUrl`), refused by port when its host is loopback. `None` in user builds.
+    /// The app's development origin (`devUrl`), reserved by backend fetch policy. Browser admission ignores it.
     pub dev_origin: Option<Url>,
 }
 
 impl UrlPolicy {
-    /// Parses `text` and classifies it (everything except port ownership and the guard).
+    /// Parses `text` and classifies its address for storage and backend resource scope.
     ///
     /// # Errors
     /// The reason, as a [`UrlRefusal`].
@@ -165,7 +133,7 @@ impl UrlPolicy {
         self.classify(&url).map(|d| (url, d))
     }
 
-    /// Classifies a parsed URL (scheme, user info, host, app origin).
+    /// Checks scheme and user info, then classifies the host without restricting its address space.
     ///
     /// # Errors
     /// The reason, as a [`UrlRefusal`].
@@ -173,134 +141,72 @@ impl UrlPolicy {
         if url.as_str() == "about:blank" {
             return Ok(Destination::Blank);
         }
-        let scheme = url.scheme();
-        if scheme != "http" && scheme != "https" {
-            return Err(UrlRefusal::Scheme(short(scheme)));
+        if !matches!(url.scheme(), "http" | "https") {
+            return Err(UrlRefusal::Scheme(short(url.scheme())));
         }
         if !url.username().is_empty() || url.password().is_some() {
             return Err(UrlRefusal::UserInfo);
         }
+        if url.path().starts_with("/__vw_guard/")
+            && matches!(url.host(), Some(Host::Ipv4(ip)) if ip.is_loopback())
+        {
+            return Err(UrlRefusal::ReservedName("browser network canary".into()));
+        }
         let port = url.port_or_known_default().unwrap_or(80);
-        let loopback = match url.host() {
-            Some(Host::Ipv4(v4)) => {
-                if v4.octets() == [127, 0, 0, 1] {
-                    true
-                } else {
-                    return literal(&v4.to_string(), classify(v4.into()));
-                }
+        match url.host() {
+            Some(Host::Domain(name)) if name.ends_with(CANARY_SUFFIX) && url.scheme() == "http" => {
+                Ok(Destination::Canary)
             }
-            Some(Host::Ipv6(v6)) => {
-                if v6.is_loopback() {
-                    true
-                } else {
-                    return literal(&format!("[{v6}]"), classify(v6.into()));
-                }
+            Some(Host::Domain(name))
+                if name.trim_end_matches('.').eq_ignore_ascii_case("localhost")
+                    || name.trim_end_matches('.').ends_with(".localhost") =>
+            {
+                Ok(Destination::Loopback { port })
             }
-            Some(Host::Domain(name)) => {
-                let lower = name.to_ascii_lowercase();
-                if lower == "localhost" {
-                    true
-                } else if lower.ends_with(CANARY_SUFFIX) && scheme == "http" {
-                    return Ok(Destination::Canary);
-                } else if lower == "localhost."
-                    || lower.trim_end_matches('.').ends_with(".localhost")
-                {
-                    return Err(UrlRefusal::ReservedName(short(&lower)));
-                } else {
-                    return Ok(Destination::Public);
-                }
-            }
-            None => return Err(UrlRefusal::NotAUrl(short(url.as_str()))),
-        };
-        debug_assert!(loopback);
-        if scheme != "http" {
-            return Err(UrlRefusal::LoopbackHttps);
+            Some(Host::Ipv4(ip)) if ip.is_loopback() => Ok(Destination::Loopback { port }),
+            Some(Host::Ipv6(ip)) if ip.is_loopback() => Ok(Destination::Loopback { port }),
+            Some(Host::Ipv4(ip)) if !classify(ip.into()).is_public() => Ok(Destination::Lan),
+            Some(Host::Ipv6(ip)) if !classify(ip.into()).is_public() => Ok(Destination::Lan),
+            Some(_) => Ok(Destination::Public),
+            None => Err(UrlRefusal::NotAUrl(short(url.as_str()))),
         }
-        if self.is_app_origin_port(port) {
-            return Err(UrlRefusal::AppOrigin(port));
-        }
-        Ok(Destination::Loopback { port })
     }
 
-    fn is_app_origin_port(&self, port: u16) -> bool {
-        // Every loopback spelling reaches the same server, so the port alone decides once the dev origin is
-        // itself on loopback (it always is: `devUrl` = http://127.0.0.1:1420).
-        self.dev_origin.as_ref().is_some_and(|dev| {
-            let dev_on_loopback = match dev.host() {
-                Some(Host::Ipv4(v)) => v.is_loopback(),
-                Some(Host::Ipv6(v)) => v.is_loopback(),
-                Some(Host::Domain(d)) => d.eq_ignore_ascii_case("localhost"),
-                None => false,
-            };
-            dev_on_loopback && dev.port_or_known_default() == Some(port)
-        })
-    }
-
-    /// The full check for a session: shape, then the owner of a loopback port. Public hosts pass here (the core
-    /// checks names against DNS, the guard every request where it runs); a private-network literal passes only when
-    /// `user` (typed by the user: the address bar or the Debug API).
+    /// Browser address admission. Site permissions, tab ownership and access modes are checked by the caller.
+    /// Legacy port/grant arguments do not restrict browser destinations.
     ///
     /// # Errors
-    /// The reason, as a [`UrlRefusal`].
+    /// Malformed URLs, credentials, non-web schemes, or an internal guard canary.
     pub fn check(
         &self,
         text: &str,
-        owner_of: impl FnOnce(u16) -> PortOwner,
-        user: bool,
+        _owner_of: impl FnOnce(u16) -> PortOwner,
+        _user: bool,
     ) -> Result<(Url, Destination), UrlRefusal> {
         let (url, destination) = self.shape(text)?;
         match destination {
-            Destination::Lan if user => Ok((url, destination)),
-            Destination::Lan => Err(UrlRefusal::Lan(short(url.host_str().unwrap_or("")))),
-            Destination::Loopback { port } => match owner_of(port) {
-                PortOwner::ThisSession => Ok((url, destination)),
-                PortOwner::OtherSession(owner) | PortOwner::OtherApp(owner) => {
-                    Err(UrlRefusal::NotThisSession { port, owner })
-                }
-                PortOwner::Nobody => Err(UrlRefusal::Unattributed(port)),
-                PortOwner::NotProven => Err(UrlRefusal::NotProven(port)),
-            },
-            Destination::Public => Ok((url, destination)),
             Destination::Blank | Destination::Canary => Err(UrlRefusal::NotAUrl(short(text))),
+            _ => Ok((url, destination)),
         }
     }
 
-    /// The navigation decision inside a webview mounted with page `class`: `about:blank`, loopback ports in
-    /// `allowed` (Local mounts), public hosts (Web mounts), and in a Lan mount only its own host `lan_host` (the one
-    /// the user opened); never the other page class (a fresh mount opens that), never an unannounced canary (the
-    /// hooks allow the announced one before asking here). Returns the refusal.
+    /// Browser navigation keeps URL and document checks without an address-space restriction.
     ///
     /// # Errors
-    /// The reason, as a [`UrlRefusal`].
+    /// An unsupported URL or an unannounced internal guard canary.
     pub fn navigation(
         &self,
         url: &Url,
-        allowed: &[u16],
-        class: PageClass,
-        lan_host: Option<&str>,
+        _allowed: &[u16],
+        _class: PageClass,
+        _lan_host: Option<&str>,
     ) -> Result<(), UrlRefusal> {
-        let destination = self.classify(url)?;
-        let same_lan_host =
-            class == PageClass::Lan && lan_host.is_some_and(|h| url.host_str() == Some(h));
-        match destination {
-            Destination::Blank => return Ok(()),
-            Destination::Canary => {
-                return Err(UrlRefusal::ReservedName(short(
-                    url.host_str().unwrap_or(""),
-                )));
-            }
-            Destination::Loopback { port } if !allowed.contains(&port) => {
-                return Err(UrlRefusal::Unattributed(port));
-            }
-            Destination::Lan | Destination::Public if same_lan_host => return Ok(()),
-            Destination::Lan => return Err(UrlRefusal::Lan(short(url.host_str().unwrap_or("")))),
-            _ => {}
+        if self.classify(url)? == Destination::Canary {
+            return Err(UrlRefusal::ReservedName(short(
+                url.host_str().unwrap_or(""),
+            )));
         }
-        if destination.class() == class {
-            Ok(())
-        } else {
-            Err(UrlRefusal::OtherClass(short(url.as_str())))
-        }
+        Ok(())
     }
 
     /// The navigation decision for a frame of a page (never the page itself): [`Self::navigation`], plus the documents
@@ -341,17 +247,6 @@ impl UrlPolicy {
     }
 }
 
-/// The refusal of a non-loopback IP literal that is not public.
-fn literal(text: &str, class: IpClass) -> Result<Destination, UrlRefusal> {
-    match class {
-        IpClass::Public => Ok(Destination::Public),
-        // Link-local (169.254.0.0/16, fe80::/10) stays refused for everyone, user-typed too: it holds cloud metadata
-        // endpoints and no user needs to type one.
-        IpClass::Private | IpClass::SharedCgnat => Ok(Destination::Lan),
-        _ => Err(UrlRefusal::Host(short(text), class.describe())),
-    }
-}
-
 /// `http://127.0.0.1:<port><path>` for a port and an optional path (a leading `/` is added).
 ///
 /// # Errors
@@ -379,4 +274,29 @@ fn short(text: &str) -> String {
 /// These documents belong to the page itself and need no refusal receipt or notification.
 pub(crate) fn embedded_document(url: &Url) -> bool {
     url.scheme() == "data" || (url.scheme() == "about" && matches!(url.path(), "srcdoc" | "blank"))
+}
+
+#[cfg(test)]
+mod local_address_tests {
+    use super::*;
+
+    #[test]
+    fn browser_addresses_do_not_need_a_local_network_grant() {
+        let private = format!("http://{}/", std::net::Ipv4Addr::new(192, 168, 1, 2));
+        for url in [
+            private.as_str(),
+            "http://localhost:9999/",
+            "https://127.0.0.2/",
+            "http://169.254.1.1/",
+            "http://[fe80::1]/",
+            "http://nas.local/",
+        ] {
+            assert!(
+                UrlPolicy::default()
+                    .check(url, |_| PortOwner::Nobody, false)
+                    .is_ok(),
+                "{url}"
+            );
+        }
+    }
 }

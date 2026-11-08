@@ -91,6 +91,9 @@ pub(super) async fn next_deferred(later: &BTreeMap<String, tokio::time::Instant>
 /// event retries). Counted in `Shared::resync_reads` (the status report shows it: asserts no
 /// read happens while sessions merely run).
 pub(crate) async fn refresh(shared: &Shared, session_id: &str) -> Option<Applied> {
+    // Resume may recover an old turn. Its send-time interrupt and verified restore have priority
+    // over reads triggered by those recovery events; the final read then includes the settled state.
+    let _restore = shared.access.lock_restore(session_id).await;
     shared.resync_reads.fetch_add(1, Ordering::Relaxed);
     let params = json!({"sessionId": session_id});
     let reply = shared.gate.call("session/read", params, None).await;

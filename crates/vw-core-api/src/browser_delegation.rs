@@ -1,6 +1,6 @@
-//! Browser tab-close permission and its durable receipt boundary.
+//! Browser access-mode delegation receipts and the inert legacy permissions API.
 //! Depends on browser delegation, private atomic storage and loaded session ownership.
-//! Called by Browser settings, tab-close tools and browser startup.
+//! Called by legacy permission requests, tab-close tools and browser startup.
 
 use std::path::PathBuf;
 use std::sync::{Arc, Weak};
@@ -37,11 +37,6 @@ struct NativeDelegation {
 }
 
 impl DelegationAuthorizer for NativeDelegation {
-    fn local_network_allowed(&self) -> bool {
-        self.shared
-            .upgrade()
-            .is_some_and(|shared| shared.chrome_control.local_network())
-    }
     fn page_authorized(&self, page_key: &str, actor: vw_browser::Actor) -> bool {
         let Some(shared) = self.shared.upgrade() else {
             return false;
@@ -54,9 +49,7 @@ impl DelegationAuthorizer for NativeDelegation {
         };
         shared.store.view(&owner).is_some()
             && (actor != vw_browser::Actor::Agent
-                || (crate::browser_tabs::agent_page_allowed(&hub.service, &owner, page_key)
-                    && (hub.service.page_class(page_key) != Some(vw_preview::PageClass::Lan)
-                        || shared.chrome_control.local_network())))
+                || (crate::browser_tabs::agent_page_allowed(&hub.service, &owner, page_key)))
     }
 
     fn record(&self, receipt: &vw_browser::delegation::DelegationReceipt) -> Result<(), String> {

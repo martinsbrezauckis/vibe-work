@@ -43,7 +43,9 @@ async fn deleted_owner_credential_names_remove_then_connect_for_both_cards() {
     keys.delete_chrome_owner().await.unwrap();
     assert!(owner::start(&core.shared).await.is_err());
     let view = core.chrome_view();
-    for setup in std::iter::once(&view.setup).chain(view.edge.as_deref()) {
+    for (setup, button) in std::iter::once((&view.setup, "Connect Chrome"))
+        .chain(view.edge.as_deref().map(|edge| (edge, "Connect Edge")))
+    {
         let addon = setup.addon.as_ref().unwrap();
         assert_eq!(
             serde_json::to_value(addon.state).unwrap(),
@@ -51,11 +53,6 @@ async fn deleted_owner_credential_names_remove_then_connect_for_both_cards() {
         );
         assert_eq!(serde_json::to_value(addon.action).unwrap(), "remove");
         assert!(addon.instruction.contains("Remove…"));
-        let button = if addon.instruction.contains(vw_vocabulary::texts::EDGE_NAME) {
-            "Set up…"
-        } else {
-            "Connect Chrome"
-        };
         assert!(addon.instruction.contains(button));
     }
     if let Some(edge) = &view.edge {

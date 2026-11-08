@@ -165,7 +165,7 @@ function cardJson(entry: Obj, ask: CardAsk): Record<string, unknown> {
     question: approvalQuestion(entry),
     // Vibe's decisions behind the buttons (older automation reads these).
     choices: offeredDecisions(entry, ask.offers).filter((d) => d !== "cancel_turn"),
-    buttons: buttonsFor(choices, alwaysControl(ask.alwaysSetting)),
+    buttons: buttonsFor(choices, alwaysControl(ask.alwaysSetting), entry),
     covers: choices.includes("session") && ask.covers !== null ? coversText(ask.covers) : null,
   };
 }

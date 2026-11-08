@@ -16,6 +16,11 @@ pub type nw_proxy_config_t = *mut NSObject;
 
 #[link(name = "Network", kind = "framework")]
 extern "C" {
+  pub fn nw_proxy_config_set_username_and_password(
+    proxy_config: nw_proxy_config_t,
+    username: *const c_char,
+    password: *const c_char,
+  );
   fn nw_endpoint_create_host(host: *const c_char, port: *const c_char) -> nw_endpoint_t;
   pub fn nw_proxy_config_create_socksv5(proxy_endpoint: nw_endpoint_t) -> nw_proxy_config_t;
   pub fn nw_proxy_config_create_http_connect(
@@ -41,4 +46,17 @@ impl TryFrom<ProxyEndpoint> for nw_endpoint_t {
       }
     }
   }
+}
+
+/// Installs proxy credentials before the configuration is attached to its website data store.
+pub unsafe fn set_credentials(
+  config: nw_proxy_config_t,
+  credentials: Option<(String, String)>,
+) -> Result<(), Error> {
+  if let Some((username, password)) = credentials {
+    let username = CString::new(username).map_err(|_| Error::ProxyEndpointCreationFailed)?;
+    let password = CString::new(password).map_err(|_| Error::ProxyEndpointCreationFailed)?;
+    nw_proxy_config_set_username_and_password(config, username.as_ptr(), password.as_ptr());
+  }
+  Ok(())
 }

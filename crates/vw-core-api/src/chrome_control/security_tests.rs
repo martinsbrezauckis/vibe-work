@@ -171,8 +171,8 @@ mod r {
         core.shutdown().await;
     }
     #[tokio::test]
-    async fn mock_redirect_local_network_refused() {
-        let core = fixture("chrome-security-mock_redirect_local_network_refused").await;
+    async fn mock_redirect_local_network_allowed() {
+        let core = fixture("chrome-security-mock_redirect_local_network_allowed").await;
         let seen = core.shared.chrome_control.owner.answering(|tool, _| {
             if tool == "chrome_status" {
                 status()
@@ -186,15 +186,15 @@ mod r {
         ] {
             let result = super::super::gateway::call(&core.shared,"a","chrome_execute",json!({"sessionId":"session-a","action":"network.intercept","args":{"tabId":7,"rules":[rule]}})).await;
             assert!(
-                result.is_err(),
-                "refused mock destination reached the helper: {result:?}"
+                result.is_ok(),
+                "local mock destination must reach the helper: {result:?}"
             );
         }
         assert!(
             seen.lock()
                 .unwrap()
                 .iter()
-                .all(|(name, _)| name != "chrome_execute")
+                .any(|(name, _)| name == "chrome_execute")
         );
         core.shutdown().await;
     }

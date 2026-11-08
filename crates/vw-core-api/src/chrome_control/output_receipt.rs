@@ -1,4 +1,5 @@
-//! Remove repeated host context after receipt verification, before model budgets. Page data is never traversed.
+//! Compact verified receipts before model budgets; remove older upload receipts' unrelated text-field value.
+//! Other page data is not traversed. Called by the final Chrome output adapter.
 use serde_json::Value;
 
 pub(super) fn compact(result: &mut Value) {
@@ -6,6 +7,7 @@ pub(super) fn compact(result: &mut Value) {
     if !body["operationId"].is_string() || !body["action"].is_string() {
         return;
     }
+    let upload = body["action"] == "files.upload";
     let duplicates: Vec<_> = [
         "operationId",
         "sessionId",
@@ -23,6 +25,10 @@ pub(super) fn compact(result: &mut Value) {
     let Some(payload) = body["untrustedPageContent"].as_object_mut() else {
         return;
     };
+    // A file input has a FileList, never an editable text value. Older adapters could fall back to a focused editor.
+    if upload && let Some(data) = payload.get_mut("data").and_then(Value::as_object_mut) {
+        data.remove("value");
+    }
     // These describe the connection, available through discovery. Revision/lease and outcome stay above.
     for key in [
         "ownerPublicKey",

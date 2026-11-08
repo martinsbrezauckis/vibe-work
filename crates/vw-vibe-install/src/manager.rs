@@ -120,6 +120,8 @@ pub(crate) struct State {
     pub(crate) update: VibeUpdatePhase,
     /// The last manifest check's result.
     pub(crate) support: crate::update::SupportState,
+    /// A verified check made during first setup, shown once the private Vibe starts.
+    pub(crate) deferred_support: Option<crate::update::SupportState>,
     /// The update offer's install data, until it is confirmed or replaced.
     pub(crate) update_job: Option<crate::update::PendingUpdate>,
     /// The Chrome extension store state of the last accepted manifest ([`crate::extension_store`]); kept when a
@@ -202,6 +204,7 @@ impl VibeInstaller {
             cancel: None,
             update: VibeUpdatePhase::Idle {},
             support: crate::update::SupportState::default(),
+            deferred_support: None,
             update_job: None,
             extension_store: crate::extension_store::load(&config.root),
             extension_min_version: crate::extension_store::load_record(&config.root)

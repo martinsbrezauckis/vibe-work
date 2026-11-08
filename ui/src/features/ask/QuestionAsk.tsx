@@ -2,6 +2,7 @@
  * Renders Vibe question fields and Submit/Skip through the shared AskCard and transcript client. Keys inside the card:
  * 1-9 pick that option (after the card's arrival grace), Enter on an option submits once every question has an answer.
  */
+import { visibleText } from "./visibleText";
 import { type ReactElement, useState } from "react";
 import { Button } from "../../components/Controls";
 import { TEXT } from "../../vocabulary";
@@ -133,7 +134,7 @@ export function QuestionAsk({
           }}
         />
       ))}
-      {footer !== null && footer !== "" ? <p className="q-footer">{footer}</p> : null}
+      {footer !== null && footer !== "" ? <p className="q-footer">{visibleText(footer)}</p> : null}
     </AskCard>
   );
 }

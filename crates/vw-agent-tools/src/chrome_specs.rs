@@ -41,7 +41,7 @@ fn chrome_status() -> Value {
 
 fn chrome_session() -> Value {
     json!({
-        "description": "Open or inspect this chat's window in the selected browser, cancel its current work or stop its session. Use the exact browser profile from chrome_status. Stop leaves the window open.",
+        "description": "Open or inspect this chat's own window in the selected browser, cancel its current work or stop its session. Use the exact profileId from chrome_status. When paired Chrome or Edge is closed, profileId chrome or edge lets Vibe Work open it and wait for its extension (approval first in Ask); multiple connected profiles require an exact id. Omit tabId unless the person asked to use an existing tab. Stop and quitting Vibe Work leave the browser window open.",
         "inputSchema": {
             "additionalProperties": false,
             "properties": {

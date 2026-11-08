@@ -22,6 +22,7 @@ import {
   protectedStateText,
 } from "../transcript/model/protectedChange";
 import { DiffView } from "../transcript/rows/DiffView";
+import { visibleText, visibleDiff } from "./visibleText";
 import { AskCard } from "./AskCard";
 import { AuditText } from "./AuditRow";
 import { type AuditLine, auditLine, buttonsFor, whoAnswered } from "./model";
@@ -99,11 +100,11 @@ function ProtectedFiles({
         <div key={file.path} className="protected-file">
           <div className="fh">
             <Badge>{file.kind === "add" ? "Add" : file.kind === "edit" ? "Edit" : "Remove"}</Badge>
-            <span className="fh-path">{file.path}</span>
+            <span className="fh-path">{visibleText(file.path)}</span>
             <span className="fh-stat">{protectedSize(file)}</span>
           </div>
           {file.diff === null || (!full && index >= 3) ? null : (
-            <DiffView diff={protectedDiff(file)} id={`${key}:${file.path}`} />
+            <DiffView diff={visibleDiff(protectedDiff(file))} id={`${key}:${file.path}`} />
           )}
           {file.diffTruncated ? <p className="card-state">Saved diff truncated.</p> : null}
         </div>
@@ -190,7 +191,7 @@ export function ProtectedAsk({
       onFocusInside={focusInside}
       data={{ "data-entry-id": key }}
     >
-      {p.note ? <p className="reason protected-note">{p.note}</p> : null}
+      {p.note ? <p className="reason protected-note">{visibleText(p.note)}</p> : null}
       <ProtectedFiles p={p} full={full} inlineShowAll={false} />
       {pending ? <span className="sr">Vibe proposes a change to its folder.</span> : null}
     </AskCard>

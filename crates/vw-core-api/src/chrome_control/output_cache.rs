@@ -67,8 +67,17 @@ pub(super) fn for_model(
     tool: &str,
     clamped: bool,
 ) -> Value {
+    #[cfg(feature = "click-marker")]
+    if tool == "chrome_execute"
+        && let super::owner::Answer::Helper(result) = &answer
+    {
+        super::action_tracking::record(shared, chat, request, result);
+    }
     let mut result = super::content::for_model(answer);
     super::receipt::stamp(shared, tool, request, &mut result);
+    if tool == "chrome_execute" {
+        super::approval::observe(shared, chat, request, &result);
+    }
     if tool == "chrome_execute"
         && super::output_file::requested(request)
         && result["structuredContent"]["status"] == "completed"

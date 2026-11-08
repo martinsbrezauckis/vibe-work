@@ -12,6 +12,8 @@ publish = false
 workspace = true
 
 [features]
+# Optional agent capture directly into the vault. Off in default builds.
+agent-vault = []
 # Optional native input feedback.
 click-marker = ["vw-preview/click-marker"]
 # TypeScript bindings for the UI (through vw-core-api's gen-core-ts).

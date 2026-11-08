@@ -18,7 +18,7 @@ import { MAX_IMAGE_BYTES, sniffImage, toBase64 } from "../composer/model/images"
 import { attachmentRefusal } from "./attachments";
 
 /** The largest file the documents path takes (the core checks it again). */
-const MAX_DROP_BYTES = 50 * 1024 * 1024;
+export const MAX_DROP_BYTES = 50 * 1024 * 1024;
 
 /** One dropped item, independent of the browser API it came from. */
 export interface DroppedItem {

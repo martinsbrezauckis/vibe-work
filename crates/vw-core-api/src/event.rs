@@ -421,6 +421,8 @@ pub enum AlertKind {
     NetworkSettingsRejected,
     /// The managed config disables MCP, including every Vibe Work tool.
     ToolsUnavailable,
+    /// The person's native browser approval could not be saved by the helper.
+    BrowserPairingFailed,
 }
 
 /// Serializable mirror of `vw_session::Change` (minus `Replaced`, which subscribers receive as a

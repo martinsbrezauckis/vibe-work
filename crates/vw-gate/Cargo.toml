@@ -12,6 +12,8 @@ publish = false
 workspace = true
 
 [features]
+# Optional context breakdown; absent from the default build.
+context-composition = []
 # Keep the method gate's transport contract aligned with the app's network settings.
 proxy-transports = ["vw-mistral/proxy-transports"]
 

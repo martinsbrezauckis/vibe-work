@@ -11,6 +11,10 @@ publish = false
 [lints]
 workspace = true
 
+[features]
+# Optional monthly plan reads; excluded from the default application build.
+plan-usage = []
+
 [dependencies]
 vw-vocabulary = { path = "../vw-vocabulary" }
 # stored secret values register here so the Debug API never returns them.

@@ -4,8 +4,8 @@
  * sessions, transcript, composer) and the loop that serves them. One hook so `Shell` stays a layout component.
  * Depends on: AppContext, actions, shellUiControl, state/uiControl, hooks. Called by: Shell.
  * Invariants: every registration is undone on unmount (React StrictMode mounts effects twice);
- * the UI-control loop only polls while the Debug API is on, or always in browser dev mode where
- * the Debug API is the transport itself.
+ * the UI-control loop polls while the Debug API is on, during an optional feedback capture for its secret check,
+ * or always in browser dev mode where the Debug API is the transport itself.
  */
 import { startDesktopLifecycle } from "../../state/desktopLifecycle";
 import { startAppAttention } from "../../state/appAttention";
@@ -21,6 +21,8 @@ import { attachSecretScanActivity } from "../../state/secretScanActivity";
 import { registerClipboard } from "../../state/clipboard";
 
 import { runUiControl } from "../../state/uiControl";
+import { feedbackFor } from "../../state/feedback";
+import { FEEDBACK_ENABLED } from "../../state/feedbackEnabled";
 import { useApp } from "./AppContext";
 import { shellActions } from "./actions";
 import { useSessionWiring } from "../sessions/useSessionWiring";
@@ -260,7 +262,10 @@ export function useShellWiring(): void {
     const core = app.core;
     if (core === null) return;
     const abort = new AbortController();
-    const active = () => core.client.kind !== "tauri" || core.store.get().debugApi.enabled;
+    const active = () =>
+      core.client.kind !== "tauri" ||
+      core.store.get().debugApi.enabled ||
+      (FEEDBACK_ENABLED && feedbackFor(core).store.get().capturing);
     void runUiControl(core.client.uiControl, app.uiControl, active, abort.signal);
     return () => {
       abort.abort();

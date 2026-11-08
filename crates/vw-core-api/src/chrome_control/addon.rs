@@ -48,6 +48,8 @@ pub enum AddonState {
     OwnerCredentialMissing,
     /// The recorded native registration could not be repaired.
     HelperSetupRequired,
+    /// macOS refused filesystem access during this browser's setup.
+    AccessBlocked,
     /// Chrome turned the extension off (for example after an update that asked for new permissions).
     TurnedOffInChrome,
     /// Chrome must restart to find the extension (macOS).
@@ -187,6 +189,7 @@ impl ConnectedProfiles {
 
 /// Choose the version for the card from the live profiles or the on-disk profiles.
 pub(super) fn installed_version(
+    config: &super::setup::ChromeControlConfig,
     profiles: &[std::path::PathBuf],
     extension_id: &str,
     connected: bool,
@@ -200,7 +203,7 @@ pub(super) fn installed_version(
     } else {
         profiles
             .iter()
-            .filter_map(|p| super::probe::installed_version(p, extension_id))
+            .filter_map(|p| super::probe::version_for(config, p, extension_id))
             .collect()
     };
     // Every connected profile must meet the minimum. When disconnected, a newer dormant
@@ -323,11 +326,6 @@ pub(crate) fn view_for(
             None,
             "This Vibe Work has no {browser} connection. Tell the person {yourBrowser} needs a Vibe Work build that includes it.",
         ),
-        S::NotSetUp if browser == super::agent_browser::Browser::Edge => (
-            "Not connected",
-            Some(A::Connect),
-            "{yourBrowser} is not set up. Ask the person to click Set up… in Settings, Browser, {yourBrowser}.",
-        ),
         S::NotSetUp => (
             "Not connected",
             Some(A::Connect),
@@ -373,25 +371,20 @@ pub(crate) fn view_for(
             Some(A::OpenPairingPage),
             "The Vibe Work extension waits to be paired. Ask the person to click Pair Vibe Work on its page in {browser} after checking that the code matches the one in Vibe Work.",
         ),
+        S::AccessBlocked => (
+            "Blocked by macOS",
+            Some(A::Connect),
+            "macOS blocked access. Ask the person to open System Settings > Privacy & Security > Files & Folders > Vibe Work, allow {fullBrowser} if listed, then retry Connect {browser}.",
+        ),
         S::HelperSetupRequired => (
             "Helper setup required",
             Some(A::SetupAgain),
             "{browser}'s helper registration is missing or changed and could not be repaired. Ask the person to click Set up again in Settings, Browser, {yourBrowser}.",
         ),
-        S::OwnerCredentialMissing if browser == super::agent_browser::Browser::Edge => (
-            "Browser credential missing",
-            Some(A::Remove),
-            "Vibe Work's browser credential is missing. Ask the person to click Remove… in Settings, Browser, {yourBrowser}, then click Set up….",
-        ),
         S::OwnerCredentialMissing => (
             "Browser credential missing",
             Some(A::Remove),
             "Vibe Work's browser credential is missing. Ask the person to click Remove… in Settings, Browser, then Connect {browser}.",
-        ),
-        S::HelperNotRunning if browser == super::agent_browser::Browser::Edge => (
-            "Not running",
-            Some(A::Connect),
-            "Vibe Work's {browser} connection is not running. Ask the person to click Finish setting up… in Settings, Browser, {yourBrowser}.",
         ),
         S::HelperNotRunning => (
             "Not running",
@@ -416,7 +409,7 @@ pub(crate) fn view_for(
         S::ChromeClosed => (
             "Connected when {browser} is open",
             None,
-            "{yourBrowser} is paired but {browser} is not open. Ask the person to open {fullBrowser}; it connects by itself.",
+            "{yourBrowser} is paired but {browser} is not open. Call chrome_session with action open and profileId {browser}; Vibe Work opens it (card first in Ask). Do not start the browser with process or shell tools: the app's launcher leaves the browser open after Vibe Work quits.",
         ),
         S::EnableInChrome => (
             "Enable in {browser}",
@@ -436,9 +429,7 @@ pub(crate) fn view_for(
         S::Connected => ("Connected", None, "{yourBrowser} is connected."),
     };
     let step: Option<String> = match state {
-        S::OwnerCredentialMissing if browser == super::agent_browser::Browser::Edge => {
-            Some("Remove, then Set up…".into())
-        }
+        S::AccessBlocked => Some("Check Files & Folders".into()),
         S::OwnerCredentialMissing => Some(browser.words("Remove, then Connect {browser}")),
         S::ChromeMissing | S::ChromeSandboxed | S::OtherBrowser => {
             Some(browser.words("Install {fullBrowser}"))

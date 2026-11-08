@@ -11,6 +11,15 @@ use super::{
 
 const TEST_FIELD: &str = "vibeWorkModelKeyTest";
 
+pub(super) fn recorded_auth_failure(item: &VaultItem) -> Option<TestCallError> {
+    let test: StoredKeyTest = serde_json::from_value(item.extra.get(TEST_FIELD)?.clone()).ok()?;
+    match test.code {
+        Some(401) => Some(TestCallError::Unauthorized),
+        Some(403) => Some(TestCallError::Forbidden),
+        _ => None,
+    }
+}
+
 /// Last completed test of one stored credential. No response body or credential value.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

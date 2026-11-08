@@ -49,8 +49,16 @@ export function PreviewTab({
   // Pointing and notes go to a chat's next message: none without a chat (the New chat screen has no session yet).
   const chat = useShellState((s) => s.selected !== null);
   const newChatOwner = useShellState((s) => s.newChatOwner);
-  const [pointNotice, setPointNotice] = useState<{ sessionId: string; text: string } | null>(null);
-  const [saveNotice, setSaveNotice] = useState<{ sessionId: string; text: string } | null>(null);
+  const [notice, setNotice] = useState<{ sessionId: string; text: string } | null>(null);
+  useEffect(() => {
+    if (notice === null) return;
+    const timer = window.setTimeout(() => {
+      setNotice(null);
+    }, 6000);
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [notice]);
   const list = useStore(previews.store, (s) =>
     sessionId === null ? undefined : s.lists[sessionId],
   );
@@ -90,7 +98,7 @@ export function PreviewTab({
       if (from !== page) return;
       const tab = shownWeb ?? undefined;
       void pointPreview(app, sessionId, "ui", undefined, tab).then((outcome) => {
-        setPointNotice({
+        setNotice({
           sessionId,
           text: outcome.ok ? `Added to your message: ${outcome.chip.label}` : outcome.reason,
         });
@@ -175,7 +183,7 @@ export function PreviewTab({
               collapsed={collapsed}
               onChoose={close}
               onNotice={(text) => {
-                setSaveNotice({ sessionId, text });
+                setNotice({ sessionId, text });
               }}
               visible={visible}
             />
@@ -244,12 +252,12 @@ export function PreviewTab({
         point={
           local && chat
             ? () => {
-                setPointNotice({
+                setNotice({
                   sessionId,
                   text: "Select text or click an element in the preview (Escape cancels).",
                 });
                 void pointPreview(app, sessionId).then((outcome) => {
-                  setPointNotice({
+                  setNotice({
                     sessionId,
                     text: outcome.ok
                       ? `Added to your message: ${outcome.chip.label}`
@@ -269,14 +277,9 @@ export function PreviewTab({
           reveal={(path) => void app.sessions?.revealPath(path)}
         />
       )}
-      {pointNotice?.sessionId === sessionId && (
+      {notice?.sessionId === sessionId && (
         <p className="preview-focus" role="status">
-          {pointNotice.text}
-        </p>
-      )}
-      {saveNotice?.sessionId === sessionId && (
-        <p className="preview-focus" role="status">
-          {saveNotice.text}
+          {notice.text}
         </p>
       )}
       {local && <Annotations browser={browser} sessionId={sessionId} controls={false} />}

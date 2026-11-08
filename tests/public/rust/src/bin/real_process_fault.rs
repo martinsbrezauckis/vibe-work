@@ -442,6 +442,11 @@ fn main() {
                             ),
                         ));
                     }
+                    // Delay this request's delivery while the real server keeps running. Unlike
+                    // suspendMs/readDelayMs this touches neither the process nor its session store.
+                    if let Some(ms) = rule["requestDelayMs"].as_u64() {
+                        std::thread::sleep(Duration::from_millis(ms));
+                    }
                     if rule["suspendMs"].is_u64() || rule["suspendUntil"].is_string() {
                         suspend(pid, true);
                         resume_later(pid, rule);

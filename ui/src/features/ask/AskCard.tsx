@@ -14,6 +14,7 @@ import { Button } from "../../components/Controls";
 import { useFirstSight } from "../../hooks/useFirstSight";
 import type { CoversPart } from "../../protocol/core";
 import { TEXT, wording } from "../../vocabulary";
+import { visibleText } from "./visibleText";
 import { registerCardFocus } from "./cardFocus";
 import { usePermissionArrival } from "./permissionArrival";
 import { type AskButton, type AskChoice } from "./model";
@@ -102,14 +103,28 @@ function CoversLine({ parts }: { parts: readonly CoversPart[] }): ReactElement {
   return (
     <span className="perms">
       Allow for this session covers{" "}
-      {parts.map((part, i) => (part.code ? <code key={i}>{part.text}</code> : part.text))}.
+      {parts.map((part, i) =>
+        part.code ? <code key={i}>{visibleText(part.text)}</code> : visibleText(part.text),
+      )}
+      .
     </span>
   );
 }
 
 /** Renders one ask. */
 export function AskCard(props: AskCardProps): ReactElement {
-  return <PermissionCard key={props.id} {...props} />;
+  return (
+    <PermissionCard
+      key={props.id}
+      {...props}
+      question={visibleText(props.question)}
+      who={visibleText(props.who)}
+      {...(props.whoTitle === undefined ? {} : { whoTitle: visibleText(props.whoTitle) })}
+      {...(props.summary === undefined ? {} : { summary: visibleText(props.summary) })}
+      reason={props.reason == null ? null : visibleText(props.reason)}
+      state={visibleText(props.state)}
+    />
+  );
 }
 
 function PermissionCard(props: AskCardProps): ReactElement {

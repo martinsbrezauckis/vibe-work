@@ -106,7 +106,7 @@ pub fn ensure(vibe_home: &Path) -> Result<TrustStore, String> {
         Ok(text) => text,
         Err(outcome) => {
             if matches!(outcome, TrustStore::Kept(true)) {
-                crate::config_comments::restore(&path, &existing, &NOTE)?;
+                crate::config_comments::restore(&path, &existing, None, KEY, &NOTE)?;
             }
             return Ok(outcome);
         }

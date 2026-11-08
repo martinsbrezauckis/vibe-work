@@ -133,9 +133,6 @@ mod linux {
                 ry,
             );
         });
-        // Feedback is native host drawing, never page input; its failure cannot undo a sent click.
-        #[cfg(feature = "click-marker")]
-        let _ = crate::webview::click_marker_linux::show(widget, point);
         Ok(())
     }
 

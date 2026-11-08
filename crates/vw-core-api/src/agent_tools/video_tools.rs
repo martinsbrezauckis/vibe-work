@@ -163,6 +163,11 @@ pub(super) async fn call(
 }
 fn snapshot(shared: &Shared, owner: &str, path: &str) -> Result<vw_video::input::Input, String> {
     let roots = super::session::folders(shared, owner)?;
+    let given = path;
+    #[cfg(windows)]
+    let native = vw_agent_tools::video::windows_path(path);
+    #[cfg(windows)]
+    let path = native.as_ref();
     let candidate = if Path::new(path).is_absolute() {
         PathBuf::from(path)
     } else {
@@ -170,7 +175,7 @@ fn snapshot(shared: &Shared, owner: &str, path: &str) -> Result<vw_video::input:
     };
     let real = candidate
         .canonicalize()
-        .map_err(|_| "decode_failed: local video is unavailable")?;
+        .map_err(|error| input_error(given, &error))?;
     let layout = Layout::new(&shared.instructions.own_home, &roots[0])
         .map_err(|_| "decode_failed: folder policy")?;
     let exclusions = crate::read_exclusions::ReadExclusions::for_chat(shared, &roots[0])?;
@@ -221,15 +226,31 @@ fn snapshot(shared: &Shared, owner: &str, path: &str) -> Result<vw_video::input:
                 | rustix::fs::OFlags::CLOEXEC,
             rustix::fs::Mode::empty(),
         )
-        .map_err(|_| "decode_failed: regular input could not be opened")?;
+        .map_err(|error| input_error(given, &error.into()))?;
         std::fs::File::from(fd)
     };
     #[cfg(not(unix))]
     let file = crate::search_walk::open(parent, name)
-        .map_err(|_| "decode_failed: input is not a regular local file or is a link")?
+        .map_err(|error| input_error(given, &error))?
         .into_std();
+    if !file
+        .metadata()
+        .map_err(|error| input_error(given, &error))?
+        .is_file()
+    {
+        return Err(format!("cannot_read: {given}"));
+    }
     exclusions.check_opened(&file, &real, None)?;
     vw_video::input::Input::copy(file, &real)
+}
+
+fn input_error(path: &str, error: &std::io::Error) -> String {
+    let code = if error.kind() == std::io::ErrorKind::NotFound {
+        "not_found"
+    } else {
+        "cannot_read"
+    };
+    format!("{code}: {path}")
 }
 
 #[cfg(test)]
@@ -237,6 +258,56 @@ mod tests {
     use super::*;
     use base64::Engine as _;
     use serde_json::json;
+    #[tokio::test]
+    async fn video_snapshot_names_missing_and_unreadable_sources_without_a_decode_diagnosis() {
+        let f = crate::feature_test_core::Fixture::new().await;
+        let cwd = f.root.join("project");
+        f.load("video", &cwd, &[], true);
+        let given = "my ārā clip.mp4";
+        let reason = snapshot(&f.core.shared, "video", given).err().unwrap();
+        assert_eq!(reason, format!("not_found: {given}"));
+        let (row, agent) = crate::video_projection::failure(&reason);
+        assert_eq!(row, format!("Not found: {given}."));
+        assert!(agent.contains("Check the file name and folder."), "{agent}");
+        assert!(!agent.contains("decode"), "{agent}");
+        let folder = cwd.join("folder.mp4");
+        std::fs::create_dir(&folder).unwrap();
+        let reason = snapshot(&f.core.shared, "video", "folder.mp4")
+            .err()
+            .unwrap();
+        let (row, agent) = crate::video_projection::failure(&reason);
+        assert_eq!(row, "Cannot read: folder.mp4.");
+        assert!(agent.contains("readable local file"), "{agent}");
+        assert!(!agent.contains("decode"), "{agent}");
+        f.finish().await;
+    }
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn git_bash_video_paths_keep_the_same_source_and_read_policy() {
+        let f = crate::feature_test_core::Fixture::new().await;
+        let cwd = f.root.join("project");
+        f.load("video", &cwd, &[], true);
+        let clip = cwd.join("video clip.mp4");
+        std::fs::write(&clip, b"ordinary video input").unwrap();
+        let msys = |path: &Path| {
+            let native = path.canonicalize().unwrap().to_string_lossy().into_owned();
+            let plain = native.strip_prefix(r"\\?\").unwrap_or(&native);
+            format!(
+                "/{}{}",
+                plain[..1].to_ascii_lowercase(),
+                plain[2..].replace('\\', "/")
+            )
+        };
+        let input = snapshot(&f.core.shared, "video", &msys(&clip)).unwrap();
+        assert_eq!(
+            std::fs::read(input.path()).unwrap(),
+            b"ordinary video input"
+        );
+        let protected = f.root.join("app-data/private.bin");
+        std::fs::write(&protected, b"private bytes").unwrap();
+        assert!(snapshot(&f.core.shared, "video", &msys(&protected)).is_err());
+        f.finish().await;
+    }
     #[cfg(target_os = "linux")]
     #[tokio::test]
     async fn linux_video_refuses_before_request_validation_or_file_access() {

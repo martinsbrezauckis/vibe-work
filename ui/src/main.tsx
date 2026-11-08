@@ -58,6 +58,7 @@ import "./styles/mistral-keys.css";
 import "./styles/shared-controls.css";
 import "./styles/search.css";
 // the shared motion and responses load last so they win over older per-feature rules.
+import "./styles/context-composition.css";
 import "./styles/feel.css";
 import "./styles/editor-workspace.css";
 import "./styles/accessibility.css";

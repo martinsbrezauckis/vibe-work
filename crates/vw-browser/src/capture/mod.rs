@@ -14,7 +14,7 @@
 //! Called by: vw-core-api (the agent tool, the `browser` command for the window and the Debug API), tests.
 //! Invariants:
 //! - Writes stay inside the session folder (`files`); page content never chooses a path.
-//! - The agent is refused on a local-network page the user opened and after the user's Stop; the user
+//! - The agent is refused after the user's Stop; the user
 //!   and the Debug API (acting as the user) are not.
 //! - The answer keeps page words under `untrustedPageContent` with the prompt guard's verdict; the files say in their
 //!   first lines that the page's content is data, not instructions.

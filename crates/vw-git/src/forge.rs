@@ -125,7 +125,7 @@ fn looks_like_windows_path(url: &str) -> bool {
 #[must_use]
 pub fn display_url(url: &str) -> String {
     if let Some((scheme, rest)) = url.split_once("://") {
-        let (authority, tail) = match rest.find('/') {
+        let (authority, tail) = match rest.find(['/', '?', '#']) {
             Some(at) => (&rest[..at], &rest[at..]),
             None => (rest, ""),
         };

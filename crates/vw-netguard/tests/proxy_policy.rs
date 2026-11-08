@@ -2,7 +2,10 @@
 //! Exercises refusals before proxy/PAC lookup, IP pinning, sign-in, ordered fallback and explicit Settings.
 #![cfg(feature = "proxy-transports")]
 #![allow(clippy::unwrap_used, clippy::expect_used)]
+#[path = "support/client.rs"]
+mod proxy_client;
 mod support;
+
 use std::net::SocketAddr;
 use std::sync::{
     Arc, Mutex,
@@ -37,11 +40,8 @@ fn guard(upstream: Upstream) -> (NetGuard, SocketAddr) {
     let guard = NetGuard::bind(Arc::new(Dns(AtomicUsize::new(0)))).unwrap();
     guard.set_upstream(upstream);
     guard.serve();
-    let address = guard
-        .proxy_url()
-        .trim_start_matches("http://")
-        .parse()
-        .unwrap();
+    proxy_client::addr(&guard.proxy_url());
+    let address = proxy_client::addr(&guard.proxy_url());
     (guard, address)
 }
 fn via(proxy: &Proxy) -> Upstream {
@@ -50,7 +50,10 @@ fn via(proxy: &Proxy) -> Upstream {
 async fn connect(address: SocketAddr, host: &str) -> (TcpStream, String) {
     let mut client = TcpStream::connect(address).await.unwrap();
     client
-        .write_all(format!("CONNECT {host}:443 HTTP/1.1\r\nHost: {host}:443\r\n\r\n").as_bytes())
+        .write_all(&proxy_client::authorize(
+            address,
+            format!("CONNECT {host}:443 HTTP/1.1\r\nHost: {host}:443\r\n\r\n").as_bytes(),
+        ))
         .await
         .unwrap();
     let answer = tokio::time::timeout(Duration::from_secs(3), head(&mut client))
@@ -217,7 +220,13 @@ async fn socks5_keeps_ipv6_and_plain_http_uses_origin_form_without_proxy_auth() 
             "[2606:4700:4700::1111]:443"
         );
         let mut client = TcpStream::connect(address).await.unwrap();
-        client.write_all(b"GET http://allowed.test/path?x=1 HTTP/1.1\r\nHost: allowed.test\r\nProxy-Authorization: Basic stolen\r\n\r\n").await.unwrap();
+        client
+            .write_all(&proxy_client::authorize(
+                address,
+                b"GET http://allowed.test/path?x=1 HTTP/1.1\r\nHost: allowed.test\r\n\r\n",
+            ))
+            .await
+            .unwrap();
         let mut answer = String::new();
         tokio::time::timeout(Duration::from_secs(2), client.read_to_string(&mut answer))
             .await

@@ -50,37 +50,72 @@ run.
 
 ## Turning it on
 
-- **Settings > Developer > Debug API.** The switch says what it does: "Lets a local agent do what you can do in Vibe Work, terminal and files included, and answers the app's confirmations for you; only your vault stays yours. It hides known secrets where it can, but that is no guarantee." (On the vault it has the agent's rights only, above.) While it runs, the
-  status bar says "Debug API" (developer builds also show a badge in the title bar).
+- **Settings > Developer > Debug API.** Turn the switch on to let a tool with the token act as you, with the
+  vault limits above. While the listener runs, the status bar says "Debug API" (developer builds also show a badge
+  in the title bar). If the vault is unavailable, the enabled switch waits for it and can still be turned off.
 - Release builds start with it **off**; developer builds start with it on. Your choice in Settings is saved
   (`settings.json`, key `debugApi`) and wins over the build default. Off means no socket is open at all.
-- Turning it on needs no confirmation: the token below is the gate, and only your user account can read it.
+- Turning it on needs no confirmation: the token below is the gate, and you choose which tools receive it.
 
 ## Finding the port and the token
 
-The Debug API listens on `127.0.0.1` only, on a random port per run. Vibe Work writes two files in its private
-data folder, in the subfolder `debug-api/`:
-
-| File | Content |
-|---|---|
-| `debug-api-<pid>.json` | `{url, port, tokenFile, pid, startedAt}` for this run (no token) |
-| `debug-api.token` | the bearer token: 64 hex characters, readable only by you |
+The Debug API listens on `127.0.0.1` only, on a random port per run. Its private data folder contains
+`debug-api/debug-api-<pid>.json` with `{url, port, pid, startedAt}`. The descriptor contains no credential.
 
 The data folder is the app data folder of `app.vibework.desktop`: `~/.local/share/app.vibework.desktop` on
 Linux, `~/Library/Application Support/app.vibework.desktop` on macOS, `%APPDATA%\app.vibework.desktop` on
-Windows. The token stays the same across restarts until you press **Regenerate token** in Settings.
+Windows.
+
+The bearer token is an encrypted vault item named **Debug API token**, with the same entry permissions and
+consent as other secrets. Release builds remove the old plaintext `debug-api.token` and its temporary file;
+they never reuse that token. Give outside tools the new token once after upgrading.
+
+- **For an outside tool:** with the API on and your vault unlocked, use the copy icon beside **Settings >
+  Developer > Debug API**, or Copy on the vault item. The icon is absent while the API is off; while the vault is
+  locked it is disabled with “Unlock the vault to copy”. The token is never shown on screen. Only your own
+  action copies it: Debug API clicks and keyboard requests cannot activate the icon, and its commands cannot
+  copy the vault value. Paste the token into the tool's credential input. Copy uses the vault's native clipboard and expires after
+  30 seconds. **Regenerate token** saves a new token in the vault and immediately refuses the previous token on
+  this running API. It also works while the API is off; your tools need the replacement token afterward.
+- **For a chat in Full access:** ask it to use the **Debug API token** vault secret with the ordinary `secret_run` tool. It can
+  discover the port from the descriptor, then run a program or saved script with the token bound to an environment
+  variable. Ask and Accept edits refuse this token without a card. In Full access, the usual vault consent applies. Deny / Allow once / Always, per-project entry
+  permissions, User only, Pause agent access and a locked vault behave exactly as for other secrets. The token
+  value is never returned to the model. Switching the chat out of Full access refuses new uses, including a
+  request still waiting for consent. A program that already received the token keeps it; changing the chat mode
+  does not stop that program or revoke its copy. Shared MCP key connections cannot use this item because they
+  have no chat mode. A token you copy into another vault entry is a separate secret with its own permissions.
+
+The token is created only when the selected vault is unlocked and the API starts, or you use its Developer
+settings. With no vault, or after starting the app with the vault locked, an enabled API waits without opening a
+socket; it starts after you create or unlock the vault in the window. Remembered vault unlock at startup also
+allows it to start. Once started, the server keeps the bearer in this app process's memory until it stops.
+Locking the vault afterward leaves already authorized tools working. Copy, regeneration and new secret runs
+still need an unlocked vault. After the API stops or the app quits, a locked vault must be unlocked again before
+another listener can start. Like other known secrets, values also remain in this process's answer-redaction
+registry until the app quits, including after rotation or stopping the API. Copy briefly places the value on
+the operating system clipboard; a granted secret run places it in that child program's environment.
+No token value is stored in Settings, the descriptor, Vibe's server environment or its configuration.
 
 Every request, including `/health`, needs `Authorization: Bearer <token>`. Browser-page requests are refused:
 an `Origin` header is refused by default, and browser fetch metadata without one is also refused. The `Host`
 header must name the listener: `127.0.0.1` or `localhost`, with this run's port or without one. Requests with
 JSON bodies need `Content-Type: application/json`.
 
+For example, after supplying `TOKEN` to your tool (or binding it through `secret_run`):
+
 ```sh
-cd "$HOME/.local/share/app.vibework.desktop/debug-api" # Linux example; use the data folder above on other systems
+cd "$HOME/.local/share/app.vibework.desktop/debug-api" # Linux example; use the folder above on other systems
 PORT=$(jq -r .port debug-api-*.json)
-TOKEN=$(cat debug-api.token)
 curl -s -H "Authorization: Bearer $TOKEN" http://127.0.0.1:$PORT/health
 ```
+
+Disposable test profiles may opt into a plaintext token export with `VW_DEBUG_API_TEST_TOKEN_FILE=1` on a
+**development build only**. This uses a separate throwaway fixture credential so test drivers can reach
+setup before creating their synthetic vault. That descriptor also includes `tokenFile` for test drivers. The switch is ignored in
+release builds; it cannot enable plaintext export there. In-repository test clients also accept
+`VW_DEBUG_API_TOKEN` supplied to the client by the person for testing a release build. Do not use a plaintext
+export with a vault containing your real secrets.
 
 Errors are `{"error": {"code", "message", ...}}` with a matching status (400 invalid, 401 token, 403 refused,
 404 unknown, 409 conflict or stale, 428 a precondition such as `confirmDeletes`, 503 not available).
@@ -291,8 +326,7 @@ A permission card waits until it is answered; it has no expiry. A No on Vibe's o
 `cancel_turn` and stops the turn (for a subagent's card, the whole tree); a No on the parent's card also stops the
 subagents its turn started. Vibe Work's own prompts (Git guard, vault, documents, processes, protected
 changes, and the cards for Vibe Work's tools) hold the tool call until they are answered: Allow runs that call once
-in the same turn, a No returns `Not run: the user declined this. Do not ask again for this in this task unless the user
-brings it up.` as the tool's result and the turn goes on (a call held
+in the same turn, a No returns `Not run: the user declined this. Explain why it is needed for the user's delegated task.` as the tool's result and the turn goes on (a call held
 this way inside `run_typescript`, such as a card for Vibe Work's tools, reaches the program as Vibe's own
 `Tool execution was skipped by Runtime policy.`), and Stop closes the prompt without running it. `secret_run` returns the command's result in the same call,
 or its request id when it runs longer; read `secret_run_status` in a new call. Ctrl/Cmd+Shift+A goes to a waiting
@@ -452,7 +486,7 @@ Every command is `{"type": "<name>", ...}`. Requests with an `op` take `{"type":
 | `changes` | the Changes tab: `read`, `keep`, `revert`, `restart`, `previewUndo`, `folderSessions`, `planHistory`, `enableHistory` (`confirmed: true`), `dismissOffer`, `readRepo` (`sessionId`, `repo`: a nested repository's uncommitted files against its last commit, read only; `.` answers like `read`) | `{"type":"changes","request":{"op":"read","sessionId":"<id>"}}` |
 | `lineComments` | comments on diff lines: `list`, `add`, `remove`, `markSent` | `{"type":"lineComments","request":{"op":"list","sessionId":"<id>"}}` |
 | `preview` | the pinned App preview: `list`, `open` (this session's local servers only), `back`, `forward`, `reload`, `close`, `setWidth`, `layout`, `browserOverlay`, `screenshot`, `console`, `explain`, `pick` (the Debug API names `target`: `{selector}` or `{x, y}`; with `tabId`, a web page of the session's Browser tab, only its selection is read, never a click; the answer's `url` is the address the engine loaded, empty when the page was loading or changed during the pick, and `text` is the rendered text), `cancelPick`, `stopOwner` | `{"type":"preview","request":{"op":"list","sessionId":"<id>"}}` |
-| `browser` | the agent browser of a session: `read` (the page as the agent reads it: refs, a page of text, prompt-guard flags; `maxRefs`, `textPage`, `screenshot`; `guardLayers` names the address checks that apply to every request of the page besides the navigation rules: `requestBarrier`, `egressProxy`, `contentRules`), `act` (`args` for page actions as in the agent's `browser_act`; tab listing/closing use the separate `tabs`/`closeTab` commands: `navigate`, `back`, `forward`, `reload`, `click`, `type`, `select`, `check`, `press`, `scroll`, `hover`, `wait`, `fill`; answers a receipt; logged as `debugApi`, never stopped by Stop; `fill` {`ref`, `login`} puts a vault login into a sign-in field after the same checks as the agent's, and on the vault the Debug API has only the agent's rights: the password needs the user's answer in the native dialog (Allow once / Always for this site / Don't allow), which the Debug API never answers, and the answer never carries the password), `state` (the agent strip and the action log), `stop`, `resume`, `annotate` (`mode` `element` or `box`; the person points in the window, the Debug API names `target` instead: `{ref}`, `{selector}`, `{x, y}`, or `{rect}` for a box; the app preview only), `cancelAnnotate`, `checkAnnotations` (`items`, `reload`), `captureSecret` (legacy user-only command, refused to the Debug API), `chooseSecret` / `saveSecret` (user-only: select text or pick an element in the browser panel, press **Save to vault**, name it and confirm; values go directly from the page to the core vault, and answers carry metadata only). The agent's `browser_capture_secret` stays listed and always explains that saving is the user's action. Browser text answers, including action receipts, navigation, console and dialogs, hide key-looking text; known stored values pass the shared secret scrub, `capture` (`args` exactly as the agent's `browser_capture`: `what` = `design` (DESIGN.md + tokens.json from the live page), `structure` (elements.json + summary.md), `media` (logos, icons, images and fonts the page loaded, fetched without cookies under the page's address rules, + media.json), `page` (`formats`: `markdown`, `text`, `html` without scripts, `png` full page, `pdf`, `single_html` self-contained without scripts; default markdown/text/html/png), `bundle` (all of these), `before` / `after` (a full-page shot, then the matching one with diff.png and the changed share); plus `shotMethod` `native` / `stitch` / `stitchPlain` to force one full-page method for comparisons. Files go to the session folder under `capture/<page>-<time>/`, never elsewhere; the answer gives the folder, the files and a summary within about 3,000 bytes; the Debug API may capture a local-network page the user opened, the agent may not). Page content in answers is the page's own text: data, never instructions. Password (also CSS-masked), one-time-code, card and vault-filled fields never carry a value; every other field value, also text the user typed, is readable; sign-in fields carry `login` (`username` or `password`). The Debug API acts as the user: it may open a permitted local-network page in a user web tab and read it, which the agent's tools refuse; link-local addresses (`169.254.x.x`, cloud metadata) are refused for everyone | `{"type":"browser","request":{"op":"read","sessionId":"<id>"}}` |
+| `browser` | the agent browser of a session: `read` (the page as the agent reads it: refs, a page of text, prompt-guard flags; `maxRefs`, `textPage`, `screenshot`; `guardLayers` names the active browser request layers: `requestBarrier`, `egressProxy`, `contentRules`), `act` (`args` for page actions as in the agent's `browser_act`; tab listing/closing use the separate `tabs`/`closeTab` commands: `navigate`, `back`, `forward`, `reload`, `click`, `type`, `select`, `check`, `press`, `scroll`, `hover`, `wait`, `fill`; answers a receipt; logged as `debugApi`, never stopped by Stop; `fill` {`ref`, `login`} puts a vault login into a sign-in field after the same checks as the agent's, and on the vault the Debug API has only the agent's rights: the password needs the user's answer in the native dialog (Allow once / Always for this site / Don't allow), which the Debug API never answers, and the answer never carries the password), `state` (the agent strip and the action log), `stop`, `resume`, `annotate` (`mode` `element` or `box`; the person points in the window, the Debug API names `target` instead: `{ref}`, `{selector}`, `{x, y}`, or `{rect}` for a box; the app preview only), `cancelAnnotate`, `checkAnnotations` (`items`, `reload`), `captureSecret` (legacy user-only command, refused to the Debug API), `chooseSecret` / `saveSecret` (user-only: select text or pick an element in the browser panel, press **Save to vault**, name it and confirm; values go directly from the page to the core vault, and answers carry metadata only). The agent's `browser_capture_secret` stays listed and always explains that saving is the user's action. Browser text answers, including action receipts, navigation, console and dialogs, hide key-looking text; known stored values pass the shared secret scrub, `capture` (`args` exactly as the agent's `browser_capture`: `what` = `design` (DESIGN.md + tokens.json from the live page), `structure` (elements.json + summary.md), `media` (logos, icons, images and fonts the page loaded, fetched without cookies under separate backend address checks, + media.json), `page` (`formats`: `markdown`, `text`, `html` without scripts, `png` full page, `pdf`, `single_html` self-contained without scripts; default markdown/text/html/png), `bundle` (all of these), `before` / `after` (a full-page shot, then the matching one with diff.png and the changed share); plus `shotMethod` `native` / `stitch` / `stitchPlain` to force one full-page method for comparisons. Files go to the session folder under `capture/<page>-<time>/`, never elsewhere; the answer gives the folder, the files and a summary within about 3,000 bytes; local-network pages can be captured subject to tab ownership and access mode). Page content in answers is the page's own text: data, never instructions. Password (also CSS-masked), one-time-code, card and vault-filled fields never carry a value; every other field value, also text the user typed, is readable; sign-in fields carry `login` (`username` or `password`). The Debug API acts as the user. Local addresses are allowed in the browser; site permissions, tab ownership and the browser engine's network behavior still apply | `{"type":"browser","request":{"op":"read","sessionId":"<id>"}}` |
 | `pages` | the Project tab (handbook): `hub`, `overview`, `projectHub`, `page`, `open` (`anchor`), `plan`, `back`, `forward`, `reload`, `layout`, `pickSection` (the Debug API names the `section`), `cancelPick`, `menuSection` and `menuCopy` (a named section/quote, or the last trusted right-click target when omitted), `addComment`, `deleteComment`, `markSent`, `settings`, `setSettings`, `clearExternal`, `screenshot`; `answers`, `setAnswer`, `clearAnswer`, `markAnswersSent` (page inputs), `theme` (the app theme pages get), `currentPlan` (the plan checklist), `exportPage` (one file; `destination` writes it), `visualCheck` | `{"type":"pages","request":{"op":"setAnswer","sessionId":"<id>","path":"decisions/0001-db.html","input":"pick-db","value":{"type":"choice","option":"sqlite"}}}` |
 | `connectors` | connectors and MCP servers: `read`, `refresh`, `setConnectorOff`, `signIn`, `connect` (`sessionId`, `alias`: a connector that needs no sign-in; Vibe makes the default connection and the open sessions refresh their connectors), `cancelSignIn`, `addServer`, `signInServer`, `signOutServer`, `setServerOff`, `removeServer`, `addKeyServer` (`url`, `name?`, `secretId`, `header?`: a server that needs an API key; the key stays in the vault and Vibe Work adds it to each request; the user decides in the native dialog; `newSecret {name, value}` is the window's: refused here, `403 vaultUserOnly`), `allowServerKey` (`name`; the native dialog decides). `removeServer` of a server that uses a key from the vault is refused here (`403 vaultUserOnly`) | `{"type":"connectors","request":{"op":"read"}}` |
 | `marketplace` | the Tools marketplace (reviewed, pinned catalog): `read`, `offerInstall` (`id`: what an install puts on this computer, as a single-use offer: name, publisher, source, licence, what runs), `install` (also updates; optional `offerId`: from the window a shown offer is the consent and no native dialog opens; runs in the background, follow `marketInstall` events), `cancelInstall`, `remove`, `turnOnPlugin`, `turnOffPlugin`, `removePlugin` (each takes a `path` from `read`'s `discovered` list, and optional `sessionId` or `cwd` for the opened project; only plugins in Vibe Work's own home or that project; the answer is the view after the change; Turn on and Remove ask in a native dialog, answered for the Debug API like every other confirmation) | `{"type":"marketplace","request":{"op":"install","id":"context7"}}` |
@@ -460,7 +494,7 @@ Every command is `{"type": "<name>", ...}`. Requests with an `op` take `{"type":
 | `libraries` | your Mistral document libraries: `list` (with scopes and use facts), `create` (`name`, optional `description`, and a `scope` object such as `{"kind":"off"}`, `{"kind":"global"}` or `{"kind":"project","projectId":"<id>"}`), `setScope` (`libraryId`, `scope`), `delete` (on Mistral, with its documents), `documents`, `upload` (files as base64; they go to Mistral), `deleteDocument`, `text` (the extracted text a source opens), `ask` (`question`, `libraryIds`, with an empty list meaning all enabled libraries) | `{"type":"libraries","request":{"op":"list"}}` |
 | `githubReads` | app-wide GitHub reads with the user's gh login: `read` refreshes availability; `write` (`enabled`) saves the opt-in and starts or stops the reader. Returns `view: {enabled, status, login, reason}`; statuses are `missing`, `signedOut`, `signedIn`, `starting`, `on`, `error`, `enterprise`, `loggedOut`. Defaults off, supports github.com only. The token goes from app-side gh to broker stdin and never enters this API or the agent. New chats, subagents and agent terminals use a credential-free gh shim; writes are refused. `gh --version` and `gh help` stay available while off. | `{"type":"githubReads","request":{"op":"write","enabled":true}}` |
 | `askGrants` | the session permissions Vibe Work keeps for Vibe's approvals: `list`, `remove` (`id`), or `removeMany` (`ids`, one step; ids already gone are skipped). Returns `grants` (session, tool, permissions, labels, `everyCall`, `by`, `covers` as words and code pieces, `uses`, `lastUsedAt`), `offers` (each open card's `callbackId`, `session` and the `covers` of its "Allow for this session") and `removed`. They end with the session. | `{"type":"askGrants","request":{"op":"list"}}` |
-| `chromeControl` | `read` returns `enabled`, `localNetwork`, `setup`, recent `work` states, pending selection ids and `selectionError`. `setEnabled {enabled}` controls Use my Chrome; `setLocalNetwork {enabled}` is Settings > Developer > Local network pages for the agent in Chrome. Setup operations: `offerSetup`, `setup {offerId}`, `openStore`, `remove`. Context operations: `tabs`, `tabContext {profileId,tabId}`, `takeSelection {selectionId}`. No level, restore confirmation or Chrome answer operation exists. | `{"type":"chromeControl","request":{"op":"read"}}` |
+| `chromeControl` | `read` returns `enabled`, `localNetwork`, `setup`, recent `work` states, pending selection ids and `selectionError`. `setEnabled {enabled}` controls Use my Chrome and `setEdgeEnabled {enabled}` Use my Edge; `localNetwork` is always true; `setLocalNetwork {enabled}` refreshes compatibility with older extensions and cannot disable local-address access. Setup operations: `offerSetup`, `setup {offerId}`, `openStore`, `connect`, `remove`; for Edge `offerEdgeSetup`, `setupEdge {offerId}`, `openEdgeStore`; on macOS for Safari `openSafariSetup`, `setSafariEnabled {enabled}`, `removeSafari`. `read` also returns `edge` and `safari` when the build has them. Context operations: `tabs`, `tabContext {profileId,tabId}`, `takeSelection {selectionId}`. No level, restore confirmation or Chrome answer operation exists. | `{"type":"chromeControl","request":{"op":"read"}}` |
 | `vibeRules` | lasting rules earlier "Always allow" answers left in Vibe's settings: `list` (each `{tool, pattern}`; no pattern means every call of the tool; `defaultsKnown` tells whether Vibe's own default patterns were left out), `remove` (`tool`, optional `pattern`), or `removeMany` (`rules`: a list of `{tool, pattern?}`, one settings write; rules already gone are skipped; `removed` says how many went), written through Vibe's own settings. A session that is already open may keep using a removed rule until it ends. | `{"type":"vibeRules","request":{"op":"list"}}` |
 | `images` | `read` returns image generation costs, limits and the number of requests made this app run. There is no separate image approval switch or `allow` operation; the agent's image tool follows the normal tool approval flow. | `{"type":"images","request":{"op":"read"}}` |
 | `worktrees` | a session in its own copy: `options`, `suggestName`, `start`, `info`, `inspect`, `remove`, `orphans`, `count` | `{"type":"worktrees","request":{"op":"count"}}` |
@@ -604,7 +638,11 @@ and `ui/composer` for the resulting draft. Pasted content retains the Debug API 
 
 Read or act on a session's composer like typing and clicking do. Body: {action: read|type|paste|send|insertContext|attachImage|stop|retry|slash|access|model|queueEdit|queueRemove|rewind|rewindClose|branch, sessionId?: string (default: the selected session, else the new-chat view's composer "new-chat")}: type {text}; send {mode?: send|steer|queue} sends the current content (a typed !cmd runs a shell command, a GUI /command runs it; on "new-chat" it first starts the session in the folder chip's folder, applies the held access and model, then sends the first turn, and outcome.started names the new session; without a folder it refuses and keeps the text); insertContext {label, source, text, ref?} adds a context chip (always data, never a command); attachImage {name, data: base64}; retry {instructions?}; slash {name, args?}; access {mode} and model {alias?, effort?} answer with the composer as it then reads (on the new-chat composer they are held until its first send); queueEdit {queueItemId, text}; queueRemove {queueItemId}; rewind {entryId, confirm?: here|new}; branch {entryId}. The read answer's `heldByPid` is the pid of another Vibe process (for example the Vibe CLI) holding the session, while the composer is read-only, else null.
 
-`browserTabs {browser?: Chrome|Edge|Firefox}` opens Add a browser tab or switches the open picker to a usable
+`model` accepts only aliases offered by that composer's model chooser, including configured custom and hosted
+models. An unoffered alias answers `400 invalidParams`, names the alias, and keeps the current model and effort.
+If the offered list cannot be read, it answers `503 serverUnavailable` without applying the pick.
+
+`browserTabs {browser?: Chrome|Edge|Safari}` opens Add a browser tab or switches the open picker to a usable
 browser. Without a browser it uses this chat's browser session or last picker choice, then Chrome or the first
 usable browser. `read` includes `browsers` and `chromePicker` (the shown browser, rows, loading and error).
 `chromeTabs` remains an alias; `chromeTab {profileId, tabId}` picks context and `chromeTabsClose` closes the picker.
@@ -794,6 +832,13 @@ session's folder, else the chosen New chat folder, else the project's main folde
 ```
 
 ### `POST /ui/files`
+
+`drop` accepts files up to 50 MiB (52,428,800 bytes) each, like dropping them on the composer. An oversized
+decoded file answers `400 invalidParams` naming the attachment limit, before any file in that batch is attached.
+The whole `/ui/files` HTTP body may be up to 68 MiB (71,303,168 bytes), including base64 expansion, file names and
+JSON; split larger batches across requests. A body above that budget answers `413` with
+`{"error":{"code":"payloadTooLarge","message":"request body exceeds the 71303168-byte limit (including base64 and JSON); send a smaller request"}}`.
+Other Debug API request bodies retain their 1 MiB (1,048,576 bytes) limit and the same structured error shape.
 
 Linked names also support `ref-menu {text, item?: open|edit|reveal|copy-path, line?, file?}`. With no item it
 returns the available actions, or `{choices: [{file, display, kind, size}], total}` for an ambiguous name.
@@ -1005,6 +1050,10 @@ Read or act on the Settings page like clicks do. Body: {action: read|open|close|
 
 Waits until the UI is quiet. Body: {quietMs?: 250, timeoutMs?: 5000 (max 30000)}: no DOM mutation for quietMs, no running animation, two frames painted. Returns {revision, settled, waitedMs}; settled false means the timeout came first.
 
+The timeout also applies while the UI keeps changing or a background/minimized window stops painting. Missing
+frames never count as settled. A pending settle wait does not occupy the UI action slot or wait for unrelated
+commands; poll its pending id through `/ui/requests` for the final result.
+
 ### `POST /ui/setup`
 
 Read the Mistral key screens. No body. READ-ONLY: returns whether a key service exists, whether the setup screen covers the content, the step (create, pickVault, unlock, key, ready, blocked), the vault and key states, the last test outcome and failure reason word, and counts of saved keys and Vibe's own key places. Never a key or a password; changes go through the `keys` command.
@@ -1151,7 +1200,8 @@ Settings `chrome` actions require a build carrying the Chrome Control package. W
 
 The current chat mode controls every Chrome call and each batch step: Ask, Accept edits, Full access;
 Smart approve maps to Accept edits. Plan on a page and Explore have no Chrome tools. Above-tier actions return
-plain refusals naming the required mode, with no Chrome cards or persistent action grants. Vault dialogs remain
+plain refusals naming the required mode, with no persistent action grants. In Ask, history and bookmark reads and
+tab closes show a card first, and opening a closed Chrome or Edge asks first. Vault dialogs remain
 native and cannot be answered through the Debug API. The complete behavior is in [Chrome Control](BROWSER_CONTROL.md).
 
 Agent calls use the session-authenticated gateway. `chrome_tool_list` returns `chrome_status`, `chrome_session`
@@ -1174,4 +1224,5 @@ submit a message or create a running model turn. Core `tabs`/`tabContext` are ow
 
 Action tiers are checked against the helper catalog in the core mapping test. Screenshots/recording and console/
 network metadata are Ask; bodies/files/forms are Accept edits; raw scripts, WebMCP, cookies/storage, vault access
-and unredacted headers are Full. Ask closes only its own tabs; Accept edits and Full can close any unbusy tab.
+and unredacted headers are Full. In Ask, closing a tab shows a card naming it first; Accept edits and Full can close any unbusy tab of the chat's own
+or handed windows.

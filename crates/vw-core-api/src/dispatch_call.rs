@@ -28,6 +28,11 @@ impl Core {
             compaction,
             selected,
         } = sending;
+        if let Some(reply) =
+            crate::detached_reads::answer(&self.shared, method, params, token).await?
+        {
+            return Ok(reply);
+        }
         if method == "config/model/write" && token.is_none() {
             return Box::pin(crate::model_choices::pick(&self.shared, params, selected)).await;
         }
@@ -35,10 +40,12 @@ impl Core {
         if let Some(id) = params["sessionId"].as_str().filter(|_| opening) {
             let mut reply = None;
             self.bounded_open(id, async {
-                reply =
-                    Some(call.await.map_err(|e| {
-                        crate::config_validation::from_gate(&self.shared, method, &e)
-                    })?);
+                let mut opened = call
+                    .await
+                    .map_err(|e| crate::config_validation::from_gate(&self.shared, method, &e))?;
+                crate::interrupted_send::stop_recovered(&self.shared, id, &mut opened.result)
+                    .await?;
+                reply = Some(opened);
                 Ok(())
             })
             .await?;
@@ -46,7 +53,13 @@ impl Core {
                 .ok_or_else(|| CoreError::new(ErrorCode::Internal, "resume without a reply"));
         }
         match call.await {
-            Ok(reply) => Ok(reply),
+            Ok(reply) => {
+                #[cfg(feature = "context-composition")]
+                if method == "session/context/read" {
+                    crate::context_composition::validate(&reply.result)?;
+                }
+                Ok(reply)
+            }
             Err(error) => Err(crate::dispatch_compaction::failed(
                 &self.shared,
                 method,

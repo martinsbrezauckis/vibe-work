@@ -2,7 +2,8 @@
 //!
 //! Why: the core keeps each session's access mode and applies it itself on every reopen (`access.rs`).
 //! Every resume names the resolved profile and the session is then switched
-//! (`session/agent/update`) to the profile it should run in, before any of its commands is sent.
+//! (`session/agent/update`) to the profile it should run in before new work is sent. An interrupted
+//! send first stops the recovered turn, in that same visible mode, before the verified switch.
 //!
 //! Which profile, in order: the one this core last saw for the session (`access.rs`), else Vibe's own
 //! record of it (`PublicSession.agent`, from the store or a `session/read` before the resume; it may
@@ -18,10 +19,12 @@
 //!   is refused with `accessModeUnverified`, an alert says so, and the next command tries again.
 //! - Full access (`auto-approve`) in this app's own record of the session (`access.rs`: the user confirmed it
 //!   for this session, in this run or an earlier one; never Vibe's session file, which the agent can write)
-//!   is put back: the resume names `ask` (a resume may not carry Full
+//!   is put back: an ordinary resume names `ask` (a caller's resume may not carry Full
 //!   access without a dialog) and the switch then selects `auto-approve` with a trusted token for that exact
 //!   call (`Gate::request_trusted_confirmation`), so no new dialog appears (the mode the
-//!   user chose is kept like any app's setting). A custom profile name is never selected by the core: it
+//!   user chose is kept like any app's setting). An interrupted send instead uses the gate's fixed,
+//!   remembered-Full resume token, keeping the visible mode through recovery and the immediate interrupt.
+//!   A custom profile name is never selected by the core: it
 //!   selects `ask` and says so (`accessModeLowered`).
 
 use std::sync::Arc;
@@ -58,6 +61,27 @@ impl Drop for Restoring {
 }
 
 impl Restoring {
+    /// The send-time interrupt must use the visible mode from the first recovered action. Full access
+    /// uses the app's existing confirmed record and an exact resume token, never a temporary safer profile.
+    pub(crate) fn resume_request(
+        &self,
+        stopping: bool,
+    ) -> Result<(Value, Option<vw_gate::ConfirmationToken>), CoreError> {
+        let full = stopping && self.ours && self.wanted == "auto-approve";
+        if full {
+            let (params, token) = self
+                .shared
+                .gate
+                .confirm_restored_full_access(&self.session_id)
+                .map_err(|e| CoreError::from_gate("session/resume", &e))?;
+            return Ok((params, Some(token)));
+        }
+        Ok((
+            json!({"sessionId":self.session_id,"agentConfig":{"agent":self.profile()}}),
+            None,
+        ))
+    }
+
     /// The selected profile, or Ask when the gate requires a new confirmation for it.
     pub(crate) fn profile(&self) -> &str {
         let params = json!({"sessionId": self.session_id, "agentName": self.wanted});

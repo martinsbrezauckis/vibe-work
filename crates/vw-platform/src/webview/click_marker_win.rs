@@ -47,13 +47,30 @@ thread_local! {
 /// # Errors
 /// Invalid geometry, a hidden view, or a failed native window/bitmap operation.
 pub fn show(controller: &ICoreWebView2Controller, point: (f64, f64)) -> Result<(), String> {
+    show_for(controller, point, Duration::from_millis(700))
+}
+
+/// Paints the shared action marker for its remaining host-clock lifetime.
+///
+/// # Errors
+/// Invalid geometry, a hidden view, or a failed native window/bitmap operation.
+pub fn show_for(
+    controller: &ICoreWebView2Controller,
+    point: (f64, f64),
+    remaining: Duration,
+) -> Result<(), String> {
+    if remaining.is_zero() {
+        return Ok(());
+    }
     // SAFETY: the controller is supplied on its UI thread; all out pointers are live stack values.
-    unsafe { show_inner(controller, point) }.map_err(|e| format!("drawing the click marker: {e}"))
+    unsafe { show_inner(controller, point, remaining) }
+        .map_err(|e| format!("drawing the click marker: {e}"))
 }
 
 unsafe fn show_inner(
     controller: &ICoreWebView2Controller,
     point: (f64, f64),
+    remaining: Duration,
 ) -> Result<(), String> {
     let mut parent = HWND::default();
     let mut bounds = RECT::default();
@@ -124,7 +141,7 @@ unsafe fn show_inner(
                 Marker {
                     controller: controller.clone(),
                     bounds,
-                    until: Instant::now() + Duration::from_millis(700),
+                    until: Instant::now() + remaining.min(Duration::from_millis(700)),
                     dpi,
                 },
             )

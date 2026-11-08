@@ -326,17 +326,24 @@ impl InnerWebView {
       }
       #[cfg(feature = "mac-proxy")]
       if let Some(proxy_config) = attributes.proxy_config {
+        let credentials = match &proxy_config {
+          ProxyConfig::Http(endpoint) | ProxyConfig::Socks5(endpoint) => endpoint.credentials.clone(),
+        };
         let proxy_config = match proxy_config {
           ProxyConfig::Http(endpoint) => {
-            let nw_endpoint = nw_endpoint_t::try_from(endpoint).unwrap();
+            let nw_endpoint = nw_endpoint_t::try_from(endpoint)?;
             nw_proxy_config_create_http_connect(nw_endpoint, std::ptr::null_mut())
           }
           ProxyConfig::Socks5(endpoint) => {
-            let nw_endpoint = nw_endpoint_t::try_from(endpoint).unwrap();
+            let nw_endpoint = nw_endpoint_t::try_from(endpoint)?;
             nw_proxy_config_create_socksv5(nw_endpoint)
           }
         };
 
+        if proxy_config.is_null() {
+          return Err(Error::ProxyEndpointCreationFailed);
+        }
+        proxy::set_credentials(proxy_config, credentials)?;
         let proxies: Retained<NSArray<NSObject>> = NSArray::arrayWithObject(&*proxy_config);
         data_store.setValue_forKey(Some(&proxies), ns_string!("proxyConfigurations"));
       }

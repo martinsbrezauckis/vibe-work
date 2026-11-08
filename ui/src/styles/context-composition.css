@@ -1,0 +1,75 @@
+/* The context meter's compact popover; uses shared surface, type and spacing tokens. */
+.context-composition {
+  position: fixed;
+  inset: auto;
+  margin: 0;
+  width: min(400px, calc(100vw - 16px));
+  padding: var(--space-card-inline);
+  overflow: auto;
+  color: var(--text);
+  background: var(--raised);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
+  font-size: var(--text-13-5);
+  font-variant-numeric: tabular-nums;
+}
+.context-composition header,
+.context-composition-state,
+.context-composition dl > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-control-gap);
+}
+.context-composition header {
+  margin-bottom: 12px;
+}
+.context-composition h2 {
+  margin: 0;
+}
+.context-composition-total {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-control-gap);
+  padding-bottom: 12px;
+}
+.context-composition-total strong {
+  margin-left: auto;
+  font-weight: var(--weight-medium);
+}
+.context-composition table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.context-composition caption {
+  text-align: left;
+  color: var(--text-2);
+  padding-bottom: 8px;
+}
+.context-composition th,
+.context-composition td {
+  padding: 8px 0;
+  text-align: right;
+  font-weight: var(--weight-regular);
+}
+.context-composition th:first-child {
+  text-align: left;
+}
+.context-composition thead {
+  color: var(--text-2);
+  font-size: var(--text-11-5);
+}
+.context-composition tbody {
+  border-block: 1px solid var(--line);
+}
+.context-composition dl {
+  margin: 12px 0 0;
+  color: var(--text-2);
+}
+.context-composition dl > div + div {
+  margin-top: 8px;
+}
+.context-composition dd {
+  margin: 0;
+}

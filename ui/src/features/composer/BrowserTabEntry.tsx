@@ -3,6 +3,7 @@ import { Button } from "../../components/Controls";
 import { TEXT } from "../../vocabulary";
 import { useApp } from "../shell/AppContext";
 import { useCoreState } from "../shell/hooks";
+import { useComposerState } from "./hooks";
 import { browserSignals, openBrowserTabs, usableBrowsers } from "./browserTabs";
 
 export function BrowserTabEntry({ sessionId }: { sessionId: string }) {
@@ -10,6 +11,8 @@ export function BrowserTabEntry({ sessionId }: { sessionId: string }) {
   const view = useCoreState((state) => state.chromeControl);
   const signals = browserSignals(view);
   const usable = usableBrowsers(view).length > 0;
+  // A second click closes this chat's open tab list, as the composer's other choice buttons do.
+  const open = useComposerState((s) => s.chromePicker?.sessionId === sessionId);
   if (signals.length === 0 && !usable) return null;
   const description = [
     ...signals.map((signal) => `${signal.browser}: ${signal.label}`),
@@ -23,8 +26,10 @@ export function BrowserTabEntry({ sessionId }: { sessionId: string }) {
       aria-label={TEXT.addBrowserTab}
       aria-description={description}
       title={description}
+      aria-expanded={usable ? open : undefined}
       onClick={() => {
-        if (usable) void openBrowserTabs(app, sessionId, "window");
+        if (usable && open) app.composer.setChromePicker(null);
+        else if (usable) void openBrowserTabs(app, sessionId, "window");
         else app.shell.actions.openSettings("browser");
       }}
     >

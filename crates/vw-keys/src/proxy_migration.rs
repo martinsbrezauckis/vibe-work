@@ -11,6 +11,7 @@ use vw_mistral::network::{NetworkSettings, has_sign_in, with_loopback};
 use vw_vault::Vault;
 
 const PREFIX: &str = "# Vibe Work proxy vault ";
+const ROUTE_PREFIX: &str = "# Vibe Work proxy route ";
 
 fn error() -> KeyError {
     KeyError::Settings(
@@ -122,6 +123,21 @@ pub(crate) fn read(path: &Path) -> Result<NetworkSettings, KeyError> {
     let text = text(path)?;
     let values = values(&text)?;
     let mut settings = NetworkSettings::from_lookup(|key| values.get(key).cloned());
+    // Restore the durable route only when its assignment still matches the previous run's capability.
+    // A person-edited proxy remains authoritative. This also covers SOCKS routes without a vault sign-in.
+    for line in text
+        .lines()
+        .filter_map(|line| line.strip_prefix(ROUTE_PREFIX))
+    {
+        let (key, local, endpoint): (String, String, String) =
+            serde_json::from_str(line).map_err(|_| error())?;
+        if !PROXIES.contains(&key.as_str()) || has_sign_in(&endpoint) {
+            return Err(error());
+        }
+        if values.get(&key) == Some(&local) {
+            settings = settings.with(&key, Some(endpoint));
+        }
+    }
     for line in text.lines().filter_map(|line| line.strip_prefix(PREFIX)) {
         let Ok((key, id, endpoint)) = serde_json::from_str::<(String, String, String)>(line) else {
             return Err(error());
@@ -155,7 +171,7 @@ pub(crate) fn write(
     let mut lines: Vec<String> = old
         .lines()
         .filter(|line| {
-            if line.starts_with(PREFIX) {
+            if line.starts_with(PREFIX) || line.starts_with(ROUTE_PREFIX) {
                 return false;
             }
             !assignment(line).is_some_and(|(key, _)| PROXIES.contains(&key) || key == "NO_PROXY")
@@ -165,7 +181,14 @@ pub(crate) fn write(
     let child = crate::proxy_forwarder::public(settings, forwarder);
     for key in PROXIES {
         if let Some(value) = child.get(key) {
-            if has_sign_in(&value) {
+            if value == forwarder.proxy_url() {
+                let endpoint = settings.get(key).ok_or_else(error)?;
+                if has_sign_in(&endpoint) {
+                    return Err(error());
+                }
+                let route = serde_json::to_string(&(key, &value, endpoint)).map_err(|_| error())?;
+                lines.push(format!("{ROUTE_PREFIX}{route}"));
+            } else if has_sign_in(&value) {
                 return Err(error());
             }
             lines.push(format!(

@@ -1,9 +1,32 @@
 //! Browser identity after Stop and pairing history after closing Edge. Uses the owned fake helper, never a desktop.
-use super::{AddonState, commands, edge_agent_tests::fixture, gateway, owner, store};
+use super::{AddonState, commands, gateway, owner, store};
 use serde_json::json;
 use std::sync::Arc;
 
 const CHROME: &str = "12345678-1234-1234-1234-123456789abc";
+
+// Closed-browser tests need an installed extension: a pairing-history flag alone cannot prove installation.
+async fn fixture(name: &str, profiles: serde_json::Value) -> crate::Core {
+    let core = super::edge_agent_tests::fixture(name, profiles).await;
+    let chrome = &core.shared.chrome_control;
+    let home = chrome.config.user_home.as_ref().unwrap();
+    let data = [home.join("chrome-data"), home.join("edge-data")];
+    std::fs::create_dir_all(
+        data[1]
+            .join("Profile 1")
+            .join("Extensions")
+            .join(&chrome.config.extension_id)
+            .join("0.1.3_0"),
+    )
+    .unwrap();
+    std::fs::write(
+        chrome.dir().unwrap().join("setup.json"),
+        json!({"files":[],"browsers":["Google Chrome","Microsoft Edge"],"userData":data})
+            .to_string(),
+    )
+    .unwrap();
+    core
+}
 
 async fn stopped_session(browser: &str, profile: &str, other: &str) {
     let core = fixture(
@@ -171,11 +194,7 @@ async fn paired_edge_closed_has_a_calm_state_and_an_open_browser_instruction() {
     assert_eq!(addon.state, AddonState::ChromeClosed, "{addon:?}");
     assert_eq!(addon.label, "Connected when Edge is open");
     assert_eq!(addon.action, None);
-    assert!(
-        addon
-            .instruction
-            .contains("Ask the person to open Microsoft Edge")
-    );
+    assert!(addon.instruction.contains("Vibe Work opens it"));
     assert!(store::paired_once(
         &core.shared.chrome_control.dir().unwrap().join("edge")
     ));
@@ -188,8 +207,8 @@ async fn paired_edge_closed_has_a_calm_state_and_an_open_browser_instruction() {
     .await
     .unwrap();
     let text = reply.to_string();
-    assert!(
-        text.contains("Ask the person to open Microsoft Edge"),
+    assert_eq!(
+        reply["vwMcpResult"]["structuredContent"]["sessionId"], "task",
         "{text}"
     );
     assert!(!text.contains("Connect Edge"), "{text}");

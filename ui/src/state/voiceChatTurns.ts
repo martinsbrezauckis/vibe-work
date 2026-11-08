@@ -130,6 +130,7 @@ export function openPrompts(
       approve_permanently: term("vaultPermissions", "allowed").name,
       deny: "No",
       cancel_turn: "Stop",
+      keep_both: "Keep both",
     };
     const isQuestion = obj(e["detail"])?.["kind"] === "user_input";
     const text = isQuestion

@@ -7,17 +7,23 @@ use std::fmt::Write;
 
 pub(super) fn reason(view: &AddonView, browser: Browser) -> String {
     let mut text = format!("Not run: {}", view.instruction);
-    if !matches!(
-        (browser, view.state),
-        (
-            _,
-            AddonState::Unavailable
-                | AddonState::Connected
-                | AddonState::ChromeMissing
-                | AddonState::ChromeSandboxed
-                | AddonState::OtherBrowser
-        ) | (Browser::Edge, AddonState::ChromeClosed)
-    ) {
+    if browser == Browser::Firefox {
+        return text;
+    }
+    if browser != Browser::Safari
+        && !matches!(
+            (browser, view.state),
+            (
+                _,
+                AddonState::Unavailable
+                    | AddonState::Connected
+                    | AddonState::ChromeMissing
+                    | AddonState::ChromeSandboxed
+                    | AddonState::OtherBrowser
+                    | AddonState::ChromeClosed
+            )
+        )
+    {
         let _ = write!(
             text,
             " Offer the {} card with addon_suggest (addon: {}).",
@@ -166,7 +172,7 @@ mod tests {
     }
 
     #[test]
-    fn a_closed_browser_keeps_the_reason_and_persons_next_step() {
+    fn a_closed_browser_explains_the_app_launcher_and_the_agents_next_step() {
         for browser in [Browser::Chrome, Browser::Edge] {
             let view = crate::chrome_control::addon::view_for(
                 AddonState::ChromeClosed,
@@ -174,9 +180,12 @@ mod tests {
                 browser,
             );
             let text = reason(&view, browser);
-            assert!(text.contains("is not open") && text.contains("Ask the person to open"));
-            assert!(!text.contains("ends programs the agent started"));
-            assert!(!text.contains("Do not start"));
+            assert!(text.contains("is not open") && text.contains("Call chrome_session"));
+            assert!(
+                text.contains("Vibe Work opens it")
+                    && text.contains("Do not start the browser with process or shell tools")
+            );
+            assert!(!text.contains("addon_suggest"));
         }
     }
 
@@ -220,6 +229,9 @@ mod tests {
             json!({"files":[],"browsers":["Google Chrome"],"userData":[data]}).to_string(),
         )
         .unwrap();
+        chrome
+            .set_browser_enabled(super::super::agent_browser::Browser::Edge, false)
+            .unwrap();
         for state in [
             AddonState::SwitchedOff,
             AddonState::ExtensionNotInstalled,

@@ -82,7 +82,7 @@ sessionId: string,
  */
 tabId: string, } | { "op": "permissions", } | { "op": "setPermissions",
 /**
- * The complete replacement contract.
+ * Ignored legacy contract.
  */
 permissions: BrowserPermissions, } | { "op": "enginePool", } | { "op": "setEnginePool",
 /**
@@ -276,7 +276,7 @@ tabs: Array<PageTab>, } | { "type": "handoffReview",
  */
 review: JsonValue, } | { "type": "permissions",
 /**
- * User-selected permissions.
+ * Empty compatibility value; grants no authority.
  */
 permissions: BrowserPermissions, } | { "type": "enginePool",
 /**

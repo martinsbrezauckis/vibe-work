@@ -17,7 +17,7 @@
  * is chosen or Temporary is turned on: a Temporary chat needs no folder (the core gives it a folder of its own).
  */
 import { Button } from "../../components/Controls";
-import { type ReactElement, useEffect, useRef } from "react";
+import { type ReactElement, useEffect, useLayoutEffect, useRef } from "react";
 
 import { Icon } from "../../components/Icon";
 import { IconButton } from "../../components/IconButton";
@@ -68,7 +68,7 @@ export function NewChatPanel(): ReactElement | null {
     by,
     sharingPending,
   });
-  useEffect(() => {
+  useLayoutEffect(() => {
     latest.current = { copy, folder, by, sharingPending };
   });
   useEffect(() => {
@@ -101,7 +101,11 @@ export function NewChatPanel(): ReactElement | null {
   }, [composer, sessions, sessionTools]);
   if (sessions === null) return null;
   return (
-    <div className="new-session" data-ask-folder={ask && !temporary ? "true" : undefined}>
+    <div
+      className="new-session"
+      data-ask-folder={ask && !temporary ? "true" : undefined}
+      data-checking-folder={copy.pending || sharingPending ? "true" : "false"}
+    >
       <div className="folder-row">
         <Button
           data-testid="sessions.new-chat-panel-pick-folder"

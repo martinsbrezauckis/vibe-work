@@ -14,14 +14,14 @@
 //! (`helper_chat`), so a chat in the middle of a turn can never make Vibe answer "busy" and no session is needed from
 //! the user. Reading and testing need no Vibe at all.
 //!
-//! Depends on: `helper_chat`, `dispatch` (`forward`), `connectors` (`token_for`: the native confirmation),
+//! Depends on: `helper_chat`, `dispatch` (`forward`), `connectors` (`token_for`: confirmation tokens),
 //! vw-platform (the user-only file), vw-mistral `network`, `network_view`, `network_test`. Called by: `dispatch`.
 //! Invariants:
 //! - **The window never sees a sign-in.** Addresses leave this module as `scheme://host:port` (or with `***@` in the
 //!   field when there is a sign-in), and Vibe's own error texts are scrubbed of the values that were sent.
-//! - A write is the user's action: `config/proxy/write` is a confirmed method, so every origin gets the native dialog
-//!   (its text shows scheme, host and port only, `vw-gate` `confirm_text`), and nothing is written, here or in the
-//!   core's file, without it.
+//! - A write needs `config/proxy/write` confirmation before either file changes. Window requests use the native
+//!   dialog (scheme, host and port only, `vw-gate` `confirm_text`); Debug API requests are confirmed as the user
+//!   without a dialog.
 //! - A value is checked before anything is asked (the same rules the gate applies, plus the disk): a refused value
 //!   comes back as `refused` with a sentence per field; no helper chat is started for a save that changes nothing.
 //! - Saving a proxy always keeps this computer's own addresses on the no-proxy list: Vibe reaches Vibe Work's model

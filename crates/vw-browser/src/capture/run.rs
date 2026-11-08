@@ -1,4 +1,4 @@
-//! Runs one capture: the checks (Stop, a local-network page for the agent), the folder, each step, the
+//! Runs one capture: the checks (Stop and live page identity), the folder, each step, the
 //! `capture.json` record, the action log entry, and the compact answer (Vibe Work's words first; page words under
 //! `untrustedPageContent` with the prompt guard's verdict; within the answer budget).
 //!
@@ -16,7 +16,7 @@ use super::{
     Before, PageFormat, Request, Source, Target, What, design_md, media, page, shot, structure,
     tokens_json,
 };
-use crate::driver::{ActError, Browser, LOCAL_NETWORK, STOPPED, failed, refused};
+use crate::driver::{ActError, Browser, STOPPED, failed, refused};
 use crate::sessions::{Actor, Outcome};
 use crate::{guard, observe, scripts};
 
@@ -193,7 +193,7 @@ impl Browser {
     /// `browser_capture` / the Capture menu: one capture by `by`, answered compactly. The action log records it.
     ///
     /// # Errors
-    /// The refusal or failure (`ActError`): Stop, a local-network page (agent), nothing open, no folder.
+    /// The refusal or failure (`ActError`): Stop, nothing open, no folder.
     pub async fn capture(
         &self,
         session_id: &str,
@@ -208,11 +208,7 @@ impl Browser {
             self.log_capture(session_id, by, what, &Err(error.clone()));
             return Err(error);
         }
-        if by == Actor::Agent && self.local_network_blocked(session_id) {
-            let error = refused(LOCAL_NETWORK);
-            self.log_capture(session_id, by, what, &Err(error.clone()));
-            return Err(error);
-        }
+
         let bound = self.bind_read(session_id, by).await.map_err(refused)?;
         let _flight = self.sessions().begin(session_id, by);
         let mut cancel = self.sessions().cancel_signal(session_id);

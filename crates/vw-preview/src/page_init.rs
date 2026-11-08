@@ -11,6 +11,7 @@
 
 /// The script source, `__VW_NAME__`, `__VW_THEME__` and `__VW_MENU__` replaced at mount.
 const SOURCE: &str = include_str!("js/page_init.js");
+const SELECTION: &str = include_str!("js/page_selection.js");
 const WIDGET_FORMATS: &str = include_str!("js/widget_formats.js");
 
 /// The page environment's accessor name for a mount whose console accessor is `console_accessor`.
@@ -59,6 +60,7 @@ pub fn page_init_script(name: &str) -> String {
 pub fn page_init_script_themed(name: &str, theme: &str) -> String {
     let theme = if theme == "light" { "light" } else { "dark" };
     let environment = SOURCE
+        .replace("__VW_SELECTION__", SELECTION)
         .replace(
             "__VW_NAME__",
             &serde_json::Value::String(name.to_owned()).to_string(),

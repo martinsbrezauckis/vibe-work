@@ -12,7 +12,7 @@ pub(super) struct Target<'a> {
 }
 
 pub(super) fn targets<'a>(home: &Path, config: &'a ChromeControlConfig) -> Vec<Target<'a>> {
-    let mut chrome = if cfg!(target_os = "macos") {
+    let mut chrome = if config.is_macos() {
         let base = home.join("Library/Application Support/Google/Chrome");
         vec![Target {
             name: "Google Chrome",
@@ -42,7 +42,7 @@ pub(super) fn targets<'a>(home: &Path, config: &'a ChromeControlConfig) -> Vec<T
         }]
     };
     if cfg!(feature = "your-edge") && super::super::edge_policy::refusal(config).is_none() {
-        let user_data = edge_data(home);
+        let user_data = edge_data_for(home, config.is_macos());
         chrome.push(Target {
             name: "Microsoft Edge",
             hosts: (!cfg!(windows)).then(|| user_data.join("NativeMessagingHosts")),
@@ -53,8 +53,8 @@ pub(super) fn targets<'a>(home: &Path, config: &'a ChromeControlConfig) -> Vec<T
     chrome
 }
 
-pub(super) fn edge_data(home: &Path) -> PathBuf {
-    if cfg!(target_os = "macos") {
+pub(super) fn edge_data_for(home: &Path, macos: bool) -> PathBuf {
+    if macos {
         home.join("Library/Application Support/Microsoft Edge")
     } else if cfg!(windows) {
         home.join("AppData")
@@ -109,4 +109,26 @@ pub(super) fn browser_of(path: &Path) -> Option<&'static str> {
         }
     }
     None
+}
+
+/// App bundles establish presence. Profile folders and stale registrations never do.
+pub(super) fn installed(config: &ChromeControlConfig, browser: &str) -> bool {
+    if !config.is_macos() {
+        return true;
+    }
+    let browser = match browser {
+        "Google Chrome" => vw_platform::browser::Browser::Chrome,
+        "Microsoft Edge" => vw_platform::browser::Browser::Edge,
+        _ => return false,
+    };
+    super::home_of(config)
+        .is_ok_and(|home| vw_platform::browser::macos_executable(browser, &home).is_some())
+}
+
+pub(super) fn require_installed(config: &ChromeControlConfig, browser: &str) -> Result<(), String> {
+    if installed(config, browser) {
+        Ok(())
+    } else {
+        Err(format!("{browser} is not installed"))
+    }
 }

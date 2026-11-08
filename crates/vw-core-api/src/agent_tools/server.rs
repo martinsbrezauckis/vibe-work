@@ -78,7 +78,7 @@ async fn serve_one(stream: TcpStream, shared: Weak<Shared>) {
     let mut reader = BufReader::new(read.take(limit));
     let mut line = String::new();
     let read = tokio::time::timeout(Duration::from_secs(10), reader.read_line(&mut line)).await;
-    let (answer, browser_answer) = match read {
+    let (answer, filter_page_answer) = match read {
         Ok(Ok(n)) if n > 0 && n <= wire::MAX_PROPOSAL_LINE && line.ends_with('\n') => {
             match serde_json::from_str::<Request>(&line) {
                 Ok(request)
@@ -89,6 +89,11 @@ async fn serve_one(stream: TcpStream, shared: Weak<Shared>) {
                                 == format!("mcp_vw.{}", names::PROPOSE_PROTECTED_CHANGE)) =>
                 {
                     let browser_answer = names::BROWSER_TOOLS.contains(&request.tool.as_str());
+                    // Direct vault capture returns app metadata only. Its requested name must stay usable;
+                    // the page-key heuristic is for observations, while the stored-value scrub still applies.
+                    let filter_page_answer = browser_answer
+                        && !(cfg!(feature = "agent-vault")
+                            && request.tool == names::BROWSER_CAPTURE_SECRET);
                     let answer = if browser_answer {
                         // The socket owns this browser call. Dropping its future on EOF or timeout
                         // also drops a pending native permission wait and its action guard.
@@ -103,6 +108,8 @@ async fn serve_one(stream: TcpStream, shared: Weak<Shared>) {
                         };
                         answer
                     } else if (cfg!(feature = "video") && request.tool == "video_frames")
+                        || (cfg!(feature = "agent-vault")
+                            && request.tool == names::SECRET_CAPTURE_COMMAND)
                         || names::CHROME_TOOLS.contains(&request.tool.as_str())
                         || matches!(
                             request.tool.as_str(),
@@ -127,7 +134,7 @@ async fn serve_one(stream: TcpStream, shared: Weak<Shared>) {
                     } else {
                         answer(&shared, request).await
                     };
-                    (answer, browser_answer)
+                    (answer, filter_page_answer)
                 }
                 Ok(_) | Err(_) => (Answer::Error("bad request".to_owned()), false),
             }
@@ -150,7 +157,7 @@ async fn serve_one(stream: TcpStream, shared: Weak<Shared>) {
         };
         // Stored values keep their established kind marker; then one browser-specific pass covers all answer
         // fields, including receipts and errors. A malformed scrubbed answer fails closed.
-        if browser_answer {
+        if filter_page_answer {
             let mut filtered = serde_json::from_slice::<Answer>(&text)
                 .unwrap_or_else(|_| Answer::Error("browser answer withheld".to_owned()));
             match &mut filtered {

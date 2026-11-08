@@ -77,8 +77,17 @@ pub(crate) async fn issue(shared: &Arc<Shared>, payload: &Value) -> Result<Value
         return Err("The originating chat is not registered.".into());
     }
     let stop = crate::stops::generation(shared, owner);
-    super::permission(shared, owner, source, call, tool, &args).await?;
+    // Resolve a restart before opening its card and retain that exact launch in the one-use receipt.
+    let restart = (tool == names::PROCESS_RESTART)
+        .then(|| crate::agent_tools::restart_launch(shared, tools, owner, &args))
+        .transpose()?;
     let mut prepared_args = args.clone();
+    if let Some(launch) = &restart {
+        prepared_args["command"] = json!(launch.command);
+        prepared_args["cwd"] = json!(launch.cwd);
+        prepared_args["port"] = json!(launch.port);
+    }
+    super::permission(shared, owner, source, call, tool, &prepared_args).await?;
     // The tool's own refusal (a vault Deny, a login-fill Cancel, a missing program) answers the agent as the
     // tool's result: inside run_typescript, Vibe shows a hook denial only as a generic skip, and the agent
     // retried the call. A No in a Vibe Work prompt asked here (the document card, a Chrome card, the vault window)
@@ -92,6 +101,9 @@ pub(crate) async fn issue(shared: &Arc<Shared>, payload: &Value) -> Result<Value
             Err(refusal) if crate::stops::generation(shared, owner) != stop => return Err(refusal),
             Err(refusal) => Some(Box::pin(std::future::ready(Err(refusal))) as Execution),
         };
+    if let Some(launch) = restart {
+        prepared_args["_vwRestart"] = json!(launch);
+    }
     if crate::stops::generation(shared, owner) != stop {
         return Err(crate::stops::APPROVAL_ENDED.into());
     }

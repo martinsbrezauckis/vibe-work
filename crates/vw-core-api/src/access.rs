@@ -6,8 +6,8 @@
 //! switches the session to the profile it should run in (`session/agent/update`, `restore.rs`) and
 //! checks Vibe's answer before any command of that session is sent. A reopened session therefore
 //! runs with the access mode the user chose; app commands wait for the verified restore. The core
-//! resumes sessions on its own (a new channel before a turn, reopening after a crash or after an
-//! idle close), so this applies to every reopen.
+//! opens a channel before a person's command when a restart or idle close detached the chat,
+//! so this applies to every attach. Viewing a detached chat only reads its saved state.
 //!
 //! Depends on: `serde_json`, tokio (restore ordering), vw-platform (user-only file). Called by: `pump` (`runtime/updated`), `sessions` (results and start
 //! params), `dispatch` (the profile a client's resume names).

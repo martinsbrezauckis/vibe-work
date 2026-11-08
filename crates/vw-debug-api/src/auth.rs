@@ -128,7 +128,7 @@ pub(crate) async fn guard(
         let mut response = guard_error(
             StatusCode::UNAUTHORIZED,
             "unauthorized",
-            "missing or invalid bearer token (read it from the token file named in the descriptor)",
+            "missing or invalid bearer token (unlock the vault, then use the copy icon in Settings > Developer > Debug API)",
         );
         response.headers_mut().insert(
             header::WWW_AUTHENTICATE,

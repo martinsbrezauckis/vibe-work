@@ -7,11 +7,11 @@ use super::{
 
 pub(super) struct Permission {
     policies: std::collections::BTreeMap<String, crate::entry_permissions::Policy>,
-    approval: Approval,
+    pub(super) approval: Approval,
 }
 
 impl Job {
-    fn log(&self, decision: &str) {
+    pub(super) fn log(&self, decision: &str) {
         let Some(shared) = self.shared.upgrade() else {
             return;
         };
@@ -32,6 +32,7 @@ impl Job {
     }
 
     async fn consent(&self, all_allowed: bool) -> Result<Approval, String> {
+        self.check_scope()?;
         if all_allowed {
             return Ok(Approval::EntryAllowed);
         }
@@ -69,6 +70,7 @@ impl Job {
             .values()
             .all(|policy| policy.permission == vw_keys::EntryPermission::Allowed);
         let approval = self.consent(all_allowed).await?;
+        self.check_scope()?;
         // A changed choice while the person was deciding cannot be overwritten by their older window.
         for (id, policy) in &mut policies {
             if self.policy_project.policy(keys, id).await.ok().as_ref() != Some(policy) {
@@ -85,11 +87,14 @@ impl Job {
         Ok(Permission { policies, approval })
     }
 
-    pub(super) async fn run(self, permission: Permission) -> Result<Value, String> {
+    pub(super) async fn checked_values(
+        &self,
+        permission: &Permission,
+    ) -> Result<Vec<(String, SecretString)>, String> {
         let shared = self.shared.upgrade().ok_or("Vibe Work closed.")?;
         let keys = keys(&shared)?;
-        let Permission { policies, approval } = permission;
         crate::agent_access::check(&shared)?;
+        self.check_scope()?;
         let mut values: Vec<(String, SecretString)> = Vec::new();
         for b in &self.bound {
             let value = keys
@@ -101,7 +106,15 @@ impl Job {
             values.push((b.env.clone(), value));
         }
 
-        for (id, policy) in &policies {
+        self.check_permission(permission).await?;
+        crate::agent_access::check(&shared)?;
+        Ok(values)
+    }
+
+    pub(super) async fn check_permission(&self, permission: &Permission) -> Result<(), String> {
+        let shared = self.shared.upgrade().ok_or("Vibe Work closed.")?;
+        let keys = keys(&shared)?;
+        for (id, policy) in &permission.policies {
             if self.policy_project.policy(keys, id).await.ok().as_ref() != Some(policy) {
                 self.log("refused");
                 return Err(
@@ -110,7 +123,13 @@ impl Job {
                 );
             }
         }
-        crate::agent_access::check(&shared)?;
+        self.check_scope()
+    }
+
+    pub(super) async fn run(self, permission: Permission) -> Result<Value, String> {
+        let shared = self.shared.upgrade().ok_or("Vibe Work closed.")?;
+        let values = self.checked_values(&permission).await?;
+        let approval = permission.approval;
         self.log(approval.as_str());
         let mut result = super::super::secret_exec::execute(
             &shared,

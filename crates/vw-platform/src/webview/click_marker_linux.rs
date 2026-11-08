@@ -11,6 +11,17 @@ const PREFIX: &str = "vw-input-marker-";
 /// # Errors
 /// Rejects invalid geometry or a view outside the host overlay.
 pub fn show(view: &gtk::Widget, point: (f64, f64)) -> Result<(), String> {
+    show_for(view, point, Duration::from_millis(700))
+}
+
+/// Paints the shared action marker for its remaining host-clock lifetime.
+///
+/// # Errors
+/// Rejects invalid geometry or a view outside the host overlay.
+pub fn show_for(view: &gtk::Widget, point: (f64, f64), remaining: Duration) -> Result<(), String> {
+    if remaining.is_zero() {
+        return Ok(());
+    }
     let (width, height) = (view.allocated_width(), view.allocated_height());
     let (x, y) = crate::native_click::map_point(point, (f64::from(width), f64::from(height)))?;
     if !view.is_mapped() {
@@ -91,7 +102,7 @@ pub fn show(view: &gtk::Widget, point: (f64, f64)) -> Result<(), String> {
         }
     });
     let weak_marker = marker.downgrade();
-    glib::timeout_add_local_once(Duration::from_millis(700), move || {
+    glib::timeout_add_local_once(remaining.min(Duration::from_millis(700)), move || {
         if let Some(marker) = weak_marker.upgrade() {
             remove(&marker);
         }

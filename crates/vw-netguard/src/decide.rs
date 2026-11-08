@@ -5,7 +5,8 @@
 //! own private network. The original Host header and TLS server name are retained.
 //!
 //! Depends on: `ip`, `resolve`. Called by: `serve`.
-//! Invariants:
+//! A live browser scope admits every address; the proxy still resolves and pins its connection targets.
+//! Default/non-browser scope invariants:
 //! - This computer is reachable only as exactly `127.0.0.1`, `[::1]` or `localhost`, and only when the request's
 //!   [`Scope`] allows that port (Private Network Access idea: never Vibe Work's own ports, never
 //!   from a page that came from the web, from a session's local page only its own and other sessions' attributed
@@ -32,6 +33,11 @@ pub type ScopeFuture<'a> = Pin<Box<dyn Future<Output = Result<(), String>> + Sen
 
 /// Who is asking: decides whether a port on this computer may be reached by this request.
 pub trait Scope: Send + Sync {
+    /// A live browser mount uses the engine's address permissions. Server-side scopes remain restricted.
+    fn browser_addresses(&self) -> bool {
+        false
+    }
+
     /// `Ok` when the request may reach `127.0.0.1:<port>`; else the reason.
     fn loopback(&self, port: u16) -> ScopeFuture<'_>;
 
@@ -75,6 +81,21 @@ pub async fn decide(
 ) -> Result<Vec<SocketAddr>, String> {
     let host = bare_host(host);
     let lower = host.trim_end_matches('.').to_ascii_lowercase();
+    if scope.browser_addresses() {
+        if let Ok(ip) = lower.parse::<IpAddr>() {
+            return Ok(vec![SocketAddr::new(ip, port)]);
+        }
+        if lower == "localhost" || lower.ends_with(".localhost") {
+            return Ok(vec![
+                SocketAddr::from((Ipv4Addr::LOCALHOST, port)),
+                SocketAddr::from((Ipv6Addr::LOCALHOST, port)),
+            ]);
+        }
+        return tokio::time::timeout(RESOLVE_LIMIT, resolver.resolve(&lower, port))
+            .await
+            .map_err(|_| format!("{lower} did not resolve within 5 s"))?
+            .map_err(|error| format!("{lower} could not be resolved ({error})"));
+    }
     let accepted_loopback = match lower.as_str() {
         "127.0.0.1" => Some(vec![SocketAddr::from((Ipv4Addr::LOCALHOST, port))]),
         "::1" => Some(vec![SocketAddr::from((Ipv6Addr::LOCALHOST, port))]),

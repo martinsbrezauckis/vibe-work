@@ -1,4 +1,5 @@
 /** Confirmed Chrome connection state and settings commands. Used by the Browser section and dialogs. */
+import { browserView, type SettingsBrowser } from "./browserView";
 import { TEXT } from "../../../vocabulary";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
@@ -31,24 +32,10 @@ export interface ChromeControlState {
 }
 
 /** Reads the view once (if the store has none yet) and runs changes. */
-export function useChromeControl(
-  browser: "Chrome" | "Edge" | "Firefox" = "Chrome",
-): ChromeControlState {
+export function useChromeControl(browser: SettingsBrowser = "Chrome"): ChromeControlState {
   const { core } = useApp();
   const stored = useCoreState((s) => s.chromeControl);
-  const view = useMemo(
-    () =>
-      browser === "Firefox"
-        ? stored?.firefox === undefined
-          ? null
-          : { ...stored, setup: stored.firefox }
-        : browser === "Edge"
-          ? stored?.edge === undefined
-            ? null
-            : { ...stored, setup: stored.edge }
-          : stored,
-    [browser, stored],
-  );
+  const view = useMemo(() => browserView(stored, browser), [browser, stored]);
   const connecting = useRef(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [status, setStatus] = useState<ChromeStatus | null>(null);
@@ -72,23 +59,31 @@ export function useChromeControl(
       setStatus(null);
       try {
         const selected: ChromeControlRequest =
-          browser === "Firefox"
-            ? request.op === "offerSetup"
-              ? { op: "offerFirefoxSetup" }
-              : request.op === "setup"
-                ? { op: "setupFirefox", offerId: request.offerId }
-                : request.op === "openStore"
-                  ? { op: "openFirefoxStore" }
-                  : request
-            : browser === "Edge"
+          browser === "Safari"
+            ? request.op === "setEnabled"
+              ? { op: "setSafariEnabled", enabled: request.enabled }
+              : request.op === "remove"
+                ? { op: "removeSafari" }
+                : request
+            : browser === "Firefox"
               ? request.op === "offerSetup"
-                ? { op: "offerEdgeSetup" }
+                ? { op: "offerFirefoxSetup" }
                 : request.op === "setup"
-                  ? { op: "setupEdge", offerId: request.offerId }
+                  ? { op: "setupFirefox", offerId: request.offerId }
                   : request.op === "openStore"
-                    ? { op: "openEdgeStore" }
+                    ? { op: "openFirefoxStore" }
                     : request
-              : request;
+              : browser === "Edge"
+                ? request.op === "setEnabled"
+                  ? { op: "setEdgeEnabled", enabled: request.enabled }
+                  : request.op === "offerSetup"
+                    ? { op: "offerEdgeSetup" }
+                    : request.op === "setup"
+                      ? { op: "setupEdge", offerId: request.offerId }
+                      : request.op === "openStore"
+                        ? { op: "openEdgeStore" }
+                        : request
+                : request;
         const result = await core.run({ type: "chromeControl", request: selected });
         if (request.op === "remove") setStatus({ kind: "removed", text: "Removed.", alert: false });
         return result;
@@ -114,21 +109,41 @@ export function useChromeControl(
     setStatus(null);
     try {
       const current = core.store.get().chromeControl;
-      if (current?.setup.state === "notSetUp") {
-        const offer = await core.run({ type: "chromeControl", request: { op: "offerSetup" } });
+      if (browser === "Safari") {
+        if (current?.safari?.enabled === false)
+          await core.run({
+            type: "chromeControl",
+            request: { op: "setSafariEnabled", enabled: true },
+          });
+        if (current?.safari?.addon.action !== "turnOn")
+          await core.run({ type: "chromeControl", request: { op: "openSafariSetup" } });
+        return;
+      }
+      const setup = browser === "Edge" ? current?.edge : current?.setup;
+      if (setup?.state === "notSetUp") {
+        const offer = await core.run({
+          type: "chromeControl",
+          request: { op: browser === "Edge" ? "offerEdgeSetup" : "offerSetup" },
+        });
         if (offer.type !== "chromeControl" || offer.offer === null)
-          throw new Error("Chrome setup unavailable");
+          throw new Error(`${browser} setup unavailable`);
         await core.run({
           type: "chromeControl",
-          request: { op: "setup", offerId: offer.offer.offerId },
+          request: { op: browser === "Edge" ? "setupEdge" : "setup", offerId: offer.offer.offerId },
         });
       } else if (
-        current?.setup.addon?.action === "turnOn" ||
-        (current?.setup.addon === undefined && current?.setup.pairingState === "paired")
+        setup?.addon?.action === "turnOn" ||
+        (setup?.addon === undefined && setup?.pairingState === "paired")
       ) {
-        await core.run({ type: "chromeControl", request: { op: "setEnabled", enabled: true } });
+        await core.run({
+          type: "chromeControl",
+          request: { op: browser === "Edge" ? "setEdgeEnabled" : "setEnabled", enabled: true },
+        });
       } else {
-        await core.run({ type: "chromeControl", request: { op: "connect" } });
+        await core.run({
+          type: "chromeControl",
+          request: { op: browser === "Edge" ? "openEdgeStore" : "connect" },
+        });
       }
     } catch (thrown) {
       setStatus({ text: toCallError(thrown).error.message, alert: true });
@@ -136,7 +151,7 @@ export function useChromeControl(
       connecting.current = false;
       setBusy(null);
     }
-  }, [core]);
+  }, [core, browser]);
 
   const setupState = view?.setup.state;
   const pendingRemoval =

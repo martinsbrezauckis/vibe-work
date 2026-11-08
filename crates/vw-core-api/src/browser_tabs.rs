@@ -240,6 +240,7 @@ pub(crate) async fn run(
                     service
                         .take_back_web_tab(owner, tab_id, &fingerprint)
                         .map_err(|e| core_error(&e))?;
+                    browser(shared)?.sessions().cancel_confirmations(tab_id);
                 }
                 _ => {}
             }

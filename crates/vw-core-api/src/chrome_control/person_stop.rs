@@ -73,6 +73,7 @@ pub(super) struct PendingCall {
     pub turn: Option<String>,
     active: Option<String>,
     generation: u64,
+    browser_generations: [u64; 3],
     stop: Option<String>,
     open: bool,
 }
@@ -95,16 +96,34 @@ impl PendingCall {
             turn: turn(shared, chat),
             active: active_turn(shared, chat),
             generation: crate::stops::generation(shared, chat),
+            browser_generations: [Browser::Chrome, Browser::Edge, Browser::Safari]
+                .map(|browser| shared.chrome_control.browser_generation(browser)),
             stop,
             open: tool == "chrome_session" && args["action"] == "open",
         }
     }
 
     pub(super) fn refusal(&self, shared: &Shared, chat: &str, browser: Browser) -> Option<String> {
+        if self.browser_disabled(shared, browser) {
+            return Some(format!(
+                "{} work was stopped by its switch. Open a fresh {} session after it is enabled.",
+                browser.short_name(),
+                browser.short_name()
+            ));
+        }
         shared
             .chrome_control
             .stopped_by_person(chat, browser, self.turn.as_deref())
             .then(|| refusal(browser))
+    }
+
+    fn browser_disabled(&self, shared: &Shared, browser: Browser) -> bool {
+        let index = match browser {
+            Browser::Chrome | Browser::Firefox => 0,
+            Browser::Edge => 1,
+            Browser::Safari => 2,
+        };
+        self.browser_generations[index] != shared.chrome_control.browser_generation(browser)
     }
 
     pub(super) fn finish(
@@ -129,6 +148,7 @@ impl PendingCall {
             .chrome_control
             .stopped_by_person(chat, browser, self.turn.as_deref());
         if stopped
+            || self.browser_disabled(shared, browser)
             || self.generation != crate::stops::generation(shared, chat)
             || self.active != active_turn(shared, chat)
             || shared.store.view(chat).is_none()
@@ -142,7 +162,9 @@ impl PendingCall {
                     .owner
                     .control(json!({"action":"stop","sessionId":id}));
             }
-            return Err(if stopped {
+            return Err(if self.browser_disabled(shared, browser) {
+                self.refusal(shared, chat, browser).unwrap_or_default()
+            } else if stopped {
                 refusal(browser)
             } else {
                 "Not run: this chat's Chrome work ended.".into()

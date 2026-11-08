@@ -32,6 +32,36 @@ fn next_start_restores_config_explanations_without_rewriting_personal_lines() {
                 "missing or repeated explanation: {phrase}"
             );
         }
+        for (note, setting) in [
+            (
+                "# Vibe Work: the agent's commits",
+                "include_commit_signature = false",
+            ),
+            (
+                "# Vibe Work: Vibe checks HTTPS",
+                "enable_system_trust_store = true",
+            ),
+            (
+                "# Vibe Work: unsupported experimental features stay off.",
+                "experimental_enable_registry_skills = false",
+            ),
+            (
+                "# Vibe Work: session titles",
+                "title = 'mistral-medium-3.5'",
+            ),
+        ] {
+            let lines: Vec<_> = after.lines().collect();
+            let setting_line = lines
+                .iter()
+                .position(|line| line.contains(setting))
+                .unwrap();
+            assert!(
+                lines[setting_line.saturating_sub(3)..setting_line]
+                    .iter()
+                    .any(|line| line.starts_with(note)),
+                "{note} must sit with {setting}, not in a block at the top"
+            );
+        }
         let own = after
             .lines()
             .filter(|line| {

@@ -6,10 +6,10 @@
 //! Called by: `dispatch` (`Command::Preview`), `agent_tools` (preview tools), `core` (start,
 //! shutdown), `sessions` / `dispatch` (delete, archive).
 //! Invariants:
-//! - Every URL is checked for the session with `UrlPolicy::check` and the monitor's ownership before it is
-//!   loaded; refusals name the owner.
+//! - Every URL passes `UrlPolicy::check`. Pinned App previews also check monitored port ownership;
+//!   browser web tabs accept local and public addresses without a port lease.
 //! - Every origin runs every request directly; the Debug API opens a session's port like the window does (it acts
-//!   as the user), and the agent's preview tools keep `strict`.
+//!   as the user). `strict` selects agent refusal reporting and pinned App preview port ownership checks.
 //! - The change-forwarding task is owned by [`PreviewHub`] and aborted when the hub drops or the core shuts down.
 
 use std::path::PathBuf;
@@ -25,9 +25,7 @@ use crate::command::CommandResult;
 use crate::core::{Core, Shared};
 use crate::error::{CoreError, ErrorCode};
 use crate::event::CoreEvent;
-use crate::preview_ports::{
-    Points, busy_ports, busy_view, names_public, navigation_text, port_owner, session_ports,
-};
+use crate::preview_ports::{busy_ports, busy_view, navigation_text, port_owner, session_ports};
 use crate::preview_view::{BrowserOverlayAction, PreviewRequest, PreviewResult};
 
 /// The preview engine and settings the app hands to the core. `None` in `CoreConfig::preview`: no previews (the
@@ -378,8 +376,8 @@ async fn blocking<T: Send + 'static>(
 
 /// Opens a URL (or a port + path) of `session_id` in its preview: the shared path of the UI, the Debug API and
 /// the agent's `preview_open` / `browser_act navigate`. Refusals are plain text naming the owner.
-/// `strict` means the agent is opening: ports require proven ownership and local-network pages require the
-/// person's current Developer switch. The user and Debug API retain their ordinary network scope.
+/// `strict` identifies agent calls for refusal reporting and pinned App preview port ownership.
+/// Web tabs use ordinary browser address admission.
 pub(crate) async fn open_for_session(
     shared: &Arc<Shared>,
     session_id: &str,
@@ -402,8 +400,7 @@ pub(crate) async fn open_for_session(
     let ports = blocking(move || session_ports(&shared_for_scan, &id))
         .await?
         .map_err(|e| CoreError::new(ErrorCode::Internal, format!("process monitor: {e}")))?;
-    let user = !strict;
-    let allow_lan = user || shared.chrome_control.local_network();
+    let allow_lan = true;
     let denied = |text: String| {
         let message = if strict {
             crate::guard_refusals::record(
@@ -428,6 +425,22 @@ pub(crate) async fn open_for_session(
         )
         .map_err(|e| denied(e.to_string()))?;
     if session_id == owner
+        && let vw_preview::Destination::Loopback { port } = destination
+    {
+        use vw_preview::{PortOwner, UrlRefusal};
+        let reason = match port_owner(shared, &ports, &owner, port, strict) {
+            PortOwner::ThisSession => None,
+            PortOwner::OtherSession(owner) | PortOwner::OtherApp(owner) => {
+                Some(UrlRefusal::NotThisSession { port, owner })
+            }
+            PortOwner::Nobody => Some(UrlRefusal::Unattributed(port)),
+            PortOwner::NotProven => Some(UrlRefusal::NotProven(port)),
+        };
+        if let Some(reason) = reason {
+            return Err(denied(reason.to_string()));
+        }
+    }
+    if session_id == owner
         && !matches!(
             destination,
             vw_preview::Destination::Loopback { .. } | vw_preview::Destination::Blank
@@ -438,22 +451,11 @@ pub(crate) async fn open_for_session(
                 .to_owned(),
         ));
     }
-    let lan = match destination {
-        vw_preview::Destination::Lan => true,
-        vw_preview::Destination::Public => match names_public(&hub.service, &url).await? {
-            Points::Public => false,
-            Points::LocalNetwork if allow_lan => true,
-            Points::LocalNetwork => {
-                return Err(denied(
-                    vw_preview::UrlRefusal::Lan(
-                        url.host_str().unwrap_or("").chars().take(80).collect(),
-                    )
-                    .to_string(),
-                ));
-            }
-        },
-        _ => false,
-    };
+    // Preserve the existing named-LAN media-fetch exception as metadata only. A lookup
+    // failure never refuses browser navigation; the browser engine resolves independently.
+    let lan = destination == vw_preview::Destination::Lan
+        || matches!(url.host(), Some(url::Host::Domain(host)) if matches!(hub.service.check_name(host).await, vw_preview::NameVerdict::LocalNetwork(_)));
+
     let downloads_dir = shared
         .names
         .cwd_of(&shared.store, &owner)
@@ -461,9 +463,6 @@ pub(crate) async fn open_for_session(
     // Other sessions' servers join the URL rules now, from this open's scan, not at the next re-check: a page's
     // first requests to them go out as it loads (macOS compiles the rules before that) and are not repeated.
     hub.service.set_server_ports(ports.servers.clone()).await;
-    if strict && lan && !shared.chrome_control.local_network() {
-        return Err(denied(vw_browser::LOCAL_NETWORK.into()));
-    }
     let opened = hub
         .service
         .open(OpenRequest {
@@ -476,13 +475,6 @@ pub(crate) async fn open_for_session(
         })
         .await
         .map_err(|e| core_error(&e))?;
-    if strict && lan && !shared.chrome_control.local_network() {
-        hub.service
-            .suspend_page(session_id)
-            .await
-            .map_err(|e| core_error(&e))?;
-        return Err(denied(vw_browser::LOCAL_NETWORK.into()));
-    }
     Ok(opened)
 }
 

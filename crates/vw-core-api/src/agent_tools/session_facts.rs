@@ -27,7 +27,6 @@ fn reason(args: &Value) -> Result<&str, String> {
 /// `addon_suggest`: the add-on's own control as a card for the person. Refused, with the reason and what to do,
 /// when there is nothing for the person to set up.
 fn addon_suggest(shared: &Shared, args: &Value) -> Result<Value, String> {
-    use crate::chrome_control::AddonState as S;
     let addon = args
         .get("addon")
         .and_then(Value::as_str)
@@ -38,7 +37,10 @@ fn addon_suggest(shared: &Shared, args: &Value) -> Result<Value, String> {
     let reason = reason(args)?;
     let view = browser.addon(shared);
     match view.state {
-        crate::chrome_control::AddonState::Connecting if browser.reconnectable(shared) => {
+        crate::chrome_control::AddonState::Connecting
+        | crate::chrome_control::AddonState::ChromeClosed
+            if browser.reconnectable(shared) =>
+        {
             Err(format!("Not shown: {}", view.instruction))
         }
         crate::chrome_control::AddonState::Connected => Err(format!(
@@ -49,33 +51,16 @@ fn addon_suggest(shared: &Shared, args: &Value) -> Result<Value, String> {
         crate::chrome_control::AddonState::Unavailable => {
             Err(format!("Not shown: {}", view.instruction))
         }
-        _ => {
-            let instruction = if browser == Browser::Edge
-                && !matches!(
-                    view.state,
-                    S::ChromeMissing
-                        | S::ChromeSandboxed
-                        | S::OtherBrowser
-                        | S::OwnerCredentialMissing
-                ) {
-                format!(
-                    "This chat's Connect Edge button opens Settings, Browser. {}",
-                    view.instruction
-                )
-            } else {
-                view.instruction
-            };
-            Ok(json!({"addonSuggestion":{
-                "addon": browser.id(),
-                "name": browser.name(),
-                "reason": reason,
-                "state": view.label,
-                "stateCode": view.state,
-                "label": view.label,
-                "instruction": instruction,
-                "extensionVersion": view.extension_version,
-            }}))
-        }
+        _ => Ok(json!({"addonSuggestion":{
+            "addon": browser.id(),
+            "name": browser.name(),
+            "reason": reason,
+            "state": view.label,
+            "stateCode": view.state,
+            "label": view.label,
+            "instruction": view.instruction,
+            "extensionVersion": view.extension_version,
+        }})),
     }
 }
 use crate::{Core, Origin, core::Shared};
@@ -370,13 +355,13 @@ mod tests {
         .unwrap();
         assert_eq!(shown["addonSuggestion"]["addon"], "edge");
         let instruction = shown["addonSuggestion"]["instruction"].as_str().unwrap();
-        assert!(instruction.contains("This chat's Connect Edge button opens Settings, Browser."));
-        assert!(instruction.contains("click Set up… in Settings, Browser,"));
+        assert!(!instruction.contains("opens Settings"));
+        assert!(instruction.contains("click Connect Edge."));
         assert!(
             shown["addonSuggestion"]["instruction"]
                 .as_str()
                 .unwrap()
-                .contains("click Set up…")
+                .contains("click Connect Edge")
         );
         core.shutdown().await;
     }
@@ -388,6 +373,20 @@ mod tests {
         crate::chrome_control::test_support::answering(&core.shared, |_, _| {
             panic!("facts must not call the helper")
         });
+        // A live profile belongs to an installed setup, just as the shared Chrome state requires.
+        let state = core
+            .shared
+            .chrome_control
+            .config
+            .user_home
+            .as_ref()
+            .unwrap()
+            .join("VibeWork/ChromeControl/setup.json");
+        std::fs::write(
+            state,
+            json!({"files":[],"browsers":["Microsoft Edge"],"userData":[]}).to_string(),
+        )
+        .unwrap();
         crate::chrome_control::test_support::observe_status(
             &core.shared,
             &json!({"profiles":[{"profileId":"edge:p","connected":true,"extensionVersion":"0.1.3"}]}),

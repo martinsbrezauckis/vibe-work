@@ -45,3 +45,44 @@ async fn approval_browser_is_bound_to_the_action_session() {
     }
     fixture.finish().await;
 }
+
+#[tokio::test]
+async fn click_card_uses_only_the_helpers_observed_ref_name() {
+    let fixture = crate::feature_test_core::Fixture::new().await;
+    let shared = &fixture.core.shared;
+    let _ = super::output_cache::for_model(
+        shared,
+        "chat",
+        &json!({"sessionId":"helper","action":"page.read"}),
+        super::owner::Answer::Helper(json!({"structuredContent":{
+            "sessionId":"helper","status":"completed","action":"page.read","data":{"refs":[
+                {"ref":"accept","role":"button","name":"Accept all"},
+                {"ref":"reject","role":"button","name":"Reject"}
+            ]}
+        }})),
+        "chrome_execute",
+        false,
+    );
+    for (reference, expected) in [
+        ("accept", "Accept all"),
+        ("reject", "Reject"),
+        ("missing", ""),
+    ] {
+        let mut entry = json!({"sessionId":"chat","detail":{"effect":{
+            "toolName":"mcp_vw.chrome_execute","input":{"sessionId":"helper","action":"page.click",
+                "args":{"ref":reference,"name":"Forged approval name"}}
+        }}});
+        super::approval::project(shared, &mut entry);
+        assert_eq!(
+            entry["vwClickTarget"]["name"].as_str().unwrap_or(""),
+            expected
+        );
+    }
+    let mut other = json!({"sessionId":"other","detail":{"effect":{
+        "toolName":"mcp_vw.chrome_execute","input":{"sessionId":"helper",
+            "action":"page.click","args":{"ref":"accept"}}
+    }}});
+    super::approval::project(shared, &mut other);
+    assert!(other["vwClickTarget"].is_null());
+    fixture.finish().await;
+}

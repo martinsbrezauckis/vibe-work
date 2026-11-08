@@ -170,7 +170,7 @@ export function createDebugApiClient(): CoreClient {
       ),
     debugApiTokenFile: () =>
       Promise.reject(
-        toCallError(new Error("the token file is managed in the app, not in browser dev mode")),
+        toCallError(new Error("the token is managed in the app, not in browser dev mode")),
       ),
     attachTerminal: (terminalId, onChunk) => Promise.resolve(pollTerminal(terminalId, onChunk)),
     // Updates belong to the installed app: browser dev mode has no update channel.

@@ -28,6 +28,7 @@ export function ToastItem({
   reading,
   onGone,
   onOpen,
+  feedback,
 }: {
   toast: Toast;
   docked: boolean;
@@ -35,6 +36,7 @@ export function ToastItem({
   reading: boolean;
   onGone: () => void;
   onOpen: () => void;
+  feedback?: React.ReactNode;
 }) {
   const { id, kind, text } = toast;
   const life = toastLifetime(toast);
@@ -138,6 +140,7 @@ export function ToastItem({
           </Button>
         )}
       </div>
+      {feedback}
       <IconButton
         tooltip={false}
         data-testid="shell.toast-item-x"

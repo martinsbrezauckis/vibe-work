@@ -23,11 +23,9 @@
 //! macOS services provider), `confirm_window` (the macOS `NSAlert` sheet and the Windows task dialog of the app's
 //! confirmations), `remove_tree` (Windows: file deletion that preserves shared read-only attributes), `kill_job` (Windows: a program in a
 //! kill-on-close job, for the Git Bash wrapper), `tcp_listeners` (Windows owner-PID listener tables),
-//! `startup_error` (Windows: the startup message box), and
+//! `startup_error` (Windows: the startup message box), `safari_extension` (macOS: the containing app's `SafariServices`
+//! calls for its Safari extension), and
 //! `webview2_env` (Windows: the `WebView2` loader's variables removed from this process at startup) use it.
-
-#[cfg(all(feature = "click-marker", not(debug_assertions)))]
-compile_error!("click markers are not available in release builds");
 
 #[cfg(target_os = "linux")]
 #[allow(unsafe_code)]
@@ -40,6 +38,8 @@ pub mod checked_executable;
 pub mod child_env;
 pub mod clipboard;
 pub mod screen_reader;
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+pub mod search_directory;
 pub use background::lower_thread_priority;
 #[cfg(target_os = "macos")]
 #[allow(unsafe_code)]
@@ -72,6 +72,9 @@ mod open_url;
 mod paths;
 mod private_file;
 mod process;
+#[cfg(target_os = "macos")]
+#[allow(unsafe_code)]
+pub mod safari_extension;
 #[cfg(any(windows, test))]
 mod tcp_listeners;
 #[cfg(windows)]

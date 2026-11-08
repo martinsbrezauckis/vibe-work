@@ -36,6 +36,11 @@ pub(crate) fn reveal_main_window<R: tauri::Runtime>(app: &AppHandle<R>) -> tauri
 pub(crate) fn menu(app: &AppHandle, id: &str) -> Result<(), String> {
     match id {
         OPEN => reveal_main_window(app).map_err(|error| error.to_string()),
+        #[cfg(feature = "feedback")]
+        "feedback" => {
+            crate::feedback_entry::open(app);
+            Ok(())
+        }
         QUIT => {
             app.exit(0);
             Ok(())
@@ -87,16 +92,26 @@ fn build(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         vw_host::attention::tray(normal.rgba(), normal.width(), normal.height(), false, true);
     let open = app.clone();
     let quit = app.clone();
+    let mut actions: Vec<vw_platform::tray::indicator::MenuAction<'_>> = vec![(
+        texts::OPEN_VIBE_WORK,
+        Box::new(move || {
+            let _ = reveal_main_window(&open);
+        }),
+    )];
+    #[cfg(feature = "feedback")]
+    {
+        let feedback = app.clone();
+        actions.push((
+            crate::feedback_entry::LABEL,
+            Box::new(move || crate::feedback_entry::open(&feedback)),
+        ));
+    }
+    actions.push((texts::QUIT_VIBE_WORK, Box::new(move || quit.exit(0))));
     vw_platform::tray::indicator::create(
         &crate::startup::data_dir(app)?.join("tray"),
         include_bytes!("../icons/tray-linux.png"),
         (&marked, normal.width(), normal.height()),
-        texts::OPEN_VIBE_WORK,
-        texts::QUIT_VIBE_WORK,
-        move || {
-            let _ = reveal_main_window(&open);
-        },
-        move || quit.exit(0),
+        actions,
     )
     .map_err(Into::into)
 }
@@ -108,7 +123,17 @@ fn build(app: &AppHandle) -> tauri::Result<()> {
     let open = MenuItem::with_id(app, OPEN, texts::OPEN_VIBE_WORK, true, None::<&str>)?;
     let quit = MenuItem::with_id(app, QUIT, texts::QUIT_VIBE_WORK, true, None::<&str>)?;
     let separator = PredefinedMenuItem::separator(app)?;
-    let menu = Menu::with_items(app, &[&open, &separator, &quit])?;
+    let menu = Menu::with_items(app, &[&open])?;
+    #[cfg(feature = "feedback")]
+    menu.append(&MenuItem::with_id(
+        app,
+        "feedback",
+        crate::feedback_entry::LABEL,
+        true,
+        None::<&str>,
+    )?)?;
+    menu.append(&separator)?;
+    menu.append(&quit)?;
     #[cfg(windows)]
     let icon = tauri::include_image!("icons/tray-windows.ico");
     #[cfg(target_os = "macos")]

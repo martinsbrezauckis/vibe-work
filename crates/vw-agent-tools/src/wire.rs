@@ -110,7 +110,7 @@ pub mod tools {
     pub const BROWSER_ACT: &str = "browser_act";
     /// Capture from the page in this session's built-in browser into the session folder.
     pub const BROWSER_CAPTURE: &str = "browser_capture";
-    /// Explains that saving a page key to the vault is user-only; always refuses without accessing the page.
+    /// Direct page-ref capture in the optional vault module; default builds explain the user's save path.
     pub const BROWSER_CAPTURE_SECRET: &str = "browser_capture_secret";
     /// The browser tools.
     pub const BROWSER_TOOLS: [&str; 4] = [
@@ -125,8 +125,16 @@ pub mod tools {
     pub const SECRET_RUN: &str = "secret_run";
     /// The state or result of a `secret_run` that was still waiting or running.
     pub const SECRET_RUN_STATUS: &str = "secret_run_status";
+    /// Capture a newly generated secret without exposing command output.
+    pub const SECRET_CAPTURE_COMMAND: &str = "secret_capture_command";
     /// The secret broker's tools.
-    pub const SECRET_TOOLS: [&str; 3] = [SECRET_LIST, SECRET_RUN, SECRET_RUN_STATUS];
+    pub const SECRET_TOOLS: [&str; 3 + cfg!(feature = "agent-vault") as usize] = [
+        SECRET_LIST,
+        SECRET_RUN,
+        SECRET_RUN_STATUS,
+        #[cfg(feature = "agent-vault")]
+        SECRET_CAPTURE_COMMAND,
+    ];
     /// The libraries this session's agent may search, with their file names.
     pub const LIBRARIES_LIST: &str = "libraries_list";
     /// Ask across those libraries; an answer with numbered sources.
@@ -182,7 +190,9 @@ pub mod tools {
 
     /// Every tool a session credential may call.
     pub const SESSION_TOOLS: [&str;
-        36 + cfg!(feature = "video") as usize + cfg!(feature = "feedback") as usize] = [
+        36 + cfg!(feature = "video") as usize
+            + cfg!(feature = "feedback") as usize
+            + cfg!(feature = "agent-vault") as usize] = [
         #[cfg(feature = "video")]
         "video_frames",
         SESSION_STATUS,
@@ -208,6 +218,8 @@ pub mod tools {
         SECRET_LIST,
         SECRET_RUN,
         SECRET_RUN_STATUS,
+        #[cfg(feature = "agent-vault")]
+        SECRET_CAPTURE_COMMAND,
         LIBRARIES_LIST,
         LIBRARY_SEARCH,
         IMAGE_GENERATE,

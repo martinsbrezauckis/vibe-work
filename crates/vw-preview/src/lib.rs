@@ -1,6 +1,5 @@
 //! The preview pane's model: one preview per session, shown in the side
-//! panel's Browser tab as a native child webview with its own website data, limited to the session's own loopback
-//! servers; screenshots and console entries for the session's agent; downloads into the session folder.
+//! panel's Browser tab as native child webviews with their own website data; screenshots and console entries for the session's agent; downloads into the session folder.
 //!
 //! Everything here runs without a window: the native engine is behind [`PreviewEngine`] (Tauri implementation in
 //! vw-webview; a recording fake in the tests).
@@ -8,12 +7,8 @@
 //! Depends on: url, png, base64, sha2, tokio, serde. Called by: vw-core-api (commands, agent tools, lifecycle),
 //! vw-webview (engine types, storage names, console scripts).
 //! Invariants:
-//! - A session's browser loads public `http`/`https` pages and plain `http` on the loopback interface on ports of its
-//!   own session; private-network addresses only when the user typed them (a Lan page the agent neither reads nor acts
-//!   on); never link-local or special addresses, other schemes or the app's own origins ([`UrlPolicy`]). Host names
-//!   are checked against DNS on every in-place navigation (`names`). The
-//!   request-time layers (the egress guard, the `WebView2` request barrier, macOS content rules; [`GuardLayer`]) are
-//!   extra where they run; without them public pages still open.
+//! - Browser tabs allow local and public HTTP/HTTPS addresses. Live mount identity, credential and scheme checks
+//!   remain; the pinned App preview opens the session's own servers. Backend capture uses a separate fetch policy.
 //! - Public web pages share a dedicated browser profile; local and LAN pages retain per-session storage.
 //! - Untrusted page text (titles, console messages, URLs) is length-capped before it leaves this crate.
 
@@ -24,6 +19,9 @@ pub mod accounts;
 mod audio;
 pub use audio::AudioQuiet;
 mod act_refusals;
+#[cfg(feature = "click-marker")]
+mod action_overlay;
+pub mod action_tracking;
 mod browse;
 mod cdp_frames;
 mod compose;
@@ -32,6 +30,7 @@ mod downloads;
 mod engine;
 mod engine_pool;
 pub use act_refusals::ActRefusal;
+mod fetch_policy;
 mod frames;
 mod hooks;
 mod ids;

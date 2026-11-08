@@ -28,7 +28,7 @@ const TURN_ON: Readonly<Record<string, Readonly<Record<string, string>>>> = {
 /** The line of a finished turn-on step: its answer's status, or a refusal ("Not run: ..."). */
 function turnOnLine(entry: Obj, lines: Readonly<Record<string, string>>): string | null {
   const view = effectView(entry);
-  if (view.live || view.status === "skipped") return null;
+  if (view.live || view.status === "skipped" || view.status === "declined") return null;
   if (outputText(entry).trim().startsWith("Not run:")) return lines["refused"] ?? null;
   const status = field(answerOf(entry), "status");
   return status !== null && Object.hasOwn(lines, status) ? (lines[status] ?? null) : null;

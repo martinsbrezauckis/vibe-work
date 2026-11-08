@@ -7,7 +7,7 @@
  * Depends on: state/uiControl, state/openMenu, AppContext types. Called by: useShellWiring.
  * Invariants:
  * - The click is the element's own `click()` (the same handlers a mouse click runs); a disabled or hidden
- *   element is refused (`denied`), never clicked, so a route can do only what a user can.
+ *   element is refused (`denied`), never clicked. Vault controls marked user-only refuse automation too.
  * - Commands a click or key sends while the request is served carry the Debug API origin (`uiControl` marks).
  * - The click commits React effects before uiControl drains their commands; native folder pickers keep running.
  * - Selectors are matched with every secret value emptied (`secretSafety.ts`): no yes/no oracle.
@@ -36,6 +36,16 @@ function physicalCode(key: string): string {
   }
 }
 
+/** Vault copy controls belong to the person; descendants and focused-key input have the same rule.
+ * Rust independently enforces the vault's user-only command boundary. */
+function refuseUserOnly(element: Element): void {
+  if (element.closest("[data-user-only]"))
+    throw new UiControlError(
+      "denied",
+      "The vault is managed in the window by you; the Debug API has the agent's access here.",
+    );
+}
+
 /** The `index`-th element matching `selector` (CSS), refused when it is missing, hidden or disabled. */
 function target(selector: unknown, index: unknown): HTMLElement {
   if (typeof selector !== "string" || selector === "")
@@ -51,6 +61,7 @@ function target(selector: unknown, index: unknown): HTMLElement {
   const at = typeof index === "number" && Number.isInteger(index) && index >= 0 ? index : 0;
   const el = all[at];
   if (el === undefined) throw new UiControlError("notFound", "no element matches that selector");
+  refuseUserOnly(el);
   if (!elementVisible(el)) throw new UiControlError("denied", "the element is not visible");
   const disabled = el instanceof HTMLButtonElement && el.disabled;
   if (disabled || el.getAttribute("aria-disabled") === "true")
@@ -127,6 +138,7 @@ export function registerInputRoutes(app: App): () => void {
         selector === undefined
           ? (document.activeElement ?? document.body)
           : target(selector, index);
+      refuseUserOnly(el);
       if (el instanceof HTMLElement && selector !== undefined) el.focus();
       const init: KeyboardEventInit = {
         key,

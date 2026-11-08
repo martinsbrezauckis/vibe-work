@@ -1,31 +1,10 @@
-//! Channel lifetime decided by the core: opening a channel for a session that needs one,
-//! reopening the sessions that had a channel after a server restart, putting a resumed session back in
-//! its profile, and closing the channel of a session that is quiet and not looked at.
-//!
-//! Why close at all: a session's channel holds the session's lease in Vibe; while it is open the
-//! Vibe CLI cannot take the session ("Session is already open"), and each channel
-//! costs memory in the server. Why only when quiet: closing a channel ends the session's work
-//! (a turn blocked on an approval can be ended by the close).
-//!
-//! Depends on: `core` (`Core`, `Shared`: gate, store, channels, config), `restore`, `sessions` (store
-//! effect of a resume). Called by: `dispatch` (a
-//! channel on selection or before a call, the profile after a client's resume), `pump` (after a new server
-//! generation; on its idle tick).
-//! Invariants:
-//! - A session is quiet when Vibe reports it idle, failed or archived, it has no open callback (in
-//!   the store or the gate's book), no queued turn, no running background process, it is not being
-//!   restored, no owned child is running or waiting on a card, and it has run at least one turn (a never-run
-//!   session is not stored by Vibe: closing its channel would lose it).
-//! - A quiet session keeps its channel while Vibe lists scheduled loops for it: Vibe runs loops only on an open
-//!   channel (`close_idle`).
-//! - Every resume the core sends names the resolved session profile and is
-//!   followed by the profile restore (`restore.rs`, fail closed), so no turn ever runs in a mode the
-//!   user did not choose.
-//! - After a crash, turns that were `in_progress` and come back `completed` without output are marked
-//!   `interrupted` (`cut_off`).
-//! - Reopens go through the gate like any resume; a session Vibe no longer knows (`not_found`, e.g. a
-//!   never-run session lost with the crash) is removed from the store, so no dead row lingers.
-//! - Reopens and closes run in spawned tasks: the pump never waits for a server round trip.
+//! Channel lifetime: attach on a person's command, read detached chats on view or server restart,
+//! and close quiet unviewed channels. Depends on core, restore, sessions and channels; called by dispatch/pump.
+//! A live channel belongs to this server generation and survives window/selection changes. A previous
+//! generation's channel stays detached unless it has scheduled work. A schedule authorizes new turns,
+//! with any unfinished old turn interrupted first; passive reads never resume it.
+//! Explicit attaches restore the chosen profile before admitting new work. Idle closure preserves callbacks,
+//! queued work, background processes, loops and never-run chats (Vibe has not stored those yet).
 
 use std::sync::Arc;
 
@@ -40,8 +19,8 @@ use crate::sessions;
 
 impl Core {
     /// Gives `session_id` a channel (a new one on the current server) by resuming it through the gate,
-    /// loads the result, and restores its profile. A forced reopen for recovery and explicit retry;
-    /// selection and implicit sends use `attach_session`. Serialized through verification, without
+    /// loads the result, and restores its profile. A forced reopen for explicit retry;
+    /// implicit sends use `attach_session`. Serialized through verification, without
     /// holding anything across sessions.
     pub(crate) async fn open_session(
         &self,
@@ -52,7 +31,7 @@ impl Core {
         self.reattach_session(origin, session_id, true).await
     }
 
-    /// Implicit opens coalesce: a send racing selection uses the already verified channel.
+    /// Implicit opens coalesce: concurrent sends use the already verified channel.
     pub(crate) async fn attach_session(
         &self,
         origin: Origin,
@@ -70,6 +49,7 @@ impl Core {
         debug!(session_id, "opening a channel for the session");
         let canonical = self.shared.channels.canonical(session_id);
         let session_id = canonical.as_str();
+        crate::interrupted_send::prepare(self, session_id).await?;
         let restore = self.begin_restore(session_id, None).await;
         if restore.attached && !force {
             return Ok(());
@@ -81,15 +61,27 @@ impl Core {
         }
         let _lease = self.claim_session(session_id).await?;
         let method = "session/resume";
-        let params = json!({"sessionId": session_id, "agentConfig": {"agent": restore.profile()}});
+        let stopping = self.shared.interrupted_send.pending(session_id).is_some();
+        let (params, token) = restore.resume_request(stopping)?;
         crate::plan_profile::before_open(&self.shared, method, &params);
         let entry_project = crate::entry_projects::before_open(&self.shared, method, &params).await;
-        let reply = self
+        let mut reply = match self
             .shared
             .gate
-            .call(method, params.clone(), None)
+            .call(method, params.clone(), token.as_ref())
             .await
-            .map_err(|e| crate::config_validation::from_gate(&self.shared, method, &e))?;
+        {
+            Ok(reply) => reply,
+            Err(error) => {
+                let error = crate::config_validation::from_gate(&self.shared, method, &error);
+                if error.server_code.as_deref() == Some("sessionHeld") {
+                    self.session_holder_after_refusal(session_id).await?;
+                }
+                return Err(error);
+            }
+        };
+        crate::interrupted_send::stop_recovered(&self.shared, session_id, &mut reply.result)
+            .await?;
         if let Some(opening) = entry_project {
             opening.finish(&self.shared, &reply.result);
         }
@@ -98,8 +90,8 @@ impl Core {
         Box::pin(self.refresh_removed_plugins(session_id)).await
     }
 
-    /// Selection keeps the channel alive and attaches immediately, using the same bounded,
-    /// verified restore as a send. The listing already carries its mode for instant display.
+    /// Selection keeps a live channel alive. A detached chat is only read: resuming it would recover
+    /// unfinished work from an earlier process without a new turn from the person.
     pub(crate) async fn view_session(
         &self,
         origin: Origin,
@@ -115,31 +107,9 @@ impl Core {
                 user_entry_ids: Vec::new(),
             });
         };
-        if !self.shared.channels.has_channel(&id)
-            && crate::stop_tree::owned(&self.shared, &id).await?
-        {
-            return self
-                .session_call(origin, "session/read", json!({"sessionId":id}))
-                .await;
-        }
-        let held = self.shared.plugin_refresh.lock(&id).await;
-        if self.shared.plugin_refresh.needs_reopen(&id) {
-            self.reopen_tools(&id).await?;
-        }
-        if self.shared.stuck.is_stuck(&id) {
-            return Err(crate::stuck::refusal(&id, "session/resume"));
-        }
-        if let Err(error) = self
-            .bounded_open(&id, self.attach_session(origin, &id))
-            .await
-        {
-            if error.server_code.as_deref() != Some("sessionHeld") {
-                return Err(error);
-            }
-            // The read-only read below goes through the dispatcher, which takes this chat's lock itself: holding
-            // it here waited forever for a chat another Vibe holds (se1 H1).
-            drop(held);
-            self.session_holder_after_refusal(&id).await?;
+        if !self.shared.channels.has_channel(&id) {
+            // Publish foreign ownership for the existing read-only UI without taking a lease.
+            let _ = self.session_holder(&id).await;
             return self
                 .session_call(origin, "session/read", json!({"sessionId": id}))
                 .await;
@@ -155,71 +125,73 @@ impl Core {
     }
 }
 
-/// Resumes each session on a new channel of the new server (the old channels died with it), in the
-/// profile it ran with. `inflight` lists, per session, the turns that were `in_progress` in the store
-/// when the server died: the app knows they were cut off, so they are marked `interrupted` here
-/// whatever the resumed state reports ([`cut_off`]); turns missing from the resumed state are marked
-/// by the store itself.
-pub(crate) fn reopen(shared: &Arc<Shared>, inflight: Vec<(String, Vec<String>)>) {
+/// Reads sessions whose channels died. Only saved schedules reopen: they authorize fresh turns.
+/// The per-chat lock serializes recovery with explicit actions; an already attached live turn is left alone.
+pub(crate) fn restore_detached(shared: &Arc<Shared>, inflight: Vec<(String, Vec<String>)>) {
     for (id, turns) in inflight {
         let core = Core {
             shared: shared.clone(),
         };
         tokio::spawn(async move {
-            let bound = if turns.is_empty() {
-                core.shared.config.reopen_timeout
-            } else {
-                core.shared.config.inflight_reopen_timeout
+            let _held = core.shared.plugin_refresh.lock(&id).await;
+            if core.shared.channels.has_channel(&id) {
+                return;
+            }
+            let applied = core.shared.store.mark_interrupted(&id, &turns);
+            let _ = core.shared.loads.send(applied).await;
+            let params = json!({"sessionId": id});
+            let read = async {
+                let mut reply = core
+                    .shared
+                    .gate
+                    .call("session/read", params.clone(), None)
+                    .await
+                    .map_err(|error| CoreError::from_gate("session/read", &error))?;
+                sessions::project_result(&core.shared, "session/read", &params, &mut reply.result);
+                sessions::observe(&core.shared, "session/read", &params, &reply.result).await?;
+                let scheduled = reply.result["state"]["session"]["archivedAt"].is_null()
+                    && reply.result["state"]["session"]["loops"]
+                        .as_array()
+                        .is_some_and(|loops| !loops.is_empty());
+                Ok::<_, CoreError>(scheduled)
             };
-            let opened = tokio::time::timeout(bound, core.open_session(Origin::Ui, &id))
-                .await
-                .unwrap_or_else(|_| {
-                    Err(CoreError::new(
-                        crate::error::ErrorCode::Timeout,
-                        format!("no answer to the reopen within {}s", bound.as_secs()),
-                    ))
-                });
-            match opened {
-                Ok(()) => {
-                    info!(session_id = id, "session reopened after a server restart");
-                    mark_cut_off(&core.shared, &id, &turns).await;
+            let bound = core.shared.config.reopen_timeout;
+            let result = tokio::time::timeout(bound, read).await.unwrap_or_else(|_| {
+                Err(CoreError::new(
+                    crate::ErrorCode::Timeout,
+                    format!("no answer within {}s", bound.as_secs()),
+                ))
+            });
+            // Let bounded_open own its deadline and channel cleanup; the read deadline must not cancel it.
+            let result = match result {
+                Ok(true) => {
+                    core.bounded_open(&id, core.attach_session(Origin::Ui, &id))
+                        .await
                 }
+                Ok(false) => Ok(()),
+                Err(error) => Err(error),
+            };
+            match result {
+                Ok(()) => info!(
+                    session_id = id,
+                    "session restored detached after a server restart"
+                ),
                 Err(error) if error.server_code.as_deref() == Some("not_found") => {
-                    warn!(
-                        session_id = id,
-                        "session is gone after the restart; dropping it"
-                    );
+                    // Vibe does not persist a never-run chat. Do not leave its dead row behind.
                     let applied = core.shared.store.remove(&id);
                     let _ = core.shared.loads.send(applied).await;
                     core.shared.leases.release(&id);
-                }
-                Err(error) if error.server_code.as_deref() == Some("sessionHeld") => {
-                    let applied = core.shared.store.mark_interrupted(&id, &turns);
-                    let _ = core.shared.loads.send(applied).await;
-                    info!(
-                        session_id = id,
-                        "session remains read-only until its other holder closes"
-                    );
                 }
                 Err(error) => {
                     warn!(
                         session_id = id,
                         code = error.code.as_str(),
-                        "reopening a session after a restart failed"
+                        "reading a session after restart failed"
                     );
-                    // The turns that were running died with the server, whether or not the session
-                    // can be reopened now.
-                    let applied = core.shared.store.mark_interrupted(&id, &turns);
-                    let _ = core.shared.loads.send(applied).await;
-                    // No automatic retries (`stuck.rs`): the user decides.
-                    core.note_stuck(&id);
-                    if error.code == crate::ErrorCode::AccessModeUnverified {
-                        return;
-                    }
                     core.shared.emit(CoreEvent::Alert {
-                        session_id: Some(id.clone()),
+                        session_id: Some(id),
                         kind: AlertKind::ReopenFailed,
-                        message: format!("{}: its unfinished turn was cut off. Try again, or continue in a new session.", crate::stuck::STUCK_TEXT),
+                        message: error.message,
                     });
                 }
             }
@@ -227,57 +199,7 @@ pub(crate) fn reopen(shared: &Arc<Shared>, inflight: Vec<(String, Vec<String>)>)
     }
 }
 
-/// The turns of `state` among `inflight` that a crash cut off and that did not finish: Vibe reports such a turn
-/// completed without a reason, so the app's own record of in-flight turns says it was running. A turn whose last
-/// entry is the model's answer finished (Vibe's resume told the model the cut-off step failed and the model went on):
-/// it is not marked; its transcript still shows the failed step.
-pub(crate) fn cut_off(state: &Value, inflight: &[String]) -> Vec<String> {
-    let history = state["history"].as_array();
-    let answered = |id: &str| {
-        history
-            .into_iter()
-            .flatten()
-            .rfind(|entry| entry["turnId"] == id)
-            .is_some_and(|last| last["type"] == "message" && last["role"] == "assistant")
-    };
-    state["turns"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter_map(|t| {
-            let id = t["id"].as_str()?;
-            let silent =
-                t["status"] == "completed" && t["stopReason"].is_null() && t["error"].is_null();
-            (inflight.iter().any(|x| x == id) && silent && !answered(id)).then(|| id.to_owned())
-        })
-        .collect()
-}
-
-/// Marks the cut-off turns of a reopened session interrupted and tells the user.
-async fn mark_cut_off(shared: &Shared, id: &str, inflight: &[String]) {
-    let Some(view) = shared.store.view(id) else {
-        return;
-    };
-    let cut = cut_off(&view.state, inflight);
-    if cut.is_empty() {
-        return;
-    }
-    warn!(
-        session_id = id,
-        turns = cut.len(),
-        "turns cut off by the restart marked interrupted"
-    );
-    let applied = shared.store.mark_interrupted(id, &cut);
-    let _ = shared.loads.send(applied).await;
-    shared.emit(CoreEvent::Alert {
-        session_id: Some(id.to_owned()),
-        kind: AlertKind::TurnsInterrupted,
-        message: "Vibe stopped while this session was working; the unfinished turn was cut off."
-            .to_owned(),
-    });
-}
-
-/// The turns of each session that are `in_progress` in the store right now (before a reopen).
+/// The turns of each session that are `in_progress` in the store right now (before a detached restore).
 pub(crate) fn in_progress_turns(shared: &Shared, ids: Vec<String>) -> Vec<(String, Vec<String>)> {
     ids.into_iter()
         .map(|id| {
@@ -418,49 +340,4 @@ pub(crate) fn working(shared: &Shared, id: &str) -> bool {
         || waiting("/activeCallbacks")
         || waiting("/turnQueue/items")
         || gate_open
-}
-
-#[cfg(test)]
-mod tests {
-    use super::cut_off;
-    use serde_json::json;
-
-    #[test]
-    fn inflight_turns_that_did_not_finish_are_cut_off() {
-        let state = json!({
-            "turns": [
-                {"id": "cut", "status": "completed", "stopReason": null, "error": null},
-                {"id": "answered", "status": "completed", "stopReason": null, "error": null},
-                {"id": "stopped", "status": "completed", "stopReason": "max_turns", "error": null},
-                {"id": "failed", "status": "failed", "stopReason": null, "error": {"message": "x"}},
-                {"id": "older", "status": "completed", "stopReason": null, "error": null},
-                {"id": "step", "status": "completed", "stopReason": null, "error": null},
-                {"id": "redone", "status": "completed", "stopReason": null, "error": null}
-            ],
-            "history": [
-                {"type": "message", "role": "user", "turnId": "cut"},
-                {"type": "message", "role": "assistant", "turnId": "answered"},
-                {"type": "message", "role": "user", "turnId": "step"},
-                {"type": "message", "role": "assistant", "turnId": "step"},
-                {"type": "effect", "turnId": "step"},
-                {"type": "message", "role": "user", "turnId": "redone"},
-                {"type": "effect", "turnId": "redone"},
-                {"type": "effect", "turnId": "redone"},
-                {"type": "message", "role": "assistant", "turnId": "redone"}
-            ]
-        });
-        let inflight: Vec<String> = ["cut", "answered", "stopped", "failed", "step", "redone"]
-            .iter()
-            .map(|s| (*s).to_owned())
-            .collect();
-        assert_eq!(
-            cut_off(&state, &inflight),
-            ["cut", "step"],
-            "a turn the model answered after the resume finished; only the one that did not is cut off"
-        );
-        assert!(
-            cut_off(&state, &[]).is_empty(),
-            "only turns that were in flight"
-        );
-    }
 }

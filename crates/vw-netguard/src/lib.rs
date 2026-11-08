@@ -13,6 +13,7 @@
 //! - This computer only as `127.0.0.1` / `[::1]` / `localhost`, never Vibe Work's own ports, and only when the
 //!   session's [`PageContext`] allows the port (Private Network Access idea).
 pub mod chromium;
+mod credential;
 pub mod decide;
 pub mod forward;
 mod guard;

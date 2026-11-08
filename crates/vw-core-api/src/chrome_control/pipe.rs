@@ -43,7 +43,9 @@ impl Pipe {
         secret: &vw_vault::SecretString,
         shared: Weak<Shared>,
     ) -> Result<Self, ()> {
-        let (mut executable, helper) = super::setup::open_helper(package).map_err(|_| ())?;
+        let (mut executable, helper) = super::setup::open_helper(package).map_err(|reason| {
+            tracing::debug!(%reason, "Chrome Control helper could not be opened");
+        })?;
         let mut bytes = Vec::new();
         std::io::Read::read_to_end(executable.file(), &mut bytes).map_err(|_| ())?;
         super::setup::check_helper_pin(package, &bytes).map_err(|_| ())?;
@@ -60,13 +62,19 @@ impl Pipe {
             .args(["owned", "--state-dir"])
             .arg(dir)
             .env_remove("CHROME_CONTROL_STATE_DIR")
+            .env_remove("CHROME_CONTROL_SAFARI_GROUP")
+            .env_remove("CHROME_CONTROL_SAFARI_EXTENSION_ID")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .kill_on_drop(true);
+        #[cfg(all(feature = "your-safari", target_os = "macos"))]
+        super::safari_package::configure(&mut command, &shared).await;
         #[cfg(windows)]
         command.creation_flags(0x0800_0000);
-        let mut child = command.spawn().map_err(|_| ())?;
+        let mut child = command.spawn().map_err(|error| {
+            tracing::debug!(%error, "Chrome Control helper could not be launched");
+        })?;
         #[cfg(target_os = "macos")]
         if child
             .id()

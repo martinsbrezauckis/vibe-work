@@ -126,7 +126,7 @@ pub fn start_script_from(name: &str, page: Option<&str>) -> String {
 {DESCRIBE_JS}
   const old = window[NAME + "_stop"]; if (typeof old === "function") old();
   const st = {{ result: {{ state: "pending" }} }};
-  const saved = window[{page}]?.takePointChoice?.();
+  const saved = window[{page}]?.takePointChoice?.() ?? window[{page}]?.selection?.();
   if (saved) {{
     let node = saved.node;
     if (node?.nodeType !== 1) node = node?.parentElement;

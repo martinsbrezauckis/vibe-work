@@ -260,9 +260,9 @@ pub enum Command {
         #[cfg_attr(feature = "ts", ts(optional))]
         confirmation_token: Option<String>,
     },
-    /// Tells the core which session this client's main view shows (`None`: none). A viewed session
-    /// attaches and restores its access mode immediately, then keeps its channel open however long
-    /// it is idle (`CoreConfig::channel_idle_close`).
+    /// Tells the core which session this client's main view shows (`None`: none). A detached session
+    /// is only read; a live session keeps its channel open however long it is idle
+    /// (`CoreConfig::channel_idle_close`). Viewing never resumes unfinished work.
     ViewSession {
         /// The shown session.
         #[serde(default, skip_serializing_if = "Option::is_none")]

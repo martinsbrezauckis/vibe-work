@@ -16,7 +16,7 @@ use gtk::glib::{self, translate::FromGlibPtrFull};
 use gtk::{
   gdk::{self},
   gio::Cancellable,
-  glib::{Cast, IsA},
+  glib::{Cast, IsA, translate::{ToGlibPtr, ToGlibPtrMut}},
   prelude::*,
 };
 use http::Request;
@@ -36,7 +36,7 @@ use std::{
 #[cfg(any(debug_assertions, feature = "devtools"))]
 use webkit2gtk::WebInspectorExt;
 use webkit2gtk::{
-  AutoplayPolicy, CookieManagerExt, GeolocationPermissionRequest, InputMethodContextExt, LoadEvent,
+  AuthenticationRequestExt, AutoplayPolicy, CookieManagerExt, GeolocationPermissionRequest, InputMethodContextExt, LoadEvent,
   NavigationPolicyDecision, NavigationPolicyDecisionExt, NetworkProxyMode, NetworkProxySettings,
   NotificationPermissionRequest, PermissionRequestExt, PointerLockPermissionRequest,
   PolicyDecisionType, PrintOperationExt, SettingsExt, URIRequest, URIRequestExt,
@@ -288,6 +288,43 @@ impl InnerWebView {
     }
 
     let webview = Self::create_webview(web_context, &attributes, &pl_attrs);
+
+    if let Some(ProxyConfig::Http(endpoint)) = &attributes.proxy_config {
+      if let Some((username, password)) = &endpoint.credentials {
+        let (host, port) = (
+          endpoint.host.clone(),
+          endpoint.port.parse::<u32>().unwrap_or(0),
+        );
+        let (username, password) = (username.clone(), password.clone());
+        webview.connect_authenticate(move |_, request| {
+          if !request.is_for_proxy()
+            || request.host().as_deref() != Some(host.as_str())
+            || request.port() != port
+          {
+            return false;
+          }
+          if request.is_retry() {
+            request.cancel();
+          } else {
+            request.set_can_save_credentials(false);
+            let mut credential = webkit2gtk::Credential::new(
+              &username,
+              &password,
+              webkit2gtk::CredentialPersistence::None,
+            );
+            // SAFETY: both objects remain alive for the synchronous native call, which copies the credential.
+            // The pinned Rust binding omits authenticate, so call the stable WebKitGTK API directly.
+            unsafe {
+              webkit2gtk_sys::webkit_authentication_request_authenticate(
+                request.to_glib_none().0,
+                credential.to_glib_none_mut().0,
+              );
+            }
+          }
+          true
+        });
+      }
+    }
 
     // Transparent
     if attributes.transparent {

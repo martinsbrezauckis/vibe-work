@@ -34,6 +34,17 @@ use crate::token::{TokenStore, write_descriptor};
 /// Why the Debug API could not start.
 #[derive(Debug, thiserror::Error)]
 pub enum DebugApiError {
+    /// The token needs the person's unlocked vault before the listener can start.
+    #[error("Unlock the vault to start the Debug API.")]
+    VaultUnavailable,
+    /// Vault storage or unlock failed; no plaintext fallback is permitted.
+    #[error(transparent)]
+    Vault(#[from] vw_keys::KeyError),
+    /// Copying or regenerating a vault token belongs to the person in the window.
+    #[error(
+        "The vault is managed in the window by you; the Debug API has the agent's access here."
+    )]
+    UserOnly,
     /// Binding the loopback listener failed.
     #[error("cannot listen on 127.0.0.1: {0}")]
     Bind(std::io::Error),
@@ -64,13 +75,12 @@ pub(crate) struct ApiState {
     pub(crate) port: u16,
     pub(crate) allowed_origins: Arc<[String]>,
     pub(crate) ui_routes: UiRoutes,
+    pub(crate) body_limit: usize,
     pub(crate) reason: EnabledReason,
     pub(crate) keep_alive: Duration,
     pub(crate) stop: watch::Receiver<bool>,
     /// The app window; `None` in runs without one.
     pub(crate) window: Option<crate::window_routes::SharedAppWindow>,
-    /// One window screenshot at a time (the UI's capture lock is one lock).
-    pub(crate) shots: Arc<tokio::sync::Mutex<()>>,
 }
 
 /// A running Debug API.
@@ -90,6 +100,9 @@ impl DebugApi {
     /// [`DebugApiError`] when binding, the token or the private descriptor fails; nothing is left
     /// listening then.
     pub async fn start(core: Core, config: DebugApiConfig) -> Result<Option<Self>, DebugApiError> {
+        if !(cfg!(debug_assertions) && config.test_token_file) {
+            crate::token::remove_legacy_token(&config.descriptor_dir)?;
+        }
         let Some(reason) = config.enablement() else {
             core.set_debug_api_flag(DebugApiFlag {
                 enabled: false,
@@ -98,11 +111,13 @@ impl DebugApi {
             info!("Debug API is off (no socket opened)");
             return Ok(None);
         };
+        let token =
+            TokenStore::load_or_create(&config.descriptor_dir, config.keys, config.test_token_file)
+                .await?;
         let listener = tokio::net::TcpListener::bind(SocketAddr::from((Ipv4Addr::LOCALHOST, 0)))
             .await
             .map_err(DebugApiError::Bind)?;
         let port = listener.local_addr().map_err(DebugApiError::Bind)?.port();
-        let token = TokenStore::load_or_create(&config.descriptor_dir)?;
         let descriptor = write_descriptor(&config.descriptor_dir, port, token.path())?;
         let (stop, stop_rx) = watch::channel(false);
         let state = ApiState {
@@ -111,16 +126,20 @@ impl DebugApi {
             port,
             allowed_origins: config.allowed_origins.into(),
             ui_routes: config.ui_routes,
+            body_limit: config.body_limit,
             reason,
             keep_alive: config.keep_alive,
             stop: stop_rx.clone(),
             window: config.window,
-            shots: Arc::default(),
         };
         // Order: the guard (Host, Origin, token) runs first; every answer it lets through, the routes' and its
         // own, passes the secret check last (one choke point for the secret rule).
         let app = router()
             .layer(DefaultBodyLimit::max(config.body_limit))
+            .layer(middleware::from_fn_with_state(
+                state.clone(),
+                crate::body_limit::structured,
+            ))
             .layer(middleware::from_fn_with_state(state.clone(), guard))
             .layer(middleware::from_fn(crate::secret_guard::guard_secrets))
             .with_state(state);
@@ -143,7 +162,7 @@ impl DebugApi {
             port,
             descriptor = %descriptor.display(),
             reason = reason.as_str(),
-            "Debug API listening on 127.0.0.1 (port in the descriptor file, token in its token file)"
+            "Debug API listening on 127.0.0.1 (port in the descriptor file)"
         );
         Ok(Some(Self {
             core,
@@ -167,27 +186,27 @@ impl DebugApi {
         format!("http://127.0.0.1:{}", self.port)
     }
 
-    /// The per-run descriptor file (port, token file path; user-only). Not the token itself.
+    /// The nonsecret per-run descriptor file (user-only).
     #[must_use]
     pub fn descriptor_path(&self) -> &Path {
         &self.descriptor
     }
 
-    /// The token file (stable across runs, user-only). Its path is safe to show; its content is
-    /// the secret.
+    /// The optional plaintext export for an explicitly selected development fixture.
+    /// Always `None` in release builds.
     #[must_use]
-    pub fn token_path(&self) -> &Path {
+    pub fn token_path(&self) -> Option<&Path> {
         self.token.path()
     }
 
-    /// Replaces the token: the new one is written atomically and the old one stops working at
+    /// Replaces the vault token, then the in-memory bearer. The old one stops working at
     /// once (the next request that carries it gets 401).
     ///
     /// # Errors
-    /// [`DebugApiError`] when the new token cannot be made or written user-only; the old token
+    /// [`DebugApiError`] when the unlocked vault cannot save the replacement; the old token
     /// keeps working then.
-    pub fn rotate_token(&self) -> Result<(), DebugApiError> {
-        self.token.rotate()?;
+    pub async fn rotate_token(&self) -> Result<(), DebugApiError> {
+        self.token.rotate().await?;
         info!("Debug API token regenerated");
         Ok(())
     }

@@ -6,7 +6,12 @@ import { expect, it, vi } from "vitest";
 import { KeySettings } from "../../../ui/src/features/setup/KeySettings";
 import { MistralKeys } from "../../../ui/src/features/settings/MistralKeys";
 import { AppProvider } from "../../../ui/src/features/shell/AppContext";
-import type { CommandResult, CoreError } from "../../../ui/src/protocol/core";
+import type {
+  CommandResult,
+  CoreError,
+  MistralKeyView,
+} from "../../../ui/src/protocol/core";
+import { keyReadiness } from "../../../ui/src/state/keyReadiness";
 import { renderShell } from "./support/renderShell";
 
 function present<T>(value: T | null | undefined): T {
@@ -15,12 +20,19 @@ function present<T>(value: T | null | undefined): T {
   return value;
 }
 
-async function setup(locked = false, count = 2) {
-  let rows = Array.from({ length: count }, (_, i) => ({
+async function setup(locked = false, count = 2, rejected?: 401 | 403) {
+  let rows: MistralKeyView[] = Array.from({ length: count }, (_, i) => ({
     itemId: String(i),
     label: i === 0 ? "Personal key" : "Work key",
     inUse: i === 0,
-    lastTest: { modelCount: 54 + i, code: null, text: null },
+    lastTest:
+      rejected !== undefined && i === 1
+        ? {
+            modelCount: null,
+            code: rejected,
+            text: `Mistral answered ${String(rejected)}`,
+          }
+        : { modelCount: 54 + i, code: null, text: null },
   }));
   let decline = false;
   const requests: unknown[] = [];
@@ -44,7 +56,7 @@ async function setup(locked = false, count = 2) {
               rememberedDevice: false,
               lockVaultOnQuit: false,
               keyState: "ready",
-              keyItemId: "0",
+              keyItemId: rows.find((k) => k.inUse)?.itemId ?? null,
               ownKey: true,
               activeKey: {
                 label: rows.find((k) => k.inUse)?.label ?? "",
@@ -106,6 +118,31 @@ async function setup(locked = false, count = 2) {
     rows: () => rows,
   };
 }
+
+it.each([401, 403] as const)(
+  "selecting a key with a recorded %s restores its existing warning",
+  async (code) => {
+    const { section, user, app, requests } = await setup(false, 2, code);
+    await user.click(section.getByRole("button", { name: "Use this key" }));
+    const state = present(app.keys).store.get();
+    expect(state.test).toMatchObject({
+      phase: "failed",
+      reason: code === 401 ? "unauthorized" : "forbidden",
+    });
+    expect(keyReadiness(state)?.kind).toBe("failed");
+    const settings = render(
+      <AppProvider app={app}>
+        <KeySettings />
+      </AppProvider>,
+    );
+    expect(
+      await within(settings.container).findByRole("alert"),
+    ).toHaveTextContent(`error ${String(code)}`);
+    expect(requests).not.toContainEqual({ op: "testKey" });
+    await user.click(section.getByRole("button", { name: "Use this key" }));
+    expect(keyReadiness(present(app.keys).store.get())).toBeNull();
+  },
+);
 
 it("shows metadata, in-use badge, exact copy and the status tooltip", async () => {
   const { section, view, app } = await setup();

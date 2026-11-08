@@ -1,5 +1,5 @@
-//! Whether the person set a stricter rule for a read-only Vibe Work tool. In Accept edits the read tools run without
-//! the default approval card (`tool_calls::reads_only`); a rule the person configured in Vibe (the tool, or the
+//! Whether the person set a stricter rule for a Vibe Work tool. Tools accepted in Accept edits run without
+//! the default approval card (`tool_calls::accepts_edits`); a rule the person configured in Vibe (the tool, or the
 //! file read it stands for, set to ask or never, or turned off) keeps the card.
 //!
 //! Invariants:

@@ -26,11 +26,9 @@
 //!   argv, a log line or an error text.
 //! - Nothing here decides ownership: the core does, from the process monitor (vw-procmon).
 
-#[cfg(all(not(debug_assertions), feature = "feedback"))]
-compile_error!("feedback tools are not available in release builds");
-
 pub mod agent_env;
 pub mod browser_input;
+mod capture_spec;
 mod chrome_output;
 mod chrome_specs;
 pub mod cli;
@@ -47,7 +45,6 @@ pub mod killparse;
 mod killparse_cmds;
 mod killparse_shell;
 pub mod mcp;
-#[cfg(any(windows, test))]
 mod msys_paths;
 pub mod output;
 mod receipt_hook;

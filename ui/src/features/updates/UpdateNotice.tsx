@@ -22,6 +22,7 @@ import { useApp } from "../shell/AppContext";
 import { TEXT } from "../../vocabulary";
 import { ReleaseHost } from "./ReleaseHost";
 import { VibeUpdateCard } from "./VibeUpdate";
+import { FeedbackAction } from "../feedback/FeedbackAction";
 
 const LABELS: Record<NoticeAction, string> = {
   download: "Download",
@@ -105,6 +106,7 @@ function Shown({
   releasePage: string | null;
   updates: NonNullable<ReturnType<typeof useApp>["updates"]>;
 }) {
+  const { core } = useApp();
   const act = (action: NoticeAction): void => {
     const run =
       action === "download"
@@ -146,6 +148,13 @@ function Shown({
               {action === "openReleasePage" && <ReleaseHost url={releasePage} />}
             </Fragment>
           ))}
+          {notice.tone === "error" && (
+            <FeedbackAction
+              core={core}
+              title="Vibe Work update failed"
+              text={[notice.headline, notice.detail].filter(Boolean).join("\n")}
+            />
+          )}
         </div>
       )}
     </div>

@@ -4,7 +4,7 @@
   "upstreamVersion": "2.12.1",
   "upstreamCrateSha256": "7f9e7e0c9f80a5130773cfabb6df4dc924518fb1b2c923726966804634b57d22",
   "license": "Apache-2.0 OR MIT",
-  "note": "Copy of the published crate (without .cargo-ok). Modified: src/lib.rs (VIBE WORK PATCH: Windows profile names from tauri-apps/tauri PR #16054; Linux child webviews start hidden until the preview engine places or parks them, preventing GtkBox allocation and blank painting during construction). Our own file: PROVENANCE.json.",
+  "note": "Copy of the published crate (without .cargo-ok). Modified: src/lib.rs (VIBE WORK PATCH: Windows profile names from tauri-apps/tauri PR #16054; Linux child webviews start hidden until the preview engine places or parks them, preventing GtkBox allocation and blank painting during construction). Our own file: PROVENANCE.json. Native proxy sign-in: retain local listener credentials through Tauri, supply them only to the configured proxy with WebKitGTK authentication, WebView2 BasicAuthenticationRequested and Network.framework proxy credentials. Remove when upstream exposes equivalent credential handling.",
   "modified": [
     "src/lib.rs"
   ],
@@ -44,7 +44,7 @@
     "build.rs": "68b2727346e58a9963803a75ac29695b500aaa7d0673e18551465502b60cbf11",
     "src/dialog/mod.rs": "ed391f94760a3f257ea7244fa62ad9b536e41f52f83b3994dedde23e5bbd287d",
     "src/dialog/windows.rs": "cb340da9de1e9688e281be9bab126cdb48ddd5802c8aabceb82170c8f1f00518",
-    "src/lib.rs": "bb4896c8bf30e1eca6026114b0718236a0db8545587baf0b344c7da745def661",
+    "src/lib.rs": "61768337ce6ee3591f5a7c0a0187b222a76a82c71f52c66dccfe8076205adfc4",
     "src/monitor/linux.rs": "ebf2b48ebe0fa8facd0457fc5d16dc3156842e65a6c6334b1e0e4daa439160b2",
     "src/monitor/macos.rs": "31bfae5bf45dff98c68a1f2f19d8787cba5e3f0575d7d13ec564e524d79abae8",
     "src/monitor/mod.rs": "f3a4161b3306afa32edb416d6c81773749d32f3068018eb83e32f055ae4c31c2",

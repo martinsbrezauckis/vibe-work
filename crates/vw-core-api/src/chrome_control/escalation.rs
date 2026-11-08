@@ -20,7 +20,7 @@ pub(super) async fn send_read(
     session: &str,
     tool: &str,
     mut args: Value,
-    consent: Option<&super::read_consent::ReadConsent>,
+    consent: Option<&super::read_consent::Consent>,
 ) -> Result<owner::Answer, String> {
     let mut tier = super::check::authorize_read(shared, session, tool, &args, consent)?;
     let sensitive = tool == "chrome_execute"
@@ -35,7 +35,7 @@ pub(super) async fn send_read(
                 .filter(|cap| extended || !super::capabilities::PERMISSIONS.contains(cap))
                 .collect::<Vec<_>>()
         );
-        if consent.is_some() && super::read_consent::personal_read(tool, &args) {
+        if consent.is_some() && super::read_consent::card_action(tool, &args) {
             let action = args["action"].clone();
             if let Some(capabilities) = args["_approvedCapabilities"].as_array_mut() {
                 capabilities.push(action);

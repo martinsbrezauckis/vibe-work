@@ -1,6 +1,7 @@
 //! Main document replacement releases native placements while retaining live page state, and a placement the
 //! replaced document started never shows its child after the reset.
-//! Uses recording engines without a window; called by the core crate's test runner.
+//! Also: approval cards address the agent's page key. Uses recording engines without a window; called by the core
+//! crate's test runner.
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -494,4 +495,54 @@ async fn a_menu_of_the_replaced_document_never_ends_the_new_documents_handoff() 
         .await
         .unwrap();
     assert_eq!(engine.overlays.lock().unwrap().as_slice(), &[true, false]);
+}
+
+#[tokio::test]
+async fn backend_media_fetch_still_refuses_private_addresses_from_a_web_page() {
+    use vw_browser::capture::Fetch;
+    let core = crate::offline_core::start("capture-private-address").await;
+    let service = PreviewService::new(
+        Arc::new(Engine::default()),
+        PreviewConfig::new(PathBuf::new()),
+    );
+    service
+        .open(OpenRequest {
+            session_id: "capture-page".into(),
+            url: "https://93.184.216.34/".parse().unwrap(),
+            allowed_ports: vec![],
+            downloads_dir: None,
+            wait: false,
+            lan: false,
+        })
+        .await
+        .unwrap();
+    let fetch = crate::browser_capture::CoreFetch::new(&core.shared, service).unwrap();
+    let private = std::net::Ipv4Addr::new(192, 168, 1, 2);
+    let result = fetch
+        .fetch("capture-page", &format!("http://{private}/image.png"), 4096)
+        .await;
+    let reason = result.unwrap_err();
+    assert!(
+        reason.starts_with("refused:") && reason.contains("local-network"),
+        "{reason}"
+    );
+    core.shutdown().await;
+}
+
+/// Approval cards read the click target's observed name from the page the action addresses (the agent's web tab
+/// or a named tab that chat owns), never from the chat id itself or another chat's page.
+#[test]
+fn approval_cards_address_the_agents_page_not_the_chat() {
+    let service = PreviewService::new(
+        Arc::new(Engine::default()),
+        PreviewConfig::new(PathBuf::new()),
+    );
+    assert_eq!(service.agent_page_for("chat", None), None);
+    let page = service.create_web_tab("chat").unwrap();
+    service.set_agent_page("chat", &page).unwrap();
+    let other = service.create_web_tab("other").unwrap();
+    assert_eq!(service.agent_page_for("chat", None), Some(page.clone()));
+    assert_eq!(service.agent_page_for("chat", Some(&page)), Some(page));
+    assert_eq!(service.agent_page_for("chat", Some(&other)), None);
+    assert_eq!(service.agent_page_for("chat", Some("new")), None);
 }

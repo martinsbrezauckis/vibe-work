@@ -113,12 +113,18 @@ fn edited(existing: &str, migrate_registry: bool) -> (Option<String>, Experiment
         }
         expected.insert(key.into(), Value::Boolean(false));
     }
+    let values_changed = doc.to_string() != existing;
     let mut out = doc
         .to_string()
         .replace(OLD_NOTE, NOTE)
         .replace(PREVIOUS_NOTE, NOTE);
     if !out.contains(NOTE) {
-        out = format!("{NOTE}\n{out}");
+        out = if values_changed {
+            format!("{NOTE}\n{out}")
+        } else {
+            crate::config_comments::insert_missing(&out, None, REGISTRY, &[NOTE])
+                .unwrap_or_else(|| format!("{NOTE}\n{out}"))
+        };
     }
     if existing.contains("\r\n") {
         out = out.replace("\r\n", "\n").replace('\n', "\r\n");
@@ -161,7 +167,7 @@ pub fn ensure(vibe_home: &Path) -> Result<ExperimentPins, String> {
             format!("{}: {e}", path.display())
         })?;
     } else if outcome.skipped.is_none() {
-        crate::config_comments::restore(&path, &existing, &[NOTE])?;
+        crate::config_comments::restore(&path, &existing, None, REGISTRY, &[NOTE])?;
     }
     // Record only after a verified config write (or no-op); invalid TOML must not consume the step.
     if !migrated && outcome.skipped.is_none() {

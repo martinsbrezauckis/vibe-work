@@ -8,12 +8,12 @@
       "name": "Headless browser",
       "publisher": "Microsoft (Playwright MCP)",
       "category": "browser",
-      "summary": "A browser the agent drives in the background, for pages the built-in browser does not open for it, such as sites on this computer or the local network.",
+      "summary": "A browser the agent drives in the background in a separate, temporary profile.",
       "licence": "Apache-2.0 AND MIT",
       "homepage": "https://github.com/microsoft/playwright-mcp",
       "review": "Vendor-official (Microsoft). Pinned: @playwright/mcp 0.0.83 and its two Playwright packages by the npm registry's SHA-512, Node.js 24.21.0 LTS by nodejs.org's SHA-256. Chromium comes from Playwright's own installer.",
       "notes": [
-        "It has none of the built-in browser's address guards: it can open local and private addresses, follows redirects anywhere and runs page scripts. Use the built-in browser for ordinary sites.",
+        "Public and local web addresses use Chromium's normal network behavior.",
         "Runs headless with a fresh profile on every start (--isolated): no cookies or logins are kept.",
         "Installs app-private: Node.js and the Playwright packages inside the plugin, Chromium in Vibe Work's data folder. Nothing is installed system-wide.",
         "Linux: Chromium needs the usual desktop libraries (present on desktop installs)."
@@ -190,7 +190,7 @@
         "bundled": {
           "skills/headless-browser/SKILL.md": "headless-browser/SKILL.md"
         },
-        "consent": "Downloads Node.js 24.21.0, Microsoft's Playwright MCP server 0.0.83 and Chromium into Vibe Work's own folders, then lets the agent start that browser. Node.js and the Playwright packages are checked against pinned checksums; Chromium is fetched by Playwright's own installer, which downloads Chromium from Playwright's CDN over HTTPS without a published checksum. It has none of the built-in browser's address guards.",
+        "consent": "Downloads Node.js 24.21.0, Microsoft's Playwright MCP server 0.0.83 and Chromium into Vibe Work's own folders, then lets the agent start that browser. Node.js and the Playwright packages are checked against pinned checksums; Chromium is fetched by Playwright's own installer, which downloads Chromium from Playwright's CDN over HTTPS without a published checksum. Public and local web addresses use Chromium's normal network behavior.",
         "downloadMb": 250,
         "diskMb": 700
       }

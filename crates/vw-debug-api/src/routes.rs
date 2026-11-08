@@ -17,7 +17,7 @@
 use axum::Router;
 use axum::body::Bytes;
 use axum::extract::rejection::QueryRejection;
-use axum::extract::{Path, Query, State};
+use axum::extract::{DefaultBodyLimit, Path, Query, State};
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
@@ -54,6 +54,10 @@ pub(crate) fn router() -> Router<ApiState> {
         .route("/server", get(server))
         .route("/ui", get(list_ui))
         .route("/ui/trace", get(crate::trace_routes::trace))
+        .route(
+            "/ui/files",
+            post(ui_files).layer(DefaultBodyLimit::max(crate::config::FILES_BODY_LIMIT)),
+        )
         .route("/ui/{*name}", post(ui_route))
         .merge(crate::terminal_routes::router())
         .merge(crate::window_routes::router())
@@ -256,4 +260,8 @@ async fn ui_route(
             ApiError(error).into_response()
         }
     }
+}
+
+async fn ui_files(state: State<ApiState>, headers: HeaderMap, body: Bytes) -> Response {
+    ui_route(state, Path("files".to_owned()), headers, body).await
 }

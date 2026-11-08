@@ -131,7 +131,7 @@ impl PreviewService {
             let label = session_storage.key.label(state.generation);
             state.by_label.insert(label.clone(), session_id.to_owned());
             let entry = state.entry(session_id);
-            // The entry's Lan host (set only by the user's open) makes a Lan mount; else the URL decides.
+            // An explicit LAN host selects its storage class; otherwise the URL selects it.
             let class = if entry.lan_host.is_some() {
                 crate::policy::PageClass::Lan
             } else {
@@ -351,7 +351,7 @@ impl PreviewService {
 
     /// A shaped screenshot of the session's visible preview, with the mount it shows. A suspended preview is opened
     /// again first. Callers that hand the pixels to the agent compare that mount with the current one afterwards
-    /// (a mount's page class never changes, so the same mount means the same local-network verdict).
+    /// so a replacement document never receives the old screenshot.
     ///
     /// # Errors
     /// [`PreviewError::NothingOpen`], engine failures and timeouts, or [`PreviewError::Image`].

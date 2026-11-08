@@ -3,6 +3,9 @@
 #![cfg(feature = "proxy-transports")]
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+#[path = "support/client.rs"]
+mod proxy_client;
+
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -37,14 +40,14 @@ async fn socks_remote_dns_receives_only_the_checked_ip() {
     let guard = NetGuard::bind(Arc::new(Dns)).unwrap();
     guard.set_upstream(Upstream::from_values(None, Some(&proxy), None, None));
     guard.serve();
-    let address: SocketAddr = guard
-        .proxy_url()
-        .trim_start_matches("http://")
-        .parse()
-        .unwrap();
+    proxy_client::addr(&guard.proxy_url());
+    let address: SocketAddr = proxy_client::addr(&guard.proxy_url());
     let mut denied = TcpStream::connect(address).await.unwrap();
     denied
-        .write_all(b"CONNECT denied.test:443 HTTP/1.1\r\nHost: denied.test:443\r\n\r\n")
+        .write_all(&proxy_client::authorize(
+            address,
+            b"CONNECT denied.test:443 HTTP/1.1\r\nHost: denied.test:443\r\n\r\n",
+        ))
         .await
         .unwrap();
     assert!(head(&mut denied).await.starts_with("HTTP/1.1 403"));
@@ -55,7 +58,10 @@ async fn socks_remote_dns_receives_only_the_checked_ip() {
     );
     let mut client = TcpStream::connect(address).await.unwrap();
     client
-        .write_all(b"CONNECT allowed.test:443 HTTP/1.1\r\nHost: allowed.test:443\r\n\r\n")
+        .write_all(&proxy_client::authorize(
+            address,
+            b"CONNECT allowed.test:443 HTTP/1.1\r\nHost: allowed.test:443\r\n\r\n",
+        ))
         .await
         .unwrap();
     let (mut upstream, _) = tokio::time::timeout(Duration::from_secs(1), listener.accept())
@@ -83,14 +89,14 @@ async fn https_proxy_starts_with_tls() {
     let guard = NetGuard::bind(Arc::new(Dns)).unwrap();
     guard.set_upstream(Upstream::from_values(None, Some(&proxy), None, None));
     guard.serve();
-    let address: SocketAddr = guard
-        .proxy_url()
-        .trim_start_matches("http://")
-        .parse()
-        .unwrap();
+    proxy_client::addr(&guard.proxy_url());
+    let address: SocketAddr = proxy_client::addr(&guard.proxy_url());
     let mut client = TcpStream::connect(address).await.unwrap();
     client
-        .write_all(b"CONNECT allowed.test:443 HTTP/1.1\r\nHost: allowed.test:443\r\n\r\n")
+        .write_all(&proxy_client::authorize(
+            address,
+            b"CONNECT allowed.test:443 HTTP/1.1\r\nHost: allowed.test:443\r\n\r\n",
+        ))
         .await
         .unwrap();
     let (mut upstream, _) = tokio::time::timeout(Duration::from_secs(1), listener.accept())

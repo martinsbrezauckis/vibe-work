@@ -21,6 +21,7 @@
 import { type CSSProperties, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { ToastItem } from "./ToastItem";
+import { FeedbackAction } from "../feedback/FeedbackAction";
 import { NotificationsPanel } from "./NotificationsPanel";
 import { IconButton } from "../../components/Controls";
 import { NATIVE_LAYOUT_EVENT, nativeRects, reserve } from "../../components/nativeLayer";
@@ -139,7 +140,7 @@ function signature(rects: readonly Rect[]): string {
 
 /** The toast stack. */
 export function Toasts() {
-  const { toasts } = useApp();
+  const { toasts, core } = useApp();
   const list = useStore(toasts.store, (s) => s);
   const reading = useStore(toasts.panel, (s) => s.open);
   const ref = useRef<HTMLDivElement>(null);
@@ -384,6 +385,15 @@ export function Toasts() {
               docked={docked}
               active={docked && toast.id === active?.id}
               reading={reading}
+              feedback={
+                toast.feedback ? (
+                  <FeedbackAction
+                    core={core}
+                    title="Temporary chat cleanup failed"
+                    text={toast.text}
+                  />
+                ) : undefined
+              }
               onOpen={() => {
                 toasts.open(toast.id);
               }}

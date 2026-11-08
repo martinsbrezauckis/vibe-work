@@ -4,18 +4,23 @@
   "upstreamVersion": "0.57.0",
   "upstreamCrateSha256": "a819957a01b3119af85e638a38d242af76dbc87d130dca67bfd0441072e21ff0",
   "license": "Apache-2.0 OR MIT",
-  "note": "Published crate without .cargo-ok. NAV exposes the native frame context during the synchronous WK navigation callback, so a held iframe URL cannot replace the top-level page. Remove when Wry/Tauri expose frame metadata in their navigation callback. Documentation host examples in MOBILE.md and src/proxy.rs use placeholders for the public-export rules. SECURITY.md has one trailing space removed. FILE PANEL: a gate before the macOS open panel, so a panel a page opens during the app's own automated act never appears (src/file_panel.rs). Remove when Wry/Tauri expose a file-chooser callback.",
+  "note": "Published crate without .cargo-ok. NAV exposes the native frame context during the synchronous WK navigation callback, so a held iframe URL cannot replace the top-level page. Remove when Wry/Tauri expose frame metadata in their navigation callback. Documentation host examples in MOBILE.md and src/proxy.rs use placeholders for the public-export rules. SECURITY.md has one trailing space removed. FILE PANEL: a gate before the macOS open panel, so a panel a page opens during the app's own automated act never appears (src/file_panel.rs). Remove when Wry/Tauri expose a file-chooser callback. Native proxy sign-in: retain local listener credentials through Tauri, supply them only to the configured proxy with WebKitGTK authentication, WebView2 BasicAuthenticationRequested and Network.framework proxy credentials. Remove when upstream exposes equivalent credential handling.",
   "modified": [
     "MOBILE.md",
+    "SECURITY.md",
     "src/lib.rs",
     "src/proxy.rs",
+    "src/webkitgtk/mod.rs",
+    "src/webview2/mod.rs",
     "src/wkwebview/class/wry_web_view_ui_delegate.rs",
+    "src/wkwebview/mod.rs",
     "src/wkwebview/navigation.rs",
-    "SECURITY.md"
+    "src/wkwebview/proxy.rs"
   ],
   "added": [
     "src/file_panel.rs",
-    "src/navigation_context.rs"
+    "src/navigation_context.rs",
+    "src/webview2/proxy_auth.rs"
   ],
   "upstreamFiles": {
     ".cargo/audit.toml": "26f5e627f768cce1687f4460d56a18b4725817d5ae392dfd154541ef39c40e3b",
@@ -158,18 +163,18 @@
     "src/custom_protocol_workaround.rs": "509ab2ad8c8aadc5746f277d97ae5588bbdd701a6f0bca32f674328d466768b5",
     "src/error.rs": "d25cb6ee2aeb38fce037e02b1ab410aacfe4cd087ba58849cd109ae4fb838bba",
     "src/inject_initialization_scripts.rs": "eff563eee5ff7b1f57fbf84268f8bc4a5853391ab64ed200a9ad60ca537b2f4b",
-    "src/lib.rs": "280b35ff1ed5b57ebc3c096514b885605359367795f81ce43e6ae9865458902f",
+    "src/lib.rs": "a86d43eb81b43f6eedfb24032599fbaa704b5452039c351af6eea9567d638716",
     "src/navigation_context.rs": "9259ccb60d63e2d683e352773e8446db535c984783454f2d5b19287ecd1252e8",
     "src/permissions.rs": "4d933418850508a0423cdbe45fd091d0f8eeb3ccab06c9ee70dbf354032552ea",
-    "src/proxy.rs": "64fe40be4efb15288cc9246e847c11ce74b82d291c528a42e890beb50aeb6fe2",
+    "src/proxy.rs": "1a2bc90dca4e21c8d4bcc7cce4b35b33204f48106b813c3b470480558c75f201",
     "src/util.rs": "5f1b64eab6c81dea1c6ce7f955d2a7888b368ef9fcbe574bb1187e4046135e98",
     "src/web_context.rs": "dd9912d669f3a5de10aeda7b8e1361751a1137a602385d31964439f101773aac",
     "src/webkitgtk/drag_drop.rs": "e3e52b6c32543c7e415244766a4a9da1decb028b50ccaaf3d981f8566acc8ed8",
-    "src/webkitgtk/mod.rs": "20a4064b352747b46d7e15ae6962922dfa85017660e109e87e255219c6ee2017",
+    "src/webkitgtk/mod.rs": "b715c4b52bdb87cc192d839d3b2e332b4e3482c139009cec8e067056052dc2a9",
     "src/webkitgtk/synthetic_mouse_events.rs": "e534ed5d79d3b0e79a6341cefa57bb20438ec34db32983522bf6816bdbdab2b0",
     "src/webkitgtk/web_context.rs": "ef43edb59e19e60743c7858be846cac23ce8e7a188f77b12ac7e0a82a907628f",
     "src/webview2/drag_drop.rs": "ec03770d82dbbf47cbc3932a1b709bd8aed5a0914e20b6afdcc6629fed99c7ee",
-    "src/webview2/mod.rs": "4800257d9d251c59b5aa464814ade5f8f041a854f0e4498afbdb036eba5307b8",
+    "src/webview2/mod.rs": "f27cc83bb0e042fa7763b5a6b3bcff4a5afcbb09385a2ef96e71242bbd574ac6",
     "src/webview2/util.rs": "068edfbcda4060a789f9e1f6dea83ba748e560a33c17179aa7839425f52ade39",
     "src/wkwebview/class/document_title_changed_observer.rs": "7e09f34f232f7838ecfa11c0d75d0361d32df91aa9ce9e041915e316f0784af8",
     "src/wkwebview/class/mod.rs": "f20048d06e0098d25eee0c549eb7fe26b20d041ada2fe1daf7771125fd44a7b8",
@@ -179,15 +184,17 @@
     "src/wkwebview/class/wry_web_view.rs": "692b4420ace30fafece0707533d68b40b82c20ee7f5843eb17e04a7c6fcb4656",
     "src/wkwebview/class/wry_web_view_delegate.rs": "97559a443b53682d98858effed722774b309b7d72aac1aacc573f1d989fae093",
     "src/wkwebview/class/wry_web_view_parent.rs": "c405e3ea1d2e062a43847c6d7c91be6da36026f3230bf47f2661bddc6852012a",
-    "src/wkwebview/class/wry_web_view_ui_delegate.rs": "931ad3ca6e303963e4d2c4267e2cd9fb94a0eef1ac8af8e6602b30cdcc324cc3",
+    "src/wkwebview/class/wry_web_view_ui_delegate.rs": "7a887df2bece4a4813d52a87066a6fb05dd1cced9b0b316fa1988bcf9fb31a21",
     "src/wkwebview/download.rs": "3b67113c3d13a2082992d284a1e995e07c06a9b892b3ed2dae9b7370daa0f6c0",
     "src/wkwebview/drag_drop.rs": "10bf1524a41d586810cae18d318629da3768e69a1b0ab59ad04dfd69840d83c7",
     "src/wkwebview/ios/WKWebView.rs": "4ff8588c4d8773c244c228e5aa1cce3af8d62e4de1fb08cb80dfb31ae9a2dbb0",
     "src/wkwebview/ios/mod.rs": "03823ce7c572f1ed345ae4ef6ec63e8ce4df1f0a7d3ad0efebb36dd6a7c18dd1",
-    "src/wkwebview/mod.rs": "a466a6d6a5fa75013876492a2074c3693601bcac63716de0c9cc54bceab5bf6b",
+    "src/wkwebview/mod.rs": "84889521741bdc79409c42bc154de4857e02783cbdfbab008a046760247d51b3",
     "src/wkwebview/navigation.rs": "1f7d23916b16de412052e792f6e76f523a45a17d195c9b61624ac656ee82927d",
-    "src/wkwebview/proxy.rs": "f7ee208069b3d4d045540c46b842c71f0fa2bba905b20463e67679471f58ad20",
+    "src/wkwebview/proxy.rs": "e1ff7ac21a4c5d7c3b866d0c5e8d7c8d55be60ee0bd4a121238662295b3713da",
     "src/wkwebview/synthetic_mouse_events.rs": "729487a4009431c29633c0ada6d78c513a18af148c118aefa9b0279c322c7cb2",
-    "src/wkwebview/util.rs": "c7be7b4421d3d4ba06a61d39f4efc3ada0eb3e2d691078aa842c3ae76f95e755"
+    "src/wkwebview/util.rs": "c7be7b4421d3d4ba06a61d39f4efc3ada0eb3e2d691078aa842c3ae76f95e755",
+    "src/file_panel.rs": "484319c77fca5c76981e62fc1d0113e58080b3841d4ecb431cc06371e13e0329",
+    "src/webview2/proxy_auth.rs": "83e88c2274fbd6b2f871922c04e250b9158fe3009916d861a703a9bb05ad908a"
   }
 }

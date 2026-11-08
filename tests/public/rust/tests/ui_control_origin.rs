@@ -70,6 +70,21 @@ fn assert_denied(result: &Result<CommandResult, vw_core_api::CoreError>, case: &
 
 #[tokio::test]
 async fn window_commands_stay_the_windows_and_only_an_exact_grant_runs_as_the_debug_api() {
+    // This fixture tests UI attribution with no key service. Opt its disposable debug host into a bearer export
+    // in a child process so parallel tests never change one another's environment.
+    if std::env::var_os("VW_DEBUG_API_TEST_TOKEN_FILE").is_none_or(|v| v != "1") {
+        let result = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "window_commands_stay_the_windows_and_only_an_exact_grant_runs_as_the_debug_api",
+                "--nocapture",
+            ])
+            .env("VW_DEBUG_API_TEST_TOKEN_FILE", "1")
+            .status()
+            .unwrap();
+        assert!(result.success());
+        return;
+    }
     let dir = scratch("host-uic-origin");
     let picked = dir.join("picked");
     let other = dir.join("other");

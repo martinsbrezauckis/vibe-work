@@ -204,6 +204,7 @@ pub(crate) async fn deleted(shared: &Shared, id: &str) {
     shared.queue_returns.forget(id);
     shared.model_choices.forget(id);
     shared.plugin_refresh.forget(id);
+    shared.interrupted_send.forget(id);
     shared.entry_projects.forget(id);
     // Its "Allow for this session" answers end with it.
     crate::ask::grants::session_ended(shared, id);

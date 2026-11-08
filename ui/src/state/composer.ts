@@ -385,7 +385,7 @@ export function createComposer(deps: {
         return sessionId === NEW_CHAT ? Promise.resolve() : deferred.loadLoops(sessionId, force);
       },
       runCommand(sessionId: string, name: string, args: string): Promise<SendOutcome> {
-        if (FEEDBACK_ENABLED && name === "feedback")
+        if (FEEDBACK_ENABLED && (name === "feedback" || name === "help"))
           return deferred.runCommand(sessionId, name, args);
         const blocked = deps.keyGuard?.() ?? null;
         if (blocked !== null) return Promise.resolve({ ok: false, kind: "key", message: blocked });
@@ -405,7 +405,7 @@ export function createComposer(deps: {
         const current = composer.store.get();
         if (
           FEEDBACK_ENABLED &&
-          /^\/feedback(?:\s|$)/.test((current.drafts[sessionId] ?? "").trim()) &&
+          /^\/(?:feedback|help)(?:\s|$)/.test((current.drafts[sessionId] ?? "").trim()) &&
           current.literal[sessionId] !== true &&
           (current.context[sessionId]?.length ?? 0) === 0 &&
           (current.images[sessionId]?.length ?? 0) === 0

@@ -89,6 +89,8 @@ struct Page {
 }
 
 async fn page(shared: &Shared, id: &str, request: &HistoryRequest) -> Result<Page, String> {
+    // Give an interrupted send's resume/interrupt and verified restore priority over hydration.
+    let _restore = shared.access.lock_restore(id).await;
     let mut reply = tokio::time::timeout(Duration::from_secs(30), shared.gate.call(
         "session/history/list",
         json!({"sessionId":id, "page":{"limit":request.limit,"direction":"backward","cursor":request.cursor}}),

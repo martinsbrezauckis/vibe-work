@@ -2,7 +2,8 @@
  * Callbacks (approvals and questions) as the transcript shows and answers them. The answer objects
  * built here are exactly Vibe's output shapes (`ApprovalCallbackOutput`, `UserInputCallbackOutput`,
  * `vibe/app_server/models.py:340,346`), which the gate validates again before anything reaches Vibe
- * (a malformed answer gets no reply from the server, so it must never be sent).
+ * (a malformed answer gets no reply from the server, so it must never be sent). App-owned vault cards add
+ * `keep_both`, which the core consumes itself and never forwards to Vibe.
  * Depends on: entries.ts, protocol/core. Called by: the approval and question cards, the audit item,
  * the `ui/transcript` route.
  * Invariants: the offered decisions are Vibe's own `detail.choices` (all five when Vibe omits the
@@ -15,13 +16,14 @@ import type { JsonValue } from "../../../protocol/core";
 import { term } from "../../../vocabulary";
 import { type Obj, arr, detailOf, obj, stateOf, str } from "./entries";
 
-/** Vibe's approval decisions (`ApprovalDecisionType`, `models.py:302`) in display order. */
+/** Vibe's approval decisions plus the app-owned vault duplicate choice. */
 const DECISIONS = [
   "approve",
   "approve_for_session",
   "approve_permanently",
   "deny",
   "cancel_turn",
+  "keep_both",
 ] as const;
 
 /** One approval decision. */
@@ -34,6 +36,7 @@ const DECISION_DONE: Record<Decision, string> = {
   approve_permanently: "Always allowed",
   deny: "Said No",
   cancel_turn: "Stopped",
+  keep_both: "Kept both",
 };
 
 function isDecision(value: JsonValue | undefined): value is Decision {
@@ -53,6 +56,7 @@ export function offeredDecisions(entry: Obj, offers: readonly string[] | undefin
   return vibe.filter(
     (d) =>
       d !== "approve_permanently" &&
+      (d !== "keep_both" || (entry["vwToolAsk"] === true && entry["vwVaultSave"] !== undefined)) &&
       (d !== "approve_for_session" || offers?.includes("session") === true),
   );
 }

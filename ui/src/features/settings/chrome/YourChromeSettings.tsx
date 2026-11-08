@@ -1,169 +1,113 @@
-/** Browser availability and connection controls. Uses the core's confirmed state; called by BrowserSettings. */
+/** Browser availability and shared connection controls. Uses confirmed core state; called by BrowserSettings. */
 import { type ReactElement, useState } from "react";
 import { Button, SettingsRow, Switch } from "../../../components/Controls";
-import { ChromeRemoveDialog, ChromeSetupDialog } from "./ChromeDialogs";
+import { ChromeRemoveDialog } from "./ChromeDialogs";
 import { ChromeConnection } from "./ChromeConnection";
-import { chromeAvailable, setupLine, stepLabel } from "./chromeRows";
+import { chromeAvailable } from "./chromeRows";
 import { useChromeControl } from "./useChromeControl";
-import { term, TEXT } from "../../../vocabulary";
-/** The section. */
+import { term, TEXT, wording } from "../../../vocabulary";
+
+/** Chrome, Edge and Safari share every connection step; Firefox owns a separate agent window. */
 export function YourChromeSettings({
   browser = "Chrome",
 }: {
-  browser?: "Chrome" | "Edge" | "Firefox";
+  browser?: "Chrome" | "Edge" | "Safari" | "Firefox";
 }): ReactElement | null {
   const chrome = useChromeControl(browser);
-  const edge = browser !== "Chrome";
-  const prefix = browser === "Firefox" ? "firefox" : edge ? "edge" : "chrome";
-  // The switch turns on the same thing the vw:chrome skill names.
-  const useMyChrome = term("builtinSkills", "vw:chrome").name;
-  const [setupOpen, setSetupOpen] = useState(false);
+  const prefix = browser.toLowerCase();
+  const firefox = browser === "Firefox";
+  const useMyBrowser =
+    browser === "Chrome"
+      ? term("builtinSkills", "vw:chrome").name
+      : wording(TEXT.browserUse, { browser });
   const [removeOpen, setRemoveOpen] = useState(false);
   const view = chrome.view;
-  const recovering = view?.setup.addon?.state === "connecting" && view.setup.addon.action === null;
   const removeRequired = view?.setup.addon?.action === "remove";
   const setUp = view !== null && view.setup.state !== "notSetUp";
-  const blocked = view?.setup.pairingState === "blocked";
   const busy = chrome.busy !== null || view === null;
   if (!chromeAvailable(view)) return null;
   return (
     <section aria-labelledby={`${prefix}-title`} data-setting={`${prefix}-control`}>
       <h3 id={`${prefix}-title`}>
-        {browser === "Firefox" ? TEXT.firefoxName : edge ? TEXT.edgeName : TEXT.chromeName}
+        {firefox
+          ? TEXT.firefoxName
+          : browser === "Safari"
+            ? TEXT.safariName
+            : browser === "Edge"
+              ? TEXT.edgeName
+              : TEXT.chromeName}
       </h3>
-      {browser !== "Firefox" &&
+      {!firefox &&
       view?.setup.browserIssue === undefined &&
-      view?.setup.addon !== undefined ? (
+      view?.setup.addon !== undefined &&
+      (browser !== "Safari" || view.setup.addon.extensionVersion) ? (
         <p className="key-line">
           {view.setup.addon.extensionVersion
             ? `Extension ${view.setup.addon.extensionVersion}`
-            : "Extension not installed"}
+            : view.setup.installState === "store"
+              ? "Extension version unknown"
+              : "Extension not installed"}
         </p>
       ) : null}
-      {edge ? (
-        <>
-          {view === null && chrome.readError === null ? (
-            <p className="key-line" role="status">
-              Reading…
-            </p>
-          ) : null}
-          <SettingsRow data-setting={`${prefix}-control-status`}>
-            <span>
-              Connection
-              <span className="d" role="status">
-                {chrome.readError !== null && view === null
-                  ? "State unavailable"
-                  : browser === "Firefox"
-                    ? view?.setup.pairing
-                    : setupLine(view, browser)}
-              </span>
+      {firefox ? (
+        <SettingsRow data-setting="firefox-control-status">
+          <span>
+            Connection
+            <span className="d" role="status">
+              {chrome.readError !== null && view === null
+                ? "State unavailable"
+                : view?.setup.pairing}
             </span>
-            {browser === "Firefox" ? (
-              <Button
-                data-testid="settings.firefox-window"
-                shape="outlined"
-                disabled={
-                  busy ||
-                  blocked ||
-                  !view.setup.package ||
-                  view.setup.pairingState === "notInstalled"
-                }
-                onClick={() => {
-                  void chrome.run(
-                    {
-                      op:
-                        view?.setup.pairingState === "windowOpen" ? "closeFirefox" : "openFirefox",
-                    },
-                    "window",
-                  );
-                }}
-              >
-                {view?.setup.pairingState === "windowOpen" ? "Close" : "Open window"}
-              </Button>
-            ) : removeRequired ? (
-              <Button
-                data-testid="settings.edge-remove-open"
-                shape="outlined"
-                variant="danger"
-                disabled={busy}
-                onClick={() => {
-                  setRemoveOpen(true);
-                }}
-              >
-                Remove…
-              </Button>
-            ) : !view?.setup.package || view.setup.browserIssue !== undefined ? null : setUp ? (
-              <Button
-                data-testid="settings.edge-setup-open"
-                shape="outlined"
-                disabled={busy || blocked}
-                onClick={() => {
-                  if (view.setup.addon?.action === "setupAgain") {
-                    void chrome.run({ op: "openStore" }, "openStore");
-                    return;
-                  }
-                  setSetupOpen(true);
-                  if (
-                    view.setup.pairingState !== "paired" &&
-                    view.setup.addon?.state !== "chromeClosed" &&
-                    view.setup.addon?.state !== "turnedOffInChrome" &&
-                    !recovering &&
-                    !view.setup.storeReview
-                  )
-                    void chrome.run({ op: "openStore" }, "openStore");
-                }}
-              >
-                {/* Turned off = set up already: the fix is in Edge itself, not the Store. */}
-                {view.setup.addon?.action === "setupAgain"
-                  ? stepLabel(view.setup.addon.action)
-                  : recovering ||
-                      view.setup.pairingState === "paired" ||
-                      view.setup.addon?.state === "chromeClosed" ||
-                      view.setup.addon?.state === "turnedOffInChrome"
-                    ? "Details"
-                    : view.setup.addon?.action === "openPairingPage"
-                      ? stepLabel(view.setup.addon.action)
-                      : view.setup.addon?.state === "notConnected" ||
-                          view.setup.addon?.state === "extensionNotInstalled"
-                        ? "Connect Edge"
-                        : "Finish setting up…"}
-              </Button>
-            ) : (
-              <Button
-                data-testid="settings.edge-setup-open"
-                shape="outlined"
-                disabled={blocked}
-                onClick={() => {
-                  setSetupOpen(true);
-                }}
-              >
-                Set up…
-              </Button>
-            )}
-          </SettingsRow>
-          {browser === "Edge" && view?.setup.addon?.step ? (
-            <p className="key-line">{view.setup.addon.step}</p>
-          ) : null}
-        </>
-      ) : (
-        <ChromeConnection chrome={chrome} />
-      )}
-      {setUp && !edge ? (
-        // Shown from setup on, like Remove: before setup the stored switch is on by default and does nothing yet.
-        <SettingsRow data-setting="chrome-control-enabled">
-          <span>{useMyChrome}</span>
-          <Switch
-            data-testid="settings.chrome-enabled"
-            aria-label={useMyChrome}
-            aria-checked={view.enabled}
-            disabled={busy}
+          </span>
+          <Button
+            data-testid="settings.firefox-window"
+            shape="outlined"
+            disabled={
+              busy ||
+              view.setup.pairingState === "blocked" ||
+              !view.setup.package ||
+              view.setup.pairingState === "notInstalled" ||
+              view.setup.pairingState === "connecting"
+            }
             onClick={() => {
-              void chrome.run({ op: "setEnabled", enabled: !view.enabled }, "setEnabled");
+              if (view === null) return;
+              void chrome.run(
+                !view.enabled
+                  ? { op: "setEnabled", enabled: true }
+                  : {
+                      op: view.setup.pairingState === "windowOpen" ? "closeFirefox" : "openFirefox",
+                    },
+                "window",
+              );
+            }}
+          >
+            {view?.setup.pairingState === "connecting"
+              ? "Starting…"
+              : view?.enabled === false
+                ? "Turn on"
+                : view?.setup.pairingState === "windowOpen"
+                  ? "Close"
+                  : "Open window"}
+          </Button>
+        </SettingsRow>
+      ) : (
+        <ChromeConnection chrome={chrome} browser={browser} showSwitch />
+      )}
+      {(setUp || browser === "Safari") && !firefox ? (
+        <SettingsRow data-setting={`${prefix}-control-enabled`}>
+          <span>{useMyBrowser}</span>
+          <Switch
+            data-testid={`settings.${prefix}-enabled`}
+            aria-label={useMyBrowser}
+            aria-checked={view?.enabled ?? false}
+            disabled={busy || (browser === "Safari" && !view.setup.package)}
+            onClick={() => {
+              void chrome.run({ op: "setEnabled", enabled: !view?.enabled }, "setEnabled");
             }}
           />
         </SettingsRow>
       ) : null}
-      {edge ? (
+      {firefox ? (
         <p
           className={chrome.status?.alert === true ? "key-problem" : "key-line"}
           role={chrome.status?.alert === true ? "alert" : "status"}
@@ -173,11 +117,11 @@ export function YourChromeSettings({
           {chrome.status?.text ?? ""}
         </p>
       ) : null}
-      {setUp && !edge && !removeRequired ? (
-        <SettingsRow data-setting="chrome-control-remove">
+      {setUp && !firefox && !removeRequired ? (
+        <SettingsRow data-setting={`${prefix}-control-remove`}>
           <span>Remove from Vibe Work</span>
           <Button
-            data-testid="settings.chrome-remove-open"
+            data-testid={`settings.${prefix}-remove-open`}
             shape="outlined"
             variant="danger"
             onClick={() => {
@@ -188,19 +132,10 @@ export function YourChromeSettings({
           </Button>
         </SettingsRow>
       ) : null}
-      {browser === "Edge" ? (
-        <ChromeSetupDialog
-          open={setupOpen}
-          browser={browser}
-          chrome={chrome}
-          onClose={() => {
-            setSetupOpen(false);
-          }}
-        />
-      ) : null}
       <ChromeRemoveDialog
         open={removeOpen}
         chrome={chrome}
+        browser={browser}
         onClose={() => {
           setRemoveOpen(false);
         }}

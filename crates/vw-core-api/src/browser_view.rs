@@ -88,11 +88,11 @@ pub enum BrowserRequest {
         /// Delegated web page key.
         tab_id: String,
     },
-    /// The user's browser tab-close permission (off by default).
+    /// Legacy request returning an empty permissions contract; tab closing follows the chat's access mode.
     Permissions {},
-    /// Saves the user-tab-close permission.
+    /// Legacy request returning an empty permissions contract without saving settings.
     SetPermissions {
-        /// The complete replacement contract.
+        /// Ignored legacy contract.
         permissions: vw_browser::delegation::BrowserPermissions,
     },
     /// The browser engine pool's memory allowance, setting and session occupancy.
@@ -330,9 +330,9 @@ pub enum BrowserResult {
         /// Identity-bound current-page metadata and fingerprint.
         review: Value,
     },
-    /// The stored browser delegation contract.
+    /// The empty legacy browser permissions contract.
     Permissions {
-        /// User-selected permissions.
+        /// Empty compatibility value; grants no authority.
         permissions: vw_browser::delegation::BrowserPermissions,
     },
     /// The current engine allowance and the sessions using or waiting for it.

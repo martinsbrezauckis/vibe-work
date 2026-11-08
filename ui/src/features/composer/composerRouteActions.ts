@@ -17,7 +17,7 @@ import { lineCount, pastesIn } from "./model/pastes";
 import { UiControlError } from "../../state/uiControl";
 import type { App } from "../shell/AppContext";
 import { configuredModeId, currentModeId } from "./model/access";
-import { currentPick, newChatPick } from "./model/models";
+import { currentPick, modelChoices, newChatPick } from "./model/models";
 import { queuedTurns, runningTurnId } from "./model/session";
 import type { CodeRef } from "../files/model/context";
 
@@ -252,8 +252,26 @@ export async function handleComposer(app: App, body: unknown): Promise<unknown> 
           ...asObject(read(sessionId)),
         };
       case "model": {
-        const alias = typeof input["alias"] === "string" ? input["alias"] : undefined;
+        const alias = input["alias"] === undefined ? undefined : text(input["alias"], "alias");
         const effort = typeof input["effort"] === "string" ? input["effort"] : undefined;
+        if (alias !== undefined) {
+          // Refresh the same source opening the window's chooser reads, without opening its menu.
+          const isNew = sessionId === NEW_CHAT;
+          const loaded = isNew ? await actions.loadConfig() : await actions.loadRuntime(sessionId);
+          if (!loaded)
+            throw new UiControlError(
+              "serverUnavailable",
+              "the offered models could not be read; try again when the model chooser is available",
+            );
+          const source = isNew
+            ? (app.composer.store.get().config ?? undefined)
+            : app.core?.store.get().sessions[sessionId]?.runtime;
+          if (!modelChoices(source).some((model) => model.alias === alias))
+            throw new UiControlError(
+              "invalidParams",
+              `model alias ${alias} is not offered in the model chooser; choose an offered alias`,
+            );
+        }
         return {
           ok: await actions.pickModel(sessionId, alias, effort),
           ...asObject(read(sessionId)),

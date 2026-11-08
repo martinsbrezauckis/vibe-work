@@ -1,4 +1,4 @@
-//! Feedback lifecycle owned by the core. Drafts stay in memory, preference alone is persisted; only Send does network I/O.
+//! Feedback lifecycle owned by the core. Drafts and attachment consent stay in memory; only Send does network I/O.
 //! Called by typed commands and the agent draft tool; the latter can never confirm, alter diagnostics, or send.
 use crate::core::Shared;
 use crate::{
@@ -6,7 +6,6 @@ use crate::{
     Origin,
 };
 use std::fmt::Write;
-use std::path::PathBuf;
 use std::sync::Arc;
 
 #[derive(Default)]
@@ -14,30 +13,23 @@ pub(crate) struct State {
     draft: Option<FeedbackDraft>,
     review: Option<FeedbackReport>,
     share: bool,
+    system: Option<crate::FeedbackSystem>,
+    screenshot: Option<crate::FeedbackScreenshot>,
+    add_screenshot: bool,
+    screenshot_error: Option<String>,
 }
+pub(crate) type CaptureAnswer =
+    std::pin::Pin<Box<dyn std::future::Future<Output = Result<Vec<u8>, String>> + Send>>;
+pub(crate) type Capture = Box<dyn Fn() -> CaptureAnswer + Send + Sync>;
 pub(crate) struct Feedback {
     state: tokio::sync::Mutex<State>,
-    settings: Option<PathBuf>,
+    capture: std::sync::OnceLock<Capture>,
 }
 impl Feedback {
-    pub(crate) fn new(config: &crate::CoreConfig) -> Self {
-        let settings = config
-            .secret_scan_data
-            .as_ref()
-            .filter(|_| cfg!(feature = "feedback"))
-            .map(|p| p.join("settings.json"));
-        let share = settings
-            .as_ref()
-            .and_then(|p| std::fs::read(p).ok())
-            .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
-            .and_then(|value| value["feedbackShareSystem"].as_bool())
-            .unwrap_or(false);
+    pub(crate) fn new(_config: &crate::CoreConfig) -> Self {
         Self {
-            state: tokio::sync::Mutex::new(State {
-                share,
-                ..State::default()
-            }),
-            settings,
+            state: tokio::sync::Mutex::new(State::default()),
+            capture: std::sync::OnceLock::new(),
         }
     }
 }
@@ -62,11 +54,62 @@ fn view(core: &Core, state: &State) -> FeedbackView {
         draft: state.draft.clone(),
         review: state.review.clone(),
         share_system: state.share,
-        system: crate::feedback_system::collect(core),
+        system: state
+            .system
+            .clone()
+            .unwrap_or_else(|| crate::feedback_system::collect(core)),
+        screenshot: state.screenshot.clone(),
+        add_screenshot: state.add_screenshot,
+        screenshot_error: state.screenshot_error.clone(),
         available: crate::feedback_transport::endpoint().is_some(),
     }
 }
+fn prepare(core: &Core, state: &mut State, draft: FeedbackDraft) -> Result<(), CoreError> {
+    let draft = crate::feedback_redact::draft(&core.shared, draft, true)?;
+    let mut report = FeedbackReport {
+        id: id()?,
+        draft: draft.clone(),
+        system: state.share.then(|| {
+            state
+                .system
+                .clone()
+                .unwrap_or_else(|| crate::feedback_system::collect(core))
+        }),
+        screenshot: state.screenshot.clone(),
+    };
+    // Identical preparation is a retry, not a new report; keep the relay's immutable id.
+    if let Some(previous) = state.review.as_ref().filter(|previous| {
+        previous.draft == report.draft
+            && previous.system == report.system
+            && previous.screenshot == report.screenshot
+    }) {
+        report.id.clone_from(&previous.id);
+    }
+    if !crate::feedback_transport::within_limits(&report) {
+        return Err(invalid(
+            "The report is too long. Shorten it and review again.",
+        ));
+    }
+    state.draft = Some(draft);
+    state.review = Some(report);
+    Ok(())
+}
 impl Core {
+    /// Installs the host's secret-safe native app capture. The typed API accepts consent only, never image bytes.
+    /// A host without a window leaves this unset and reports capture as unavailable.
+    pub fn set_feedback_capture<F, Fut>(&self, capture: F)
+    where
+        F: Fn() -> Fut + Send + Sync + 'static,
+        Fut: std::future::Future<Output = Result<Vec<u8>, String>> + Send + 'static,
+    {
+        if cfg!(feature = "feedback") {
+            let _ = self
+                .shared
+                .feedback
+                .capture
+                .set(Box::new(move || Box::pin(capture())));
+        }
+    }
     pub(crate) async fn feedback(
         &self,
         origin: Origin,
@@ -95,44 +138,44 @@ impl Core {
                         "A feedback draft is already open. Finish or cancel it first.",
                     ));
                 }
-                state.draft = Some(crate::feedback_redact::draft(&self.shared, draft, false)?);
-                state.review = None;
-            }
-            FeedbackRequest::Review { draft } => {
-                let draft = crate::feedback_redact::draft(&self.shared, draft, true)?;
-                let report = FeedbackReport {
-                    id: id()?,
-                    draft: draft.clone(),
-                    system: state.share.then(|| crate::feedback_system::collect(self)),
+                let draft = crate::feedback_redact::draft(&self.shared, draft, false)?;
+                *state = State {
+                    draft: Some(draft),
+                    system: Some(crate::feedback_system::collect(self)),
+                    ..State::default()
                 };
-                if serde_json::to_vec(&report).map_or(true, |v| v.len() > 16384) {
-                    return Err(invalid(
-                        "The report is too long. Shorten it and review again.",
-                    ));
-                }
-                state.draft = Some(draft);
-                state.review = Some(report);
             }
+            FeedbackRequest::Review { draft } => prepare(self, &mut state, draft)?,
             FeedbackRequest::Share { share_system } => {
                 state.share = share_system;
+                let system = state
+                    .system
+                    .get_or_insert_with(|| crate::feedback_system::collect(self))
+                    .clone();
                 if let Some(review) = state.review.as_mut() {
                     review.id = id()?;
-                    review.system = share_system.then(|| crate::feedback_system::collect(self));
+                    review.system = share_system.then_some(system);
                 }
-                // A disk error never prevents sending with either choice. Only this boolean is saved.
-                if let Some(path) = &self.shared.feedback.settings {
-                    let update = serde_json::Map::from_iter([(
-                        "feedbackShareSystem".into(),
-                        share_system.into(),
-                    )]);
-                    if crate::write_app_settings(path, update).is_err() {
-                        tracing::warn!("feedback sharing preference could not be saved");
+            }
+            FeedbackRequest::Screenshot { include } => {
+                if state.draft.is_none() {
+                    return Err(invalid("Open feedback before adding a screenshot."));
+                }
+                state.add_screenshot = include;
+                state.screenshot = None;
+                state.screenshot_error = None;
+                state.review = None;
+                if include {
+                    match crate::feedback_screenshot::capture(self.shared.feedback.capture.get())
+                        .await
+                    {
+                        Ok(image) => state.screenshot = Some(image),
+                        Err(message) => state.screenshot_error = Some(message),
                     }
                 }
             }
             FeedbackRequest::Close => {
-                state.draft = None;
-                state.review = None;
+                *state = State::default();
             }
             FeedbackRequest::Send { review_id } => {
                 let report = state
@@ -145,14 +188,13 @@ impl Core {
                     crate::feedback_redact::draft(&self.shared, report.draft.clone(), true)?;
                 if redacted != report.draft {
                     return Err(invalid(
-                        "More private text was found. Go back and review the report again.",
+                        "More private text was found. Check the form and send again.",
                     ));
                 }
                 let url = crate::feedback_transport::endpoint()
                     .ok_or_else(|| invalid("Feedback sending is not configured in this build."))?;
                 crate::feedback_transport::send(url, report).await?;
-                state.draft = None;
-                state.review = None;
+                *state = State::default();
             }
         }
         let view = view(self, &state);

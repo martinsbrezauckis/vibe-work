@@ -103,6 +103,7 @@ async fn confirm_switch(
         .ok_or_else(|| crate::keys::key_error(&vw_keys::KeyError::NotACandidate))?;
     // First setup has no credential to replace. The command name never grants an exception.
     if row.in_use
+        || keys.key_was_rejected()
         || matches!(
             keys.status()
                 .await

@@ -154,6 +154,11 @@ macro_rules! deny {
 /// Forwarded methods without `unified` in the bench report's `ok_on`, each with the evidence that
 /// justifies forwarding it anyway. A test fails if this list and the report disagree.
 pub const FORWARDED_WITHOUT_UNIFIED_EVIDENCE: &[(&str, &str)] = &[
+    #[cfg(feature = "context-composition")]
+    (
+        "session/context/read",
+        "real pinned unified-server context read through the core: unmeasured and measured sums, file content, unchanged history and no model request; the older bench predates this method",
+    ),
     (
         "session/lease/subscribe",
         "real unified-server regression vw_se1_holder covers foreign ownership, refusal before resume, release and our own server; the older bench predates this use",
@@ -212,7 +217,10 @@ static TABLE: &[Row] = &[
     deny!("artifacts/markViewed", NoUserInterface),
     deny!("artifacts/sync", NoUserInterface),
     deny!("artifacts/subscribe", NoUserInterface),
+    #[cfg(not(feature = "context-composition"))]
     deny!("session/context/read", NoUserInterface),
+    #[cfg(feature = "context-composition")]
+    fwd!("session/context/read", SessionContextRead),
     fwd!("account/read", AccountRead),
     p2!("agents/install", AgentsInstall),
     deny!("agents/list", NotOnUnified),

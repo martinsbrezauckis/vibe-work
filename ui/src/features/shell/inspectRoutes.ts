@@ -173,23 +173,33 @@ function createRevision() {
       quietForMs: Math.round(performance.now() - lastAt),
       animations: running(),
     }),
-    async settle(quietMs: number, timeoutMs: number) {
+    settle(quietMs: number, timeoutMs: number) {
       const started = performance.now();
-      for (;;) {
-        // Two frames: what a mutation scheduled is painted before it counts as quiet.
-        await new Promise<void>((resolve) => {
-          requestAnimationFrame(() => {
-            requestAnimationFrame(() => {
-              resolve();
+      return new Promise<{ revision: number; settled: boolean; waitedMs: number }>((resolve) => {
+        let frame: number | undefined;
+        let poll: ReturnType<typeof setTimeout> | undefined;
+        const finish = (settled: boolean) => {
+          clearTimeout(deadline);
+          clearTimeout(poll);
+          if (frame !== undefined) cancelAnimationFrame(frame);
+          resolve({ revision, settled, waitedMs: Math.round(performance.now() - started) });
+        };
+        // Paints may pause in a background/minimized window. The deadline must not await a frame.
+        const deadline = setTimeout(() => {
+          finish(false);
+        }, timeoutMs);
+        const check = () => {
+          // Two actual frames are still required before reporting quiet.
+          frame = requestAnimationFrame(() => {
+            frame = requestAnimationFrame(() => {
+              if (performance.now() - started >= timeoutMs) finish(false);
+              else if (performance.now() - lastAt >= quietMs && running() === 0) finish(true);
+              else poll = setTimeout(check, Math.min(50, quietMs));
             });
           });
-        });
-        const quiet = performance.now() - lastAt >= quietMs && running() === 0;
-        const waited = performance.now() - started;
-        if (quiet || waited >= timeoutMs)
-          return { revision, settled: quiet, waitedMs: Math.round(waited) };
-        await new Promise((resolve) => setTimeout(resolve, Math.min(50, quietMs)));
-      }
+        };
+        check();
+      });
     },
     stop: () => {
       observer.disconnect();
@@ -245,10 +255,15 @@ export function registerInspectRoutes(app: App): () => void {
   const counter = createRevision();
   const off = [
     app.uiControl.register("revision", () => counter.read()),
-    app.uiControl.register("settle", (body) => {
-      const { quietMs, timeoutMs } = asObject(body);
-      return counter.settle(numberIn(quietMs, 250, 10_000), numberIn(timeoutMs, 5_000, 30_000));
-    }),
+    app.uiControl.register(
+      "settle",
+      (body) => {
+        const { quietMs, timeoutMs } = asObject(body);
+        return counter.settle(numberIn(quietMs, 250, 10_000), numberIn(timeoutMs, 5_000, 30_000));
+      },
+      // A wait sends no commands: background work must not join it and extend its final reply.
+      () => true,
+    ),
     app.uiControl.register("rect", (body) => {
       const { selector } = asObject(body);
       if (typeof selector !== "string" || selector === "")

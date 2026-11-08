@@ -5,8 +5,10 @@
  * (visible whenever the API runs).
  * Depends on: hooks, state/account, KeyNotice, LeftRunning. Called by: Shell.
  */
-import { type ReactNode, useEffect, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 
+import { ContextComposition } from "../context/ContextComposition";
+import { contextCompositionEnabled } from "../../state/contextComposition";
 import { PathText } from "../../components/PathText";
 import { contextReadout, rateLimitWarning, usageOf } from "../../state/account";
 import { useKeyUi } from "../setup/useKeys";
@@ -85,6 +87,9 @@ function UsageReadout() {
   const readout = contextReadout(usageOf(session, runtime), runtime);
   if (readout === null) return null;
   const { percent } = readout;
+  // The direct build flag lets an OFF production bundle drop the optional panel.
+  if (import.meta.env.VITE_CONTEXT_COMPOSITION === "1" && contextCompositionEnabled())
+    return <CompositionReadout key={selected} sessionId={selected} percent={percent} />;
   const explain = `${readout.explain} Click for Usage and plan.`;
   return (
     <button
@@ -99,6 +104,39 @@ function UsageReadout() {
     >
       Context {percent}%
     </button>
+  );
+}
+
+/** Meter entry, remounted by session identity so changing chats closes its panel. */
+function CompositionReadout({ sessionId, percent }: { sessionId: string; percent: number }) {
+  const { core } = useApp();
+  const [open, setOpen] = useState(false);
+  const trigger = useRef<HTMLButtonElement>(null);
+  const close = useCallback(() => {
+    setOpen(false);
+  }, []);
+  return (
+    <>
+      <button
+        type="button"
+        ref={trigger}
+        className="sb-usage"
+        data-testid="shell.statusbar-usage"
+        title="Context breakdown"
+        aria-label={`Context ${String(percent)}%: Context breakdown`}
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        aria-controls={open ? "context-composition" : undefined}
+        onClick={() => {
+          setOpen((value) => !value);
+        }}
+      >
+        Context {percent}%
+      </button>
+      {open && core !== null && (
+        <ContextComposition core={core} sessionId={sessionId} trigger={trigger} close={close} />
+      )}
+    </>
   );
 }
 

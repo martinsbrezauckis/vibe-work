@@ -153,6 +153,7 @@ impl CoreSubscription {
             }
             _ => {}
         }
+        shared.interrupted_send.project_event(&mut event);
         event
     }
 

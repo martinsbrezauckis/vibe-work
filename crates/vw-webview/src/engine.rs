@@ -41,7 +41,7 @@
 //!     `proxyConfigurations` belongs to the store, which several mounts can share), set by wry before the webview
 //!     exists. `WebKit` sends host NAMES through it (resolved, checked and connected by the guard: DNS rebinding
 //!     closed) and address literals (loopback, this computer's own addresses) around it, which the content rules
-//!     cover; WebTransport, which ignores the proxy, is turned off first. Proven by the `.invalid` canary only
+//!     cover. The proxy route is checked by the `.invalid` canary only
 //!     (a loopback canary cannot reach the proxy here by design).
 
 use std::collections::HashMap;
@@ -191,7 +191,7 @@ impl TauriEngine {
 
     /// Requires the build's protection layers before the first page: a guard listener and proven canary on
     /// Linux/Windows and macOS with `macos-proxy` (the app's default); macOS without it uses content rules only.
-    /// Proxied macOS also needs WebTransport off; Windows needs its own guarded data folder.
+    /// Windows needs its own guarded data folder.
     /// A missing or unproven layer refuses the mount with a plain error.
     #[must_use]
     pub fn require_network_guard(mut self) -> Self {
@@ -396,7 +396,7 @@ impl TauriEngine {
                 hooks.names_checked_later(&spec.id.label);
             }
             let proven = self
-                // macOS: reaching here with a proxy means WebTransport is off (otherwise setup refused).
+                // macOS: the content rules and proxy route have been installed.
                 .check_guard(&webview, &spec.id, proxy.as_deref(), true, &hooks)
                 .await;
             if (self.proxy_required() || cfg!(target_os = "macos") && proxy.is_some()) && !proven {
@@ -502,7 +502,7 @@ impl PreviewEngine for TauriEngine {
     fn show_input_marker(
         &self,
         id: &MountId,
-        point: vw_preview::NativeClickPoint,
+        marker: vw_preview::action_tracking::ActionMarker,
     ) -> EngineFuture<'_, ()> {
         let id = id.clone();
         Box::pin(async move {
@@ -514,7 +514,7 @@ impl PreviewEngine for TauriEngine {
                 .get(&id.label)
                 .is_some_and(|shown| shown.visible && !shown.overlay_hidden)
             {
-                crate::input_marker::show(&self.webview(&id)?, point).await?;
+                crate::input_marker::show(&self.webview(&id)?, marker).await?;
             }
             Ok(())
         })
@@ -620,9 +620,8 @@ impl PreviewEngine for TauriEngine {
                 .get(&label)
                 .is_some_and(|shown| shown.overlay_hidden);
             if overlay_hidden {
-                // Keep the child unmapped until the selected page is restored.
-                webview
-                    .hide()
+                // A macOS child stays parked outside the window so covering it keeps its selection.
+                crate::overlay_visibility::cover(cfg!(target_os = "macos"), || webview.hide())
                     .map_err(|e| EngineError::Platform(e.to_string()))?;
                 self.note_shown(&label, None);
             } else {

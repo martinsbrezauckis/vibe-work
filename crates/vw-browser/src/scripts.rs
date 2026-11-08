@@ -232,3 +232,10 @@ pub fn point_receipt(page: &str, token: &str, clear: bool) -> String {
         json!({"page":page,"token":token,"clear":clear})
     )
 }
+
+/// Direct native capture of a retained ref; the returned value is never a tool result.
+#[cfg(feature = "agent-vault")]
+#[must_use]
+pub fn agent_secret(request: &Value) -> String {
+    assemble(include_str!("js/agent_secret.js"), request)
+}

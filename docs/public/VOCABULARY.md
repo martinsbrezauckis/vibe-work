@@ -63,6 +63,8 @@ Models use Vibe's reported display name, falling back to the configured alias. D
 | `session` | Session | Existing work with its messages, history and settings, saved in the session list. | Open session |
 | `chat` | chat | Starting an interaction with Vibe, as in New chat or voice chat. | Start a chat |
 | `yourChrome` | Your Chrome | Use your Google Chrome from Vibe Work. | Set up Your Chrome |
+| `yourEdge` | Your Edge | Use your Microsoft Edge from Vibe Work. | Set up Your Edge |
+| `yourSafari` | Your Safari | Use your Safari from Vibe Work. | Set up Your Safari |
 | `chromeExtension` | the Vibe Work extension | The extension added to Google Chrome for Your Chrome. | Add the Vibe Work extension |
 
 ## Built-in plugins

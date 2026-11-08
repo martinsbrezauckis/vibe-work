@@ -1,9 +1,10 @@
-//! Read-only Vibe Work tools in each access mode: in Accept edits and Full access they run without a card; every
-//! other tool and every other mode keep their approval.
+//! Read and browser tools in each access mode: Accept edits and Full access skip their default card;
+//! explicit tool rules and other modes keep their approval.
 use super::permission;
 use serde_json::{Value, json};
 use std::time::Duration;
 use vw_agent_tools::wire::tools as names;
+use vw_browser::capture::What;
 
 const READS: [&str; 10] = [
     names::PREVIEW_LIST,
@@ -70,12 +71,19 @@ async fn reads_run_without_a_card_in_accept_edits_and_full_access_only() {
             assert_eq!(asks(shared, tool, json!({})).await, !free, "{mode} {tool}");
         }
         for (tool, args) in [
+            (names::BROWSER_CAPTURE, json!({"what":What::Page})),
+            (
+                names::BROWSER_READ,
+                json!({"tab":"new","url":"https://example.com/"}),
+            ),
+        ] {
+            assert_eq!(asks(shared, tool, args).await, !free, "{mode} {tool}");
+        }
+        for (tool, args) in [
             (names::BROWSER_ACT, json!({"action":"click","ref":"r"})),
             (names::PREVIEW_OPEN, json!({"url":"http://localhost:5173/"})),
-            (names::BROWSER_CAPTURE, json!({"kind":"screenshot"})),
             (names::PROCESS_START, json!({"command":"echo hello"})),
-            // Explicit tab creation, resizing and repairs keep their card.
-            (names::BROWSER_READ, json!({"tab":"new"})),
+            // Preview resizing and handbook repairs keep their card.
             (names::PREVIEW_SCREENSHOT, json!({"width":900})),
             (names::HANDBOOK_CHECK, json!({"repair":"stylesheet"})),
         ] {
@@ -174,6 +182,36 @@ async fn builtin_actions_match_chrome_in_accept_edits() {
             "{action}"
         );
     }
+    assert!(
+        !asks(
+            shared,
+            names::BROWSER_ACT,
+            json!({"action":"navigate","tab":"new","url":"https://example.com/"})
+        )
+        .await
+    );
+    assert!(
+        !asks(
+            shared,
+            names::BROWSER_READ,
+            json!({"tab":"new","url":"https://example.com/"})
+        )
+        .await
+    );
+    for what in [
+        "design",
+        "structure",
+        "media",
+        "page",
+        "bundle",
+        "before",
+        "after",
+    ] {
+        assert!(
+            !asks(shared, names::BROWSER_CAPTURE, json!({"what":what})).await,
+            "capture: {what}"
+        );
+    }
     let config = shared.instructions.own_home.join("config.toml");
     std::fs::create_dir_all(config.parent().unwrap()).unwrap();
     std::fs::write(&config, "[tools.vw_browser_act]\npermission = \"ask\"\n").unwrap();
@@ -182,6 +220,17 @@ async fn builtin_actions_match_chrome_in_accept_edits() {
             asks(shared, names::BROWSER_ACT, json!({"action":action})).await,
             "explicit rule: {action}"
         );
+    }
+    for (tool, args) in [
+        (names::BROWSER_READ, json!({"tab":"new"})),
+        (names::BROWSER_CAPTURE, json!({"what":What::Page})),
+    ] {
+        std::fs::write(
+            &config,
+            format!("[tools.vw_{tool}]\npermission = \"ask\"\n"),
+        )
+        .unwrap();
+        assert!(asks(shared, tool, args).await, "explicit rule: {tool}");
     }
     fixture.finish().await;
 }

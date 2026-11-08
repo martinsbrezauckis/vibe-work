@@ -10,8 +10,7 @@
 //!   gone, replaced or ambiguous targets require another read. Receipts retain the target's last observed state;
 //!   coordinate baselines stay latest-only.
 //! - The agent never types into a password, one-time-code or payment-card field (refused, nothing typed).
-//! - Local-network reads and actions require the person's current switch in addition to ordinary page ownership
-//!   and action permissions. With that switch off, the agent may navigate away to an allowed page.
+//! - Local addresses use ordinary page ownership and action permissions.
 //! - Every wait is bounded (actionability 2 s, settling 1.5 s, loads 8 s, `wait` at most 15 s): an action answers
 //!   well within Vibe's 60 s tool timeout.
 
@@ -30,10 +29,6 @@ use crate::observe;
 use crate::refs::PAGE_CLOSED;
 use crate::sessions::{Actor, Outcome, Seen, Sessions};
 use crate::{guard, receipt, scripts};
-
-/// The agent's refusal on a local-network page the user opened.
-pub const LOCAL_NETWORK: &str = "this page is on your local network; the agent doesn't act here (it may only \
-                                 navigate away with browser_act navigate)";
 
 /// The receipt's outcome key. Answers are JSON objects with sorted keys and the agent's code parses them, so the outcome
 /// stays inside the JSON, under a key that sorts first (capital `O` before every lowercase key): the first thing a
@@ -143,7 +138,6 @@ pub struct Browser {
     pub(crate) sessions: Arc<Sessions>,
     captures: crate::capture::Captures,
     pub(crate) read_mount: Option<vw_preview::MountId>,
-    pub(crate) read_actor: Option<Actor>,
     #[cfg(feature = "e2e-script")]
     pub(crate) image_gate: crate::image_read::ImageGate,
     pub(crate) secret_choices: Arc<crate::secret_capture::SecretChoices>,
@@ -164,7 +158,6 @@ impl Browser {
             sessions,
             captures: crate::capture::Captures::default(),
             read_mount: None,
-            read_actor: None,
             #[cfg(feature = "e2e-script")]
             image_gate: Arc::default(),
             secret_choices: Arc::new(crate::secret_capture::SecretChoices::default()),
@@ -180,6 +173,13 @@ impl Browser {
     #[must_use]
     pub fn sessions(&self) -> &Arc<Sessions> {
         &self.sessions
+    }
+
+    /// Role and visible name the agent last observed for one page reference, for a click approval.
+    #[must_use]
+    pub fn observed_target(&self, session_id: &str, reference: &str) -> Option<(String, String)> {
+        self.current_seen(session_id)
+            .and_then(|seen| seen.names.get(reference).cloned())
     }
 
     /// The `before` shots of the captures.
@@ -202,33 +202,16 @@ impl Browser {
             // Plain and positive ("...are refused when a page is opened" was read as "this page was
             // refused"). A refusal always comes as an error or under `refusedNavigations`, never here.
             "networkGuard": if self.service.guarded(session_id) {
-                "every request of the page is checked"
+                "browser request guard is active; local addresses are allowed"
             } else {
-                "addresses are checked when a page opens"
+                "local addresses use the browser engine's network behavior"
             },
             // The mount's protection layers besides the navigation policy, by name (diagnostics, tests).
             "guardLayers": self.service.guard_layers(session_id),
         })
     }
 
-    /// True when the session shows a local-network page, independently of the current agent grant.
-    #[must_use]
-    pub fn on_local_network(&self, session_id: &str) -> bool {
-        self.service.page_class(session_id) == Some(vw_preview::PageClass::Lan)
-    }
-
-    /// True when the agent lacks the person's current local-network permission for this page.
-    #[must_use]
-    pub fn local_network_blocked(&self, session_id: &str) -> bool {
-        self.on_local_network(session_id)
-            && !self.delegation_authorizer.read().is_ok_and(|slot| {
-                slot.as_ref()
-                    .is_some_and(|authority| authority.local_network_allowed())
-            })
-    }
-
-    /// `browser_read`: the observation, and a screenshot when asked. The agent is refused on a local-network page
-    /// without the local-network grant ([`LOCAL_NETWORK`]); user reads retain their usual admission.
+    /// `browser_read`: the observation, and a screenshot when asked, under the current page authority.
     ///
     /// # Errors
     /// A plain-text reason.
@@ -239,9 +222,6 @@ impl Browser {
         screenshot: bool,
         by: Actor,
     ) -> Result<(Value, Option<Shot>), String> {
-        if by == Actor::Agent && self.local_network_blocked(session_id) {
-            return Err(LOCAL_NETWORK.to_owned());
-        }
         let clamped =
             options.max_bytes > observe::MAX_BUDGET || options.max_refs > observe::MAX_OUTPUT_REFS;
         options.max_refs = options.max_refs.clamp(1, observe::MAX_OUTPUT_REFS);
@@ -255,10 +235,8 @@ impl Browser {
         // A page loading again (a front page refreshing itself, a released tab reloaded here) is read once loaded.
         self.page(session_id).await?;
         self.wait_loaded(session_id).await;
-        // The wait can outlast the page: the user may have opened a local-network page in this tab meanwhile.
-        if by == Actor::Agent && self.local_network_blocked(session_id) {
-            return Err(LOCAL_NETWORK.to_owned());
-        }
+        // The wait can outlast the page: the user may have navigated this tab meanwhile.
+
         let bound = self.bind_read(session_id, by).await?;
         let (mut model, verdict, snapshot) = bound.observe(session_id, options).await?;
         let mut host = self.host(session_id);
@@ -286,13 +264,10 @@ impl Browser {
             None
         };
         // The image must show the observed page: the same mount and page class (the read binding), and the same
-        // document the refs came from (a navigation inside the mount during the shot), local-network rule again.
+        // document the refs came from (a navigation inside the mount during the shot).
         bound.check_read_mount()?;
         if screenshot {
             self.ref_mount(session_id).map_err(|error| error.text)?;
-            if by == Actor::Agent && self.local_network_blocked(session_id) {
-                return Err(LOCAL_NETWORK.to_owned());
-            }
         }
         // Labels go on the agent's copy only, after the image is known to show the observed page.
         let shot = shot
@@ -461,7 +436,7 @@ impl Browser {
         let before = Self::receipt_baseline(before, reference.as_deref());
         self.await_action_navigation(session_id, action, loads, refused0)
             .await;
-        let dialogs = self.settle(session_id, loads).await;
+        let dialogs = self.settle(session_id, loads, reference.as_deref()).await;
         if let Some(outcome) = self.navigation_outcome(session_id, loads, refused0, &result) {
             return outcome;
         }
@@ -598,7 +573,7 @@ impl Browser {
         {
             request["testConsentOrigin"] = json!(origin);
         }
-        let script = scripts::act(&request);
+        let mut script = scripts::act(&request);
         let allowed = self.dispatch_permission_check(session_id, by);
         let start = tokio::time::Instant::now();
         loop {
@@ -622,8 +597,9 @@ impl Browser {
             // Bound to the authorized document.
             self.reading_ref_allowed(session_id, &page, &answer.url, action.reference())
                 .map_err(refused)?;
-            if crate::answers::transient(&answer) && start.elapsed() < ACT_RETRY {
-                tokio::time::sleep(POLL).await;
+            let transient = crate::answers::transient(&answer) && start.elapsed() < ACT_RETRY;
+            if transient || answer.status == "focusPending" {
+                await_retry(start, &mut request, &mut script).await;
                 continue;
             }
             // A controlled control may accept the change asynchronously; prove it after settling, without retrying input.
@@ -663,8 +639,13 @@ impl Browser {
 
     /// Waits for the page to settle after an action: a load it started (bounded), else a quiet DOM. Returns the
     /// dialogs the page environment answered meanwhile.
-    async fn settle(&self, session_id: &str, loads_before: u64) -> Vec<Value> {
-        self.wait_quiet(session_id, loads_before).await;
+    async fn settle(
+        &self,
+        session_id: &str,
+        loads_before: u64,
+        reference: Option<&str>,
+    ) -> Vec<Value> {
+        self.wait_quiet(session_id, loads_before, reference).await;
         self.probe(session_id, None, None, true)
             .await
             .and_then(|p| p["dialogs"].as_array().cloned())
@@ -674,7 +655,14 @@ impl Browser {
             .collect()
     }
 
-    pub(crate) async fn wait_quiet(&self, session_id: &str, loads_before: u64) {
+    /// A quiet DOM counts the page's document and, for an action on a ref, the document holding it: a frame's
+    /// own changes (a calendar closing in a demo frame) are invisible to the page's counter.
+    pub(crate) async fn wait_quiet(
+        &self,
+        session_id: &str,
+        loads_before: u64,
+        reference: Option<&str>,
+    ) {
         let start = tokio::time::Instant::now();
         let mut last = None;
         let mut quiet_since = tokio::time::Instant::now();
@@ -690,7 +678,16 @@ impl Browser {
                 break;
             }
             let probe = self.probe(session_id, None, None, false).await;
-            let mutations = probe.as_ref().and_then(|p| p["mutations"].as_i64());
+            let mut mutations = probe.as_ref().and_then(|p| p["mutations"].as_i64());
+            if let Some(reference) = reference {
+                let held = self.probe(session_id, None, Some(reference), false).await;
+                if let (Some(page), Some(frame)) = (
+                    mutations,
+                    held.as_ref().and_then(|p| p["mutations"].as_i64()),
+                ) {
+                    mutations = Some(page + frame);
+                }
+            }
             if mutations != last {
                 last = mutations;
                 quiet_since = tokio::time::Instant::now();
@@ -776,5 +773,17 @@ impl Browser {
             }
             tokio::time::sleep(Duration::from_millis(200)).await;
         }
+    }
+}
+
+/// Waits one poll before an act runs again while [`ACT_RETRY`] lasts. A datepicker field is typed only after the
+/// page has seen its focus (`act.js` answers `focusPending`); a page that cannot take focus (its window is not
+/// active) never sends it, so after [`ACT_RETRY`] the date is typed without it.
+async fn await_retry(start: tokio::time::Instant, request: &mut Value, script: &mut String) {
+    if start.elapsed() < ACT_RETRY {
+        tokio::time::sleep(POLL).await;
+    } else {
+        request["focusWait"] = json!(false);
+        *script = scripts::act(request);
     }
 }

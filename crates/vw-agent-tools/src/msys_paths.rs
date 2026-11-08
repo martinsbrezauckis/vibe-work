@@ -16,6 +16,7 @@ pub(crate) fn native_drive(path: &str) -> Option<String> {
     ))
 }
 
+#[cfg(any(windows, test))]
 pub(crate) fn rewrite(tool: &str, input: &serde_json::Value) -> Option<serde_json::Value> {
     let leaf = tool.rsplit('.').next().unwrap_or(tool);
     if (!tool.starts_with("file_system.") || crate::folders::SHELL_TOOLS.contains(&leaf))

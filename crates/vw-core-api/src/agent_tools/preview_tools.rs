@@ -7,8 +7,7 @@
 //! Invariants:
 //! - Answers stay small JSON except the screenshot, which carries its PNG under `wire::IMAGE_KEY` (at most 1 MiB
 //!   before base64, within `wire::MAX_ANSWER`).
-//! - On a local-network page the user opened, the agent gets no screenshot, no console
-//!   and no title (`preview_list` shows the URL only, `localNetwork: true`); it may open another page.
+//! - Local-network pages use the same title, screenshot and console access rules as other pages.
 //! - `preview_list.canOpen` holds only listening servers (leased free ports are `leasedFree`);
 //!   `preview_open` on a loopback port nothing listens on is refused with how to start the server (it used to
 //!   answer "loaded" over an error page).
@@ -31,8 +30,7 @@ use crate::preview_ports::{busy_ports, session_ports};
 use crate::preview_readiness;
 use crate::previews::{PreviewHub, core_error, hub, open_for_session};
 
-/// The short preview description the agent reads (`lan`: a local-network page the user opened; its title is not
-/// shown to the agent).
+/// The pinned App preview label returned alongside ordinary browser tabs.
 fn app_tab(session_id: &str) -> Value {
     json!({"id": session_id, "kind": "appPreview", "label": "App preview"})
 }
@@ -49,7 +47,7 @@ fn preview_json(
         json!({
             "tab": app_tab(session_id),
             "url": v.url,
-            "title": if lan { None } else { v.title.clone() },
+            "title": v.title,
             "localNetwork": lan,
             "state": pending.map_or_else(|| json!(v.state), |_| json!("waitingForListener")),
             "stateMeans": pending.map(str::to_owned).or(unavailable).unwrap_or_else(|| match v.state {
@@ -288,9 +286,7 @@ pub(crate) async fn call(
 ) -> Result<Value, String> {
     let hub = hub(shared).map_err(|e| text(&e))?;
     let lan = hub.service.page_class(session_id) == Some(vw_preview::PageClass::Lan);
-    if lan && (tool == names::PREVIEW_SCREENSHOT || tool == names::PREVIEW_CONSOLE) {
-        return Err(vw_browser::LOCAL_NETWORK.to_owned());
-    }
+
     match tool {
         names::PREVIEW_LIST => list(shared, hub, session_id, lan).await,
         names::PREVIEW_OPEN => open(shared, hub, session_id, args).await,
@@ -312,17 +308,14 @@ pub(crate) async fn call(
                 .screenshot_of_mount(session_id)
                 .await
                 .map_err(|e| text(&core_error(&e)))?;
-            // The image binds to the mount it shows: still the current one (a mount's page class never changes),
-            // and that page may be shown to the agent (the local-network rule).
+            // The image must still belong to the current mount.
             if hub.service.page_mount(session_id).as_ref() != Some(&mount) {
                 return Err(
                     "the page changed during screenshot, so no image was returned; read it again"
                         .into(),
                 );
             }
-            if hub.browser.local_network_blocked(session_id) {
-                return Err(vw_browser::LOCAL_NETWORK.into());
-            }
+
             let view = hub.service.view(session_id);
             Ok(json!({
                 "tab": app_tab(session_id),

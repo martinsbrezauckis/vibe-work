@@ -26,7 +26,6 @@ use crate::core::Core;
 use crate::error::{CoreError, ErrorCode, clip};
 use crate::event::CoreEvent;
 use crate::plan::{Planned, plan};
-use crate::routing::needs_channel;
 use crate::sessions;
 use crate::view::{AnomalyReport, CallbackInfo};
 
@@ -238,7 +237,7 @@ impl Core {
                     .is_some_and(|turns| turns.iter().any(|turn| turn["status"] == "in_progress"))
             });
             if !active && let Some(epoch) = hub.service.browser_turn_epoch(id) {
-                let _ = hub.service.release_browser_for_turn(id, epoch).await;
+                crate::browser::turn_ended(&self.shared, id, epoch).await;
             }
         }
     }
@@ -591,13 +590,13 @@ impl Core {
             return Ok(reply);
         }
         crate::session_ownership::check_delete(&self.shared, method, &params).await?;
-        let _refresh = self.plugin_refresh_lock(method, &params).await?;
+        let _refresh = self.plugin_refresh_lock(method, &params, stop).await?;
         // Under the chat's send lock (`stops.rs`): a Stop's interrupt reaches a turn a checked send started; a Stop
         // since the continuation was scheduled refuses it here, before a stopped chat is reopened (the test that
         // decides runs again right before the send, `turn_start::call`).
         let params = crate::stop_tree::admit(&self.shared, method, params, stop).await?;
         // A stuck session is never opened implicitly (`stuck.rs`): refused at once, nothing sent.
-        let opens = needs_channel(method, &params).or_else(|| {
+        let opens = crate::routing::attaches_session(method, &params).or_else(|| {
             (method == "session/resume")
                 .then(|| params["sessionId"].as_str())
                 .flatten()
@@ -676,6 +675,7 @@ impl Core {
         }
         if matches!(method, "runtime/read" | "config/reload")
             && let Some(id) = params["sessionId"].as_str()
+            && self.shared.channels.has_channel(id)
             && let Some(runtime) = reply.result.get("runtime")
         {
             crate::model_choices::publish(&self.shared, id, runtime.clone()).await;
@@ -698,8 +698,7 @@ impl Core {
             self.after_access_write(origin, method, &params, token.is_none(), was_full)
                 .await;
         }
-        // credentials in remote addresses of Vibe's git listings never leave the core (`secret_scrub`).
-        reply.result = crate::secret_scrub::git_listing(method, std::mem::take(&mut reply.result));
+        sessions::project_client(&self.shared, method, &params, &mut reply.result);
         Ok(reply)
     }
 
@@ -711,7 +710,7 @@ impl Core {
         params: &Value,
         token: Option<&ConfirmationToken>,
     ) -> Result<(), CoreError> {
-        if let Some(id) = needs_channel(method, params)
+        if let Some(id) = crate::routing::attaches_session(method, params)
             && !self.shared.channels.has_channel(id)
         {
             self.shared

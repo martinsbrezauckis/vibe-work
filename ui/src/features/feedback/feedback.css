@@ -1,11 +1,16 @@
 /* Feedback-specific layout using existing modal, field and control tokens; imported by FeedbackDialog. */
 .modal.feedback-dialog {
   width: min(560px, calc(100vw - 48px));
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100vh - 48px);
+  overflow: hidden;
 }
 .feedback-dialog section {
   display: grid;
   gap: 12px;
-  max-height: 65vh;
+  min-height: 0;
+  flex: 1;
   overflow-y: auto;
 }
 .feedback-dialog .git-field {
@@ -13,12 +18,8 @@
 }
 .feedback-dialog textarea {
   resize: vertical;
-  min-height: 64px;
+  min-height: 48px;
   width: 100%;
-}
-.feedback-prose {
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
 }
 .feedback-share {
   display: flex;
@@ -39,8 +40,37 @@
   overflow-wrap: anywhere;
 }
 
-.feedback-prose,
-.feedback-dialog h4,
 .feedback-facts {
   margin: 0;
+}
+
+.feedback-capturing .scrim,
+.feedback-capturing .feedback-dialog {
+  visibility: hidden;
+}
+.feedback-thumbnail {
+  margin: 8px 0 0 24px;
+}
+.feedback-thumbnail img {
+  display: block;
+  width: 160px;
+  height: auto;
+}
+.modal.feedback-dialog[data-image-preview="true"] {
+  width: min(1100px, calc(100vw - 48px));
+}
+.feedback-dialog section > .tb-btn {
+  justify-self: start;
+}
+.feedback-image {
+  display: block;
+  width: 100%;
+  height: auto;
+  object-fit: contain;
+  max-height: calc(100vh - 250px);
+}
+
+.feedback-dialog header,
+.feedback-dialog footer {
+  flex-shrink: 0;
 }

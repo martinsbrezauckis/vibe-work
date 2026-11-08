@@ -1,4 +1,4 @@
-//! Requests Chrome's own extension consent on Windows/macOS; Linux uses the Store.
+//! Requests Chrome's own extension consent on Windows; macOS and Linux use the Store.
 //! Setup owns only registrations it creates, never Chrome profile preferences or enterprise policies.
 use std::path::{Path, PathBuf};
 
@@ -60,7 +60,7 @@ fn permitted(config: &ChromeControlConfig, registration: &Registration) -> Resul
 }
 
 fn chrome_pids(config: &ChromeControlConfig) -> Option<Vec<String>> {
-    if !cfg!(target_os = "macos") {
+    if !config.is_macos() {
         return Some(Vec::new());
     }
     super::browser::snapshot(config, vw_platform::browser::Browser::Chrome)?
@@ -69,6 +69,9 @@ fn chrome_pids(config: &ChromeControlConfig) -> Option<Vec<String>> {
 }
 
 pub(super) fn status(config: &ChromeControlConfig, state: &Path) -> Option<String> {
+    if config.is_macos() {
+        return None;
+    }
     let registration = read(state)?;
     let live = chrome_pids(config);
     Some(
@@ -88,27 +91,6 @@ pub(super) fn status(config: &ChromeControlConfig, state: &Path) -> Option<Strin
     )
 }
 
-/// False means a registration already exists and was left alone.
-fn create_file(path: &Path) -> Result<bool, String> {
-    use std::io::Write;
-    std::fs::create_dir_all(path.parent().ok_or("Chrome folder unavailable")?)
-        .map_err(|_| "Chrome folder unavailable".to_owned())?;
-    let mut file = match std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(path)
-    {
-        Ok(file) => file,
-        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => return Ok(false),
-        Err(_) => return Err("Chrome registration failed".to_owned()),
-    };
-    if file.write_all(&bytes()).is_err() {
-        let _ = std::fs::remove_file(path);
-        return Err("Chrome registration failed".to_owned());
-    }
-    Ok(true)
-}
-
 /// Run setup's OS/file work away from async request workers, after the first native observation.
 pub(super) async fn begin_async(config: &ChromeControlConfig, state: &Path) -> Result<(), String> {
     super::browser::refresh(config).await;
@@ -122,32 +104,23 @@ pub(super) async fn begin_async(config: &ChromeControlConfig, state: &Path) -> R
 /// Use a native consent prompt where supported. An existing registration uses the Store for recovery,
 /// including after a person removed an externally installed extension in Chrome (Chrome remembers that).
 pub(super) fn begin(config: &ChromeControlConfig, state: &Path) -> Result<(), String> {
-    if !cfg!(any(windows, target_os = "macos")) || read(state).is_some() {
+    if config.is_macos() || !cfg!(windows) || read(state).is_some() {
         return setup::open_store(config);
     }
-    let mut registration = Registration {
+    // Isolated configurations derive the sibling within their disposable HKCU root.
+    let key = registry_key(config)?;
+    if !extension_registry::create(&key, &extension_registry::Native)? {
+        return setup::open_store(config);
+    }
+    let registration = Registration {
         file: None,
-        key: None,
+        key: Some(key),
         chrome_pids: chrome_pids(config).unwrap_or_default(),
     };
-    if cfg!(target_os = "macos") {
-        let path = manifest_path(config)?;
-        if !create_file(&path)? {
-            return setup::open_store(config);
-        }
-        registration.file = Some(path);
-    } else {
-        // Isolated configurations derive the sibling within their disposable HKCU root.
-        let key = registry_key(config)?;
-        if !extension_registry::create(&key, &extension_registry::Native)? {
-            return setup::open_store(config);
-        }
-        registration.key = Some(key);
-    }
     let saved =
         serde_json::to_vec(&registration).map_err(|_| "Chrome registration failed".to_owned())?;
     if vw_platform::write_private_new(&state.join(RECEIPT), &saved).is_err() {
-        undo(&registration)?;
+        undo(config, &registration)?;
         return Err("Chrome registration failed".to_owned());
     }
     prompt(config, super::browser::running(config))
@@ -162,8 +135,16 @@ fn prompt(config: &ChromeControlConfig, running: bool) -> Result<(), String> {
     }
 }
 
-fn undo(registration: &Registration) -> Result<bool, String> {
+fn undo(config: &ChromeControlConfig, registration: &Registration) -> Result<bool, String> {
     let mut removed = false;
+    if let Some(file) = &registration.file {
+        setup::files::access(
+            config,
+            setup::files::Access::ReadDir,
+            file.parent().ok_or("Chrome folder unavailable")?,
+        )
+        .map_err(|e| e.to_string())?;
+    }
     if let Some(file) = &registration.file
         && super::probe::read_regular(file, 1024).is_some_and(|current| current == bytes())
     {
@@ -179,9 +160,13 @@ fn undo(registration: &Registration) -> Result<bool, String> {
 /// Undoes this flow's registration. `Ok(true)`: one was undone, so Chrome removes the extension it installed from
 /// it by itself.
 pub(super) fn remove(config: &ChromeControlConfig, state: &Path) -> Result<bool, String> {
+    // Old external registrations are inside protected browser data. The person removes the extension in Chrome.
+    if config.is_macos() {
+        return Ok(false);
+    }
     if let Some(registration) = read(state) {
         permitted(config, &registration)?;
-        return undo(&registration);
+        return undo(config, &registration);
     }
     Ok(false)
 }
@@ -375,23 +360,24 @@ mod tests {
     }
 
     #[test]
-    fn an_existing_registration_is_never_overwritten_and_changed_files_survive_removal() {
+    fn changed_legacy_registration_files_survive_removal() {
         let root = std::env::temp_dir().join(format!("chrome-external-{}", std::process::id()));
+        let config = &ChromeControlConfig::default();
         let path = root.join("external.json");
         let _ = std::fs::remove_dir_all(&root);
-        assert!(create_file(&path).unwrap());
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(&path, bytes()).unwrap();
         assert_eq!(std::fs::read(&path).unwrap(), bytes());
         let registration = Registration {
             file: Some(path.clone()),
             key: None,
             chrome_pids: vec![],
         };
-        assert!(!create_file(&path).unwrap());
         std::fs::write(&path, b"another installer").unwrap();
-        undo(&registration).unwrap();
+        undo(config, &registration).unwrap();
         assert_eq!(std::fs::read(&path).unwrap(), b"another installer");
         std::fs::write(&path, bytes()).unwrap();
-        undo(&registration).unwrap();
+        undo(config, &registration).unwrap();
         assert!(!path.exists());
         std::fs::remove_dir_all(root).unwrap();
     }

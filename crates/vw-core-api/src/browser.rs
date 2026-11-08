@@ -7,8 +7,8 @@
 //! Called by: `dispatch` (`Command::Browser`, `turn/start`), `agent_tools::browser_tools`, `previews` (events,
 //! session end).
 //! Invariants:
-//! - The agent's navigations are strict (proven local ports only); the window's and the Debug API's are the
-//!   user's. Public pages need the mount's proven network guard everywhere.
+//! - Browser navigation accepts local and public addresses under the same URL policy. Agent calls retain
+//!   refusal reporting and pinned App preview port ownership checks; the window and Debug API act as the user.
 //! - Stop applies to the agent only; the session's next `turn/start` (the user's next message) lifts it.
 //! - Vault choices and saves are window-only; the vault scope refuses Debug API calls before page access.
 
@@ -26,7 +26,7 @@ use crate::previews::{hub, open_for_session};
 /// Opens URLs for the driver: the session's ports and owners, the policy, the guard.
 pub(crate) struct CoreNav {
     pub(crate) shared: Arc<Shared>,
-    /// The agent: proven local ports only.
+    /// Identifies agent calls for refusal reporting and pinned App preview port ownership checks.
     pub(crate) strict: bool,
 }
 
@@ -263,7 +263,6 @@ pub(crate) fn turn_started(shared: &Shared, session_id: &str) {
         hub.browser.sessions().resume(session_id);
         for key in hub.service.web_tabs(session_id) {
             hub.browser.sessions().cancel_actions(&key);
-            hub.service.browser_turn_started(&key);
             hub.browser.sessions().resume(&key);
         }
     }
@@ -280,14 +279,22 @@ pub(crate) async fn turn_ended(shared: &Shared, session_id: &str, epoch: u64) {
         return;
     }
     if let Some(hub) = &shared.preview {
-        let pages = std::iter::once(session_id.to_owned()).chain(hub.service.web_tabs(session_id));
-        for page in pages {
-            if hub.service.browser_turn_epoch(&page) != Some(epoch) {
-                continue;
+        // The chat owns the turn generation. Tabs can be created mid-turn and have no matching counter.
+        match hub
+            .service
+            .release_browser_for_turn(session_id, epoch)
+            .await
+        {
+            Ok(true) if hub.service.browser_turn_epoch(session_id) == Some(epoch) => {
+                let pages =
+                    std::iter::once(session_id.to_owned()).chain(hub.service.web_tabs(session_id));
+                for page in pages {
+                    hub.browser.sessions().cancel_confirmations(&page);
+                }
             }
-            hub.browser.sessions().cancel_confirmations(&page);
-            if let Err(error) = hub.service.release_browser_for_turn(&page, epoch).await {
-                tracing::warn!(%error, session_id, page_key = %page, "browser turn completion failed");
+            Ok(_) => {}
+            Err(error) => {
+                tracing::warn!(%error, session_id, "browser turn completion failed");
             }
         }
     }
@@ -314,7 +321,7 @@ impl Core {
         let result = match request {
             BrowserRequest::Permissions {} => crate::browser_delegation::settings(shared, None)?,
             BrowserRequest::SetPermissions { permissions } => {
-                // A disk-confirmed write: on the blocking pool, never on an async worker.
+                // Legacy compatibility request: returns empty permissions without writing a settings file.
                 let owned = shared.clone();
                 tokio::task::spawn_blocking(move || {
                     crate::browser_delegation::settings(&owned, Some(permissions))

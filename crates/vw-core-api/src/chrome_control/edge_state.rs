@@ -4,8 +4,13 @@ use crate::core::Shared;
 use serde_json::Value;
 use std::sync::{Arc, PoisonError};
 
-/// Remembers a live Edge connection for display only; an owner conflict or new pairing request revokes it.
+/// Remembers a live Edge connection for display and reopening; an owner conflict or new pairing request revokes it.
 pub(super) fn remember_pairing(chrome: &super::ChromeControl, paired: bool) {
+    if paired {
+        super::installation::remember_directory(chrome, super::agent_browser::Browser::Edge);
+    } else {
+        super::installation::forget_directory(chrome, super::agent_browser::Browser::Edge);
+    }
     if chrome
         .edge_paired_once
         .swap(paired, std::sync::atomic::Ordering::SeqCst)
@@ -47,6 +52,13 @@ fn state(data: &Value, browser: &str) -> Option<PairingState> {
     if data.get("profiles").is_none() && code.is_empty() {
         return None;
     }
+    if browser == "firefox:" {
+        return Some(if connected {
+            PairingState::WindowOpen
+        } else {
+            PairingState::WindowClosed
+        });
+    }
     Some(PairingState::observe(
         code,
         connected,
@@ -74,7 +86,7 @@ pub(super) fn update(shared: &Arc<Shared>, data: &Value) {
         }
         // A signed pairing event precedes adapter registration. Empty status polls must not erase it.
         let prefix = browser;
-        if (browser != "firefox:" || data.get("firefoxWindow").is_none())
+        if browser != "firefox:"
             && current.0 != PairingState::Unknown
             && (browser != "edge:" || current.0 != PairingState::Paired)
             && data["profiles"].as_array().is_some_and(|profiles| {
@@ -183,7 +195,7 @@ mod firefox_tests {
     #[test]
     fn a_firefox_connection_never_pairs_chrome_or_edge() {
         let data = json!({"profiles":[{"profileId":"firefox:same","connected":true}]});
-        assert_eq!(state(&data, "firefox:"), Some(PairingState::Paired));
+        assert_eq!(state(&data, "firefox:"), Some(PairingState::WindowOpen));
         assert_eq!(state(&data, "chrome:"), Some(PairingState::Disconnected));
         assert_eq!(state(&data, "edge:"), Some(PairingState::Disconnected));
     }

@@ -130,3 +130,32 @@ async fn failed_wakes_do_not_open_another_tab_on_each_call() {
     );
     core.shutdown().await;
 }
+
+#[tokio::test]
+async fn macos_remembered_pairing_can_wake_without_a_profile_folder_probe() {
+    let forbidden = Arc::new(Mutex::new(Vec::new()));
+    let attempts = forbidden.clone();
+    let core = fixture_with(
+        "mac-remembered-wake",
+        json!([{"profileId":"edge:p","connected":true}]),
+        |config| {
+            config.macos = Some(true);
+            config.file_access = Some(Arc::new(move |_, path| {
+                if path.to_string_lossy().contains("Microsoft Edge") {
+                    attempts.lock().unwrap().push(path.to_owned());
+                    return Err(std::io::Error::from_raw_os_error(1));
+                }
+                Ok(())
+            }));
+        },
+    )
+    .await;
+    core.shared.chrome_control.owner.connected_profiles.clear();
+    assert!(
+        super::known_extension(&core.shared, Browser::Edge),
+        "remembered pairing must allow a wake without a readable profile folder"
+    );
+    assert!(!super::known_extension(&core.shared, Browser::Chrome));
+    assert!(forbidden.lock().unwrap().is_empty());
+    core.shutdown().await;
+}

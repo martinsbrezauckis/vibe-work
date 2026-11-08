@@ -334,6 +334,23 @@ pub(crate) async fn start(
             output_tail: String::new(),
         },
     };
+    if let InstallPhase::Installed {
+        source: InstallSource::Private,
+        ..
+    } = &state.phase
+    {
+        if let Some(support) = state.deferred_support.take() {
+            state.support = support;
+        }
+    } else if matches!(
+        state.phase,
+        InstallPhase::Installed {
+            source: InstallSource::Existing,
+            ..
+        }
+    ) {
+        state.deferred_support = None;
+    }
     inner.publish(&state);
 }
 

@@ -74,7 +74,7 @@ jobs:
 
       - name: Build video and tool sidecars
         run: |
-          cargo build --release -p vw-video -p vw-agent-tools --features vw-video/helper,vw-agent-tools/video
+          node scripts/public/release_sidecar.mjs -- cargo build --release -p vw-video -p vw-agent-tools --features vw-video/helper,vw-agent-tools/video
           triple="$(rustc -vV | sed -n 's/^host: //p')"
           suffix=""
           case "$triple" in *windows*) suffix=".exe" ;; esac
@@ -86,10 +86,14 @@ jobs:
       - name: Build unsigned bundle (nothing is published)
         env:
           BUNDLES: ${{ matrix.bundles }}
-        run: >-
-          pnpm tauri build
-          --features your-edge,proxy-transports,macos-proxy,video
-          --ci
-          --no-sign
-          --bundles "$BUNDLES"
+        run: |
+          eval "$(node scripts/public/release_ui_env.mjs --shell)"
+          pnpm tauri build \
+          --features your-edge,proxy-transports,macos-proxy,video \
+          --ci \
+          --no-sign \
+          --bundles "$BUNDLES" \
           --config '{"bundle":{"createUpdaterArtifacts":false,"externalBin":["binaries/vw-agent-tools","binaries/vw-video-helper"]}}'
+
+      - name: Check embedded release UI features
+        run: node scripts/public/check_ui_features.mjs

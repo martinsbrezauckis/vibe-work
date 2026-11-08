@@ -29,6 +29,20 @@ pub const BEGIN: &str = "<!-- >>> vibe-work note (managed by Vibe Work: rewritte
 pub const END: &str = "<!-- <<< vibe-work note <<< -->";
 /// The note itself (`working_note.md`): the map, a few hundred tokens.
 pub const TEXT: &str = include_str!("working_note.md");
+/// Optional direct-to-vault capability, shared with the staged built-in skills.
+#[must_use]
+pub const fn vault_capture_line() -> Option<&'static str> {
+    if cfg!(feature = "agent-vault") {
+        Some(
+            "A secret can go straight from its source into the vault without entering the chat: use browser_capture_secret with a browser_read ref, or secret_capture_command with a program and arguments, and give the entry a name.",
+        )
+    } else {
+        None
+    }
+}
+fn vault_capture_note() -> String {
+    vault_capture_line().map_or_else(String::new, |line| format!("\n\n{line}"))
+}
 const SCREEN_READER: &str = if cfg!(target_os = "macos") {
     "On macOS, the system screen reader is VoiceOver (System Settings > Accessibility)."
 } else if cfg!(windows) {
@@ -65,7 +79,11 @@ fn recognised(doc: &str) -> Option<String> {
 /// The whole block: markers around [`TEXT`], ending in a newline.
 #[must_use]
 pub fn block() -> String {
-    format!("{BEGIN}\n{}\n\n{SCREEN_READER}\n{END}\n", TEXT.trim_end())
+    format!(
+        "{BEGIN}\n{}{}\n\n{SCREEN_READER}\n{END}\n",
+        TEXT.trim_end(),
+        vault_capture_note()
+    )
 }
 
 /// True when `doc` starts with exactly the block this build ships (its first bytes are [`block`]). Only then is the

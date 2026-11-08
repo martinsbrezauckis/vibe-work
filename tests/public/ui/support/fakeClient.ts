@@ -119,7 +119,7 @@ export interface FakeClient extends CoreClient {
   >;
   setDebugApi: ReturnType<typeof vi.fn<(enabled: boolean) => Promise<void>>>;
   debugApiTokenFile: ReturnType<
-    typeof vi.fn<(rotate: boolean) => Promise<string>>
+    typeof vi.fn<(rotate: boolean) => Promise<string | null>>
   >;
   /**
    * The update flow . Default: this build has no update channel (`subscribe` answers false). A test
@@ -444,8 +444,8 @@ export function fakeClient(kind: CoreClient["kind"] = "fake"): FakeClient {
     setDebugApi: vi.fn<(enabled: boolean) => Promise<void>>(() =>
       Promise.resolve(),
     ),
-    debugApiTokenFile: vi.fn<(rotate: boolean) => Promise<string>>(() =>
-      Promise.resolve("/data/debug-api/debug-api.token"),
+    debugApiTokenFile: vi.fn<(rotate: boolean) => Promise<string | null>>(() =>
+      Promise.resolve("vibe-work-secret-deb06a9100000001"),
     ),
     updateChannel: false,
     updateCalls: [],

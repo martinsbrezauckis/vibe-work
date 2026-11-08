@@ -78,6 +78,11 @@ fn candidates(browser: Browser, home: &Path) -> Vec<PathBuf> {
 
 pub(super) fn discover(browser: Browser, home: &Path) -> Result<PathBuf, InstallationIssue> {
     let edge = browser == Browser::Edge;
+    if cfg!(target_os = "macos")
+        && let Some(path) = super::macos_executable(browser, home)
+    {
+        return Ok(path);
+    }
     let candidates = candidates(browser, home);
     let mut found_sandbox = false;
     for path in candidates.into_iter().filter(|p| executable(p)) {

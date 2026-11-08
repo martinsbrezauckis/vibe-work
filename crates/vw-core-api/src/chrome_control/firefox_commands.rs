@@ -24,13 +24,18 @@ pub(super) fn setup_view(shared: &crate::core::Shared) -> Option<Box<setup::Chro
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         setup.pairing_state = match pairing.0 {
-            PairingState::WindowOpen | PairingState::WindowClosed | PairingState::NotInstalled => {
-                pairing.0
-            }
+            PairingState::WindowOpen
+            | PairingState::WindowClosed
+            | PairingState::NotInstalled
+            | PairingState::Connecting
+            | PairingState::BrowserOutdated
+            | PairingState::Blocked => pairing.0,
             _ if installed() => PairingState::WindowClosed,
             _ => PairingState::NotInstalled,
         };
-        setup.pairing = setup.pairing_state.label("Firefox");
+        let facts = state_view(setup.pairing_state, chrome.enabled(), setup.package);
+        setup.pairing.clone_from(&facts.label);
+        setup.addon = Some(facts);
         setup.state = if setup.pairing_state == PairingState::WindowOpen {
             setup::SetupState::ExtensionAdded
         } else {
@@ -112,6 +117,17 @@ impl Core {
                 .map_err(|_| invalid("The Firefox connection could not be saved."))?;
             super::start_owner(&self.shared).await;
         }
+        if open {
+            *chrome
+                .owner
+                .firefox_pairing
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) =
+                (PairingState::Connecting, None);
+            self.shared.emit(crate::CoreEvent::ChromeControl {
+                view: view(&self.shared),
+            });
+        }
         let answer = chrome
             .owner
             .call(
@@ -130,6 +146,19 @@ impl Core {
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner) = (state, None);
         } else {
+            let state = match data["error"]["code"].as_str() {
+                Some("BROWSER_NOT_INSTALLED") => PairingState::NotInstalled,
+                Some("BROWSER_OUTDATED") => PairingState::BrowserOutdated,
+                _ => PairingState::WindowClosed,
+            };
+            *chrome
+                .owner
+                .firefox_pairing
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = (state, None);
+            self.shared.emit(crate::CoreEvent::ChromeControl {
+                view: view(&self.shared),
+            });
             return Err(invalid(data["error"]["message"].as_str().unwrap_or(
                 "The Firefox connection is unavailable. Try opening the window again.",
             )));
@@ -138,5 +167,130 @@ impl Core {
         self.shared
             .emit(crate::CoreEvent::ChromeControl { view: view.clone() });
         Ok(CommandResult::ChromeControl { view, offer: None })
+    }
+}
+
+/// Firefox's card and agent facts share one diagnosis and name the actual window controls.
+pub(super) fn addon(shared: &crate::core::Shared) -> super::AddonView {
+    setup_view(shared)
+        .and_then(|v| v.addon)
+        .unwrap_or_else(|| state_view(PairingState::Unknown, false, false))
+}
+fn state_view(state: PairingState, enabled: bool, package: bool) -> super::AddonView {
+    use super::AddonState as A;
+    let (state, label, instruction) = if (!package && state != PairingState::WindowOpen)
+        || !cfg!(feature = "your-firefox")
+    {
+        (
+            A::Unavailable,
+            "Unavailable",
+            "{yourBrowser} is unavailable in this build. Use a build that includes the Firefox module.",
+        )
+    } else if state == PairingState::NotInstalled {
+        (
+            A::ChromeMissing,
+            "Not installed",
+            "Firefox is missing. Install Firefox, then choose Open window in Settings > Browser > {yourBrowser}.",
+        )
+    } else if !enabled {
+        (
+            A::SwitchedOff,
+            "Off",
+            "The browser connection is off. Ask the person to choose Turn on under Settings > Browser > {yourBrowser}.",
+        )
+    } else {
+        match state {
+            PairingState::WindowOpen => (
+                A::Connected,
+                "Window open",
+                "The owned Firefox window is ready. Use chrome_session with profileId firefox:agent to open this chat's session; use chrome_status for its supported actions.",
+            ),
+            PairingState::Connecting => (
+                A::Connecting,
+                "Starting",
+                "The owned Firefox window is starting. Wait for Window open in Settings > Browser > {yourBrowser}, then check chrome_status.",
+            ),
+            PairingState::BrowserOutdated => (
+                A::UpdateNeeded,
+                "Update Firefox",
+                "Firefox is older than the supported version. Update Firefox to version 159 or later, then choose Open window under Settings > Browser > {yourBrowser}.",
+            ),
+            PairingState::Blocked => (
+                A::Unavailable,
+                "Blocked by your organization",
+                "Your organization blocks this Firefox connection. Ask the person to contact their administrator.",
+            ),
+            _ => (
+                A::ChromeClosed,
+                "Window closed",
+                "The owned Firefox window is closed. Ask the person to choose Open window under Settings > Browser > {yourBrowser}, then open a new chat browser session; the old session cannot resume after a restart.",
+            ),
+        }
+    };
+    super::AddonView {
+        state,
+        label: label.into(),
+        instruction: super::agent_browser::Browser::Firefox.words(instruction),
+        action: None,
+        extension_version: None,
+        step: None,
+    }
+}
+
+#[cfg(all(test, feature = "your-firefox"))]
+mod tests {
+    use super::*;
+    #[tokio::test]
+    async fn firefox_facts_use_its_window_controls_and_connection_state() {
+        let core = crate::offline_core::start_with("firefox-window-facts", |config, dir| {
+            config.chrome_control.package = Some(dir.join("package"));
+        })
+        .await;
+        super::super::test_support::answering(&core.shared, |_, _| json!({"structuredContent":{}}));
+        for (state, label, instruction) in [
+            (PairingState::WindowClosed, "Window closed", "Open window"),
+            (PairingState::WindowOpen, "Window open", "chrome_session"),
+            (PairingState::Connecting, "Starting", "Wait"),
+            (
+                PairingState::BrowserOutdated,
+                "Update Firefox",
+                "Open window",
+            ),
+            (
+                PairingState::NotInstalled,
+                "Not installed",
+                "Install Firefox",
+            ),
+        ] {
+            *core
+                .shared
+                .chrome_control
+                .owner
+                .firefox_pairing
+                .lock()
+                .unwrap() = (state, None);
+            let facts = super::super::installation::addons(&core.shared);
+            let firefox = facts
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|v| v["id"] == "firefox")
+                .expect("Firefox facts are required when its module is enabled");
+            assert_eq!(firefox["label"], label);
+            assert!(
+                firefox["instruction"]
+                    .as_str()
+                    .unwrap()
+                    .contains(instruction),
+                "{firefox}"
+            );
+            assert!(
+                !firefox["instruction"]
+                    .as_str()
+                    .unwrap()
+                    .contains("Connect Firefox")
+            );
+        }
+        core.shutdown().await;
     }
 }

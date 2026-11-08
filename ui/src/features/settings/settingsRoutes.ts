@@ -124,6 +124,7 @@ function read(app: App, instructions: Instructions | null) {
       chromeAvailable(app.core?.store.get().chromeControl),
       app.core?.store.get().chromeControl?.edge !== undefined,
       app.core?.store.get().chromeControl?.firefox !== undefined,
+      app.core?.store.get().chromeControl?.safari !== undefined,
     ).map((r) => ({
       id: r.id,
       category: r.category,
@@ -222,6 +223,8 @@ export function registerSettingsRoutes(app: App): () => void {
               (e) =>
                 e.id === setting &&
                 e.opens === undefined &&
+                (app.core?.store.get().chromeControl?.safari !== undefined ||
+                  !e.id.startsWith("safari-control")) &&
                 (app.core?.store.get().chromeControl?.firefox !== undefined ||
                   !e.id.startsWith("firefox-control")) &&
                 (app.core?.store.get().chromeControl?.edge !== undefined ||

@@ -9,6 +9,7 @@
 // - service workers are off : a worker outlives its page and could send requests later under
 //   another page's rights; the engine also clears registrations at every mount.
 // The accessor name is random per mount and non-enumerable: a collision guard, not a secret.
+/* global pageSelection */
 (() => {
   const NAME = __VW_NAME__;
   const TRUSTED = false;
@@ -37,6 +38,7 @@
     return APP_THEME;
   };
   if (Object.prototype.hasOwnProperty.call(window, NAME)) return;
+  __VW_SELECTION__
   const dialogs = [];
   const stability = new WeakMap();
   let mutations = 0;
@@ -98,12 +100,12 @@
     pointChoice = null;
     pointIntent = false;
     if (!event.isTrusted) return;
-    const selection = window.getSelection();
-    const selected = selection?.containsNode?.(event.target, true) && String(selection.toString()).trim() !== "";
-    let value = selected ? String(selection.toString()).trim() : "";
+    const selection = pageSelection(event);
+    const selected = selection?.range.intersectsNode(event.target);
+    let value = selected ? selection.quote.trim() : "";
     const webPage = /^https?:$/.test(location.protocol);
-    if (selected && webPage && selection.rangeCount > 0) pointRange = selection.getRangeAt(0).cloneRange();
-    const copyRange = selected && selection.rangeCount > 0 ? selection.getRangeAt(0).cloneRange() : null;
+    if (selected && webPage) pointRange = selection.range.cloneRange();
+    const copyRange = selected ? selection.range.cloneRange() : null;
     if (!value) {
       const target = event.target;
       const el = target?.closest?.("input,textarea,code,pre,[data-copy],[data-copy-value],[data-clipboard-text]") || target;
@@ -283,6 +285,7 @@
     // A document without a root yet: the counter stays 0 (settling then waits its minimum).
   }
   const api = {
+    selection: pageSelection,
     takePointChoice: () => {
       const choice = !pointChoice || performance.now() < pointExpires ? pointChoice : { node: null, quote: "" };
       pointChoice = null;

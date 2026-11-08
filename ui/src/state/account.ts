@@ -56,7 +56,8 @@ export function parseAccount(
   const first = text(who?.["firstName"]);
   const last = text(who?.["lastName"]);
   return {
-    status: text(view?.["status"]) ?? "unknown",
+    status:
+      asObject(account)?.["detached"] === true ? "unknown" : (text(view?.["status"]) ?? "unknown"),
     plan: text(plan?.["title"]) ?? text(plan?.["name"]),
     planKind: text(plan?.["kind"]),
     name: [first, last].filter((x) => x !== null).join(" ") || null,

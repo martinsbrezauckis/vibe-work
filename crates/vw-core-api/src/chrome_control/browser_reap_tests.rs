@@ -3,13 +3,56 @@
 use super::*;
 use std::os::unix::fs::PermissionsExt;
 #[test]
+fn chrome_launch_survives_its_parent_in_a_detached_session() {
+    const CHILD: &str = "VW_CHROME_DETACHED_FIXTURE";
+    if let Some(marker) = std::env::var_os(CHILD) {
+        open(&ChromeControlConfig::default(), "").unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+        while !std::path::Path::new(&marker).exists() {
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let launcher = dir.path().join("google-chrome");
+    std::fs::write(
+        &launcher,
+        "#!/bin/sh\nprintf '%s' \"$$\" > \"$VW_CHROME_DETACHED_FIXTURE\"\nexec /bin/sleep 30\n",
+    )
+    .unwrap();
+    std::fs::set_permissions(&launcher, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let marker = dir.path().join("pid");
+    let result = std::process::Command::new(std::env::current_exe().unwrap())
+        .args(["--exact", "chrome_control::browser::reap_tests::chrome_launch_survives_its_parent_in_a_detached_session"])
+        .env(CHILD, &marker).env("PATH", dir.path()).output().unwrap();
+    assert!(result.status.success(), "{result:?}");
+    let pid = std::fs::read_to_string(marker).unwrap();
+    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).unwrap();
+    // Stop only the disposable child after recording its survival and session identity.
+    let _ = std::process::Command::new("/bin/kill")
+        .arg(&pid)
+        .status()
+        .unwrap();
+    let fields: Vec<_> = stat.split_whitespace().collect();
+    assert_ne!(fields[2], "Z", "the browser outlives its launching app");
+    assert_eq!(
+        fields[5], pid,
+        "browser must be in a detached OS session: {stat}"
+    );
+}
+
+#[test]
 fn chrome_launch_reaps_its_child() {
     const CHILD: &str = "VW_CHROME_REAP_FIXTURE";
     if let Some(pid_file) = std::env::var_os(CHILD) {
         open(&ChromeControlConfig::default(), "https://example.test").unwrap();
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
         let pid = loop {
-            if let Ok(pid) = std::fs::read_to_string(&pid_file) {
+            // The shell creates the file before it writes the PID: an empty read is not a PID yet.
+            if let Ok(pid) = std::fs::read_to_string(&pid_file)
+                && !pid.trim().is_empty()
+            {
                 break pid.trim().to_owned();
             }
             assert!(std::time::Instant::now() < deadline, "launcher never ran");

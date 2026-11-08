@@ -82,3 +82,23 @@ fn linux_video_refuses_without_progress_or_forwarding() {
     assert!(text.starts_with("Not run: video review is not available on Linux yet."));
     assert!(text.contains("Ask for still images"));
 }
+
+#[test]
+fn git_bash_video_paths_name_the_same_windows_file() {
+    for (path, expected) in [
+        ("/c/Users/Example/clip.mp4", r"C:\Users\Example\clip.mp4"),
+        ("/D/video clips/film.mp4", r"D:\video clips\film.mp4"),
+        ("/z/é/clip.mp4", r"Z:\é\clip.mp4"),
+        ("/c", r"C:\"),
+        (r"C:\clips\file.mp4", r"C:\clips\file.mp4"),
+        ("clip.mp4", "clip.mp4"),
+        ("/clips/file.mp4", "/clips/file.mp4"),
+        ("//server/share/file.mp4", "//server/share/file.mp4"),
+    ] {
+        assert_eq!(
+            vw_agent_tools::video::windows_path(path),
+            expected,
+            "{path}"
+        );
+    }
+}

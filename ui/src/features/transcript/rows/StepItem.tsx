@@ -24,7 +24,7 @@ import { formatElapsed } from "./Time";
 /** The status class: `run`, `done`, `fail` or `cancel`. */
 function stateClass(view: ReturnType<typeof effectView>): string {
   if (view.live) return "run";
-  if (view.status === "cancelled" || view.status === "skipped") return "cancel";
+  if (["cancelled", "skipped", "declined"].includes(view.status)) return "cancel";
   if (view.status === "failed" || view.success === false) return "fail";
   return "done";
 }
@@ -76,7 +76,7 @@ export const StepItem = memo(function StepItem({ entry }: { entry: Obj }): React
           ) : view.durationMs !== null && view.durationMs >= 1 ? (
             formatElapsed(view.durationMs)
           ) : null}
-          <span className="sr">{STATE_TEXT[state]}</span>
+          <span className="sr">{view.status === "declined" ? "declined" : STATE_TEXT[state]}</span>
         </span>
       </button>
       {outcome === null ? null : (

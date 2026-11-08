@@ -1,0 +1,18 @@
+{
+  "subscription": { "plan_name": "PRO", "vibe_payg_enabled": true },
+  "budget": {
+    "vibe_budget": {
+      "usage_percentage": 42.5,
+      "initial_budget": 100,
+      "reset_at": "2026-12-01T00:00:00Z",
+      "payg_enabled": null
+    }
+  },
+  "account": {
+    "account": {
+      "status": "ready",
+      "plan": { "kind": "chat", "name": "pro", "title": "Pro" },
+      "budget": { "usagePercentage": 42.5, "resetAt": "2026-12-01T00:00:00Z", "paygEnabled": true }
+    }
+  }
+}

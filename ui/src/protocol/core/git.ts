@@ -522,7 +522,7 @@ export type PushPlan = {
  */
 remote: string,
 /**
- * Where it goes (no user info).
+ * The exact address Git resolves for this push (credentials and fragments are refused).
  */
 url: string,
 /**

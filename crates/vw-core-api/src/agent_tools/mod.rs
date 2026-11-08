@@ -31,6 +31,10 @@ mod launches;
 pub(crate) mod panel;
 mod preview_tools;
 mod process_reply;
+#[cfg(feature = "agent-vault")]
+mod secret_capture;
+#[cfg(feature = "agent-vault")]
+mod secret_capture_exec;
 mod secret_dialog;
 pub(crate) mod secret_env;
 mod secret_exec;
@@ -49,6 +53,7 @@ pub(crate) mod shell_commands;
 mod start;
 mod tools;
 pub(crate) use prepare::prepare;
+pub(crate) use tools::restart_launch;
 mod work_tools;
 
 /// The secret broker's dialog method (one of the vault's native-only dialogs, `vault_scope`).
@@ -324,7 +329,7 @@ impl AgentTools {
             });
         chrome_launch(
             shared.chrome_control.config.available(),
-            shared.chrome_control.enabled(),
+            shared.chrome_control.enabled() || crate::chrome_control::safari::enabled(&shared),
             mode.as_deref(),
         )
     }
@@ -622,3 +627,9 @@ mod server_args_tests {
         );
     }
 }
+
+#[cfg(feature = "agent-vault")]
+mod vault_capture;
+
+#[cfg(test)]
+mod restart_tests;

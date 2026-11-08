@@ -1,11 +1,11 @@
-//! Ask-mode consent for history and bookmark reads. The authenticated hook keeps the prepared call in its receipt.
+//! Ask-mode consent for personal reads and closing exact tabs. The authenticated hook keeps the prepared call in its receipt.
 //! Uses the existing card/grant service; no mode change, helper retry or model instructions.
 use crate::{ask::tool_calls, core::Shared};
 use serde_json::{Value, json};
 use std::sync::Arc;
 
 /// Core-only preflight marker; execution receives it only after consent. Never deserialized from tool input.
-pub(super) struct ReadConsent(());
+pub(super) struct Consent(());
 
 pub(crate) fn personal_read(tool: &str, args: &Value) -> bool {
     tool == "chrome_execute"
@@ -15,9 +15,18 @@ pub(crate) fn personal_read(tool: &str, args: &Value) -> bool {
         )
 }
 
+pub(crate) fn card_action(tool: &str, args: &Value) -> bool {
+    personal_read(tool, args)
+        || tool == "chrome_execute"
+            && matches!(
+                args["action"].as_str(),
+                Some("tabs.close_owned" | "tabs.close_user")
+            )
+}
+
 pub(crate) fn needed(shared: &Shared, owner: &str, args: &Value) -> bool {
     super::check::mode(shared, owner).as_deref() == Some("ask")
-        && personal_read("chrome_execute", args)
+        && card_action("chrome_execute", args)
 }
 
 pub(crate) async fn prepare(
@@ -28,24 +37,44 @@ pub(crate) async fn prepare(
     args: Value,
 ) -> Result<tool_calls::receipts::Execution, String> {
     super::gateway::validate_execute_args(&args)?;
+    let (args, reopened) = match super::reopen::resolve(shared, owner, "chrome_execute", args)
+        .await?
+    {
+        super::reopen::Resolved::Ready(args, reopened) => (args, reopened),
+        super::reopen::Resolved::Refused(answer) => return Ok(Box::pin(async move { Ok(answer) })),
+    };
     // Check availability, chat ownership and the current mode before opening any card.
-    super::check::authorize_read(
-        shared,
-        owner,
-        "chrome_execute",
-        &args,
-        Some(&ReadConsent(())),
-    )?;
+    super::check::authorize_read(shared, owner, "chrome_execute", &args, Some(&Consent(())))?;
     super::gateway::validate_session(shared, owner, "chrome_execute", &args)?;
-    tool_calls::approve(shared, owner, source, call, json!({"kind":"approval",
-        "effect":{"kind":"tool","toolName":"mcp_vw.chrome_execute","input":args},"requiredPermissions":[]})).await?;
+    let mut detail = json!({"kind":"approval","effect":{"kind":"tool","toolName":"mcp_vw.chrome_execute","input":args},"requiredPermissions":[]});
+    if !personal_read("chrome_execute", &args) {
+        let reply = shared
+            .chrome_control
+            .owner
+            .call(
+                "chrome_status",
+                json!({"_closeTab":{"sessionId":args["sessionId"],"tabId":args["args"]["tabId"]}}),
+            )
+            .await
+            .into_value();
+        let tab = &reply["structuredContent"]["tab"];
+        if !tab.is_object() || tab["tabId"] != args["args"]["tabId"] {
+            return Err("Not run: this tab is unavailable to this chat. Use a tab in this chat window or a window handed to this chat.".into());
+        }
+        detail["effect"]["display"] = json!({"tab":tab});
+    }
+    tool_calls::approve(shared, owner, source, call, detail).await?;
     let shared = Arc::downgrade(shared);
     let owner = owner.to_owned();
     Ok(Box::pin(async move {
         let shared = shared
             .upgrade()
             .ok_or("Browser closed. Reopen the session before trying again.")?;
-        execute(&shared, &owner, args, ReadConsent(())).await
+        let mut answer = execute(&shared, &owner, args, Consent(())).await?;
+        if let Some(reopened) = reopened {
+            super::reopen::note(&mut answer, &reopened);
+        }
+        Ok(answer)
     }))
 }
 
@@ -53,7 +82,7 @@ async fn execute(
     shared: &Arc<Shared>,
     session: &str,
     args: Value,
-    consent: ReadConsent,
+    consent: Consent,
 ) -> Result<Value, String> {
     let request = args.clone();
     let mut answer =
@@ -75,7 +104,7 @@ pub(super) async fn send(
     session: &str,
     tool: &str,
     args: Value,
-    consent: Option<&ReadConsent>,
+    consent: Option<&Consent>,
 ) -> Result<super::owner::Answer, String> {
     if consent.is_some() {
         super::escalation::send_read(shared, session, tool, args, consent).await

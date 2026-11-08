@@ -74,7 +74,13 @@ impl Rig {
                 .to_string(),
         )
         .unwrap();
-        let calls = chrome.owner.answering(answer);
+        let calls = chrome.owner.answering(move |method, args| {
+            if method == "owner.browserAvailability" {
+                json!({"applied":true})
+            } else {
+                answer(method, args)
+            }
+        });
         // A helper connection is up (its tool list arrived).
         chrome
             .owner
@@ -205,9 +211,9 @@ async fn connect_revokes_previous_attempt() {
         )
         .await
         .unwrap();
-    assert_eq!(
-        rig.methods().last().map(String::as_str),
-        Some(enroll::REVOKE)
+    assert!(
+        !has_attempt(&rig),
+        "the disabled browser keeps no enrollment attempt"
     );
     rig.core.shutdown().await;
 }
@@ -317,11 +323,6 @@ async fn opens_enroll_url_once_without_profile_flag() {
         "exactly one page, with the full fingerprint"
     );
     assert!(opened[0].ends_with(&format!("&f={OURS}")));
-    // The real launcher passes the address as Chrome's only argument: no profile directory flag.
-    assert_eq!(
-        browser::launch_args("chrome-extension://x/ui.html#t"),
-        [std::ffi::OsString::from("chrome-extension://x/ui.html#t")]
-    );
     // The view and its events never carry the ticket.
     let view = serde_json::to_string(&rig.core.chrome_view()).unwrap();
     assert!(!view.contains(TICKET));
@@ -587,7 +588,7 @@ async fn connect_restores_a_registration_after_the_browser_profile_was_reset() {
     }
     #[cfg(feature = "your-edge")]
     {
-        let data = setup::user_data(Some(dir), "Microsoft Edge").remove(0);
+        let data = setup::user_data(&chrome.config, Some(dir), "Microsoft Edge").remove(0);
         let manifest = data
             .join("NativeMessagingHosts")
             .join(format!("{}.json", setup::HOST_NAME));
@@ -613,7 +614,7 @@ async fn an_unrepairable_host_has_the_same_recovery_action_for_settings_and_the_
         &rig.core.shared.instructions.own_home,
     )
     .unwrap();
-    let data = setup::user_data(Some(state), "Google Chrome").remove(0);
+    let data = setup::user_data(&chrome.config, Some(state), "Google Chrome").remove(0);
     let extension = data
         .join("Default/Extensions")
         .join(&chrome.config.extension_id)

@@ -34,7 +34,7 @@ const PUSH_TIMEOUT: Duration = Duration::from_secs(600);
 pub struct PushPlan {
     /// The remote's name.
     pub remote: String,
-    /// Where it goes (no user info).
+    /// The exact address Git resolves for this push (credentials and fragments are refused).
     pub url: String,
     /// The local branch.
     pub branch: String,
@@ -48,8 +48,7 @@ pub struct PushPlan {
     pub first_push: bool,
     /// The repository uses Git LFS (its objects are not uploaded by this push).
     pub lfs: bool,
-    /// The exact push address git gets as its target (`url` is this without user info; kept by the core, never
-    /// sent: it may hold a token).
+    /// The resolved push address, retained by the core to check the destination again before execution.
     #[serde(skip)]
     #[cfg_attr(feature = "ts", ts(skip))]
     pub target: String,
@@ -94,19 +93,7 @@ pub fn plan(root: &Path, state: &BranchState, remote: Option<&str>) -> Result<Pu
             target.url_note()
         )));
     }
-    let addresses = state::read(
-        root,
-        &["remote", "get-url", "--push", "--all", &target.name],
-    )?
-    .unwrap_or_default();
-    let mut lines = addresses.lines();
-    let push_target = lines.next().unwrap_or("").to_owned();
-    if lines.next().is_some() {
-        return Err(GitError::Blocked(format!(
-            "The remote {} pushes to several addresses; push it from your own git tool.",
-            target.name
-        )));
-    }
+    let push_target = resolved_target(root, &target.name)?;
     let upstream = state.upstream.as_ref().filter(|u| u.remote == target.name);
     let remote_branch = upstream.map_or_else(|| branch.to_owned(), |u| u.branch.clone());
     for name in [branch, remote_branch.as_str()] {
@@ -129,7 +116,7 @@ pub fn plan(root: &Path, state: &BranchState, remote: Option<&str>) -> Result<Pu
     };
     Ok(PushPlan {
         remote: target.name.clone(),
-        url: target.push_url.clone(),
+        url: push_target.clone(),
         branch: branch.to_owned(),
         remote_branch,
         commit,
@@ -138,6 +125,39 @@ pub fn plan(root: &Path, state: &BranchState, remote: Option<&str>) -> Result<Pu
         lfs: uses_lfs(root)?,
         target: push_target,
     })
+}
+
+/// Git resolves pushInsteadOf/insteadOf once, using the Publish configuration just as `push` does.
+fn resolved_target(root: &Path, remote: &str) -> Result<String, GitError> {
+    let bytes = Call::new(root, Index::User)
+        .profile(Profile::Publish)
+        .args(["remote", "get-url", "--push", "--all", remote])
+        .timeout(Duration::from_secs(20))
+        .run()?;
+    let addresses = String::from_utf8(bytes)
+        .map_err(|_| GitError::Blocked("The push address is not valid UTF-8.".into()))?;
+    // Remove only Git's output delimiter, never whitespace belonging to the actual URL.
+    let address = addresses.strip_suffix('\n').unwrap_or(&addresses);
+    if address.is_empty() || address.starts_with('-') || address.contains(['\n', '\r']) {
+        return Err(GitError::Blocked(format!(
+            "The remote {remote} must have one push address."
+        )));
+    }
+    // URL parsing must recognize # and ? as authority terminators, never as part of a host/user name.
+    // SSH's login name (including scp-style git@host:path) is not a password or token.
+    if address.contains("://") {
+        let url = url::Url::parse(address)
+            .map_err(|_| GitError::Blocked("The push address is not a valid URL.".into()))?;
+        if url.fragment().is_some()
+            || url.password().is_some()
+            || (!url.username().is_empty() && url.scheme() != "ssh")
+        {
+            return Err(GitError::Blocked(
+                "The push address must not contain credentials or a fragment.".into(),
+            ));
+        }
+    }
+    Ok(address.to_owned())
 }
 
 /// True when the repository's `.gitattributes` at `HEAD` sends files through the LFS filter.
@@ -210,15 +230,9 @@ pub fn push(root: &Path, plan: &PushPlan) -> Result<String, GitError> {
             "The remote or branch name cannot be used.".to_owned(),
         ));
     }
-    // The address now must be the one confirmed; git then gets that exact string as the target (no second
-    // resolution), and git's own protocol allowlist (`GIT_ALLOW_PROTOCOL`, set by the Publish profile) decides
-    // the transport. Our classification only words the dialog (parser differential).
-    let address = state::read(
-        root,
-        &["remote", "get-url", "--push", "--all", &plan.remote],
-    )?
-    .unwrap_or_default();
-    if address != plan.target || plan.target.is_empty() || plan.target.starts_with('-') {
+    // Resolve with the same config and push direction as execution, then use the remote name.
+    // Passing the expanded URL back to Git would expand insteadOf a second time.
+    if resolved_target(root, &plan.remote)? != plan.target || plan.url != plan.target {
         return Err(changed());
     }
     // The confirmed commit itself, never a branch name that could move after the dialog.
@@ -235,13 +249,12 @@ pub fn push(root: &Path, plan: &PushPlan) -> Result<String, GitError> {
             "--no-verify",
         ])
         // `--` first: nothing after it can be read as an option.
-        .args(["--", plan.target.as_str(), refspec.as_str()])
+        .args(["--", plan.remote.as_str(), refspec.as_str()])
         .timeout(PUSH_TIMEOUT)
         .output()?;
     let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
     if out.ok() {
-        // Pushed to an address, git updates no remote-tracking ref: record what the remote has now, as a push
-        // to the remote's name would, and the upstream on a first push (what `--set-upstream` writes).
+        // Record the confirmed remote tip and the upstream on a first push (what `--set-upstream` writes).
         let tracking = format!("refs/remotes/{}/{}", plan.remote, plan.remote_branch);
         Call::new(root, Index::User)
             .args([

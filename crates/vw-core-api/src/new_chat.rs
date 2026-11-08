@@ -305,6 +305,10 @@ pub(crate) async fn adopt(
         return Err(CoreError::not_loaded(session_id));
     }
     let old = shared.new_chat.renew();
+    shared
+        .chrome_control
+        .adopt_tab_context(&old, session_id)
+        .await;
     // One lease per session: a fresh session that already leased ports gives back the ones nothing uses.
     if !shared.procmon.leases().of(&old).is_empty()
         && !shared.procmon.leases().of(session_id).is_empty()
@@ -348,6 +352,8 @@ pub(crate) async fn adopt(
 /// what it holds until quit), so the next first message can only adopt data made after Close all.
 pub(crate) async fn close_all(shared: &std::sync::Arc<Shared>) {
     let id = shared.new_chat.renew();
+    let next = shared.new_chat.lock().id.clone();
+    shared.chrome_control.adopt_tab_context(&id, &next).await;
     crate::terminals::close_session(shared, &id).await;
     crate::processes::end_session(shared, &id, false).await;
     crate::previews::session_ended(shared, &id, true).await;

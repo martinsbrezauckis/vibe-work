@@ -20,8 +20,9 @@ vw-platform = { path = "../vw-platform", optional = true, features = ["proxy-res
 tokio = { version = "1.53", features = ["net", "io-util", "time", "sync", "rt", "macros"] }
 tracing = "0.1"
 url = "2"
-# Canary tokens (same version as the other crates).
+# Canary tokens and per-listener credentials (same version as the other crates).
 getrandom = "0.3"
+base64 = "0.23"
 # The content-rule JSON for macOS webviews (same version as the other crates).
 serde_json = "1"
 # The user's proxy rules (environment, Windows/macOS system settings, NO_PROXY), the same matcher reqwest uses for

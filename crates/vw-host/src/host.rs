@@ -28,7 +28,7 @@ use tracing::{info, warn};
 use vw_core_api::{
     Command, CommandResult, Core, CoreConfig, CoreError, CoreEvent, ErrorCode, Origin,
 };
-use vw_debug_api::{DebugApi, DebugApiConfig, UiRoutes};
+use vw_debug_api::{DebugApi, UiRoutes};
 use vw_platform::{Notifier, reveal_folder};
 use vw_supervisor::{SecretProvider, SupervisorConfig};
 
@@ -297,21 +297,28 @@ pub struct HostConfig {
 
 /// The running host. Cheap to share behind an `Arc`.
 pub struct Host {
-    core: Option<Core>,
+    pub(crate) core: Option<Core>,
     startup: Startup,
-    ui: UiBridge,
-    routes: UiRoutes,
-    debug: AsyncMutex<Option<DebugApi>>,
+    pub(crate) ui: UiBridge,
+    pub(crate) routes: UiRoutes,
+    pub(crate) debug: AsyncMutex<Option<DebugApi>>,
     forwarder: Forwarder,
     runtime: Handle,
     notifier: Arc<dyn Notifier>,
     limiter: RateLimit,
     events: HostEvents,
     pub(crate) settings_path: PathBuf,
-    descriptor_dir: PathBuf,
-    dev_build: bool,
-    keys: Option<Arc<vw_keys::KeyService>>,
-    app_window: Option<vw_debug_api::SharedAppWindow>,
+    pub(crate) descriptor_dir: PathBuf,
+    pub(crate) dev_build: bool,
+    pub(crate) keys: Option<Arc<vw_keys::KeyService>>,
+    pub(crate) app_window: Option<vw_debug_api::SharedAppWindow>,
+}
+
+fn remove_legacy_debug_token(dir: &Path) {
+    let test_export = vw_debug_api::DebugApiConfig::new(dir.to_path_buf()).test_token_file;
+    if !test_export && let Err(error) = vw_debug_api::remove_legacy_token(dir) {
+        warn!(%error, "could not remove legacy Debug API credentials");
+    }
 }
 
 impl Host {
@@ -325,6 +332,7 @@ impl Host {
     }
 
     async fn start_inner(config: HostConfig) -> Self {
+        remove_legacy_debug_token(&config.descriptor_dir);
         let ui = UiBridge::new(config.ui_reply_timeout);
         let routes = UiRoutes::default();
         for (name, description) in SHELL_ROUTES
@@ -374,6 +382,9 @@ impl Host {
             ui.set_facts(Arc::new(crate::ui_grants::CoreFacts(core.clone())));
             let bridge = ui.clone();
             core.set_window_drive(move || bridge.driving());
+            if let Some(window) = config.app_window.clone() {
+                feedback_capture(core, window, routes.clone());
+            }
             for folder in &config.picked_folders {
                 if let Err(error) = core.register_picked_folder(folder) {
                     warn!(%error, "picked folder not registered");
@@ -400,25 +411,6 @@ impl Host {
         let setting = HostSettings::load(&host.settings_path).debug_api;
         host.start_debug_api(setting).await;
         host
-    }
-
-    async fn start_debug_api(&self, user_setting: Option<bool>) {
-        let Some(core) = &self.core else { return };
-        let mut config = DebugApiConfig::new(self.descriptor_dir.clone());
-        config.user_setting = user_setting;
-        config.dev_build = self.dev_build;
-        config.ui_routes = self.routes.clone();
-        config.window = self.app_window.clone();
-        match DebugApi::start(core.clone(), config).await {
-            Ok(api) => {
-                // the Debug API's port is never reachable from a browser page.
-                if let (Some(api), Some(guard)) = (&api, core.network_guard()) {
-                    guard.add_internal_port(api.port());
-                }
-                *self.debug.lock().await = api;
-            }
-            Err(error) => warn!(%error, "the Debug API did not start"),
-        }
     }
 
     /// Whether Vibe is running and, if not, why.
@@ -508,7 +500,16 @@ impl Host {
         command: Command,
     ) -> Result<CommandResult, CoreError> {
         match &self.core {
-            Some(core) => core.execute(origin, command).await,
+            Some(core) => {
+                let vault_command =
+                    matches!(command, Command::Keys { .. } | Command::Secrets { .. });
+                let result = core.execute(origin, command).await;
+                if result.is_ok() && vault_command {
+                    self.start_debug_api(HostSettings::load(&self.settings_path).debug_api)
+                        .await;
+                }
+                result
+            }
             None => Err(self.unavailable()),
         }
     }
@@ -671,7 +672,7 @@ impl Host {
     /// the core.
     ///
     /// No dialog is needed to turn it on, in any build: the bearer token is the
-    /// gate. A script in the webview can flip the switch but cannot read the token file, so it
+    /// gate. A script in the webview can flip the switch but cannot read its vault value, so it
     /// gains nothing (and the token never crosses the bridge, see [`Host::debug_token_file`]).
     ///
     /// # Errors
@@ -720,34 +721,6 @@ impl Host {
         settings.save(&self.settings_path)
     }
 
-    /// The Debug API token file's path (stable across runs; user-only), regenerating the token
-    /// first when `rotate` is true: the old token stops working at once. Works while the API is
-    /// off too (the next start reuses the new token).
-    ///
-    /// The result is a PATH. The token itself never leaves the Debug API crate except in the
-    /// token file: not in this return value, not in any command result, event or `ui/*` reply
-    /// (tests assert it with the real token value).
-    ///
-    /// # Errors
-    /// [`vw_debug_api::DebugApiError`] when the new token cannot be written user-only (the old one
-    /// keeps working then).
-    pub async fn debug_token_file(
-        &self,
-        rotate: bool,
-    ) -> Result<PathBuf, vw_debug_api::DebugApiError> {
-        if let Some(api) = self.debug.lock().await.as_ref() {
-            if rotate {
-                api.rotate_token()?;
-            }
-            return Ok(api.token_path().to_path_buf());
-        }
-        if rotate {
-            vw_debug_api::rotate_token_file(&self.descriptor_dir)
-        } else {
-            Ok(self.descriptor_dir.join(vw_debug_api::TOKEN_FILE))
-        }
-    }
-
     /// Stops the Debug API, the forwarder and the core (server shut down cleanly).
     pub async fn shutdown(&self) {
         self.forwarder.stop();
@@ -762,4 +735,24 @@ impl Host {
             keys.shutdown().await;
         }
     }
+}
+
+/// Lets the feedback form attach a screenshot of the app window, through the Debug API's capture (secret fields blanked).
+fn feedback_capture(core: &Core, window: vw_debug_api::SharedAppWindow, routes: UiRoutes) {
+    core.set_feedback_capture(move || {
+        let window = window.clone();
+        let routes = routes.clone();
+        async move {
+            vw_debug_api::capture_main(&window, &routes)
+                .await
+                .map(|(png, _)| png)
+                .map_err(|error| {
+                    if error.secret_check_failed() {
+                        "Secret fields could not be hidden. No screenshot attached.".to_owned()
+                    } else {
+                        "Screenshot unavailable. No screenshot attached.".to_owned()
+                    }
+                })
+        }
+    });
 }

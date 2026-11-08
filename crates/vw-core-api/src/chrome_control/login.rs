@@ -242,7 +242,7 @@ mod tests {
             .lock()
             .unwrap()
             .insert("t".into(), "s".into());
-        shared.chrome_control.set_local_network(true).unwrap();
+        shared.chrome_control.set_local_network(true);
         let seen = super::super::test_support::answering(shared, |_, _| {
             json!({"isError":false,"content":[{"type":"text","text":"filled"}],
                 "structuredContent":{"operationId":"op","status":"completed","data":{"filled":true}}})

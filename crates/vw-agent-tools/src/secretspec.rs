@@ -75,6 +75,36 @@ fn hidden(c: char) -> bool {
 /// # Errors
 /// A plain-text reason for the agent.
 pub fn parse(args: &Value) -> Result<RunSpec, String> {
+    parse_inner(args, true)
+}
+
+/// Checks a bounded command whose stdout is a new vault value; existing input secrets are optional.
+/// # Errors
+/// Invalid command arguments, bindings or time limit.
+#[cfg(feature = "agent-vault")]
+pub fn parse_capture(args: &Value) -> Result<RunSpec, String> {
+    if !args.is_object() || args.get("cwd").is_some_and(|cwd| !cwd.is_string()) {
+        return Err(
+            "A command capture needs command options; supply an object and a text cwd if used."
+                .into(),
+        );
+    }
+    let mut args = args.clone();
+    args["purpose"] = Value::String("Save command output directly to the vault".into());
+    if args.get("timeoutSeconds").is_none() {
+        args["timeoutSeconds"] = 20.into();
+    }
+    let spec = parse_inner(&args, false)?;
+    if spec.timeout_s > 30 {
+        return Err(
+            "A private capture must finish within one tool call; use timeoutSeconds from 1 to 30."
+                .into(),
+        );
+    }
+    Ok(spec)
+}
+
+fn parse_inner(args: &Value, require_bindings: bool) -> Result<RunSpec, String> {
     let program = text(args, "program")
         .map(|p| p.trim().to_owned())
         .filter(|p| !p.is_empty() && p.len() <= MAX_ARG && plain(p))
@@ -112,7 +142,15 @@ pub fn parse(args: &Value) -> Result<RunSpec, String> {
             .filter(|s| (1..=MAX_TIMEOUT_S).contains(s))
             .ok_or(format!("timeoutSeconds must be 1 to {MAX_TIMEOUT_S}"))?,
     };
-    let bindings = parse_bindings(args.get("env"))?;
+    let bindings = if !require_bindings
+        && args
+            .get("env")
+            .is_none_or(|v| v.as_array().is_some_and(Vec::is_empty))
+    {
+        Vec::new()
+    } else {
+        parse_bindings(args.get("env"))?
+    };
     if let Some(reason) = inline_evaluation(&program, &list) {
         return Err(reason);
     }

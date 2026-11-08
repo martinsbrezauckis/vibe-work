@@ -133,19 +133,6 @@ impl PreviewService {
                 "the App preview opens only this session's local servers".to_owned(),
             ));
         }
-        // A local-network literal opens only as the user's Lan page (the core refuses the agent).
-        if destination == Destination::Lan && !request.lan {
-            return Err(crate::policy::UrlRefusal::Lan(
-                request
-                    .url
-                    .host_str()
-                    .unwrap_or("")
-                    .chars()
-                    .take(80)
-                    .collect(),
-            )
-            .into());
-        }
         let mut state = self.inner.lock();
         let owner = state.owner_of(session);
         if let Some(tabs) = state.tabs.get_mut(&owner) {
@@ -318,6 +305,20 @@ impl PreviewService {
             .tabs
             .get(owner)
             .and_then(|tabs| tabs.agent.clone())
+    }
+
+    /// The page an agent browser action of `owner` addresses, without creating or selecting one (approval
+    /// cards look up the observed target there): the named tab only when `owner` owns it, else the selected
+    /// agent page. A new tab (`"new"`) has no observation yet.
+    #[must_use]
+    pub fn agent_page_for(&self, owner: &str, tab: Option<&str>) -> Option<String> {
+        match tab {
+            Some("new") => None,
+            Some(key) => {
+                (self.owner_session_id(key).as_deref() == Some(owner)).then(|| key.to_owned())
+            }
+            None => self.agent_page(owner),
+        }
     }
 
     /// All Browser pages, with the pinned app page first.

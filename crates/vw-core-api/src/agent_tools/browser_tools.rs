@@ -4,8 +4,8 @@
 //! Depends on: `browser` (driver, navigation), vw-browser, vw-agent-tools (`wire`). Called by: `tools::call`.
 //! `browser_act` `fill` goes to `browser_fill` (a vault login into a sign-in field) before the driver.
 //! A read that searches for a registered secret is refused before accessing the page, with no location information.
-//! Invariants: the agent's navigations are strict (proven local ports) and public pages need the mount's proven
-//! network guard; an answer with a screenshot carries its PNG under `wire::IMAGE_KEY` (<= 1 MiB before base64).
+//! Invariants: local and public addresses share the browser URL policy; agent calls retain refusal reporting and
+//! pinned App preview port ownership checks. Screenshots carry their PNG under `wire::IMAGE_KEY` (<= 1 MiB before base64).
 
 use std::sync::Arc;
 
@@ -30,7 +30,7 @@ fn target(chrome_available: bool, args: &Value) -> Result<(), String> {
     }
 }
 
-fn check_current(shared: &Shared, owner: &str, page: &str) -> Result<(), String> {
+pub(super) fn check_current(shared: &Shared, owner: &str, page: &str) -> Result<(), String> {
     let hub = crate::previews::hub(shared).map_err(|error| error.message)?;
     if shared.store.view(owner).is_none()
         || agent_stopped(&hub.browser, &hub.service, owner)
@@ -113,6 +113,14 @@ pub(crate) async fn call(
     args: Value,
 ) -> Result<Value, String> {
     vw_agent_tools::browser_input::validate(tool, &args)?;
+    #[cfg(feature = "agent-vault")]
+    if tool == names::BROWSER_CAPTURE_SECRET {
+        return Err(
+            "This vault save needs its pre-tool hook decision; retry the tool through its hook."
+                .into(),
+        );
+    }
+    #[cfg(not(feature = "agent-vault"))]
     if tool == names::BROWSER_CAPTURE_SECRET {
         return Err("Not run: saving a key to the vault is the user's action. Ask the user to select the key in the browser panel, then choose Save to vault in the toolbar, in Browser options when narrow, or by right-click on the selection.".to_owned());
     }

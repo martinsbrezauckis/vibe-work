@@ -22,7 +22,7 @@ export interface SlashCommandRow {
 
 /** The GUI commands, in menu order. */
 const ALL_COMMANDS: readonly SlashCommandRow[] = [
-  { name: "feedback", description: "Report a bug or ask for a feature", runs: "in the app" },
+  { name: "feedback", description: "Send feedback", runs: "in the app" },
   {
     name: "compact",
     description: "Summarize the history now (optional instructions)",

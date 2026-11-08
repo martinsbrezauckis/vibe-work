@@ -157,6 +157,9 @@ impl Core {
             ),
         };
         // Not `serverUnavailable`: a restart in progress is no reason to give up on a session.
+        if self.shared.interrupted_send.pending(id).is_some() {
+            self.shared.channels.close(id).await;
+        }
         let stuck = matches!(outcome.code, ErrorCode::Timeout | ErrorCode::ServerError)
             && !matches!(
                 outcome.server_code.as_deref(),
@@ -202,6 +205,11 @@ impl Core {
             _ = &mut cancel => None,
         };
         self.shared.stuck.end_retry(id, &owner);
+        if !matches!(outcome, Some(Ok(Ok(()))))
+            && self.shared.interrupted_send.pending(id).is_some()
+        {
+            self.shared.channels.close(id).await;
+        }
         match outcome {
             Some(Ok(Ok(()))) => {
                 if self.shared.stuck.clear(id) {

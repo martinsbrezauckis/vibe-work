@@ -1,12 +1,10 @@
 //! `Core`: both clients' shared facade for commands, events, sessions, supervisor and method gate.
 //! Depends on vw-supervisor, vw-session, vw-gate, pump, transport, confirmer, subscription and view.
-//! Called by the app's Tauri bridge, vw-debug-api and tests.
-//! Invariants:
+//! Called by the app's Tauri bridge, vw-debug-api and tests. Invariants:
 //! - One gate per core: tokens, callbacks, picked folders and model aliases survive server restarts.
 //!   Transport routes requests to the session's channel or the current server's lobby (`channels`).
 //! - The pump subscribes to the first connection before `start` returns, so no session notification is missed.
-//! - `Core` is an Arc handle. Dropping the last handle kills the supervisor and terminal process trees;
-//!   `shutdown` does the same cleanly, terminals first.
+//! - `Core` is an Arc handle. Drop kills the supervisor/terminal trees; `shutdown` stops terminals first.
 
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -78,6 +76,7 @@ pub(crate) struct Shared {
     pub(crate) access: Access,
     pub(crate) model_choices: crate::model_choices::Choices,
     pub(crate) plugin_refresh: crate::plugin_refresh::Refresh,
+    pub(crate) interrupted_send: crate::interrupted_send::State,
     /// Per-chat Stop generation: a continuation scheduled before a Stop is never sent (`stops.rs`).
     pub(crate) stops: crate::stops::Stops,
     pub(crate) queue_returns: crate::queue_return::Returns,
@@ -337,7 +336,6 @@ fn spawn_owned_tasks(shared: &Arc<Shared>) {
         .procmon_tick
         .lock()
         .unwrap_or_else(PoisonError::into_inner) = Some(crate::processes::spawn_tick(shared));
-    // which viewed sessions another process holds.
     crate::session_holder::start_poll(shared);
 }
 
@@ -499,6 +497,7 @@ impl Core {
             access: Access::load(config.sessions_dir.clone()),
             model_choices: crate::model_choices::Choices::load(config.sessions_dir.as_deref()),
             plugin_refresh: crate::plugin_refresh::Refresh::default(),
+            interrupted_send: crate::interrupted_send::State::default(),
             stops: crate::stops::Stops::default(),
             stuck: crate::stuck::StuckSessions::default(),
             resync_reads: AtomicU64::new(0),
@@ -591,6 +590,7 @@ impl Core {
             shared: shared.clone(),
         }))
         .await;
+        crate::recovery_schedules::start(&shared);
         crate::github_reads::watch(&shared);
         crate::keep_awake::publish(&shared);
         crate::secret_scan::start(&shared);
@@ -782,6 +782,9 @@ impl Core {
         crate::files::shutdown(&self.shared).await;
         // temporary sessions are deleted while Vibe still runs (bounded per session).
         self.delete_temporary_all(false).await;
+        if let Some(keys) = &self.shared.config.keys {
+            keys.begin_shutdown().await;
+        }
         let exit = self.shared.supervisor.stop().await;
         self.shared.vibe_processes.shutdown();
         self.shared.leases.release_all();

@@ -183,7 +183,7 @@ pub struct KeyService {
     lock_on_quit: std::sync::atomic::AtomicBool,
     /// The kept key opens nothing until a password unlock (`last_state`).
     locked_until_password: std::sync::atomic::AtomicBool,
-    selection: tokio::sync::Mutex<()>,
+    pub(crate) selection: tokio::sync::Mutex<()>,
     existing: ExistingKeys,
     pub(crate) events: broadcast::Sender<KeyEvent>,
     cleanup_notices: Arc<std::sync::Mutex<Vec<String>>>,
@@ -332,16 +332,32 @@ impl KeyService {
             // Every vault-opening path ends here: stored values are registered for the Debug API first.
             crate::scan_secrets::open_and_registered(&vault)?;
             match vault.read_item(&item_id) {
-                Ok(Some(item)) => mistral_key::key_in_item(&item).ok_or(KeyNeed::Setup),
+                Ok(Some(item)) => mistral_key::key_in_item(&item)
+                    .map(|key| (key, mistral_keys::recorded_auth_failure(&item)))
+                    .ok_or(KeyNeed::Setup),
                 _ => Err(KeyNeed::Setup),
             }
         })
         .await;
+        let mut latest = self
+            .last_key_test
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        *latest = None;
         match read {
-            Ok(Ok(key)) => self.key.set_key(Zeroizing::new(key.expose().to_owned())),
+            Ok(Ok((key, failure))) => {
+                self.key.set_key(Zeroizing::new(key.expose().to_owned()));
+                if let (Some(error), KeyState::Ready(current)) = (failure, self.key.current()) {
+                    *latest = Some(KeyTest {
+                        key: Arc::downgrade(&current),
+                        result: Err(error),
+                    });
+                }
+            }
             Ok(Err(need)) => self.key.clear(need),
             Err(_) => self.key.clear(KeyNeed::Unlock),
         }
+        drop(latest);
         self.changed();
     }
 
@@ -698,6 +714,14 @@ impl KeyService {
         blocking(move || existing.remove(source))
             .await?
             .map_err(KeyError::Existing)
+    }
+
+    /// Ends waiting model requests before the core closes Vibe's stdin. The proxy stays available
+    /// to answer those requests with a nonretryable shutdown error while Vibe releases its sessions.
+    pub async fn begin_shutdown(&self) {
+        if let Some(proxy) = self.proxy.lock().await.as_ref() {
+            proxy.begin_shutdown();
+        }
     }
 
     /// Stops the proxy and ends the vault session for the quit (app exit, update restart): with

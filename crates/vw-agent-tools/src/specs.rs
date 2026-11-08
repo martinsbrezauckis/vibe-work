@@ -75,7 +75,7 @@ pub fn tool_list(chrome_package: bool) -> Value {
         },
         {
             "name":tools::ADDON_SUGGEST,
-            "description":"Show one Vibe Work add-on's own setup control to the person in this chat (chrome or edge: that browser’s setup card with its current step), with the reason it helps their task. The initial Edge card has Connect Edge, which opens Settings, Browser; Set up… starts setup there. The person uses it; nothing is installed, paired or turned on by this tool. Refused when the add-on is already connected or this Vibe Work cannot have it.",
+            "description":"Show one Vibe Work add-on's own setup control to the person in this chat (chrome or edge: that browser’s setup card with its current step), with the reason it helps their task. The current installation diagnosis and available step come from session_status and the returned card. A browser that is not installed needs installation first and has no connection button. The person uses it; nothing is installed, paired or turned on by this tool. Refused when the add-on is already connected or this Vibe Work cannot have it.",
             "annotations":{"readOnlyHint":true},
             "inputSchema":{"type":"object","additionalProperties":false,"required":["addon","reason"],"properties":{
                 "addon":{"type":"string","enum":["chrome","edge"],"description":"An add-on id reported by session_status."},
@@ -174,7 +174,7 @@ pub(crate) fn with_receipts(mut list: Value) -> Value {
 fn on_demand_specs(chrome_package: bool) -> Vec<Value> {
     let mut list = vec![json!({
         "name": tools::USE_HEADLESS_BROWSER,
-        "description": "Vibe Work: turn on the headless browser plugin's tools in this chat (a developer plugin, available only when it is installed). It opens local pages that Vibe Work's own browser refuses. The tools arrive after this reply; Vibe Work then continues the chat by itself.",
+        "description": "Vibe Work: turn on the headless browser plugin's tools in this chat (a developer plugin, available only when it is installed). The tools arrive after this reply; Vibe Work then continues the chat by itself.",
         "inputSchema": empty_object(),
     })];
     if !chrome_package {
@@ -185,7 +185,7 @@ fn on_demand_specs(chrome_package: bool) -> Vec<Value> {
 
 /// The secret broker: names only, values go into one program's environment after the user's consent.
 fn secret_specs() -> Vec<Value> {
-    vec![
+    let mut specs = vec![
         json!({
             "name": tools::SECRET_LIST,
             "description": "Vibe Work: list visible secret names and fields, and login names, sites and usernames, never secret values. secret_run runs a program with a named secret. The user adds secrets in Settings > Project secrets.",
@@ -231,7 +231,9 @@ fn secret_specs() -> Vec<Value> {
                 "additionalProperties": false,
             },
         }),
-    ]
+    ];
+    specs.extend(crate::capture_spec::spec());
+    specs
 }
 
 /// `panel_read`: what the user has open in the side panel.
@@ -357,7 +359,7 @@ fn builtin_browser_specs() -> Vec<Value> {
         }),
         json!({
             "name": tools::BROWSER_ACT,
-            "description": mode_names("Vibe Work: act in your current web tab of Vibe Work's own browser (not the user's Chrome), list this session's web tabs, or close one by id. Page actions use the current web tab without tab, a fresh web tab with tab 'new', or the tab of an id; reading or acting in a user tab needs handoff. The pinned App preview cannot be targeted. Page actions return an outcome (what happened, in Vibe Work's words), then newRefs and updatedRefs with current states, console errors and refused navigations. Earlier refs stay valid on the same page. Actions: navigate {url}, back, forward, reload, click {ref} or {x, y, ref?}, type {ref, text, submit?} (native dates: YYYY-MM-DD), select {ref, value}, check {ref, checked}, press {key, ref?}, scroll {ref? | direction}, hover {ref}, drag {ref, to}, wait {text | ref | load, timeoutMs <= 15000}, fill {ref, login}, upload {ref, paths} (attaches files from this chat's folders to a file field; a page's file picker never opens for the agent, and a click that opens one says so). Refs come from the latest browser_read; a stale ref is refused. Public web pages and this session's own local servers open; private/LAN addresses and other sessions' servers are refused. Sign-in uses fill: a login the user saved in the vault (secret_list lists them) into a field browser_read marks login password or username; the user allows the password once or always for that site and it never reaches the agent; the form's button is a click. Typing into password, one-time-code and card fields is refused. After the user presses Stop, browser actions are refused for the rest of the turn. list_tabs returns a bounded list (continue with tab:nextTab) of web tab id/site/owner/active/suspended and title/URL as untrusted page content, without creating or selecting a tab. close_tab requires an explicit tab id. {ask} may close agent-owned tabs; {edits} and {full} may also close user-origin tabs. Above-tier calls return a refusal without a card."),
+            "description": mode_names("Vibe Work: act in your current web tab of Vibe Work's own browser (not the user's Chrome), list this session's web tabs, or close one by id. Page actions use the current web tab without tab, a fresh web tab with tab 'new', or the tab of an id; reading or acting in a user tab needs handoff. The pinned App preview cannot be targeted. Page actions return an outcome (what happened, in Vibe Work's words), then newRefs and updatedRefs with current states, console errors and refused navigations. Earlier refs stay valid on the same page. Actions: navigate {url}, back, forward, reload, click {ref} or {x, y, ref?}, type {ref, text, submit?} (native dates: YYYY-MM-DD), select {ref, value}, check {ref, checked}, press {key, ref?}, scroll {ref? | direction}, hover {ref}, drag {ref, to}, wait {text | ref | load, timeoutMs <= 15000}, fill {ref, login}, upload {ref, paths} (attaches files from this chat's folders to a file field; a page's file picker never opens for the agent, and a click that opens one says so). Refs come from the latest browser_read; a stale ref is refused. Public, localhost and private-network web addresses open under the browser engine's normal network behavior; tab ownership and access modes still apply. Sign-in uses fill: a login the user saved in the vault (secret_list lists them) into a field browser_read marks login password or username; the user allows the password once or always for that site and it never reaches the agent; the form's button is a click. Typing into password, one-time-code and card fields is refused. After the user presses Stop, browser actions are refused for the rest of the turn. list_tabs returns a bounded list (continue with tab:nextTab) of web tab id/site/owner/active/suspended and title/URL as untrusted page content, without creating or selecting a tab. close_tab requires an explicit tab id. {ask} may close agent-owned tabs; {edits} and {full} may also close user-origin tabs. Above-tier calls return a refusal without a card."),
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -401,20 +403,34 @@ fn builtin_browser_specs() -> Vec<Value> {
                 "additionalProperties": false,
             },
         }),
-        json!({
-            "name": tools::BROWSER_CAPTURE_SECRET,
-            "description": "Saving a key to the vault is the user's action. This tool always refuses; the user selects the key in the browser panel, then chooses Save to vault in the toolbar, in Browser options when narrow, or by right-click on the selection. A saved key is used by name with secret_run.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "ref": {"type": "string", "description": "Ignored legacy argument; saving is user-only."},
-                    "name": {"type": "string", "description": "Ignored legacy argument; saving is user-only."},
-                    "label": {"type": "string", "enum": ["mcp"], "description": "Ignored legacy argument; saving is user-only."}
+        if cfg!(feature = "agent-vault") {
+            json!({
+                "name": tools::BROWSER_CAPTURE_SECRET,
+                "description": mode_names("Save a password or key directly to the vault without reading its value: point at its built-in browser_read ref and give it a name. {full} saves a new entry with {allowed} permission; {ask} and {edits} ask first and save with {askPermission} permission. Existing names need a duplicate decision: replace an app-owned entry, keep both or cancel. Returns only name, source and permission.")
+                    .replace("{allowed}", vw_vocabulary::label("vaultPermissions", "allowed"))
+                    .replace("{askPermission}", vw_vocabulary::label("vaultPermissions", "askEachTime")),
+                "inputSchema": {"type":"object","properties":{
+                    "ref":{"type":"string","description":"The value's retained browser_read ref."},
+                    "name":{"type":"string","description":"Vault entry name."},
+                    "tab":{"type":"string","description":"The read's web tab id; omitted uses the current agent tab."}
+                },"required":["ref","name"],"additionalProperties":false}
+            })
+        } else {
+            json!({
+                "name": tools::BROWSER_CAPTURE_SECRET,
+                "description": "Saving a key to the vault is the user's action. This tool always refuses; the user selects the key in the browser panel, then chooses Save to vault in the toolbar, in Browser options when narrow, or by right-click on the selection. A saved key is used by name with secret_run.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "ref": {"type": "string", "description": "Ignored legacy argument; saving is user-only."},
+                        "name": {"type": "string", "description": "Ignored legacy argument; saving is user-only."},
+                        "label": {"type": "string", "enum": ["mcp"], "description": "Ignored legacy argument; saving is user-only."}
+                    },
+                    "required": [],
+                    "additionalProperties": false,
                 },
-                "required": [],
-                "additionalProperties": false,
-            },
-        }),
+            })
+        },
     ]
 }
 

@@ -10,6 +10,11 @@ use crate::core::Shared;
 pub(super) fn observe(shared: &Arc<Shared>, params: &Value, mut result: Value) {
     let browser = Browser::from_report(params["profileId"].as_str());
     let state = params["state"].as_str();
+    if state == Some("paired")
+        && let Some(profile) = params["profileId"].as_str()
+    {
+        shared.chrome_control.owner.approvals.paired(profile);
+    }
     tracing::info!(
         state = enroll::state_word(state),
         ?browser,

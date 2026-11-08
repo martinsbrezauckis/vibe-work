@@ -30,6 +30,7 @@ import { toCallError } from "../protocol/client/types";
 import type { CoreController } from "./coreStore";
 import { type Store, createStore } from "./createStore";
 import { describeProblem, reasonOf } from "./keyText";
+import { recordedKeyTest } from "./mistralKeys";
 import { type SetupStep, needsSetup, stepOf } from "./keyView";
 
 const DONE_KEY = "vw.keySetupDone";
@@ -247,6 +248,10 @@ export function createKeys(
       problem: s.problem?.operation === "readStatus" ? null : s.problem,
       status,
       mistralKeys,
+      test:
+        s.status?.keyItemId === status.keyItemId
+          ? s.test
+          : recordedKeyTest(mistralKeys.find((key) => key.inUse)?.lastTest),
       vibeKeys,
       setupDone: s.setupDone || keyReady,
       startupUnlock: step.kind === "unlock" && (s.startupUnlock || startupUnlock),
@@ -360,7 +365,6 @@ export function createKeys(
       try {
         const ok = await change({ op: "useMistralKey", itemId }, false);
         if (ok) {
-          set({ test: { phase: "idle" } });
           notify(`Now using “${label ?? ""}”.`);
         }
         return ok;

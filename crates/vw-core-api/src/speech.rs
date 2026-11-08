@@ -120,6 +120,18 @@ fn append(shared: &Shared, id: &str, pcm: &str) -> Result<CommandResult, CoreErr
 pub(crate) async fn stop(shared: &Shared, id: &str) -> Result<CommandResult, CoreError> {
     let stopped = shared.dictations.take_for_stop(id).map_err(stream_error)?;
     let seconds = vw_mistral::audio::seconds_at_16k(stopped.samples.len());
+    if stopped.samples.is_empty() {
+        if let Some(task) = stopped.task {
+            task.abort();
+        }
+        return Ok(result(SpeechResult::Transcript {
+            text: String::new(),
+            via: stopped.mode,
+            model: String::new(),
+            seconds,
+            note: Some("Nothing was heard.".to_owned()),
+        }));
+    }
     let wait = shared.dictations.config().stop_wait;
     let mut note = stopped.live_lost.clone();
     if let Some(live) = stopped.live {
@@ -148,15 +160,6 @@ pub(crate) async fn stop(shared: &Shared, id: &str) -> Result<CommandResult, Cor
             Err(_) => note = Some("the live text did not finish in time".to_owned()),
         }
     }
-    if stopped.samples.is_empty() {
-        return Ok(result(SpeechResult::Transcript {
-            text: String::new(),
-            via: stopped.mode,
-            model: String::new(),
-            seconds,
-            note,
-        }));
-    }
     let keys = keys(shared)?;
     let wav = wav_pcm16(&stopped.samples, STT_SAMPLE_RATE);
     let transcript = keys
@@ -178,10 +181,8 @@ pub(crate) async fn stop(shared: &Shared, id: &str) -> Result<CommandResult, Cor
         model: transcript.model,
         seconds,
         note: if stopped.mode == DictationMode::Realtime {
-            note.map(|n| {
-                format!(
-                    "Live text was not available ({n}); the text was transcribed when you stopped."
-                )
+            note.map(|_| {
+                "Live text was not available; the text was transcribed when you stopped.".to_owned()
             })
         } else {
             None

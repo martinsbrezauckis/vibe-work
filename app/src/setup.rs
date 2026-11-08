@@ -21,6 +21,8 @@ pub(crate) fn start(
     if !instance::admit(app, hand_over)? {
         return Ok(());
     }
+    #[cfg(all(feature = "feedback", target_os = "macos"))]
+    crate::feedback_entry::setup(app.handle())?;
     tray::setup(app.handle())?;
     let live_root = live_profile::root()?;
     let confirmer = dialogs::native_confirmer(app.handle().clone());

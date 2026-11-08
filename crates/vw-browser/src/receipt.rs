@@ -1,6 +1,6 @@
 //! What changed after an action: the receipt the agent checks its own work with. Compares the page
 //! before (the latest observation) and after (a fresh short one): URL, title, lines of visible text added or gone,
-//! refs added or gone; "no visible change" when nothing differs.
+//! refs added or gone, and scroll position; "no visible change" when nothing differs.
 //!
 //! Depends on: `model`, `serde_json`. Called by: `driver`, tests.
 //! Invariants: pure; at most [`ADDED_LINES`] added and [`REMOVED_LINES`] removed lines of at most 200 characters
@@ -89,6 +89,13 @@ pub fn diff(before: Option<&PageModel>, after: &PageModel) -> (Value, Value) {
         untrusted.insert(
             "title".into(),
             json!({"from": before.title, "to": after.title}),
+        );
+    }
+    if before.scroll.y != after.scroll.y {
+        parts.push("the page scrolled");
+        facts.insert(
+            "scroll".into(),
+            json!({"from": before.scroll.y, "to": after.scroll.y}),
         );
     }
     let old: HashSet<String> = lines(&before.text).into_iter().collect();

@@ -45,6 +45,37 @@ fn probe(profiles: Vec<PathBuf>) -> Probe {
     Prober::default().probe(profiles, ID, Instant::now())
 }
 
+#[test]
+fn unpacked_non_default_profiles_are_discovered_without_following_the_extension_path() {
+    let s = Scratch::new("unpacked-profiles");
+    let default = s.profile("Default", &[("Preferences", prefs(&json!(1)))]);
+    for location in [4, 8] {
+        let other = s.0.join("Profile 1");
+        std::fs::create_dir_all(&other).unwrap();
+        std::fs::write(
+            other.join("Preferences"),
+            json!({"extensions":{"settings":{ID:{
+                "location":location,"path":"/unavailable/external/extension","disable_reasons":[]
+            }}}})
+            .to_string(),
+        )
+        .unwrap();
+        assert_eq!(profiles(&s.0, ID), vec![default.clone(), other.clone()]);
+        assert_eq!(probe(vec![other]), Probe::NotOff);
+    }
+}
+
+#[test]
+fn a_cached_disabled_copy_does_not_describe_a_different_profile_set() {
+    let s = Scratch::new("cache-profile-scope");
+    let pending = s.profile("Pending", &[("Preferences", prefs(&json!(8192)))]);
+    let paired = s.profile("Paired", &[("Preferences", prefs(&json!(0)))]);
+    let prober = Prober::default();
+    let now = Instant::now();
+    assert_eq!(prober.probe(vec![pending], ID, now), Probe::AwaitingEnable);
+    assert_eq!(prober.probe(vec![paired], ID, now), Probe::NotOff);
+}
+
 // A busy full-suite run can schedule the reader later than its injected delay.
 // Wait for completion instead of assuming another fixed sleep is long enough.
 fn wait_for_worker(prober: &Prober) {
@@ -224,10 +255,18 @@ fn receipt_profiles(s: &Scratch, user_data: &Path) -> Vec<PathBuf> {
         json!({"files":[], "browsers":["Google Chrome"], "userData":[user_data]}).to_string(),
     )
     .unwrap();
-    let roots = super::super::setup::user_data(Some(&state), "Google Chrome");
+    let roots = super::super::setup::user_data(
+        &super::super::setup::ChromeControlConfig::default(),
+        Some(&state),
+        "Google Chrome",
+    );
     assert_eq!(roots, [user_data]);
     assert_eq!(
-        super::super::setup::user_data(Some(&state), "Microsoft Edge"),
+        super::super::setup::user_data(
+            &super::super::setup::ChromeControlConfig::default(),
+            Some(&state),
+            "Microsoft Edge"
+        ),
         Vec::<PathBuf>::new()
     );
     roots.iter().flat_map(|root| profiles(root, ID)).collect()

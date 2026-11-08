@@ -18,6 +18,8 @@ name = "vw-agent-tools"
 path = "src/main.rs"
 
 [features]
+# Optional agent capture directly into the vault. Off in default builds.
+agent-vault = []
 feedback = []
 video = []
 

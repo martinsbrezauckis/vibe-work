@@ -9,7 +9,7 @@ use std::sync::{
 };
 
 use crate::act::Action;
-use crate::driver::{ActError, Browser, LOCAL_NETWORK, Navigate, STOPPED, refused};
+use crate::driver::{ActError, Browser, Navigate, STOPPED, refused};
 use crate::sessions::{Actor, Outcome};
 
 impl Browser {
@@ -28,14 +28,6 @@ impl Browser {
         let target = self.target_text(session_id, &action);
         if by == Actor::Agent && self.sessions.stopped(session_id) {
             let error = refused(STOPPED);
-            self.log(session_id, by, &action, &target, &Err(error.clone()));
-            return Err(error);
-        }
-        if by == Actor::Agent
-            && self.local_network_blocked(session_id)
-            && !matches!(action, Action::Navigate { .. })
-        {
-            let error = refused(LOCAL_NETWORK);
             self.log(session_id, by, &action, &target, &Err(error.clone()));
             return Err(error);
         }

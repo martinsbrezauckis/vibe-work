@@ -132,6 +132,15 @@ pub(super) async fn wait(
     }
 }
 
+fn known_extension(shared: &Shared, browser: Browser) -> bool {
+    if shared.chrome_control.config.is_macos() {
+        // The extension's earlier pairing is our evidence; its protected profile cannot be inspected.
+        browser.was_paired(shared)
+    } else {
+        !super::installation::profiles(shared, browser).is_empty()
+    }
+}
+
 async fn wake(
     shared: &Arc<Shared>,
     session: &str,
@@ -143,8 +152,9 @@ async fn wake(
     let injected = match browser {
         Browser::Chrome => config.launcher.is_some(),
         Browser::Edge => config.edge_launcher.is_some(),
+        Browser::Safari | Browser::Firefox => return,
     };
-    if (!injected && super::installation::profiles(shared, browser).is_empty())
+    if (!injected && !known_extension(shared, browser))
         || !shared.chrome_control.owner.wake.take(browser)
     {
         return;
@@ -160,6 +170,7 @@ async fn wake(
             && !match browser {
                 Browser::Chrome => super::browser::running(config),
                 Browser::Edge => super::browser::edge_running(config),
+                Browser::Safari | Browser::Firefox => false,
             }
         {
             return;
@@ -179,6 +190,7 @@ async fn wake(
         let result = match browser {
             Browser::Chrome => super::browser::open(config, &url),
             Browser::Edge => super::browser::open_edge(config, &url),
+            Browser::Safari | Browser::Firefox => return,
         };
         if let Err(error) = result {
             tracing::debug!(%error, browser = browser.id(), "Browser wake failed");

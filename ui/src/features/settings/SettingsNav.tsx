@@ -38,6 +38,7 @@ export function SettingsNav(): ReactElement {
     chromeAvailable(chrome),
     chrome?.edge !== undefined,
     chrome?.firefox !== undefined,
+    chrome?.safari !== undefined,
   ).filter((r) => offered.some((c) => c.id === r.category));
   const searching = view.query.trim() !== "";
   const widen = () => {

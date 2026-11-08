@@ -8,8 +8,18 @@ import { Component, type ReactNode, useEffect } from "react";
 import { Button } from "../../components/Controls";
 import type { App } from "./AppContext";
 import { startRecoveryWiring } from "./recoveryWiring";
+import { FeedbackAction } from "../feedback/FeedbackAction";
+import { CoreFeedbackDialog } from "../feedback/FeedbackDialog";
 
-function Recovery({ app, retry }: { app: App | undefined; retry: () => void }) {
+function Recovery({
+  app,
+  retry,
+  error,
+}: {
+  app: App | undefined;
+  retry: () => void;
+  error: string;
+}) {
   useEffect(() => (app === undefined ? undefined : startRecoveryWiring(app)), [app]);
   return (
     <main className="setup" role="alert">
@@ -33,7 +43,9 @@ function Recovery({ app, retry }: { app: App | undefined; retry: () => void }) {
         >
           Reload window
         </Button>
+        <FeedbackAction core={app?.core} title="The window could not be displayed" text={error} />
       </div>
+      <CoreFeedbackDialog core={app?.core} />
     </main>
   );
 }
@@ -41,12 +53,15 @@ function Recovery({ app, retry }: { app: App | undefined; retry: () => void }) {
 /** Keeps a failed render from leaving the window blank. */
 export class AppErrorBoundary extends Component<
   { children: ReactNode; app?: App },
-  { failed: boolean }
+  { failed: boolean; error: string }
 > {
-  override state = { failed: false };
+  override state = { failed: false, error: "" };
 
-  static getDerivedStateFromError(): { failed: boolean } {
-    return { failed: true };
+  static getDerivedStateFromError(error: unknown): { failed: boolean; error: string } {
+    return {
+      failed: true,
+      error: error instanceof Error ? error.message : "The window could not be displayed.",
+    };
   }
 
   override render(): ReactNode {
@@ -54,6 +69,7 @@ export class AppErrorBoundary extends Component<
     return (
       <Recovery
         app={this.props.app}
+        error={this.state.error}
         retry={() => {
           this.setState({ failed: false });
         }}

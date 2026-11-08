@@ -17,6 +17,7 @@ import { vibeStatusLine } from "../../state/vibeUpdates";
 import { useVibeUi } from "../setup/VibeInstallStep";
 import { useApp } from "../shell/AppContext";
 import { ReleaseHost } from "./ReleaseHost";
+import { FeedbackAction } from "../feedback/FeedbackAction";
 
 /** The section. */
 export function UpdateSettings() {
@@ -26,6 +27,7 @@ export function UpdateSettings() {
 }
 
 function Section({ updates }: { updates: NonNullable<ReturnType<typeof useApp>["updates"]> }) {
+  const { core } = useApp();
   const state = useStore(updates.store, (s) => s);
   const view = state.view;
   if (!state.available || view === null) return null;
@@ -95,6 +97,9 @@ function Section({ updates }: { updates: NonNullable<ReturnType<typeof useApp>["
           >
             Check now
           </Button>
+          {phase.type === "failed" && phase.stage !== "check" && (
+            <FeedbackAction core={core} title="Vibe Work update failed" text={statusLine(view)} />
+          )}
         </span>
       </div>
       <VibeRow />

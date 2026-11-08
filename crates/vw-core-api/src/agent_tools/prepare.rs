@@ -13,6 +13,21 @@ pub(crate) async fn prepare(
     tool: &str,
     args: &mut Value,
 ) -> Result<Option<Execution>, String> {
+    let execution = prepare_inner(shared, owner, source, call, tool, args).await?;
+    crate::chrome_control::browser_start::prepare(
+        shared, owner, source, call, tool, args, execution,
+    )
+    .await
+}
+
+async fn prepare_inner(
+    shared: &Arc<Shared>,
+    owner: &str,
+    source: &str,
+    call: &str,
+    tool: &str,
+    args: &mut Value,
+) -> Result<Option<Execution>, String> {
     let tools = shared.agent_tools.as_ref().ok_or("Tools unavailable.")?;
     #[cfg(feature = "video")]
     if tool == "video_frames" {
@@ -21,6 +36,18 @@ pub(crate) async fn prepare(
     // Without the Chrome package the check below refuses every Chrome tool with "not in this version" first.
     if tool == "chrome_execute" && shared.chrome_control.config.available() {
         crate::chrome_control::gateway::validate_execute_args(args)?;
+    }
+    #[cfg(feature = "agent-vault")]
+    if tool == names::SECRET_CAPTURE_COMMAND {
+        return super::secret_capture::prepare(shared, owner, args)
+            .await
+            .map(Some);
+    }
+    #[cfg(feature = "agent-vault")]
+    if tool == names::BROWSER_CAPTURE_SECRET {
+        return super::vault_capture::prepare(shared, owner, args)
+            .await
+            .map(Some);
     }
     if tool == names::SECRET_RUN {
         return super::secret_run::prepare(shared, tools, owner, args)
@@ -80,6 +107,6 @@ pub(crate) async fn prepare(
     {
         return Ok(Some(execution));
     }
-    super::tools::guard_start(shared, tools, owner, tool, args).await?;
+    super::tools::guard_start(shared, owner, tool, args).await?;
     Ok(None)
 }

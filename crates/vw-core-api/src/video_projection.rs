@@ -69,6 +69,26 @@ fn recovery(lower: &str) -> Option<(&'static str, &'static str)> {
 }
 /// Diagnose the native refusal for the row; retain the exact reason and a next action for the agent.
 pub(crate) fn failure(reason: &str) -> (String, String) {
+    for (prefix, label, instruction) in [
+        (
+            "not_found: ",
+            "Not found",
+            "Check the file name and folder.",
+        ),
+        (
+            "cannot_read: ",
+            "Cannot read",
+            "Check that this path names a readable local file.",
+        ),
+    ] {
+        if let Some(path) = reason.strip_prefix(prefix) {
+            let row = format!("{label}: {path}.");
+            return (
+                row.clone(),
+                format!("{row} No video images were sent. {instruction}"),
+            );
+        }
+    }
     let lower = reason.to_ascii_lowercase();
     if let Some((row, instruction)) = recovery(&lower) {
         return (

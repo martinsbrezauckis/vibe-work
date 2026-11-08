@@ -1,4 +1,5 @@
-//! Chrome's legacy UUID alias at the helper boundary. Trusted status selects the wire format; Edge stays scoped.
+//! Browser names and legacy UUID aliases at the helper boundary. The gateway validates feature gates;
+//! session opening resolves explicit browser names from trusted status, keeping Edge scoped.
 use serde_json::Value;
 use std::sync::{Mutex, PoisonError};
 
@@ -53,6 +54,57 @@ fn bare(args: &Value) -> bool {
             .and_then(Value::as_str)
             .is_some_and(super::enroll::uuid_shape)
     })
+}
+
+/// Refuse an explicit Edge selection when its module is absent; never reinterpret it as Chrome.
+pub(super) fn validate_browser(args: &Value) -> Result<(), String> {
+    if !cfg!(feature = "your-edge")
+        && args["profileId"].as_str().is_some_and(|id| {
+            id.starts_with("edge:")
+                || id.eq_ignore_ascii_case("edge")
+                || id.eq_ignore_ascii_case(vw_vocabulary::texts::EDGE_NAME)
+        })
+    {
+        return Err(super::setup::absent_for(true).to_owned());
+    }
+    Ok(())
+}
+
+/// A closed browser has no live profile to list yet. Resolve its explicit name after launch; never guess among
+/// multiple profiles, change an exact profile id or silently switch browsers.
+pub(super) fn resolve_browser(args: &mut Value, status: &Value) -> Result<(), String> {
+    use super::agent_browser::Browser;
+    let Some(id) = args["profileId"].as_str() else {
+        return Ok(());
+    };
+    let Some(browser) = [Browser::Chrome, Browser::Edge]
+        .into_iter()
+        .find(|browser| {
+            (browser == &Browser::Chrome || cfg!(feature = "your-edge"))
+                && (id.eq_ignore_ascii_case(browser.id())
+                    || id.eq_ignore_ascii_case(browser.name()))
+        })
+    else {
+        return Ok(());
+    };
+    let profiles: Vec<_> = status["profiles"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|profile| profile["connected"] == true)
+        .filter_map(|profile| profile["profileId"].as_str())
+        .filter(|id| browser.owns_profile(id))
+        .collect();
+    if let [profile] = profiles.as_slice() {
+        args["profileId"] = Value::String((*profile).to_owned());
+        Ok(())
+    } else {
+        Err(format!(
+            "Not run: {} has {} connected profiles. Use chrome_status and supply the exact profileId for the intended profile; do not guess a profile.",
+            browser.name(),
+            profiles.len()
+        ))
+    }
 }
 
 /// Old saved bindings and new helper labels can name the same Chrome profile; never an Edge profile.

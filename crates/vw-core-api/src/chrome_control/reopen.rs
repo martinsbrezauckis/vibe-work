@@ -309,7 +309,7 @@ mod tests {
         .await;
         assert_eq!(
             unknown.unwrap_err(),
-            "Not run: no Chrome session with this id; open one with chrome_session."
+            "Not run: no browser session with this id; open one with chrome_session."
         );
         assert_eq!(opens(&seen).len(), 1);
         core.shutdown().await;

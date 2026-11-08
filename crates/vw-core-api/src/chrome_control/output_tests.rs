@@ -149,8 +149,13 @@ async fn overview_keeps_mode_exceptions_and_shared_profile_lists() {
         assert_eq!(status["sessions"].as_array().unwrap().len(), 2);
         assert_eq!(status["featureLists"].as_array().unwrap().len(), 1);
         for p in status["profiles"].as_array().unwrap() {
-            assert_eq!(p["features"], json!({"list":0}));
-            assert_eq!(p["extensionCapabilities"], json!({"list":0}));
+            let mut restored = status["profileDefaults"]
+                .as_object()
+                .cloned()
+                .unwrap_or_default();
+            restored.extend(p.as_object().unwrap().clone());
+            assert_eq!(restored["features"], json!({"list":0}));
+            assert_eq!(restored["extensionCapabilities"], json!({"list":0}));
         }
         assert_eq!(status["capabilities"]["permissions"]["total"], 31);
         let actions = &status["capabilities"]["actions"];
@@ -212,6 +217,7 @@ async fn full_session_records_keep_their_shared_context() {
     assert_eq!(status["sessionDefaults"]["clientSessionId"], "s");
     assert_eq!(status["sessions"].as_array().unwrap().len(), 2);
     let capabilities = &status["capabilities"];
+    assert_catalog_features(status);
     for action in ["history.read", "bookmarks.read"] {
         assert_eq!(capabilities["actions"][action]["approvalRequired"], true);
         assert!(capabilities["actions"][action].get("needs").is_none());
@@ -249,6 +255,21 @@ async fn full_session_records_keep_their_shared_context() {
     if cfg!(feature = "your-edge") {
         assert_eq!(addons[1]["stateCode"], "notSetUp");
         assert!(capabilities["capabilityNames"].is_array());
+    }
+    if cfg!(all(feature = "your-safari", feature = "your-edge")) {
+        // Crowded optional builds retain all per-profile facts through the same explicit-defaults convention.
+        for (index, profile) in status["profiles"].as_array().unwrap().iter().enumerate() {
+            let mut restored = status["profileDefaults"].as_object().unwrap().clone();
+            restored.extend(profile.as_object().unwrap().clone());
+            assert_eq!(restored["profileId"], format!("chrome:profile-{index}"));
+            assert_eq!(restored["browser"], "chrome");
+            assert_eq!(restored["connected"], true);
+            assert_eq!(restored["browserVersion"], "142.0.7444.60");
+            assert_eq!(restored["extensionVersion"], "0.1.6");
+            assert_eq!(restored["route"], "extension");
+            assert_eq!(restored["features"], json!({"list":0}));
+            assert_eq!(restored["extensionCapabilities"], json!({"list":0}));
+        }
     }
 }
 
@@ -387,5 +408,70 @@ fn small_receipt_control() {
     assert_eq!(
         content::for_model(owner::Answer::Helper(raw)).to_string(),
         expected.to_string()
+    );
+}
+
+#[cfg(all(feature = "your-firefox", feature = "your-safari"))]
+#[tokio::test]
+async fn compact_catalog_reference_keeps_partial_profile_support_explicit() {
+    let core = core("chrome-output-partial-features").await;
+    test_support::answering(&core.shared, |_, args| {
+        let mut result = status(args);
+        for key in ["features", "extensionCapabilities"] {
+            result["structuredContent"]["profiles"][1][key]
+                .as_array_mut()
+                .unwrap()
+                .retain(|id| id != "raw.execute");
+        }
+        result
+    });
+    let answer = gateway::call(&core.shared, "s", "chrome_status", json!({}))
+        .await
+        .unwrap();
+    let status = &answer["vwMcpResult"]["structuredContent"]["untrustedPageContent"];
+    let lists = status["featureLists"].as_array().unwrap();
+    assert_eq!(lists[0], json!({"allActions":true}));
+    let partial = lists[1].as_array().unwrap();
+    assert_eq!(partial.len(), 65);
+    assert!(!partial.contains(&json!("raw.execute")));
+    for action in catalog()["actions"].as_array().unwrap() {
+        assert_eq!(
+            partial.contains(&action["id"]),
+            action["id"] != "raw.execute"
+        );
+    }
+    core.shutdown().await;
+}
+
+fn assert_catalog_features(status: &Value) {
+    let capabilities = &status["capabilities"];
+    let features = &status["featureLists"][0];
+    let mut actual: Vec<Value> = if features["allActions"] == true {
+        assert!(
+            capabilities["availability"]
+                .as_str()
+                .unwrap()
+                .contains("allActions")
+        );
+        capabilities["actions"]
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(|id| json!(id))
+            .collect()
+    } else {
+        features.as_array().unwrap().clone()
+    };
+    let mut expected: Vec<Value> = catalog()["actions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|row| row["id"].clone())
+        .collect();
+    actual.sort_by_key(Value::to_string);
+    expected.sort_by_key(Value::to_string);
+    assert_eq!(
+        actual, expected,
+        "every supported action survives compact status"
     );
 }

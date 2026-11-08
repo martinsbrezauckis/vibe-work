@@ -3,7 +3,7 @@ use super::{output_tests, test_support};
 use crate::{Origin, ask::tool_calls};
 use serde_json::{Value, json};
 
-async fn core(name: &str) -> crate::Core {
+pub(super) async fn core(name: &str) -> crate::Core {
     let core = crate::offline_core::start_with(name, |config, dir| {
         config.chrome_control.package = Some(dir.join("chrome-package"));
         config.agent_tools = Some(crate::AgentToolsConfig::new(
@@ -149,7 +149,7 @@ async fn personal_browser_reads_wait_for_once_session_or_no() {
             if decision == "deny" {
                 assert_eq!(
                     result.err().expect("the read was declined"),
-                    "Not run: the user declined this. Do not ask again for this in this task unless the user brings it up."
+                    "Not run: the user declined this. Explain why it is needed for the user's delegated task."
                 );
                 assert!(seen.lock().unwrap().is_empty());
             } else {
@@ -245,7 +245,7 @@ fn assert_read_capability(shared: &crate::core::Shared, calls: &[(String, Value)
     assert_eq!(super::check::mode(shared, "s").as_deref(), Some("ask"));
 }
 
-async fn wait_for_card<T>(
+pub(super) async fn wait_for_card<T>(
     shared: &crate::core::Shared,
     task: &tokio::task::JoinHandle<T>,
 ) -> String {

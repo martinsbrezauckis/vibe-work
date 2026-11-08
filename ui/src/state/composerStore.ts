@@ -90,7 +90,7 @@ export interface RewindDialog {
 /** The visible Chrome tab picker, bound to the composer that opened it. */
 export interface ChromePicker {
   /** Browser explicitly chosen by the person; omitted for the original Chrome picker. */
-  browser?: "Edge" | "Firefox";
+  browser?: "Edge" | "Safari" | "Firefox";
   sessionId: string;
   rows: readonly ChromeTab[];
   loading: boolean;
@@ -132,7 +132,7 @@ export interface ComposerState {
   rewind: RewindDialog | null;
   chromePicker: ChromePicker | null;
   /** Last browser shown by each composer, retained when the picker closes. */
-  tabBrowser: Readonly<Record<string, "Chrome" | "Edge" | "Firefox">>;
+  tabBrowser: Readonly<Record<string, "Chrome" | "Edge" | "Safari" | "Firefox">>;
   /** Sessions whose draft the app put back (a rewound message): sent as text until the user edits it. */
   literal: Readonly<Record<string, true>>;
   /** Sessions whose draft text a Debug API client wrote (until the user edits it). */
@@ -624,7 +624,7 @@ export function createComposerStore(persist: boolean) {
       store.set((s) => ({
         ...s,
         newChat: NO_PICKS,
-        tabBrowser: setIn<"Chrome" | "Edge" | "Firefox">(
+        tabBrowser: setIn<"Chrome" | "Edge" | "Safari" | "Firefox">(
           setIn(s.tabBrowser, sessionId, s.tabBrowser[NEW_CHAT]),
           NEW_CHAT,
           undefined,

@@ -133,6 +133,11 @@
     } catch {
       text = "";
     }
+    // Native PDF viewers render a plugin, whose text is outside the page DOM (notably WebView2).
+    if (!text.trim() && (document.contentType === "application/pdf" ||
+        document.querySelector('embed[type="application/pdf"], object[type="application/pdf"]'))) {
+      return "This PDF viewer does not expose page text. Use a screenshot to read the page.";
+    }
     return text;
   };
 

@@ -13,7 +13,7 @@ fn chrome_setup_omits_edge_registration_when_edge_policy_refuses() {
         Some(super::super::super::edge_policy::BLOCKED)
     );
     install(&config, &scratch.state(), &scratch.vibe_home()).unwrap();
-    let receipt = read_receipt(&scratch.state()).unwrap();
+    let receipt = read_receipt(&scratch.config(), &scratch.state()).unwrap();
     assert_eq!(receipt.browsers, ["Google Chrome"]);
     assert_eq!(receipt.user_data.len(), 1);
     if let Some(hosts) = edge.hosts {
@@ -36,7 +36,9 @@ fn chrome_setup_omits_edge_registration_when_edge_policy_refuses() {
         assert!(String::from_utf8_lossy(&installed.1).contains(manifest.to_str().unwrap()));
     }
     assert_eq!(
-        read_receipt(&scratch.state()).unwrap().browsers,
+        read_receipt(&scratch.config(), &scratch.state())
+            .unwrap()
+            .browsers,
         ["Google Chrome", "Microsoft Edge"]
     );
     remove(&scratch.config(), &scratch.state()).unwrap();
@@ -77,7 +79,7 @@ fn edge_setup_registers_both_browsers_and_keeps_profile_labels_separate() {
         return;
     }
     let edge = &places[1];
-    let expected = if cfg!(target_os = "macos") {
+    let expected = if config.is_macos() {
         "Library/Application Support/Microsoft Edge"
     } else {
         ".config/microsoft-edge"
@@ -93,7 +95,7 @@ fn edge_setup_registers_both_browsers_and_keeps_profile_labels_separate() {
         view.profiles.is_empty(),
         "Edge must never appear among Chrome profiles"
     );
-    let receipt = read_receipt(&state).unwrap();
+    let receipt = read_receipt(&config, &state).unwrap();
     assert_eq!(receipt.browsers, expected_names);
     for place in &places {
         let manifest = place
@@ -146,11 +148,6 @@ fn edge_store_uses_its_own_launcher_and_the_existing_store_id() {
     };
     open_store_for(&config, true).unwrap();
     assert_eq!(*opened.lock().unwrap(), [store_url(EXTENSION_ID)]);
-    let url = store_url(EXTENSION_ID);
-    assert_eq!(
-        crate::chrome_control::browser::launch_args(&url),
-        [std::ffi::OsString::from(url)]
-    );
 }
 
 #[cfg(unix)]
@@ -160,7 +157,7 @@ fn adding_edge_to_a_chrome_receipt_keeps_the_shared_helper_and_removes_both() {
     let config = scratch.config();
     let state = scratch.state();
     install(&config, &state, &scratch.vibe_home()).unwrap();
-    let mut receipt = read_receipt(&state).unwrap();
+    let mut receipt = read_receipt(&config, &state).unwrap();
     let edge = targets(&scratch.root.join("home"), &config).remove(1);
     let manifest = edge.hosts.unwrap().join(format!("{HOST_NAME}.json"));
     std::fs::remove_file(&manifest).unwrap();
@@ -176,7 +173,7 @@ fn adding_edge_to_a_chrome_receipt_keeps_the_shared_helper_and_removes_both() {
         std::fs::metadata(&helper).unwrap().modified().unwrap(),
         before
     );
-    assert_eq!(read_receipt(&state).unwrap().browsers.len(), 2);
+    assert_eq!(read_receipt(&config, &state).unwrap().browsers.len(), 2);
     remove(&config, &state).unwrap();
     assert!(!manifest.exists());
 }

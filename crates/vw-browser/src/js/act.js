@@ -236,6 +236,27 @@
     }
     return result("error", { message: "this action has no requested control state" });
   };
+  // Whether the page has seen the field's focus. Already focused in a focused document counts, unless this act
+  // focused it and the focus event has not reached the page yet (the document may report focus before it is sent).
+  const pageSawFocus = (el) => {
+    if (!ENV) return true;
+    const view = viewOf(el);
+    if (!ENV.focusWatch) {
+      ENV.focusWatch = true;
+      view.addEventListener("focus", (event) => { ENV.lastFocus = event.composedPath()[0]; }, true);
+    }
+    if (ENV.focusOwed === el) return ENV.lastFocus === el;
+    if (el.ownerDocument.hasFocus() && deepActive(el.ownerDocument) === el) return true;
+    ENV.focusOwed = el;
+    ENV.lastFocus = null;
+    if (el.focus) el.focus({ preventScroll: true });
+    return ENV.lastFocus === el;
+  };
+  const deepActive = (doc) => {
+    let active = doc.activeElement;
+    while (active?.shadowRoot?.activeElement) active = active.shadowRoot.activeElement;
+    return active;
+  };
   const typeInto = (el, text) => {
     if (el.focus) el.focus({ preventScroll: true });
     if (
@@ -350,7 +371,7 @@
         Number(REQ.amount) > 0
           ? Number(REQ.amount)
           : Math.round(window.innerHeight * 0.8);
-      window.scrollBy(0, REQ.direction === "up" ? -step : step);
+      window.scrollBy({ top: REQ.direction === "up" ? -step : step, left: 0, behavior: "instant" });
       return result("done", { scrollY: Math.round(window.scrollY) });
     }
     if (action === "uploadChunk") {
@@ -459,8 +480,18 @@
     if (action === "type") {
       const wanted = requestedValue(el, String(REQ.text || ""));
       if (wanted.status) return result(wanted.status, { target, kind: wanted.kind });
-      if (typeInto(el, wanted.value) && wanted.widgetDate)
+      // An attached calendar opens on the field's focus. The page must have seen that focus before the date is
+      // committed and the calendar closed: a page without focus (WKWebView whose view is not focused, a field in a
+      // frame that is not the focused one) gets it only later, and the calendar would open over the committed
+      // date. `focusPending` asks the host to run the act again once the page has seen it.
+      if (wanted.widgetDate && REQ.focusWait !== false && !pageSawFocus(el))
+        return result("focusPending", { target });
+      if (ENV) ENV.focusOwed = null;
+      if (typeInto(el, wanted.value) && wanted.widgetDate) {
         fire(el, "keyup", "KeyboardEvent", { key: wanted.value.slice(-1), bubbles: true });
+        // Commit only the attached calendar; its page-world code never supplies the success receipt.
+        fire(el, "vw-widget-date-commit", "Event", { bubbles: true, composed: true });
+      }
       const answer = JSON.parse(postcondition(el, target));
       if (answer.status === "done" && REQ.submit) answer.effect = press(el, "Enter");
       return JSON.stringify(answer);

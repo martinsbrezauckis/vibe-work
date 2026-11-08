@@ -215,8 +215,8 @@ pub(crate) struct Entry {
     /// engine can report a canary's load after its check ended (`WebKitGTK`), or ask about it once more (`WebKit`);
     /// such a report is never the page and never shown as a refused page, and a navigation to it stays refused.
     pub(crate) ended_canaries: VecDeque<Url>,
-    /// The local-network host the USER opened: set, the page is a [`PageClass::Lan`] page; its
-    /// mount reaches only this host, and the agent neither reads nor acts on it. Kept across a suspension.
+    /// Original local-network host for [`PageClass::Lan`] storage and the separate backend media scope.
+    /// Kept across suspension; it does not restrict browser requests or agent access.
     ///
     /// [`PageClass::Lan`]: crate::policy::PageClass::Lan
     pub(crate) lan_host: Option<String>,

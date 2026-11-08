@@ -22,7 +22,7 @@ import type { Files } from "../../state/files";
 import { tabOf } from "../../state/files";
 import { UiControlError } from "../../state/uiControl";
 import type { App } from "../shell/AppContext";
-import { type DroppedItem, runDrop } from "./drop";
+import { type DroppedItem, MAX_DROP_BYTES, runDrop } from "./drop";
 import { saveEdit } from "./saveEdit";
 import { saveEditor } from "./saveEditor";
 import { editableKind, runFileRefAction } from "./fileRefActions";
@@ -140,6 +140,11 @@ function dropItems(input: Record<string, unknown>): DroppedItem[] {
     const folder = file["folder"] === true;
     const data = typeof file["data"] === "string" ? file["data"] : "";
     const binary = atob(data);
+    if (binary.length > MAX_DROP_BYTES)
+      throw new UiControlError(
+        "invalidParams",
+        `file ${name} exceeds the ${String(MAX_DROP_BYTES)}-byte attachment limit (50 MiB); use a smaller file`,
+      );
     const bytes = new Uint8Array(binary.length);
     for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
     return { name, folder, size: bytes.length, bytes: () => Promise.resolve(bytes) };

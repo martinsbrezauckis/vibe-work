@@ -91,6 +91,7 @@ const NATIVE: &[&str] = &[
     "vibe-work/projectInstructions/delete",
     "newChat/restoreFolder",
     "chrome/control/fill",
+    "chrome/control/pair",
 ];
 const VAULT: &[&str] = &[
     "vibe-work/secretRun",
@@ -109,12 +110,16 @@ pub fn always_settings() -> impl Iterator<Item = (&'static str, &'static str)> {
 }
 /// Every known policy key; unknown runtime methods still fail closed as native asks.
 pub fn policies() -> impl Iterator<Item = &'static str> {
-    NATIVE.iter().copied().chain([
-        "approval",
-        "user_input",
-        "connector_auth",
-        "protected_change",
-    ])
+    NATIVE
+        .iter()
+        .copied()
+        .chain(cfg!(feature = "agent-vault").then_some("vault_save"))
+        .chain([
+            "approval",
+            "user_input",
+            "connector_auth",
+            "protected_change",
+        ])
 }
 /// Resolve a method's fixed presentation policy. None means the method needs an explicit policy row.
 #[must_use]
@@ -122,7 +127,7 @@ pub fn policy(kind: &str) -> Option<Policy> {
     let key = policies().find(|k| *k == kind)?;
     let card = matches!(
         key,
-        "approval" | "user_input" | "connector_auth" | "protected_change"
+        "approval" | "user_input" | "connector_auth" | "protected_change" | "vault_save"
     );
     let title = match key {
         "approval" => "this tool call",
@@ -133,6 +138,7 @@ pub fn policy(kind: &str) -> Option<Policy> {
         "vibe-work/secretRun" => "this use of a secret",
         "vibe-work/fillLogin" => "this saved login",
         "vibe-work/providerConsent" => "this account access",
+        "chrome/control/pair" => "this browser connection",
         // The canonical "New chat" name lives in the shared vocabulary.
         "newChat/restoreFolder" => {
             vw_vocabulary::text("askRestoreFolderSubject").unwrap_or("the saved folder")
@@ -143,7 +149,7 @@ pub fn policy(kind: &str) -> Option<Policy> {
         kind: key,
         title,
         surface: if card { Surface::Card } else { Surface::Native },
-        person_only: VAULT.contains(&key),
+        person_only: VAULT.contains(&key) || matches!(key, "vault_save" | "chrome/control/pair"),
         always_setting: ALWAYS_SETTINGS
             .iter()
             .find(|(kind, _)| *kind == key)

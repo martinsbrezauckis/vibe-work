@@ -6,21 +6,28 @@ import { TEXT } from "../../../vocabulary";
 import { chromeAvailable, pairingStep, setupLine, stepAction, stepLabel } from "./chromeRows";
 import { useChromeControl, type ChromeControlState } from "./useChromeControl";
 
-/** One app click starts setup; Chrome keeps its own installation and pairing consent. */
+/** One app click starts setup; the selected browser keeps its installation and pairing consent. */
 export function ChromeConnection({
   chrome,
   browser = "Chrome",
+  showSwitch = false,
 }: {
   chrome: ChromeControlState;
-  browser?: "Chrome" | "Edge";
+  browser?: "Chrome" | "Edge" | "Safari";
+  showSwitch?: boolean;
 }): ReactElement {
   const [removeOpen, setRemoveOpen] = useState(false);
   const view = chrome.view;
   const action = stepAction(view);
   const needsPair = pairingStep(view);
+  const step =
+    browser === "Safari" && needsPair
+      ? `Toolbar: ${TEXT.safariName} → Pair`
+      : view?.setup.addon?.step;
+  const prefix = browser.toLowerCase();
   return (
-    <div data-testid="chrome-connect">
-      <SettingsRow data-setting="chrome-control-status">
+    <div data-testid={`${prefix}-connect`}>
+      <SettingsRow data-setting={`${prefix}-control-status`}>
         <span>
           Connection
           <span className="d" role="status" aria-live="polite">
@@ -29,9 +36,9 @@ export function ChromeConnection({
               : setupLine(view, browser)}
           </span>
         </span>
-        {action !== null ? (
+        {action !== null && !(showSwitch && action === "turnOn") ? (
           <Button
-            data-testid="chrome.connect"
+            data-testid={`${prefix}.connect`}
             data-step={action}
             variant="primary"
             disabled={
@@ -40,6 +47,7 @@ export function ChromeConnection({
               (action !== "remove" &&
                 (!view.setup.package ||
                   view.setup.storeReview ||
+                  (browser === "Edge" && view.setup.pairingState === "blocked") ||
                   view.setup.browserIssue !== undefined))
             }
             onClick={() => {
@@ -47,14 +55,15 @@ export function ChromeConnection({
               else void chrome.connect();
             }}
           >
-            {stepLabel(action)}
+            {stepLabel(action, browser)}
           </Button>
         ) : null}
       </SettingsRow>
-      {view?.setup.addon?.step ? <p className="key-line">{view.setup.addon.step}</p> : null}
+      {step ? <p className="key-line">{step}</p> : null}
       <ChromeRemoveDialog
         open={removeOpen}
         chrome={chrome}
+        browser={browser}
         onClose={() => {
           setRemoveOpen(false);
         }}

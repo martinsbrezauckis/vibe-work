@@ -261,6 +261,15 @@ impl Browser {
             .await
             .map_err(|e| native_error(&e, &sent))?;
         crate::point_receipt::confirm(&input, &page, &receipt, &frame.id, &frame.document).await?;
+        #[cfg(feature = "click-marker")]
+        {
+            // Release the input lease before the overlay takes the same mount lock. Drawing never changes
+            // the confirmed outcome; the feature-off path retains the original lease lifetime.
+            drop(input);
+            if by == Actor::Agent {
+                self.mark_native_input(&seen, item, point).await;
+            }
+        }
         serde_json::from_value(json!({"status":"done","url":frame.url}))
             .map_err(|e| refused(e.to_string()))
     }

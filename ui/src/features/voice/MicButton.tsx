@@ -7,7 +7,7 @@
  * session dictates, or while voice chat is on (one microphone), this button is disabled. While the previous text is still being made ("Finishing…") a press
  * queues the next dictation and a second press cancels it.
  */
-import { type ReactElement, useRef } from "react";
+import { type ReactElement, useEffect, useRef } from "react";
 
 import { Icon } from "../../components/Icon";
 import { Walker } from "../../components/Walker";
@@ -31,8 +31,22 @@ export function MicButton({
   const seconds = useDictation((s) => s.seconds);
   const error = useDictation((s) => s.error);
   const queued = useDictation((s) => s.queued);
-  const press = useRef<{ at: number; started: boolean } | null>(null);
+  const press = useRef<{ at: number; started: boolean; pointerId: number } | null>(null);
   const pointerClick = useRef(false);
+  // The listening strip can move the new-chat button under a held pointer. Release belongs to
+  // the gesture even when it lands outside that button.
+  useEffect(() => {
+    const release = (event: PointerEvent) => {
+      const p = press.current;
+      if (p === null || event.pointerId !== p.pointerId) return;
+      press.current = null;
+      if (!p.started || event.timeStamp - p.at >= HOLD_MS) void voice?.dictation.stop();
+    };
+    window.addEventListener("pointerup", release);
+    return () => {
+      window.removeEventListener("pointerup", release);
+    };
+  }, [voice]);
   // voice chat and dictation share the microphone; while voice chat is on, dictation waits.
   const voiceChatOn = useVoiceChat((s) => s.on);
   if (voice === null) return null;
@@ -76,17 +90,13 @@ export function MicButton({
           press.current = null;
           dictation.queueStart(sessionId);
         } else if (phase === "idle" || phase === "error") {
-          press.current = { at: performance.now(), started: true };
+          // AudioContext preparation can block this handler. Event timestamps retain the person's
+          // actual press duration even when the release waits in the webview's input queue.
+          press.current = { at: e.timeStamp, started: true, pointerId: e.pointerId };
           void dictation.start(sessionId);
         } else {
-          press.current = { at: performance.now(), started: false };
+          press.current = { at: e.timeStamp, started: false, pointerId: e.pointerId };
         }
-      }}
-      onPointerUp={() => {
-        const p = press.current;
-        press.current = null;
-        if (p === null) return;
-        if (!p.started || performance.now() - p.at >= HOLD_MS) void dictation.stop();
       }}
       onPointerCancel={() => {
         press.current = null;

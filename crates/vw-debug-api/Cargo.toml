@@ -24,6 +24,8 @@ vw-ask = { path = "../vw-ask" }
 vw-core-api = { path = "../vw-core-api" }
 vw-platform = { path = "../vw-platform" }
 vw-secrets = { path = "../vw-secrets" }
+vw-keys = { path = "../vw-keys" }
+vw-vault = { path = "../vw-vault" }
 # Crops of window screenshots (decode, crop, encode).
 vw-preview = { path = "../vw-preview" }
 # HTTP/1.1 server. axum 0.8.9 (MIT, MSRV 1.80), on hyper 1 and tokio, which

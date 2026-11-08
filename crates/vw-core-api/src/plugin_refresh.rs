@@ -163,6 +163,7 @@ impl Core {
         &self,
         method: &str,
         params: &Value,
+        continuation: Option<u64>,
     ) -> Result<Option<tokio::sync::OwnedMutexGuard<()>>, CoreError> {
         if method == "plugin/reload" {
             self.shared
@@ -178,7 +179,14 @@ impl Core {
         };
         let id = self.shared.channels.canonical(id);
         let held = self.shared.plugin_refresh.lock(&id).await;
-        if self.shared.plugin_refresh.needs_reopen(&id) {
+        if continuation.is_none() && matches!(method, "turn/start" | "session/resume") {
+            crate::interrupted_send::prepare(self, &id).await?;
+        }
+        if self.shared.plugin_refresh.needs_reopen(&id)
+            && (crate::routing::attaches_session(method, params).is_some()
+                || reopens(method)
+                || method == "plugin/reload")
+        {
             self.reopen_tools(&id).await?;
         }
         // Explicit deferred closure (instructions/key refresh) also applies to a viewed chat. The idle
@@ -353,6 +361,9 @@ impl Core {
             ))
         });
         if let Err(error) = &reopened {
+            if self.shared.interrupted_send.pending(id).is_some() {
+                self.shared.channels.close(id).await;
+            }
             warn!(session_id = id, %error, "the chat did not reopen with its new tools");
             if error.code != ErrorCode::AccessModeUnverified {
                 let title = self

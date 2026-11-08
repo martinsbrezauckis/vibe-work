@@ -1,4 +1,4 @@
-//! Browser policy adapters and launch. OS discovery/process facts live in vw-platform; launchers retain and reap children.
+//! Browser policy adapters and detached launch. OS discovery/process facts live in vw-platform; launchers reap children.
 //! Called by setup, enrollment and status. Injected launchers isolate tests from installed browsers.
 use super::setup::ChromeControlConfig;
 #[cfg(all(test, target_os = "linux"))]
@@ -81,15 +81,11 @@ pub(super) fn edge_running(config: &ChromeControlConfig) -> bool {
 fn running_for(config: &ChromeControlConfig, browser: Browser) -> bool {
     snapshot(config, browser).is_none_or(|facts| facts.process != ProcessState::Stopped)
 }
-/// One complete URL argument; never use a shell or select a different browser profile.
-pub(super) fn launch_args(url: &str) -> [std::ffi::OsString; 1] {
-    [url.into()]
-}
 pub(super) fn open(config: &ChromeControlConfig, url: &str) -> Result<(), String> {
     if let Some(launcher) = &config.launcher {
         return launcher(url);
     }
-    launch(config, Browser::Chrome, url)
+    launch(config, Browser::Chrome, url, None)
 }
 pub(super) fn open_edge(config: &ChromeControlConfig, url: &str) -> Result<(), String> {
     if !cfg!(feature = "your-edge") {
@@ -98,11 +94,37 @@ pub(super) fn open_edge(config: &ChromeControlConfig, url: &str) -> Result<(), S
     if let Some(launcher) = &config.edge_launcher {
         return launcher(url);
     }
-    launch(config, Browser::Edge, url)
+    launch(config, Browser::Edge, url, None)
 }
-fn launch(config: &ChromeControlConfig, browser: Browser, url: &str) -> Result<(), String> {
+/// Reopen the paired browser without visiting a page; a unique installed profile identifies the directory.
+pub(super) fn open_paired(
+    shared: &crate::core::Shared,
+    browser: super::agent_browser::Browser,
+) -> Result<(), String> {
+    let config = &shared.chrome_control.config;
+    let (native, launcher) = match browser {
+        super::agent_browser::Browser::Chrome => (Browser::Chrome, &config.launcher),
+        super::agent_browser::Browser::Edge => (Browser::Edge, &config.edge_launcher),
+        _ => return Ok(()),
+    };
+    if let Some(launcher) = launcher {
+        return launcher("");
+    }
+    launch(
+        config,
+        native,
+        "",
+        super::installation::paired_directory(shared, browser),
+    )
+}
+fn launch(
+    config: &ChromeControlConfig,
+    browser: Browser,
+    url: &str,
+    profile: Option<String>,
+) -> Result<(), String> {
     let home = super::setup::home_of(config)?;
-    let args = launch_args(url);
+    let url = url.to_owned();
     let (sent, received) = std::sync::mpsc::channel();
     std::thread::Builder::new()
         .name("browser-launch".into())
@@ -112,23 +134,34 @@ fn launch(config: &ChromeControlConfig, browser: Browser, url: &str) -> Result<(
             } else {
                 "Google Chrome"
             };
-            let child = vw_platform::browser::discover(browser, &home)
-                .map_err(|issue| match issue {
-                    InstallationIssue::Missing => format!("{name} is not installed"),
-                    InstallationIssue::Sandboxed => {
-                        format!("Snap or Flatpak {name} is unsupported")
-                    }
-                    InstallationIssue::DifferentBrowser => format!("{name} required"),
-                })
-                .and_then(|path| {
-                    std::process::Command::new(path)
-                        .args(args.into_iter().filter(|arg| !arg.is_empty()))
-                        .stdin(std::process::Stdio::null())
-                        .stdout(std::process::Stdio::null())
-                        .stderr(std::process::Stdio::null())
-                        .spawn()
-                        .map_err(|_| format!("{name} could not be opened"))
-                });
+            let child = vw_platform::browser::launch_command_with_profile(
+                browser,
+                &home,
+                &url,
+                profile.as_deref(),
+            )
+            .map_err(|issue| match issue {
+                InstallationIssue::Missing => format!("{name} is not installed"),
+                InstallationIssue::Sandboxed => {
+                    format!("Snap or Flatpak {name} is unsupported")
+                }
+                InstallationIssue::DifferentBrowser => format!("{name} required"),
+            })
+            .and_then(|mut command| {
+                command
+                    .spawn()
+                    .map_err(|_| format!("{name} could not be opened"))
+            });
+            // `open` is a short LaunchServices request. Its exit status tells us whether the bundle was found;
+            // the browser itself belongs to LaunchServices and is never waited on or killed by the app.
+            #[cfg(target_os = "macos")]
+            let child = child.and_then(|mut child| {
+                if child.wait().is_ok_and(|status| status.success()) {
+                    Ok(child)
+                } else {
+                    Err(format!("{name} could not be opened"))
+                }
+            });
             let _ = sent.send(child.as_ref().map(|_| ()).map_err(Clone::clone));
             if let Ok(mut child) = child {
                 let _ = child.wait();

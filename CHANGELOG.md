@@ -2,6 +2,24 @@
 
 All notable changes to Vibe Work. Versions follow [Semantic Versioning](https://semver.org/); dates are UTC.
 
+## 0.1.8 (2026-11-08)
+
+Built for Vibe 3.1.0 on Python 3.14.8.
+
+- **Your Safari** on macOS: the agent can work in your own Safari, as in Your Chrome. Set it up in Settings > Browser >
+  Your Safari.
+- **Send feedback**: report a bug or a suggestion in one short form from Settings > About, the tray menu or `/feedback`,
+  with an optional screenshot.
+- **Monthly plan usage**: see your plan allowance and remaining budget when Mistral reports them.
+- **Context breakdown**: see how the last model call used the context window.
+- **Your Chrome and Your Edge** open when the agent needs them, in a window of its own for each chat, and you turn each
+  on or off separately.
+- The agent can close the tabs it works with, and approval cards name the button or link it wants to click.
+- **Local servers**: in the built-in browser and Your Safari, the agent can open your local development servers and
+  pages on your home network.
+- **Debug API**: outside tools now use a token; copy it in Settings > Developer.
+- Faster contact sheets from 4K videos, and many smaller fixes.
+
 ## 0.1.7 (2026-11-06)
 
 Built for Vibe 3.1.0 on Python 3.14.8.

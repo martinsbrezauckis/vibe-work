@@ -1,6 +1,13 @@
 //! Typed video requests shared by the MCP catalog and the optional core adapter.
 //! Integer presentation times and preflight frame counts are validated before starting a decoder.
 use serde::{Deserialize, Serialize};
+/// The Windows spelling of a local video path. Other paths retain their spelling.
+/// This lexical conversion grants no file access; callers still canonicalize and authorize the source.
+#[must_use]
+pub fn windows_path(path: &str) -> std::borrow::Cow<'_, str> {
+    crate::msys_paths::native_drive(path)
+        .map_or_else(|| std::borrow::Cow::Borrowed(path), std::borrow::Cow::Owned)
+}
 /// Shipping availability; keep the Linux implementation compiled for its future release.
 pub const ENABLED: bool = cfg!(all(feature = "video", any(windows, target_os = "macos")));
 /// Reason and next action for a stale or direct call on an unsupported platform.

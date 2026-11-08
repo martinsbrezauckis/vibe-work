@@ -7,7 +7,7 @@
 //! - [`watch_requests`] attaches Apple's PRIVATE watch-only request delegate, only while [`set_request_watch`]
 //!   is on (Settings > Developer; off by default). A macOS without the private interface leaves it off quietly.
 //!
-//! - [`show_click_marker`] draws a short ring where the agent clicked, in the person's view only (never the page).
+//! - [`click_marker_state`] inspects the shared host overlay in native acceptance tests.
 //!
 //! Depends on: vw-platform `webview::{agent_world_mac, request_watch_mac, click_marker_mac}`, `platform::with_native`. Called by:
 //! the engine and its private test fixture.
@@ -54,6 +54,30 @@ pub async fn install_world(webview: &Webview<Wry>) -> Result<WorldFacts, EngineE
             let _ = reply.send(vw_platform::webview::agent_world_mac::install_agent_world(
                 native.inner(),
             ));
+        },
+    )
+    .await
+}
+
+/// Installs the mount's bridge in the agent world before navigation, without page-world selection code.
+///
+/// # Errors
+/// The webview is gone or its isolated world could not be installed.
+pub async fn install_initializer(
+    webview: &Webview<Wry>,
+    source: String,
+) -> Result<(), EngineError> {
+    with_native(
+        webview,
+        "installing the browser bridge",
+        Duration::from_secs(5),
+        move |native, reply| {
+            let _ = reply.send(
+                vw_platform::webview::agent_world_mac::install_agent_initializer(
+                    native.inner(),
+                    &source,
+                ),
+            );
         },
     )
     .await
@@ -178,29 +202,6 @@ pub async fn forget(webview: &Webview<Wry>) -> Result<(), EngineError> {
             vw_platform::webview::request_watch_mac::detach(native.inner());
             vw_platform::webview::agent_world_mac::forget_agent_world(native.inner());
             let _ = reply.send(Ok(()));
-        },
-    )
-    .await
-}
-
-/// Shows the agent's click marker at `point` (0..1 of the view, from the top left) for a moment.
-///
-/// # Errors
-/// The webview is gone or the point is outside it.
-#[cfg(feature = "click-marker")]
-pub async fn show_click_marker(
-    webview: &Webview<Wry>,
-    point: (f64, f64),
-) -> Result<(), EngineError> {
-    with_native(
-        webview,
-        "showing the click marker",
-        Duration::from_secs(2),
-        move |native, reply| {
-            let _ = reply.send(vw_platform::webview::click_marker_mac::show(
-                native.inner(),
-                point,
-            ));
         },
     )
     .await

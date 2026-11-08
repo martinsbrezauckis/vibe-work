@@ -18,6 +18,7 @@ pub(super) async fn apply(shared: &Shared, session: &str, args: &mut Value) -> R
         return Err("Not run: this chat's browser work ended while checking helper support. Start a new turn before opening the browser again.".into());
     }
     let status = &status.value()["structuredContent"];
+    super::profile_ids::resolve_browser(args, status)?;
     let profile = args["profileId"].as_str().and_then(|selected| {
         status["profiles"].as_array()?.iter().find(|profile| {
             profile["profileId"]

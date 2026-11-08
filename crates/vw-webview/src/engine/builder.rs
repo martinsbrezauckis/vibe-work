@@ -140,15 +140,15 @@ impl TauriEngine {
 
 /// Sends a webview's traffic through the guard's listener `proxy` (`http://127.0.0.1:<port>`). Windows: the whole
 /// browser argument string (`vw_netguard::chromium`: wry's defaults, the proxy and `<-loopback>`, which wry's own
-/// proxy option cannot express); elsewhere Tauri's proxy option.
+/// proxy option cannot express). Tauri's proxy option also carries credentials to every native backend.
 pub(super) fn with_proxy(
-    builder: WebviewBuilder<Wry>,
+    mut builder: WebviewBuilder<Wry>,
     proxy: &str,
 ) -> Result<WebviewBuilder<Wry>, EngineError> {
     if cfg!(windows) {
         let arguments =
             vw_netguard::chromium::webview2_arguments(proxy).map_err(EngineError::Platform)?;
-        return Ok(builder.additional_browser_args(&arguments));
+        builder = builder.additional_browser_args(&arguments);
     }
     let url = Url::parse(proxy).map_err(|e| EngineError::Platform(e.to_string()))?;
     Ok(builder.proxy_url(url))

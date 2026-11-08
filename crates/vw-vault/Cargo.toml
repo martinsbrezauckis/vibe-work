@@ -43,3 +43,7 @@ blake3 = { version = "1.8", features = ["pure"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 apple-native-keyring-store = { version = "=1.0.2", default-features = false, features = ["keychain"] }
+
+[features]
+# Optional agent capture directly into the vault. Off in default builds.
+agent-vault = []

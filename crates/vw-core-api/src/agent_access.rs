@@ -37,6 +37,22 @@ pub(crate) fn check_for(shared: &Shared, kind: &str, session: &str) -> Result<()
     })
 }
 
+/// The Debug bearer carries person authority. Check the current chat, never its earlier consent or mode.
+/// Other entries keep their ordinary vault policy; the host's copy and regeneration do not call this.
+pub(crate) fn check_item(shared: &Shared, session: &str, id: &str) -> Result<(), String> {
+    if id == vw_keys::DEBUG_TOKEN_ITEM
+        && (shared.store.view(session).is_none()
+            || crate::chrome_control::check::mode(shared, session).as_deref()
+                != Some("auto-approve"))
+    {
+        let full = vw_vocabulary::label("accessModes", "auto-approve");
+        return Err(format!(
+            "Not run: the Debug API token is available only in {full}. Ask the user to switch this chat to {full}, then try again."
+        ));
+    }
+    Ok(())
+}
+
 /// Sets the pause after a user-only command has passed `vault_scope`.
 pub(crate) fn set(shared: &Shared, locked: bool) {
     shared.agent_access_locked.store(locked, Ordering::SeqCst);

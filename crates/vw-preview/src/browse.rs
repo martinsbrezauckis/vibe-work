@@ -27,8 +27,7 @@ pub struct LoadState {
 /// The first answer for a request of a webview mount to `127.0.0.1:<port>`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum LoopbackGate {
-    /// The mount holds a page of this session's own server (the session id): the port's owner decides (own or
-    /// another session's server).
+    /// The live mount belongs to this session; retained for older callers.
     NeedOwner(String),
     /// Refused: the reason.
     Refuse(String),
@@ -236,31 +235,23 @@ impl PreviewService {
             .or_else(|| entry.lan_host.is_some().then_some(PageClass::Lan))
     }
 
-    /// The loopback rule's first step for a request of the webview mounted as `label` to a port on this computer
-    /// (following the Private Network Access model): a mount holding a page of the session's own server asks the
-    /// port's owner next (answering the session); a mount holding a page from the web, or an unknown label, is
-    /// refused. A mount's class never changes (`PageClass`), so no allowance is ever carried across a navigation.
+    /// Compatibility view of a live mount's owner. Address classes do not restrict browser requests.
+    /// Stale labels remain refused; current guard callers use the live mount identity directly.
     #[must_use]
     pub fn loopback_gate(&self, label: &str) -> LoopbackGate {
         let state = self.inner.lock();
         let Some(session) = state.session_of(label) else {
             return LoopbackGate::Refuse("this page is no longer shown".to_owned());
         };
-        let class = state
+        if state
             .entries
             .get(session)
             .and_then(|entry| entry.mount.as_ref())
-            .filter(|m| m.label == label)
-            .map(|m| m.class);
-        match class {
-            Some(PageClass::Local) => LoopbackGate::NeedOwner(state.owner_of(session)),
-            Some(PageClass::Web) => LoopbackGate::Refuse(
-                "a page from the web cannot reach servers on this computer".to_owned(),
-            ),
-            Some(PageClass::Lan) => LoopbackGate::Refuse(
-                "a page on your local network cannot reach servers on this computer".to_owned(),
-            ),
-            None => LoopbackGate::Refuse("this page is no longer shown".to_owned()),
+            .is_some_and(|mount| mount.label == label)
+        {
+            LoopbackGate::NeedOwner(state.owner_of(session))
+        } else {
+            LoopbackGate::Refuse("this page is no longer shown".to_owned())
         }
     }
 
@@ -424,7 +415,11 @@ impl PreviewService {
         session_id: &str,
         url: &url::Url,
     ) -> Result<crate::policy::Destination, String> {
-        let destination = self.inner.policy.classify(url).map_err(|e| e.to_string())?;
+        let destination = self
+            .inner
+            .policy
+            .fetch_classify(url)
+            .map_err(|e| e.to_string())?;
         if destination == crate::policy::Destination::Public {
             return Ok(destination);
         }
@@ -438,7 +433,7 @@ impl PreviewService {
             .ok_or_else(|| "this session's page is not shown".to_owned())?;
         self.inner
             .policy
-            .navigation(url, &entry.allowed, mount.class, entry.mount_lan_host())
+            .fetch_navigation(url, &entry.allowed, mount.class, entry.mount_lan_host())
             .map_err(|e| e.to_string())?;
         Ok(destination)
     }
