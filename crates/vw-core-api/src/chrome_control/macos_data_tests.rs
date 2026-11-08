@@ -258,6 +258,17 @@ mod status;
 #[test]
 fn macos_remove_skips_an_absent_legacy_edge_even_when_policy_hides_it() {
     let s = Scratch::new("mac-remove-absent");
+    // As in the test above: presence also checks the machine's own /Applications, so on a Mac with Edge installed
+    // (hosted CI images have it) the premise "Edge is gone" cannot be built; it is asserted wherever it holds.
+    if vw_platform::browser::macos_executable(
+        vw_platform::browser::Browser::Edge,
+        &s.root.join("no-home"),
+    )
+    .is_some()
+    {
+        eprintln!("skipped: this machine has Microsoft Edge in /Applications");
+        return;
+    }
     let (mut config, _) = protected(&s);
     bundle(&s, "Google Chrome");
     bundle(&s, "Microsoft Edge");
