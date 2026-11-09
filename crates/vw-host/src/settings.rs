@@ -30,7 +30,7 @@ pub struct HostSettings {
     pub terminals_per_session: Option<u16>,
     /// User builds: list and save sessions in the Vibe CLI's session
     /// folder so the app and the CLI see the same history. `None` = the default, **on**.
-    /// Applied at start; no Settings control yet: the file is the setting.
+    /// Applied at start; Settings > General controls session sharing.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub share_cli_sessions: Option<bool>,
     /// User builds that carry an update endpoint: download a newer version in the background

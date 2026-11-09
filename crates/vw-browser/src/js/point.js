@@ -6,7 +6,11 @@
   __VW_COMMON__
   // eslint-disable-next-line no-undef -- Expanded by the script assembler.
   __VW_POINT_RECEIPT__
+  /* global postsForm -- Inserted by the script assembler. */
+  // eslint-disable-next-line no-undef -- Expanded by the Rust script assembler.
+  __VW_SENDING__
   const request = REQ;
+  const hover = request.click?.count === 0;
   const env = window[request.page];
   const check = request.checks.find(c => c.document === env?.frameDocument);
   if (!check) { armPointReceipt(null, null); return null; }
@@ -24,17 +28,19 @@
   for (let i = 0; target && env.nodeIdentities?.get(target) !== check.node && i < 64; i += 1)
     target = target.parentElement || target.getRootNode()?.host;
   if (!target || !check.node || env.nodeIdentities?.get(target) !== check.node) return fail("node or frame under point changed");
+  if (!hover && check.target && !REQ.nativeUser && REQ.allowSend === false && postsForm(hit))
+    return fail("browser send approval required");
   const control = hit.closest?.("label")?.control || hit;
-  if (check.target && !REQ.nativeUser && control?.localName === "input" && control.type === "color")
+  if (!hover && check.target && !REQ.nativeUser && control?.localName === "input" && control.type === "color")
     return fail("native colour picker unsupported; use browser_read for the field ref, then browser_act type with #RRGGBB text");
-  if (check.target && !REQ.nativeUser && (authorizationPage() || REQ.consent)) {
+  if (!hover && check.target && !REQ.nativeUser && (authorizationPage() || REQ.consent)) {
     if (!REQ.consent || REQ.consent.snapshot !== consentSnapshot(REQ.ref).snapshot) return fail("authorization changed");
   }
   const rect = target.getBoundingClientRect();
   if (["x", "y", "width", "height"].some(k => Math.round(rect[k]) !== check.bounds[k])) return fail("target geometry changed");
   for (let node = target; node; node = node.parentElement || node.getRootNode()?.host) {
     const style = getComputedStyle(node);
-    if (node.inert || node.disabled || node.getAttribute("aria-disabled") === "true" || style.visibility !== "visible" || Number(style.opacity) === 0) return fail("target is not actionable");
+    if ((!hover && (node.inert || node.disabled || node.getAttribute("aria-disabled") === "true")) || style.visibility !== "visible" || Number(style.opacity) === 0) return fail("target is not actionable");
     if (style.perspective !== "none" || (style.rotate && !["none", "0deg"].includes(style.rotate))) return fail("transformed target");
     if (style.transform !== "none") {
       const matrix = new DOMMatrixReadOnly(style.transform);

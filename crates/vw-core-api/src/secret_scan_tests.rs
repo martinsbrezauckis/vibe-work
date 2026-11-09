@@ -292,7 +292,7 @@ fn unified_store_files_belong_to_their_store_meta_and_are_sealed_while_2x_files_
     assert!(!derived_index(&folder, &store.join("meta.json")));
     assert_eq!(chat(&folder, &index), None);
 
-    // 2.26.1 (0.1.1 users' logs): meta.json beside messages.jsonl, editable.
+    // 2.26.1 (legacy session logs): meta.json beside messages.jsonl, editable.
     let legacy = folder.join("session_20261001_120000_0c0ffee0");
     std::fs::create_dir_all(&legacy).unwrap();
     std::fs::write(

@@ -263,7 +263,8 @@ async fn shortened_article_explains_supported_continuation() {
         !how.contains("64000"),
         "must not suggest bypassing the inline cap: {how}"
     );
-    assert!(how.contains("textPage") && how.contains("find"));
+    assert!(how.contains("textCursor") && how.contains("find"));
+    assert!(answer["untrustedPageContent"]["nextTextCursor"].is_object());
     assert!(
         how.contains('0'),
         "shortened current window must remain recoverable: {how}"

@@ -24,12 +24,33 @@ impl Browser {
         by: Actor,
         nav: &dyn Navigate,
     ) -> Result<Value, ActError> {
+        self.act_with_sending(session_id, action, by, nav, true)
+            .await
+    }
+
+    /// Runs an authorized tool package; when sending is absent, POST activation returns a no-effect signal.
+    ///
+    /// # Errors
+    /// The ordinary action failure, or [`crate::SEND_REQUIRED`] for the core's existing approval card.
+    pub async fn act_with_sending(
+        &self,
+        session_id: &str,
+        action: Action,
+        by: Actor,
+        nav: &dyn Navigate,
+        allow_send: bool,
+    ) -> Result<Value, ActError> {
         let action = self.bind_point(session_id, action)?;
         let target = self.target_text(session_id, &action);
         if by == Actor::Agent && self.sessions.stopped(session_id) {
             let error = refused(STOPPED);
             self.log(session_id, by, &action, &target, &Err(error.clone()));
             return Err(error);
+        }
+        if !matches!(action, Action::Dialog(_))
+            && let Some(receipt) = self.dialog_receipt(session_id)
+        {
+            return Ok(receipt);
         }
         if let Err(error) = self.check_ref(session_id, &action) {
             self.log(session_id, by, &action, &target, &Err(error.clone()));
@@ -41,9 +62,7 @@ impl Browser {
             .pending_native_click
             .is_some()
         {
-            return Err(refused(
-                "A native click is already waiting. Bring Vibe Work to the front or press Stop before another act.",
-            ));
+            return Err(refused(crate::native_focus::CLICK_WAITING));
         }
         let _flight = self.sessions.begin(session_id, by);
         let mut cancel = self.sessions.cancel_signal(session_id);
@@ -51,12 +70,18 @@ impl Browser {
         let mut authorization_token = None;
         let native_sent = Arc::new(AtomicBool::new(false));
         let result = {
-            let work = async {
-                let consent = if by == Actor::User {
+            let work = Box::pin(async {
+                let mut consent = if by == Actor::User {
                     None
                 } else {
                     self.consent_before_action(session_id, &action, by).await?
                 };
+                if by == Actor::Agent && !allow_send {
+                    self.send_before_action(session_id, &action, consent.as_ref())
+                        .await?;
+                    consent.get_or_insert_with(|| serde_json::json!({}))["allowSend"] =
+                        serde_json::json!(false);
+                }
                 authorization_token.clone_from(&consent);
                 self.perform(
                     session_id,
@@ -67,16 +92,13 @@ impl Browser {
                     native_sent.clone(),
                 )
                 .await
-            };
-            if by == Actor::Agent {
-                tokio::select! {
-                    result = work => result,
-                    _ = cancel.changed() => Err(ActError { outcome: Outcome::Stopped,
-                        text: if self.sessions.stopped(session_id) { STOPPED.to_owned() }
-                            else { "Not run: this browser act was canceled because its turn ended or was replaced.".to_owned() } }),
-                }
-            } else {
-                work.await
+            });
+            tokio::select! {
+                result = work => result,
+                receipt = self.wait_for_dialog(session_id), if !matches!(action, Action::Dialog(_)) => Ok(receipt),
+                _ = cancel.changed(), if by == Actor::Agent => Err(ActError { capture_block: None, outcome: Outcome::Stopped,
+                    text: if self.sessions.stopped(session_id) { STOPPED.to_owned() }
+                        else { "Not run: this browser act was canceled because its turn ended or was replaced.".to_owned() } }),
             }
         };
         if by == Actor::Agent
@@ -90,7 +112,25 @@ impl Browser {
                 .queue_focus_retry(session_id, action, token, target, cancel)
                 .await;
         }
+        if self.sessions.stopped(session_id) {
+            self.service.dismiss_dialog(session_id).await;
+        }
+        if !allow_send
+            && !native_sent.load(Ordering::Acquire)
+            && result.as_ref().is_err_and(|error| {
+                error.outcome == Outcome::Refused && error.text != crate::SEND_REQUIRED
+            })
+        {
+            self.send_before_action(session_id, &action, authorization_token.as_ref())
+                .await?;
+        }
         let result = Self::finish_native_action(result, native_sent.load(Ordering::Acquire));
+        if result
+            .as_ref()
+            .is_err_and(|error| error.text == crate::SEND_REQUIRED)
+        {
+            return result;
+        }
         self.log(session_id, by, &action, &target, &result);
         result
     }

@@ -6,12 +6,6 @@
   min-height: 0;
   color: var(--text);
 }
-.gb-panel {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  min-height: 0;
-}
 .gb-project-choice {
   display: flex;
   align-items: center;

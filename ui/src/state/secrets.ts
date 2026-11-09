@@ -2,7 +2,7 @@
  * Project secrets and safety reminders for Settings: thin calls to the core's `secrets` and `safety`
  * commands, plus the plain words the screens show for the broker's decisions.
  * Depends on: protocol/core types, coreStore. Called by: features/secrets (ProjectSecretsSettings, SafetySettings).
- * Invariants: no function here receives a secret value back; `addSecret` sends the value once (the core answers
+ * Invariants: no function here receives a secret value back; a `secrets` add request sends the value once (the core answers
  * metadata only) and the caller clears its field right after.
  */
 import type {

@@ -142,6 +142,22 @@ pub struct BranchState {
     pub base: Option<BaseInfo>,
 }
 
+/// Why committing is blocked by this branch state (detached HEAD or an unfinished Git operation).
+#[must_use]
+pub fn blocker(state: &BranchState) -> Option<String> {
+    if state.branch().is_none() {
+        return Some(
+            "This folder is not on a branch (detached HEAD). Switch to a branch first.".to_owned(),
+        );
+    }
+    state.in_progress.map(|op| {
+        format!(
+            "git has {} in progress in this folder. Finish or abort it in your git tool first.",
+            op.words()
+        )
+    })
+}
+
 impl RemoteInfo {
     /// The address for a sentence ("a remote helper address" when it is not a plain one).
     #[must_use]

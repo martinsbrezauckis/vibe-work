@@ -21,6 +21,7 @@ click-marker = ["vw-browser/click-marker"]
 proxy-transports = ["vw-netguard/proxy-transports", "vw-mistral/proxy-transports", "vw-gate/proxy-transports"]
 feedback = ["vw-agent-tools/feedback"]
 video = ["dep:vw-video", "vw-agent-tools/video"]
+linux-video = ["video", "vw-agent-tools/linux-video"]
 video-test = ["video", "vw-video/helper"]
 # Browser modules selected by the app; Firefox remains off by default.
 your-firefox = []

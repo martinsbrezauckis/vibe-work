@@ -1,7 +1,7 @@
 //! Browser availability and connection setup for Settings and the Debug API.
 //! Called by core dispatch; permissions come from chat access modes.
 
-use super::{PairingState, setup};
+use super::{PairingState, agent_browser::Browser, setup};
 use crate::install_offers::{OfferKey, ToolsInstallOffer};
 use crate::{CommandResult, Core, CoreError, ErrorCode, Origin};
 
@@ -92,8 +92,10 @@ pub enum ChromeControlRequest {
     },
     /// Unregister only the embedded Safari connection and leave it off.
     RemoveSafari {},
-    /// Remove what Set up made.
+    /// Remove only the Chrome connection.
     Remove {},
+    /// Remove only the Edge connection.
+    RemoveEdge {},
 }
 
 /// Settings › Browser › Your Chrome.
@@ -186,8 +188,7 @@ pub(crate) fn view(shared: &crate::core::Shared) -> ChromeControlView {
     let pairing_state = pairing.0;
     drop(pairing);
     if chrome.config.is_macos() {
-        setup.profiles =
-            super::installation::reported_profiles(shared, super::agent_browser::Browser::Chrome);
+        setup.profiles = super::installation::reported_profiles(shared, Browser::Chrome);
     }
     setup.addon = Some(addon_view(shared, &setup, pairing_state));
     let left = extension_left(chrome);
@@ -234,8 +235,7 @@ pub(crate) fn view(shared: &crate::core::Shared) -> ChromeControlView {
         }
         drop(pairing);
         if chrome.config.is_macos() {
-            edge.profiles =
-                super::installation::reported_profiles(shared, super::agent_browser::Browser::Edge);
+            edge.profiles = super::installation::reported_profiles(shared, Browser::Edge);
         }
         edge.addon = Some(super::agent_browser::edge_addon(shared, &edge));
         Box::new(edge)
@@ -278,8 +278,7 @@ fn addon_view(
     }
     if setup.state == setup::SetupState::RepairRequired {
         let mut view = super::addon::view(super::AddonState::HelperSetupRequired, "");
-        view.extension_version =
-            super::installation::version(shared, super::agent_browser::Browser::Chrome);
+        view.extension_version = super::installation::version(shared, Browser::Chrome);
         return view;
     }
     let chrome = &shared.chrome_control;
@@ -294,7 +293,7 @@ fn addon_view(
             enroll.connecting(tokio::time::Instant::now()),
         )
     };
-    let profiles = super::installation::profiles(shared, super::agent_browser::Browser::Chrome);
+    let profiles = super::installation::profiles(shared, Browser::Chrome);
     let installed_version = super::addon::installed_version(
         &chrome.config,
         &profiles,
@@ -305,7 +304,7 @@ fn addon_view(
             .connected_profiles
             .snapshot()
             .into_iter()
-            .filter(|(id, _)| super::agent_browser::Browser::Chrome.owns_profile(id))
+            .filter(|(id, _)| Browser::Chrome.owns_profile(id))
             .collect::<Vec<_>>(),
     );
     let paired_once = chrome.paired_once.load(std::sync::atomic::Ordering::SeqCst);
@@ -357,8 +356,7 @@ fn addon_view(
     });
     let state = super::installation::observed_state(&chrome.config, state);
     let mut view = super::addon::view(state, &facts.package_text);
-    view.extension_version =
-        super::installation::version(shared, super::agent_browser::Browser::Chrome);
+    view.extension_version = super::installation::version(shared, Browser::Chrome);
     super::addon::reconnecting(&mut view, paired_once && !waiting);
     super::installation::present(&chrome.config, &mut view);
     view
@@ -397,54 +395,6 @@ impl Core {
             view: self.chrome_view(),
             offer: offer.map(Box::new),
         }
-    }
-
-    async fn chrome_remove(&self) -> Result<CommandResult, CoreError> {
-        let chrome = &self.shared.chrome_control;
-        let _held = chrome.lifecycle.lock().await;
-        let state = chrome
-            .dir()
-            .ok_or_else(|| invalid("Vibe Work has no app folder."))?;
-        super::stop_owner(&self.shared).await;
-        let user_data = setup::user_data(&chrome.config, Some(state), "Google Chrome");
-        if let Some(keys) = &self.shared.config.keys {
-            keys.delete_chrome_owner()
-                .await
-                .map_err(|_| invalid(vw_vocabulary::texts::CHROME_OWNER_DELETE_FAILED))?;
-        }
-        // Chrome removes an extension it installed from Vibe Work's registration by itself once the registration
-        // is gone; a Store-added extension stays until the person removes it in Chrome.
-        let chrome_removes_it = super::extension_install::remove(&chrome.config, state)
-            .map_err(|reason| invalid(&reason))?;
-        chrome.forget_paired();
-        super::edge_state::remember_pairing(chrome, false);
-        let removed = setup::remove(&chrome.config, state);
-        chrome.reset();
-        chrome
-            .owner
-            .credential_missing
-            .store(false, std::sync::atomic::Ordering::SeqCst);
-        chrome
-            .removed_external
-            .store(chrome_removes_it, std::sync::atomic::Ordering::SeqCst);
-        *chrome
-            .left_in_chrome
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = user_data;
-        removed.map_err(|reason| {
-            CoreError::new(ErrorCode::Internal, {
-                tracing::warn!(%reason, "Chrome Control removal failed");
-                if reason.starts_with("macOS blocked access") {
-                    reason
-                } else {
-                    vw_vocabulary::texts::CHROME_REMOVAL_FAILED.to_owned()
-                }
-            })
-        })?;
-        self.shared.emit(crate::CoreEvent::ChromeControl {
-            view: self.chrome_view(),
-        });
-        Ok(self.chrome_result(None))
     }
 
     fn chrome_open_store(&self) -> Result<CommandResult, CoreError> {
@@ -559,7 +509,8 @@ impl Core {
         let chrome = &self.shared.chrome_control;
         let edge = matches!(
             request,
-            ChromeControlRequest::OfferEdgeSetup {}
+            ChromeControlRequest::RemoveEdge {}
+                | ChromeControlRequest::OfferEdgeSetup {}
                 | ChromeControlRequest::SetupEdge { .. }
                 | ChromeControlRequest::OpenEdgeStore {}
         );
@@ -609,15 +560,13 @@ impl Core {
                 .await
             }
             ChromeControlRequest::SetEnabled { enabled } => {
-                self.browser_enabled(super::agent_browser::Browser::Chrome, enabled)
-                    .await
+                self.browser_enabled(Browser::Chrome, enabled).await
             }
             ChromeControlRequest::SetEdgeEnabled { enabled } => {
                 if !cfg!(feature = "your-edge") {
                     return Err(invalid(setup::absent_for(true)));
                 }
-                self.browser_enabled(super::agent_browser::Browser::Edge, enabled)
-                    .await
+                self.browser_enabled(Browser::Edge, enabled).await
             }
             ChromeControlRequest::SetLocalNetwork { enabled } => {
                 self.set_local_network(enabled).await
@@ -651,7 +600,8 @@ impl Core {
             )),
             ChromeControlRequest::OpenFirefox {} => self.firefox_window(true).await,
             ChromeControlRequest::CloseFirefox {} => self.firefox_window(false).await,
-            ChromeControlRequest::Remove {} => self.chrome_remove().await,
+            ChromeControlRequest::Remove {} => self.remove_browser(Browser::Chrome).await,
+            ChromeControlRequest::RemoveEdge {} => self.remove_browser(Browser::Edge).await,
         }
     }
 

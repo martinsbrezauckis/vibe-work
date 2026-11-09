@@ -32,9 +32,13 @@ pub mod consent;
 mod consent_driver;
 pub mod delegation;
 mod delegation_driver;
+pub mod dialogs;
+pub mod downloads;
 mod driver;
+mod frame_wait;
 pub mod frames;
 pub mod guard;
+mod host_action;
 mod image_read;
 mod inline_output;
 #[cfg(test)]
@@ -51,15 +55,20 @@ pub mod output;
 mod page;
 mod point;
 mod point_receipt;
+mod pointer;
 mod postconditions;
 mod read;
 pub mod receipt;
 mod refs;
+pub mod screenshot_area;
 pub mod scripts;
 mod scroll_shown;
 mod secret_capture;
+mod sending;
 mod sessions;
+pub mod site_storage;
 pub mod text;
+mod text_paging;
 mod upload;
 mod visual;
 
@@ -68,12 +77,13 @@ pub use act::{
     MAX_WAIT_MS, PageAnswer, Target, UploadFile, parse,
 };
 pub use action_loop::POST_INPUT_FAILED;
-pub use driver::{
-    ActError, Browser, HEADLINE_KEY, NOTHING_OPEN, NavFuture, Navigate, ReadOptions, STOPPED,
-};
+pub use choices::ChoiceCursor;
+pub use driver::{ActError, Browser, HEADLINE_KEY, NOTHING_OPEN, NavFuture, Navigate, STOPPED};
 pub use login_fill::{FillRefusal, FillTarget, LoginRole};
 pub use output::filter_agent_output;
+pub use read::ReadOptions;
 pub use secret_capture::CapturedSecret;
+pub use sending::SEND_REQUIRED;
 pub use sessions::{
     ACTIVE_FOR_MS, Actor, BrowserState, LOG_CAP, LogEntry, Outcome, Sessions, now_ms,
 };
@@ -82,3 +92,4 @@ pub use sessions::{
 mod agent_secret;
 #[cfg(feature = "agent-vault")]
 pub use agent_secret::AgentSecret;
+pub use text_paging::TextCursor;

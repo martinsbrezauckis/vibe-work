@@ -25,10 +25,10 @@ use preview::{browser_decls, preview_decls, proposal_decls};
 use crate::{
     AlertKind, AnomalyCountsView, AnomalyRecordView, AnomalyReport, CallbackInfo, ChannelView,
     ChannelsReport, Command, CommandResult, CoreError, CoreEvent, CoreStatus, DeathView,
-    DebugApiFlag, DocumentRefusal, DocumentSource, DocumentView, DocumentsRequest, DocumentsResult,
-    ErrorCode, InstructionsDoc, InstructionsRequest, InstructionsResult, InstructionsScope,
-    KeptUnitView, KeptView, KeyCandidateView, KeyMetadataView, KeyRequest, KeySourceView,
-    KeyStatusView, Origin, ProjectInstructionFile, ProjectInstructionsRequest,
+    DebugApiFlag, DocumentRefusal, DocumentRefusalKind, DocumentSource, DocumentView,
+    DocumentsRequest, DocumentsResult, ErrorCode, InstructionsDoc, InstructionsRequest,
+    InstructionsResult, InstructionsScope, KeptUnitView, KeptView, KeyMetadataView, KeyRequest,
+    KeySourceView, KeyStatusView, Origin, ProjectInstructionFile, ProjectInstructionsRequest,
     ProjectInstructionsResult, RateLimitsView, RecoveringView, SecretInput, ServerReport,
     ServerStatus, SessionChange, SessionRowView, SessionSnapshot, StuckView, SubagentCard,
     TerminalEventView, TerminalOutputView, TerminalRequest, TerminalResult, TerminalStateView,
@@ -271,10 +271,10 @@ fn keys_decls(cfg: &Config) -> Vec<String> {
         KeyStatusView::decl(cfg),
         KeyMetadataView::decl(cfg),
         KeySourceView::decl(cfg),
-        KeyCandidateView::decl(cfg),
         VibeKeyView::decl(cfg),
         VibeKeySource::decl(cfg),
         VaultChoice::decl(cfg),
+        crate::VaultUnlockMethod::decl(cfg),
     ]
 }
 
@@ -303,6 +303,7 @@ fn documents_decls(cfg: &Config) -> Vec<String> {
         KeptView::decl(cfg),
         KeptUnitView::decl(cfg),
         DocumentRefusal::decl(cfg),
+        DocumentRefusalKind::decl(cfg),
         DocumentSource::decl(cfg),
         crate::DroppedFile::decl(cfg),
     ]

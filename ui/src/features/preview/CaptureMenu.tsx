@@ -7,6 +7,7 @@
  * Invariants: keyboard reachable (Enter/Space open, arrows move, Escape closes and returns focus); the menu never
  * covers an action the user did not open; texts are Vibe Work's own (the page's words are never shown here).
  */
+import type { CaptureBlock } from "../../protocol/core";
 import { Button } from "../../components/Controls";
 import {
   Fragment,
@@ -23,30 +24,25 @@ import { CAPTURE_KINDS, type Capture } from "./capture";
 import { useBrowserPopup } from "./useBrowserPopup";
 import { closeBrowserOverlaysAndWait } from "./browserOverlays";
 
-/** Keep agent guidance in the capture result; the visible status needs only the reason. */
-export function captureErrorLabel(error: string): string {
-  const reason = error.startsWith("Not run: ") ? error.slice("Not run: ".length) : error;
-  if (reason.startsWith("The Vibe Work window is minimized or hidden,")) return "Window hidden";
-  if (reason.startsWith("The user is viewing another session,")) return "Another session";
-  if (reason.startsWith("The user is viewing another page,")) return "Another page";
-  if (reason.startsWith("The Browser side panel is closed or shows another panel tab,"))
-    return "Browser panel closed";
-  if (reason.startsWith("The browser engine for ") && reason.includes(" is paused to save memory."))
-    return "Browser paused";
-  if (reason.startsWith("The user has selected a web tab instead of App preview."))
-    return "App preview not selected";
-  if (reason.startsWith("The user has selected another tab instead of web tab '"))
-    return "Web tab not selected";
-  if (
-    (reason.startsWith("App preview for ") || reason.startsWith("web tab '")) &&
-    reason.includes(" remains stopped. Start its server if needed, then Reload.")
-  )
-    return "Server stopped";
-  if (reason.startsWith("App preview is not shown in the Browser panel."))
-    return "App preview not shown";
-  if (reason.startsWith("web tab '") && reason.includes(" is not shown in the Browser panel."))
-    return "Web tab not shown";
-  return error;
+/** Short window labels use typed reasons; detailed guidance stays in the capture result. */
+const BLOCK_LABELS: Record<CaptureBlock, string> = {
+  windowHidden: "Window hidden",
+  anotherSession: "Another session",
+  anotherPage: "Another page",
+  noChatSelected: "No chat selected",
+  browserPanelClosed: "Browser panel closed",
+  browserPaused: "Browser paused",
+  appPreviewNotSelected: "App preview not selected",
+  webTabNotSelected: "Web tab not selected",
+  serverStopped: "Server stopped",
+  appPreviewNotShown: "App preview not shown",
+  webTabNotShown: "Web tab not shown",
+  browserPageNotShown: "Browser page not shown",
+};
+
+/** An unknown failure keeps its complete text. */
+export function captureErrorLabel(error: string, block?: CaptureBlock): string {
+  return block === undefined ? error : BLOCK_LABELS[block];
 }
 
 /** The row for `sessionId`. `reveal` opens a folder in the system's file manager. */
@@ -76,6 +72,7 @@ export function CaptureMenu({
   const busy = useStore(capture.store, (s) => s.busy[sessionId]);
   const last = useStore(capture.store, (s) => s.last[sessionId]);
   const error = useStore(capture.store, (s) => s.error[sessionId] ?? null);
+  const block = useStore(capture.store, (s) => s.block[sessionId]);
 
   const close = () => {
     setOpen(false);
@@ -188,7 +185,7 @@ export function CaptureMenu({
           </span>
           {error !== null && busy === undefined && (
             <p className="key-problem preview-error" role="alert">
-              {captureErrorLabel(error)}
+              {captureErrorLabel(error, block)}
             </p>
           )}
         </>

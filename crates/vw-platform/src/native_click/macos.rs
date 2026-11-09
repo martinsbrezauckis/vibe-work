@@ -29,15 +29,36 @@ pub fn click(
     point: (f64, f64),
     sent: &AtomicBool,
 ) -> Result<(), String> {
+    click_options(webview, point, sent, (0, 1, 0))
+}
+
+/// Sends a native button/count/modifier sequence to this view only.
+///
+/// # Errors
+/// Invalid options, an absent view, hidden/inactive window or an occluded point.
+pub fn click_options(
+    webview: *mut std::ffi::c_void,
+    point: (f64, f64),
+    sent: &AtomicBool,
+    options: (u8, u8, u8),
+) -> Result<(), String> {
+    if options != (0, 0, 0) && (options.0 > 2 || !(1..=3).contains(&options.1) || options.2 > 15) {
+        return Err("invalid native click options".into());
+    }
     let _main = MainThreadMarker::new().ok_or("native click requires the main thread")?;
     // SAFETY: Tauri gives this live WKWebView pointer inside with_webview on the main thread. Retaining it keeps the
     // view alive through both AppKit messages; no global event tap or other app receives the events.
     let view = unsafe { Retained::retain(webview.cast::<WKWebView>()) }
         .ok_or("native preview webview is unavailable")?;
-    click_view(&view, point, sent)
+    click_view(&view, point, sent, options)
 }
 
-fn click_view(view: &WKWebView, point: (f64, f64), sent: &AtomicBool) -> Result<(), String> {
+fn click_view(
+    view: &WKWebView,
+    point: (f64, f64),
+    sent: &AtomicBool,
+    options: (u8, u8, u8),
+) -> Result<(), String> {
     let main = MainThreadMarker::new().ok_or("native click requires the main thread")?;
     if !NSApplication::sharedApplication(main).isActive() {
         return Err("native preview application is not active".to_owned());
@@ -92,34 +113,60 @@ fn click_view(view: &WKWebView, point: (f64, f64), sent: &AtomicBool) -> Result<
         0.0,
     )
     .ok_or("AppKit could not create mouse move")?;
-    let down = NSEvent::mouseEventWithType_location_modifierFlags_timestamp_windowNumber_context_eventNumber_clickCount_pressure(
-        NSEventType::LeftMouseDown,
-        window_point,
-        NSEventModifierFlags::empty(),
-        time,
-        number,
-        None,
-        0,
-        1,
-        1.0,
-    )
-    .ok_or("AppKit could not create mouse press")?;
-    let up = NSEvent::mouseEventWithType_location_modifierFlags_timestamp_windowNumber_context_eventNumber_clickCount_pressure(
-        NSEventType::LeftMouseUp,
-        window_point,
-        NSEventModifierFlags::empty(),
-        time,
-        number,
-        None,
-        0,
-        1,
-        0.0,
-    )
-    .ok_or("AppKit could not create mouse release")?;
-    move_pointer(base, local, &moved);
     sent.store(true, Ordering::Release);
-    hit.mouseDown(&down);
-    hit.mouseUp(&up);
+    move_pointer(base, local, &moved);
+    send_events(&hit, window_point, number, options, sent)
+}
+
+fn send_events(
+    hit: &NSView,
+    window_point: NSPoint,
+    number: isize,
+    options: (u8, u8, u8),
+    sent: &AtomicBool,
+) -> Result<(), String> {
+    let time = NSProcessInfo::processInfo().systemUptime();
+    let flags = if options.2 & 1 != 0 {
+        NSEventModifierFlags::Option
+    } else {
+        NSEventModifierFlags::empty()
+    } | if options.2 & 2 != 0 {
+        NSEventModifierFlags::Control
+    } else {
+        NSEventModifierFlags::empty()
+    } | if options.2 & 4 != 0 {
+        NSEventModifierFlags::Command
+    } else {
+        NSEventModifierFlags::empty()
+    } | if options.2 & 8 != 0 {
+        NSEventModifierFlags::Shift
+    } else {
+        NSEventModifierFlags::empty()
+    };
+    let (down_type, up_type) = match options.0 {
+        1 => (NSEventType::OtherMouseDown, NSEventType::OtherMouseUp),
+        2 => (NSEventType::RightMouseDown, NSEventType::RightMouseUp),
+        _ => (NSEventType::LeftMouseDown, NSEventType::LeftMouseUp),
+    };
+    for count in 1..=options.1 {
+        let down=NSEvent::mouseEventWithType_location_modifierFlags_timestamp_windowNumber_context_eventNumber_clickCount_pressure(down_type,window_point,flags,time,number,None,0,isize::from(count),1.0).ok_or("AppKit could not create mouse press")?;
+        let up=NSEvent::mouseEventWithType_location_modifierFlags_timestamp_windowNumber_context_eventNumber_clickCount_pressure(up_type,window_point,flags,time,number,None,0,isize::from(count),0.0).ok_or("AppKit could not create mouse release")?;
+        sent.store(true, Ordering::Release);
+        match options.0 {
+            1 => {
+                hit.otherMouseDown(&down);
+                hit.otherMouseUp(&up);
+            }
+            2 => {
+                hit.rightMouseDown(&down);
+                hit.rightMouseUp(&up);
+            }
+            _ => {
+                hit.mouseDown(&down);
+                hit.mouseUp(&up);
+            }
+        }
+    }
     Ok(())
 }
 
@@ -225,7 +272,7 @@ pub fn click_checked(
                 } else if allowed.as_ref().is_some_and(|allowed| !allowed()) {
                     Err("Not run: browser permission changed before native input".to_owned())
                 } else {
-                    click_view(&callback_view, point, &sent)
+                    click_view(&callback_view, point, &sent, (0, 1, 0))
                 }
             } else {
                 Err("Not run: the page target changed before native input".to_owned())

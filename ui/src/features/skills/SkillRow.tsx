@@ -83,7 +83,9 @@ export function SkillRow({ row }: { row: Row }) {
         </div>
         <div className="skills-actions">
           {typeof row.modifiedAt === "number" ? <Changed ms={row.modifiedAt} /> : null}
-          <span className="cmuted">v{row.installedVersion ?? row.latestVersion ?? "—"}</span>
+          {(row.installedVersion ?? row.latestVersion) !== null ? (
+            <span className="cmuted">v{row.installedVersion ?? row.latestVersion}</span>
+          ) : null}
           {row.installed ? (
             <>
               {row.updateAvailable && row.latestVersion !== null && offer === undefined ? (

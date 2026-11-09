@@ -39,7 +39,7 @@ pub(super) fn authorize(
     args: &Value,
 ) -> Result<Tier, String> {
     let browser = super::agent_browser::selected(shared, session, tool, args);
-    authorize_mode(shared, session, tool, args, false).map_err(|reason| browser.text(&reason))
+    authorize_mode(shared, session, tool, args, None).map_err(|reason| browser.text(&reason))
 }
 pub(super) fn authorize_read(
     shared: &Shared,
@@ -54,7 +54,7 @@ pub(super) fn authorize_read(
         session,
         tool,
         args,
-        consent.is_some() && super::read_consent::card_action(tool, args),
+        consent.map(|consent| consent.0),
     )
     .map_err(|reason| browser.text(&reason))
 }
@@ -63,7 +63,7 @@ fn authorize_mode(
     session: &str,
     tool: &str,
     args: &Value,
-    read_consent: bool,
+    consent: Option<Tier>,
 ) -> Result<Tier, String> {
     let Some(view) = shared.store.view(session) else {
         return Err("Not run: this chat is not open.".into());
@@ -84,31 +84,34 @@ fn authorize_mode(
         .ok_or_else(|| "Not run: this chat's access mode is unavailable.".to_owned())?;
     let tier =
         Tier::from_mode(&mode).ok_or("Not run: Chrome is unavailable in this access mode.")?;
-    let required = super::mapping::required(tool, args).ok_or_else(|| {
+    super::mapping::check_full(Some(&mode), tool, args)?;
+    let required = (if tier == Tier::Ask { super::mapping::ask_required(tool,args) } else { super::mapping::required(tool, args) }).ok_or_else(|| {
         match super::mapping::action(tool, args).as_str() {
-            "client.selection" => "Not run: selection is sent by the person from Chrome. Use Ask Vibe Work in Chrome's context menu.",
+            "client.selection" => "Not run: selection is sent by the person from Chrome. Ask the person to use Ask Vibe Work in Chrome's context menu.",
             "page.dragdrop" => "Not run: page.dragdrop is a permission name. Use page.drag; ask chrome_status for its schema.",
             _ => "Not run: unknown Chrome action. Use chrome_status to find supported actions.",
         }
     })?;
-    if required > tier && !(tier == Tier::Ask && read_consent) {
-        let label = if mode == "smart-approve" {
-            vw_vocabulary::label("accessModes", "smart-approve")
-        } else {
-            tier.label()
-        };
+    let authority = tier.max(consent.unwrap_or(tier));
+    if required > authority {
         let action = super::mapping::action(tool, args);
         let action = if action == "page.commit" {
             "sending this form"
         } else {
             action.as_str()
         };
-        return Err(format!(
-            "Not run: {action} needs {}; this chat is in {label}. Use an allowed action or ask the person to change the chat mode.",
-            required.required_label()
-        ));
+        return Err(mode_refusal(action, required, &mode));
     }
-    Ok(tier)
+    Ok(authority)
+}
+
+/// One diagnosis and next step for local and helper-reported browser mode refusals.
+pub(super) fn mode_refusal(action: &str, required: Tier, mode: &str) -> String {
+    let label = vw_vocabulary::label("accessModes", mode);
+    format!(
+        "Not run: {action} needs {}; this chat is in {label}. Use an allowed action or ask the person to change the chat mode.",
+        required.required_label()
+    )
 }
 
 fn subagent_reason(browser: super::agent_browser::Browser) -> String {
@@ -174,6 +177,11 @@ pub(super) fn annotate_modes(shared: &Shared, session: &str, tool: &str, result:
     };
     rows.retain(|row| known(&row["action"]));
     for row in rows {
+        // Approval and mode annotations belong to this live chat, not to an old helper snapshot.
+        if let Some(row) = row.as_object_mut() {
+            row.remove("approvalRequired");
+            row.remove("needs");
+        }
         let action = row["action"].as_str().unwrap_or_default().to_owned();
         // page.key's tier depends on the key: navigation keys (Tab, Escape, arrows…) are marked; typing keys are noted.
         let args = if action == "page.key" {
@@ -181,24 +189,30 @@ pub(super) fn annotate_modes(shared: &Shared, session: &str, tool: &str, result:
         } else {
             json!({})
         };
-        let Some(needed) =
-            super::mapping::required("chrome_execute", &json!({"action":action,"args":args}))
-        else {
+        let request = json!({"action":action,"args":args});
+        let Some(needed) = (if tier == Some(Tier::Ask) {
+            super::mapping::ask_required("chrome_execute", &request)
+        } else {
+            super::mapping::required("chrome_execute", &request)
+        }) else {
             continue;
         };
         let allowed = tier.is_some_and(|tier| needed <= tier);
         row["allowedInThisMode"] = json!(allowed);
-        let consent = tier == Some(Tier::Ask)
-            && matches!(
-                action.as_str(),
-                "history.read" | "bookmarks.read" | "tabs.close_owned" | "tabs.close_user"
-            );
+        let consent = super::mapping::approval_tier(
+            mode(shared, session).as_deref(),
+            "chrome_execute",
+            &request,
+        )
+        .is_some();
         if consent {
             row["approvalRequired"] = json!(true);
         } else if !allowed {
             row["needs"] = json!(needed.required_label());
         }
-        if action == "page.key" && tier.is_none_or(|tier| tier < Tier::AcceptEdits) {
+        if action == "page.key" && tier == Some(Tier::Ask) {
+            row["typingKeysApprovalRequired"] = json!(true);
+        } else if action == "page.key" && tier.is_none_or(|tier| tier < Tier::AcceptEdits) {
             row["typingKeysNeed"] = json!(Tier::AcceptEdits.required_label());
         }
     }
@@ -346,17 +360,15 @@ mod tests {
             assert_eq!(row("page.read")["allowedInThisMode"], true, "{mode}");
             assert_eq!(row("page.type")["allowedInThisMode"], typing, "{mode}");
             assert_eq!(row("raw.execute")["allowedInThisMode"], script, "{mode}");
-            if !typing {
+            if !typing && mode != "ask" {
                 assert_eq!(
                     row("page.type")["needs"],
                     Tier::AcceptEdits.required_label()
                 );
             }
             if !script {
-                assert_eq!(
-                    row("raw.execute")["needs"],
-                    Tier::FullAccess.required_label()
-                );
+                assert_eq!(row("raw.execute")["approvalRequired"], true);
+                assert!(row("raw.execute").get("needs").is_none());
             }
             assert!(row("page.read").get("needs").is_none());
             // W3 T11: page.key was marked not allowed in Ask, yet Tab and Escape ran there; the mark follows the
@@ -364,7 +376,7 @@ mod tests {
             assert_eq!(row("page.key")["allowedInThisMode"], true, "{mode}");
             assert_eq!(
                 row("page.key").get("typingKeysNeed").cloned(),
-                (!typing).then(|| json!(Tier::AcceptEdits.required_label())),
+                (!typing && mode != "ask").then(|| json!(Tier::AcceptEdits.required_label())),
                 "{mode}"
             );
             // The model reads the text part: the same facts are there.

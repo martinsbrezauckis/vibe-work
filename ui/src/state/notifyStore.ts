@@ -140,7 +140,11 @@ export function createNotifier(options: { persist?: boolean } = {}) {
         // Native Show can still be in flight when the answer arrives; removal must follow it.
         void retained.shown.then(() => core.client.dismissOs(retained.id)).catch(() => undefined);
       };
-      return core.store.subscribe(() => {
+      let deadline: ReturnType<typeof setTimeout> | undefined;
+      const refresh = () => {
+        clearTimeout(deadline);
+        deadline = undefined;
+        let nextWait = Infinity;
         const next = core.store.get();
         const found = transitions(last, next);
         // A loaded child chat announced its callback before the parent's subagent card arrived: the one entry now
@@ -227,6 +231,8 @@ export function createNotifier(options: { persist?: boolean } = {}) {
                   sessionId: retained.sessionId,
                 });
               }
+              if (retained.stopped === undefined)
+                nextWait = Math.min(nextWait, WAIT_MS - (performance.now() - retained.closedAt));
               continue;
             }
             withdraw(retained);
@@ -292,7 +298,13 @@ export function createNotifier(options: { persist?: boolean } = {}) {
             },
           );
         }
-      });
+        if (Number.isFinite(nextWait)) deadline = setTimeout(refresh, Math.max(0, nextWait));
+      };
+      const unsubscribe = core.store.subscribe(refresh);
+      return () => {
+        unsubscribe();
+        clearTimeout(deadline);
+      };
     },
   };
 }

@@ -179,7 +179,7 @@ impl PreviewService {
     #[must_use]
     pub fn screenshot_unavailable_reason(&self, page_key: &str) -> Option<String> {
         match self.require_visible_screenshot(page_key) {
-            Err(PreviewError::ScreenshotHidden(reason)) => Some(reason),
+            Err(PreviewError::ScreenshotHidden(reason)) => Some(reason.text),
             _ => None,
         }
     }
@@ -188,6 +188,7 @@ impl PreviewService {
     #[must_use]
     pub fn new(engine: Arc<dyn PreviewEngine>, config: PreviewConfig) -> Self {
         let inner = Arc::new(Inner {
+            window_close: std::sync::Mutex::new(None),
             popup: std::sync::Mutex::new(None),
             shields: std::sync::Mutex::new(crate::shields::Saved::load(&config.storage_root)),
             guard_refused: std::sync::Mutex::new(None),
@@ -754,6 +755,7 @@ impl PreviewService {
         self.cancel_pending_navigation(session_id);
         let _activity = self.session_lock(session_id).await;
         self.unmount(session_id).await?;
+        self.close_page_window(session_id).await?;
         if let Some(entry) = self.inner.lock().entries.get_mut(session_id) {
             entry.reset_console();
             entry.url = None;

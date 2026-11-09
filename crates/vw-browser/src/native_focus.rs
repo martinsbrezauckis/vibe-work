@@ -13,7 +13,8 @@ use crate::act::Action;
 use crate::driver::{ActError, Browser, NavFuture, Navigate, refused};
 use crate::sessions::{Actor, Outcome, Sessions};
 
-pub(crate) const FOCUS_REQUEST: &str = "Bring Vibe Work to the front, then I'll try once.";
+pub(crate) const FOCUS_REQUEST: &str = "No input has been sent: Vibe Work needs to be in front. Ask the person to bring it forward; this click will try once.";
+pub(crate) const CLICK_WAITING: &str = "A native click is already waiting for Vibe Work to come to the front. Do not repeat it; ask the person to bring the window forward or press Stop to cancel.";
 const FOCUS_WAIT: Duration = Duration::from_secs(60);
 
 struct Pending {
@@ -41,12 +42,10 @@ impl Browser {
         action: Action,
         token: Value,
         target: String,
-        mut cancel: tokio::sync::watch::Receiver<u64>,
+        cancel: tokio::sync::watch::Receiver<u64>,
     ) -> Result<Value, ActError> {
         if !self.sessions.queue_native_click(session) {
-            return Err(refused(
-                "A native click is already waiting; press Stop before another act.",
-            ));
+            return Err(refused(CLICK_WAITING));
         }
         let pending = Pending {
             sessions: self.sessions.clone(),
@@ -70,57 +69,96 @@ impl Browser {
         );
         let browser = self.clone();
         let session = session.to_owned();
-        tokio::spawn(async move {
+        let waits_for_send_check = token["allowSend"] == false;
+        let work = async move {
             let _pending = pending;
             let _keep_mount = keep_mount;
-            let sent = Arc::new(AtomicBool::new(false));
-            let work = async {
-                loop {
-                    tokio::time::sleep(Duration::from_millis(250)).await;
-                    let result = browser
-                        .perform(
-                            &session,
-                            &action,
-                            &StayInPage,
-                            Some(&token),
-                            Actor::Agent,
-                            sent.clone(),
-                        )
-                        .await;
-                    if !sent.load(Ordering::Acquire)
-                        && result
-                            .as_ref()
-                            .is_err_and(|error| error.text == FOCUS_REQUEST)
-                    {
-                        continue;
-                    }
-                    return result;
-                }
-            };
-            let result = tokio::select! {
-                biased;
-                _ = cancel.changed() => Err(ActError { outcome: Outcome::Stopped,
-                    text: "The pending native click was canceled before completion.".to_owned() }),
-                result = tokio::time::timeout(FOCUS_WAIT, work) => result.unwrap_or_else(|_| Err(refused(
-                    "Not run: the window did not come to the front within 60 seconds; the pending click was canceled."
-                ))),
-            };
-            // Session deletion cancels this wait; do not recreate its state or durable receipts.
-            if browser
-                .sessions
-                .state(&session)
-                .pending_native_click
-                .is_none()
-            {
-                return;
-            }
-            let result = Self::finish_native_action(result, sent.load(Ordering::Acquire));
-            browser.log(&session, Actor::Agent, &action, &target, &result);
-        });
+            browser
+                .retry_when_focused(&session, &action, &token, &target, cancel)
+                .await
+        };
+        // The Ask hook must remain available for a newly discovered send instead of losing its card path.
+        if waits_for_send_check {
+            return Box::pin(work).await;
+        }
+        tokio::spawn(work);
         Ok(
             json!({"Outcome": FOCUS_REQUEST, "ok": false, "pending": true,
             "expiresInSeconds": FOCUS_WAIT.as_secs(),
-            "note": "No input has been sent. This authorized act will try once when the window is key. Do not repeat it: it is already queued, and a repeat is refused while it waits; press Stop to cancel. Its result will appear in Browser actions."}),
+            "note": "No input has been sent. This authorized act will try once when the window is key. Do not repeat it: it is already queued, and a repeat is refused while it waits. Ask the person to press Stop if they want to cancel. Its result will appear in Browser actions."}),
         )
+    }
+
+    async fn retry_when_focused(
+        &self,
+        session: &str,
+        action: &Action,
+        token: &Value,
+        target: &str,
+        mut cancel: tokio::sync::watch::Receiver<u64>,
+    ) -> Result<Value, ActError> {
+        let sent = Arc::new(AtomicBool::new(false));
+        let work = async {
+            loop {
+                tokio::time::sleep(Duration::from_millis(250)).await;
+                if token["allowSend"] == false {
+                    self.send_before_action(session, action, Some(token))
+                        .await?;
+                }
+                let result = self
+                    .perform(
+                        session,
+                        action,
+                        &StayInPage,
+                        Some(token),
+                        Actor::Agent,
+                        sent.clone(),
+                    )
+                    .await;
+                if !sent.load(Ordering::Acquire) {
+                    if result
+                        .as_ref()
+                        .is_err_and(|error| error.text == FOCUS_REQUEST)
+                    {
+                        continue;
+                    }
+                    if token["allowSend"] == false && result.is_err() {
+                        self.send_before_action(session, action, Some(token))
+                            .await?;
+                    }
+                }
+                return result;
+            }
+        };
+        let result = tokio::select! {
+            biased;
+            _ = cancel.changed() => Err(ActError { capture_block: None, outcome: Outcome::Stopped,
+                text: "The pending native click was canceled before completion.".to_owned() }),
+            result = tokio::time::timeout(FOCUS_WAIT, work) => result.unwrap_or_else(|_| Err(refused(
+                "Not run: the window did not come to the front within 60 seconds; the pending click was canceled."
+            ))),
+        };
+        // Session deletion cancels this wait; do not recreate its state or durable receipts.
+        if self.sessions.state(session).pending_native_click.is_none() {
+            return Err(refused(
+                "The pending native click was canceled before completion.",
+            ));
+        }
+        let result = Self::finish_native_action(result, sent.load(Ordering::Acquire));
+        if !result
+            .as_ref()
+            .is_err_and(|error| error.text == crate::SEND_REQUIRED)
+        {
+            self.log(session, Actor::Agent, action, target, &result);
+        }
+        result
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn pending_native_input_asks_the_person_for_focus() {
+        assert!(super::FOCUS_REQUEST.contains("Ask the person"));
     }
 }

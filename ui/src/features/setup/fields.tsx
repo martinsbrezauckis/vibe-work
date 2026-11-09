@@ -8,6 +8,7 @@
  * `data-secret`: the Debug API's element routes match selectors with its value emptied, window
  * screenshots blank it, and during a capture it shows dots with Show disabled (`shell/secretSafety.ts`).
  */
+import { literalInputProps } from "../../components/inputProps";
 import { Button } from "../../components/Controls";
 import { useId, useState } from "react";
 
@@ -40,6 +41,7 @@ export function SecretField(props: {
       <label htmlFor={id}>{props.label}</label>
       <div className="key-field-row">
         <input
+          {...literalInputProps}
           id={id}
           data-secret="true"
           data-testid={props.testId}
@@ -48,9 +50,6 @@ export function SecretField(props: {
           placeholder={props.placeholder}
           autoFocus={props.autoFocus}
           autoComplete={props.autoComplete ?? "off"}
-          autoCapitalize="off"
-          autoCorrect="off"
-          spellCheck={false}
           aria-invalid={props.invalid === true ? true : undefined}
           aria-describedby={props.hint === undefined ? undefined : hintId}
           onChange={(e) => {

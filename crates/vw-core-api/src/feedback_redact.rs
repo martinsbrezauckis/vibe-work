@@ -31,12 +31,23 @@ static RULES: std::sync::LazyLock<Result<Vec<(regex::Regex, String)>, String>> =
     });
 
 pub(crate) fn text(input: &str, identities: &[String]) -> String {
+    text_with_work(input, identities, |_, _| {})
+}
+
+/// Charge each regex application by its actual input length. The scaling regression counts these units,
+/// independent of scheduler delays; production uses the same path with an optimized-away observer.
+pub(crate) fn text_with_work(
+    input: &str,
+    identities: &[String],
+    mut charge: impl FnMut(&regex::Regex, &str),
+) -> String {
     let mut out = input.to_owned();
     for name in identities.iter().filter(|s| !s.is_empty()) {
         if let Ok(re) = regex::RegexBuilder::new(&regex::escape(name))
             .case_insensitive(true)
             .build()
         {
+            charge(&re, &out);
             out = re.replace_all(&out, "[redacted]").into_owned();
         }
     }
@@ -45,6 +56,7 @@ pub(crate) fn text(input: &str, identities: &[String]) -> String {
         return "[redacted]".into();
     };
     for (pattern, replacement) in rules {
+        charge(pattern, &out);
         out = pattern.replace_all(&out, replacement.as_str()).into_owned();
     }
 

@@ -173,8 +173,7 @@ export function AccountSettings({ part }: { part: "account" | "usage" }) {
       )}
       {!PLAN_USAGE_ENABLED && (
         <p className="key-field-hint ui-help">
-          Mistral shows how much of your plan is left on its website, not to apps (see the links
-          below). Vibe compacts the session on its own before the context is full.
+          Plan left: on Mistral&apos;s website (links below).
         </p>
       )}
     </section>

@@ -21,7 +21,7 @@ pub(super) fn require_unregistered(target: &super::places::Target<'_>) -> Result
             return Err("Firefox is already set up by another Vibe Work".into());
         }
     } else if let Some(root) = target.registry {
-        let result = std::process::Command::new("reg")
+        let result = vw_platform::process_command::hidden("reg")
             .args(["query", &format!(r"{root}\{HOST_NAME}")])
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())

@@ -7,7 +7,6 @@
 //! a window or price that still holds the value an earlier version seeded takes the published one.
 //! Every other configured value and the user's model choice remain unchanged.
 
-use std::fs::OpenOptions;
 use std::io::{self, Write};
 use std::path::Path;
 use toml_edit::{DocumentMut, value};
@@ -67,13 +66,15 @@ auto_compact_threshold = 800000\n";
 /// Returns the filesystem error when the file cannot be created or written.
 pub fn ensure(vibe_home: &Path) -> io::Result<bool> {
     let path = vibe_home.join("config.toml");
-    let mut file = match OpenOptions::new().write(true).create_new(true).open(&path) {
+    let mut file = match vw_platform::create_private_new(&path) {
         Ok(file) => file,
-        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+        Err(vw_platform::PrivateFileError::Io { source, .. })
+            if source.kind() == io::ErrorKind::AlreadyExists =>
+        {
             fill_missing_defaults(&path)?;
             return Ok(false);
         }
-        Err(error) => return Err(error),
+        Err(error) => return Err(io::Error::other(error)),
     };
     file.write_all(FIRST_CONFIG.as_bytes())?;
     Ok(true)

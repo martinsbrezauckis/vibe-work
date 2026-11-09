@@ -15,10 +15,7 @@ import {
 } from "../../../ui/src/components/markdown/highlight";
 import { languageForName } from "../../../ui/src/features/files/model/kinds";
 import { CodeEditor } from "../../../ui/src/features/editor/CodeEditor";
-import {
-  EDITOR_LANGUAGES,
-  languageFor,
-} from "../../../ui/src/features/editor/languages";
+import { languageFor } from "../../../ui/src/features/editor/languages";
 import { editorHighlight } from "../../../ui/src/features/editor/theme";
 import { setupCodeEditor } from "./support/codeEditor";
 
@@ -115,9 +112,6 @@ const FILES: readonly (readonly [name: string, source: string])[] = [
 
 describe("editor and viewer languages", () => {
   it("both offer the same language names", () => {
-    expect([...EDITOR_LANGUAGES].sort()).toEqual(
-      [...HIGHLIGHT_LANGUAGES].sort(),
-    );
     expect(Object.keys(EDITOR_NAME).sort()).toEqual(
       [...HIGHLIGHT_LANGUAGES].sort(),
     );

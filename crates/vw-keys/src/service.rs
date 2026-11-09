@@ -26,7 +26,7 @@ use vw_keyproxy::{
     TokenSlot,
 };
 use vw_mistral::{TestCallError, TestCallOk};
-use vw_vault::mistral_key::{self, Candidate};
+use vw_vault::mistral_key;
 use vw_vault::{SecretString, Vault, VaultConfig, VaultKind, VaultStatus};
 use zeroize::Zeroizing;
 
@@ -37,6 +37,8 @@ mod service_start;
 mod last_state;
 #[path = "mistral_keys.rs"]
 mod mistral_keys;
+#[path = "unlock_method.rs"]
+mod unlock_method;
 pub use mistral_keys::{MistralKey, StoredKeyTest};
 
 use crate::error::KeyError;
@@ -148,6 +150,8 @@ pub struct KeyMetadata {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct KeyStatus {
+    /// The persisted unlock policy.
+    pub unlock_method: crate::UnlockMethod,
     /// The vault.
     pub vault: VaultStatus,
     /// Local vault layouts found on this computer.
@@ -179,6 +183,8 @@ pub struct KeyService {
     settings: KeySettings,
     pub(crate) chrome_owner_account: String,
     vault_settings: VaultSettings,
+    unlock_with_password: std::sync::atomic::AtomicBool,
+    unlock_change: tokio::sync::Mutex<()>,
     /// The switch as this run uses it (also when its file could not be written).
     lock_on_quit: std::sync::atomic::AtomicBool,
     /// The kept key opens nothing until a password unlock (`last_state`).
@@ -424,6 +430,7 @@ impl KeyService {
             None
         };
         Ok(KeyStatus {
+            unlock_method: self.unlock_method(),
             vault: status,
             available_vaults: available?,
             vault_selected: selected?.is_some(),
@@ -433,56 +440,6 @@ impl KeyService {
             remember_note: note,
             lock_on_quit: self.lock_on_quit(),
         })
-    }
-
-    /// Creates and selects the private Vibe Work vault in managed app mode, then leaves it unlocked
-    /// with its key kept in the credential store (the vault keeps its last state).
-    /// Low-level fixture configurations retain ShellX-layout creation in their supplied folder.
-    ///
-    /// # Errors
-    /// [`KeyError::Vault`].
-    pub async fn create_vault(&self, passphrase: SecretString) -> Result<(), KeyError> {
-        let vault = Arc::clone(&self.vault);
-        blocking(move || vault.create(&passphrase, true)).await??;
-        self.password_typed();
-        self.network_unlocked().await;
-        self.refresh_key().await;
-        Ok(())
-    }
-
-    /// Unlocks with the passphrase (`choice`: which of two vaults) and keeps the key in the
-    /// credential store (the Vault app's layout has no kept key).
-    ///
-    /// # Errors
-    /// [`KeyError::Vault`].
-    pub async fn unlock(
-        &self,
-        passphrase: SecretString,
-        choice: Option<VaultKind>,
-    ) -> Result<(), KeyError> {
-        let vault = Arc::clone(&self.vault);
-        blocking(move || vault.unlock(&passphrase, Some(true), choice)).await??;
-        self.password_typed();
-        self.network_unlocked().await;
-        self.refresh_key().await;
-        Ok(())
-    }
-
-    /// Tries the device's existing remembered unlock for an explicit user action, even after a manual lock.
-    ///
-    /// # Errors
-    /// [`KeyError::Vault`] when the saved device key cannot unlock the vault.
-    pub async fn unlock_remembered(&self) -> Result<bool, KeyError> {
-        if self.waits_for_password() {
-            return Ok(false);
-        }
-        let vault = Arc::clone(&self.vault);
-        let unlocked = blocking(move || vault.unlock_remembered_for_user()).await??;
-        if unlocked {
-            self.network_unlocked().await;
-            self.refresh_key().await;
-        }
-        Ok(unlocked)
     }
 
     /// Locks the vault and deletes its kept key; model requests wait for the next unlock, also
@@ -547,28 +504,6 @@ impl KeyService {
         self.changed();
         self.key_changed();
         Ok(())
-    }
-
-    /// Compatibility view of the same saved-key catalog used by Settings and setup.
-    ///
-    /// # Errors
-    /// [`KeyError::Vault`].
-    pub async fn candidates(&self) -> Result<Vec<Candidate>, KeyError> {
-        Ok(self
-            .key_catalog()
-            .await?
-            .into_iter()
-            .map(|(candidate, _)| candidate)
-            .collect())
-    }
-
-    /// Compatibility name for selecting a saved key without copying its value.
-    /// The core applies the same confirmation and busy policy for both command names.
-    ///
-    /// # Errors
-    /// As [`KeyService::use_mistral_key`].
-    pub async fn use_existing(&self, item_id: String) -> Result<(), KeyError> {
-        self.use_mistral_key(item_id).await
     }
 
     /// The test call with the key in use (`GET /v1/models` direct to Mistral).

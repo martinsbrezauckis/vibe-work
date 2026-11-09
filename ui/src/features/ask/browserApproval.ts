@@ -4,7 +4,7 @@
 import { TEXT, wording } from "../../vocabulary";
 import type { JsonValue } from "../../protocol/core";
 import { approvalEffect } from "../transcript/model/callbacks";
-import { type Obj, arr, obj, str } from "../transcript/model/entries";
+import { type Obj, arr, detailOf, obj, str } from "../transcript/model/entries";
 import { BROWSER_ACTIONS, BUILTIN_ACTIONS, SESSION_ACTIONS } from "./browserApprovalActions";
 
 function toolOf(entry: Obj): string {
@@ -158,20 +158,33 @@ export function browserApprovalSummary(entry: Obj): string | null {
           ? "page.uncheck"
           : ((Object.hasOwn(BUILTIN_ACTIONS, action) ? BUILTIN_ACTIONS[action] : undefined) ?? "");
   }
+  const discovered = str(detailOf(entry)["vwBrowserAction"]);
+  if (
+    entry["vwToolAsk"] === true &&
+    discovered !== null &&
+    ["page.commit", "page.type", "auth.fill", "raw.execute"].includes(discovered)
+  )
+    action = discovered;
   if (["tabs.close_owned", "tabs.close_user"].includes(action)) {
     const tab = obj(obj(approvalEffect(entry)["display"])?.["tab"]);
     const id = args["tabId"];
     if (tab && tab["tabId"] === id && typeof id === "number" && Number.isSafeInteger(id)) {
-      const title = (str(tab["title"]) ?? "")
-        .replace(/[\p{Cc}\p{Cf}]/gu, "")
-        .replace(/\s+/g, " ")
-        .trim()
-        .slice(0, 120);
       const kind = str(tab["kind"]);
+      const clean = (value: JsonValue | undefined) =>
+        (str(value) ?? "")
+          .replace(/[\p{Cc}\p{Cf}]/gu, "")
+          .replace(/\s+/g, " ")
+          .trim()
+          .slice(0, 120);
+      const title = clean(tab["title"]);
       const label =
         title ||
-        (kind === "blank tab" ? "blank tab" : kind === "browser page" ? "browser page" : "tab");
-      return `Close ${label} (tab ${String(id)}) in ${browser}`;
+        (kind === "blank tab"
+          ? "blank tab"
+          : kind === "browser page"
+            ? "browser page"
+            : clean(tab["url"]) || "tab");
+      return `Close ${label} in ${browser}`;
     }
   }
   return describe(

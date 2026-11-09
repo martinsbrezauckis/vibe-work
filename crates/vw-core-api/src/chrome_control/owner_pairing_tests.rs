@@ -43,3 +43,42 @@ fn unknown_or_missing_state_is_ignored() {
     assert!(pairing_result(&json!({"state":"admit"})).is_none());
     assert!(pairing_result(&json!({})).is_none());
 }
+
+#[tokio::test(start_paused = true)]
+async fn paired_notification_refreshes_extension_metadata_before_the_next_poll() {
+    let core = crate::offline_core::start_with("pair-event-refresh", |config, _| {
+        config.chrome_control.macos = Some(true);
+    })
+    .await;
+    let shared = &core.shared;
+    let calls = shared.chrome_control.owner.answering(|tool, _| {
+        assert_eq!(tool, "chrome_status");
+        json!({"structuredContent":{"profiles":[{"profileId":"chrome:p","connected":true,
+            "extensionVersion":"0.1.6"}]}})
+    });
+    let mut events = core.subscribe(None);
+    super::observe(&std::sync::Arc::downgrade(shared), &json!({
+        "method":"notifications/owner/pairing", "params":{"profileId":"chrome:p","state":"paired","fingerprint":OURS}
+    })).unwrap();
+    // A refreshed event must arrive before the two-second periodic poll, with paused virtual time.
+    tokio::time::timeout(std::time::Duration::from_secs(1), async {
+        while let Some(event) = events.next().await {
+            if matches!(event, crate::CoreEvent::ChromeControl { view }
+                if view.setup.addon.as_ref().and_then(|addon| addon.extension_version.as_deref()) == Some("0.1.6")) {
+                return;
+            }
+        }
+        panic!("Settings event stream ended");
+    }).await.expect("Settings must receive the refreshed add-on view before the next poll");
+    assert_eq!(
+        calls.lock().unwrap().len(),
+        1,
+        "paired must request status immediately"
+    );
+    assert_eq!(
+        super::super::installation::version(shared, super::super::agent_browser::Browser::Chrome)
+            .as_deref(),
+        Some("0.1.6")
+    );
+    core.shutdown().await;
+}

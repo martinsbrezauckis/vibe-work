@@ -1,6 +1,7 @@
 /** Settings Account's saved Mistral keys. Depends on the key controller and shared controls/focus.
  * Renders metadata only; every mutation goes through the typed window command client.
  */
+import { literalInputProps } from "../../components/inputProps";
 import { useRef, useState } from "react";
 import { Badge, Button, LinkButton } from "../../components/Controls";
 import { useModalFocus } from "../../hooks/useModalFocus";
@@ -101,6 +102,7 @@ export function MistralKeys() {
                       <label htmlFor="rename-mistral-key">Name</label>
                       <div className="key-field-row">
                         <input
+                          {...literalInputProps}
                           data-testid="settings.mistral-keys-name"
                           id="rename-mistral-key"
                           value={name}

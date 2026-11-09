@@ -27,20 +27,20 @@ export const NONE: readonly never[] = Object.freeze([]);
 const clock = createStore(Date.now() / 1000);
 
 /**
- * The current time in epoch seconds, renewed every `everyMs` while `active` (the Loops list counts down to the
+ * The current time in epoch seconds, renewed every second while `active` (the Loops list counts down to the
  * next run). Inactive: no timer runs and the value stays at the last renewal. The value is brought up to date before
  * the first paint after the hook turns active, so a list that appears late never shows an old countdown.
  */
-export function useNowSeconds(active: boolean, everyMs = 1000): number {
+export function useNowSeconds(active: boolean): number {
   useLayoutEffect(() => {
     if (!active) return undefined;
     clock.set(Date.now() / 1000);
     const timer = setInterval(() => {
       clock.set(Date.now() / 1000);
-    }, everyMs);
+    }, 1000);
     return () => {
       clearInterval(timer);
     };
-  }, [active, everyMs]);
+  }, [active]);
   return useStore(clock, (now) => now);
 }

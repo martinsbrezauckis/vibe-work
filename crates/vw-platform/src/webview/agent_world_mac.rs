@@ -61,11 +61,6 @@ impl WorldFacts {
     pub fn js_handles(self) -> bool {
         self.configured
     }
-    /// `window.webkit.createNodeSnapshot` exists in the agent world.
-    #[must_use]
-    pub fn node_snapshots(self) -> bool {
-        self.configured
-    }
 }
 
 /// One frame's answer.

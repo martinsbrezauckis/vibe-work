@@ -85,12 +85,15 @@ async fn a_stopped_worker_is_woken_before_the_action_is_sent_once() {
 async fn failed_wakes_do_not_open_another_tab_on_each_call() {
     let launches = Arc::new(Mutex::new(Vec::new()));
     let recorded = launches.clone();
+    let admission = Arc::new(tokio::sync::Notify::new());
+    let ready = admission.clone();
     let core = fixture_with(
         "browser-worker-stuck",
         json!([{"profileId":"edge:p","connected":true}]),
         move |config| {
             config.edge_launcher = Some(Arc::new(move |url| {
                 recorded.lock().unwrap().push(url.to_owned());
+                ready.notify_one();
                 Ok(())
             }));
         },
@@ -107,15 +110,37 @@ async fn failed_wakes_do_not_open_another_tab_on_each_call() {
         .chrome_control
         .owner
         .answering(|_, _| json!({"structuredContent":{"profiles":[]}}));
+    let mut paused = false;
     for _ in 0..2 {
+        let shared = core.shared.clone();
+        let mut call = tokio::spawn(async move {
+            gateway::call(
+                &shared,
+                "s",
+                "chrome_session",
+                json!({"action":"open","profileId":"edge:p"}),
+            )
+            .await
+        });
+        // The detached launcher uses an OS worker. Observe its actual call before advancing virtual
+        // reconnect time; a busy worker/executor must not count against this policy assertion.
+        let completed = if paused {
+            None
+        } else {
+            let completed = tokio::select! {
+                () = admission.notified() => None,
+                result = &mut call => Some(result),
+            };
+            tokio::time::pause();
+            paused = true;
+            completed
+        };
         let started = tokio::time::Instant::now();
-        let reply = gateway::call(
-            &core.shared,
-            "s",
-            "chrome_session",
-            json!({"action":"open","profileId":"edge:p"}),
-        )
-        .await
+        let reply = match completed {
+            Some(result) => result,
+            None => call.await,
+        }
+        .unwrap()
         .unwrap();
         assert_eq!(
             reply["vwMcpResult"]["structuredContent"]["error"]["code"],

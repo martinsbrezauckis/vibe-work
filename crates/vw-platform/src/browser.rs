@@ -11,6 +11,9 @@ mod discovery;
 mod launch;
 #[path = "browser_process.rs"]
 mod process;
+#[cfg(any(windows, test))]
+#[path = "browser_windows.rs"]
+mod windows;
 pub use launch::{launch_command, launch_command_with_profile};
 
 /// A supported browser identity; Chrome and Edge facts are always kept separately.

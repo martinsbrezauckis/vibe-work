@@ -32,6 +32,7 @@ impl Core {
     fn refuse_history_over_nested_repo(&self, session_id: &str) -> Result<(), CoreError> {
         if self
             .git_repos(session_id)?
+            .places
             .iter()
             .any(|(repo, _)| repo.root != ".")
         {

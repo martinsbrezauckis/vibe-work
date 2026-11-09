@@ -133,7 +133,7 @@ export function createTauriClient(): CoreClient {
     async setDebugApi(enabled) {
       await call<null>("debug_api_set", { enabled });
     },
-    debugApiTokenFile: (rotate) => call<string | null>("debug_api_token_file", { rotate }),
+    debugApiTokenItem: (rotate) => call<string | null>("debug_api_token_item", { rotate }),
     attachTerminal: attachTauriTerminal,
     updates: {
       async subscribe(onView) {

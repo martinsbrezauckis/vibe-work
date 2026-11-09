@@ -182,9 +182,9 @@ export function contextReadout(
   };
 }
 
-/** A count with thousands separators ("12,345"); "not reported yet" for `null`. */
+/** A count with thousands separators ("12,345"); "Not reported yet" for `null`. */
 export function formatTokens(value: number | null): string {
-  return value === null ? "not reported yet" : value.toLocaleString("en-US");
+  return value === null ? "Not reported yet" : value.toLocaleString("en-US");
 }
 
 /** How long a rate-limit snapshot counts as current: the numbers are per minute. */

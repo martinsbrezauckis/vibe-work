@@ -3,7 +3,9 @@
 //! Each test owns its subprocess, storage and page; page scripts are the production scripts.
 #![allow(dead_code)]
 mod faults;
+mod pointer;
 mod readiness;
+mod screenshot;
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use serde_json::{Value, json};
 use std::io::{BufRead, BufReader, Write};
@@ -77,6 +79,7 @@ pub struct PageEngine {
     pub on_pin: Mutex<Option<Box<dyn FnOnce() + Send>>>,
     pub on_click: Mutex<Option<Box<dyn FnOnce() + Send>>>,
     pub native_clicks: AtomicU64,
+    pub focus_required: AtomicBool,
     pub input_markers: Mutex<Vec<vw_preview::action_tracking::ActionMarker>>,
     pub reverse_frames: AtomicBool,
     pub after_verify: Mutex<Option<String>>,
@@ -169,6 +172,7 @@ impl PageEngine {
             on_pin: Mutex::new(None),
             on_click: Mutex::new(None),
             native_clicks: AtomicU64::new(0),
+            focus_required: AtomicBool::new(false),
             input_markers: Mutex::default(),
             reverse_frames: AtomicBool::new(false),
             after_verify: Mutex::new(None),
@@ -227,44 +231,6 @@ impl PageEngine {
             .await
             .map_err(|e| EngineError::Platform(e.to_string()))?
             .map_err(EngineError::Platform)
-    }
-
-    /// The agent's native click; CDP mode opens the act window's picker interception around it, as the `WebView2`
-    /// adapter does for every act, and reports a picker it intercepted.
-    async fn agent_click(
-        &self,
-        label: &str,
-        point: vw_preview::NativeClickPoint,
-    ) -> Result<(), EngineError> {
-        let pickers = PICKERS.load(Ordering::Relaxed);
-        let window = cdp_frames() && !self.page_world.load(Ordering::Relaxed);
-        if window && !NATIVE_CLICK_WITHOUT_WINDOW.load(Ordering::Relaxed) {
-            self.intercept(true).await;
-        }
-        self.rpc(json!({"op":"click", "x":point.x, "y":point.y}))
-            .await?;
-        if window {
-            self.intercept(false).await;
-            if PICKERS.load(Ordering::Relaxed) > pickers {
-                self.hooks()
-                    .act_refused(label, vw_preview::ActRefusal::FilePicker);
-            }
-        }
-        Ok(())
-    }
-
-    /// The act window's picker interception (CDP mode only; the picker event comes with the switch-off's answer).
-    async fn intercept(&self, on: bool) {
-        let (done, confirmed) = tokio::sync::oneshot::channel();
-        let sent = self
-            .cdp
-            .lock()
-            .unwrap()
-            .get_or_insert_with(|| cdp_worker(self.pipe.clone()))
-            .send(CdpRequest::Intercept(on, done));
-        if sent.is_ok() {
-            let _ = confirmed.await;
-        }
     }
 
     pub async fn eval(&self, script: &str) -> Value {
@@ -337,23 +303,6 @@ impl PageEngine {
                 .collect::<Vec<_>>()
         };
         Ok(answers)
-    }
-
-    /// Keeps the registry snapshot fixed when a test models delayed host registrations.
-    fn lag_frames(&self, answers: &mut Vec<vw_preview::FrameAnswer>) {
-        if self.registry_lag.load(Ordering::Relaxed) {
-            let mut lagged = self.lagged.lock().unwrap();
-            let known = lagged.get_or_insert_with(|| {
-                answers
-                    .iter()
-                    .map(|a| (a.id.clone(), a.generation))
-                    .collect()
-            });
-            answers.retain(|a| known.iter().any(|(id, _)| *id == a.id));
-            for answer in answers.iter_mut() {
-                answer.generation = known.iter().find(|(id, _)| *id == answer.id).unwrap().1;
-            }
-        }
     }
 
     /// The fault switches a test set for a whole-page read (observe), applied to the engine's frame answers.
@@ -486,6 +435,9 @@ impl PreviewEngine for PageEngine {
     ) -> EngineFuture<'_, ()> {
         let id = id.clone();
         Box::pin(async move {
+            if self.focus_required.load(Ordering::Relaxed) {
+                return Err(EngineError::FocusRequired);
+            }
             self.person.arm(&guard.person);
             if let Some(script) = &guard.validation {
                 if let Ok(request) = serde_json::from_str::<Value>(script) {
@@ -560,7 +512,7 @@ impl PreviewEngine for PageEngine {
             guard.sent.store(true, Ordering::Release);
             self.native_clicks.fetch_add(1, Ordering::Relaxed);
             if !self.agent_input_lost.load(Ordering::Relaxed) {
-                self.agent_click(&id.label, point).await?;
+                self.agent_click(&id.label, point, &guard).await?;
             }
             if self
                 .person_click_after_dispatch

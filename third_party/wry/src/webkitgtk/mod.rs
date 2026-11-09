@@ -711,6 +711,7 @@ impl InnerWebView {
       || attributes.download_completed_handler.is_some()
     {
       web_context.register_download_handler(
+        webview.clone(),
         attributes.download_started_handler.take(),
         attributes.download_completed_handler.take(),
       )

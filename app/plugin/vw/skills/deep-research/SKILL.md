@@ -3,7 +3,7 @@ name: deep-research
 description: The web search connector's functions, their result sizes and time limits, and where a cited research report goes - for researching a question, a market, a technology or a landscape from many sources.
 ---
 
-The web search connector's functions, inside `run_typescript`: `tools.connector_web_search.web_search({ query, limit })` returns an object of hits (`url`, `title`, `description`, `snippets`, `date`), and `tools.connector_web_search.open_url({ url })` returns `content`, the page text. A raw hit is about 4,000 characters and a page up to 70,000. Every model step re-sends the whole conversation, which the user pays for per token; only what a program returns enters the conversation:
+The web search connector's functions, inside `run_typescript`: `tools.connector_web_search.web_search({ query, limit })` returns an object of hits (`url`, `title`, `description`, `snippets`, `date`), and `tools.connector_web_search.open_url({ url })` returns `content`, the page text. A raw hit is about 4,000 characters and a page up to 70,000. Every model step re-sends the whole conversation; only what a program returns enters the conversation:
 
 ```ts
 async function main() {

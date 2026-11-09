@@ -17,6 +17,7 @@
 //! - No credential is ever logged, put in argv, or returned to a client.
 //! - The listener is loopback only and owned by the core (aborted on shutdown).
 
+mod browser_sending;
 mod browser_tools;
 #[cfg(feature = "video")]
 mod video_budget;

@@ -34,8 +34,21 @@ impl Browser {
                 .filter(|current| same_node(item, current))
                 .ok_or_else(|| refused("node or frame changed during native click preparation"))?;
             let (x, y) = top_point(current, point)?;
-            self.click_point(session, &item.id, (x, y), by, sent, request.get("consent"))
-                .await?;
+            let mut consent = request
+                .get("consent")
+                .filter(|token| token.is_object())
+                .cloned()
+                .unwrap_or_else(|| json!({}));
+            consent["allowSend"] = request["allowSend"].clone();
+            self.click_point(
+                session,
+                &item.id,
+                ((x, y), action.click_options()),
+                by,
+                sent,
+                Some(&consent),
+            )
+            .await?;
             return Ok(());
         }
         Err(refused("native click requires an isolated frame identity"))
@@ -49,7 +62,7 @@ impl Browser {
         &self,
         session: &str,
         reference: &str,
-        point: (u32, u32),
+        input: ((u32, u32), vw_preview::ClickOptions),
         by: Actor,
         sent: Arc<AtomicBool>,
         consent: Option<&serde_json::Value>,
@@ -86,11 +99,17 @@ impl Browser {
                 "node or frame changed during native click preparation",
             ));
         }
-        self.click_point(session, reference, point, by, sent, consent)
+        self.click_point(session, reference, input, by, sent, consent)
             .await
     }
 
     pub(crate) fn bind_point(&self, session: &str, action: Action) -> Result<Action, ActError> {
+        if let Action::Pointer { base, options } = action {
+            return self.bind_point(session, *base).map(|base| Action::Pointer {
+                base: Box::new(base),
+                options,
+            });
+        }
         // A shape the read found inside a canvas or image is no element of its own: a scroll to it scrolls its
         // canvas or image into view.
         let action = if let Action::Scroll {
@@ -177,11 +196,12 @@ impl Browser {
         &self,
         session: &str,
         reference: &str,
-        point: (u32, u32),
+        input: ((u32, u32), vw_preview::ClickOptions),
         by: Actor,
         sent: Arc<AtomicBool>,
         consent: Option<&serde_json::Value>,
     ) -> Result<PageAnswer, ActError> {
+        let (point, options) = input;
         let seen = self
             .current_seen(session)
             .ok_or_else(|| refused("the observed page closed"))?;
@@ -240,10 +260,12 @@ impl Browser {
             .iter()
             .map(|check| check["document"].clone())
             .collect();
-        let request = json!({"receipt":receipt,"page":page,"checks":checks,"singleFrame":true,"ref":reference,"consent":consent,"nativeUser":by == Actor::User});
+        let request = json!({"receipt":receipt,"page":page,"checks":checks,"singleFrame":true,"ref":reference,
+            "allowSend":consent.is_none_or(|token|token["allowSend"]!=false),
+            "consent":consent.filter(|token|token.get("snapshot").is_some()),"nativeUser":by == Actor::User,"click":options,"expected":options.events()});
         let script = crate::scripts::point_validation(&request);
         let dispatch = crate::scripts::point_dispatch(&page, &receipt);
-        let validation = json!({"framePointValidation":true,"script":script,"dispatch":dispatch,"ids":ids,"documents":documents,"receipt":receipt}).to_string();
+        let validation = json!({"framePointValidation":true,"script":script,"dispatch":dispatch,"ids":ids,"documents":documents,"receipt":receipt,"click":options,"cssPoint":point}).to_string();
         let input = self
             .service
             .native_click_on_mount(
@@ -260,13 +282,14 @@ impl Browser {
             )
             .await
             .map_err(|e| native_error(&e, &sent))?;
-        crate::point_receipt::confirm(&input, &page, &receipt, &frame.id, &frame.document).await?;
+        crate::point_receipt::confirm(&input, &page, &receipt, &frame.id, &frame.document, options)
+            .await?;
         #[cfg(feature = "click-marker")]
         {
             // Release the input lease before the overlay takes the same mount lock. Drawing never changes
             // the confirmed outcome; the feature-off path retains the original lease lifetime.
             drop(input);
-            if by == Actor::Agent {
+            if by == Actor::Agent && options != vw_preview::ClickOptions::HOVER {
                 self.mark_native_input(&seen, item, point).await;
             }
         }
@@ -275,7 +298,7 @@ impl Browser {
     }
 }
 
-fn same_node(before: &crate::model::RefItem, after: &crate::model::RefItem) -> bool {
+pub(crate) fn same_node(before: &crate::model::RefItem, after: &crate::model::RefItem) -> bool {
     let (Some(old), Some(new)) = (&before.frame_id, &after.frame_id) else {
         return false;
     };

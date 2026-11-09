@@ -140,67 +140,69 @@ export function SidePanel({ onDragging }: { onDragging: (dragging: boolean) => v
         onPointerCancel={onUp}
         onKeyDown={onKey}
       />
-      <Tabs
-        data-testid="shell.side-panel-ptabs"
-        variant="pill"
+      <div className="panel-tabs">
+        <Tabs
+          data-testid="shell.side-panel-ptabs"
+          variant="pill"
 
-        aria-label="Side panel tabs"
-        ref={tabStrip}
-      >
-        {/* the selected tab's pill slides to the new tab (200 ms) instead of jumping. */}
-        {pill !== null && (
-          <span
-            className="ptab-pill"
-            aria-hidden="true"
-            style={{
-              width: pill.w,
-              height: pill.h,
-              transform: `translate(${String(pill.x)}px, ${String(pill.y)}px)`,
-            }}
-          />
-        )}
-        {[...panel.tabs]
-          .sort((a, b) => (a === "git" ? -1 : b === "git" ? 1 : 0))
-          .filter((k) => k !== "file" || !separate || files === null || sessionId === null)
-          .map((kind) => (
+          aria-label="Side panel tabs"
+          ref={tabStrip}
+        >
+          {/* the selected tab's pill slides to the new tab (200 ms) instead of jumping. */}
+          {pill !== null && (
             <span
-              data-item-id={kind}
-              key={kind}
-              className="ptab-group"
-              data-selected={kind === active}
-            >
-              <Tab
-                data-testid="shell.side-panel-open-tab"
-                type="button"
-
-                aria-selected={kind === active}
-                data-tab={kind}
-                title={`Show ${TAB_META[kind].label} tab${kind === "terminal" ? ` (${formatKeys("Mod+`")})` : ""}`}
-                aria-label={`Show ${TAB_META[kind].label} tab${kind === "terminal" ? ` (${formatKeys("Mod+`")})` : ""}`}
-                onClick={() => {
-                  shell.actions.openTab(kind);
-                }}
+              className="ptab-pill"
+              aria-hidden="true"
+              style={{
+                width: pill.w,
+                height: pill.h,
+                transform: `translate(${String(pill.x)}px, ${String(pill.y)}px)`,
+              }}
+            />
+          )}
+          {[...panel.tabs]
+            .sort((a, b) => (a === "git" ? -1 : b === "git" ? 1 : 0))
+            .filter((k) => k !== "file" || !separate || files === null || sessionId === null)
+            .map((kind) => (
+              <span
+                data-item-id={kind}
+                key={kind}
+                className="ptab-group"
+                data-selected={kind === active}
               >
-                <Icon name={TAB_ICON[kind]} size={14} />
-                <span className="ptab-label">{TAB_META[kind].label}</span>
-              </Tab>
-              <TabClose
-                data-testid="shell.side-panel-close-tab"
-                type="button"
+                <Tab
+                  data-testid="shell.side-panel-open-tab"
+                  type="button"
 
-                aria-label={`Close ${TAB_META[kind].label} tab`}
-                title={`Close ${TAB_META[kind].label} tab`}
-                onClick={() => {
-                  shell.actions.closeTab(kind);
-                }}
-              >
-                <Icon name="x" size={12} />
-              </TabClose>
-            </span>
-          ))}
-        {files !== null && sessionId !== null && panel.tabs.includes("file") && (
-          <FilePanelTabs files={files} sessionId={sessionId} active={active === "file"} />
-        )}
+                  aria-selected={kind === active}
+                  data-tab={kind}
+                  title={`Show ${TAB_META[kind].label} tab${kind === "terminal" ? ` (${formatKeys("Mod+`")})` : ""}`}
+                  aria-label={`Show ${TAB_META[kind].label} tab${kind === "terminal" ? ` (${formatKeys("Mod+`")})` : ""}`}
+                  onClick={() => {
+                    shell.actions.openTab(kind);
+                  }}
+                >
+                  <Icon name={TAB_ICON[kind]} size={14} />
+                  <span className="ptab-label">{TAB_META[kind].label}</span>
+                </Tab>
+                <TabClose
+                  data-testid="shell.side-panel-close-tab"
+                  type="button"
+
+                  aria-label={`Close ${TAB_META[kind].label} tab`}
+                  title={`Close ${TAB_META[kind].label} tab`}
+                  onClick={() => {
+                    shell.actions.closeTab(kind);
+                  }}
+                >
+                  <Icon name="x" size={12} />
+                </TabClose>
+              </span>
+            ))}
+          {files !== null && sessionId !== null && panel.tabs.includes("file") && (
+            <FilePanelTabs files={files} sessionId={sessionId} active={active === "file"} />
+          )}
+        </Tabs>
         <span className="end">
           {remaining !== undefined && (
             <IconButton
@@ -250,7 +252,7 @@ export function SidePanel({ onDragging }: { onDragging: (dragging: boolean) => v
             onClick={shell.actions.closePanel}
           />
         </span>
-      </Tabs>
+      </div>
       <div data-testid="shell.side-panel-pbody" className="pbody" role="tabpanel">
         {body ?? <div className="empty">Nothing to show.</div>}
       </div>

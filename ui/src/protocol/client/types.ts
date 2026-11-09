@@ -258,7 +258,7 @@ export interface CoreClient {
    * The existing Debug API vault item id, or null when absent (historical method name).
    * Creates or regenerates only when requested. Never returns the value; copy uses the ordinary user-only vault command.
    */
-  debugApiTokenFile(rotate: boolean): Promise<string | null>;
+  debugApiTokenItem(rotate: boolean): Promise<string | null>;
   /**
    * Streams a terminal's output into `onChunk` (scrollback first). Tauri: raw bytes on a Channel
    * with acknowledgements; browser dev mode: polls the `read` command (no flow control).

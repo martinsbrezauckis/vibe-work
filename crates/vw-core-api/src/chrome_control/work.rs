@@ -68,6 +68,14 @@ enum Stop {
 #[derive(Default)]
 pub(super) struct Work(VecDeque<Session>);
 impl Work {
+    pub(super) fn remove_browser(&mut self, browser: Browser) {
+        for session in &mut self.0 {
+            if browser.owns_profile(&session.profile) {
+                session.stop = Stop::Ended;
+                session.row.state = "disconnected".into();
+            }
+        }
+    }
     pub(super) fn open(
         &mut self,
         helper: &str,

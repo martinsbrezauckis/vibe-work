@@ -391,6 +391,9 @@ export function Toasts() {
                     core={core}
                     title="Temporary chat cleanup failed"
                     text={toast.text}
+                    onOpen={() => {
+                      toasts.dismiss(toast.id);
+                    }}
                   />
                 ) : undefined
               }

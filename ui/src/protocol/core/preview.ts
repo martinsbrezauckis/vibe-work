@@ -434,6 +434,8 @@ browserPanelOpen: boolean,
  */
 selectedPageKey: string | null, };
 
+export type CaptureBlock = "windowHidden" | "anotherPage" | "noChatSelected" | "anotherSession" | "browserPanelClosed" | "browserPaused" | "appPreviewNotSelected" | "webTabNotSelected" | "appPreviewNotShown" | "webTabNotShown" | "serverStopped" | "browserPageNotShown";
+
 export type DeviceWidth = "phone" | "tablet" | "desktop" | "fit";
 
 export type Rect = {

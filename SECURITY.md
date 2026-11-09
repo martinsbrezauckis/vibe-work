@@ -46,6 +46,26 @@ the local key proxy and vault handling, the installers and the update flow.
   the agent started keep running until you stop them; deleting a session asks whether to stop them.
 - **Updates are signed.** The app installs an update only after its signature checks out and you agreed.
 
+## Vault unlock and stored keys
+
+You can choose your existing system sign-in or the vault password each time, in setup and vault settings.
+Password mode removes the saved unlock key and never saves another on password unlock. Existing vaults keep
+their system-sign-in choice after an update. Changing this choice leaves vault contents and the password intact.
+
+On macOS, the login-Keychain items for vault unlock and Chrome ownership use a trusted-application ACL for
+Vibe Work's signed executable. Another application needs Keychain consent; approving that prompt grants access.
+The signed release must be checked with a separately signed executable before this boundary is considered verified.
+
+On Windows with a usable TPM, the OS-store values are encrypted under a non-exportable, per-user TPM wrapping
+key. This needs no installer service or new sign-in. Systems without a usable TPM retain Windows Credential
+Manager. **Neither route is an application boundary:** another process running as the same user can invoke the
+TPM key. A privileged broker that authenticates the calling application would be needed for that boundary in
+the current desktop installation model. Chrome ownership and its trusted policy use the same storage route.
+
+Linux Secret Service has no per-application access boundary. Password mode is recommended when other programs
+running as your user must not read a saved vault-unlock secret. Chrome's owner identity remains in Secret Service
+and has the same limitation. Password mode does not isolate an unlocked process's memory or revoke saved copies.
+
 ## Known limits
 
 - The agent runs commands with your user's permissions. Vibe's access modes and Vibe Work's Plan on a page profile
@@ -62,8 +82,7 @@ the local key proxy and vault handling, the installers and the update flow.
   cannot attach a debugger to it or read its memory; on macOS only core dumps are turned off, and on Windows other
   processes of the same user can read its memory.
 - Browser web tabs are separate from the pinned App preview. The agent lists only its session's web tabs. In Ask,
-  the built-in browser refuses to close a tab you opened; Your Chrome and Your Edge ask before closing a tab. In
-  Accept edits and Full access, closing a tab you opened runs without a card. The agent cannot close the pinned
-  App preview or another session's tab.
+  Accept edits and Full access, closing an agent tab or a tab handed to the chat runs without a card. The agent
+  cannot close the pinned App preview or another session's tab.
 - On Linux, the built-in Browser's reads leave out a frame that cannot run scripts inside a closed shadow root without
   reporting it as unreadable; a click still checks its own target.

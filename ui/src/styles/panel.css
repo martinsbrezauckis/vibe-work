@@ -42,17 +42,26 @@
 .dragging .grip::after {
   background: var(--focus);
 }
+.panel-tabs {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  min-height: var(--header-height);
+  padding-right: 8px;
+  border-bottom: 1px solid var(--line);
+}
 .ptabs {
+  flex: 1;
   display: flex;
   align-items: center;
   gap: 2px;
   padding: 7px 8px 7px 12px;
   min-height: var(--header-height);
-  border-bottom: 1px solid var(--line);
   min-width: 0;
   overflow-x: auto;
 }
 .ptab-group {
+  flex-shrink: 0;
   display: inline-flex;
   align-items: center;
   border-radius: var(--radius-7);
@@ -97,7 +106,8 @@
   background: var(--line-2);
   color: var(--text);
 }
-.ptabs .end {
+.panel-tabs > .end {
+  flex-shrink: 0;
   margin-left: auto;
   display: flex;
   gap: 2px;

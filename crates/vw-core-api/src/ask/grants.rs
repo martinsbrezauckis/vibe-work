@@ -21,7 +21,7 @@
 //!
 //! A malformed permission (missing or non-text field, blank pattern) keeps nothing either: fail closed.
 //!
-//! Lifetime: in memory only (0.1.2). A grant ends when its session (or the parent session of a subagent's card)
+//! Lifetime: in memory only. A grant ends when its session (or the parent session of a subagent's card)
 //! is deleted or archived, with Remove, or when Vibe Work quits. It follows a hand-off (compaction gives the
 //! chat a new session id). It survives a Vibe server restart and an idle channel close: the chat is the same.
 //!
@@ -94,6 +94,9 @@ fn own_call(tool: &str, input: &Value) -> Own {
         })
     };
     match name {
+        // Browser session scope comes only from the described tier package above. A generic card
+        // (including an unknown action) must never fall back to granting the whole browser tool.
+        names::BROWSER_ACT => Own::Nothing,
         "chrome_execute" => {
             if !crate::chrome_control::read_consent::personal_read(name, input) {
                 return Own::Nothing;
@@ -271,6 +274,11 @@ pub(crate) fn scope_of(entry: &Value) -> Scopeable {
     if detail["kind"] != "approval" {
         return Scopeable::No;
     }
+    if entry["vwToolAsk"] == true
+        && let Some(tier) = detail["vwBrowserTier"].as_u64()
+    {
+        return super::browser_package::scope(entry, tool, tier);
+    }
     // Vibe's model defaults the list to empty (`models.py:327`).
     let raw = match &detail["requiredPermissions"] {
         Value::Null => Vec::new(),
@@ -446,7 +454,10 @@ impl Grants {
         self.lock()
             .kept
             .iter()
-            .find(|k| k.grant.covers(session, &tool, &permissions))
+            .find(|k| {
+                k.grant.covers(session, &tool, &permissions)
+                    || super::browser_package::covers(&k.grant, session, &tool, &permissions)
+            })
             .map(|k| k.grant.clone())
     }
 

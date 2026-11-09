@@ -28,6 +28,7 @@ pub(super) fn register_browser(
         return Err(reason.to_owned());
     }
     let _held = super::registration_lock();
+    super::selection::migrate(config, state)?;
     let mut receipt = read_receipt(config, state).ok_or("Browser setup is missing")?;
     if receipt.browsers.iter().any(|name| name == browser) {
         return super::registration::repair(config, state, Some(browser));
@@ -62,6 +63,13 @@ pub(super) fn register_browser(
             made.files.push(path);
         } else if let Some(root) = target.registry {
             let file = state.join("host").join(format!("{HOST_NAME}.json"));
+            let manifest = host_manifest(&helper, &config.extension_id);
+            let owned = receipt.files.contains(&file);
+            super::registration::ensure_manifest(config, &file, &manifest, owned)?;
+            if !owned {
+                made.written.push((file.clone(), manifest));
+                made.files.push(file.clone());
+            }
             let key = format!(r"{root}\{HOST_NAME}");
             registry_set(&key, &file)?;
             made.keys.push((key.clone(), file));
@@ -69,6 +77,7 @@ pub(super) fn register_browser(
         }
         receipt.files.extend(made.files.clone());
         receipt.browsers.push(target.name.into());
+        receipt.selected_browsers = Some(receipt.browsers.clone());
         receipt.user_data.push(target.user_data);
         let bytes = serde_json::to_vec_pretty(&receipt).map_err(|e| e.to_string())?;
         write_file(config, &mut made, &state.join(RECEIPT), &bytes)

@@ -16,6 +16,126 @@ fn safety() -> Value {
 }
 
 #[test]
+fn trimmed_text_continues_after_the_characters_actually_returned() {
+    let model = crate::model::PageModel {
+        url: "https://example.test/".into(),
+        text: "Readable 🦊 paragraph. ".repeat(120),
+        text_length: 6000,
+        environment: true,
+        ..Default::default()
+    };
+    let mut out = observe::answer(
+        &model,
+        &observe::verdict(&model),
+        "snapshot",
+        json!({}),
+        false,
+        3000,
+    );
+    out["tab"] = json!({"id":"web-page-fixture","site":"example.test"});
+    observe::fit(&mut out, 1500);
+    let content = &out["untrustedPageContent"];
+    let returned = content["text"].as_str().unwrap().encode_utf16().count();
+    assert!(returned > 0 && returned < model.text.encode_utf16().count());
+    assert_eq!(
+        content["nextTextCursor"],
+        json!({"page":0,"offset":returned}),
+        "{out}"
+    );
+    assert_eq!(out["size"]["bytes"], observe::size(&out));
+}
+
+#[test]
+fn continuation_does_not_repeat_ref_and_text_budget_boilerplate() {
+    let mut out = safety();
+    out["refsTotal"] = json!(60);
+    out["refsShown"] = json!(20);
+    out["untrustedPageContent"] = json!({"text":"paragraph ".repeat(300), "textPageNumber":0,
+        "coveringFrames":[{"complete":false,"choices":[]}], "refs":[]});
+    observe::fit(&mut out, 1500);
+    let how = out["trimmed"]["how"].as_str().unwrap();
+    assert!(how.len() <= 240, "{} bytes: {how}", how.len());
+    assert!(how.contains("find") && how.contains("tab") && how.contains("Do not replay"));
+}
+
+#[test]
+fn a_trimmed_choice_inventory_has_an_exact_continuation() {
+    let mut out = safety();
+    let choices: Vec<_> = (0..30).map(|n| json!({"ref":format!("e{n:08x}"),"role":"button","name":format!("Purpose {n}: {}", "rendered terms ".repeat(4))})).collect();
+    out["untrustedPageContent"]["coveringFrames"] = json!([{"index":0,"frameOrigin":"https://consent.example.test","coversPage":true,"choicesTotal":30,"complete":true,"choices":choices}]);
+    observe::fit(&mut out, 1500);
+    let frame = &out["untrustedPageContent"]["coveringFrames"][0];
+    let shown = frame["choices"].as_array().unwrap().len();
+    assert!(shown > 0 && shown < 30);
+    assert_eq!(
+        frame["nextChoiceCursor"],
+        json!({"frame":0,"offset":shown}),
+        "{out}"
+    );
+    assert!(
+        out["trimmed"]["how"]
+            .as_str()
+            .unwrap()
+            .contains("choiceCursor")
+    );
+}
+
+#[test]
+fn heading_lists_yield_with_explicit_omissions_under_small_budgets() {
+    let model = crate::model::PageModel {
+        main_headings: vec!["界".repeat(180); 3],
+        main_headings_total: 3,
+        environment: true,
+        ..Default::default()
+    };
+    let out = observe::answer(
+        &model,
+        &observe::verdict(&model),
+        "snapshot",
+        json!({}),
+        true,
+        1500,
+    );
+    assert!(observe::size(&out) <= 1500, "{} bytes", observe::size(&out));
+    let content = &out["untrustedPageContent"];
+    assert_eq!(
+        content["mainHeadings"].as_array().unwrap().len() as u64
+            + content["mainHeadingsOmitted"].as_u64().unwrap_or(0),
+        3
+    );
+}
+
+#[test]
+fn a_final_secret_scrub_cannot_advance_a_text_cursor_by_replacement_length() {
+    let model = crate::model::PageModel {
+        title: "API key documentation".into(),
+        text: "1234567890123456 ".repeat(60),
+        text_length: 6000,
+        environment: true,
+        ..Default::default()
+    };
+    let mut out = observe::answer(
+        &model,
+        &observe::verdict(&model),
+        "snapshot",
+        json!({}),
+        false,
+        3000,
+    );
+    crate::filter_agent_output(&mut out);
+    assert!(
+        out["untrustedPageContent"].get("nextTextCursor").is_none(),
+        "{out}"
+    );
+    assert!(
+        out["untrustedPageContent"]["textContinuation"]
+            .as_str()
+            .unwrap()
+            .contains("redacted")
+    );
+}
+
+#[test]
 fn long_navigation_addresses_cannot_escape_the_whole_result_budget() {
     let mut out = safety();
     let address = format!("https://example.test/{}", "long-path/".repeat(200));

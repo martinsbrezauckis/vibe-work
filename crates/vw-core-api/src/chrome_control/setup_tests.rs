@@ -181,6 +181,8 @@ fn set_up_and_remove_use_the_configured_key_and_leave_real_chrome_untouched() {
     // Configured roots can contain forward slashes; persisted native paths must not.
     let mixed_state = PathBuf::from(s.state().to_str().unwrap().replace('\\', "/"));
     let view = install(&config, &mixed_state, &s.vibe_home()).unwrap();
+    #[cfg(feature = "your-edge")]
+    register_edge(&config, &mixed_state).unwrap();
     assert_eq!(view.state, SetupState::WaitingForExtension);
     let installed = registration(&key);
     assert_eq!(installed.0, Some(0));
@@ -438,6 +440,10 @@ fn planted_helper_is_refused_before_copy_or_registration() {
 #[path = "setup_edge_tests.rs"]
 mod edge_tests;
 
+#[cfg(feature = "your-edge")]
+#[path = "setup_scoped_remove_tests.rs"]
+mod scoped_remove_tests;
+
 #[cfg(feature = "your-firefox")]
 #[test]
 fn owned_firefox_never_registers_a_native_addon_host() {
@@ -457,3 +463,7 @@ mod repair_tests;
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 #[path = "macos_data_tests.rs"]
 mod macos_data;
+
+#[cfg(feature = "your-edge")]
+#[path = "setup_selection_tests.rs"]
+mod selection_tests;

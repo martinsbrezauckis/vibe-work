@@ -1,4 +1,5 @@
 //! Bounded host classification for backend media fetching and legacy compatibility metadata.
+//! Depends on: std DNS and vw-netguard address classes. Called by: backend capture and resolver diagnostics.
 //! Browser navigation and page requests do not consult these verdicts. Resolver queues, cache bounds,
 //! public-address checks and private-answer classification remain available to backend fetch callers.
 
@@ -52,18 +53,6 @@ impl NameVerdict {
         match self {
             Self::Public => None,
             Self::LocalNetwork(why) | Self::Refused(why) => Some(why),
-        }
-    }
-
-    /// The refusal text for a page that may reach public names and, when `own_lan_host` (the name is the host of the
-    /// Lan page the user opened), local-network answers too. Loopback, link-local and special answers stay refused
-    /// for every page (the Lan page's own name is looked up like any other, so a name
-    /// that points, or later rebinds, to this machine is refused instead of exempted).
-    #[must_use]
-    pub fn refusal_on(&self, own_lan_host: bool) -> Option<&str> {
-        match self {
-            Self::LocalNetwork(_) if own_lan_host => None,
-            other => other.refusal(),
         }
     }
 

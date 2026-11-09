@@ -7,6 +7,8 @@
  * are cleared whether or not the call worked; a failure leaves the user on this step with the reason.
  */
 import { Button } from "../../components/Controls";
+import type { VaultUnlockMethod } from "../../protocol/core";
+import { VaultUnlockChoice } from "./VaultUnlockChoice";
 import { useState } from "react";
 import { term } from "../../vocabulary";
 
@@ -27,6 +29,7 @@ export function CreateStep() {
   const [useVibe, setUseVibe] = useState(true);
   const [key, setKey] = useState("");
   const [password, setPassword] = useState("");
+  const [unlockMethod, setUnlockMethod] = useState<VaultUnlockMethod>("system");
   const fromVibe = found !== undefined && useVibe;
   const ready = password !== "" && (fromVibe || key.trim() !== "");
 
@@ -37,7 +40,7 @@ export function CreateStep() {
     // Clear first: whatever happens next, the inputs no longer hold the secrets.
     setKey("");
     setPassword("");
-    void keys.createWithKey(pass, how);
+    void keys.createWithKey(pass, how, unlockMethod);
   };
 
   return (
@@ -90,6 +93,7 @@ export function CreateStep() {
         If you forget the password, paste your key again. Vibe Work never sees your Mistral account
         password.
       </p>
+      <VaultUnlockChoice value={unlockMethod} onChange={setUnlockMethod} disabled={busy} />
       <Problem text={problem?.text ?? null} />
       <div className="key-actions">
         <Button

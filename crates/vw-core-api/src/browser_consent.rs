@@ -15,54 +15,56 @@ use vw_gate::{ConfirmationRequest, Confirmer, Requester};
 
 use crate::core::Shared;
 
+#[cfg(test)]
+#[path = "browser_consent_tests.rs"]
+mod tests;
+
 /// A native-only confirmation method for wider provider permissions.
 pub(crate) const METHOD: &str = "vibe-work/providerConsent";
 
 fn describe_scope(scope: &str) -> String {
-    let lower = scope.to_ascii_lowercase();
-    let label = if matches!(
-        lower.as_str(),
-        "openid" | "profile" | "name" | "read:user" | "user.read"
-    ) || lower.ends_with("/userinfo.profile")
-    {
-        "Read your basic profile"
-    } else if matches!(lower.as_str(), "email" | "user:email") || lower.ends_with("/userinfo.email")
-    {
-        "Read your email address"
-    } else if lower.contains("offline") {
-        "Keep access when you are away"
-    } else if lower.contains("mail") || lower.contains("gmail") {
-        if lower.contains("read") {
-            "Read your mail"
-        } else {
-            "Read or change your mail"
+    // Scope names are exact tokens, not prose: a familiar substring cannot establish read-only access.
+    let label = match scope {
+        "openid"
+        | "profile"
+        | "name"
+        | "read:user"
+        | "User.Read"
+        | "https://www.googleapis.com/auth/userinfo.profile" => "Read your basic profile",
+        "email" | "user:email" | "https://www.googleapis.com/auth/userinfo.email" => {
+            "Read your email address"
         }
-    } else if lower.contains("drive") || lower.contains("files") {
-        if lower.contains("read") {
+        "offline_access" => "Keep access when you are away",
+        "Mail.Read" | "https://www.googleapis.com/auth/gmail.readonly" => "Read your mail",
+        "Mail.ReadWrite" => "Read or change your mail",
+        "Mail.Send" | "https://www.googleapis.com/auth/gmail.send" => "Send mail",
+        "https://www.googleapis.com/auth/gmail.compose" => "Read or change drafts and send mail",
+        "https://www.googleapis.com/auth/gmail.modify" => "Read or change your mail and send mail",
+        "https://mail.google.com/" => "Read, change, send or permanently delete all your mail",
+        "Files.Read" | "Files.Read.All" | "https://www.googleapis.com/auth/drive.readonly" => {
             "Read your files"
-        } else {
-            "Read or change your files"
         }
-    } else if lower.contains("calendar") {
-        if lower.contains("read") {
-            "Read your calendar"
-        } else {
-            "Read or change your calendar"
-        }
-    } else if lower.contains("contacts") {
-        if lower.contains("write") {
-            "Read or change your contacts"
-        } else {
+        "Files.ReadWrite"
+        | "Files.ReadWrite.All"
+        | "https://www.googleapis.com/auth/drive"
+        | "https://www.googleapis.com/auth/drive.file" => "Read or change your files",
+        "Calendars.Read"
+        | "https://www.googleapis.com/auth/calendar.readonly"
+        | "https://www.googleapis.com/auth/calendar.events.readonly" => "Read your calendar",
+        "Calendars.ReadWrite"
+        | "https://www.googleapis.com/auth/calendar"
+        | "https://www.googleapis.com/auth/calendar.events" => "Read or change your calendar",
+        "Contacts.Read" | "https://www.googleapis.com/auth/contacts.readonly" => {
             "Read your contacts"
         }
-    } else if lower.contains("repo") || lower.contains("contents") {
-        if lower.contains("read") {
-            "Read your repositories"
-        } else {
-            "Read or change your repositories"
+        "Contacts.ReadWrite" | "https://www.googleapis.com/auth/contacts" => {
+            "Read or change your contacts"
         }
-    } else {
-        "Unrecognized permission"
+        "repo" => {
+            "Manage repositories and organization projects, invitations, team memberships and webhooks"
+        }
+        "public_repo" => "Read or change your repositories",
+        _ => "Unrecognized permission",
     };
     format!("{label} ({})", vw_gate::dialog_quote(scope))
 }

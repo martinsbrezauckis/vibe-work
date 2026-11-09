@@ -62,7 +62,7 @@ async fn check(
         &json!({"url":url, "settings":values, "systemTrustStore": system_trust_store}),
     )
     .ok()?;
-    let mut command = tokio::process::Command::new(python);
+    let mut command = vw_platform::process_command::hidden_tokio(python);
     command.env_clear();
     for name in ["SystemRoot", "WINDIR", "TEMP", "TMP"] {
         if let Some(value) = std::env::var_os(name) {

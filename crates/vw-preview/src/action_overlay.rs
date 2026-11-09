@@ -4,7 +4,15 @@ use crate::action_tracking::{
     ActionGeometry, ActionKind, ActionSource, ActionTracker, SourceBrowser,
 };
 use crate::{MountId, PreviewService};
-use std::sync::Arc;
+use std::sync::{Arc, Once};
+
+static MARKER_ERROR: Once = Once::new();
+
+fn report_marker_result(once: &Once, result: Result<(), crate::EngineError>) {
+    if let Err(error) = result {
+        once.call_once(|| tracing::warn!(%error, "could not draw browser input marker"));
+    }
+}
 
 impl PreviewService {
     /// The same timeline receives external Chrome/Edge receipts at the core boundary.
@@ -44,12 +52,17 @@ impl PreviewService {
             return;
         }
         if let Some(marker) = self.actions.marker_for(&event, &session_id, &source) {
-            let _ = self
+            let result = self
                 .bounded(
                     "showing browser input",
                     self.engine.show_input_marker(id, marker),
                 )
                 .await;
+            report_marker_result(&MARKER_ERROR, result);
         }
     }
 }
+
+#[cfg(test)]
+#[path = "action_overlay_tests.rs"]
+mod tests;

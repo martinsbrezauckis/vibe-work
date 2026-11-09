@@ -1,13 +1,43 @@
 //! Document-bound browser observation, frame merge and optional visual gap pass.
 //! Called by reads and receipts; all output passes policy, bounding, prompt guard and current-mount checks.
 use crate::{
-    Browser, ReadOptions, guard,
+    Browser, guard,
     model::{PageModel, RefItem},
     observe::{self, PAGE_CHARS},
     refs::PAGE_CLOSED,
     scripts,
 };
 const FIND_TEXT: usize = 20_000;
+
+/// How a read is shaped (token budget: `observe` module docs).
+#[derive(Clone, Debug)]
+pub struct ReadOptions {
+    /// Observation refs (0..=200, default 32); full reads clamp this to 32. Zero requests text only.
+    pub max_refs: usize,
+    /// A text page (0-based, 2,500 UTF-16 units each); `None`: the default 800-character preview.
+    pub text_page: Option<usize>,
+    /// Continue after the text actually returned from a page, including child-frame windows.
+    pub text_cursor: Option<crate::TextCursor>,
+    /// Only the named covering frame's choices from this position, without ordinary refs or text.
+    pub choice_cursor: Option<crate::ChoiceCursor>,
+    /// The answer's size budget in bytes (1,500..=4,000, default 3,000).
+    pub max_bytes: usize,
+    /// A focused read: only the refs and text lines containing this.
+    pub find: Option<String>,
+}
+
+impl Default for ReadOptions {
+    fn default() -> Self {
+        Self {
+            max_refs: observe::DEFAULT_REFS,
+            text_page: None,
+            text_cursor: None,
+            choice_cursor: None,
+            max_bytes: observe::READ_BUDGET,
+            find: None,
+        }
+    }
+}
 
 /// Caps an already priority-ordered list, reserving half (rounded up) for available main refs.
 /// Full observations and focused output both use this, before any smaller byte-budget cap.
@@ -142,12 +172,16 @@ impl Browser {
             .service
             .page_mount(session_id)
             .ok_or_else(|| PAGE_CLOSED.to_owned())?;
-        let offset = options.text_page.unwrap_or(0).saturating_mul(PAGE_CHARS);
+        let offset = options
+            .text_cursor
+            .as_ref()
+            .map_or(options.text_page.unwrap_or(0), |c| c.page)
+            .saturating_mul(PAGE_CHARS);
         let (max_refs, max_text, offset) = if options.find.is_some() || node.is_some() {
             (crate::model::MAX_REFS, FIND_TEXT, offset)
         } else {
             (
-                options.max_refs.clamp(1, crate::model::MAX_REFS),
+                options.max_refs.min(crate::model::MAX_REFS),
                 PAGE_CHARS,
                 offset,
             )
@@ -172,6 +206,18 @@ impl Browser {
             Some(model) => model,
             None => self.run_in_mount(session_id, script, Some(&mount)).await?,
         };
+        if let Some(cursor) = &options.choice_cursor {
+            let frame = model.covering_frames.get(cursor.frame).ok_or(
+                "covering frame is no longer in this inventory; read without choiceCursor again",
+            )?;
+            if cursor.offset > frame.choices.len() {
+                return Err(
+                    "choice cursor is past the observed choices; read without choiceCursor again"
+                        .into(),
+                );
+            }
+            model.choice_cursor = Some(cursor.clone());
+        }
         // Authorization binds to the document that answered: the same mount, a page it may show.
         self.service
             .reading_allowed(session_id, &page, &model.url)?;
@@ -193,6 +239,7 @@ impl Browser {
         });
         model.refs.retain(|item| crate::model::is_ref(&item.id));
         reserve_main_refs(&mut model.refs, max_refs);
+        crate::text_paging::select(&mut model, options.text_cursor.as_ref());
         model.bound(max_text);
         let verdict = observe::verdict(&model);
         let mut seen = observe::seen(&model, mount);

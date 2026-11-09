@@ -3,7 +3,7 @@ name: preview
 description: Vibe Work's preview tools - this session's web app in the Browser tab - its server, screenshots and console errors.
 ---
 
-Vibe Work shows this session's local servers in the Browser tab next to the chat. The tools are on `mcp_vw` inside `run_typescript`; one program has 60 s for all of its tool calls:
+Vibe Work shows this session's local servers in the Browser tab next to the session. The tools are on `mcp_vw` inside `run_typescript`; one program has 60 s for all of its tool calls:
 
 ```ts
 const list = await tools.mcp_vw.preview_list({});

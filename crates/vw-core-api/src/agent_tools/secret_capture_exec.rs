@@ -2,7 +2,7 @@
 //! Uses the existing process environment and monitor, with group/job cleanup on cancellation and bounded zeroizing reads.
 use super::secret_exec::Exec;
 use crate::core::Shared;
-use process_wrap::tokio::{ChildWrapper, CommandWrap, KillOnDrop};
+use process_wrap::tokio::{ChildWrapper, KillOnDrop};
 use std::{ffi::OsString, process::Stdio, sync::Arc, time::Duration};
 use tokio::io::{AsyncRead, AsyncReadExt};
 use vw_procmon::{OwnProcess, ProcessClass, ProcessGroup, ProcessRef};
@@ -67,7 +67,7 @@ fn spawn(
             .map(|(name, value)| (OsString::from(name), OsString::from(value.expose()))),
     );
     vw_supervisor::isolate_credentials(&mut env);
-    let mut command = CommandWrap::with_new(exec.program, |cmd| {
+    let mut command = vw_platform::process_command::hidden_wrap(exec.program, |cmd| {
         cmd.args(exec.args)
             .current_dir(exec.cwd)
             .env_clear()
@@ -80,9 +80,6 @@ fn spawn(
     command.wrap(process_wrap::tokio::ProcessGroup::leader());
     #[cfg(windows)]
     {
-        command.wrap(process_wrap::tokio::CreationFlags(
-            windows::Win32::System::Threading::CREATE_NO_WINDOW,
-        ));
         command.wrap(process_wrap::tokio::JobObject);
     }
     command.wrap(KillOnDrop);

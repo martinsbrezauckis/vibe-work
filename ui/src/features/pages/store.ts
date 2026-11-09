@@ -450,9 +450,10 @@ export function createPages(core: CoreController) {
       return;
     }
     // after `lagged` the core's events for this were missed: read again what is shown.
-    if (event.type !== "pagesChanged" && event.type !== "lagged") return;
+    if (event.type !== "pagesChanged" && event.type !== "changesUpdated" && event.type !== "lagged")
+      return;
     const { hubs, plans } = store.get();
-    const one = event.type === "pagesChanged" ? event.sessionId : null;
+    const one = event.type === "lagged" ? null : event.sessionId;
     const ids = one === null ? Object.keys(hubs) : [one];
     for (const id of ids) if (hubs[id] !== undefined) void controller.load(id);
     const planIds = one === null ? Object.keys(plans) : [one];

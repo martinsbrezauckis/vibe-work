@@ -12,7 +12,9 @@
 pub fn restrict() -> Result<(), String> {
     use rustix::process::{Resource, Rlimit, setrlimit};
     for (resource, cap) in [
-        (Resource::As, 512 * 1024 * 1024),
+        // System decoder libraries and 4K reference frames need more than 512 MiB of address space.
+        // Match the Windows worker's 1 GiB budget; namespace and syscall denials stay unchanged.
+        (Resource::As, 1024 * 1024 * 1024),
         (Resource::Cpu, 35),
         (Resource::Fsize, 0),
         (Resource::Core, 0),

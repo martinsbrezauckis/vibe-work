@@ -81,12 +81,7 @@ async fn key_and_vault_management_is_the_users_the_debug_api_only_reads() {
     );
 
     // reads ask nothing and carry no secret value.
-    for op in [
-        "readStatus",
-        "listKeyCandidates",
-        "testKey",
-        "detectVibeKey",
-    ] {
+    for op in ["readStatus", "listMistralKeys", "testKey", "detectVibeKey"] {
         let answer = run(Origin::DebugApi, json!({"op": op})).await.unwrap();
         let text = serde_json::to_string(&answer).unwrap();
         for secret in [
@@ -120,7 +115,7 @@ async fn key_and_vault_management_is_the_users_the_debug_api_only_reads() {
         json!({"op": "unlockVault", "passphrase": pass.as_str()}),
         json!({"op": "unlockVault", "passphrase": pass.as_str()}),
         json!({"op": "lockVault"}),
-        json!({"op": "useExistingKey", "itemId": "vibe-work-mistral-key"}),
+        json!({"op": "useMistralKey", "itemId": "vibe-work-mistral-key"}),
         json!({"op": "importVibeKey", "source": "dotEnv"}),
         json!({"op": "removeVibeKeyOriginal", "source": "dotEnv"}),
     ] {

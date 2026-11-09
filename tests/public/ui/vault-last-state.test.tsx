@@ -48,8 +48,6 @@ async function setup(
         requests.push(r);
         if (r.op === "readStatus")
           return { type: "keyStatus", status: status() };
-        if (r.op === "listKeyCandidates")
-          return { type: "keyCandidates", candidates: [] };
         if (r.op === "listMistralKeys")
           return { type: "mistralKeys", keys: [] };
         if (r.op === "detectVibeKey") return { type: "vibeKeys", found: [] };

@@ -228,12 +228,6 @@ pub fn commit(
     }
     let state = state::read_state(root, git_dir, None)?;
     match &state.head {
-        HeadState::Detached { .. } => {
-            return Err(GitError::Blocked(
-                "This folder is not on a branch (detached HEAD). Switch to a branch first."
-                    .to_owned(),
-            ));
-        }
         HeadState::Branch { name } | HeadState::Unborn { name } if *name != expected.branch => {
             return Err(GitError::Stale(format!(
                 "The folder is on the branch {name} now, not {}. Open Commit again.",
@@ -242,11 +236,8 @@ pub fn commit(
         }
         _ => {}
     }
-    if let Some(op) = state.in_progress {
-        return Err(GitError::Blocked(format!(
-            "git has {} in progress in this folder. Finish or abort it in your git tool first.",
-            op.words()
-        )));
+    if let Some(reason) = state::blocker(&state) {
+        return Err(GitError::Blocked(reason));
     }
     if state.commit != expected.head {
         return Err(GitError::Stale(

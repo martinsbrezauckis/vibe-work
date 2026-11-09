@@ -49,6 +49,7 @@ fn edge_registration_rechecks_policy_even_for_an_existing_receipt() {
     let scratch = Scratch::new("edge-blocked-upgrade");
     let mut config = scratch.config();
     install(&config, &scratch.state(), &scratch.vibe_home()).unwrap();
+    register_edge(&config, &scratch.state()).unwrap();
     let before = std::fs::read(scratch.state().join(RECEIPT)).unwrap();
     config.edge_policy = Some(serde_json::json!({"NativeMessagingUserLevelHosts":false}));
     assert_eq!(
@@ -63,7 +64,7 @@ fn edge_registration_rechecks_policy_even_for_an_existing_receipt() {
 }
 
 #[test]
-fn edge_setup_registers_both_browsers_and_keeps_profile_labels_separate() {
+fn separate_browser_setups_keep_profile_labels_separate() {
     let scratch = Scratch::new("edge");
     let home = scratch.root.join("home");
     let state = scratch.state();
@@ -91,6 +92,11 @@ fn edge_setup_registers_both_browsers_and_keeps_profile_labels_separate() {
     );
     std::fs::create_dir_all(edge.user_data.join("Default/Extensions").join(EXTENSION_ID)).unwrap();
     let view = install(&config, &state, &scratch.vibe_home()).unwrap();
+    assert_eq!(
+        read_receipt(&config, &state).unwrap().browsers,
+        ["Google Chrome"]
+    );
+    install_for(&config, &state, &scratch.vibe_home(), "Microsoft Edge").unwrap();
     assert!(
         view.profiles.is_empty(),
         "Edge must never appear among Chrome profiles"
@@ -157,14 +163,13 @@ fn adding_edge_to_a_chrome_receipt_keeps_the_shared_helper_and_removes_both() {
     let config = scratch.config();
     let state = scratch.state();
     install(&config, &state, &scratch.vibe_home()).unwrap();
-    let mut receipt = read_receipt(&config, &state).unwrap();
     let edge = targets(&scratch.root.join("home"), &config).remove(1);
     let manifest = edge.hosts.unwrap().join(format!("{HOST_NAME}.json"));
-    std::fs::remove_file(&manifest).unwrap();
-    receipt.files.retain(|file| file != &manifest);
-    receipt.browsers.remove(1);
-    receipt.user_data.remove(1);
-    std::fs::write(state.join(RECEIPT), serde_json::to_vec(&receipt).unwrap()).unwrap();
+    assert!(!manifest.exists());
+    assert_eq!(
+        read_receipt(&config, &state).unwrap().browsers,
+        ["Google Chrome"]
+    );
     let helper = state.join("bin").join(helper_name());
     let before = std::fs::metadata(&helper).unwrap().modified().unwrap();
     register_edge(&config, &state).unwrap();

@@ -4,10 +4,9 @@
 //! Vibe 3.0.4 removes `tool_paths` during migration; that half remains for older selected runtimes.
 //! `agent_paths` still needs this check.
 
-use std::io::{self, Write};
+use std::io;
 use std::ops::Range;
 use std::path::Path;
-use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde::Deserialize;
 
@@ -42,33 +41,13 @@ fn update(config: &Path) -> Result<(), String> {
 }
 
 fn replace_config(config: &Path, original: &str, updated: &str) -> io::Result<()> {
-    static NEXT: AtomicU64 = AtomicU64::new(0);
-    let temp = config.with_extension(format!(
-        "toml.vw-extensions-{}-{}.tmp",
-        std::process::id(),
-        NEXT.fetch_add(1, Ordering::Relaxed)
-    ));
-    let permissions = std::fs::metadata(config)?.permissions();
-    let mut file = std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&temp)?;
-    let result = (|| {
-        file.write_all(updated.as_bytes())?;
-        file.set_permissions(permissions)?;
-        drop(file);
-        // Keep an edit made while we were preparing the candidate. The launch can still proceed with it.
-        if std::fs::read_to_string(config)? != original {
-            return Err(io::Error::other(
-                "config changed during extension path preparation",
-            ));
-        }
-        std::fs::rename(&temp, config)
-    })();
-    if result.is_err() {
-        let _ = std::fs::remove_file(&temp);
+    // Keep an edit made while we were preparing the candidate. The launch can still proceed with it.
+    if std::fs::read_to_string(config)? != original {
+        return Err(io::Error::other(
+            "config changed during extension path preparation",
+        ));
     }
-    result
+    vw_platform::replace_private(config, updated.as_bytes()).map_err(io::Error::other)
 }
 
 fn without_relative_paths(text: &str) -> Result<(String, [usize; 2]), &'static str> {

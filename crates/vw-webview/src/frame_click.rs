@@ -23,6 +23,13 @@ pub(crate) fn click(
     input: Input,
     reply: crate::platform::Reply<()>,
 ) {
+    let options = match click_options(&request) {
+        Ok(options) => options,
+        Err(reason) => {
+            let _ = reply.send(Err(reason));
+            return;
+        }
+    };
     let Input {
         sent,
         allowed,
@@ -88,30 +95,8 @@ pub(crate) fn click(
                             ));
                             return;
                         }
-                        // Nothing is sent while the person is pressing, has just pressed or released, or
-                        // pressed since arming.
-                        #[cfg(target_os = "linux")]
-                        let admitted = person.admit(
-                            &interval,
-                            vw_platform::native_click::person::holding(&native.inner()),
-                            vw_platform::native_click::person::recent(),
-                        );
-                        #[cfg(target_os = "macos")]
-                        let admitted = person.admit(
-                            &interval,
-                            vw_platform::native_click::person::holding(native.inner()),
-                            vw_platform::native_click::person::recent(),
-                        );
-                        if let Err(reason) = admitted {
-                            let _ = reply.send(Err(reason));
-                            return;
-                        }
-                        #[cfg(target_os = "linux")]
                         let result =
-                            vw_platform::native_click::linux_click(&native.inner(), point, &sent);
-                        #[cfg(target_os = "macos")]
-                        let result =
-                            vw_platform::native_click::macos_click(native.inner(), point, &sent);
+                            dispatch_native(&native, point, &sent, options, &person, &interval);
                         let _ = reply.send(result);
                     };
                     // WebKit (GTK and macOS) floors DOM event times and the mark's clock to whole
@@ -189,6 +174,14 @@ pub(crate) fn click(
     input: Input,
     reply: crate::platform::Reply<()>,
 ) {
+    let options = match click_options(&request) {
+        Ok(options) => options,
+        Err(reason) => {
+            let _ = reply.send(Err(reason));
+            return;
+        }
+    };
+    let css = serde_json::from_value::<(f64, f64)>(request["cssPoint"].clone()).unwrap_or_default();
     let Input {
         sent,
         allowed,
@@ -249,28 +242,109 @@ pub(crate) fn click(
                         ));
                         return;
                     }
-                    if let Err(reason) = crate::frames_win::act_ready(&native) {
-                        let _ = reply.send(Err(reason));
-                        return;
-                    }
-                    let controller = native.controller();
-                    // Nothing is sent while the person is pressing, has just pressed or released, or pressed
-                    // since arming.
-                    if let Err(reason) = person.admit(
-                        &interval,
-                        vw_platform::native_click::person::holding(&controller),
-                        vw_platform::native_click::person::recent(),
-                    ) {
-                        let _ = reply.send(Err(reason));
-                        return;
-                    }
-                    let _ = reply.send(vw_platform::native_click::windows_click(
-                        &controller,
-                        point,
-                        &sent,
-                    ));
+                    dispatch_windows(
+                        &native,
+                        (point, css),
+                        options,
+                        Input {
+                            sent,
+                            allowed,
+                            person,
+                            interval,
+                        },
+                        reply,
+                    );
                 }),
             );
         }),
     );
+}
+
+fn click_options(request: &serde_json::Value) -> Result<vw_preview::ClickOptions, String> {
+    let options = request
+        .get("click")
+        .map(|v| serde_json::from_value::<vw_preview::ClickOptions>(v.clone()))
+        .transpose()
+        .map_err(|_| "Invalid native click options.")?
+        .unwrap_or_default();
+    if options.valid() {
+        Ok(options)
+    } else {
+        Err("Invalid native click options.".into())
+    }
+}
+
+#[cfg(not(windows))]
+fn dispatch_native(
+    native: &PlatformWebview,
+    point: (f64, f64),
+    sent: &AtomicBool,
+    options: vw_preview::ClickOptions,
+    person: &PersonPointer,
+    interval: &PersonInterval,
+) -> Result<(), String> {
+    let view = native.inner();
+    #[cfg(target_os = "linux")]
+    let view = &view;
+    person.admit(
+        interval,
+        vw_platform::native_click::person::holding(view),
+        vw_platform::native_click::person::recent(),
+    )?;
+    let options = (options.button, options.count, options.modifiers);
+    #[cfg(target_os = "linux")]
+    return vw_platform::native_click::linux_click_options(view, point, sent, options);
+    #[cfg(target_os = "macos")]
+    return vw_platform::native_click::macos_click_options(view, point, sent, options);
+}
+
+#[cfg(windows)]
+fn dispatch_windows(
+    native: &PlatformWebview,
+    points: ((f64, f64), (f64, f64)),
+    options: vw_preview::ClickOptions,
+    input: Input,
+    reply: crate::platform::Reply<()>,
+) {
+    let (point, css) = points;
+    let Input {
+        sent,
+        allowed,
+        person,
+        interval,
+    } = input;
+    if let Err(reason) = crate::frames_win::act_ready(native) {
+        let _ = reply.send(Err(reason));
+        return;
+    }
+    let controller = native.controller();
+    // Nothing is sent while the person is pressing, has just pressed or released, or pressed
+    // since arming.
+    if let Err(reason) = person.admit(
+        &interval,
+        vw_platform::native_click::person::holding(&controller),
+        vw_platform::native_click::person::recent(),
+    ) {
+        let _ = reply.send(Err(reason));
+        return;
+    }
+    if options == vw_preview::ClickOptions::default() {
+        let _ = reply.send(vw_platform::native_click::windows_click(
+            &controller,
+            point,
+            &sent,
+        ));
+    } else {
+        let allowed: Option<Arc<dyn Fn() -> bool + Send + Sync>> = Some(Arc::new(move || {
+            interval.undisturbed().is_ok() && allowed.as_ref().is_none_or(|check| check())
+        }));
+        vw_platform::native_click::windows_click_options(
+            &controller,
+            (point, css),
+            (options.button, options.count, options.modifiers),
+            sent,
+            allowed,
+            reply,
+        );
+    }
 }

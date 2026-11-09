@@ -1,0 +1,20 @@
+<!doctype html>
+<!-- CSS hover regression shared by the page-script and native browser fixtures; no menu script opens it. -->
+<style>
+  body { margin: 0; }
+  #menu { position: absolute; left: 30px; top: 30px; width: 160px; }
+  #menu > button { width: 160px; height: 40px; }
+  #choices { display: none; background: white; }
+  #menu:hover #choices { display: block; }
+</style>
+<div id="menu"><button id="products" type="button">Products</button>
+  <div id="choices"><a href="#widgets">Widgets</a></div>
+</div>
+<script>
+  window.hoverEvents = [];
+  for (const name of ["mouseover", "mouseenter", "mousemove", "mousedown", "mouseup", "click"])
+    products.addEventListener(name, event => {
+      hoverEvents.push({ name, trusted: event.isTrusted });
+      products.dataset.hoverEvents = JSON.stringify(hoverEvents);
+    });
+</script>

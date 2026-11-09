@@ -15,7 +15,7 @@ pub(crate) fn install(
     install_for(config, state, vibe_home, "Google Chrome")
 }
 
-/// macOS installs exactly the selected browser; other platforms retain their existing registration flow.
+/// Registers only the selected browser so another card cannot retain unrequested shared ownership.
 pub(in crate::chrome_control) fn install_for(
     config: &ChromeControlConfig,
     state: &Path,
@@ -33,7 +33,11 @@ fn install_inner(
     vibe_home: &Path,
     browser: &str,
 ) -> Result<ChromeSetupView, String> {
-    if config.is_macos() && read_receipt(config, state).is_some() {
+    if read_receipt(config, state).is_some_and(|receipt| {
+        receipt
+            .files
+            .contains(&state.join("bin").join(helper_name()))
+    }) {
         edge::register_browser(config, state, browser)?;
         problem::finish(config, state, browser, Ok(()))?;
         return Ok(view_for(config, Some(state), vibe_home, browser));
@@ -45,7 +49,7 @@ fn install_inner(
     let result = (|| -> Result<Receipt, String> {
         for target in targets(&home, config)
             .into_iter()
-            .filter(|t| !config.is_macos() || t.name == browser)
+            .filter(|t| t.name == browser)
         {
             if target.name == "Mozilla Firefox" {
                 firefox::require_unregistered(&target)?;
@@ -62,7 +66,7 @@ fn install_inner(
         let mut receipt = Receipt::default();
         for target in targets(&home, config)
             .into_iter()
-            .filter(|t| !config.is_macos() || t.name == browser)
+            .filter(|t| t.name == browser)
         {
             let manifest = manifest_for(&helper, config, target.name);
             match (&target.hosts, target.registry) {
@@ -89,6 +93,7 @@ fn install_inner(
             receipt.browsers.push(target.name.to_owned());
             receipt.user_data.push(target.user_data);
         }
+        receipt.selected_browsers = Some(receipt.browsers.clone());
         receipt.files.clone_from(&made.files);
         let bytes = serde_json::to_vec_pretty(&receipt).map_err(|e| e.to_string())?;
         write_file(config, &mut made, &state.join(RECEIPT), &bytes)?;

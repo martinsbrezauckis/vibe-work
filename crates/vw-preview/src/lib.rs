@@ -26,7 +26,16 @@ mod browse;
 mod cdp_frames;
 mod compose;
 mod console;
+mod dialogs;
+mod windows;
+pub use windows::{PageWindowAction, PageWindowInfo};
+mod download_tools;
+pub use dialogs::DialogAnswer;
+mod pointer;
+pub use pointer::ClickOptions;
 mod downloads;
+mod site_cookies;
+pub use site_cookies::CookieRequest;
 mod engine;
 mod engine_pool;
 pub use act_refusals::ActRefusal;
@@ -94,6 +103,8 @@ pub use shot::{
 pub use state::{PreviewServerState, PreviewState, PreviewView};
 pub use tabs::{PageTab, PageTabKind, PageTabOwner};
 pub use visibility::VisibilityReport;
+mod capture_block;
+pub use capture_block::{CaptureBlock, CaptureRefusal};
 
 /// One-line statement of what this crate is responsible for, exposed so tests and diagnostics
 /// can assert which crate they are looking at.

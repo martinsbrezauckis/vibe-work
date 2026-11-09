@@ -53,6 +53,7 @@ pub(super) fn refresh_with(
     state: &Path,
     replace: &mut Replace,
 ) -> Result<Refreshed, String> {
+    setup::migrate_selections(config, state)?;
     let Some(files) = setup::receipt_files(config, state) else {
         return Ok(Refreshed::NotSetUp);
     };

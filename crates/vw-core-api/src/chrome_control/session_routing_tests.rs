@@ -163,7 +163,7 @@ async fn an_idle_chat_keeps_the_stopped_browsers_state_separate() {
         .await
         .unwrap_err();
         assert!(
-            refused.contains(&format!("you pressed Stop in Your {name}")),
+            refused.contains(&format!("the person pressed Stop in Your {name}")),
             "{refused}"
         );
         let result = gateway::call(

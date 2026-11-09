@@ -104,11 +104,8 @@ impl Containment {
 /// An empty set when `tasklist` cannot run (then `terminate` reports success after the job close,
 /// which is what kill-on-close guarantees).
 fn live_pids() -> std::collections::HashSet<u32> {
-    use std::os::windows::process::CommandExt;
-    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-    std::process::Command::new("tasklist")
+    vw_platform::process_command::hidden("tasklist")
         .args(["/FO", "CSV", "/NH"])
-        .creation_flags(CREATE_NO_WINDOW)
         .output()
         .map(|out| {
             String::from_utf8_lossy(&out.stdout)

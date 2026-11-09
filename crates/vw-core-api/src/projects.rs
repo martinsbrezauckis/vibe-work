@@ -99,18 +99,6 @@ fn count(n: usize) -> u32 {
 }
 
 impl Core {
-    /// True when `path` is exactly a saved project's main folder. Folder reveal uses
-    /// [`Self::reveal_folder_target`] to admit contained subfolders too.
-    #[must_use]
-    pub fn is_project_main_folder(&self, path: &str) -> bool {
-        self.shared.projects.store.read(|store| {
-            store
-                .projects()
-                .iter()
-                .any(|project| project.main_folder.as_deref() == Some(path))
-        })
-    }
-
     /// `start`: the same gated `session/start` as `startSession`, inside the filing hint of `project`.
     async fn start_in_project(
         &self,

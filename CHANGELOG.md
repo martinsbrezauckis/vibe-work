@@ -2,6 +2,27 @@
 
 All notable changes to Vibe Work. Versions follow [Semantic Versioning](https://semver.org/); dates are UTC.
 
+## 0.1.9 (2026-11-09)
+
+Built for Vibe 3.1.0 on Python 3.14.8.
+
+- **Video review on Linux**: H.264, H.265, VP8, VP9 and AV1 videos, using the computer's installed media support, as on
+  Windows and macOS. The agent finds Vibe Work's own video preview without being pointed to it.
+- **Built-in browser**: the agent opens, focuses and closes its own windows; reads and answers page dialogs; signs in to
+  HTTP Basic pages with an approved vault login; uses double, right and middle click and modifier keys; downloads files
+  into the chat folder; captures one element or an area; and works with the site's cookies and storage.
+- **Ask mode in the browser**: reading, searching, browsing, closing tabs, choosing options and ordinary downloads run
+  without a prompt in every browser; entering or sending information asks first. A site's cookie and storage values,
+  clipboard text, captured response bodies and raw request data need Full access.
+- **Your Safari**: Back and Forward, screenshots, find on the page; and Vibe Work restores its Safari extension when it
+  starts.
+- **Vault**: choose whether it opens with your computer sign-in or asks for the vault password each time.
+- **Faster on Windows**: tool calls start faster, with less background activity, and the optional click marker shows
+  where the agent clicks.
+- Removing Chrome or Edge disconnects only that browser; refusals name the check that stopped them; approval cards say
+  exactly which permission an account sign-in grants, including full mail deletion and organization access.
+- Many smaller fixes.
+
 ## 0.1.8 (2026-11-08)
 
 Built for Vibe 3.1.0 on Python 3.14.8.

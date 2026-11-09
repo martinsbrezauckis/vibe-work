@@ -74,15 +74,17 @@ export function useChromeControl(browser: SettingsBrowser = "Chrome"): ChromeCon
                     ? { op: "openFirefoxStore" }
                     : request
               : browser === "Edge"
-                ? request.op === "setEnabled"
-                  ? { op: "setEdgeEnabled", enabled: request.enabled }
-                  : request.op === "offerSetup"
-                    ? { op: "offerEdgeSetup" }
-                    : request.op === "setup"
-                      ? { op: "setupEdge", offerId: request.offerId }
-                      : request.op === "openStore"
-                        ? { op: "openEdgeStore" }
-                        : request
+                ? request.op === "remove"
+                  ? { op: "removeEdge" }
+                  : request.op === "setEnabled"
+                    ? { op: "setEdgeEnabled", enabled: request.enabled }
+                    : request.op === "offerSetup"
+                      ? { op: "offerEdgeSetup" }
+                      : request.op === "setup"
+                        ? { op: "setupEdge", offerId: request.offerId }
+                        : request.op === "openStore"
+                          ? { op: "openEdgeStore" }
+                          : request
                 : request;
         const result = await core.run({ type: "chromeControl", request: selected });
         if (request.op === "remove") setStatus({ kind: "removed", text: "Removed.", alert: false });

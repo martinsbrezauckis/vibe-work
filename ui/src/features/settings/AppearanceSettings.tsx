@@ -43,7 +43,7 @@ export function AppearanceSettings(): ReactElement {
           Show usage in the status bar
           <span className="d">
             How full the open session&apos;s context is, as &quot;Context 42%&quot;. A click opens
-            Account and usage.
+            Usage and plan.
           </span>
         </span>
         <Switch
@@ -71,7 +71,7 @@ export function AppearanceSettings(): ReactElement {
       <div className="check" data-setting="open-html-markdown-as">
         <span>
           Open HTML and Markdown as
-          <span className="d">How these files open in Separate tabs.</span>
+          <span className="d">Applies when files open in separate tabs.</span>
         </span>
         <Selector
           testId="settings.appearance-open-html-markdown-as"

@@ -11,7 +11,7 @@
 
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::time::{Duration, Instant};
 
 use serde_json::Value;
@@ -103,7 +103,7 @@ impl Gh {
         stdin: Option<&[u8]>,
         timeout: Duration,
     ) -> Result<Output, GitError> {
-        let mut command = Command::new(&self.program);
+        let mut command = vw_platform::process_command::hidden(&self.program);
         command.current_dir(&self.workdir).args(args);
         for (key, _) in std::env::vars_os() {
             if key
@@ -128,7 +128,6 @@ impl Gh {
             })
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
-        no_window(&mut command);
         let mut child = command
             .spawn()
             .map_err(|e| GitError::Gh(format!("cannot start {}: {e}", self.program.display())))?;
@@ -336,14 +335,3 @@ fn reader(mut pipe: impl Read + Send + 'static, cap: usize) -> std::thread::Join
         kept
     })
 }
-
-#[cfg(windows)]
-fn no_window(command: &mut Command) {
-    use std::os::windows::process::CommandExt;
-    /// `CREATE_NO_WINDOW`: no console window flashes for each gh call.
-    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-    command.creation_flags(CREATE_NO_WINDOW);
-}
-
-#[cfg(not(windows))]
-fn no_window(_command: &mut Command) {}

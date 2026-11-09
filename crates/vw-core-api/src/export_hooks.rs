@@ -239,8 +239,10 @@ pub(crate) fn line(entry: &Value, steps: &HashMap<&str, &Value>) -> Option<Strin
     // A successful transport binding or input rewrite is bookkeeping, not conversation.
     if reason.is_none()
         && ((name == "vibe-work tool receipt" && status == "ok")
-            || (matches!(name, "vibe-work tool receipt" | "vibe-work folder guard")
-                && pre_tool
+            || (matches!(
+                name,
+                "vibe-work safety reminder" | "vibe-work tool receipt" | "vibe-work folder guard"
+            ) && pre_tool
                 && status == "warning"
                 && input_rewrite(content)))
     {

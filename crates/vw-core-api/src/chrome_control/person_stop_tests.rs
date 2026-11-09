@@ -398,7 +398,7 @@ async fn refusal_names_your_stop_and_ends_browser_calls() {
                     .await
                     .unwrap_err(),
                 format!(
-                    "Not run: you pressed Stop in {}. The turn is stopped; do not call browser tools again in this turn.",
+                    "Not run: the person pressed Stop in {}. Do not use the browser again in this turn; tell them what you were doing and wait for their answer.",
                     browser.name()
                 )
             );

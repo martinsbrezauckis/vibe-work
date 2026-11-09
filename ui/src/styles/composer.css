@@ -93,53 +93,12 @@
   padding: 6px 8px 8px;
   min-width: 0;
 }
-.ctools > .cmenu-anchor {
-  flex-shrink: 0;
-  max-width: 100%;
-}
-.cchip {
-  /* Tighter than a plain .chip so both labels fit a 376 px composer next to an open side panel; the
-     full values are also in each chip's accessible name and tooltip when a narrower pane still cuts one. */
-  padding: 3px 6px;
-  gap: 4px;
-  min-width: 0;
-  flex: 0 1 auto;
-  cursor: pointer;
-  background: none;
-  font: inherit;
-  font-size: var(--text-12);
-}
-.cchip:hover:where(:not(:disabled)) {
-  background: var(--hover);
-  color: var(--text);
-}
-.cchip > span:not(.lv) {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.cchip .effort {
-  color: var(--text-3);
-  font-size: var(--text-11);
-}
 .lv {
   width: 8px;
   height: 8px;
   border-radius: var(--radius-round);
   flex: none;
   background: var(--text-3);
-}
-.lv-yolo {
-  background: var(--orange);
-}
-.lv-smart {
-  background: var(--blue);
-}
-.lv-warn {
-  background: var(--orange-3);
-}
-.lv-safe {
-  background: var(--green);
 }
 .send {
   width: 32px;
@@ -364,71 +323,6 @@
   color: var(--text-2);
 }
 
-/* Menus: access mode, model + thinking, and the `/` menu. */
-.cmenu-anchor {
-  position: relative;
-  display: inline-flex;
-  min-width: 0;
-}
-.cmenu {
-  position: absolute;
-  left: 0;
-  bottom: calc(100% + 8px);
-  z-index: var(--z-panel);
-  width: min(340px, 86vw);
-  max-height: 380px;
-  overflow: auto;
-  display: grid;
-  padding: 6px;
-  background: var(--raised);
-  border-radius: var(--radius-xl);
-  box-shadow: var(--shadow);
-}
-.cmenu-sec {
-  font-size: var(--text-11-5);
-  color: var(--text-3);
-  padding: 6px 10px 2px;
-}
-.cmenu-empty {
-  font-size: var(--text-12-5);
-  color: var(--text-3);
-  padding: 6px 10px;
-}
-.cmenu-item {
-  all: unset;
-  box-sizing: border-box;
-  display: flex;
-  gap: 10px;
-  align-items: flex-start;
-  padding: 7px 10px;
-  border-radius: var(--radius-md);
-  cursor: pointer;
-  font-size: var(--text-13);
-  color: var(--text-2);
-}
-.cmenu-item .lv {
-  margin-top: 5px;
-}
-.cmenu-item:hover:where(:not(:disabled)),
-.cmenu-item:focus-visible,
-.cmenu-item[aria-checked="true"] {
-  background: var(--active);
-  color: var(--text);
-}
-.cmenu-text {
-  display: grid;
-  gap: 2px;
-}
-.cmenu-text .d {
-  font-size: var(--text-12);
-  color: var(--text-3);
-}
-.cmenu-levels {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  padding: 4px 10px 8px;
-}
 /*
  * The `/` menu: compact suggestions above the composer, like the command lists of other desktop
  * tools: "/name" and one short description per row, about eight rows then a scroll, the typed letters marked, and a
@@ -584,14 +478,6 @@
 @media (max-width: 600px) {
   .composer-wrap {
     padding: 0 var(--composer-inset, 10px) 10px;
-  }
-  .ctools > .cmenu-anchor {
-    position: static;
-  }
-  .ctools .cmenu {
-    left: 8px;
-    right: 8px;
-    width: auto;
   }
   .hint {
     display: none;

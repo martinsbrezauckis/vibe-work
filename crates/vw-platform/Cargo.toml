@@ -46,6 +46,8 @@ webview = [
 ]
 
 [dependencies]
+# Hidden child flags must survive process-wrap's temporary suspended job assignment on Windows.
+process-wrap = { version = "10.0.1", default-features = false, features = ["tokio1", "creation-flags"] }
 # Random exclusive sibling names for ordinary atomic replacement.
 getrandom = "0.3"
 libloading = { version = "0.7.4", optional = true }
@@ -56,7 +58,7 @@ cap-fs-ext = "4.0.3"
 keepawake = { version = "=0.6.1", default-features = false }
 thiserror = "2"
 arboard = { version = "=3.6.1", default-features = false, features = ["wayland-data-control"] }
-tokio = { version = "1.53", features = ["sync", "time", "rt", "macros"] }
+tokio = { version = "1.53", features = ["sync", "time", "rt", "macros", "process"] }
 zeroize = "1.8"
 # Link checks before opening the browser; same major version as vw-host.
 url = "2"
@@ -80,6 +82,8 @@ dispatch2 = "0.3"
 objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSGraphics", "NSRunningApplication"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
+# Owned CF references for the vault's explicit signed-app Keychain ACL.
+core-foundation = "0.10"
 core-foundation-sys = { version = "0.8", optional = true }
 objc2-core-foundation = { version = "0.3", optional = true, default-features = false, features = ["std", "CFCGTypes"] }
 objc2-av-foundation = { version = "0.3", optional = true, default-features = false, features = ["std", "AVAsset", "AVAssetTrack", "AVAssetImageGenerator", "AVMediaFormat", "objc2-core-media", "objc2-core-graphics", "objc2-core-foundation"] }
@@ -89,7 +93,7 @@ objc2-core-graphics = { version = "0.3", optional = true, default-features = fal
 # `WKWebView` snapshots (webview.rs, feature `webview`), the confirmation window (`confirm_window/mac.rs`) and the
 # services provider of "Send to Vibe Work" (`send_to_mac.rs`). The versions wry 0.57 already uses (lockfile).
 objc2 = { version = "0.6", features = ["exception"] }
-objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSData", "NSDictionary", "NSError", "NSString", "NSArray", "NSHTTPCookie", "NSProcessInfo", "NSLocale", "NSGeometry", "NSJSONSerialization", "NSValue", "NSURL", "NSDate", "NSSet", "NSUserDefaults", "NSEnumerator", "NSURLRequest", "NSURLResponse", "NSTimer", "block2"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSData", "NSDictionary", "NSError", "NSString", "NSArray", "NSHTTPCookie", "NSProcessInfo", "NSLocale", "NSGeometry", "NSJSONSerialization", "NSValue", "NSURL", "NSDate", "NSSet", "NSUserDefaults", "NSEnumerator", "NSURLRequest", "NSURLResponse", "NSURLAuthenticationChallenge", "NSURLCredential", "NSURLProtectionSpace", "NSURLSession", "NSTimer", "block2"] }
 objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSPasteboard", "NSImage", "NSImageRep", "NSBitmapImageRep", "NSView", "NSWindow", "NSResponder", "NSEvent", "NSGraphicsContext", "NSPrintInfo", "NSPrintOperation", "objc2-core-foundation", "NSPasteboardItem", "NSWorkspace", "NSRunningApplication", "block2", "NSAccessibilityProtocols", "NSAlert", "NSButton", "NSControl", "NSBezierPath", "NSColor", "NSAccessibility", "NSTrackingArea"] }
 # Content rule lists per preview webview (WKContentRuleListStore, the configuration's user content controller).
 objc2-web-kit = { version = "0.3", optional = true, default-features = false, features = ["std", "block2", "objc2-app-kit", "objc2-core-foundation", "WKWebView", "WKPreferences", "WKSnapshotConfiguration", "WKContentRuleList", "WKContentRuleListStore", "WKUserContentController", "WKWebViewConfiguration", "WKWebsiteDataStore", "WKWebsiteDataRecord", "WKHTTPCookieStore", "WKContentWorld", "WKUserScript", "WKFrameInfo", "WKScriptMessage", "WKScriptMessageHandler", "WKSecurityOrigin"] }
@@ -110,7 +114,7 @@ base64 = { version = "0.22", optional = true }
 # The Git Bash wrapper's kill-on-close job (`kill_job.rs`): job objects, the command line, the standard handles.
 # The person's pointer watch (`native_click/person/windows.rs`): the low-level mouse hook, button state.
 # Toast objects and subscriptions (`notify/windows.rs`) stay alive for banner clicks, then are removed.
-windows = { version = "0.62", features = ["Data_Xml_Dom", "Foundation", "UI_Notifications", "Win32_NetworkManagement_IpHelper", "Win32_Networking_WinSock", "Win32_Globalization", "Win32_Foundation", "Win32_System_Threading", "Win32_System_WindowsProgramming", "Win32_Graphics_Gdi", "Win32_Storage_Xps", "Win32_UI_WindowsAndMessaging", "Win32_UI_ColorSystem", "Win32_UI_HiDpi", "Win32_Security", "Win32_Security_Authorization", "Win32_Storage_FileSystem", "Win32_UI_Shell", "Win32_System_Com", "Win32_UI_Controls", "Win32_System_JobObjects", "Win32_System_Environment", "Win32_System_Console", "Win32_UI_Input_KeyboardAndMouse", "Win32_System_LibraryLoader", "Win32_UI_Notifications", "Win32_Security_Credentials"] }
+windows = { version = "0.62", features = ["Data_Xml_Dom", "Foundation", "UI_Notifications", "Win32_NetworkManagement_IpHelper", "Win32_Networking_WinSock", "Win32_Globalization", "Win32_Foundation", "Win32_System_Threading", "Win32_System_Diagnostics_ToolHelp", "Win32_System_RemoteDesktop", "Win32_System_WindowsProgramming", "Win32_Graphics_Gdi", "Win32_Storage_Xps", "Win32_UI_WindowsAndMessaging", "Win32_UI_ColorSystem", "Win32_UI_HiDpi", "Win32_Security", "Win32_Security_Authorization", "Win32_Storage_FileSystem", "Win32_UI_Shell", "Win32_System_Com", "Win32_UI_Controls", "Win32_System_JobObjects", "Win32_System_Environment", "Win32_System_Console", "Win32_UI_Input_KeyboardAndMouse", "Win32_System_LibraryLoader", "Win32_UI_Notifications", "Win32_Security_Credentials", "Win32_Security_Cryptography"] }
 # The "Send to Vibe Work" Explorer verbs under HKCU (`send_to_windows.rs`) and the WebView2 UserDataFolder policy
 # lookup (webview.rs `user_data_folder_override`); already in the lockfile (0.6.1).
 windows-registry = "0.6"
@@ -135,7 +139,7 @@ dbus = "0.9"
 gtk = { version = "0.18", optional = true }
 gdk = { version = "0.18", optional = true }
 glib = { version = "0.18", optional = true }
-webkit2gtk = { version = "=2.0.2", optional = true }
+webkit2gtk = { version = "=2.0.2", optional = true, features = ["v2_40"] }
 javascriptcore-rs = { version = "1.1.2", optional = true }
 
 [target.'cfg(unix)'.dependencies]

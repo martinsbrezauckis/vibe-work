@@ -187,7 +187,7 @@ pub(super) async fn fixture_with(
         .push(json!({"name":"chrome_status"}));
     std::fs::write(
         shared.chrome_control.dir().unwrap().join("setup.json"),
-        json!({"files":[],"browsers":["Google Chrome","Microsoft Edge"],"userData":[]}).to_string(),
+        json!({"files":[],"browsers":["Google Chrome","Microsoft Edge"],"selectedBrowsers":["Google Chrome","Microsoft Edge"],"userData":[]}).to_string(),
     )
     .unwrap();
     owner::update_pairing(&Arc::downgrade(shared), &status);

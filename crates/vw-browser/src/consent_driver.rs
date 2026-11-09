@@ -71,7 +71,12 @@ impl Browser {
     ) -> Result<Option<Value>, ActError> {
         if matches!(
             action,
-            Action::Navigate { .. }
+            Action::Dialog(_)
+                | Action::Storage(_)
+                | Action::Screenshot(_)
+                | Action::Downloads(_)
+                | Action::Cookies(_)
+                | Action::Navigate { .. }
                 | Action::Back
                 | Action::Forward
                 | Action::Reload
@@ -112,7 +117,10 @@ impl Browser {
             account_chooser: probe.account_chooser
                 && matches!(
                     action,
-                    Action::Click { .. } | Action::ClickAt { .. } | Action::Press { .. }
+                    Action::Click { .. }
+                        | Action::ClickAt { .. }
+                        | Action::Pointer { .. }
+                        | Action::Press { .. }
                 ),
         };
         #[allow(unused_mut)]

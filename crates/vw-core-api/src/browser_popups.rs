@@ -23,6 +23,7 @@ fn allowed(shared: &Shared, owner: &str, source: &MountId) -> bool {
 }
 
 pub(crate) fn install(shared: &Arc<Shared>) {
+    crate::browser_windows::install(shared);
     let Some(hub) = &shared.preview else {
         return;
     };

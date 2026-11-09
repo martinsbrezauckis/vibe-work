@@ -163,7 +163,13 @@ name: string,
 /**
  * Why.
  */
-reason: string, };
+reason: string,
+/**
+ * File-kind guidance, independent of the wording; other failures omit it.
+ */
+kind?: DocumentRefusalKind, };
+
+export type DocumentRefusalKind = "unsupported" | "archive";
 
 export type DocumentSource = "picker" | "drop" | "composer";
 

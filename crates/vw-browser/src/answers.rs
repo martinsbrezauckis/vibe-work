@@ -7,7 +7,7 @@
 //! instruction: refusal messages reach the agent outside the `untrustedPageContent` wrapper.
 
 use crate::act::{Action, PageAnswer};
-use crate::driver::ActError;
+use crate::driver::{ActError, failed, refused};
 use crate::sessions::Outcome;
 
 /// Whether an actionability answer can settle during the driver's bounded retry window.
@@ -67,16 +67,17 @@ fn input_refusal(answer: &PageAnswer) -> Option<String> {
 /// [`ActError`] with the reason the agent reads.
 pub(crate) fn interpret(answer: PageAnswer, action: &Action) -> Result<PageAnswer, ActError> {
     let reference = action.reference().unwrap_or("-");
-    let refused = |text: String| ActError {
-        outcome: Outcome::Refused,
-        text,
-    };
     if let Some(text) = input_refusal(&answer) {
         return Err(refused(text));
     }
     match answer.status.as_str() {
         "done" => Ok(answer),
+        "verificationChanged" => Err(failed(
+            "Not done: the original control changed before its final state could be verified. The action may already have taken effect. Read the page again; do not repeat the action.",
+        )),
+        "sendRequired" => Err(refused(crate::sending::SEND_REQUIRED.to_owned())),
         "unmet" => Err(ActError {
+            capture_block: None,
             outcome: Outcome::Failed,
             text: match action {
                 Action::Check { .. } => {
@@ -155,6 +156,7 @@ pub(crate) fn interpret(answer: PageAnswer, action: &Action) -> Result<PageAnswe
                 .join(", ")
         ))),
         _ => Err(ActError {
+            capture_block: None,
             outcome: Outcome::Failed,
             text: format!(
                 "the action failed in the page: {}",

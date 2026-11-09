@@ -38,10 +38,39 @@ pub(super) fn observe(shared: &Arc<Shared>, params: &Value, mut result: Value) {
         result["structuredContent"]["profileId"] = params["profileId"].clone();
     }
     super::update_pairing(&Arc::downgrade(shared), &result);
+    if state == Some("paired")
+        && let Some(browser) = browser
+    {
+        refresh(shared, browser);
+    }
     if let Some(browser) = browser
         && matches!(state, Some("waiting" | "mismatch"))
         && browser.requested(shared).swap(false, Ordering::SeqCst)
     {
         enroll::on_waiting(shared, state == Some("waiting"), browser);
     }
+}
+
+fn refresh(shared: &Arc<Shared>, browser: Browser) {
+    let browser = match browser {
+        Browser::Chrome => super::super::agent_browser::Browser::Chrome,
+        Browser::Edge => super::super::agent_browser::Browser::Edge,
+    };
+    let generation = shared.chrome_control.browser_generation(browser);
+    let weak = Arc::downgrade(shared);
+    tokio::spawn(async move {
+        let Some(shared) = weak.upgrade() else { return };
+        // Pairing precedes adapter registration. Refresh the complete status rather than inferring its
+        // version/capabilities from the pairing notification or waiting for the periodic poll.
+        let result = shared
+            .chrome_control
+            .owner
+            .call("chrome_status", serde_json::json!({}))
+            .await;
+        if shared.chrome_control.browser_generation(browser) != generation {
+            return;
+        }
+        super::update_pairing(&weak, result.value());
+        super::publish(&shared);
+    });
 }

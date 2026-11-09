@@ -1,6 +1,6 @@
 /**
  * Session header Git facts. Uses the Git controller and core events; called by shell/Content.
- * Rechecks plain folders while mounted because git init need not emit a changed-file event.
+ * Rechecks on mount, core changes and window focus, including folders newly put under Git.
  */
 import { useEffect } from "react";
 import { createStore, useStore } from "../../state/createStore";
@@ -20,13 +20,6 @@ const NO_GIT = createStore<GitUi>({
   output: {},
   committed: {},
 });
-const DISCOVERY_POLL = 1000;
-
-/** Whether the session folder itself is in Git, independent of a selected child repository. */
-function sessionHasGit(status: GitStatusView | undefined): boolean {
-  return status?.repos.some((repo) => repo.root === ".") === true;
-}
-
 /** Follows the mounted session's folder without borrowing a Debug API request's origin. */
 export function useSessionGit(sessionId: string): GitStatusView | undefined {
   const { git, core } = useApp();
@@ -36,26 +29,23 @@ export function useSessionGit(sessionId: string): GitStatusView | undefined {
   const status = useStore(git?.store ?? NO_GIT, (s) => s.status[sessionId]);
   useEffect(() => {
     if (git === null || !opened) return;
-    void git.load(sessionId, "window");
-    return core?.listen((event) => {
-      if (event.type === "worktreesChanged" || event.type === "gitBrowserChanged")
-        void git.load(sessionId, "window");
+    const refresh = () => {
+      void git.load(sessionId, "window");
+    };
+    const visible = () => {
+      if (document.visibilityState === "visible") refresh();
+    };
+    refresh();
+    const stop = core?.listen((event) => {
+      if (event.type === "worktreesChanged" || event.type === "gitBrowserChanged") refresh();
     });
-  }, [git, core, sessionId, cwd, opened]);
-  const hasGit = sessionHasGit(status);
-  useEffect(() => {
-    if (git === null || hasGit || !opened) return;
-    let live = true;
-    let timer: ReturnType<typeof setTimeout>;
-    const poll = async () => {
-      await git.load(sessionId, "window");
-      if (live) timer = setTimeout(() => void poll(), DISCOVERY_POLL);
-    };
-    timer = setTimeout(() => void poll(), DISCOVERY_POLL);
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", visible);
     return () => {
-      live = false;
-      clearTimeout(timer);
+      stop?.();
+      window.removeEventListener("focus", refresh);
+      document.removeEventListener("visibilitychange", visible);
     };
-  }, [git, sessionId, cwd, hasGit, opened]);
+  }, [git, core, sessionId, cwd, opened]);
   return status;
 }

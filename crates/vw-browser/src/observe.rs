@@ -93,6 +93,12 @@ pub fn verdict_with(model: &PageModel, extra: &[(String, String)]) -> Verdict {
                 .map(|heading| ("choice heading".into(), heading.as_str())),
         );
     }
+    sources.extend(
+        model
+            .main_headings
+            .iter()
+            .map(|text| ("main heading".into(), text.as_str())),
+    );
     for (channel, text) in extra {
         sources.push((channel.clone(), text.as_str()));
     }
@@ -120,6 +126,7 @@ pub(crate) fn seen(model: &PageModel, mount: vw_preview::MountId) -> Seen {
     let mut choices = json!({});
     crate::choices::include(&mut choices, model);
     crate::choice_context::include(&mut choices, model);
+    choices["mainHeadings"] = json!(model.main_headings);
     Seen {
         mount,
         snapshot: hash(&[
@@ -128,6 +135,7 @@ pub(crate) fn seen(model: &PageModel, mount: vw_preview::MountId) -> Seen {
             &ids.join(","),
             &model.text,
             &model.text_offset.to_string(),
+            &model.text_cursor_offset.to_string(),
             &choices.to_string(),
         ]),
         refs,
@@ -162,7 +170,7 @@ fn chars(text: &str, max: usize) -> String {
 /// fills, coordinate clicks, screenshot labels); the agent acts by ref, so its text carries only what it can use: a
 /// ref inside a frame names that frame's origin (`frameOrigin`), a visual region (`coordinateKind`) its box as
 /// `[x, y, width, height]` in top-level CSS pixels, and `label` only on a read with a screenshot. Main-frame
-/// controls stay as compact as 0.1.4's, so the default budget lists as many of them.
+/// controls retain a compact representation, so the default budget lists as many of them.
 #[must_use]
 pub(crate) fn agent_ref(r: &crate::model::RefItem) -> Value {
     let mut v = json!(r);
@@ -199,7 +207,23 @@ fn capped_refs(refs: &[crate::model::RefItem]) -> Vec<Value> {
 /// characters (the default read and a navigation's receipt); else the text window as read (`textPage`).
 #[must_use]
 pub fn content(model: &PageModel, preview: bool) -> Value {
-    let pages = model.text_length.div_ceil(PAGE_CHARS as u64).max(1);
+    if let Some(cursor) = &model.choice_cursor {
+        let mut out = json!({"url":chars(model.displayed_url(),300),"title":chars(&model.title,ITEM_CHARS),"refs":[],"choiceCursor":cursor});
+        crate::choices::include(&mut out, model);
+        if let Some(frame) = model.covering_frames.get(cursor.frame) {
+            out["choiceContext"] = json!(
+                model
+                    .choice_context
+                    .iter()
+                    .filter(|context| context.frame_origin == frame.origin)
+                    .collect::<Vec<_>>()
+            );
+        }
+        return out;
+    }
+    let pages = model
+        .text_page_count
+        .unwrap_or_else(|| model.text_length.div_ceil(PAGE_CHARS as u64).max(1));
     let page = model.text_offset / PAGE_CHARS as u64;
     let text = if preview {
         chars(&model.text, PREVIEW_CHARS)
@@ -209,6 +233,7 @@ pub fn content(model: &PageModel, preview: bool) -> Value {
     let mut out = json!({
         "url": chars(model.displayed_url(), 300),
         "title": chars(&model.title, ITEM_CHARS),
+        "mainHeadings": model.main_headings,
         "text": text,
         "textChars": model.text_length,
         // Numbers only (an object named like the `textPage` parameter was taken for text).
@@ -216,11 +241,14 @@ pub fn content(model: &PageModel, preview: bool) -> Value {
         "textPages": pages,
         "refs": capped_refs(&model.refs),
     });
-    if preview && model.text_length > text.encode_utf16().count() as u64 {
-        out["textContinuation"] = json!(
-            "Preview only. browser_read {textPage:0} reads the first text window; increment textPage for later windows."
-        );
+    if model.main_headings_total > model.main_headings.len() as u64 {
+        out["mainHeadingsOmitted"] =
+            json!(model.main_headings_total - model.main_headings.len() as u64);
     }
+    if model.truncated {
+        out["mainHeadingsComplete"] = json!(false);
+    }
+    crate::text_paging::include(&mut out, model);
     if !model.frames.is_empty() {
         out["frames"] = json!(model.frames);
     }
@@ -448,7 +476,7 @@ pub fn found(
             "No matching control ref was returned; text alone cannot be clicked."
         };
         out["nextStep"] = json!(format!(
-            "{reason} Read without find for visible labels, or use browser_capture to inspect the screen."
+            "{reason} Read without find for visible labels, or use browser_read with screenshot:true to inspect the screen."
         ));
         fit(&mut out, budget);
     }
@@ -470,7 +498,9 @@ pub fn answer(
     // Recounted by `fit` once trimming is done.
     out["refsShown"] = json!(model.refs.len());
     out["refsTotal"] = json!(model.ref_count);
-    if model.truncated || model.ref_count as usize > model.refs.len() {
+    if model.choice_cursor.is_none()
+        && (model.truncated || model.ref_count as usize > model.refs.len())
+    {
         out["note2"] = json!(
             "Only part of the page's controls is listed. At least half the ref slots are reserved for the main document when it has enough candidates. Continue browser_read with find set to a label or role; it also searches readable frames. Keep the same tab."
         );

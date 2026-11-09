@@ -374,8 +374,13 @@ impl Core {
         let planned = match blocking(move || plan(&c, &b, &n, &taken)).await? {
             // The approved folder must be the repository's main folder exactly as named in the dialog (no
             // symlink, subfolder or linked worktree that would put the branch somewhere the dialog did not
-            // name).
-            Ok(planned) if !picked && planned.main_root != cwd => {
+            // name). Only remove an equivalent Windows verbatim prefix: canonicalizing here
+            // would also accept a symlink that names a different folder in the consent dialog.
+            Ok(planned)
+                if !picked
+                    && vw_platform::plain_path(&planned.main_root)
+                        != vw_platform::plain_path(&cwd) =>
+            {
                 return Err(CoreError::new(ErrorCode::Denied, NOT_PICKED_REFUSAL));
             }
             Ok(planned) => planned,

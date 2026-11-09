@@ -3,10 +3,8 @@
 //! guard, and the folder guard ([`crate::folders`]) and the connector guard
 //! ([`crate::forge`]).
 //!
-//! each guard is its own `[[hooks]]` entry with its own name ([`Guard::hook_name`]), because
-//! Vibe labels a refusal with the hook's name ("vibe-work git guard: Denied tool 'bash'"); one shared name made a
-//! push refusal read as a kill-guard refusal. [`decide`] still runs all of them in order (tests, the old
-//! `kill-guard` command line).
+//! One strict hook runs the selected guards in order. Its refusal reason names the guard, because Vibe's
+//! notice no longer does. The individual `guard <name>` commands remain compatible with older hook blocks.
 //!
 //! Git guard ([`crate::gitparse`]): literal Git and GitHub CLI command starts are classified.
 //! Pushes, forge writes and credential commands are refused here; branch rewrites ask the core
@@ -46,6 +44,9 @@
 //! - Anything that goes wrong after a kill command was found denies (never allow blindly).
 
 use std::path::Path;
+
+/// The core endpoint filename inherited by Windows hooks, without shell interpolation.
+pub const ENV_ENDPOINT_FILE: &str = "VW_HOOK_ENDPOINT_FILE";
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -101,7 +102,7 @@ pub const PUSH_REASON: &str = "Not run: sending commits to a remote is the user'
                                No command in this line ran. Existing commits are unchanged. \
                                The Push button is in the Changes tab.";
 
-/// One guard of the hook block (one `[[hooks]]` entry each, so Vibe's notice names the right one).
+/// One check within the combined pre-tool hook, or the separate post-tool note.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Guard {
     /// Safety reminders: deleting the home folder, disk tools, shutdown, the user's own rules.
@@ -125,7 +126,7 @@ pub enum Guard {
 pub const ALLOWED_NOTE: &str = "The user allowed this command.";
 
 impl Guard {
-    /// Every guard, in the order the hook block lists them (the first refusal wins in Vibe).
+    /// Every pre-tool guard in execution order; the first refusal wins.
     pub const ALL: [Self; 6] = [
         Self::Safety,
         Self::Process,
@@ -184,13 +185,13 @@ impl Guard {
         }
     }
 
-    /// The tools the hook entry matches (Vibe's `match`: a glob, or `re:` = a regex FULL-matched against the tool's
-    /// qualified name only; Vibe 2.26.1 `utils/matching.py::name_matches`).
+    /// The original per-guard matcher. Vibe 3.1.0 matches full, leaf and underscore-joined names,
+    /// plus its built-in model aliases; kept for compatibility and pinned matcher parity tests.
     ///
     /// The command guards match every tool (fail closed, like the folder guard): Vibe's hooked shells are not only
     /// `bash` and `process_start` but also `powershell` / `powershell_stdin` (Vibe's managed Windows shell, switched on
     /// by `managed_shell_tools_enabled` or a Vibe experiment) and any later name; the guards act only on a call that
-    /// carries `tool_input.command`, so other tools pass unchanged (one process start each).
+    /// carries `tool_input.command`, so other tools pass unchanged.
     ///
     /// The hooks are one layer: the agent's environment (no credentials, pushes unreachable, gh signed out)
     /// and Vibe's own approval cards apply to every command as well.
@@ -207,6 +208,19 @@ impl Guard {
             Self::Allowed => {
                 "re:(.+\\.)?(bash|experimental_bash|powershell|powershell_stdin)|process\\.(start|write)"
             }
+        }
+    }
+
+    /// Existing visible guard names, without the hook's application prefix.
+    const fn refusal_name(self) -> &'static str {
+        match self {
+            Self::Safety => "Safety reminder",
+            Self::Process => "Process guard",
+            Self::Folder => "Folder guard",
+            Self::Git => "Git guard",
+            Self::Connector => "Connector guard",
+            Self::Receipt => "Tool receipt",
+            Self::Allowed => "Allowed note",
         }
     }
 
@@ -245,9 +259,16 @@ pub fn decide(payload: &str, endpoint_file: &Path) -> Option<String> {
     for guard in Guard::ALL {
         if let Some(answer) = guard.decide(&payload, endpoint_file) {
             // Fail closed: an answer that is not a rewrite (or cannot be read as one) is printed as it is.
-            let Ok(output) = serde_json::from_str::<Value>(&answer) else {
+            let Ok(mut output) = serde_json::from_str::<Value>(&answer) else {
                 return Some(answer);
             };
+            // Prefix only after the existing reporting/scrubbing step; keep its reason and instructions intact.
+            if output["decision"] == "deny"
+                && let Some(reason) = output["reason"].as_str()
+            {
+                output["reason"] = json!(format!("{}: {reason}", guard.refusal_name()));
+                return Some(output.to_string());
+            }
             let Some(input) = output.pointer("/hook_specific_output/tool_input") else {
                 return Some(answer);
             };

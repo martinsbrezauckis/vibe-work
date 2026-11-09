@@ -11,6 +11,13 @@ fn fits(out: &Value, budget: usize) -> bool {
 }
 
 fn measure(out: &mut Value) {
+    if let Some(content) = out.get_mut("untrustedPageContent") {
+        crate::text_paging::update(content);
+        crate::choices::update(content);
+    }
+    if out.get("trimmed").is_some() {
+        out["trimmed"]["how"] = json!(continuation(out));
+    }
     // Include the size field itself; decimal width reaches a fixed point after at most a few passes.
     for _ in 0..4 {
         let bytes = size(out);
@@ -30,20 +37,36 @@ fn continuation(out: &Value) -> String {
             "Tab details shortened. browser_read {tab:\"id\"} reads an accessible tab; use its id from tabs."
         }.into();
     }
+    let reservation =
+        if out["refsTotal"].as_u64().unwrap_or(0) > out["refsShown"].as_u64().unwrap_or(0) {
+            " At least half the ref slots reserve the main document."
+        } else {
+            ""
+        };
+    if out["untrustedPageContent"]["coveringFrames"]
+        .as_array()
+        .is_some_and(|frames| {
+            frames
+                .iter()
+                .any(|frame| frame["nextChoiceCursor"].is_object())
+        })
+    {
+        let recovery = if out.get("Outcome").is_some() {
+            " Do not replay that action."
+        } else {
+            ""
+        };
+        return format!(
+            "Output shortened.{reservation} Continue browser_read: choiceCursor from the frame's nextChoiceCursor for choices, or find for a label. Keep tab.{recovery}"
+        );
+    }
     let page = out["untrustedPageContent"]["textPageNumber"]
         .as_u64()
         .unwrap_or(0);
-    let reservation = if out["trimmed"]["refs"].as_u64().unwrap_or(0) > 0
-        || out["refsTotal"].as_u64().unwrap_or(0) > out["refsShown"].as_u64().unwrap_or(0)
-    {
-        " At least half the ref slots are reserved for the main document when it has enough candidates."
+    let paging = if out["untrustedPageContent"]["textCursor"].is_object() {
+        "textCursor:nextTextCursor, maxRefs:0".to_owned()
     } else {
-        ""
-    };
-    let scope = if out["untrustedPageContent"]["coveringFrames"].is_array() {
-        " Covering-frame choice completeness is reported separately."
-    } else {
-        ""
+        format!("textPage:{page},find:\"words\"")
     };
     let action_recovery = if out.get("Outcome").is_some() {
         " Do not replay that action."
@@ -51,8 +74,7 @@ fn continuation(out: &Value) -> String {
         ""
     };
     format!(
-        "Output shortened.{scope}{reservation} Continue browser_read with find set to a label/role (also searches readable frames). For text use textPage:{page}; narrow omitted text with textPage:{page},find:\"words\". Later text: textPage:{}. Keep tab.{action_recovery}",
-        page + 1
+        "Output shortened.{reservation} Continue browser_read: find for controls; {paging} for text. Keep tab.{action_recovery}"
     )
 }
 
@@ -140,6 +162,15 @@ fn trim_extras(content: &mut Value) -> bool {
             items.pop();
             return true;
         }
+    }
+    if content
+        .get_mut("mainHeadings")
+        .and_then(Value::as_array_mut)
+        .is_some_and(|headings| headings.pop().is_some())
+    {
+        content["mainHeadingsOmitted"] =
+            json!(content["mainHeadingsOmitted"].as_u64().unwrap_or(0) + 1);
+        return true;
     }
     false
 }

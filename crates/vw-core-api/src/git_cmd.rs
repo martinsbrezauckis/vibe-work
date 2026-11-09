@@ -20,7 +20,7 @@ use vw_git::GitError;
 use vw_git::commit::{self, Expected};
 use vw_git::identity::{self, CommitIdentity};
 use vw_git::pr::PrCard;
-use vw_git::state::{self, BranchState};
+use vw_git::state;
 
 use crate::changes_facts::facts;
 use crate::command::Origin;
@@ -366,7 +366,10 @@ impl Core {
         session_id: &str,
         repo: Option<&str>,
     ) -> Result<GitResult, CoreError> {
-        let repos = self.git_repos(session_id)?;
+        let crate::git_discovery::DiscoveredRepos {
+            places: repos,
+            unavailable,
+        } = self.git_repos(session_id)?;
         let selected = repo.map(str::to_owned).or_else(|| {
             crate::git_discovery::default_root(repos.iter().map(|(r, _)| r.root.as_str()))
         });
@@ -388,7 +391,7 @@ impl Core {
                         repos: Vec::new(),
                         repo: None,
                         available: false,
-                        reason: Some(self.git_place(session_id).err().map_or_else(
+                        reason: Some(unavailable.map_or_else(
                             || {
                                 "this session's recorded file changes have no git repository"
                                     .to_owned()
@@ -431,7 +434,7 @@ impl Core {
             Err(other) => return Err(git_error(other)),
         };
         if blocker.is_none() {
-            blocker = state_blocker(&state);
+            blocker = state::blocker(&state);
         }
         Ok(GitResult::Status {
             status: GitStatusView {
@@ -477,7 +480,7 @@ impl Core {
         })
         .await?;
         let state = state.map_err(git_error)?;
-        let mut blocker = state_blocker(&state);
+        let mut blocker = state::blocker(&state);
         let files = match listed {
             Ok(files) => files,
             Err(GitError::Blocked(why)) => {
@@ -683,19 +686,4 @@ impl Core {
         }
         kept
     }
-}
-
-/// Why commits are not possible from the branch state (detached, an operation in progress).
-pub(crate) fn state_blocker(state: &BranchState) -> Option<String> {
-    if state.branch().is_none() {
-        return Some(
-            "This folder is not on a branch (detached HEAD). Switch to a branch first.".to_owned(),
-        );
-    }
-    state.in_progress.map(|op| {
-        format!(
-            "git has {} in progress in this folder. Finish or abort it in your git tool first.",
-            op.words()
-        )
-    })
 }

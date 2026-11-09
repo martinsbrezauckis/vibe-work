@@ -1,28 +1,22 @@
-//! Bounded native browser process/window query. Called only by browser detection workers; every child is reaped.
+//! Browser observation dispatch. Windows uses native process/window APIs; POSIX workers bound and reap pgrep.
 use super::{Browser, ProcessState};
 #[cfg(unix)]
 use std::io::Read;
+#[cfg(not(windows))]
 use std::{
     process::{Command, Stdio},
     time::{Duration, Instant},
 };
 
+#[cfg(windows)]
+pub(super) fn inspect(browser: Browser) -> (ProcessState, Option<Vec<u32>>) {
+    (super::windows::inspect(browser), None)
+}
+
+#[cfg(not(windows))]
 pub(super) fn inspect(browser: Browser) -> (ProcessState, Option<Vec<u32>>) {
     let edge = browser == Browser::Edge;
-    let mut command = if cfg!(windows) {
-        let process = if edge { "msedge" } else { "chrome" };
-        let script = format!(
-            "$s = (Get-Process -Id $PID).SessionId; if (@(Get-Process {process} -ErrorAction SilentlyContinue | Where-Object {{ $_.SessionId -eq $s -and $_.MainWindowHandle -ne 0 }}).Count -gt 0) {{ exit 0 }}; exit 1"
-        );
-        let mut command = Command::new("powershell.exe");
-        command.args(["-NoProfile", "-NonInteractive", "-Command", &script]);
-        #[cfg(windows)]
-        {
-            use std::os::windows::process::CommandExt;
-            command.creation_flags(0x0800_0000);
-        }
-        command
-    } else {
+    let mut command = {
         let mut command = Command::new(if cfg!(target_os = "macos") {
             "/usr/bin/pgrep"
         } else {
@@ -47,6 +41,7 @@ pub(super) fn inspect(browser: Browser) -> (ProcessState, Option<Vec<u32>>) {
     bounded(&mut command, Duration::from_secs(2))
 }
 
+#[cfg(not(windows))]
 pub(super) fn bounded(
     command: &mut Command,
     timeout: Duration,

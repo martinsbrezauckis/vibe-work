@@ -160,12 +160,7 @@ pub fn ensure(vibe_home: &Path) -> Result<ExperimentPins, String> {
     let (updated, outcome) = edited(&existing, !migrated);
     if let Some(updated) = updated {
         std::fs::create_dir_all(vibe_home).map_err(|e| format!("{}: {e}", vibe_home.display()))?;
-        let tmp = vibe_home.join("config.toml.vw-tmp");
-        std::fs::write(&tmp, &updated).map_err(|e| format!("{}: {e}", tmp.display()))?;
-        std::fs::rename(&tmp, &path).map_err(|e| {
-            let _ = std::fs::remove_file(&tmp);
-            format!("{}: {e}", path.display())
-        })?;
+        vw_platform::replace_private(&path, updated.as_bytes()).map_err(|e| e.to_string())?;
     } else if outcome.skipped.is_none() {
         crate::config_comments::restore(&path, &existing, None, REGISTRY, &[NOTE])?;
     }

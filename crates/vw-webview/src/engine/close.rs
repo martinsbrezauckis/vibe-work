@@ -31,7 +31,14 @@ impl TauriEngine {
 
     pub(super) fn close_inner(&self, id: &MountId) -> Result<(), EngineError> {
         match self.webview(id) {
-            Ok(webview) => Self::close_webview(&webview)?,
+            Ok(webview) => {
+                let hub = self.dialogs.clone();
+                let label = id.label.clone();
+                webview
+                    .with_webview(move |_| vw_platform::webview::dialogs::forget(&hub, &label))
+                    .map_err(|e| EngineError::Platform(e.to_string()))?;
+                Self::close_webview(&webview)?;
+            }
             Err(EngineError::NotMounted) => {}
             Err(other) => return Err(other),
         }
@@ -42,6 +49,10 @@ impl TauriEngine {
             guard.forget_store(&own_store_key(&id.label));
         }
         self.drains
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(&id.label);
+        self.download_proxies
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .remove(&id.label);

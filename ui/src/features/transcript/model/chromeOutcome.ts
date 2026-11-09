@@ -185,7 +185,7 @@ const LINES: readonly (readonly [string, readonly string[]])[] = [
 ];
 
 /**
- * The closed list of codes the window knows: Chrome Control's helper and extension codes (Chrome Control 0.1.3) and
+ * The closed list of codes the window knows: Chrome Control's helper and extension codes  and
  * the core's own (`OWNER_REQUIRED`, `TRANSPORT_LOST`, `BUSY`). Inside the page envelope any other code gives
  * {@link ANY_PROBLEM}.
  */

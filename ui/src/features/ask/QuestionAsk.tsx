@@ -1,6 +1,7 @@
 /**
  * Renders Vibe question fields and Submit/Skip through the shared AskCard and transcript client. Keys inside the card:
- * 1-9 pick that option (after the card's arrival grace), Enter on an option submits once every question has an answer.
+ * 1-9 pick that option (after the card's arrival grace); Enter on an option or the single-line Other field
+ * submits once every question has an answer. All submit paths share focus return to the Message box.
  */
 import { visibleText } from "./visibleText";
 import { type ReactElement, useState } from "react";
@@ -53,6 +54,9 @@ export function QuestionAsk({
   const output = questionOutput(questions, picks);
   const send = (value: typeof output) => {
     if (disabled || value === null) return;
+    // WebKit pointer and accessibility clicks may leave DOM focus in the Browser pane.
+    // An accepted local answer owns focus return even when its button never took focus.
+    focusInside(true);
     void transcript.answer(sessionId, callbackId, value, "window");
   };
   return (
@@ -66,9 +70,10 @@ export function QuestionAsk({
       disabled={disabled}
       keys={false}
       onKeys={(event, ready) => {
-        const onOption =
-          event.target instanceof HTMLInputElement && event.target.closest(".q-opts") !== null;
-        if (event.key === "Enter" && onOption) {
+        const onAnswer =
+          event.target instanceof HTMLInputElement &&
+          event.target.closest(".q-opts, .q-other") !== null;
+        if (event.key === "Enter" && onAnswer) {
           event.preventDefault();
           if (ready) send(output);
           return;

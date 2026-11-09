@@ -16,15 +16,23 @@ use crate::error::{CoreError, ErrorCode};
 use crate::git_cmd::Place;
 use crate::git_view::{GitLocation, GitRepoView};
 
+/// Repositories and the first root-discovery refusal, retained so callers never repeat Git just for its reason.
+pub(crate) struct DiscoveredRepos {
+    pub(crate) places: Vec<(GitRepoView, Place)>,
+    pub(crate) unavailable: Option<CoreError>,
+}
+
 impl Core {
     /// Rebuild the selectable repositories from the session's recorded file effects on every request.
     /// A client-supplied root is matched against this list, never joined to a filesystem path.
-    pub(crate) fn git_repos(
-        &self,
-        session_id: &str,
-    ) -> Result<Vec<(GitRepoView, Place)>, CoreError> {
+    pub(crate) fn git_repos(&self, session_id: &str) -> Result<DiscoveredRepos, CoreError> {
         if self.workspace_folder(session_id)?.is_some() {
-            return self.workspace_repos(session_id);
+            return self
+                .workspace_repos(session_id)
+                .map(|places| DiscoveredRepos {
+                    places,
+                    unavailable: None,
+                });
         }
         let view = self
             .shared
@@ -49,9 +57,13 @@ impl Core {
             ));
         }
         let mut found = BTreeMap::new();
-        if let Ok(place) = self.git_place(session_id) {
-            found.insert(".".to_owned(), place);
-        }
+        let unavailable = match self.git_place(session_id) {
+            Ok(place) => {
+                found.insert(".".to_owned(), place);
+                None
+            }
+            Err(error) => Some(error),
+        };
         let prior = self
             .shared
             .git
@@ -103,23 +115,11 @@ impl Core {
                         .collect(),
                 ),
             );
-        Ok(found
-            .into_iter()
-            .map(|(root, place)| {
-                let branch = state::read_state(&place.root, &place.git_dir, place.base.as_deref())
-                    .ok()
-                    .and_then(|state| state.branch().map(str::to_owned));
-                // Always the repository's own folder name, also for "." (a session in a subfolder
-                // of a larger repository works in that repository, not in a repository named after the subfolder).
-                let name = place
-                    .root
-                    .file_name()
-                    .unwrap_or_default()
-                    .to_string_lossy()
-                    .into_owned();
-                (GitRepoView { name, root, branch }, place)
-            })
-            .collect())
+        let places = found.into_iter().map(repo_view).collect();
+        Ok(DiscoveredRepos {
+            places,
+            unavailable,
+        })
     }
 
     fn workspace_repos(&self, session_id: &str) -> Result<Vec<(GitRepoView, Place)>, CoreError> {
@@ -145,11 +145,16 @@ impl Core {
         session_id: &str,
         repo: Option<&str>,
     ) -> Result<(String, Place), CoreError> {
-        let places = self.git_repos(session_id)?;
+        let DiscoveredRepos {
+            places,
+            unavailable,
+        } = self.git_repos(session_id)?;
         if repo.is_none() && places.is_empty() {
             // No repository at all: keep the session folder's own reason (not a repository, ignored by
             // its parent repository, ...) and its code instead of a generic "not found".
-            self.git_place(session_id)?;
+            if let Some(error) = unavailable {
+                return Err(error);
+            }
         }
         let selected = repo
             .map(str::to_owned)
@@ -188,6 +193,7 @@ impl Core {
     ) -> Result<(), CoreError> {
         if self
             .git_repos(session_id)?
+            .places
             .iter()
             .any(|(_, current)| current.root == place.root && current.git_dir == place.git_dir)
         {
@@ -450,4 +456,18 @@ fn links_out(git_dir: &Path) -> bool {
         }
     }
     false
+}
+
+fn repo_view((root, place): (String, Place)) -> (GitRepoView, Place) {
+    let branch = state::read_state(&place.root, &place.git_dir, place.base.as_deref())
+        .ok()
+        .and_then(|state| state.branch().map(str::to_owned));
+    // Use the repository's own folder name, including sessions in a repository's subfolder.
+    let name = place
+        .root
+        .file_name()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .into_owned();
+    (GitRepoView { name, root, branch }, place)
 }

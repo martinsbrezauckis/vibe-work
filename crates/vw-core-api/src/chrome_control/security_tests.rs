@@ -60,13 +60,13 @@ mod r {
                     "a",
                     &json!({"agentName":mode}),
                 );
-                let reason = super::super::check::authorize(
+                let authorization = super::super::check::authorize(
                     &core.shared,
                     "a",
                     "chrome_execute",
                     &json!({"action":action}),
-                )
-                .unwrap_err();
+                );
+                let reason = authorization.unwrap_err();
                 assert!(
                     reason.contains(vw_ask::chrome::Tier::FullAccess.label()),
                     "{reason}"
@@ -117,7 +117,7 @@ mod r {
     async fn emulation_cross_chat_refused() {
         let core = fixture("chrome-security-emulation_cross_chat_refused").await;
         for (mode, allowed) in [
-            ("ask", false),
+            ("ask", true),
             ("accept-edits", true),
             ("auto-approve", true),
         ] {

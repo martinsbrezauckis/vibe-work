@@ -271,7 +271,7 @@ export function SessionList() {
             {model.total === 0 && (index.loaded || needsInstall) && error === null && (
               <EmptyState glyph="chat" small className="col-note">
                 {loadingSavedChats
-                  ? "Loading saved chats…"
+                  ? "Loading saved sessions…"
                   : searching
                     ? "No sessions match."
                     : "No sessions yet."}

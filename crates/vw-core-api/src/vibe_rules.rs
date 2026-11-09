@@ -1,4 +1,4 @@
-//! Old "always" answers in Vibe's config, visible and removable. Before 0.1.2 Vibe's "Always allow" on an approval card made Vibe write a lasting rule into
+//! Old "always" answers in Vibe's config, visible and removable. Vibe's legacy "Always allow" on an approval card made Vibe write a lasting rule into
 //! Vibe Work's own `config.toml` (`VIBE_HOME`, Vibe's user layer, `_unified_permissions.py` `_persist`):
 //! `/tools/<tool>/permission = "always"` for a tool without permissions, or the call's patterns appended to
 //! `/tools/<tool>/allowlist`. They keep working; this module lists them and removes one.

@@ -20,7 +20,7 @@ const INTERACTIVE =
   "a[href],button,input:not([type=hidden]),textarea,select,summary,iframe,frame," +
   "[role=button],[role=link],[role=checkbox],[role=radio],[role=switch],[role=tab],[role=menuitem]," +
   "[role=option],[role=combobox],[role=textbox],[role=searchbox],[role=slider],[contenteditable=''],[contenteditable=true]," +
-  "[tabindex]:not([tabindex='-1']),[onclick]";
+  "[tabindex]:not([tabindex='-1']),[onclick],[ondblclick],[oncontextmenu],[onauxclick]";
 // Some site footers install a click listener on a plain span/div and expose only a pointer cursor. Give a
 // small, visibly labelled target a ref so normal hit testing can decide whether to act.
 const customClickable = (el) => {

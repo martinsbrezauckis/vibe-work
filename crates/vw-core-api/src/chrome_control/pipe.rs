@@ -57,7 +57,7 @@ impl Pipe {
             after_check(&helper);
         }
         drop(helper);
-        let mut command = tokio::process::Command::new(executable.path());
+        let mut command = vw_platform::process_command::hidden_tokio(executable.path());
         command
             .args(["owned", "--state-dir"])
             .arg(dir)
@@ -70,8 +70,6 @@ impl Pipe {
             .kill_on_drop(true);
         #[cfg(all(feature = "your-safari", target_os = "macos"))]
         super::safari_package::configure(&mut command, &shared).await;
-        #[cfg(windows)]
-        command.creation_flags(0x0800_0000);
         let mut child = command.spawn().map_err(|error| {
             tracing::debug!(%error, "Chrome Control helper could not be launched");
         })?;

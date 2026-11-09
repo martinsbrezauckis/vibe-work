@@ -168,7 +168,7 @@ export function createDebugApiClient(): CoreClient {
       Promise.reject(
         toCallError(new Error("the Debug API switch works in the app, not in browser dev mode")),
       ),
-    debugApiTokenFile: () =>
+    debugApiTokenItem: () =>
       Promise.reject(
         toCallError(new Error("the token is managed in the app, not in browser dev mode")),
       ),

@@ -81,7 +81,7 @@ impl PreviewService {
                 entry.allowed.clear();
                 entry.server_status = None;
             }
-            if self.unmount(key).await.is_err() {
+            if self.unmount(key).await.is_err() || self.close_page_window(key).await.is_err() {
                 leftovers.push(self.storage(key).dir);
             }
             self.forget_browser_turn(key);
@@ -151,6 +151,9 @@ impl PreviewService {
             if self.unmount(&key).await.is_err() {
                 return;
             }
+            if self.close_page_window(&key).await.is_err() {
+                return;
+            }
             self.forget_browser_turn(&key);
         }
         let _layout = self.layout_op.lock().await;
@@ -215,6 +218,7 @@ impl PreviewService {
         for session in sessions {
             let _activity = self.session_lock(&session).await;
             let _ = self.unmount(&session).await;
+            let _ = self.close_page_window(&session).await;
         }
     }
 }

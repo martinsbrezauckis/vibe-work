@@ -12,7 +12,7 @@ pub(super) fn render(browser: Browser, text: &str) -> String {
         "Not run: invalid Chrome tool arguments." => browser.words("Not run: invalid {browser} tool arguments."),
         "Not run: no Chrome session with this id; open one with chrome_session." => browser.words("Not run: no {browser} session with this id; open one with chrome_session."),
         "Not run: open a Chrome session in this chat first." => browser.words("Not run: open a {browser} session in this chat first."),
-        "Not run: selection is sent by the person from Chrome. Use Ask Vibe Work in Chrome's context menu." => browser.words("Not run: selection is sent by the person from {browser}. Use Ask Vibe Work in {browser}'s context menu."),
+        "Not run: selection is sent by the person from Chrome. Ask the person to use Ask Vibe Work in Chrome's context menu." => browser.words("Not run: selection is sent by the person from {browser}. Ask the person to use Ask Vibe Work in {browser}'s context menu."),
         "Not run: this Chrome session belongs to another chat." => browser.words("Not run: this {browser} session belongs to another chat."),
         "Not run: this Chrome session lost its connection to Chrome." => browser.words("Not run: this {browser} session lost its connection to {browser}."),
         "Not run: this Chrome session was stopped." => browser.words("Not run: this {browser} session was stopped."),

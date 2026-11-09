@@ -7,7 +7,8 @@
 //! - [`watch_requests`] attaches Apple's PRIVATE watch-only request delegate, only while [`set_request_watch`]
 //!   is on (Settings > Developer; off by default). A macOS without the private interface leaves it off quietly.
 //!
-//! - [`click_marker_state`] inspects the shared host overlay in native acceptance tests.
+//! - [`click_marker_state`] inspects the shared host overlay in native acceptance tests; [`show_click_marker`] draws it
+//!   directly for the private fixture.
 //!
 //! Depends on: vw-platform `webview::{agent_world_mac, request_watch_mac, click_marker_mac}`, `platform::with_native`. Called by:
 //! the engine and its private test fixture.
@@ -202,6 +203,30 @@ pub async fn forget(webview: &Webview<Wry>) -> Result<(), EngineError> {
             vw_platform::webview::request_watch_mac::detach(native.inner());
             vw_platform::webview::agent_world_mac::forget_agent_world(native.inner());
             let _ = reply.send(Ok(()));
+        },
+    )
+    .await
+}
+
+/// Shows the click marker at `point` (0..1 of the view, from the top left) for a moment. Used by the private native
+/// acceptance fixture to check the drawn ring; the product shows it through the host action timeline.
+///
+/// # Errors
+/// The webview is gone or the point is outside it.
+#[cfg(feature = "click-marker")]
+pub async fn show_click_marker(
+    webview: &Webview<Wry>,
+    point: (f64, f64),
+) -> Result<(), EngineError> {
+    with_native(
+        webview,
+        "showing the click marker",
+        Duration::from_secs(2),
+        move |native, reply| {
+            let _ = reply.send(vw_platform::webview::click_marker_mac::show(
+                native.inner(),
+                point,
+            ));
         },
     )
     .await

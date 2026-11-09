@@ -54,8 +54,8 @@ export interface AskCardProps {
   /** Keys 1-4 answer (not for a question). */
   keys?: boolean;
   /**
-   * A question's own keys (number keys pick options, Enter submits): called for every key pressed in the card outside
-   * a text field, with whether the arrival grace has passed. The card's own answer keys are then off.
+   * A question's own keys (number keys pick options, Enter submits): text fields forward only Enter.
+   * Includes whether the arrival grace has passed. The card's own answer keys are then off.
    */
   onKeys?: (event: KeyboardEvent<HTMLDivElement>, ready: boolean) => void;
   /** Extra attributes for automation (`data-callback-id`, `data-entry-id`). */
@@ -173,7 +173,10 @@ function PermissionCard(props: AskCardProps): ReactElement {
     [props.id, arrival.visible],
   );
   const choose = (choice: AskChoice) => {
-    if (!disabled) onChoose?.(choice);
+    if (disabled || onChoose === undefined) return;
+    // macOS can activate a button without focusing it. Every accepted local answer returns to Message.
+    props.onFocusInside?.(true);
+    onChoose(choice);
   };
   const onKey = (event: KeyboardEvent<HTMLDivElement>) => {
     if (props.onKeys !== undefined) {
@@ -183,7 +186,15 @@ function PermissionCard(props: AskCardProps): ReactElement {
           target.type !== "radio" &&
           target.type !== "checkbox") ||
         target instanceof HTMLTextAreaElement;
-      if (!typed && !event.altKey && !event.ctrlKey && !event.metaKey)
+      if (
+        (!typed || event.key === "Enter") &&
+        !event.nativeEvent.isComposing &&
+        // eslint-disable-next-line @typescript-eslint/no-deprecated -- WebKit's IME confirmation Enter still uses 229.
+        event.nativeEvent.keyCode !== 229 &&
+        !event.altKey &&
+        !event.ctrlKey &&
+        !event.metaKey
+      )
         props.onKeys(event, arrival.keysReady() && !event.repeat);
       return;
     }
@@ -233,9 +244,13 @@ function PermissionCard(props: AskCardProps): ReactElement {
       }}
       onBlurCapture={(event) => {
         const next = event.relatedTarget;
-        // A native button loses focus when sending disables it. Keep the card's focus ownership until
-        // the answer settles, so its replacement can return focus to the composer.
-        if (next === null && event.target instanceof HTMLButtonElement && event.target.disabled)
+        // Sending disables buttons and option inputs (including through a fieldset). WebKit blurs them
+        // without a new target; retain ownership so every answer path returns focus to the composer.
+        if (
+          next === null &&
+          event.target instanceof HTMLElement &&
+          event.target.matches(":disabled")
+        )
           return;
         props.onFocusInside?.(next instanceof Node && event.currentTarget.contains(next));
       }}

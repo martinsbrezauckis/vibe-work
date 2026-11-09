@@ -36,6 +36,7 @@ import {
 } from "./entries";
 import { isWebSearch } from "./sources";
 import { hookLine, isHookNotice, refusedSteps, transcriptEntries } from "./hookNotices";
+import { interruptedEntry } from "./settled";
 
 /** The `searches` of an answer without web searches (one shared list: rows stay comparable). */
 const NO_SEARCHES: readonly Obj[] = Object.freeze([]);
@@ -329,13 +330,15 @@ export function buildRows(history: readonly JsonValue[], turns: readonly JsonVal
   const entries = dedupe(history);
   const table = turnTable(turns);
   const settled = entries.map((entry) => {
+    const turnId = turnIdOf(entry) ?? turnAt(table, createdAt(entry));
+    const turn = turnId === null ? undefined : table.get(turnId);
+    if (turn?.turn["status"] === "interrupted") entry = interruptedEntry(entry);
     if (
       entryType(entry) !== "checkpoint" ||
       entry["kind"] !== "compaction" ||
       entry["generationStatus"] !== "in_progress"
     )
       return entry;
-    const turn = table.get(str(entry["turnId"]) ?? "");
     if (turn === undefined || !ENDED.has(str(turn.turn["status"]) ?? "")) return entry;
     return { ...entry, generationStatus: "completed", message: "Context compaction interrupted" };
   });

@@ -28,6 +28,9 @@ impl Vault {
             profile.remembered_keyfile_json = None;
             profile.write(&profile_dir)?;
         }
+        if let Some(session) = self.session().as_mut() {
+            session.remembered = false;
+        }
         // Deleting an absent entry is fine; no read first (one credential store call, no secret read).
         self.config
             .device_store
@@ -37,7 +40,9 @@ impl Vault {
 
     /// The selected (or only) ShellX-layout profile and its folder; none for the Vault app's
     /// layout or before a choice.
-    fn kept_key_profile(&self) -> Result<Option<(ShellxProfile, std::path::PathBuf)>, VaultError> {
+    pub(super) fn kept_key_profile(
+        &self,
+    ) -> Result<Option<(ShellxProfile, std::path::PathBuf)>, VaultError> {
         if let Some(managed) = &self.managed {
             let Some(kind) = managed.selected(&self.config.location)? else {
                 return Ok(None);

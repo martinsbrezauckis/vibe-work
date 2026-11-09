@@ -159,9 +159,13 @@ impl Core {
             self.shared.emit(crate::CoreEvent::ChromeControl {
                 view: view(&self.shared),
             });
-            return Err(invalid(data["error"]["message"].as_str().unwrap_or(
-                "The Firefox connection is unavailable. Try opening the window again.",
-            )));
+            let fallback = format!(
+                "{} Ask the person to open its window in Vibe Work Settings, then check chrome_status.",
+                vw_vocabulary::texts::FIREFOX_NOT_CONNECTED
+            );
+            return Err(invalid(
+                data["error"]["message"].as_str().unwrap_or(&fallback),
+            ));
         }
         let view = view(&self.shared);
         self.shared
@@ -190,7 +194,7 @@ fn state_view(state: PairingState, enabled: bool, package: bool) -> super::Addon
         (
             A::ChromeMissing,
             "Not installed",
-            "Firefox is missing. Install Firefox, then choose Open window in Settings > Browser > {yourBrowser}.",
+            "Firefox is missing. Ask the person to install Firefox, then choose Open window in Settings > Browser > {yourBrowser}.",
         )
     } else if !enabled {
         (
@@ -208,12 +212,12 @@ fn state_view(state: PairingState, enabled: bool, package: bool) -> super::Addon
             PairingState::Connecting => (
                 A::Connecting,
                 "Starting",
-                "The owned Firefox window is starting. Wait for Window open in Settings > Browser > {yourBrowser}, then check chrome_status.",
+                "The owned Firefox window is starting. Wait, then check chrome_status for its connection state.",
             ),
             PairingState::BrowserOutdated => (
                 A::UpdateNeeded,
                 "Update Firefox",
-                "Firefox is older than the supported version. Update Firefox to version 159 or later, then choose Open window under Settings > Browser > {yourBrowser}.",
+                "Firefox is older than the supported version. Ask the person to update Firefox to version 159 or later, then choose Open window under Settings > Browser > {yourBrowser}.",
             ),
             PairingState::Blocked => (
                 A::Unavailable,
@@ -259,7 +263,7 @@ mod tests {
             (
                 PairingState::NotInstalled,
                 "Not installed",
-                "Install Firefox",
+                "Ask the person to install Firefox",
             ),
         ] {
             *core
@@ -290,6 +294,15 @@ mod tests {
                     .unwrap()
                     .contains("Connect Firefox")
             );
+            if state == PairingState::NotInstalled {
+                assert_eq!(
+                    firefox["instruction"],
+                    format!(
+                        "Firefox is missing. Ask the person to install Firefox, then choose Open window in Settings > Browser > {}.",
+                        vw_vocabulary::texts::FIREFOX_NAME
+                    )
+                );
+            }
         }
         core.shutdown().await;
     }

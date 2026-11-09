@@ -156,7 +156,7 @@ impl Core {
 /// seconds, and on Windows a process's current folder cannot be deleted, so a Temporary chat deleted during a read
 /// would keep its own folder.
 fn discovery_command(python: &Path, home: &Path, cwd: &Path, options: &Value) -> Command {
-    let mut command = Command::new(python);
+    let mut command = vw_platform::process_command::hidden_tokio(python);
     command
         .arg("-I")
         .arg("-B")
@@ -174,8 +174,6 @@ fn discovery_command(python: &Path, home: &Path, cwd: &Path, options: &Value) ->
         .current_dir(home)
         .kill_on_drop(true);
     // The app has no console of its own: without this, Windows opens a console window for every read.
-    #[cfg(windows)]
-    command.creation_flags(0x0800_0000);
     for key in ["PATH", "SYSTEMROOT", "TEMP", "TMP", "HOME", "USERPROFILE"] {
         if let Some(value) = std::env::var_os(key) {
             command.env(key, value);

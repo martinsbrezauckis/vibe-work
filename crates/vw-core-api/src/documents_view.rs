@@ -197,6 +197,40 @@ pub struct DocumentRefusal {
     pub name: String,
     /// Why.
     pub reason: String,
+    /// File-kind guidance, independent of the wording; other failures omit it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
+    pub kind: Option<DocumentRefusalKind>,
+}
+
+/// A refused file type for which the UI can offer supported-format guidance.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+pub enum DocumentRefusalKind {
+    /// No supported format matched.
+    Unsupported,
+    /// An archive must be unpacked before attaching its contents.
+    Archive,
+}
+
+impl DocumentRefusal {
+    pub(crate) fn from_error(name: String, error: &vw_documents::AddError) -> Self {
+        let kind = match error {
+            vw_documents::AddError::Kind(vw_documents::KindError::Unsupported) => {
+                Some(DocumentRefusalKind::Unsupported)
+            }
+            vw_documents::AddError::Kind(vw_documents::KindError::Archive) => {
+                Some(DocumentRefusalKind::Archive)
+            }
+            _ => None,
+        };
+        Self {
+            name,
+            kind,
+            reason: error.to_string(),
+        }
+    }
 }
 
 /// How files arrived.

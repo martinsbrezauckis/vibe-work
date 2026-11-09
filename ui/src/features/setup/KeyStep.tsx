@@ -5,6 +5,7 @@
  * Depends on: AppContext, useKeys, fields, VibeKeyOffer, ConsoleLink. Called by: SetupScreen,
  * ResultStep (to replace a key that failed), KeySettings.
  */
+import { literalInputProps } from "../../components/inputProps";
 import { Button } from "../../components/Controls";
 import { useState } from "react";
 
@@ -91,6 +92,7 @@ export function KeyStep({
             <label htmlFor="mistral-key-name">Name</label>
             <div className="key-field-row">
               <input
+                {...literalInputProps}
                 data-testid="setup.key-name"
                 id="mistral-key-name"
                 maxLength={200}

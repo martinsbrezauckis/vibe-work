@@ -27,6 +27,7 @@
 //! - Nothing here decides ownership: the core does, from the process monitor (vw-procmon).
 
 pub mod agent_env;
+mod browser_everyday;
 pub mod browser_input;
 mod capture_spec;
 mod chrome_output;

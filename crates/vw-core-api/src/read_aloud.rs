@@ -192,7 +192,7 @@ pub(crate) async fn start(
     let title = view.state["session"]["title"]
         .as_str()
         .filter(|t| !t.is_empty())
-        .unwrap_or("Untitled chat")
+        .unwrap_or(vw_vocabulary::text("untitledSession").unwrap_or_default())
         .to_owned();
     let (request_id, reply) = shared.readings.begin();
     shared.emit(CoreEvent::ReadAloud {

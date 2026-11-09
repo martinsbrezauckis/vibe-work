@@ -13,7 +13,10 @@ fn video_is_absent_without_feature() {
     );
 }
 #[test]
-#[cfg(all(feature = "video", any(windows, target_os = "macos")))]
+#[cfg(all(
+    feature = "video",
+    any(windows, target_os = "macos", feature = "linux-video")
+))]
 fn video_reaches_mcp_as_image_content() {
     let list = vw_agent_tools::mcp::tool_list();
     assert!(
@@ -60,12 +63,19 @@ fn video_catalog_follows_the_platform_and_feature() {
         .any(|tool| tool["name"] == "video_frames");
     assert_eq!(
         listed,
-        cfg!(all(feature = "video", any(windows, target_os = "macos")))
+        cfg!(all(
+            feature = "video",
+            any(
+                windows,
+                target_os = "macos",
+                all(target_os = "linux", feature = "linux-video")
+            )
+        ))
     );
 }
 
 #[test]
-#[cfg(all(feature = "video", target_os = "linux"))]
+#[cfg(all(feature = "video", target_os = "linux", not(feature = "linux-video")))]
 fn linux_video_refuses_without_progress_or_forwarding() {
     let input = json!({"id":1,"method":"tools/call","params":{"name":"video_frames","arguments":{"path":"clip.mp4","selection":{"kind":"timestamps","times_ms":[999]},"output":"frame"}}}).to_string()+"\n";
     let mut output = Vec::new();

@@ -462,12 +462,6 @@
   gap: 6px;
   min-width: 0;
 }
-.new-chat-work-note {
-  margin: 0;
-  color: var(--text-2);
-  font-size: var(--text-12);
-  line-height: var(--leading-helper);
-}
 .new-chat-work-status.key-line {
   margin: 0;
   font-size: var(--text-12);

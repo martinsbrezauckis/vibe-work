@@ -119,6 +119,8 @@ pub struct PreviewView {
 
 /// One download: what is shown, and where the engine writes it until it is delivered.
 pub(crate) struct DownloadRecord {
+    /// Original native mount, retained after its tab closes so late completions remain attributable.
+    pub(crate) source_label: String,
     pub(crate) view: DownloadView,
     pub(crate) at: std::time::Instant,
     /// The engine's file in the private staging folder.
@@ -382,8 +384,13 @@ impl Entry {
 
     pub(crate) fn push_download(&mut self, record: DownloadRecord) {
         self.downloads.push(record);
-        if self.downloads.len() > MAX_LISTED {
-            self.downloads.remove(0);
+        if self.downloads.len() > MAX_LISTED
+            && let Some(at) = self
+                .downloads
+                .iter()
+                .position(|r| r.view.state != crate::DownloadState::Running)
+        {
+            self.downloads.remove(at);
         }
     }
 
@@ -430,6 +437,8 @@ pub(crate) struct State {
     pub(crate) tabs: HashMap<String, SessionTabs>,
     pub(crate) by_label: HashMap<String, String>,
     pub(crate) shown: Option<Shown>,
+    /// Independent native browser windows: page key -> chat-scoped window id.
+    pub(crate) windows: HashMap<String, String>,
     /// Selected pages whose native child is parked under HTML Browser chrome, keyed by page and mount label.
     pub(crate) browser_overlays: HashMap<String, String>,
     /// Last prepared page identity: mount label, document load and child bounds.
@@ -475,9 +484,11 @@ impl State {
     }
 
     pub(crate) fn is_shown(&self, session_id: &str) -> bool {
-        self.shown
-            .as_ref()
-            .is_some_and(|s| s.session_id == session_id)
+        self.windows.contains_key(session_id)
+            || self
+                .shown
+                .as_ref()
+                .is_some_and(|s| s.session_id == session_id)
     }
 
     /// Mounted entries beyond `cap` to suspend: least recently used first, never `keep` or the shown one.

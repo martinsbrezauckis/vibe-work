@@ -34,6 +34,8 @@ pub enum DenyReason {
     /// (`workspace/git/worktrees/prune` and `reap`). Vibe Work's own cleanup inspects first and
     /// asks with the file list (`worktrees` command).
     UnnamedRemoval,
+    /// The session was stopped after this continuation was scheduled. Nothing was sent.
+    Stopped,
     /// A request of an allowed method that a policy forbids (path outside the allowlist, option
     /// that runs code, folder the user did not pick). The text names the rule, not the values.
     Policy(String),
@@ -54,6 +56,9 @@ impl std::fmt::Display for DenyReason {
             Self::UnnamedRemoval => f.write_str(
                 "removes worktrees without naming their files; use the app's worktree cleanup",
             ),
+            Self::Stopped => {
+                f.write_str("Not sent: the chat was stopped after this continuation was scheduled.")
+            }
             Self::Policy(rule) => write!(f, "refused by policy: {rule}"),
         }
     }

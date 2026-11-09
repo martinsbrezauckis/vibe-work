@@ -1,4 +1,5 @@
-/** App-owned GitHub reader preference and status; Settings uses typed commands and polls for login changes. */
+/** App-owned GitHub reader preference and status; refreshes sign-in on focus.
+ * Depends on React and the typed core controller. Called by General settings. */
 import { useEffect, useRef, useState } from "react";
 import type { GithubReadsView } from "../protocol/core";
 import { toCallError } from "../protocol/client/types";
@@ -35,7 +36,11 @@ export function useGithubReads(core: CoreController | null) {
         });
     };
     read();
-    const timer = setInterval(read, 5000);
+    const visible = () => {
+      if (document.visibilityState === "visible") read();
+    };
+    window.addEventListener("focus", read);
+    document.addEventListener("visibilitychange", visible);
     const stop = core.listen((event) => {
       if (event.type === "githubReads") {
         revision.current++;
@@ -44,7 +49,8 @@ export function useGithubReads(core: CoreController | null) {
     });
     return () => {
       live = false;
-      clearInterval(timer);
+      window.removeEventListener("focus", read);
+      document.removeEventListener("visibilitychange", visible);
       stop();
     };
   }, [core]);

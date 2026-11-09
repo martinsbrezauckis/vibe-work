@@ -129,7 +129,7 @@ fn windows_script(command: &str) -> String {
 
 #[cfg(windows)]
 fn command(shell: &str, script: &Path) -> Command {
-    let mut cmd = Command::new(shell);
+    let mut cmd = vw_platform::process_command::hidden(shell);
     cmd.args(windows_argv(script));
     cmd
 }
@@ -174,8 +174,6 @@ fn write_windows_script(spec: &AgentCommand<'_>) -> io::Result<std::path::PathBu
 #[cfg(windows)]
 const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
 #[cfg(windows)]
-const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-#[cfg(windows)]
 const CREATE_BREAKAWAY_FROM_JOB: u32 = 0x0100_0000;
 
 fn prepared(
@@ -214,20 +212,22 @@ fn windows_child(
     shell: &str,
     script: &Path,
 ) -> io::Result<(std::process::Child, bool)> {
-    use std::os::windows::process::CommandExt;
-    let base = CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW;
-    match prepared(spec, shell, script)?
-        .creation_flags(base | CREATE_BREAKAWAY_FROM_JOB)
-        .spawn()
-    {
+    let mut command = prepared(spec, shell, script)?;
+    vw_platform::process_command::set_creation_flags(
+        &mut command,
+        CREATE_NEW_PROCESS_GROUP | CREATE_BREAKAWAY_FROM_JOB,
+    );
+    match command.spawn() {
         Ok(child) => Ok((child, true)),
         // ERROR_ACCESS_DENIED: the job we are in does not allow breakaway.
-        Err(e) if e.raw_os_error() == Some(5) => Ok((
-            prepared(spec, shell, script)?
-                .creation_flags(base)
-                .spawn()?,
-            false,
-        )),
+        Err(e) if e.raw_os_error() == Some(5) => {
+            let mut command = prepared(spec, shell, script)?;
+            vw_platform::process_command::set_creation_flags(
+                &mut command,
+                CREATE_NEW_PROCESS_GROUP,
+            );
+            Ok((command.spawn()?, false))
+        }
         Err(e) => Err(e),
     }
 }

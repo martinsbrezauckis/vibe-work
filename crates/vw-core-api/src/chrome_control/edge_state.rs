@@ -77,6 +77,11 @@ pub(super) fn update(shared: &Arc<Shared>, data: &Value) {
             continue;
         };
         let mut current = pairing.lock().unwrap_or_else(PoisonError::into_inner);
+        if browser == "edge:"
+            && super::remove::is_removed(shared, super::agent_browser::Browser::Edge)
+        {
+            continue;
+        }
         // No registered profile is expected while an enabled extension holds another identity.
         if current.0 == PairingState::OtherOwner
             && data.get("error").is_none()

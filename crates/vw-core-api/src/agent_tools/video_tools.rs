@@ -308,7 +308,7 @@ mod tests {
         assert!(snapshot(&f.core.shared, "video", &msys(&protected)).is_err());
         f.finish().await;
     }
-    #[cfg(target_os = "linux")]
+    #[cfg(all(target_os = "linux", not(feature = "linux-video")))]
     #[tokio::test]
     async fn linux_video_refuses_before_request_validation_or_file_access() {
         let f = crate::feature_test_core::Fixture::new().await;

@@ -313,6 +313,9 @@ async fn on_main_thread<T: Send + 'static>(
 /// GTK top-level windows of this process that are shown and are not the main window, with a stable id (the
 /// widget's address while it lives).
 #[cfg(target_os = "linux")]
+pub(crate) const BROWSER_WINDOW_WIDGET: &str = "vw-owned-browser-window";
+
+#[cfg(target_os = "linux")]
 fn gtk_dialogs(main_title: &str) -> Vec<(String, gtk::Window)> {
     use glib::prelude::*;
     use gtk::prelude::*;
@@ -320,6 +323,8 @@ fn gtk_dialogs(main_title: &str) -> Vec<(String, gtk::Window)> {
         .into_iter()
         .filter_map(|w| w.downcast::<gtk::Window>().ok())
         .filter(|w| w.is_visible() && w.window_type() == gtk::WindowType::Toplevel)
+        // Browser pages use the browser capture path, including its vault and document restrictions.
+        .filter(|w| w.widget_name() != BROWSER_WINDOW_WIDGET)
         .filter(|w| {
             // The main window is the one holding the main webview; dialogs are transient for it.
             w.transient_for().is_some() || w.title().is_some_and(|t| t != main_title)

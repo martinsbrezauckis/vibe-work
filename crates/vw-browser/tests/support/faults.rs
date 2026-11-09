@@ -15,6 +15,23 @@ pub(super) fn take_one(counter: &AtomicU64) -> bool {
 }
 
 impl PageEngine {
+    /// Keeps the registry snapshot fixed when a test models delayed host registrations.
+    pub(super) fn lag_frames(&self, answers: &mut Vec<vw_preview::FrameAnswer>) {
+        if self.registry_lag.load(Ordering::Relaxed) {
+            let mut lagged = self.lagged.lock().unwrap();
+            let known = lagged.get_or_insert_with(|| {
+                answers
+                    .iter()
+                    .map(|a| (a.id.clone(), a.generation))
+                    .collect()
+            });
+            answers.retain(|a| known.iter().any(|(id, _)| *id == a.id));
+            for answer in answers.iter_mut() {
+                answer.generation = known.iter().find(|(id, _)| *id == answer.id).unwrap().1;
+            }
+        }
+    }
+
     /// Capture uses isolated frame evaluation; fault injection must follow the same pin step on either path.
     pub(super) async fn capture_pin(&self) -> Result<(), EngineError> {
         if let Some(action) = self.on_pin.lock().unwrap().take() {

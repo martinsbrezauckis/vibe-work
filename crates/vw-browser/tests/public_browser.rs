@@ -58,22 +58,25 @@ impl Walk {
     }
 
     async fn read(&mut self, find: Option<&str>) -> Value {
+        self.read_options(
+            ReadOptions {
+                find: find.map(str::to_owned),
+                ..ReadOptions::default()
+            },
+            json!({"find":find}),
+        )
+        .await
+    }
+
+    async fn read_options(&mut self, options: ReadOptions, args: Value) -> Value {
         let start = Instant::now();
         let result = self
             .rig
             .browser
-            .read(
-                SESSION,
-                ReadOptions {
-                    find: find.map(str::to_owned),
-                    ..ReadOptions::default()
-                },
-                false,
-                Actor::Agent,
-            )
+            .read(SESSION, options, false, Actor::Agent)
             .await
             .map_or_else(|e| json!({"error":e}), |r| r.0);
-        self.record("browser_read", json!({"find":find}), result, start)
+        self.record("browser_read", args, result, start)
     }
 
     async fn act(&mut self, args: Value) -> Value {
@@ -103,6 +106,66 @@ impl Walk {
         result["detail"] = detail;
         result
     }
+}
+
+#[tokio::test]
+#[ignore = "real public consent inventory; run explicitly with VW_BROWSER_BENCH_OUTPUT"]
+async fn public_choice_continuation() {
+    let output = std::env::var("VW_BROWSER_BENCH_OUTPUT").expect("receipt output path");
+    let mut walk = Walk::new().await;
+    walk.act(json!({"action":"navigate","url":"https://www.meteounradars.lv/"}))
+        .await;
+    walk.act(json!({"action":"wait","text":"PIEŅEMT","timeoutMs":15000}))
+        .await;
+    let mut answer = walk.read(None).await;
+    let (model, _, _) = walk
+        .rig
+        .browser
+        .observe(SESSION, ReadOptions::default())
+        .await
+        .unwrap();
+    let oracle: Vec<_> = model
+        .covering_frames
+        .first()
+        .map(|frame| {
+            frame
+                .choices
+                .iter()
+                .map(|choice| choice.name.clone())
+                .collect()
+        })
+        .unwrap_or_default();
+    let mut names = Vec::new();
+    for _ in 0..20 {
+        let frame = &answer["untrustedPageContent"]["coveringFrames"][0];
+        if let Some(choices) = frame["choices"].as_array() {
+            names.extend(
+                choices
+                    .iter()
+                    .filter_map(|choice| choice["name"].as_str().map(str::to_owned)),
+            );
+        }
+        let Some(next) = frame.get("nextChoiceCursor").cloned() else {
+            break;
+        };
+        let cursor = serde_json::from_value(next.clone()).unwrap();
+        answer = walk
+            .read_options(
+                ReadOptions {
+                    choice_cursor: Some(cursor),
+                    ..ReadOptions::default()
+                },
+                json!({"choiceCursor":next}),
+            )
+            .await;
+    }
+    let verified = !oracle.is_empty() && names == oracle;
+    let result = walk.finish("CONSENT-PAGES", verified, json!({"scope":"Read-only choice pagination, not a forecast or model run. Oracle is a separate full host observation, excluded from tool counts.","names":names,"oracleNames":oracle}));
+    std::fs::write(output, serde_json::to_string_pretty(&result).unwrap()).unwrap();
+    assert!(
+        verified,
+        "public consent inventory changed or was unavailable"
+    );
 }
 
 fn reference(answer: &Value, name: &str) -> Option<Value> {

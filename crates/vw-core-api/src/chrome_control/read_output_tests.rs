@@ -4,7 +4,7 @@ use super::{gateway, output_tests, test_support};
 use serde_json::{Value, json};
 use std::path::PathBuf;
 
-async fn fixture(label: &str) -> (crate::Core, PathBuf) {
+pub(super) async fn fixture(label: &str) -> (crate::Core, PathBuf) {
     let core = output_tests::core(label).await;
     let folder = core
         .shared
@@ -388,15 +388,31 @@ async fn exporting_a_non_read_buffer_refuses_without_replaying_it() {
 }
 
 #[tokio::test]
-async fn export_respects_the_current_file_write_mode_for_fresh_and_buffered_reads() {
+async fn ask_browser_exports_run_for_fresh_and_buffered_reads_without_general_file_edit_authority()
+{
     let (core, folder) = fixture("chrome-save-write-mode").await;
-    let seen = test_support::answering(&core.shared, |_, _| output_tests::mcp(captured()));
+    let seen = test_support::answering(&core.shared, |tool, args| {
+        if tool == "chrome_status" {
+            output_tests::status(args)
+        } else {
+            output_tests::mcp(captured())
+        }
+    });
     core.shared
         .access
         .observe_request("session/agent/update", "s", &json!({"agentName":"ask"}));
     let first = gateway::call(&core.shared, "s", "chrome_execute", request(json!({})))
         .await
         .unwrap();
+    // Metadata reads are allowed too; they must not count as re-reading a frozen page.
+    assert!(matches!(
+        core.shared
+            .chrome_control
+            .owner
+            .call("chrome_status", json!({}))
+            .await,
+        super::owner::Answer::Helper(_)
+    ));
     for read_args in [
         json!({}),
         first["vwMcpResult"]["structuredContent"]["continuation"]["args"].clone(),
@@ -404,11 +420,21 @@ async fn export_respects_the_current_file_write_mode_for_fresh_and_buffered_read
         let mut args = request(read_args);
         args["saveTo"] = json!("file");
         let result = gateway::call(&core.shared, "s", "chrome_execute", args).await;
-        assert!(result.is_err(), "Ask mode must not create an export");
-        assert!(result.unwrap_err().contains("omit saveTo"));
+        assert!(result.unwrap()["vwMcpResult"]["structuredContent"]["savedToFile"].is_object());
     }
-    assert_eq!(seen.lock().unwrap().len(), 1);
-    assert_eq!(std::fs::read_dir(&folder).unwrap().count(), 0);
+    let calls = seen.lock().unwrap().clone();
+    assert_eq!(
+        calls
+            .iter()
+            .filter(|(tool, _)| tool == "chrome_execute")
+            .count(),
+        2,
+        "fresh reads dispatch twice; the frozen export does not re-read: {calls:?}"
+    );
+    assert!(calls.iter().all(|(tool, args)| tool == "chrome_status"
+        || (tool == "chrome_execute" && args["action"] == "page.read")));
+    assert_eq!(std::fs::read_dir(&folder).unwrap().count(), 2);
+    assert_eq!(core.shared.asks.list(), [] as [vw_ask::Ask; 0]);
     core.shared.access.observe_request(
         "session/agent/update",
         "s",
@@ -420,7 +446,7 @@ async fn export_respects_the_current_file_write_mode_for_fresh_and_buffered_read
         .await
         .unwrap();
     assert!(result["vwMcpResult"]["structuredContent"]["savedToFile"].is_object());
-    assert_eq!(std::fs::read_dir(folder).unwrap().count(), 1);
+    assert_eq!(std::fs::read_dir(folder).unwrap().count(), 3);
     core.shutdown().await;
 }
 

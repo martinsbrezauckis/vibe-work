@@ -10,9 +10,10 @@
 //!   `--chrome-catalog` advertises the Chrome tools (the core decides it per chat), `--without-chrome` marks a build
 //!   without the Chrome package; with neither flag no Chrome tool is listed; `--app-version <version>` is accepted and
 //!   ignored, as is `--build-id <identity>` (they separate tool-list caches per build). Exits when stdin closes.
-//! - `guard <safety|process|git|folder|connector|chrome|receipt|allowed> --endpoint-file <path>`: one `pre_tool` hook of
-//!   `$VIBE_HOME/hooks.toml`. Reads Vibe's hook payload on stdin, prints a deny decision or nothing, exits 0.
-//! - `kill-guard --endpoint-file <path>`: every guard in one call (the earlier form, kept for tests).
+//! - `guard <safety|process|git|folder|connector|receipt|allowed> --endpoint-file <path>`: a single check from
+//!   `$VIBE_HOME/hooks.toml`. The filename can instead arrive through `VW_HOOK_ENDPOINT_FILE` (Windows).
+//!   Reads Vibe's hook payload on stdin, prints a deny decision or nothing, exits 0.
+//! - `kill-guard --endpoint-file <path>`: the managed pre-tool hook: selected guards in order, with the refusing guard named in the reason.
 //!
 //! Depends on: `hook`, `mcp`, `wire`. Called by: `main.rs`, the private test binary.
 
@@ -48,11 +49,7 @@ fn mcp_mode(chrome: bool, package: bool) -> ExitCode {
 }
 
 fn kill_guard(args: &[String], guard: Option<hook::Guard>) -> ExitCode {
-    let file = args
-        .iter()
-        .position(|a| a == "--endpoint-file")
-        .and_then(|i| args.get(i + 1))
-        .map(PathBuf::from);
+    let file = endpoint_file(args, std::env::var_os(hook::ENV_ENDPOINT_FILE));
     let mut payload = String::new();
     let limit = u64::try_from(hook::MAX_PAYLOAD).unwrap_or(u64::MAX);
     if std::io::stdin()
@@ -62,8 +59,6 @@ fn kill_guard(args: &[String], guard: Option<hook::Guard>) -> ExitCode {
     {
         payload.clear();
     }
-    // Misconfigured (no file): decide still allows commands without kill words, denies the rest.
-    let file = file.unwrap_or_default();
     let decision = match guard {
         Some(guard) => guard.decide(&payload, &file),
         None => hook::decide(&payload, &file),
@@ -72,6 +67,15 @@ fn kill_guard(args: &[String], guard: Option<hook::Guard>) -> ExitCode {
         println!("{text}");
     }
     ExitCode::SUCCESS
+}
+
+fn endpoint_file(args: &[String], inherited: Option<std::ffi::OsString>) -> PathBuf {
+    args.iter()
+        .position(|a| a == "--endpoint-file")
+        .and_then(|i| args.get(i + 1))
+        .map(PathBuf::from)
+        .or_else(|| inherited.map(PathBuf::from))
+        .unwrap_or_default()
 }
 
 /// Runs the program with `args` (without the program name).
@@ -133,9 +137,28 @@ pub fn run(args: &[String]) -> ExitCode {
         }
         _ => {
             eprintln!(
-                "usage: vw-agent-tools mcp | vw-agent-tools guard <safety|process|git|folder|connector|chrome|receipt|allowed> --endpoint-file <path> | vw-agent-tools kill-guard --endpoint-file <path>"
+                "usage: vw-agent-tools mcp | vw-agent-tools guard <safety|process|git|folder|connector|receipt|allowed> --endpoint-file <path> | vw-agent-tools kill-guard --endpoint-file <path>"
             );
             ExitCode::from(2)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hook_endpoint_environment_is_literal_and_explicit_file_takes_precedence() {
+        let path = r"C:\OneDrive - Mārtiņš\$`';&\hook.json";
+        assert_eq!(endpoint_file(&[], Some(path.into())), PathBuf::from(path));
+        assert_eq!(
+            endpoint_file(
+                &["--endpoint-file".into(), "explicit.json".into()],
+                Some(path.into())
+            ),
+            PathBuf::from("explicit.json")
+        );
+        assert_eq!(endpoint_file(&[], None), PathBuf::new());
     }
 }

@@ -15,7 +15,6 @@
 
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use crate::reveal::windows_local_drive_path;
 
@@ -152,7 +151,7 @@ pub fn file_open_class(path: &Path) -> Result<(PathBuf, OpenClass), OpenFileErro
 }
 
 fn spawn_detached(program: &str, args: Vec<std::ffi::OsString>) -> Result<(), OpenFileError> {
-    let mut command = Command::new(program);
+    let mut command = crate::process_command::hidden(program);
     crate::child_env::remove_own_run_settings(&mut command);
     let mut child = command
         .args(args)
@@ -196,7 +195,7 @@ pub fn reveal_file(path: &Path) -> Result<(), OpenFileError> {
     {
         use std::os::windows::process::CommandExt;
         // Explorer parses `/select,"<path>"` itself; Windows paths cannot contain `"`.
-        let mut child = Command::new("explorer")
+        let mut child = crate::process_command::hidden("explorer")
             .raw_arg(format!("/select,\"{}\"", canonical.display()))
             .spawn()
             .map_err(|error| OpenFileError::Spawn(error.to_string()))?;

@@ -2,9 +2,8 @@
 // browser. It keeps the facts the observe/act scripts need and nothing the page can use against the user.
 // What the user types is readable to the agent like any page text, so there is no typing tracker; secret fields
 // are recognised by their kind (`js/common.js` in vw-browser):
-// - dialogs (alert/confirm/prompt) raised while an agent action runs are answered at once (ok / cancel / empty)
-//   and logged for the receipt, so an action never hangs on a dialog; outside that window the page's own
-//   dialogs work as usual for the user;
+// - native dialogs are held by the engine until an explicit browser-tool answer
+//   on agent-owned pages; user pages keep the native dialog UI;
 // - a mutation counter (settling after an action) and a stability store (actionability);
 // - service workers are off : a worker outlives its page and could send requests later under
 //   another page's rights; the engine also clears registrations at every mount.
@@ -42,7 +41,6 @@
   const dialogs = [];
   const stability = new WeakMap();
   let mutations = 0;
-  let agentUntil = 0;
   let contextChoice = "";
   let contextElement = "selected text";
   let contextTarget = null;
@@ -100,6 +98,12 @@
     pointChoice = null;
     pointIntent = false;
     if (!event.isTrusted) return;
+    // Native agent input is trusted too. Its isolated receipt owns this one right-click sequence;
+    // cancel the engine's default menu, while allowing the page's contextmenu handlers to run.
+    if (window[NAME + "_pointReceipt"]?.takeContextMenu(event)) {
+      event.preventDefault();
+      return;
+    }
     const selection = pageSelection(event);
     const selected = selection?.range.intersectsNode(event.target);
     let value = selected ? selection.quote.trim() : "";
@@ -256,19 +260,6 @@
       contextTokenize = false;
     }
   }, true);
-  const answers = { alert: undefined, confirm: false, prompt: null };
-  for (const kind of Object.keys(answers)) {
-    const original = window[kind];
-    if (typeof original !== "function") continue;
-    window[kind] = function (message) {
-      if (performance.now() < agentUntil) {
-        dialogs.push({ kind, message: String(message === undefined ? "" : message).slice(0, 300) });
-        if (dialogs.length > 20) dialogs.shift();
-        return answers[kind];
-      }
-      return original.apply(this, arguments);
-    };
-  }
   try {
     const refuse = () => Promise.reject(new DOMException("Service workers are off in this browser", "SecurityError"));
     if (window.ServiceWorkerContainer) {
@@ -294,9 +285,6 @@
     dialogs,
     stability,
     mutations: () => mutations,
-    agentActing: (ms) => {
-      agentUntil = performance.now() + Math.max(0, Math.min(Number(ms) || 0, 10000));
-    },
     takeContextChoice: () => {
       const value = contextReady && performance.now() < contextExpires ? contextChoice : "";
       const element = contextElement;

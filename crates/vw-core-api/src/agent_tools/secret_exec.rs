@@ -52,7 +52,7 @@ pub(crate) async fn execute(
     exec: &Exec<'_>,
     values: &[(String, SecretString)],
 ) -> Result<Value, String> {
-    let mut command = tokio::process::Command::new(exec.program);
+    let mut command = vw_platform::process_command::hidden_tokio(exec.program);
     command
         .args(exec.args)
         .current_dir(exec.cwd)
@@ -81,7 +81,7 @@ pub(crate) async fn execute(
     #[cfg(unix)]
     command.process_group(0);
     #[cfg(windows)]
-    command.creation_flags(0x0800_0000 | 0x0000_0200); // CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP
+    vw_platform::process_command::set_creation_flags(command.as_std_mut(), 0x0000_0200);
     let mut child = command
         .spawn()
         .map_err(|e| format!("Not run: the program could not be started ({e})"))?;

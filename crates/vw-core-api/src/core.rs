@@ -319,10 +319,9 @@ fn spawn_key_forwarder(shared: &Arc<Shared>) {
     }
 }
 
-/// Starts the core's owned background tasks: the agent tools' listener, the preview event forwarder, the
-/// Changes refresh and the process monitor's tick (each aborted on shutdown or when the core drops). First it
-/// registers the credentials of Vibe Work's own Vibe config as stored secrets, before a session can
-/// echo them, and installs the MCP forwarder's resolver.
+/// Wires the core's owned services and starts their background work (stopped on shutdown or core drop).
+/// Registers Vibe config credentials before a session can echo them, then starts agent tools, preview events,
+/// browser popups, pages, files, plan profiles, Changes refresh, process monitoring and session-holder polling.
 fn spawn_owned_tasks(shared: &Arc<Shared>) {
     crate::mcp_keys::at_start(shared);
     crate::agent_tools::start_server(shared);
@@ -594,9 +593,9 @@ impl Core {
         crate::github_reads::watch(&shared);
         crate::keep_awake::publish(&shared);
         crate::secret_scan::start(&shared);
-        // An app update brings a new helper: Chrome's copy follows it in the background (start does not wait).
+        // Repair app-owned browser packages in the background; startup does not wait.
         let refreshing = shared.clone();
-        tokio::spawn(async move { crate::chrome_control::refresh_helper(&refreshing).await });
+        tokio::spawn(async move { crate::chrome_control::startup(&refreshing).await });
         crate::chrome_control::start_owner(&shared).await;
         info!("core started");
         Ok(Self { shared })

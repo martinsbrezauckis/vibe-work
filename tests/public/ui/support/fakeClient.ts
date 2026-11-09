@@ -118,7 +118,7 @@ export interface FakeClient extends CoreClient {
     typeof vi.fn<(share?: boolean) => Promise<CliSharingView>>
   >;
   setDebugApi: ReturnType<typeof vi.fn<(enabled: boolean) => Promise<void>>>;
-  debugApiTokenFile: ReturnType<
+  debugApiTokenItem: ReturnType<
     typeof vi.fn<(rotate: boolean) => Promise<string | null>>
   >;
   /**
@@ -444,7 +444,7 @@ export function fakeClient(kind: CoreClient["kind"] = "fake"): FakeClient {
     setDebugApi: vi.fn<(enabled: boolean) => Promise<void>>(() =>
       Promise.resolve(),
     ),
-    debugApiTokenFile: vi.fn<(rotate: boolean) => Promise<string | null>>(() =>
+    debugApiTokenItem: vi.fn<(rotate: boolean) => Promise<string | null>>(() =>
       Promise.resolve("vibe-work-secret-deb06a9100000001"),
     ),
     updateChannel: false,

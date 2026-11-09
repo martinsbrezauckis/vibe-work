@@ -63,7 +63,14 @@ fn video_frames_is_listed_only_on_supported_platforms() {
         .any(|tool| tool["name"] == "video_frames");
     assert_eq!(
         listed,
-        cfg!(all(feature = "video", any(windows, target_os = "macos")))
+        cfg!(all(
+            feature = "video",
+            any(
+                windows,
+                target_os = "macos",
+                all(target_os = "linux", feature = "linux-video")
+            )
+        ))
     );
 }
 

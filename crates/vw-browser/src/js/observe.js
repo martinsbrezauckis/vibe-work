@@ -15,6 +15,10 @@
   // The original address stays on the host for admission checks; only displayUrl goes into agent answers.
   const out = { url: String(location.href).slice(0, 2000), displayUrl: hideKeys(String(location.href)).slice(0, 2000), title: clip(hideKeys(document.title), 300), readyState: document.readyState };
   out.document = ENV?.frameDocument || "";
+  const headings = everything.elements.filter(el => el.ownerDocument === document &&
+    el.matches('h1,[role="heading"][aria-level="1"]') && visible(el));
+  out.mainHeadings = headings.slice(0, 3).map(el => clip(hideKeys(el.innerText || el.textContent, el), 180));
+  out.mainHeadingsTotal = headings.length;
   const { truncated, crossOriginFrames } = everything;
   const needle = typeof REQ.find === "string" ? REQ.find.toLowerCase() : null;
   // Search only redacted display fields, never the original value of a secret field. A checked click's fresh
@@ -63,6 +67,11 @@
   const elements = everything.elements.filter(el => actionableCandidate(el) || visualCandidate(el))
     .map((el) => ({ el, rank: refOf(el) === REQ.priorityRef ? 8 : Math.min(priority(el), frameLimit(el)) }))
     .sort((a, b) => b.rank - a.rank);
+  // A consent dialog in this document needs the same independent inventory as a covering child frame.
+  // Find its roots before the ordinary page-choice cap: unrelated links cannot hide a late dialog.
+  const overlays = new Map(overlayChoiceRoots(elements.filter(({ el }) =>
+    el.ownerDocument === document && visible(el))).slice(0, 4)
+    .map(root => [root, { choices: [], total: 0 }]));
   const refs = [];
   const choiceGroups = new Map();
   // Retain up to one cap from each group before selecting, so children cannot consume the
@@ -171,6 +180,11 @@
       const group = choiceGroups.get(doc);
       group.total += 1;
       if (group.choices.length < 200) group.choices.push({ el, item });
+      for (const [root, overlay] of overlays) {
+        if (!root.contains(el)) continue;
+        overlay.total += 1;
+        if (overlay.choices.length < 200) overlay.choices.push({ el, item });
+      }
     }
     if (!alreadySeen && room(el)) addRef(item);
   }
@@ -179,8 +193,11 @@
   try { text = String(document.body?.innerText || ""); } catch { text = ""; }
   // Text that looks like a key is hidden (the element that shows it has a keyLike ref).
   text = hideKeys(text);
-  const offset = Math.max(0, Math.min(Number(REQ.textOffset) || 0, text.length));
-  out.text = text.slice(offset, offset + REQ.maxText);
+  let offset = Math.max(0, Math.min(Number(REQ.textOffset) || 0, text.length));
+  let end = offset + REQ.maxText;
+  if (offset && /[\uDC00-\uDFFF]/u.test(text[offset] || "")) offset += 1;
+  if (/[\uD800-\uDBFF]/u.test(text[end - 1] || "")) end += 1;
+  out.text = text.slice(offset, end);
   out.textOffset = offset;
   out.textLength = text.length;
   // Hidden text (display:none, visibility:hidden, tiny, off-canvas): only for the prompt guard.
@@ -209,13 +226,20 @@
   out.coveringFrames = [];
   out.choiceContext = [];
   out.documentContext = choiceContextFor(document.body || document.documentElement);
+  for (const [root, group] of overlays) {
+    if (!group.total) continue;
+    group.choices.sort((a, b) => a.el.compareDocumentPosition(b.el) & 2 ? 1 : -1);
+    const choices = group.choices.map(({ item }) => item);
+    out.coveringFrames.push({ origin: hideKeys(location.origin), choices,
+      total: group.total, complete: !truncated && group.total === choices.length });
+    out.choiceContext.push(choiceContextFor(root));
+  }
   for (const [doc, group] of choiceGroups) {
     group.choices.sort((a, b) => a.el.compareDocumentPosition(b.el) & 2 ? 1 : -1);
     const choices = group.choices.map(({ item }) => item);
     if (doc === document) {
       out.choiceRefs = choices;
       out.choiceCount = group.total;
-      out.choiceContext.push(...overlayChoiceRoots(group.choices).slice(0, 4).map(choiceContextFor));
     } else if (group.choices.length && frameLimit(group.choices[0].el) === 7) {
       out.coveringFrames.push({ origin: hideKeys(doc.location.origin), choices,
         total: group.total, complete: !truncated && group.total === choices.length });

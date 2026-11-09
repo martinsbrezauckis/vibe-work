@@ -23,6 +23,7 @@ import type {
   KeyRequest,
   KeyStatusView,
   VaultChoice,
+  VaultUnlockMethod,
   VibeKeySource,
   VibeKeyView,
 } from "../protocol/core";
@@ -137,8 +138,9 @@ export interface KeyController {
   createWithKey(
     password: string,
     how: { key: string } | { importFrom: VibeKeySource },
+    unlockMethod?: VaultUnlockMethod,
   ): Promise<boolean>;
-  unlock(password: string, vault?: VaultChoice): Promise<boolean>;
+  unlock(password: string, vault?: VaultChoice, unlockMethod?: VaultUnlockMethod): Promise<boolean>;
   saveKey(key: string): Promise<boolean>;
   addMistralKey(name: string, key: string): Promise<boolean>;
   useMistralKey(itemId: string): Promise<boolean>;
@@ -151,6 +153,7 @@ export interface KeyController {
   lockNow(): Promise<boolean>;
   /** Turns "Lock the vault when Vibe Work quits" on or off (no password: nothing is re-wrapped). */
   setLockOnQuit(on: boolean): Promise<boolean>;
+  setUnlockMethod(method: VaultUnlockMethod, password: string): Promise<boolean>;
   dismiss(): void;
   reopen(): void;
   /** Closes the result view after setup (the sessions show again). */
@@ -323,8 +326,8 @@ export function createKeys(
     covers: () => covering(),
     start: load,
     load,
-    async createWithKey(password, how) {
-      const created = await send({ op: "createVault", passphrase: password });
+    async createWithKey(password, how, unlockMethod = "system") {
+      const created = await send({ op: "createVault", passphrase: password, unlockMethod });
       if (created === null) return false;
       const stored = await send(
         "key" in how
@@ -340,12 +343,13 @@ export function createKeys(
       await testKey(true);
       return true;
     },
-    async unlock(password, vault) {
+    async unlock(password, vault, unlockMethod) {
       const fromSetup = covering();
       const result = await send({
         op: "unlockVault",
         passphrase: password,
         ...(vault === undefined ? {} : { vault }),
+        ...(unlockMethod === undefined ? {} : { unlockMethod }),
       });
       if (result === null) return false;
       if (fromSetup) set({ resultPending: true });
@@ -389,6 +393,8 @@ export function createKeys(
       if (ok) set({ test: { phase: "idle" } });
       return ok;
     },
+    setUnlockMethod: (unlockMethod, passphrase) =>
+      change({ op: "setVaultUnlockMethod", unlockMethod, passphrase }, false),
     setLockOnQuit: (on) => change({ op: "setLockVaultOnQuit", on }, false),
     dismiss: () => {
       set({ dismissed: true });

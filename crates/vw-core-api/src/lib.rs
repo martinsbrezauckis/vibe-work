@@ -45,7 +45,9 @@ mod audio_output;
 mod background_output;
 mod browser;
 mod browser_accounts;
+mod browser_auth;
 mod browser_capture;
+mod browser_clipboard;
 mod browser_consent;
 mod browser_delegation;
 mod browser_delegation_receipts;
@@ -58,6 +60,7 @@ mod browser_tab_tools;
 mod browser_tabs;
 mod browser_upload;
 mod browser_view;
+mod browser_windows;
 mod changes;
 mod changes_children;
 mod changes_effects;
@@ -300,6 +303,8 @@ mod skills_view;
 mod speech;
 mod speech_view;
 mod stop_tree;
+#[cfg(test)]
+mod stop_tree_tests;
 mod stops;
 mod stuck;
 mod subagents_setting;
@@ -349,8 +354,8 @@ pub use core_viewers::for_window_generation;
 pub use dictation::SpeechConfig;
 pub use documents::DocumentsConfig;
 pub use documents_view::{
-    DocumentRefusal, DocumentSource, DocumentView, DocumentsRequest, DocumentsResult, DroppedFile,
-    KeptUnitView, KeptView,
+    DocumentRefusal, DocumentRefusalKind, DocumentSource, DocumentView, DocumentsRequest,
+    DocumentsResult, DroppedFile, KeptUnitView, KeptView,
 };
 pub use error::{CoreError, ErrorCode};
 pub use event::{AlertKind, CoreEvent, SessionChange, SubagentCard};
@@ -369,8 +374,8 @@ pub use instructions_view::{
     InstructionsDoc, InstructionsRequest, InstructionsResult, InstructionsScope,
 };
 pub use keys::{
-    KeyCandidateView, KeyMetadataView, KeyRequest, KeySourceView, KeyStatusView, RateLimitsView,
-    SecretInput, VaultChoice, VibeKeySource, VibeKeyView,
+    KeyMetadataView, KeyRequest, KeySourceView, KeyStatusView, RateLimitsView, SecretInput,
+    VaultChoice, VaultUnlockMethod, VibeKeySource, VibeKeyView,
 };
 pub use left_running_view::{
     LeftRunningView, ProcessesRequest, ProcessesResult, SessionProcessView,

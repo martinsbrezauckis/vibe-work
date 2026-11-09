@@ -76,6 +76,7 @@ pub(crate) fn download_policy(
       let mut started_fn = started_fn.borrow_mut();
       match started_fn(url.to_string(), &mut download_destination) {
         true => {
+          this.ivars().destinations.borrow_mut().insert(download as *const WKDownload as usize, download_destination.clone());
           let path = NSString::from_str(&download_destination.display().to_string());
           let ns_url = NSURL::fileURLWithPath_isDirectory(&path, false);
           (*completion_handler).call((Retained::as_ptr(&ns_url),))
@@ -95,7 +96,8 @@ pub(crate) fn download_did_finish(this: &WryDownloadDelegate, download: &WKDownl
     let original_request = download.originalRequest().unwrap();
     let url = original_request.URL().unwrap().absoluteString().unwrap();
     if let Some(completed_fn) = this.ivars().completed.clone() {
-      completed_fn(url.to_string(), None, true);
+      let path = this.ivars().destinations.borrow_mut().remove(&(download as *const WKDownload as usize));
+      completed_fn(url.to_string(), path, true);
     }
   }
 }
@@ -116,7 +118,8 @@ pub(crate) fn download_did_fail(
     let original_request = download.originalRequest().unwrap();
     let url = original_request.URL().unwrap().absoluteString().unwrap();
     if let Some(completed_fn) = this.ivars().completed.clone() {
-      completed_fn(url.to_string(), None, false);
+      let path = this.ivars().destinations.borrow_mut().remove(&(download as *const WKDownload as usize));
+      completed_fn(url.to_string(), path, false);
     }
   }
 }

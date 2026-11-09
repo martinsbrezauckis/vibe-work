@@ -345,7 +345,7 @@ async fn agent_requester_cannot_reach_key_storage_through_the_method_gate() {
 
 #[tokio::test]
 async fn a_rejected_key_can_be_replaced_by_a_saved_key_without_an_extra_confirmation() {
-    for (status, op) in [(401, "useMistralKey"), (403, "useExistingKey")] {
+    for (status, op) in [(401, "useMistralKey"), (403, "useMistralKey")] {
         let rig = Rig::new(&format!("key-rejected-saved-{status}")).await;
         rig.core.core.execute(Origin::Ui, serde_json::from_value(json!({
             "type":"keys", "request":{"op":"addMistralKey","name":"Other key","apiKey":REPLACEMENT}

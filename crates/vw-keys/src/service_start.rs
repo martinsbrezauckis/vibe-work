@@ -108,6 +108,10 @@ impl KeyService {
             chrome_owner_account: crate::chrome::account(&config.settings_path),
             settings: KeySettings::new(config.settings_path),
             vault_settings,
+            unlock_with_password: std::sync::atomic::AtomicBool::new(
+                at_start.unlock_method == crate::UnlockMethod::Password,
+            ),
+            unlock_change: tokio::sync::Mutex::new(()),
             lock_on_quit: std::sync::atomic::AtomicBool::new(at_start.lock_on_quit),
             locked_until_password: std::sync::atomic::AtomicBool::new(
                 at_start.locked_until_password,

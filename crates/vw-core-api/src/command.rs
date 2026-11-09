@@ -12,7 +12,7 @@ use crate::files_view::{FilesRequest, FilesResult};
 use crate::git_browser_view::{GitBrowserRequest, GitBrowserResult};
 use crate::git_view::{GitRequest, GitResult};
 use crate::instructions_view::{InstructionsRequest, InstructionsResult};
-use crate::keys::{KeyCandidateView, KeyRequest, KeyStatusView, VibeKeyView};
+use crate::keys::{KeyRequest, KeyStatusView, VibeKeyView};
 use crate::left_running_view::{ProcessesRequest, ProcessesResult};
 use crate::line_comments_view::{LineCommentsRequest, LineCommentsResult};
 use crate::market_view::{MarketRequest, MarketResult};
@@ -589,11 +589,6 @@ pub enum CommandResult {
     KeyStatus {
         /// Vault and key status (no secret).
         status: KeyStatusView,
-    },
-    /// `keys` / `listKeyCandidates`.
-    KeyCandidates {
-        /// Mistral credentials already in the vault (metadata).
-        candidates: Vec<KeyCandidateView>,
     },
     /// All saved Mistral keys; metadata only.
     MistralKeys {

@@ -14,7 +14,9 @@ An independent open-source project, part of the ShellX family of apps
   <img src="docs/public/images/vibe-work-016-dark.webp" alt="Vibe Work with three projects, a pending one-line edit to approve, and the Changes panel." width="1920">
 </picture>
 
-Version 0.1.8 adds Your Safari on macOS, Send feedback, your monthly plan usage and a context breakdown.
+Version 0.1.9 adds video review on Linux, more of the agent browser (its own windows, page dialogs, double, right and
+middle clicks, downloads, element captures, cookies and storage), a browser rule for Ask mode and a choice of how the vault
+opens.
 Something specific you want Vibe Work to do? Post it in
 [Discussions](https://github.com/martinsbrezauckis/vibe-work/discussions). Changes per version: `CHANGELOG.md`.
 Questions and reports: `CONTRIBUTING.md`.
@@ -28,7 +30,7 @@ Questions and reports: `CONTRIBUTING.md`.
   with the Vibe CLI. The agent searches text and file names in the chat's folders, respecting ignored files.
   Settings > Models and agent > Compaction point sets when each model's chats are compacted. Temporary chats need no
   folder: without one they work in an empty folder of their own. They are deleted when you quit.
-- **Video review.** The agent can look at a local video on Windows and macOS through selected frames, scene
+- **Video review.** The agent can look at a local video on Windows, macOS and Linux through selected frames, scene
   changes and contact sheets shown in the chat, using the video support your computer already has.
 - **Needs you.** A badge on the app icon or a mark in the tray shows when a chat is waiting for you.
 - **Tray.** Closing the window keeps chats working in the tray (menu bar on macOS); notifications reopen the chat
@@ -64,7 +66,8 @@ Questions and reports: `CONTRIBUTING.md`.
 - **Agent browser.** Web tabs the agent opens, reads, fills in and clicks through while you watch, with Stop. Logins
   come from the vault for sites you allow; the agent never sees the password. It also works inside embedded frames
   such as sign-in boxes. It clicks canvas and image controls, and controls that only accept a real mouse click, only
-  while the page still shows what it checked. On Windows, macOS and Linux, Settings > Browser blocks ads and trackers
+  while the page still shows what it checked. In Ask mode reading and browsing run without a card; entering or sending
+  information asks first, in every browser. On Windows, macOS and Linux, Settings > Browser blocks ads and trackers
   (Off, Balanced, Strict).
 - **Your Chrome, Your Edge and Your Safari.** Connect the extension in Settings > Browser > Your Chrome or Your Edge
   (Connect Chrome or Connect Edge), or on macOS in Settings > Browser > Your Safari. The agent works in your own
@@ -164,9 +167,11 @@ Services feature; the file and folder entries are available on all three systems
 
 ## Vault and permissions
 
-An unlocked vault opens unlocked at the next start and after an update; Lock keeps it locked. Settings > Account >
-Lock the vault when Vibe Work quits turns on locking at every quit. Its key is kept in this computer's credential
-store while unlocked. After updating from 0.1.1 or 0.1.0 with Remember on this computer on, enter the password once.
+Choose in setup or vault settings: unlock with your system sign-in (the key is kept in this computer's
+credential store), or enter the vault password each time (no unlock key is saved). With system sign-in, an unlocked
+vault opens unlocked at the next start and after an update; Lock keeps it locked. Settings > Account > Lock the
+vault when Vibe Work quits turns on locking at every quit. After updating from 0.1.1 or 0.1.0 with Remember on this
+computer on, enter the password once.
 
 Permission cards show the action and wait until you answer. Saying No on a card for Vibe's own tools stops the
 turn; write what to do instead in the chat. A No in Vibe Work's own prompts answers only that call and the turn

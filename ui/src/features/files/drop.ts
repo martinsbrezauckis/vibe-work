@@ -15,6 +15,7 @@
  */
 import { toCallError } from "../../protocol/client/types";
 import { MAX_IMAGE_BYTES, sniffImage, toBase64 } from "../composer/model/images";
+import type { DocumentRefusal } from "../../protocol/core";
 import { attachmentRefusal } from "./attachments";
 
 /** The largest file the documents path takes (the core checks it again). */
@@ -46,7 +47,7 @@ export interface DropTargets {
   /** Sends files to the documents store; resolves to what it added and refused. */
   addDocuments: (
     files: { name: string; data: string }[],
-  ) => Promise<{ added: { name: string }[]; refused: { name: string; reason: string }[] }>;
+  ) => Promise<{ added: { name: string }[]; refused: DocumentRefusal[] }>;
 }
 
 /** The items of an HTML drop (`DataTransfer`), folders recognised through `webkitGetAsEntry`. */
@@ -112,7 +113,10 @@ export async function dropFiles(
       const result = await targets.addDocuments(documents);
       report.documents = result.added.map((d) => d.name);
       report.refused.push(
-        ...result.refused.map((r) => ({ ...r, reason: attachmentRefusal(r.name, r.reason) })),
+        ...result.refused.map((r) => ({
+          ...r,
+          reason: attachmentRefusal(r.name, r.reason, r.kind),
+        })),
       );
     } catch (thrown) {
       // The core also bounds a single addDropped batch (32 files); report that rejection rather than losing it.
@@ -149,7 +153,7 @@ type DocumentsDrop = {
   addDropped: (
     sessionId: string,
     files: readonly { name: string; data: string }[],
-  ) => Promise<{ added: { name: string }[]; refused: { name: string; reason: string }[] }>;
+  ) => Promise<{ added: { name: string }[]; refused: DocumentRefusal[] }>;
 };
 
 /**

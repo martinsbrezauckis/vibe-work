@@ -25,7 +25,13 @@ export function QuestionField({
 }): ReactElement {
   const legend = useId();
   return (
-    <fieldset data-item-id={name} className="q" disabled={disabled}>
+    <fieldset
+      data-item-id={name}
+      className="q"
+      disabled={disabled}
+      role={question.multiSelect ? undefined : "radiogroup"}
+      aria-labelledby={legend}
+    >
       <legend id={legend}>
         <span className="q-prompt" tabIndex={0} data-testid="transcript.question-prompt">
           {question.header !== "" ? (
@@ -39,7 +45,6 @@ export function QuestionField({
         name={name}
         picked={picked}
         disabled={disabled}
-        labelledBy={legend}
         onChange={onChange}
       />
       {question.allowOther ? (

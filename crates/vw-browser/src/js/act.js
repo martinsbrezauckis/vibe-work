@@ -12,6 +12,9 @@
   /* global dragTo -- Inserted by the script assembler. */
   __VW_COMMON__;
   __VW_NATIVE_CLICK__;
+  /* global postsForm -- Inserted by the script assembler. */
+  // eslint-disable-next-line no-undef -- Expanded by the Rust script assembler.
+  __VW_SENDING__;
   const result = (status, extra) =>
     JSON.stringify({
       status,
@@ -365,7 +368,6 @@
   };
   try {
     const action = REQ.action;
-    if (ENV) ENV.agentActing(3000);
     if (action === "scroll" && !REQ.ref) {
       const step =
         Number(REQ.amount) > 0
@@ -386,7 +388,14 @@
       return result("done");
     }
     let el = null;
-    if (REQ.ref) {
+    if (REQ.postconditionOnly) {
+      // Focus/input can insert a calendar and change the ref's DOM path. Read the same observed node,
+      // never a replacement with identical markup. This branch sends no new input or focus events.
+      const found = Number.isSafeInteger(REQ.observedNode) && REQ.observedNode > 0
+        ? candidates().elements.filter(node => ENV.nodeIdentities?.get(node) === REQ.observedNode) : [];
+      if (found.length !== 1) return result("verificationChanged");
+      el = found[0];
+    } else if (REQ.ref) {
       // A scroll also brings a canvas or image region of the read into view (it sends no input to it).
       const { found, target } = actionRef(REQ.ref, action === "scroll");
       if (found.length === 0) return result("stale");
@@ -397,14 +406,21 @@
       el = target;
     } else if (action === "press") {
       el = document.activeElement || document.body;
+      // Focus inside an open shadow root belongs to its active control, not the retargeted host.
+      while (el.shadowRoot?.activeElement) el = el.shadowRoot.activeElement;
     } else return result("error", { message: "this action needs a ref" });
     const target = { role: roleOf(el), name: labelOf(el) };
     if (action === "type") {
       const secret = secretKind(el);
-      if (secret) return result("secret", { kind: secret, target });
+      if (secret) return REQ.postconditionOnly ? result("verificationChanged") : result("secret", { kind: secret, target });
     }
     // A second host call reads the settled state. It sends no input, focus or scroll events.
     if (REQ.postconditionOnly) return postcondition(el, target);
+    if (!REQ.nativeUser && REQ.allowSend === false &&
+      (((action === "click" || action === "check" && checkedState(el) !== (REQ.checked !== false)) && postsForm(el)) ||
+       (action === "press" && ["Enter", "Space", " "].includes(REQ.key) && postsForm(el, REQ.key === "Enter"))))
+      return result("sendRequired", {target});
+    if (REQ.permissionCheckOnly) return result("done", {target});
     if (action === "type") {
       const wanted = requestedValue(el, String(REQ.text || ""));
       if (wanted.status) return result(wanted.status, { target, kind: wanted.kind });
@@ -427,7 +443,7 @@
     const { failed, covering, hitPoint, retryable } = checks(el, action);
     if (failed.length > 0)
       return result("notActionable", { failed, covering, target, retryable });
-    if (REQ.nativeClick && ["click", "check"].includes(action)) {
+    if (action === "hover" || (REQ.nativeClick && ["click", "check"].includes(action))) {
       if (
         action === "check" &&
         checkedState(el) === (REQ.checked !== false)
@@ -460,13 +476,6 @@
     }
     if (action === "click") {
       clickLike(el, hitPoint);
-      return result("done", { target });
-    }
-    if (action === "hover") {
-      const p = point(el, hitPoint);
-      for (const [type, kind] of [["pointerover", "PointerEvent"], ["pointerenter", "PointerEvent"], ["mouseover", "MouseEvent"], ["mouseenter", "MouseEvent"], ["pointermove", "PointerEvent"], ["mousemove", "MouseEvent"]]) {
-        fire(el, type, kind, p);
-      }
       return result("done", { target });
     }
     if (action === "scroll") {

@@ -22,13 +22,13 @@ use std::time::Duration;
 use serde_json::{Value, json};
 use vw_preview::{HistoryStep, PreviewError, PreviewService, Shot};
 
-use crate::act::{Action, PageAnswer};
+use crate::act::Action;
 use crate::consent::ConsentConfirmer;
 use crate::delegation::DelegationAuthorizer;
 use crate::observe;
 use crate::refs::PAGE_CLOSED;
 use crate::sessions::{Actor, Outcome, Seen, Sessions};
-use crate::{guard, receipt, scripts};
+use crate::{ReadOptions, guard, receipt, scripts};
 
 /// The receipt's outcome key. Answers are JSON objects with sorted keys and the agent's code parses them, so the outcome
 /// stays inside the JSON, under a key that sorts first (capital `O` before every lowercase key): the first thing a
@@ -46,45 +46,23 @@ pub trait Navigate: Send + Sync {
 }
 
 /// The text of a refused agent action after the user's Stop.
-pub const STOPPED: &str = "The user stopped your use of the browser. Do not use the browser again in this turn: tell \
-    the user what you were doing and wait for their answer.";
+pub const STOPPED: &str = "Not run: the person pressed Stop in Vibe Work's browser. Do not use the browser again in this turn; tell \
+    them what you were doing and wait for their answer.";
 /// Nothing is open.
 pub const NOTHING_OPEN: &str =
     "the browser has no page open: use browser_act with action \"navigate\" and a url first";
 
-const ACT_RETRY: Duration = Duration::from_secs(2);
+mod page_input;
 const SETTLE_MAX: Duration = Duration::from_millis(1500);
 const SETTLE_QUIET: Duration = Duration::from_millis(300);
 const LOAD_WAIT: Duration = Duration::from_secs(8);
 const POLL: Duration = Duration::from_millis(60);
 
-/// How a read is shaped (token budget: `observe` module docs).
-#[derive(Clone, Debug)]
-pub struct ReadOptions {
-    /// Observation refs (1..=200, default 32); full reads clamp this to 32.
-    pub max_refs: usize,
-    /// A text page (0-based, 2,500 UTF-16 units each); `None`: the default 800-character preview.
-    pub text_page: Option<usize>,
-    /// The answer's size budget in bytes (1,500..=4,000, default 3,000).
-    pub max_bytes: usize,
-    /// A focused read: only the refs and text lines containing this.
-    pub find: Option<String>,
-}
-
-impl Default for ReadOptions {
-    fn default() -> Self {
-        Self {
-            max_refs: observe::DEFAULT_REFS,
-            text_page: None,
-            max_bytes: observe::READ_BUDGET,
-            find: None,
-        }
-    }
-}
-
 /// Why an action did not run or failed (the text the agent reads).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ActError {
+    /// A typed screenshot refusal, when capture was blocked before it could run.
+    pub capture_block: Option<vw_preview::CaptureBlock>,
     /// Refused, failed or stopped.
     pub outcome: Outcome,
     /// The reason.
@@ -93,6 +71,7 @@ pub struct ActError {
 
 pub(crate) fn refused(text: impl Into<String>) -> ActError {
     ActError {
+        capture_block: None,
         outcome: Outcome::Refused,
         text: text.into(),
     }
@@ -100,6 +79,7 @@ pub(crate) fn refused(text: impl Into<String>) -> ActError {
 
 pub(crate) fn failed(text: impl Into<String>) -> ActError {
     ActError {
+        capture_block: None,
         outcome: Outcome::Failed,
         text: text.into(),
     }
@@ -222,12 +202,26 @@ impl Browser {
         screenshot: bool,
         by: Actor,
     ) -> Result<(Value, Option<Shot>), String> {
+        if options.choice_cursor.is_some() {
+            if options.find.is_some()
+                || options.text_cursor.is_some()
+                || options.text_page.is_some()
+            {
+                return Err(
+                    "choiceCursor reads choices; omit find, textCursor and textPage".into(),
+                );
+            }
+            options.max_refs = 0;
+        }
+        if let Some(receipt) = self.dialog_receipt(session_id) {
+            return Ok((receipt, None));
+        }
         let clamped =
             options.max_bytes > observe::MAX_BUDGET || options.max_refs > observe::MAX_OUTPUT_REFS;
-        options.max_refs = options.max_refs.clamp(1, observe::MAX_OUTPUT_REFS);
+        options.max_refs = options.max_refs.min(observe::MAX_OUTPUT_REFS);
         let find = options.find.clone();
         let (preview, budget) = (
-            options.text_page.is_none(),
+            options.text_page.is_none() && options.text_cursor.is_none(),
             options
                 .max_bytes
                 .clamp(observe::MIN_BUDGET, observe::MAX_BUDGET),
@@ -309,7 +303,7 @@ impl Browser {
             .end(session_id, by, action.name(), target, outcome, &detail);
     }
 
-    pub(crate) async fn perform(
+    pub(crate) async fn perform_page(
         &self,
         session_id: &str,
         action: &Action,
@@ -525,118 +519,6 @@ impl Browser {
         Ok(receipt)
     }
 
-    /// Runs the act script, polling moving targets and active entrance animations for at most [`ACT_RETRY`].
-    async fn page_act(
-        &self,
-        session_id: &str,
-        action: &Action,
-        consent: Option<&Value>,
-        by: Actor,
-        native_sent: Arc<std::sync::atomic::AtomicBool>,
-    ) -> Result<PageAnswer, ActError> {
-        let mount = self.check_ref(session_id, action)?;
-        if let Action::ClickAt { reference, x, y } = action {
-            return self
-                .coordinate_click(session_id, reference, (*x, *y), by, native_sent, consent)
-                .await;
-        }
-        let page = if mount.is_some() {
-            self.service
-                .page_accessor(session_id)
-                .ok_or_else(|| refused(PAGE_CLOSED))?
-        } else {
-            self.page(session_id).await.map_err(refused)?
-        };
-        let mut request = action
-            .page_request(&page)
-            .ok_or_else(|| failed("this action does not run in the page"))?;
-        self.bind_ref_request(session_id, &mut request);
-        // Submission is a separate authorized Enter after the settled field proves the requested text.
-        request["submit"] = json!(false);
-        request["nativeUser"] = json!(by == Actor::User);
-        request["nativeClick"] = json!(
-            by != Actor::User
-                && consent.is_some_and(|token| token["nativeClick"] == true)
-                && matches!(action, Action::Click { .. } | Action::Check { .. })
-        );
-        if let Some(consent) = consent
-            && consent.get("snapshot").is_some()
-        {
-            request["consent"] = consent.clone();
-        }
-        #[cfg(feature = "e2e-script")]
-        if let Some(origin) = self
-            .test_consent_origin
-            .read()
-            .ok()
-            .and_then(|slot| slot.clone())
-        {
-            request["testConsentOrigin"] = json!(origin);
-        }
-        let mut script = scripts::act(&request);
-        let allowed = self.dispatch_permission_check(session_id, by);
-        let start = tokio::time::Instant::now();
-        loop {
-            let answer: PageAnswer = self
-                .run_act(
-                    session_id,
-                    script.clone(),
-                    mount.as_ref(),
-                    allowed.clone(),
-                    // A native click brings its own real input; other input acts run as the person's gesture.
-                    request["nativeClick"] != true && action.is_input(),
-                )
-                .await
-                .map_err(|text| {
-                    if text == PAGE_CLOSED || text.starts_with("Not run:") {
-                        refused(text)
-                    } else {
-                        failed(text)
-                    }
-                })?;
-            // Bound to the authorized document.
-            self.reading_ref_allowed(session_id, &page, &answer.url, action.reference())
-                .map_err(refused)?;
-            let transient = crate::answers::transient(&answer) && start.elapsed() < ACT_RETRY;
-            if transient || answer.status == "focusPending" {
-                await_retry(start, &mut request, &mut script).await;
-                continue;
-            }
-            // A controlled control may accept the change asynchronously; prove it after settling, without retrying input.
-            let mut answer = if answer.status == "unmet"
-                && matches!(
-                    action,
-                    Action::Check { .. } | Action::Select { .. } | Action::Type { .. }
-                ) {
-                answer
-            } else {
-                self.interpret_ref_answer(session_id, answer, action)?
-            };
-            if request["nativeClick"] == true {
-                if let Some(point) = answer.native_point {
-                    self.native_ref_click(
-                        session_id,
-                        action,
-                        &request,
-                        point,
-                        by,
-                        native_sent.clone(),
-                    )
-                    .await?;
-                    // The ensuing receipt proves a native check's post-input state after settling.
-                    answer.checked = None;
-                } else if !matches!(action, Action::Check { .. }) {
-                    return Err(refused(
-                        "Not run: the page did not provide native click geometry",
-                    ));
-                }
-            }
-            return self
-                .finish_input(session_id, action, &request, by, answer)
-                .await;
-        }
-    }
-
     /// Waits for the page to settle after an action: a load it started (bounded), else a quiet DOM. Returns the
     /// dialogs the page environment answered meanwhile.
     async fn settle(
@@ -761,8 +643,16 @@ impl Browser {
                     return Err(PAGE_CLOSED.to_owned());
                 }
                 let probe = probe.unwrap_or(Value::Null);
-                met = probe["readyState"].as_str().is_some()
-                    && text.is_none_or(|_| probe["text"].as_bool() == Some(true))
+                let frame_text = if let Some(text) = text
+                    && reference.is_none()
+                    && probe["text"] != true
+                {
+                    self.text_in_frames(session_id, text).await
+                } else {
+                    false
+                };
+                met = (probe["readyState"].as_str().is_some() || frame_text)
+                    && text.is_none_or(|_| probe["text"].as_bool() == Some(true) || frame_text)
                     && reference.is_none_or(|_| probe["ref"].as_bool() == Some(true));
             }
             if met {
@@ -773,17 +663,5 @@ impl Browser {
             }
             tokio::time::sleep(Duration::from_millis(200)).await;
         }
-    }
-}
-
-/// Waits one poll before an act runs again while [`ACT_RETRY`] lasts. A datepicker field is typed only after the
-/// page has seen its focus (`act.js` answers `focusPending`); a page that cannot take focus (its window is not
-/// active) never sends it, so after [`ACT_RETRY`] the date is typed without it.
-async fn await_retry(start: tokio::time::Instant, request: &mut Value, script: &mut String) {
-    if start.elapsed() < ACT_RETRY {
-        tokio::time::sleep(POLL).await;
-    } else {
-        request["focusWait"] = json!(false);
-        *script = scripts::act(request);
     }
 }

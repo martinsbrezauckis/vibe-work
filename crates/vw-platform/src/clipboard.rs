@@ -58,6 +58,7 @@ pub trait ClipboardBackend: Send + 'static {
 }
 
 enum Request {
+    Read(oneshot::Sender<Result<String, ClipboardError>>),
     Copy(
         Zeroizing<String>,
         bool,
@@ -74,6 +75,20 @@ pub struct ClipboardService {
 }
 
 impl ClipboardService {
+    /// Reads ordinary clipboard text, withholding a still-live vault copy.
+    ///
+    /// # Errors
+    /// Clipboard unavailable, a pending secret copy or an operation timeout.
+    pub async fn read_text(&self) -> Result<String, ClipboardError> {
+        let (reply, response) = oneshot::channel();
+        self.sender
+            .send(Request::Read(reply))
+            .map_err(|_| ClipboardError::Unavailable)?;
+        tokio::time::timeout(COPY_WAIT, response)
+            .await
+            .map_err(|_| ClipboardError::TimedOut)?
+            .map_err(|_| ClipboardError::Unavailable)?
+    }
     /// Starts a service whose native clipboard is opened only on the first copy.
     ///
     /// # Errors
@@ -188,6 +203,22 @@ fn run_worker(
             receiver.recv().ok()
         };
         match request {
+            Some(Request::Read(reply)) => {
+                if reply.is_closed() {
+                    continue;
+                }
+                let result = backend.get_text().and_then(|value| {
+                    if current
+                        .as_ref()
+                        .is_some_and(|(secret, _)| secret.as_str() == value)
+                    {
+                        Err(ClipboardError::Operation)
+                    } else {
+                        Ok(value)
+                    }
+                });
+                let _ = reply.send(result);
+            }
             Some(Request::Copy(value, expires, cancelled, reply)) => {
                 if cancelled.load(Ordering::Acquire) || reply.is_closed() {
                     let _ = reply.send(Err(ClipboardError::TimedOut));

@@ -114,7 +114,7 @@ pub(super) fn compact(shared: &Shared, chat: &str, action: Option<&str>, result:
         status.remove("owner");
     }
     status["capabilities"]["availability"] = json!(
-        "needs/typingKeysNeed: modes index (blocked); approvalRequired asks. Support: features. Schema: chrome_status({action})."
+        "needs/typingKeysNeed: modes index (blocked); approvalRequired/typingKeysApprovalRequired asks. Support: features. Schema: chrome_status({action})."
     );
     status["capabilities"]["execution"] =
         json!("Receipts report outcomes. Never replay an unknown outcome.");
@@ -125,7 +125,7 @@ pub(super) fn compact(shared: &Shared, chat: &str, action: Option<&str>, result:
         let capabilities = &mut body["untrustedPageContent"]["capabilities"];
         share_capability_names(capabilities);
         capabilities["availability"] = json!(
-            "capability: capabilityNames index; needs/typingKeysNeed: modes index (blocked); approvalRequired asks. Support: features. Schema: chrome_status({action})."
+            "capability: capabilityNames index; needs/typingKeysNeed: modes index (blocked); approvalRequired/typingKeysApprovalRequired asks. Support: features. Schema: chrome_status({action})."
         );
     }
     super::safari::compact_overview(body);
@@ -133,12 +133,10 @@ pub(super) fn compact(shared: &Shared, chat: &str, action: Option<&str>, result:
     super::output::sync_text(result);
 }
 
-// Crowded optional builds can refer to the catalog's action keys instead of repeating the same support set.
+// Crowded discovery can refer to the catalog's action keys instead of repeating the same support set.
 // Partial profile lists stay explicit: a catalog entry alone never establishes that a browser supports it.
 fn share_catalog_features(body: &mut Value) {
-    if !cfg!(all(feature = "your-firefox", feature = "your-safari"))
-        || super::output::fits(body, 6000)
-    {
+    if super::output::fits(body, 6000) {
         return;
     }
     let status = &mut body["untrustedPageContent"];

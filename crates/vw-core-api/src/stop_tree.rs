@@ -214,7 +214,7 @@ pub(crate) async fn child(shared: &Shared, session: &str) -> Result<(), CoreErro
                 None,
             )
             .await;
-        result.map_err(|e| CoreError::from_gate("turn/interrupt", &e))?;
+        interrupt_finished(result)?;
     }
     Ok(())
 }
@@ -252,21 +252,36 @@ pub(crate) async fn stop_with<T>(
         if !crate::stops::compacting(shared, &canonical)
             && let Some(turn) = snapshot.state["session"]["status"]["activeTurnId"].as_str()
         {
-            shared
+            let result = shared
                 .gate
                 .call(
                     "turn/interrupt",
                     json!({"sessionId":canonical,"expectedTurnId":turn}),
                     None,
                 )
-                .await
-                .map_err(|e| CoreError::from_gate("turn/interrupt", &e))?;
+                .await;
+            interrupt_finished(result)?;
         }
         let answered = answer.await;
         // A failed callback delivery still stops the tree; its reservation records the unconfirmed answer.
         descendants(shared, &canonical).await?;
         shared.channels.close(&canonical).await;
         answered
+    }
+}
+
+/// A turn may settle after the snapshot but before Vibe receives Stop. Preserve every other failure,
+/// especially a stale expected id when a different turn is active.
+fn interrupt_finished(result: Result<vw_gate::Reply, vw_gate::GateError>) -> Result<(), CoreError> {
+    match result {
+        Ok(_) => Ok(()),
+        Err(vw_gate::GateError::Transport(vw_rpc::RpcError::Remote { error, .. }))
+            if error.code == vw_protocol::ProtocolErrorCode::Conflict
+                && error.message == "No active turn" =>
+        {
+            Ok(())
+        }
+        Err(error) => Err(CoreError::from_gate("turn/interrupt", &error)),
     }
 }
 

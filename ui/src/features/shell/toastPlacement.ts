@@ -152,13 +152,3 @@ export function placeToastsOver(
   }
   return { corner: "bottom-right", blocked: true, lift: 0 };
 }
-
-/** Picks a clear corner with no native views, or null when the stack must use the footer. */
-export function placeToasts(
-  viewport: Viewport,
-  size: { width: number; height: number },
-  avoid: readonly Rect[],
-): Corner | null {
-  const placement = placeToastsOver(viewport, size, avoid, []);
-  return placement.blocked ? null : placement.corner;
-}

@@ -79,55 +79,6 @@ impl KeyService {
     }
 }
 
-impl KeyService {
-    /// Reads Chrome's trusted restrictions independently of any agent-writable state file.
-    ///
-    /// # Errors
-    /// The credential store is unavailable or the stored policy is malformed.
-    pub async fn chrome_restrictions(
-        &self,
-    ) -> Result<std::collections::BTreeMap<String, String>, KeyError> {
-        let vault = self.vault();
-        let account = format!("{}-policy", self.chrome_owner_account);
-        blocking(move || {
-            let Some(encoded) = vault.device_store().get(&account)? else {
-                return Ok(std::collections::BTreeMap::new());
-            };
-            let rows: std::collections::BTreeMap<String, String> =
-                serde_json::from_str(encoded.expose()).map_err(|_| KeyError::Internal)?;
-            if rows
-                .values()
-                .any(|value| value != "ask" && value != "never")
-            {
-                return Err(KeyError::Internal);
-            }
-            Ok(rows)
-        })
-        .await?
-    }
-
-    /// Persists a trusted extension lowering or a person-confirmed replacement.
-    ///
-    /// # Errors
-    /// The OS credential store cannot save the policy.
-    pub async fn save_chrome_restrictions(
-        &self,
-        rows: std::collections::BTreeMap<String, String>,
-    ) -> Result<(), KeyError> {
-        let vault = self.vault();
-        let account = format!("{}-policy", self.chrome_owner_account);
-        blocking(move || {
-            let encoded =
-                SecretString::new(serde_json::to_string(&rows).map_err(|_| KeyError::Internal)?);
-            vault
-                .device_store()
-                .set(&account, &encoded)
-                .map_err(KeyError::from)
-        })
-        .await?
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

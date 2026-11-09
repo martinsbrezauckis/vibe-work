@@ -296,7 +296,7 @@ impl Core {
                 kind: AlertKind::AccessModeLowered,
                 message: format!(
                     "“{}” was reopened in Ask. Choose the access again in the chat if you want to change it.{}",
-                    self.shared.names.title_of(&self.shared.store, &id).unwrap_or_else(|| "Untitled session".to_owned()),
+                    self.shared.names.title_of(&self.shared.store, &id).unwrap_or_else(|| vw_vocabulary::text("untitledSession").unwrap_or_default().to_owned()),
                     if wanted == "plan" { format!("\nPlan first is gone in Vibe 3; {} is Vibe Work’s planning mode.", vw_vocabulary::label("accessModes", "vw-plan")) } else { String::new() }
                 ),
             });
@@ -319,7 +319,11 @@ impl Core {
             .shared
             .names
             .title_of(&self.shared.store, &id)
-            .unwrap_or_else(|| "Untitled session".to_owned());
+            .unwrap_or_else(|| {
+                vw_vocabulary::text("untitledSession")
+                    .unwrap_or_default()
+                    .to_owned()
+            });
         let mode = vw_vocabulary::term("accessModes", agent)
             .map_or("the previous access mode", |mode| mode.name);
         let message = format!(

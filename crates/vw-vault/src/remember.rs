@@ -13,8 +13,13 @@
 //! Windows target `<user>.<service>`, macOS login-keychain generic password (service, account),
 //! Linux Secret Service attributes `service` + `username`.
 //!
-//! Residual risk (copy): on Linux and Windows any program running as the same user
-//! can read the entry (no per-app access control there); on macOS another app gets a prompt.
+//! Windows wraps new values with a non-exportable per-user TPM key when available and migrates legacy values
+//! on read; without a usable TPM it retains Credential Manager. ShellX can still open the vault with its password,
+//! but does not understand these envelopes. The storage core and primary password keyfile remain compatible.
+//!
+//! Residual risk: Linux programs running as the same user can read the entry. Windows programs with the same
+//! user token can operate the TPM key (this is NOT app binding). On macOS items receive the calling signed
+//! app's trusted-app ACL at creation; old unbound items migrate once. Other binaries need Keychain consent.
 //!
 //! Linux: the Secret Service is a D-Bus service, and D-Bus can start one on request that then never answers. Every
 //! call to it therefore runs with a deadline ([`bounded`]): opening the store [`CONNECT_TIMEOUT`] (no prompt can be
@@ -199,6 +204,7 @@ impl DeviceSecretStore for MemoryDeviceStore {
 
 /// The OS credential store (Windows Credential Manager, macOS login keychain, Linux Secret Service).
 pub struct OsDeviceStore {
+    #[cfg(not(target_os = "macos"))]
     store: Arc<keyring_core::api::CredentialStore>,
 }
 
@@ -254,10 +260,12 @@ impl OsDeviceStore {
     /// session on Linux).
     pub fn new() -> Result<Self, VaultError> {
         Ok(Self {
+            #[cfg(not(target_os = "macos"))]
             store: os_credential_store()?,
         })
     }
 
+    #[cfg(not(target_os = "macos"))]
     fn entry(&self, account: &str) -> Result<keyring_core::Entry, VaultError> {
         self.store
             .build(KEYRING_SERVICE, account, None)
@@ -267,13 +275,41 @@ impl OsDeviceStore {
 
 impl DeviceSecretStore for OsDeviceStore {
     fn get(&self, account: &str) -> Result<Option<SecretString>, VaultError> {
+        #[cfg(target_os = "macos")]
+        let found = vw_platform::vault_keychain::get(
+            KEYRING_SERVICE,
+            account,
+            vw_vocabulary::label("vaultKinds", "vibeWork"),
+        )
+        .map_err(VaultError::Remember)?
+        .map(|bytes| {
+            std::str::from_utf8(&bytes)
+                .map(SecretString::new)
+                .map_err(|_| VaultError::Remember("Keychain secret is not UTF-8".to_owned()))
+        })
+        .transpose()?;
+        #[cfg(not(target_os = "macos"))]
         let entry = self.entry(account)?;
+        #[cfg(not(target_os = "macos"))]
         let found = bounded(CALL_TIMEOUT, move || match entry.get_password() {
             Ok(secret) => Ok(Some(SecretString::new(secret))),
             Err(keyring_core::Error::NoEntry) => Ok(None),
             Err(error) => Err(error.to_string()),
         })
         .map_err(VaultError::Remember)?;
+        #[cfg(windows)]
+        let found = match found {
+            Some(stored) => {
+                if let Some(secret) = crate::stored_secret::unprotect(account, &stored)? {
+                    Some(secret)
+                } else {
+                    // Migrate the same value, including Chrome identity/policy; never regenerate an owner key.
+                    self.set(account, &stored)?;
+                    Some(stored)
+                }
+            }
+            None => None,
+        };
         if let Some(secret) = &found {
             secret.register_as(vw_secrets::SecretKind::VaultValue);
         }
@@ -281,23 +317,43 @@ impl DeviceSecretStore for OsDeviceStore {
     }
 
     fn set(&self, account: &str, secret: &SecretString) -> Result<(), VaultError> {
-        let entry = self.entry(account)?;
-        let secret = secret.clone();
-        bounded(CALL_TIMEOUT, move || {
-            entry
-                .set_password(secret.expose())
-                .map_err(|e| e.to_string())
-        })
-        .map_err(VaultError::Remember)
+        #[cfg(target_os = "macos")]
+        return vw_platform::vault_keychain::set(
+            KEYRING_SERVICE,
+            account,
+            vw_vocabulary::label("vaultKinds", "vibeWork"),
+            secret.expose().as_bytes(),
+        )
+        .map_err(VaultError::Remember);
+        #[cfg(not(target_os = "macos"))]
+        {
+            let entry = self.entry(account)?;
+            #[cfg(windows)]
+            let secret = crate::stored_secret::protect(account, secret)?;
+            #[cfg(not(windows))]
+            let secret = secret.clone();
+            bounded(CALL_TIMEOUT, move || {
+                entry
+                    .set_password(secret.expose())
+                    .map_err(|e| e.to_string())
+            })
+            .map_err(VaultError::Remember)
+        }
     }
 
     fn delete(&self, account: &str) -> Result<(), VaultError> {
-        let entry = self.entry(account)?;
-        bounded(CALL_TIMEOUT, move || match entry.delete_credential() {
-            Ok(()) | Err(keyring_core::Error::NoEntry) => Ok(()),
-            Err(error) => Err(error.to_string()),
-        })
-        .map_err(VaultError::Remember)
+        #[cfg(target_os = "macos")]
+        return vw_platform::vault_keychain::delete(KEYRING_SERVICE, account)
+            .map_err(VaultError::Remember);
+        #[cfg(not(target_os = "macos"))]
+        {
+            let entry = self.entry(account)?;
+            bounded(CALL_TIMEOUT, move || match entry.delete_credential() {
+                Ok(()) | Err(keyring_core::Error::NoEntry) => Ok(()),
+                Err(error) => Err(error.to_string()),
+            })
+            .map_err(VaultError::Remember)
+        }
     }
 }
 

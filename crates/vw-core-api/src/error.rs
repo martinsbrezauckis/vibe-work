@@ -158,6 +158,10 @@ pub const NOT_IN_THIS_BUILD: &str = "notInThisBuild";
 #[serde(rename_all = "camelCase")]
 #[error("{message}")]
 pub struct CoreError {
+    /// Stable screenshot refusal for the Capture menu; agent guidance remains in `message`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
+    pub capture_block: Option<vw_preview::CaptureBlock>,
     /// What kind of failure.
     pub code: ErrorCode,
     /// Human-readable description.
@@ -181,6 +185,7 @@ impl CoreError {
             method: None,
             summary: None,
             server_code: None,
+            capture_block: None,
         }
     }
 
@@ -293,6 +298,7 @@ impl CoreError {
             method: Some(clip(method, METHOD_MAX)),
             summary: None,
             server_code,
+            capture_block: None,
         }
     }
 
@@ -321,7 +327,15 @@ impl CoreError {
             message: clip(&error.to_string(), MESSAGE_MAX),
             method: Some(clip(method, METHOD_MAX)),
             summary,
-            server_code: None,
+            server_code: matches!(
+                error,
+                GateError::Denied {
+                    reason: vw_gate::DenyReason::Stopped,
+                    ..
+                }
+            )
+            .then(|| "stopped".to_owned()),
+            capture_block: None,
         }
     }
 }
@@ -358,6 +372,26 @@ mod tests {
             method: "session/start".to_owned(),
             source: Box::new(error),
         }
+    }
+
+    #[test]
+    fn capture_refusals_keep_the_typed_reason_and_complete_agent_guidance() {
+        let text = "No chat is selected. Ask the user to open this session.";
+        let error = crate::browser::act_error(&vw_browser::ActError {
+            outcome: vw_browser::Outcome::Refused,
+            text: text.into(),
+            capture_block: Some(vw_preview::CaptureBlock::NoChatSelected),
+        });
+        let wire = serde_json::to_value(&error).unwrap();
+        assert_eq!(wire["captureBlock"], "noChatSelected");
+        assert_eq!(wire["message"], text);
+        assert_eq!(wire["code"], "denied");
+        assert!(
+            serde_json::to_value(CoreError::new(ErrorCode::Denied, "other"))
+                .unwrap()
+                .get("captureBlock")
+                .is_none()
+        );
     }
 
     /// The core's own failure keeps its code and plain message; it is never a server error.

@@ -446,3 +446,15 @@ async fn idle_parent_is_not_quiet_while_owned_children_work() {
         "a Branch does not keep its source runtime busy"
     );
 }
+
+#[test]
+fn stopped_refusal_is_recognized_by_code_after_wording_changes() {
+    let mut stopped = crate::CoreError::new(crate::ErrorCode::Denied, "The continuation ended.");
+    stopped.server_code = Some("stopped".to_owned());
+    assert!(super::refused_as_stopped(&stopped));
+    let unrelated = crate::CoreError::new(
+        crate::ErrorCode::Denied,
+        "Not sent: the chat was stopped after this continuation was scheduled.",
+    );
+    assert!(!super::refused_as_stopped(&unrelated));
+}

@@ -1,4 +1,5 @@
 //! Per-chat Stop generations invalidate earlier sends and tool decisions before the runtime is stopped.
+//! Depends on: core channels, gate errors and session events. Called by: dispatch and permission continuations.
 //! Uses channel identity and turn events; dispatch and the permission-answer routes call it.
 //! Hook disconnect owns prompt cancellation when a call ends. Explicit Stop closes remaining cards after
 //! Vibe has stopped, so a cancelled card cannot release a sibling hook into another model step.
@@ -13,9 +14,6 @@ use vw_gate::{DenyReason, GateError};
 use crate::command::Command;
 use crate::core::Shared;
 use crate::error::{CoreError, ErrorCode};
-
-/// Why a checked send was not sent (the refusal's text, also how [`refused_as_stopped`] knows it).
-const NOT_SENT: &str = "Not sent: the chat was stopped after this continuation was scheduled.";
 
 /// What the agent reads when an approval from before a Stop (or a turn that ended failed or interrupted) is used.
 pub(crate) const APPROVAL_ENDED: &str = "This approval ended when the chat was stopped or its turn ended. Do not run this action unless the person asks again.";
@@ -248,7 +246,13 @@ pub(crate) fn still(
     {
         return Ok(());
     }
-    Err(CoreError::new(ErrorCode::Denied, NOT_SENT).with_method(method))
+    Err(CoreError::from_gate(
+        method,
+        &GateError::Denied {
+            method: method.to_owned(),
+            reason: DenyReason::Stopped,
+        },
+    ))
 }
 
 /// The checked forward under the chat's send lock: the interrupt is pointed at a turn a checked send started
@@ -273,13 +277,13 @@ pub(crate) fn sendable(
 ) -> Result<(), GateError> {
     still(shared, expected, method, params).map_err(|_| GateError::Denied {
         method: method.to_owned(),
-        reason: DenyReason::Policy(NOT_SENT.to_owned()),
+        reason: DenyReason::Stopped,
     })
 }
 
 /// Whether `error` is a checked send's refusal after a Stop (nothing was sent).
 pub(crate) fn refused_as_stopped(error: &CoreError) -> bool {
-    error.code == ErrorCode::Denied && error.message.contains(NOT_SENT)
+    error.code == ErrorCode::Denied && error.server_code.as_deref() == Some("stopped")
 }
 
 /// After a gated send of `method`: a checked `turn/start` (`expected` set) that Vibe accepted started a turn a later

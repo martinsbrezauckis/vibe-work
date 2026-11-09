@@ -79,7 +79,7 @@ export function protectedStateText(p: ProtectedChangeView): string {
     case "applying":
       return "Applying…";
     case "applied":
-      return `Applied at ${time}: ${String(p.files.length)} file(s).${p.files.some((f) => f.path.startsWith("skills/")) ? " New chats use it." : ""}`;
+      return `Applied at ${time}: ${String(p.files.length)} ${p.files.length === 1 ? "file" : "files"}.${p.files.some((f) => f.path.startsWith("skills/")) ? " New chats use it." : ""}`;
     case "declined":
       return p.stopped
         ? "Declined: the turn was stopped."

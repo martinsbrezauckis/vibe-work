@@ -340,51 +340,72 @@ impl PreviewService {
             })
     }
 
-    /// Where a capture may fetch `url` when it is on the local-network page the USER opened in `session_id` by NAME:
-    /// `None` when `url`'s host is not that page's own host name (the ordinary public-only fetch applies; a literal address already goes that way); else that name's addresses from the lookup the
-    /// navigation uses, accepted only when every answer is a private-network, carrier-grade NAT or public address
-    /// (never this computer, link-local or reserved: the same rule as the network guard for the user's Lan page).
-    /// The fetcher connects to exactly these addresses (no second lookup).
+    /// Resolves and pins media addresses when the captured page's current host has only private-network
+    /// answers. Such a page may fetch media from other private-network hosts too. Public pages use
+    /// the fetcher's public-only resolver. Loopback, link-local and reserved answers are always refused.
+    /// `None` retains the public-only rule; `Some` contains every checked destination address, with no second lookup.
     pub async fn lan_media_addresses(
         &self,
         session_id: &str,
         url: &url::Url,
     ) -> Option<Result<Vec<std::net::SocketAddr>, String>> {
         use vw_netguard::ip::{IpClass, classify};
-        let host = url.host_str()?.trim_end_matches('.').to_ascii_lowercase();
-        if host
-            .trim_matches(['[', ']'])
-            .parse::<std::net::IpAddr>()
-            .is_ok()
-        {
-            return None;
-        }
         let own = {
             let state = self.inner.lock();
             let entry = state.entries.get(session_id)?;
-            entry
-                .mount_lan_host()?
-                .trim_end_matches('.')
-                .to_ascii_lowercase()
+            entry.ready_mount()?;
+            entry.url.as_ref()?.host_str()?.to_owned()
         };
-        if own != host {
+        let resolver = self.inner.names.resolver();
+        let own_answers = match resolve_media_host(resolver.clone(), &own).await {
+            Ok(answers) => answers,
+            Err(error) => return Some(Err(error)),
+        };
+        if let Some(bad) = own_answers.iter().find(|ip| {
+            !matches!(
+                classify(**ip),
+                IpClass::Public | IpClass::Private | IpClass::SharedCgnat | IpClass::Loopback
+            )
+        }) {
+            return Some(Err(format!(
+                "{own} resolves to {bad}, {}",
+                classify(*bad).describe()
+            )));
+        }
+        // Use the current document's host answers, never the mount's legacy Lan flag.
+        if !own_answers
+            .iter()
+            .any(|ip| matches!(classify(*ip), IpClass::Private | IpClass::SharedCgnat))
+        {
             return None;
         }
+        if let Some(bad) = own_answers.iter().find(|ip| {
+            !matches!(
+                classify(**ip),
+                IpClass::Public | IpClass::Private | IpClass::SharedCgnat
+            )
+        }) {
+            return Some(Err(format!(
+                "{own} resolves to {bad}, {}",
+                classify(*bad).describe()
+            )));
+        }
+        // Mixed public/private answers cannot establish that the captured page is on the private network.
+        if own_answers
+            .iter()
+            .any(|ip| classify(*ip) == IpClass::Public)
+        {
+            return None;
+        }
+        let host = url.host_str()?;
         let port = url.port_or_known_default()?;
-        let resolver = self.inner.names.resolver();
-        let name = host.clone();
-        let lookup = tokio::time::timeout(
-            std::time::Duration::from_secs(3),
-            tokio::task::spawn_blocking(move || resolver(&name)),
-        )
-        .await;
-        let answers = match lookup {
-            Ok(Ok(Ok(answers))) if !answers.is_empty() => answers,
-            Ok(Ok(Ok(_))) => return Some(Err(format!("{host} has no address"))),
-            Ok(Ok(Err(error))) => {
-                return Some(Err(format!("{host} could not be resolved ({error})")));
+        let answers = if host.eq_ignore_ascii_case(&own) {
+            own_answers
+        } else {
+            match resolve_media_host(resolver, host).await {
+                Ok(answers) => answers,
+                Err(error) => return Some(Err(error)),
             }
-            Ok(Err(_)) | Err(_) => return Some(Err(format!("{host} did not resolve in time"))),
         };
         if let Some(bad) = answers.iter().find(|ip| {
             !matches!(
@@ -403,25 +424,42 @@ impl PreviewService {
             .collect()))
     }
 
-    /// Whether a capture of the session's current page may fetch `url` (media): a public host for every
-    /// page (the fetcher checks the DNS answers again when it connects and pins them), anything else only as the
-    /// mount's own navigation policy allows (the session's own ports for a page of its local server, the Lan page's
-    /// own host). Returns where the URL goes.
+    /// Whether a capture may fetch `url`, with checked addresses for a private page's media.
+    /// Public pages retain the public-only resolver and the existing session-port restrictions.
     ///
     /// # Errors
     /// The reason.
-    pub fn fetch_allowed(
+    pub async fn fetch_allowed(
         &self,
         session_id: &str,
         url: &url::Url,
-    ) -> Result<crate::policy::Destination, String> {
+    ) -> Result<
+        (
+            crate::policy::Destination,
+            Option<Vec<std::net::SocketAddr>>,
+        ),
+        String,
+    > {
         let destination = self
             .inner
             .policy
             .fetch_classify(url)
             .map_err(|e| e.to_string())?;
+        if matches!(
+            destination,
+            crate::policy::Destination::Public | crate::policy::Destination::Lan
+        ) && let Some(addresses) = self.lan_media_addresses(session_id, url).await
+        {
+            return addresses.map(|addresses| (destination, Some(addresses)));
+        }
+        if destination == crate::policy::Destination::Lan {
+            return Err(crate::policy::UrlRefusal::Lan(
+                url.host_str().unwrap_or_default().to_owned(),
+            )
+            .to_string());
+        }
         if destination == crate::policy::Destination::Public {
-            return Ok(destination);
+            return Ok((destination, None));
         }
         let state = self.inner.lock();
         let entry = state
@@ -435,7 +473,7 @@ impl PreviewService {
             .policy
             .fetch_navigation(url, &entry.allowed, mount.class, entry.mount_lan_host())
             .map_err(|e| e.to_string())?;
-        Ok(destination)
+        Ok((destination, None))
     }
 
     /// The host of the local-network page the USER opened in the mount `label` (`None`: not a Lan mount, or gone);
@@ -489,4 +527,31 @@ impl PreviewService {
         let skip = entry.console.len() - new;
         Ok(entry.console.iter().skip(skip).cloned().collect())
     }
+}
+
+// Resolve once; the caller classifies the current page and pins the checked media addresses.
+async fn resolve_media_host(
+    resolver: crate::names::NameResolver,
+    host: &str,
+) -> Result<Vec<std::net::IpAddr>, String> {
+    let host = host
+        .trim_matches(['[', ']'])
+        .trim_end_matches('.')
+        .to_ascii_lowercase();
+    let answers = if let Ok(ip) = host.parse::<std::net::IpAddr>() {
+        vec![ip]
+    } else {
+        let name = host.clone();
+        tokio::time::timeout(
+            std::time::Duration::from_secs(3),
+            tokio::task::spawn_blocking(move || resolver(&name)),
+        )
+        .await
+        .map_err(|_| format!("{host} did not resolve in time"))?
+        .map_err(|_| format!("{host} could not be resolved"))??
+    };
+    if answers.is_empty() {
+        return Err(format!("{host} has no address"));
+    }
+    Ok(answers)
 }

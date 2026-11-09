@@ -1,31 +1,10 @@
-//! Operating-system edges: user-only files, OS notifications with click handling and
-//! "show this folder in the file manager", "open this link in the browser", "open this file with
-//! its default app / show it in its folder" without ever running a program, precise process
-//! identity on macOS/Windows, process hardening for the key holder, the everyday spelling of a
-//! canonical path (no Windows `\\?\` prefix in what people read), the startup accessibility bus check
-//! (Linux) and keeping that check's run-only setting out of the programs the app starts (`child_env`), and the
-//! "Send to Vibe Work" right-click entries (`send_to`), and the system version (`system_version`: macOS and the
-//! Windows build; `glibc_version` on Linux), the final path of an open file handle (`final_path`);
-//! PTY/ConPTY live in vw-terminal (the OS credential store is used by vw-vault).
+//! Operating-system edges: private files, credential stores, process identity, desktop integration,
+//! native media and webviews. PTY/ConPTY live in vw-terminal.
 //!
-//! Depends on: nothing of ours (`thiserror` for errors, `url` for link checks, `dunce` for plain paths, `dbus`
-//! for the accessibility bus check).
-//! Called by: vw-gate, vw-debug-api (the per-run token descriptor), vw-procmon (process identity), vw-terminal
-//! (`child_env`), app.
-//! Invariant: the only crate allowed to relax the `unsafe_code` ban, and only behind a safe API with a SAFETY comment.
-//! Only `process` (macOS `proc_pidinfo`, Windows process handles) and `webview` (feature `webview`: `WebView2` and
-//! `WKWebView` screenshots), `native_click` (scoped webview input), `private_file` (Windows DACLs and
-//! owners), `atomic_file` (Windows: retained ordinary-file DACLs), `background` (per-thread scheduling), `window_keys` (the main window's bare Alt tap), `event_target` (tao's event-target window on a polite close), `final_path` (Windows: `GetFinalPathNameByHandleW`),
-//! `a11y_bus` (Linux: `NO_AT_BRIDGE` for one run, set only while the process has one thread),
-//! `content_rules` (macOS `WKContentRuleList` per preview webview, with URL rules), `web_transport` (macOS: the
-//! WebTransport preference of one preview webview), `exec_inherit` (Linux: close-on-exec for inherited
-//! descriptors before the restart after an update), `send_to` (the Windows Send to shortcut through COM, the
-//! macOS services provider), `confirm_window` (the macOS `NSAlert` sheet and the Windows task dialog of the app's
-//! confirmations), `remove_tree` (Windows: file deletion that preserves shared read-only attributes), `kill_job` (Windows: a program in a
-//! kill-on-close job, for the Git Bash wrapper), `tcp_listeners` (Windows owner-PID listener tables),
-//! `startup_error` (Windows: the startup message box), `safari_extension` (macOS: the containing app's `SafariServices`
-//! calls for its Safari extension), and
-//! `webview2_env` (Windows: the `WebView2` loader's variables removed from this process at startup) use it.
+//! Depends on: platform libraries and the OS bindings listed in Cargo.toml; no workspace crates.
+//! Called by: the core, host, browser, preview, vault and terminal services, and app wiring.
+//! Invariant: only this crate may relax the unsafe-code ban, behind safe APIs with SAFETY comments.
+//! Modules marked `#[allow(unsafe_code)]` below or in their own source are the unsafe boundary.
 
 #[cfg(target_os = "linux")]
 #[allow(unsafe_code)]
@@ -72,6 +51,7 @@ mod open_url;
 mod paths;
 mod private_file;
 mod process;
+pub mod process_command;
 #[cfg(target_os = "macos")]
 #[allow(unsafe_code)]
 pub mod safari_extension;
@@ -86,9 +66,6 @@ pub mod send_to;
 pub mod startup_error;
 mod system_version;
 pub mod tray;
-#[cfg(all(feature = "webview", target_os = "macos"))]
-#[allow(unsafe_code)]
-pub mod web_transport;
 #[cfg(feature = "webview")]
 pub mod webview;
 #[cfg(windows)]
@@ -158,3 +135,15 @@ pub mod proxy;
 #[cfg(windows)]
 #[allow(unsafe_code)]
 pub mod credentials;
+
+#[cfg(any(target_os = "macos", test))]
+#[allow(unsafe_code)]
+pub mod vault_keychain;
+
+#[cfg(windows)]
+#[allow(unsafe_code)]
+pub mod vault_tpm;
+
+#[cfg(test)]
+#[path = "vault_keychain/contract_tests.rs"]
+mod vault_keychain_contract_tests;

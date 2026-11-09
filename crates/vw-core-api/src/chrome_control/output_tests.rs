@@ -161,9 +161,17 @@ async fn overview_keeps_mode_exceptions_and_shared_profile_lists() {
         let actions = &status["capabilities"]["actions"];
         assert_eq!(actions.as_object().unwrap().len(), 66);
         assert!(actions["page.read"].get("needs").is_none());
-        assert_eq!(actions["page.type"].get("needs").is_some(), mode == "ask");
+        assert!(actions["page.type"].get("needs").is_none());
         assert_eq!(
-            actions["raw.execute"].get("needs").is_some(),
+            actions["page.type"]["approvalRequired"] == true,
+            mode == "ask"
+        );
+        assert_eq!(
+            actions["raw.execute"]["approvalRequired"] == true,
+            mode != "auto-approve"
+        );
+        assert_eq!(
+            actions["cookies.read"].get("needs").is_some(),
             mode != "auto-approve"
         );
     }
@@ -219,7 +227,11 @@ async fn full_session_records_keep_their_shared_context() {
     let capabilities = &status["capabilities"];
     assert_catalog_features(status);
     for action in ["history.read", "bookmarks.read"] {
-        assert_eq!(capabilities["actions"][action]["approvalRequired"], true);
+        assert!(
+            capabilities["actions"][action]
+                .get("approvalRequired")
+                .is_none()
+        );
         assert!(capabilities["actions"][action].get("needs").is_none());
     }
     for action in catalog()["actions"].as_array().unwrap() {

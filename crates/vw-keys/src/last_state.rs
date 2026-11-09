@@ -28,7 +28,7 @@ pub(super) fn restore(vault: &Vault, settings: &VaultSettings) -> AtStart {
         _ => None,
     };
     let at_start = settings.at_start(remembered);
-    if at_start.lock_on_quit {
+    if at_start.lock_on_quit || at_start.unlock_method == crate::UnlockMethod::Password {
         match vault.forget_kept_key() {
             Ok(true) => info!("key service: deleted the key a run that did not quit kept"),
             Ok(false) => {}

@@ -18,7 +18,7 @@ use vw_git::state::{self, BranchState, RemoteInfo};
 use crate::command::Origin;
 use crate::core::Core;
 use crate::error::{CoreError, ErrorCode};
-use crate::git_cmd::{Place, git_error, state_blocker};
+use crate::git_cmd::{Place, git_error};
 use crate::git_publish::{folder_label, push_consent, requester, stale_unless};
 use crate::git_view::{GitRequest, GitResult, PrCreatedView, PrPlanView, PrVia};
 use crate::worktrees::blocking;
@@ -52,7 +52,7 @@ impl Core {
         })
         .await?
         .map_err(git_error)?;
-        if let Some(why) = state_blocker(&state) {
+        if let Some(why) = state::blocker(&state) {
             return Err(git_error(vw_git::GitError::Blocked(why)));
         }
         let remote_info = remote_info.ok_or_else(|| {

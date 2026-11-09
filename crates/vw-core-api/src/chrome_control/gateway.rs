@@ -362,8 +362,19 @@ pub(super) async fn call_one_inner(
     shared: &Arc<Shared>,
     session: &str,
     tool: &str,
+    args: Value,
+    consent: Option<&super::read_consent::Consent>,
+) -> Result<Value, String> {
+    call_one_preflighted(shared, session, tool, args, consent, None).await
+}
+
+pub(super) async fn call_one_preflighted(
+    shared: &Arc<Shared>,
+    session: &str,
+    tool: &str,
     mut args: Value,
     consent: Option<&super::read_consent::Consent>,
+    previous: Option<&str>,
 ) -> Result<Value, String> {
     if let Some(reply) = local_reply(shared, session, tool, &args, consent)? {
         return Ok(reply);
@@ -373,7 +384,7 @@ pub(super) async fn call_one_inner(
         && !(tool == "chrome_session"
             && matches!(args["action"].as_str(), Some("get" | "cancel" | "stop")));
     if acts {
-        if let Some(reply) = super::browser_start::wait(shared, session, browser, false).await? {
+        if let Some(reply) = super::browser_start::wait(shared, session, browser).await? {
             return Ok(reply);
         }
         if let Some(retry) = super::reconnect::wait(shared, session, browser).await? {
@@ -427,6 +438,9 @@ pub(super) async fn call_one_inner(
     let clamped = super::output::clamp_request(tool, &mut args);
     let output_request = args.clone();
     args.as_object_mut().map(|args| args.remove("saveTo"));
+    if let Some(previous) = previous {
+        args["_preflightOperationId"] = json!(previous);
+    }
     let mut answer = super::read_consent::send(shared, session, tool, args, consent)
         .await
         .map_err(|reason| pending.refusal(shared, session, browser).unwrap_or(reason))?;

@@ -251,34 +251,3 @@ pub fn evaluate(
         }
     }
 }
-
-/// Installs the immutable origin stamp before the first admitted navigation. Completion means it is registered.
-pub fn install_origin(
-    controller: &ICoreWebView2Controller,
-    done: Box<dyn FnOnce(Result<(), String>)>,
-) {
-    let done = Rc::new(RefCell::new(Some(done)));
-    let pending = done.clone();
-    let handler = webview2_com::AddScriptToExecuteOnDocumentCreatedCompletedHandler::create(
-        Box::new(move |status, _| {
-            if let Some(done) = pending.borrow_mut().take() {
-                done(status.map_err(|e| e.to_string()));
-            }
-            Ok(())
-        }),
-    );
-    // SAFETY: the controller is live on its UI thread; WebView2 retains the completion handler.
-    let result = unsafe {
-        controller.CoreWebView2().and_then(|v| {
-            v.AddScriptToExecuteOnDocumentCreated(
-                &HSTRING::from(include_str!("frame_origin.js")),
-                &handler,
-            )
-        })
-    };
-    if let Err(error) = result
-        && let Some(done) = done.borrow_mut().take()
-    {
-        done(Err(error.to_string()));
-    }
-}

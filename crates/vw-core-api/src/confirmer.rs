@@ -186,7 +186,11 @@ fn decorate(
             .get("sessionId")
             .and_then(serde_json::Value::as_str)
             .map_or_else(
-                || "Untitled session".to_owned(),
+                || {
+                    vw_vocabulary::text("untitledSession")
+                        .unwrap_or_default()
+                        .to_owned()
+                },
                 |id| names.confirmation_title(store, id),
             );
         request.summary = format!(
@@ -203,7 +207,11 @@ fn decorate(
             .get("sessionId")
             .and_then(serde_json::Value::as_str)
             .map_or_else(
-                || "Untitled session".to_owned(),
+                || {
+                    vw_vocabulary::text("untitledSession")
+                        .unwrap_or_default()
+                        .to_owned()
+                },
                 |id| names.confirmation_title(store, id),
             );
         request.summary = format!(

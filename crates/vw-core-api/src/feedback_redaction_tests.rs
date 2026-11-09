@@ -1,4 +1,4 @@
-//! App-only synthetic redaction cases; verifies review, outbound serialization and bounded-input performance.
+//! App-only synthetic redaction cases; verifies review, outbound serialization and bounded redaction work.
 use crate::{FeedbackDraft, FeedbackKind, FeedbackRequest, Origin};
 
 #[tokio::test]
@@ -56,43 +56,43 @@ async fn feedback_redaction_cases_reach_review_and_wire() {
 
 #[test]
 fn feedback_redaction_adversarial_scaling() {
-    use std::time::{Duration, Instant};
-    // Lazy compilation is a one-time cost; measure repeated redaction with the embedded rules loaded.
-    crate::feedback_redact::text("Warm the rules", &[]);
+    // Each embedded rule is a linear regex search for these zero/one-match adversarial inputs.
+    // Count rule applications and admitted bytes, so repeated scans cannot hide behind a fast CPU.
+    const PASSES: usize = 20;
     for chunk in ["a-", "a."] {
-        let mut baseline = Duration::ZERO;
-        for bytes in [8000_u32, 16000, 32000, 65536] {
-            // 8000 is the description limit; larger inputs probe the redactor, not report admission.
-            let input = chunk.repeat(usize::try_from(bytes / 2).unwrap());
-            let mut samples = Vec::new();
-            for _ in 0..9 {
-                let start = Instant::now();
-                let result = crate::feedback_redact::text(std::hint::black_box(&input), &[]);
-                samples.push(start.elapsed());
-                assert_eq!(
-                    result,
-                    if chunk == "a-" {
-                        "[redacted key]"
-                    } else {
-                        &input
-                    }
-                );
-            }
-            samples.sort();
-            let median = samples[4];
-            println!("redaction {chunk} {bytes} bytes: {median:?} median (9 runs)");
-            if bytes == 8000 {
-                baseline = median;
-            } else {
-                // Allow scheduling noise, but reject quadratic growth over this 8x size range.
-                assert!(median < baseline * (2 * bytes / 8000) + Duration::from_millis(1));
-            }
-            if !cfg!(debug_assertions) {
-                assert!(
-                    median < Duration::from_millis(20),
-                    "{bytes} bytes took {median:?}"
-                );
-            }
+        for bytes in [8000, 16000, 32000, 65536] {
+            let input = chunk.repeat(bytes / 2);
+            let mut calls = 0;
+            let mut work = 0;
+            let result =
+                crate::feedback_redact::text_with_work(&input, &[], |pattern, admitted| {
+                    calls += 1;
+                    work += admitted.len();
+                    // Rust regex bounds a search by pattern size × input length. With zero/one
+                    // match, replace_all needs at most two searches; repeated suffix searches
+                    // cannot turn this adversarial family into quadratic replacement work.
+                    assert!(
+                        pattern.find_iter(admitted).take(2).count() <= 1,
+                        "multiple suffix searches for {}",
+                        pattern.as_str()
+                    );
+                });
+            assert_eq!(
+                result,
+                if chunk == "a-" {
+                    "[redacted key]"
+                } else {
+                    &input
+                }
+            );
+            println!(
+                "redaction {chunk} {bytes} bytes: {calls} rule applications, {work} input bytes"
+            );
+            assert_eq!(calls, PASSES);
+            assert!(
+                work <= PASSES * (bytes + "[redacted key]".len()),
+                "repeated scans: {work}"
+            );
         }
     }
 }

@@ -306,14 +306,23 @@ impl Core {
                 kind: AlertKind::PluginReloadFailed,
                 message: message.to_owned(),
             });
-            return Err(CoreError::new(
+            let mut failure = CoreError::new(
                 if rejected {
                     ErrorCode::ServerError
                 } else {
                     ErrorCode::ServerUnavailable
                 },
                 message,
-            ));
+            );
+            failure.server_code = Some(
+                if rejected {
+                    "pluginReloadRejected"
+                } else {
+                    "pluginReloadUncertain"
+                }
+                .to_owned(),
+            );
+            return Err(failure);
         }
         if unstarted {
             return Ok(());
@@ -370,7 +379,11 @@ impl Core {
                     .shared
                     .names
                     .title_of(&self.shared.store, id)
-                    .unwrap_or_else(|| "Untitled session".to_owned());
+                    .unwrap_or_else(|| {
+                        vw_vocabulary::text("untitledSession")
+                            .unwrap_or_default()
+                            .to_owned()
+                    });
                 self.shared.emit(CoreEvent::Alert {
                     session_id: Some(id.to_owned()), kind: AlertKind::ReopenFailed,
                     message: format!("“{title}” could not reopen with its new tools. Send a message to try again."),

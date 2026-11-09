@@ -478,7 +478,10 @@ async fn a_person_stop_received_during_reconnect_prevents_the_action() {
     .await
     .unwrap_err();
     assert!(
-        reason.contains(&format!("you pressed Stop in {}", Browser::Edge.name())),
+        reason.contains(&format!(
+            "the person pressed Stop in {}",
+            Browser::Edge.name()
+        )),
         "{reason}"
     );
     assert!(

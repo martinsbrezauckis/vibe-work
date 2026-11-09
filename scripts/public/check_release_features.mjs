@@ -6,11 +6,24 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { REPO_ROOT } from "./lib_files.mjs";
 
-const targets = [
-  "x86_64-unknown-linux-gnu",
-  "x86_64-pc-windows-msvc",
-  "aarch64-apple-darwin",
-];
+const args = process.argv.slice(2);
+let extraFeatures = "";
+let selectedTarget;
+let safariPackage = false;
+while (args.length) {
+  const option = args.shift();
+  if (option === "--features") extraFeatures = args.shift() ?? "";
+  else if (option === "--target") selectedTarget = args.shift();
+  else if (option === "--safari-package") safariPackage = true;
+  else throw new Error(`Unknown release feature option: ${option}`);
+}
+const targets = selectedTarget
+  ? [selectedTarget]
+  : [
+      "x86_64-unknown-linux-gnu",
+      "x86_64-pc-windows-msvc",
+      "aarch64-apple-darwin",
+    ];
 const manifest = readFileSync(join(REPO_ROOT, "app/Cargo.toml"), "utf8");
 const defaults = manifest.match(/^default = \[([^\]]+)\]/m);
 if (!defaults) throw new Error("app/Cargo.toml has no default feature list");
@@ -48,12 +61,18 @@ const forbidden = new Set([
   "video-test",
   "agent-vault",
 ]);
+if (safariPackage) {
+  if (!selectedTarget?.includes("apple-darwin"))
+    throw new Error("Safari packaging requires a macOS target");
+  forbidden.delete("your-safari");
+}
 const errors = [];
 for (const target of targets) {
   const tree = execFileSync(
     "cargo",
     [
       "tree",
+      ...(extraFeatures ? ["--features", extraFeatures] : []),
       "--color",
       "never",
       "--locked",
@@ -100,6 +119,11 @@ for (const target of targets) {
         errors.push(`${target}: ${name}/${feature} is on`);
     }
   }
+  if (
+    target.includes("linux") &&
+    !packages.get("vw-agent-tools")?.has("linux-video")
+  )
+    errors.push(`${target}: Linux video sidecar is off`);
   if (!packages.has("vw-video"))
     errors.push(`${target}: video module is missing`);
   if (!packages.get("vw-webview")?.has("macos-proxy"))
@@ -110,6 +134,6 @@ if (errors.length) {
   process.exitCode = 1;
 } else {
   console.log(
-    `Release features: Edge, proxies, tray and video on; plan usage, context breakdown and click markers follow app defaults; feedback ${selected.has("feedback") ? "on" : "off"}; Firefox, Safari and agent vault off (all OSes)`,
+    `Release features: Edge, proxies, tray and video on; plan usage, context breakdown and click markers follow app defaults; feedback ${selected.has("feedback") ? "on" : "off"}; Firefox and agent vault off; Safari ${safariPackage ? "package enabled" : "off"}`,
   );
 }

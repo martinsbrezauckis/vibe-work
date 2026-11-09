@@ -200,6 +200,23 @@ impl std::fmt::Debug for RequestCheck {
 /// Callbacks from the engine into the model. Called on the engine's thread (the UI thread for Tauri): every
 /// method must return quickly and never block on the async runtime.
 pub trait PreviewHooks: Send + Sync {
+    /// The app-tracked URL for this live mount; absent after close or before an address is known.
+    /// Native adapters use this instead of querying a possibly closing native view.
+    fn current_url(&self, label: &str) -> Option<Url> {
+        let _ = label;
+        None
+    }
+
+    /// The person closed a chat browser window; core queues cleanup of its page.
+    fn window_close_requested(&self, page: &str) {
+        let _ = page;
+    }
+    /// Whether this mount belongs to an agent and its native dialogs should wait for a tool answer.
+    fn handles_dialog(&self, label: &str) -> bool {
+        let _ = label;
+        false
+    }
+
     /// Optional native ad-filter JSON, independent of navigation and network policy.
     fn content_filter(&self) -> Option<String> {
         None
@@ -271,6 +288,77 @@ pub trait PreviewHooks: Send + Sync {
 
 /// The native engine.
 pub trait PreviewEngine: Send + Sync {
+    /// Creates, focuses, inspects or closes a chat-owned native window.
+    fn page_window(
+        &self,
+        page: &str,
+        action: crate::PageWindowAction,
+    ) -> EngineFuture<'_, Option<crate::PageWindowInfo>> {
+        let _ = (page, action);
+        Box::pin(async {
+            Err(EngineError::Unsupported(
+                "Native browser windows are unavailable on this engine.".into(),
+            ))
+        })
+    }
+    /// Updates native dialog ownership on handoff, releasing held agent dialogs when the person takes the page.
+    ///
+    /// # Errors
+    /// Returns an engine error if the mounted page cannot receive the ownership update.
+    fn dialog_ownership(&self, id: &MountId, owned: bool) -> Result<(), EngineError> {
+        let _ = (id, owned);
+        Ok(())
+    }
+
+    /// Read a held native dialog without evaluating the blocked page.
+    fn pending_dialog(&self, id: &MountId) -> Option<serde_json::Value> {
+        let _ = id;
+        None
+    }
+    /// Answer an observed native dialog on its UI thread.
+    fn answer_dialog(
+        &self,
+        id: &MountId,
+        dialog: String,
+        answer: crate::DialogAnswer,
+    ) -> EngineFuture<'_, ()> {
+        let _ = (id, dialog, answer);
+        Box::pin(async {
+            Err(EngineError::Unsupported(
+                "Native page dialogs are unavailable in this engine.".into(),
+            ))
+        })
+    }
+
+    /// Download an HTTP(S) URL with this mount's profile, into a new private staging file, bounded in size/time.
+    fn download_url(
+        &self,
+        id: &MountId,
+        url: Url,
+        destination: PathBuf,
+        max_bytes: u64,
+    ) -> EngineFuture<'_, ()> {
+        let _ = (id, url, destination, max_bytes);
+        Box::pin(async {
+            Err(EngineError::Unsupported(
+                "URL downloads are unavailable in this engine.".into(),
+            ))
+        })
+    }
+    /// Read/change the current site's native cookie store, including `HttpOnly` cookies.
+    fn site_cookies(
+        &self,
+        id: &MountId,
+        url: Url,
+        request: crate::CookieRequest,
+    ) -> EngineFuture<'_, serde_json::Value> {
+        let _ = (id, url, request);
+        Box::pin(async {
+            Err(EngineError::Unsupported(
+                "Cookie access is unavailable in this engine.".into(),
+            ))
+        })
+    }
     /// Evaluates only the main document in an isolated world. Missing isolation fails closed.
     fn evaluate_isolated(&self, id: &MountId, script: String) -> EngineFuture<'_, String> {
         let id = id.clone();

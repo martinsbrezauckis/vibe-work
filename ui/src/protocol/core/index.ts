@@ -11,7 +11,7 @@ export type JsonValue = number | string | boolean | Array<JsonValue> | { [key in
 import type { SessionSnapshot, SessionRowView, SessionToolsRequest, SessionToolsResult, SearchRequest, SearchResult } from "./sessions";
 import type { AnomalyReport, CoreStatus, ProcessesRequest, ProcessesResult } from "./status";
 import type { ChangesRequest, ChangesResult, LineCommentsRequest, LineCommentsResult } from "./changes";
-import type { PreviewRequest, PreviewResult } from "./preview";
+import type { PreviewRequest, PreviewResult, CaptureBlock } from "./preview";
 import type { BrowserRequest, BrowserResult } from "./browser";
 import type { PagesRequest, PagesResult } from "./pages";
 import type { WorktreesRequest, WorktreesResult } from "./worktrees";
@@ -20,7 +20,7 @@ import type { SecretsRequest, SecretsResult, SafetyRequest, SafetyResult } from 
 import type { GitRequest } from "./git_request";
 import type { ProtectedChangeView } from "./proposals";
 import type { TerminalRequest, TerminalResult } from "./terminal";
-import type { KeyRequest, MistralKeyView, KeyStatusView, KeyCandidateView, VibeKeyView } from "./keys";
+import type { KeyRequest, MistralKeyView, KeyStatusView, VibeKeyView } from "./keys";
 import type { InstructionsRequest, InstructionsResult, ProjectInstructionsRequest, ProjectInstructionsResult } from "./instructions";
 import type { DocumentsRequest, DocumentsResult } from "./documents";
 import type { SpeechRequest, SpeechResult } from "./speech";
@@ -512,11 +512,7 @@ view: InstallView, } | { "type": "keyStatus",
 /**
  * Vault and key status (no secret).
  */
-status: KeyStatusView, } | { "type": "keyCandidates",
-/**
- * Mistral credentials already in the vault (metadata).
- */
-candidates: Array<KeyCandidateView>, } | { "type": "mistralKeys",
+status: KeyStatusView, } | { "type": "mistralKeys",
 /**
  * Account rows without credential values.
  */
@@ -695,6 +691,10 @@ result: SessionToolsResult, } | { "type": "search",
 result: SearchResult, };
 
 export type CoreError = {
+/**
+ * Stable screenshot refusal for the Capture menu; agent guidance remains in `message`.
+ */
+captureBlock?: CaptureBlock,
 /**
  * What kind of failure.
  */

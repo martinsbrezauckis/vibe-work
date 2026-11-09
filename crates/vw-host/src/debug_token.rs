@@ -1,4 +1,5 @@
 //! Host Debug API startup after vault unlock and user-only token regeneration.
+//! Depends on: host Debug API state and the key service. Called by: native Developer settings commands.
 //! Uses the vault-backed server and UI attribution; called at startup, after vault commands and by Settings.
 use tracing::warn;
 use vw_core_api::DebugApiFlag;
@@ -38,12 +39,12 @@ impl Host {
     }
 
     /// Returns the existing vault item id for Settings, or creates/regenerates it only on request.
-    /// The historical command name is retained; the return value contains no token or token-file path.
+    /// The return value contains no token or token-file path.
     /// Copy uses the ordinary user-only `secrets.copy` command and native expiring clipboard.
     ///
     /// # Errors
     /// A locked/unavailable vault or an operation attributed to a Debug API UI request.
-    pub async fn debug_token_file(&self, rotate: bool) -> Result<Option<String>, DebugApiError> {
+    pub async fn debug_token_item(&self, rotate: bool) -> Result<Option<String>, DebugApiError> {
         if self.ui.driving() {
             return Err(DebugApiError::UserOnly);
         }

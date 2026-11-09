@@ -4,6 +4,7 @@
  * Generation sends options only and requires confirmation before replacing an existing value.
  * Depends on: SecretField, GeneratorOptions. Called by: VaultEntryRow.
  */
+import { literalInputProps } from "../../components/inputProps";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { Button, LinkButton } from "../../components/Controls";
@@ -294,6 +295,7 @@ export function VaultItemActions(props: {
           }}
         >
           <input
+            {...literalInputProps}
             data-testid="secrets.vault-item-actions-set-name-2"
             aria-label="Name"
             autoFocus

@@ -17,7 +17,7 @@
 pub fn system_version() -> Option<(&'static str, String)> {
     #[cfg(target_os = "macos")]
     {
-        let output = std::process::Command::new("/usr/bin/sw_vers")
+        let output = crate::process_command::hidden("/usr/bin/sw_vers")
             .arg("-productVersion")
             .output()
             .ok()?;
@@ -96,7 +96,7 @@ mod tests {
         assert_eq!(parts.len(), 4, "{version}");
         assert_eq!(parts[..2], [10, 0], "{version}");
         assert!(parts[2] >= 10240, "{version}");
-        let ver = std::process::Command::new("cmd")
+        let ver = crate::process_command::hidden("cmd")
             .args(["/d", "/c", "ver"])
             .output()
             .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
@@ -114,7 +114,7 @@ mod tests {
         let Some(version) = super::glibc_version() else {
             panic!("the glibc version was not read");
         };
-        let getconf = std::process::Command::new("getconf")
+        let getconf = crate::process_command::hidden("getconf")
             .arg("GNU_LIBC_VERSION")
             .output()
             .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_owned())

@@ -13,6 +13,8 @@ const MAX_IDENTITY_ENTRIES: usize = 4096;
 const IDENTITY_BUDGET: Duration = Duration::from_millis(100);
 
 pub(crate) struct ReadExclusions {
+    #[cfg(test)]
+    clock: Option<std::sync::Arc<dyn Fn() -> Instant + Send + Sync>>,
     data: Option<PathBuf>,
     own: Option<PathBuf>,
     vaults: Vec<PathBuf>,
@@ -59,6 +61,8 @@ impl ReadExclusions {
             .map(|p| resolve(p).map_err(|e| e.to_string()))
             .collect::<Result<_, _>>()?;
         Ok(Self {
+            #[cfg(test)]
+            clock: None,
             data,
             own: layout.own,
             vaults,
@@ -114,11 +118,11 @@ impl ReadExclusions {
         identity: vw_platform::final_path::FileIdentity,
         deadline: Option<Instant>,
     ) -> Result<(), ()> {
-        let limit = Instant::now() + IDENTITY_BUDGET;
+        let limit = self.now() + IDENTITY_BUDGET;
         let deadline = deadline.map_or(limit, |deadline| deadline.min(limit));
         let mut visited = 0;
         for root in self.data.iter().chain(&self.vaults) {
-            if Instant::now() >= deadline {
+            if self.now() >= deadline {
                 return Err(());
             }
             match std::fs::symlink_metadata(root) {
@@ -133,7 +137,7 @@ impl ReadExclusions {
                 .max_open(MAX_IDENTITY_ENTRIES)
                 .into_iter();
             loop {
-                if visited >= MAX_IDENTITY_ENTRIES || Instant::now() >= deadline {
+                if visited >= MAX_IDENTITY_ENTRIES || self.now() >= deadline {
                     return Err(());
                 }
                 let Some(entry) = entries.next() else { break };
@@ -148,7 +152,7 @@ impl ReadExclusions {
                 if !entry.file_type().is_file() {
                     continue;
                 }
-                if Instant::now() >= deadline {
+                if self.now() >= deadline {
                     return Err(());
                 }
                 let file = File::open(entry.path()).map_err(|_| ())?;
@@ -158,11 +162,23 @@ impl ReadExclusions {
                 }
             }
         }
-        if Instant::now() >= deadline {
+        if self.now() >= deadline {
             Err(())
         } else {
             Ok(())
         }
+    }
+
+    #[cfg_attr(
+        not(test),
+        expect(clippy::unused_self, reason = "tests inject a per-policy clock")
+    )]
+    fn now(&self) -> Instant {
+        #[cfg(test)]
+        if let Some(clock) = &self.clock {
+            return clock();
+        }
+        Instant::now()
     }
 }
 

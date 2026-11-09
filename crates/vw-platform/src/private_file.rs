@@ -236,9 +236,7 @@ mod os {
     //! Windows DACLs: set with `SetNamedSecurityInfoW` (a protected one-entry DACL for the SID in the
     //! process token), read back with `icacls`, keyed by the current user's name from `whoami`.
     use std::fs::File;
-    use std::os::windows::process::CommandExt;
     use std::path::{Path, PathBuf};
-    use std::process::Command;
 
     use super::PrivateFileError;
 
@@ -272,9 +270,6 @@ mod os {
         }
         .map_err(|_| std::io::Error::last_os_error())
     }
-
-    /// `CREATE_NO_WINDOW`: no console window flashes when a GUI app runs the tool.
-    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
     /// Paths of this many UTF-16 units or more get the long form ([`long_path`]): the shortest limit of the Win32
     /// calls, a directory name (260 minus room for an 8.3 file name), the same threshold std uses.
@@ -327,9 +322,8 @@ mod os {
             path: path.display().to_string(),
             detail,
         };
-        let output = Command::new(system_tool(tool))
+        let output = crate::process_command::hidden(system_tool(tool))
             .args(args)
-            .creation_flags(CREATE_NO_WINDOW)
             .output()
             .map_err(|e| fail(e.to_string()))?;
         if !output.status.success() {
@@ -396,7 +390,7 @@ mod os {
     /// developer tool's sandbox adds its own users group and an unresolvable account SID with Modify
     /// rights to workspace folders. Only the DACL section is written, which needs no privilege (writing
     /// a whole descriptor, as the `Set-Acl` cmdlet does, needs `SeSecurityPrivilege`, held only
-    /// elevated: Windows 11).
+    /// elevated: Windows 11). Exit: none expected; keep for Windows ownership and SID-resolution behaviour.
     ///
     /// PERF(Windows): this used to run `whoami.exe` and a PowerShell script per call, about
     /// 0.4-0.7 s each on Windows 11, so every store save (projects, comments, settings) took about 0.6 s and a

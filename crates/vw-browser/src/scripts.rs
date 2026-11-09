@@ -53,6 +53,15 @@ pub fn observe(page: &str, max_refs: usize, max_text: usize, text_offset: usize)
     observe_focused(page, max_refs, max_text, text_offset, None, None)
 }
 
+/// A text match marker in a minimal model for the native frame validator; contains no control refs.
+#[must_use]
+pub(crate) fn frame_text(page: &str, text: &str) -> String {
+    assemble(
+        include_str!("js/frame_text.js"),
+        &json!({"page":page,"text":text}),
+    )
+}
+
 /// A receipt keeps the acted-on control ahead of the ordinary ref cap, including in native frames.
 #[must_use]
 pub(crate) fn observe_receipt(
@@ -88,6 +97,7 @@ pub fn observe_focused(
 #[must_use]
 pub fn act(request: &Value) -> String {
     assemble(ACT, request)
+        .replace("__VW_SENDING__", include_str!("js/sending.js"))
         .replace("__VW_NATIVE_CLICK__", NATIVE_CLICK)
         .replace("__VW_DRAG__", include_str!("js/drag.js"))
         .replace("__VW_WIDGET_DATES__", include_str!("js/widget_dates.js"))
@@ -212,6 +222,7 @@ pub fn frame_scroll(request: &Value) -> String {
 #[must_use]
 pub fn point_validation(request: &Value) -> String {
     assemble(include_str!("js/point.js"), request)
+        .replace("__VW_SENDING__", include_str!("js/sending.js"))
         .replace("__VW_POINT_RECEIPT__", include_str!("js/point_receipt.js"))
 }
 

@@ -4,6 +4,7 @@
  * Depends on: modal focus, native-layer reservations and the browser choice metadata. Called by: SaveVault.
  */
 import { Button } from "../../components/Controls";
+import { literalInputProps } from "../../components/inputProps";
 import { type ReactElement, type SubmitEvent, useLayoutEffect, useRef, useState } from "react";
 
 import { reserve } from "../../components/nativeLayer";
@@ -87,6 +88,7 @@ export function SaveNameDialog({
             <label className="preview-save-name">
               <span>Name</span>
               <input
+                {...literalInputProps}
                 data-testid="preview.save-name-dialog-set-name"
                 data-vault-save-name
                 data-dialog-initial-focus="true"

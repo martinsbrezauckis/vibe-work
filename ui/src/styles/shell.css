@@ -511,7 +511,7 @@ kbd {
   text-wrap: balance;
 }
 
-/* A path that loses its start, not its end (components/PathText, UX-14). */
+/* A path that loses its start, not its end (components/PathText). */
 .path-start {
   display: flex;
   overflow: hidden;

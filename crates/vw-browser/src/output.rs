@@ -253,6 +253,7 @@ fn replace(value: &mut Value, tokens: &[String], path: &mut Vec<String>) {
 
 /// Filters known and generic keys in every browser result, plus every long token on key pages.
 pub fn filter_agent_output(value: &mut Value) {
+    let text_before = value.pointer("/untrustedPageContent/text").cloned();
     crate::text::clean_value(value);
     let context = has_context(value);
     let mut tokens = Vec::new();
@@ -260,6 +261,22 @@ pub fn filter_agent_output(value: &mut Value) {
     tokens.sort_by(|left, right| right.len().cmp(&left.len()).then_with(|| left.cmp(right)));
     tokens.dedup();
     replace(value, &tokens, &mut Vec::new());
+    if value.pointer("/untrustedPageContent/text").cloned() != text_before
+        && let Some(content) = value
+            .get_mut("untrustedPageContent")
+            .and_then(Value::as_object_mut)
+        && content.remove("textCursor").is_some()
+    {
+        content.remove("nextTextCursor");
+        content.remove("textWindowChars");
+        content.insert(
+            "textContinuation".into(),
+            Value::String(
+                "Text was redacted after paging; use textPage with find for a specific passage."
+                    .into(),
+            ),
+        );
+    }
     // Redaction markers can be longer than the original strings. Refit reads and receipts after
     // the last scrub, including their tab envelope; captures have their own file-summary budget.
     if value.is_string() {

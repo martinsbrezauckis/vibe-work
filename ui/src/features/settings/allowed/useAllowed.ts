@@ -65,10 +65,10 @@ export function useAllowedFocus(): void {
 }
 
 /**
- * `text` while `waiting` is false; while it is true, the value it had once it stayed the same for `ms` (so a polite
+ * `text` while `waiting` is false; while it is true, the value it had once it stayed the same for 300 ms (so a polite
  * status line is announced once after typing stops, not on every key).
  */
-export function useSettled(text: string, waiting: boolean, ms = 300): string {
+export function useSettled(text: string, waiting: boolean): string {
   const [settled, setSettled] = useState(text);
   useEffect(() => {
     if (text === settled) return;
@@ -76,11 +76,11 @@ export function useSettled(text: string, waiting: boolean, ms = 300): string {
       () => {
         setSettled(text);
       },
-      waiting ? ms : 0,
+      waiting ? 300 : 0,
     );
     return () => {
       clearTimeout(timer);
     };
-  }, [text, settled, waiting, ms]);
+  }, [text, settled, waiting]);
   return waiting ? settled : text;
 }

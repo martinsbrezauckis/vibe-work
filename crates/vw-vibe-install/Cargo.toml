@@ -49,7 +49,3 @@ ts-rs = { version = "12.0.1", optional = true, features = ["serde-json-impl", "n
 minisign-verify = "0.2.5"
 base64 = "0.22"
 semver = "1"
-
-[target.'cfg(windows)'.dependencies]
-# Only for the CREATE_NO_WINDOW constant process-wrap's CreationFlags takes (as vw-supervisor).
-windows = { version = "0.62", features = ["Win32_System_Threading"] }

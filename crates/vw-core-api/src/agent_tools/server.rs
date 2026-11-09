@@ -126,7 +126,8 @@ async fn serve_one(stream: TcpStream, shared: Weak<Shared>) {
                         // A hook that has exited can no longer use this approval. Release its
                         // confirmation future and listener slot as soon as the client goes away.
                         let Some(answer) =
-                            answer_while_connected(&mut reader, answer(&shared, request)).await
+                            answer_while_connected(&mut reader, Box::pin(answer(&shared, request)))
+                                .await
                         else {
                             return;
                         };

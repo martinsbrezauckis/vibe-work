@@ -1,7 +1,7 @@
 //! Classifies literal Git and GitHub CLI command starts for the hook and core.
 //! Depends on `command_segments`, `killparse_shell` (quote-aware readings) and `gitparse_cmds`; called by the hook,
 //! core and tests.
-//! This is a guardrail: it does not interpret scripts or words in command data. Each command is read as unquoted literal words and as Bash and Windows
+//! This is a guardrail: only shell `-c` payloads are also checked for credential calls; ordinary argument data is not code. Each command is read as unquoted literal words and as Bash and Windows
 //! dequoted words and every operation any reading finds counts, so a
 //! quoted value with a space (`git -C "C:\work\git test" push`) or a quoted program name cannot hide a push
 //! (a literal reading could otherwise take `"C:\...\git` as the `-C` value).
@@ -171,16 +171,28 @@ impl GitScan {
 #[must_use]
 pub fn scan(command: &str) -> GitScan {
     let mut out = GitScan::default();
-    for reading in readings(command) {
-        let one = scan_reading(
-            reading
-                .iter()
-                .map(|segment| segment.iter().map(String::as_str).collect()),
-        );
-        out.mentions |= one.mentions;
-        for op in one.ops {
-            if !out.ops.contains(&op) {
-                out.ops.push(op);
+    let mut pending = vec![(command.to_owned(), false)];
+    let mut seen = std::collections::BTreeSet::new();
+    while let Some((command, credentials_only)) = pending.pop() {
+        if !seen.insert(command.clone()) {
+            continue;
+        }
+        for reading in readings(&command) {
+            let one = scan_reading(
+                reading
+                    .iter()
+                    .map(|segment| segment.iter().map(String::as_str).collect()),
+                &mut pending,
+            );
+            out.mentions |= if credentials_only {
+                one.credential_read()
+            } else {
+                one.mentions
+            };
+            for op in one.ops {
+                if (!credentials_only || op.kind == GitKind::Credential) && !out.ops.contains(&op) {
+                    out.ops.push(op);
+                }
             }
         }
     }
@@ -207,7 +219,10 @@ pub(crate) fn readings(command: &str) -> [Vec<Vec<String>>; 3] {
     ]
 }
 
-fn scan_reading<'a>(reading: impl Iterator<Item = Vec<&'a str>>) -> GitScan {
+fn scan_reading<'a>(
+    reading: impl Iterator<Item = Vec<&'a str>>,
+    scripts: &mut Vec<(String, bool)>,
+) -> GitScan {
     let mut out = GitScan::default();
     let mut elsewhere = false;
     for segment in reading {
@@ -228,6 +243,25 @@ fn scan_reading<'a>(reading: impl Iterator<Item = Vec<&'a str>>) -> GitScan {
             continue;
         }
         let name = executable_name(name).to_ascii_lowercase();
+        if matches!(name.as_str(), "bash" | "sh") {
+            let mut at = 0;
+            while let Some(arg) = args.get(at) {
+                if *arg == "--" || !arg.starts_with('-') {
+                    break;
+                }
+                if matches!(*arg, "-o" | "-O") {
+                    at += 2;
+                    continue;
+                }
+                if !arg.starts_with("--") && arg.contains('c') {
+                    if let Some(script) = args.get(at + 1) {
+                        scripts.push(((*script).to_owned(), true));
+                    }
+                    break;
+                }
+                at += 1;
+            }
+        }
         let mut switched = false;
         if name == "git" {
             out.mentions = true;

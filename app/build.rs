@@ -20,7 +20,7 @@ const BRIDGE_COMMANDS: &[&str] = &[
     "ui_control_reply",
     "debug_api_set",
     "cli_sharing",
-    "debug_api_token_file",
+    "debug_api_token_item",
     "host_subscribe",
     "pick_folder",
     "pick_documents",

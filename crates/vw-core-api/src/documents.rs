@@ -164,6 +164,7 @@ async fn add_dropped(
             refused.push(DocumentRefusal {
                 name,
                 reason: vw_documents::AddError::TooLarge.to_string(),
+                kind: None,
             });
             continue;
         }
@@ -172,6 +173,7 @@ async fn add_dropped(
             refused.push(DocumentRefusal {
                 name,
                 reason: "the file could not be read".to_owned(),
+                kind: None,
             });
             continue;
         };
@@ -188,10 +190,7 @@ async fn add_dropped(
                 info!(document = %info.id, kind = ?info.kind, bytes = info.size, "document dropped");
                 added.push(DocumentView::from(&info));
             }
-            Err(error) => refused.push(DocumentRefusal {
-                name,
-                reason: error.to_string(),
-            }),
+            Err(error) => refused.push(DocumentRefusal::from_error(name, &error)),
         }
     }
     shared.emit(CoreEvent::DocumentsAdded {
@@ -327,10 +326,7 @@ impl Core {
                         info!(document = %info.id, kind = ?info.kind, bytes = info.size, ?via, "document added");
                         added.push(DocumentView::from(&info));
                     }
-                    Err(error) => refused.push(DocumentRefusal {
-                        name,
-                        reason: error.to_string(),
-                    }),
+                    Err(error) => refused.push(DocumentRefusal::from_error(name, &error)),
                 }
             }
             (added, refused)

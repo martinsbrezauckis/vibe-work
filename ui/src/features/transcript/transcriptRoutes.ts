@@ -9,7 +9,6 @@
  *   approve, approve_for_session or deny the same way; the answer is built by the same model functions and
  *   marked "via UI control" in the audit row and the bell);
  * - `protected {proposalId, choice: once | no, note?}`: Allow once / No on a protected change card;
- * - `chrome {askId, choice, note?}`: a button of a Chrome Control card (`features/ask/chromeRoute.ts`);
  * - `grants`, `grantsOpen`, `revokeGrant`, `grantsAllowed`: the session header's grants chip and list
  *   (`features/ask/grantsRoute.ts`);
  * - `link {url}`: shows the link dialog for a URL (what a click on a link in a message does);
@@ -395,7 +394,7 @@ export function registerTranscriptRoutes(app: App): () => void {
         if (grants !== null) return grants;
         throw new UiControlError(
           "invalidParams",
-          "action must be read, open, answer, protected, chrome, grants, grantsOpen, revokeGrant, grantsAllowed, link or sources",
+          "action must be read, open, answer, protected, grants, grantsOpen, revokeGrant, grantsAllowed, link or sources",
         );
       }
     }

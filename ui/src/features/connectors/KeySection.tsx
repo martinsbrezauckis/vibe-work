@@ -7,6 +7,7 @@
  * Invariants: the value field is a `SecretField` (`data-secret`); the list shows names only (the core
  * never sends a value); nothing is stored here: the core stores a new secret only after the user's native dialog.
  */
+import { literalInputProps } from "../../components/inputProps";
 import { type ReactElement, useEffect, useRef, useState } from "react";
 
 import { Selector } from "../../components/Selector";
@@ -154,6 +155,7 @@ export function KeySection(props: {
             <label className="cfield">
               <span>Its name</span>
               <input
+                {...literalInputProps}
                 data-testid="connectors.key-section-set-3"
                 value={draft.newName}
                 placeholder="GitHub token"
@@ -192,10 +194,10 @@ export function KeySection(props: {
           <label className="cfield">
             <span>Header name</span>
             <input
+              {...literalInputProps}
               data-testid="connectors.key-section-set-6"
               value={draft.header}
               placeholder="X-Api-Key"
-              spellCheck={false}
               aria-invalid={headerCheck !== null}
               onChange={(e) => {
                 set({ header: e.target.value });

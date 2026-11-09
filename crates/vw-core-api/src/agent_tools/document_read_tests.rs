@@ -1,7 +1,7 @@
-//! Original-file reads through tool preparation, consent and extraction, without a provider or window.
+//! Original-file reads through tool preparation, admission and extraction, without a provider or window.
 //! Uses the core fixture and real search adapter; replacements cannot change the bytes in a prepared read.
 use super::{document_tools, prepare, search_tool};
-use crate::ask::tool_calls::{self, receipts::Execution};
+use crate::ask::tool_calls::receipts::Execution;
 use crate::feature_test_core::Fixture;
 use serde_json::json;
 use std::path::Path;
@@ -32,40 +32,6 @@ async fn search(f: &Fixture) -> String {
         .as_str()
         .unwrap()
         .to_owned()
-}
-
-async fn allow(f: &Fixture, expected: &[u8]) {
-    let ask = tokio::time::timeout(Duration::from_secs(5), async {
-        loop {
-            if let Some(ask) = f.core.asks().into_iter().next() {
-                break ask;
-            }
-            tokio::time::sleep(Duration::from_millis(5)).await;
-        }
-    })
-    .await
-    .expect("a new exact-byte consent card");
-    let mut state = json!({"history":[]});
-    tool_calls::overlay(&f.core.shared, "s", &mut state);
-    let card = state["history"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|card| Some(card["id"].as_str().unwrap()) == ask.id.strip_prefix("callback:"))
-        .unwrap();
-    assert_eq!(
-        card["detail"]["effect"]["vwDocumentDigest"],
-        json!(crate::saved_documents::digest(expected))
-    );
-    tool_calls::answer_by(
-        &f.core.shared,
-        crate::Origin::Ui,
-        "s",
-        ask.id.strip_prefix("callback:").unwrap(),
-        &json!({"decision":{"type":"approve"}}),
-        vw_ask::AnsweredBy::Person,
-    )
-    .unwrap();
 }
 
 #[tokio::test]
@@ -103,18 +69,18 @@ async fn unchanged_original_reuses_digest_cache() {
 }
 
 #[tokio::test]
-async fn changed_original_needs_a_new_allow_for_its_digest() {
+async fn changed_original_invalidates_the_cache_without_a_card() {
     let f = Fixture::new().await;
     let folder = f.root.join("project");
     f.load("s", &folder, &[], false);
     let path = folder.join("brief.txt");
     for text in ["first bytes", "changed bytes"] {
         std::fs::write(&path, text).unwrap();
-        let shared = f.core.shared.clone();
-        let source = path.clone();
-        let pending = tokio::spawn(async move { prepared(&shared, &source).await.await });
-        allow(&f, text.as_bytes()).await;
-        let result = pending.await.unwrap().unwrap();
+        let read = tokio::time::timeout(Duration::from_secs(1), prepared(&f.core.shared, &path))
+            .await
+            .expect("local extraction never waits for a card");
+        assert_eq!(f.core.asks(), [] as [vw_ask::Ask; 0]);
+        let result = read.await.unwrap();
         assert!(result["text"].as_str().unwrap().contains(text));
         assert_eq!(result["cached"], false);
         let repeated = prepared(&f.core.shared, &path).await.await.unwrap();
@@ -205,7 +171,7 @@ async fn legacy_copy_remains_readable_and_search_shows_both_paths() {
 }
 
 #[tokio::test]
-async fn cached_bytes_at_another_path_still_need_their_own_grant() {
+async fn matching_bytes_at_another_path_reuse_the_cache_without_a_card() {
     let f = Fixture::new().await;
     let folder = f.root.join("project");
     let extra = f.root.join("extra");
@@ -214,10 +180,11 @@ async fn cached_bytes_at_another_path_still_need_their_own_grant() {
     for (index, root) in [folder, extra].iter().enumerate() {
         let path = root.join("brief.txt");
         std::fs::write(&path, "same bytes").unwrap();
-        let shared = f.core.shared.clone();
-        let pending = tokio::spawn(async move { prepared(&shared, &path).await.await });
-        allow(&f, b"same bytes").await;
-        let result = pending.await.unwrap().unwrap();
+        let read = tokio::time::timeout(Duration::from_secs(1), prepared(&f.core.shared, &path))
+            .await
+            .expect("each local path reads without a card");
+        assert_eq!(f.core.asks(), [] as [vw_ask::Ask; 0]);
+        let result = read.await.unwrap();
         assert_eq!(result["cached"], index == 1);
     }
     f.finish().await;

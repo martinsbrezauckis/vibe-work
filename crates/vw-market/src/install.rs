@@ -406,11 +406,9 @@ async fn run_step(
     root: &Path,
     data: &Path,
 ) -> Result<(), MarketError> {
-    let mut command = tokio::process::Command::new(runtime);
+    let mut command = vw_platform::process_command::hidden_tokio(runtime);
     command.env_clear();
     // No console window for an install step (the app has no console of its own).
-    #[cfg(windows)]
-    command.creation_flags(0x0800_0000);
     for name in STEP_ENV {
         if let Some(value) = std::env::var_os(name) {
             command.env(name, value);

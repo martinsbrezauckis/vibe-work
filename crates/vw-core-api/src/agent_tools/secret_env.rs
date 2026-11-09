@@ -44,7 +44,7 @@ pub(super) async fn for_run(
 ) -> Result<Vec<(OsString, OsString)>, String> {
     let python = vw_supervisor::server_python(&shared.supervisor.program())
         .ok_or("Vibe's Python could not be found to read the agent shell PATH")?;
-    let mut command = tokio::process::Command::new(python);
+    let mut command = vw_platform::process_command::hidden_tokio(python);
     // The launcher can add its own tool folders even when usr/bin/bash.exe, named in the
     // secret request, does not. Ask the same resolver/launcher as Vibe; do not guess folders.
     command
@@ -53,8 +53,7 @@ pub(super) async fn for_run(
         .env_clear()
         .envs(tools.config.process_env.clone())
         .stdin(std::process::Stdio::null())
-        .kill_on_drop(true)
-        .creation_flags(0x0800_0000);
+        .kill_on_drop(true);
     let output = tokio::time::timeout(std::time::Duration::from_secs(10), command.output())
         .await
         .map_err(|_| "The agent shell PATH probe timed out")?

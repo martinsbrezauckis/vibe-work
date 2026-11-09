@@ -1,6 +1,9 @@
 //! Native frame observations and document-bound ref input. Depends on preview frame evaluation and models.
 //! Called by the browser driver; stale handles and navigation never fall back to another document.
 
+#[path = "frame_choices.rs"]
+mod frame_choices;
+
 use crate::{
     Browser,
     model::{PageModel, parse_answer},
@@ -554,6 +557,12 @@ fn merge(
         .ok_or("the main frame changed while it was read")?;
     let mut model = frames[top].2.model.clone();
     model.document.clone_from(&frames[top].2.document);
+    model.text_page_count = Some(
+        model
+            .text_length
+            .div_ceil(crate::observe::PAGE_CHARS as u64)
+            .max(1),
+    );
     model.viewport = Some((
         frames[top].2.width.round() as u32,
         frames[top].2.height.round() as u32,
@@ -587,6 +596,7 @@ fn merge(
             url: observation.model.url.clone(),
         };
         model.documents.push(frame.clone());
+        frame_choices::append_main(&mut model, observation, &frame, *main);
         let visible = observation.path.iter().enumerate().all(|(depth, index)| {
             frames
                 .iter()
@@ -630,7 +640,7 @@ fn merge(
             }
         }
         if !main && prominent {
-            append_choices(&mut model, observation, choices);
+            frame_choices::append_child(&mut model, observation, choices);
         }
         append_frame_content(&mut model, &observation.model, *main, visible);
     }
@@ -642,37 +652,32 @@ fn merge(
     Ok(model)
 }
 
-fn append_choices(
-    model: &mut PageModel,
-    observation: &Observation,
-    choices: Vec<crate::model::RefItem>,
-) {
-    if let Some(mut context) = observation.model.document_context.clone() {
-        context.frame_origin.clone_from(&observation.origin);
-        model.choice_context.push(context);
-    }
-    model.covering_frames.push(crate::model::FrameChoices {
-        origin: observation.origin.clone(),
-        complete: !observation.model.truncated
-            && choices.len() == observation.model.choice_count as usize,
-        total: observation.model.choice_count,
-        choices,
-    });
-}
-
 fn append_frame_content(model: &mut PageModel, child: &PageModel, main: bool, visible: bool) {
     model
         .all_refs
         .extend(child.refs.iter().map(|r| r.id.clone()));
     model.ref_count = model.ref_count.saturating_add(child.ref_count);
     if !main {
+        if visible {
+            model.text_page_count = Some(
+                model.text_page_count.unwrap_or(1).max(
+                    child
+                        .text_length
+                        .div_ceil(crate::observe::PAGE_CHARS as u64),
+                ),
+            );
+        }
         let text = if visible {
             &mut model.text
         } else {
             &mut model.hidden_text
         };
-        text.push('\n');
-        text.push_str(&child.text);
+        if !child.text.is_empty() {
+            if !text.is_empty() {
+                text.push('\n');
+            }
+            text.push_str(&child.text);
+        }
         model.hidden_text.push('\n');
         model.hidden_text.push_str(&child.hidden_text);
         model.text_length = model.text_length.saturating_add(child.text_length);

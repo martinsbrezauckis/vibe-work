@@ -39,6 +39,23 @@ pub const KEYS: [&str; 15] = [
 /// One browser action.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Action {
+    /// Read or answer a held native page dialog.
+    Dialog(crate::dialogs::Request),
+    /// A native click variant wrapping one ordinary checked ref or coordinate target.
+    Pointer {
+        /// The ref or coordinate click.
+        base: Box<Action>,
+        /// Button, count and modifiers.
+        options: vw_preview::ClickOptions,
+    },
+    /// Current-site local or session storage.
+    Storage(crate::site_storage::Request),
+    /// Current-site native cookie store.
+    Cookies(vw_preview::CookieRequest),
+    /// Chat-scoped download management.
+    Downloads(crate::downloads::Request),
+    /// Capture a viewport, one visible element, or a rectangle.
+    Screenshot(crate::screenshot_area::Area),
     /// Load a URL (the navigation policy decides).
     Navigate {
         /// The URL.
@@ -169,6 +186,7 @@ impl Action {
         matches!(
             self,
             Self::Click { .. }
+                | Self::Pointer { .. }
                 | Self::Check { .. }
                 | Self::Press { .. }
                 | Self::Type { .. }
@@ -181,6 +199,12 @@ impl Action {
     #[must_use]
     pub fn name(&self) -> &'static str {
         match self {
+            Self::Pointer { options, .. } => crate::pointer::name(*options),
+            Self::Dialog(request) => request.name(),
+            Self::Storage(request) => request.name(),
+            Self::Cookies(request) => request.name(),
+            Self::Downloads(request) => request.name(),
+            Self::Screenshot(_) => "capture.screenshot",
             Self::Navigate { .. } => "navigate",
             Self::Back => "back",
             Self::Forward => "forward",
@@ -202,6 +226,8 @@ impl Action {
     #[must_use]
     pub fn reference(&self) -> Option<&str> {
         match self {
+            Self::Pointer { base, .. } => base.reference(),
+            Self::Screenshot(area) => area.reference(),
             Self::Click { reference }
             | Self::ClickAt { reference, .. }
             | Self::Drag { reference, .. }
@@ -220,6 +246,9 @@ impl Action {
     /// The act script's request (`page` = the page environment accessor); `None` for actions the host does itself.
     #[must_use]
     pub fn page_request(&self, page: &str) -> Option<Value> {
+        if let Self::Pointer { base, .. } = self {
+            return base.page_request(page);
+        }
         let r = |action: &str, extra: Value| {
             let mut v = json!({"page": page, "action": action});
             if let (Value::Object(map), Value::Object(more)) = (&mut v, extra) {
@@ -350,6 +379,55 @@ const ACTIONS: &str = "navigate, back, forward, reload, click, type, select, che
 /// # Errors
 /// A plain-text reason the agent can act on.
 pub fn parse(args: &Value) -> Result<Action, String> {
+    if matches!(
+        args["action"].as_str(),
+        Some(
+            "page.click"
+                | "page.double_click"
+                | "page.triple_click"
+                | "page.right_click"
+                | "page.middle_click"
+        )
+    ) || args["action"] == "click" && args.get("modifiers").is_some()
+    {
+        return crate::pointer::parse(args);
+    }
+    if args["action"]
+        .as_str()
+        .is_some_and(|a| a.starts_with("page.dialog"))
+    {
+        return crate::dialogs::Request::parse(args).map(Action::Dialog);
+    }
+    if args["action"] == "capture.screenshot" {
+        return crate::screenshot_area::Area::parse(args).map(Action::Screenshot);
+    }
+    if matches!(
+        args["action"].as_str(),
+        Some(
+            "files.download"
+                | "files.list_downloads"
+                | "files.wait_download"
+                | "files.save_download"
+        )
+    ) {
+        return crate::downloads::Request::parse(args).map(Action::Downloads);
+    }
+    if args["action"]
+        .as_str()
+        .is_some_and(|name| name.starts_with("cookies."))
+    {
+        return vw_preview::CookieRequest::parse(args).map(Action::Cookies);
+    }
+    if args["action"]
+        .as_str()
+        .is_some_and(|name| name.starts_with("storage."))
+    {
+        return crate::site_storage::Request::parse(args).map(Action::Storage);
+    }
+    parse_page(args)
+}
+
+pub(crate) fn parse_page(args: &Value) -> Result<Action, String> {
     let a: Args = serde_json::from_value(args.clone())
         .map_err(|e| format!("browser_act arguments are not readable: {e}"))?;
     let action = a.action.unwrap_or_default();

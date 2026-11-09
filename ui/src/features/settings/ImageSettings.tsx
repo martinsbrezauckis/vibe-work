@@ -1,9 +1,9 @@
 /**
- * Settings › Models and agent, "Images": what image generation sends and its limits (the core's
- * sentences) and how many image requests this run sent. Information only: image generation asks nothing of its own
+ * Settings › Models and agent, "Images": what image generation sends to Mistral
+ * and how many image requests this run sent. Information only: image generation asks nothing of its own
  * (Vibe's own approval for the session's access mode is the one ask, as for every other tool).
  * Depends on: AppContext (core), protocol/core (`images`). Called by: SettingsPage.
- * Invariants: shows the core's own sentences and count; prices live on the provider's pricing page.
+ * Invariants: shows the data-flow fact and the core's count; prices live on the provider's pricing page.
  */
 import { type ReactElement, useEffect, useState } from "react";
 
@@ -50,10 +50,7 @@ export function ImageSettings(): ReactElement | null {
         <span>
           Image generation
           <span className="d">
-            {state === null
-              ? "The agent can make and change images with Mistral's image generation."
-              : `${state.costs.limits} ${state.costs.leaves}`}
-            {" The agent asks like for any other tool, by the session's access mode."}
+            Prompts and source images go to Mistral.
             {state === null || state.made === 0
               ? ""
               : ` Image requests since the app started: ${String(state.made)}.`}

@@ -146,13 +146,7 @@ impl PreviewService {
             || pool.saves.contains_key(session)
             || pool.selected_panel.as_deref() == Some(session);
         drop(pool);
-        protected
-            || self
-                .inner
-                .lock()
-                .shown
-                .as_ref()
-                .is_some_and(|shown| shown.session_id == session)
+        protected || self.inner.lock().is_shown(session)
     }
 
     pub(super) fn browser_released(&self, session: &str) {
@@ -241,29 +235,6 @@ impl PreviewService {
             *used = tokio::time::Instant::now();
         }
         Ok(true)
-    }
-
-    /// Parks a browser view while preserving its document and slot.
-    ///
-    /// # Errors
-    /// An engine close failure.
-    pub async fn release_browser(&self, session_id: &str) -> Result<(), PreviewError> {
-        let _activity = self.session_lock(session_id).await;
-        let mount = self
-            .inner
-            .lock()
-            .entries
-            .get(session_id)
-            .and_then(|entry| entry.ready_mount().cloned());
-        if let Some(mount) = mount {
-            self.bounded(
-                "park",
-                self.engine.place(&self.mount_id(session_id, &mount), None),
-            )
-            .await?;
-        }
-        self.touch_pool(session_id);
-        Ok(())
     }
 
     /// Closes only hidden, unprotected engines idle for ten minutes.

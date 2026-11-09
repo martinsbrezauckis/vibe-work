@@ -24,7 +24,7 @@ fn check_child_authors(linked: bool) {
     ));
     std::fs::create_dir_all(base.join("repo")).unwrap();
     // The session names the folder as git does (macOS: the temp folder is under the /var link). A child's edits in
-    // a folder opened through a link are a separate case (0.1.5: subagent paths there are not yet made relative).
+    // a folder opened through a link are a separate case (subagent paths there are not yet made relative).
     let root = std::fs::canonicalize(base.join("repo")).unwrap();
     assert!(
         std::process::Command::new("git")

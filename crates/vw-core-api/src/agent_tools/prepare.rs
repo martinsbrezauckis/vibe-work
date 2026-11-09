@@ -1,4 +1,4 @@
-//! Permission checks run in the pre-tool hook; execution starts only after its decision is consumed.
+//! Permission checks settle in the pre-tool hook; checked browser results and deferred actions are consumed once.
 //! Uses existing tool policies and keeps prepared secret/browser actions inside the core.
 use crate::{ask::tool_calls::receipts::Execution, core::Shared};
 use serde_json::{Value, json};
@@ -13,11 +13,8 @@ pub(crate) async fn prepare(
     tool: &str,
     args: &mut Value,
 ) -> Result<Option<Execution>, String> {
-    let execution = prepare_inner(shared, owner, source, call, tool, args).await?;
-    crate::chrome_control::browser_start::prepare(
-        shared, owner, source, call, tool, args, execution,
-    )
-    .await
+    // A browser hook may retain a checked receipt while awaiting consent; keep that future off the listener stack.
+    Box::pin(prepare_inner(shared, owner, source, call, tool, args)).await
 }
 
 async fn prepare_inner(
@@ -84,11 +81,27 @@ async fn prepare_inner(
         .map(Some);
     }
     if tool == "chrome_execute"
+        && crate::chrome_control::check::mode(shared, owner).as_deref() == Some("ask")
+        && crate::chrome_control::interaction_consent::checks(args)
+    {
+        return crate::chrome_control::interaction_consent::prepare(
+            shared,
+            owner,
+            source,
+            call,
+            args.clone(),
+        )
+        .await
+        .map(Some);
+    }
+    if tool == "chrome_execute"
         && args["steps"].as_array().is_some_and(|steps| {
-            steps.iter().any(|step| {
-                ["auth.fill", "auth.basic"].contains(&step["action"].as_str().unwrap_or_default())
-                    || crate::chrome_control::read_consent::needed(shared, owner, step)
-            })
+            crate::chrome_control::check::mode(shared, owner).as_deref() == Some("ask")
+                || steps.iter().any(|step| {
+                    ["auth.fill", "auth.basic"]
+                        .contains(&step["action"].as_str().unwrap_or_default())
+                        || crate::chrome_control::read_consent::needed(shared, owner, step)
+                })
         })
     {
         return crate::chrome_control::batch::prepare(shared, owner, source, call, args.clone())
@@ -103,7 +116,8 @@ async fn prepare_inner(
             .map(Some);
     }
     if tool == names::BROWSER_ACT
-        && let Some(execution) = super::browser_tools::prepare(shared, owner, args).await?
+        && let Some(execution) =
+            super::browser_tools::prepare(shared, owner, source, call, args).await?
     {
         return Ok(Some(execution));
     }

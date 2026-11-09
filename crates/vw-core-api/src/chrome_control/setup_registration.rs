@@ -12,6 +12,7 @@ pub(super) fn repair(
     state: &Path,
     browser: Option<&str>,
 ) -> Result<(), String> {
+    super::selection::migrate(config, state)?;
     let Some(receipt) = read_receipt(config, state) else {
         return Ok(());
     };

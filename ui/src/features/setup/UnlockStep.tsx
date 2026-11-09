@@ -2,13 +2,13 @@
  * Unlocks the selected vault with one password. During first run `choice` is the user's explicit
  * choice; later the persisted core selection supplies the kind and cannot be switched here.
  * Depends on: AppContext, useKeys, fields. Called by: SetupScreen, VaultStartStep.
- * Invariants: the password is cleared on submit; no "remember" choice: the core keeps the unlocked vault's key
- * in the computer's credential store unless the Settings switch locks the vault at quit.
+ * Invariants: the password is cleared on submit. First selection offers the unlock policy; later unlocks keep it.
  */
 import { Button } from "../../components/Controls";
 import { useState } from "react";
 
-import type { VaultChoice } from "../../protocol/core";
+import { VaultUnlockChoice } from "./VaultUnlockChoice";
+import type { VaultChoice, VaultUnlockMethod } from "../../protocol/core";
 import { vaultName } from "../../state/keyText";
 import { useApp } from "../shell/AppContext";
 import { Problem, SecretField } from "./fields";
@@ -21,6 +21,7 @@ export function UnlockStep({ choice }: { choice?: VaultChoice }) {
   const busy = useKeyUi((s) => s.busy);
   const problem = useKeyUi((s) => s.problem);
   const [password, setPassword] = useState("");
+  const [unlockMethod, setUnlockMethod] = useState<VaultUnlockMethod>("system");
   const kind = choice ?? status?.vaultKind ?? null;
 
   return (
@@ -31,7 +32,11 @@ export function UnlockStep({ choice }: { choice?: VaultChoice }) {
         if (keys === null || password === "") return;
         const pass = password;
         setPassword("");
-        void keys.unlock(pass, choice);
+        void keys.unlock(
+          pass,
+          choice,
+          choice === undefined ? undefined : kind === "desktop" ? "password" : unlockMethod,
+        );
       }}
     >
       <p>Type the password to open your {vaultName(kind)} and continue.</p>
@@ -43,6 +48,14 @@ export function UnlockStep({ choice }: { choice?: VaultChoice }) {
         autoFocus
         invalid={problem?.reason === "wrongPassphrase"}
       />
+      {choice !== undefined && (
+        <VaultUnlockChoice
+          value={kind === "desktop" ? "password" : unlockMethod}
+          onChange={setUnlockMethod}
+          disabled={busy}
+          systemDisabled={kind === "desktop"}
+        />
+      )}
       <Problem text={problem?.text ?? null} />
       <div className="key-actions">
         <Button

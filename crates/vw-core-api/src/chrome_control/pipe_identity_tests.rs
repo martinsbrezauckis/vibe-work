@@ -4,6 +4,10 @@ use super::*;
 use sha2::{Digest, Sha256};
 use std::{path::PathBuf, sync::Arc};
 
+#[cfg(target_os = "linux")]
+#[path = "../../../../tests/public/rust/tests/common/sealed_execution.rs"]
+mod sealed_execution;
+
 fn recorder(root: &Path, name: &str) -> PathBuf {
     let source = root.join(format!("{name}.rs"));
     std::fs::write(&source, format!(r#"
@@ -39,6 +43,17 @@ async fn overwrite_after_check_never_receives_owner_line() {
 }
 
 async fn checked_launch(overwrite: bool) {
+    #[cfg(target_os = "linux")]
+    if !sealed_execution::available(
+        if overwrite {
+            "overwrite_after_check_never_receives_owner_line"
+        } else {
+            "replacement_after_check_never_receives_owner_line"
+        },
+        false,
+    ) {
+        return;
+    }
     let root =
         std::env::temp_dir().join(format!("vw-helper-swap-{}-{overwrite}", std::process::id()));
     let _ = std::fs::remove_dir_all(&root);

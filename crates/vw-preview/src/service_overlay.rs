@@ -47,7 +47,11 @@ impl PreviewService {
         let area = state
             .shown
             .as_ref()
-            .ok_or_else(|| PreviewError::ScreenshotHidden("Browser page is not shown".to_owned()))?
+            .ok_or_else(|| {
+                PreviewError::ScreenshotHidden(
+                    crate::CaptureBlock::BrowserPageNotShown.because("Browser page is not shown"),
+                )
+            })?
             .area;
         let bounds = layout::place(area, entry.width)
             .map_err(PreviewError::Layout)?

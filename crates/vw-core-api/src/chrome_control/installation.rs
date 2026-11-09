@@ -140,24 +140,19 @@ pub(super) fn forget_directory(chrome: &super::ChromeControl, browser: Browser) 
     }
 }
 
-/// Use the directory observed at pairing only while it remains the sole paired or enabled extension profile.
-/// Missing, changed or ambiguous profiles keep the ordinary browser launch.
+/// Launch the sole existing paired or enabled extension profile. Historical unknown pairings do not
+/// identify a folder, and a deleted saved folder cannot be a launch choice. Multiple choices keep the picker.
 pub(super) fn paired_directory(shared: &Shared, browser: Browser) -> Option<String> {
     let chrome = &shared.chrome_control;
     if chrome.config.is_macos() || !browser.was_paired(shared) {
         return None;
     }
-    let saved = saved_directory(chrome, browser)?;
     let installed = installed_profiles(chrome, browser);
-    // Older ambiguous pairings cannot be mapped without reading new browser data. Keep the picker then.
-    if installed.len() > 1 && super::profile_folders::load(chrome, browser).uncertain() {
-        return None;
-    }
     let profiles = selectable_profiles(chrome, browser, &installed);
     let [profile] = profiles.as_slice() else {
         return None;
     };
-    (profile.file_name()?.to_str()? == saved).then_some(saved)
+    Some(profile.file_name()?.to_str()?.to_owned())
 }
 
 pub(super) fn version(shared: &Shared, browser: Browser) -> Option<String> {

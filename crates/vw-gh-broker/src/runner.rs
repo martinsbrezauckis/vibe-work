@@ -4,10 +4,12 @@
 use crate::{Reply, Request, local, policy, wire};
 use bstr::ByteSlice;
 use interprocess::local_socket::{Listener, prelude::*};
+#[cfg(not(windows))]
+use std::process::Command;
 use std::{
     io::{self, BufReader},
     path::Path,
-    process::{Command, ExitStatus, Stdio},
+    process::{ExitStatus, Stdio},
 };
 use tempfile::TempDir;
 use zeroize::Zeroizing;
@@ -127,6 +129,9 @@ impl Broker {
                 "Vibe Work only lets Vibe read GitHub. Use the Push and Create PR buttons for changes.\n{reason}"
             ));
         }
+        #[cfg(windows)]
+        let mut child = vw_platform::process_command::hidden(&self.executable);
+        #[cfg(not(windows))]
         let mut child = Command::new(&self.executable);
         child.env_clear();
         for key in [

@@ -26,11 +26,11 @@ pub(super) fn folder(shared: &Shared, chat: &str) -> Result<Dir, String> {
     if super::check::mode(shared, chat)
         .as_deref()
         .and_then(Tier::from_mode)
-        .is_none_or(|tier| tier < Tier::AcceptEdits)
+        .is_none()
     {
         return Err(format!(
             "Not saved: saving a file needs {}; omit saveTo for an inline read or ask the person to change this chat's mode.",
-            Tier::AcceptEdits.required_label()
+            Tier::Ask.required_label()
         ));
     }
     let folders = crate::agent_tools::session::folders(shared, chat).map_err(|reason| {
@@ -56,6 +56,9 @@ pub(super) fn save(shared: &Shared, chat: &str, body: &Value) -> Result<Value, S
     let directory = folder(shared, chat)?;
     let bytes = serde_json::to_vec(body)
         .map_err(|_| "Not saved: the read could not be encoded. Omit saveTo for an inline read.")?;
+    // A saved read is another agent-visible answer. Apply the listener's stored-value scrub
+    // before any bytes reach disk, including exports resumed from the frozen receipt cache.
+    let bytes = vw_secrets::scrub(&bytes).map_or(bytes, |(clean, _)| clean);
     let mut random = [0u8; 16];
     getrandom::fill(&mut random)
         .map_err(|_| "Not saved: a unique filename could not be allocated. Try saving again.")?;

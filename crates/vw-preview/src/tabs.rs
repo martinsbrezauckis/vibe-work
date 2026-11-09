@@ -151,6 +151,9 @@ impl PreviewService {
         owner: &str,
         page_key: &str,
     ) -> Result<bool, PreviewError> {
+        if self.page_window_id(page_key).is_some() {
+            return Ok(false);
+        }
         let _layout = self.layout_op.lock().await;
         self.switch_tab(owner, page_key)?;
         let area = {
@@ -494,6 +497,19 @@ impl PreviewService {
                 "page handoff review is stale".to_owned(),
             ));
         }
+        if let Some(id) = state
+            .entries
+            .get(page_key)
+            .and_then(|entry| entry.mount.as_ref())
+        {
+            self.engine.dialog_ownership(
+                &crate::MountId {
+                    session_id: page_key.into(),
+                    label: id.label.clone(),
+                },
+                to != PageTabOwner::User,
+            )?;
+        }
         let Some(tabs) = state.tabs.get_mut(owner) else {
             return Err(PreviewError::InvalidTab("unknown session tabs".to_owned()));
         };
@@ -543,15 +559,6 @@ impl PreviewService {
         Ok(())
     }
 
-    /// Closes a web page and its native view, retaining the shared public browser store.
-    ///
-    /// # Errors
-    /// The page is foreign or its native view cannot close.
-    pub async fn close_web_tab(&self, owner: &str, page_key: &str) -> Result<(), PreviewError> {
-        self.close_web_tab_expected(owner, page_key, None, None)
-            .await
-    }
-
     async fn close_web_tab_expected(
         &self,
         owner: &str,
@@ -594,9 +601,14 @@ impl PreviewService {
             key: page_key,
         };
         self.unmount(page_key).await?;
+        self.close_page_window(page_key).await?;
         {
             let mut state = self.inner.lock();
-            state.entries.remove(page_key);
+            if let Some(entry) = state.entries.remove(page_key) {
+                for record in entry.downloads {
+                    state.entry(owner).push_download(record);
+                }
+            }
             state.page_owners.remove(page_key);
             if state.is_shown(page_key) {
                 state.shown = None;

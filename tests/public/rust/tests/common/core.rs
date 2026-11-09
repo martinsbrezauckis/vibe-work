@@ -185,11 +185,7 @@ async fn core_on_model(
     let mut core_config = CoreConfig::default();
     tweak(&mut core_config);
     if let Some(tools) = &core_config.agent_tools {
-        std::fs::write(
-            config.vibe_home.join("hooks.toml"),
-            vw_host::agent_tools::hook_block(&tools.binary, &tools.endpoint_file()),
-        )
-        .unwrap();
+        vw_host::agent_tools::configure_hooks(&mut config, tools).unwrap();
     }
     let secret = model.route(&mut config).await;
     let core = Core::start(config, secret, confirmer.clone(), core_config)

@@ -73,7 +73,7 @@ export function AgentDefaultsSettings(): ReactElement | null {
             <SwitchRow
               id="background-processes"
               label="Background processes"
-              detail="The agent may start commands that keep running (a dev server) and check on them. Off: commands run to the end before the agent goes on."
+              detail="Off: commands run to the end."
               on={view.backgroundProcesses.value}
               disabled={busy}
               setBy={view.backgroundProcesses.setBy}
@@ -87,7 +87,7 @@ export function AgentDefaultsSettings(): ReactElement | null {
             <SwitchRow
               id="subagents"
               label="Subagents"
-              detail="The agent may hand parts of a task to helper agents. Off: it works alone."
+              detail={TEXT.defaultThinkingDescription}
               on={view.subagents.value}
               disabled={busy}
               setBy={view.subagents.setBy}
@@ -100,7 +100,7 @@ export function AgentDefaultsSettings(): ReactElement | null {
             <SelectRow
               id="stream-idle-timeout"
               label="A silent answer counts as stalled after"
-              detail="Once the model has started answering, this much silence makes Vibe retry. Off waits as long as the request may take."
+              detail="Off: no silence limit."
               value={String(view.streamIdleTimeout.value ?? 0)}
               options={TIMEOUTS.map((t) => ({
                 value: String(t),

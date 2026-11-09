@@ -8,7 +8,7 @@
   const run = () => {
   let env = window[req.page];
   if (!env && req.observe) {
-    env = { stability: new WeakMap(), agentActing: () => {}, mutations: 0 };
+    env = { stability: new WeakMap(), mutations: 0 };
     Object.defineProperty(window, req.page, { value: env });
     new MutationObserver(() => { env.mutations += 1; }).observe(document, { subtree: true, childList: true, attributes: true });
   }

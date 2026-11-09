@@ -16,6 +16,7 @@ workspace = true
 ts = ["dep:ts-rs"]
 
 [dependencies]
+vw-platform = { path = "../vw-platform" }
 # All already in the lock file: sha2 0.10.9 (vw-changes, vw-pages), flate2 1.1 and zip 9.1.3
 # (vw-documents), tar 0.4.46 (through the Tauri bundler stack), base64 0.23 (vw-pages), reqwest 0.13.5 (vw-mistral).
 sha2 = "0.10.9"

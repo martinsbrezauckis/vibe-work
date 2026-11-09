@@ -6,14 +6,6 @@ use std::sync::Arc;
 use crate::{EngineError, MountId, PreviewError, PreviewService};
 
 impl PreviewService {
-    /// Disposes of a live document after the host withdraws its network access, retaining the tab's address.
-    ///
-    /// # Errors
-    /// The native mount could not be closed.
-    pub async fn suspend_page(&self, session_id: &str) -> Result<(), PreviewError> {
-        let _activity = self.session_lock(session_id).await;
-        self.unmount(session_id).await
-    }
     /// Prints only the current authorized mount; released pages are never recreated.
     ///
     /// # Errors

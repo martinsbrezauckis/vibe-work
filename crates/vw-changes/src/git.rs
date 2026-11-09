@@ -443,7 +443,7 @@ fn build(
     profile: Profile,
     repo_hooks: bool,
 ) -> Command {
-    let mut command = Command::new("git");
+    let mut command = vw_platform::process_command::hidden("git");
     // Every path git gets is in its plain form (see `for_git`); the working folder too, although
     // Windows already hands the child the plain form of a verbatim working folder (measured on Windows 11).
     command.current_dir(vw_platform::plain_path(cwd));
@@ -498,7 +498,6 @@ fn build(
         })
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    no_window(&mut command);
     command
 }
 
@@ -549,17 +548,6 @@ fn hook_env(upper: &str) -> bool {
     ];
     !DROP_PREFIX.iter().any(|p| upper.starts_with(p)) && !DROP.contains(&upper)
 }
-
-#[cfg(windows)]
-fn no_window(command: &mut Command) {
-    use std::os::windows::process::CommandExt;
-    /// `CREATE_NO_WINDOW`: no console window flashes for each git call.
-    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-    command.creation_flags(CREATE_NO_WINDOW);
-}
-
-#[cfg(not(windows))]
-fn no_window(_command: &mut Command) {}
 
 /// Reads a pipe to the end, keeping at most `cap` bytes. With `overflow`, going over the cap sets the flag
 /// (the caller kills git) and the rest is drained and dropped so git never blocks on a full pipe.

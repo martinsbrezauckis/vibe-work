@@ -12,6 +12,7 @@
  * - A value the core refuses shows its sentence under its field; the test names the failure and the next step.
  * - Nothing is saved without the native confirmation the core asks on Save.
  */
+import { literalInputProps } from "../../components/inputProps";
 import { useId, useState, type ReactElement, type ReactNode } from "react";
 
 import { Button } from "../../components/Controls";
@@ -40,6 +41,7 @@ function Field(props: {
       <label htmlFor={id}>{props.label}</label>
       <div className="key-field-row">
         <input
+          {...literalInputProps}
           data-testid={props.testId}
           id={id}
           type={mask ? "password" : "text"}
@@ -48,9 +50,6 @@ function Field(props: {
           placeholder={props.placeholder}
           disabled={props.disabled}
           autoComplete="off"
-          autoCapitalize="off"
-          autoCorrect="off"
-          spellCheck={false}
           onFocus={() => {
             setEditing(true);
           }}

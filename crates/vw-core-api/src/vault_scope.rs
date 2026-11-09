@@ -1,4 +1,5 @@
 //! The vault rule for the Debug API: outside the vault, the Debug API acts as the user.
+//! Depends on: typed core commands and vault access grants. Called by: command admission and UI attribution.
 //! For vault operations, a Debug API request has the agent's rights and no more.
 //! Permission changes (grant, always, revoke), vault management (create, unlock, lock, passphrase, "Lock the vault
 //! when Vibe Work quits", setting, replacing or removing the Mistral key, adding or removing secrets with values) and raw values
@@ -68,7 +69,6 @@ pub enum VaultAccess {
 pub const ACTS: &[(&str, VaultAccess)] = &[
     // The Mistral key and the vault.
     ("keys.readStatus", VaultAccess::Read),
-    ("keys.listKeyCandidates", VaultAccess::Read),
     ("keys.listMistralKeys", VaultAccess::Read),
     ("keys.addMistralKey", VaultAccess::UserOnly),
     ("keys.useMistralKey", VaultAccess::UserOnly),
@@ -83,8 +83,8 @@ pub const ACTS: &[(&str, VaultAccess)] = &[
     // Whether the vault's key stays on this computer across a quit: a vault setting, the user's alone (the status
     // read above carries it).
     ("keys.setLockVaultOnQuit", VaultAccess::UserOnly),
+    ("keys.setVaultUnlockMethod", VaultAccess::UserOnly),
     ("keys.setupStoreKey", VaultAccess::UserOnly),
-    ("keys.useExistingKey", VaultAccess::UserOnly),
     ("keys.importVibeKey", VaultAccess::UserOnly),
     ("keys.removeVibeKeyOriginal", VaultAccess::UserOnly),
     // Project secrets and their grants.

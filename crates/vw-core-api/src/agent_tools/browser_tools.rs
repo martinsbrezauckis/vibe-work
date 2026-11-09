@@ -57,10 +57,36 @@ fn agent_stopped(
 pub(super) async fn prepare(
     shared: &Arc<Shared>,
     owner: &str,
+    source: &str,
+    call: &str,
     args: &Value,
 ) -> Result<Option<crate::ask::tool_calls::receipts::Execution>, String> {
     vw_agent_tools::browser_input::validate(names::BROWSER_ACT, args)?;
     target(shared.chrome_control.config.available(), args)?;
+    if matches!(
+        args["action"].as_str(),
+        Some(
+            "click"
+                | "check"
+                | "uncheck"
+                | "page.click"
+                | "page.double_click"
+                | "page.right_click"
+                | "page.middle_click"
+                | "page.triple_click"
+        )
+    ) && crate::chrome_control::check::mode(shared, owner).as_deref() == Some("ask")
+    {
+        return super::browser_sending::prepare(shared, owner, source, call, args)
+            .await
+            .map(Some);
+    }
+    if args["action"]
+        .as_str()
+        .is_some_and(|action| action.starts_with("window."))
+    {
+        return crate::browser_windows::prepare(shared, owner, args).map(Some);
+    }
     if args["action"] == "close_tab" {
         return crate::browser_tab_tools::prepare_close(
             shared,
@@ -69,7 +95,7 @@ pub(super) async fn prepare(
         )
         .map(Some);
     }
-    if args["action"] != "fill" {
+    if args["action"] != "fill" && args["action"] != "auth.basic" {
         return Ok(None);
     }
     let driver = browser(shared).map_err(|e| e.message)?;
@@ -83,15 +109,26 @@ pub(super) async fn prepare(
     if let Some(input) = input.as_object_mut() {
         input.remove("tab");
     }
-    let action = crate::browser_fill::prepare(
-        shared,
-        driver,
-        &page,
-        &input,
-        Actor::Agent,
-        vw_gate::Requester::Agent,
-    )
-    .await?;
+    let action = if args["action"] == "auth.basic" {
+        crate::browser_auth::prepare(
+            shared,
+            &page,
+            &input,
+            Actor::Agent,
+            vw_gate::Requester::Agent,
+        )
+        .await?
+    } else {
+        crate::browser_fill::prepare(
+            shared,
+            driver,
+            &page,
+            &input,
+            Actor::Agent,
+            vw_gate::Requester::Agent,
+        )
+        .await?
+    };
     let shared = Arc::downgrade(shared);
     let owner = owner.to_owned();
     Ok(Some(Box::pin(async move {
@@ -111,6 +148,21 @@ pub(crate) async fn call(
     session_id: &str,
     tool: &str,
     args: Value,
+) -> Result<Value, String> {
+    let allow_send = crate::chrome_control::check::mode(shared, session_id).as_deref()
+        != Some("ask")
+        || crate::chrome_control::builtin::ask_required(&args)
+            .is_some_and(|tier| tier > vw_ask::chrome::Tier::Ask);
+    call_with_sending(shared, session_id, tool, args, allow_send).await
+}
+
+#[allow(clippy::too_many_lines)]
+pub(super) async fn call_with_sending(
+    shared: &Arc<Shared>,
+    session_id: &str,
+    tool: &str,
+    args: Value,
+    allow_send: bool,
 ) -> Result<Value, String> {
     vw_agent_tools::browser_input::validate(tool, &args)?;
     #[cfg(feature = "agent-vault")]
@@ -136,6 +188,12 @@ pub(crate) async fn call(
         );
     }
     target(shared.chrome_control.config.available(), &args)?;
+    if tool == names::BROWSER_ACT {
+        crate::chrome_control::builtin::check_full(
+            shared.access.remembered(session_id).as_deref(),
+            &args,
+        )?;
+    }
     let tab = match args.get("tab") {
         None => None,
         Some(Value::String(tab)) if !tab.trim().is_empty() => Some(tab.as_str()),
@@ -172,14 +230,55 @@ pub(crate) async fn call(
     )
     .await
     .map_err(|e| e.message)?;
+    if tool == names::BROWSER_ACT
+        && matches!(
+            args["action"].as_str(),
+            Some("clipboard.read" | "clipboard.write")
+        )
+    {
+        check_current(shared, session_id, &page)?;
+        let mut canceled = driver.sessions().cancel_signal(&page);
+        let mut answer = tokio::select! {
+            biased;
+            _=canceled.changed()=>return Err("Clipboard action canceled; start a new browser action.".into()),
+            result=crate::browser_clipboard::run(shared,&args)=>result?,
+        };
+        check_current(shared, session_id, &page)?;
+        attach_tab(shared, &page, &mut answer);
+        return Ok(answer);
+    }
     match tool {
         names::BROWSER_READ => {
-            let options = read_options(
+            let mut options = read_options(
                 args.get("maxRefs").and_then(Value::as_u64),
                 args.get("textPage").and_then(Value::as_u64),
                 args.get("maxBytes").and_then(Value::as_u64),
                 args.get("find").and_then(Value::as_str),
             );
+            if let Some(cursor) = args.get("textCursor") {
+                if options.find.is_some() || options.text_page.is_some() {
+                    return Err(
+                        "textCursor continues plain text; use it without find or textPage".into(),
+                    );
+                }
+                let cursor: vw_browser::TextCursor = serde_json::from_value(cursor.clone())
+                    .map_err(|_| "textCursor needs nonnegative page and offset integers")?;
+                if cursor.page > 10_000 || cursor.offset > vw_browser::model::MAX_ANSWER {
+                    return Err("textCursor exceeds the text paging limit".into());
+                }
+                options.text_cursor = Some(cursor);
+            }
+            if let Some(cursor) = args.get("choiceCursor") {
+                let cursor: vw_browser::ChoiceCursor = serde_json::from_value(cursor.clone())
+                    .map_err(|_| "choiceCursor needs nonnegative frame and offset integers")?;
+                if cursor.frame >= 64 || cursor.offset > vw_browser::model::MAX_REFS {
+                    return Err(
+                        "choiceCursor exceeds the observed choice limit; use find for a label"
+                            .into(),
+                    );
+                }
+                options.choice_cursor = Some(cursor);
+            }
             let screenshot = args
                 .get("screenshot")
                 .and_then(Value::as_bool)
@@ -210,6 +309,9 @@ pub(crate) async fn call(
             Ok(observation)
         }
         names::BROWSER_ACT => {
+            if args["action"] == "auth.basic" {
+                return Err("HTTP sign-in needs its vault decision before the tool starts; retry through the tool hook.".into());
+            }
             let mut args = args;
             if let Value::Object(map) = &mut args {
                 map.remove("target");
@@ -222,13 +324,19 @@ pub(crate) async fn call(
                 strict: true,
             };
             let mut receipt = driver
-                .act(&page, action, Actor::Agent, &nav)
+                .act_with_sending(&page, action, Actor::Agent, &nav, allow_send)
                 .await
                 .map_err(|e| e.text)?;
             // The act already completed. Its own navigation may have stopped the page;
             // preserve what happened instead of turning sent input into a refusal.
             attach_tab(shared, &page, &mut receipt);
+            let image = receipt
+                .as_object_mut()
+                .and_then(|o| o.remove(wire::IMAGE_KEY));
             vw_browser::observe::fit(&mut receipt, vw_browser::observe::READ_BUDGET);
+            if let Some(image) = image {
+                receipt[wire::IMAGE_KEY] = image;
+            }
             Ok(receipt)
         }
         names::BROWSER_CAPTURE => {

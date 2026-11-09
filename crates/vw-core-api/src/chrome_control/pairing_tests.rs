@@ -278,7 +278,7 @@ async fn external_removal_reports_restart_until_chrome_deletes_the_extension() {
     std::fs::create_dir_all(state).unwrap();
     std::fs::write(
         state.join("setup.json"),
-        json!({"files":[],"browsers":["Google Chrome","Microsoft Edge"],"userData":[data,edge_data]}).to_string(),
+        json!({"files":[],"browsers":["Google Chrome","Microsoft Edge"],"selectedBrowsers":["Google Chrome","Microsoft Edge"],"userData":[data,edge_data]}).to_string(),
     )
     .unwrap();
     // Chrome removes an extension itself only after a registration this app made is undone.

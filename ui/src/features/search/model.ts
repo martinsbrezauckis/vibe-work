@@ -7,6 +7,7 @@
  * `folder › src/config.toml:8`); opening never invents a location (a file opens only through the core's resolve,
  * in a session whose folder holds it).
  */
+import { TEXT } from "../../vocabulary";
 import type { FileHit, MessageHit } from "../../protocol/core";
 import type { App } from "../shell/AppContext";
 
@@ -22,7 +23,7 @@ export function messagePath(hit: MessageHit): string[] {
   const who = hit.role === "user" ? "Your message" : "Agent reply";
   return [
     folderName(hit.cwd),
-    hit.title ?? "Untitled session",
+    hit.title ?? TEXT.untitledSession,
     `${who}, turn ${String(hit.turn)}`,
   ].filter((p) => p !== "");
 }

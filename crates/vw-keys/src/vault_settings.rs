@@ -1,6 +1,6 @@
 //! The vault's own settings file, `vault-settings.json` next to the key settings: the "Lock the vault when Vibe Work
 //! quits" switch (`lockVaultOnQuit`), and `lockedUntilPassword` while an updated install waits for its first
-//! password unlock. No secret is ever written here.
+//! password unlock. `unlockMethod` chooses system sign-in or a password each time. No secret is ever written here.
 //!
 //! The switch is off by default: the vault keeps its last state. Installs from before the switch had a "remember
 //! this computer" choice instead; the first start that finds no switch takes it from that choice, once
@@ -14,6 +14,7 @@
 
 use std::path::{Path, PathBuf};
 
+use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use tracing::warn;
 
@@ -24,9 +25,22 @@ const FIELD: &str = "lockVaultOnQuit";
 /// Set while the vault waits for its password before a kept key may open it.
 const UNTIL_PASSWORD: &str = "lockedUntilPassword";
 
+/// How this install may open its vault. Missing settings retain the existing system-sign-in behavior.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum UnlockMethod {
+    /// Keep an unlock secret in the existing OS credential store.
+    #[default]
+    System,
+    /// Never keep an unlock secret outside the encrypted vault.
+    Password,
+}
+
 /// What a start reads from the file.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AtStart {
+    /// The saved unlock choice.
+    pub unlock_method: UnlockMethod,
     /// "Lock the vault when Vibe Work quits".
     pub lock_on_quit: bool,
     /// The vault stays locked until a password unlock, whatever key is kept.
@@ -66,17 +80,25 @@ impl VaultSettings {
             && let Some(lock_on_quit) = fields.get(FIELD).and_then(Value::as_bool)
         {
             return AtStart {
+                unlock_method: self.unlock_method(),
                 lock_on_quit,
                 locked_until_password: fields.get(UNTIL_PASSWORD).and_then(Value::as_bool)
                     == Some(true),
             };
         }
         let at_start = AtStart {
+            unlock_method: self.unlock_method(),
             lock_on_quit: remembered == Some(false),
             locked_until_password: remembered == Some(true),
         };
         let saved = self.write(|fields| {
             fields.insert(FIELD.to_owned(), Value::Bool(at_start.lock_on_quit));
+            if at_start.unlock_method == UnlockMethod::Password {
+                fields.insert(
+                    "unlockMethod".to_owned(),
+                    Value::String("password".to_owned()),
+                );
+            }
             if at_start.locked_until_password {
                 fields.insert(UNTIL_PASSWORD.to_owned(), Value::Bool(true));
             }
@@ -85,6 +107,32 @@ impl VaultSettings {
             warn!(%error, "vault settings: the switch from the old choice was not saved");
         }
         at_start
+    }
+
+    /// Reads the unlock policy. An unknown or unreadable policy never enables remembered unlock.
+    pub fn unlock_method(&self) -> UnlockMethod {
+        match std::fs::read(&self.path) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => UnlockMethod::System,
+            Err(_) => UnlockMethod::Password,
+            Ok(raw) => match serde_json::from_slice::<Value>(&raw) {
+                Ok(Value::Object(fields)) => fields
+                    .get("unlockMethod")
+                    .map_or(UnlockMethod::System, |value| {
+                        serde_json::from_value(value.clone()).unwrap_or(UnlockMethod::Password)
+                    }),
+                _ => UnlockMethod::Password,
+            },
+        }
+    }
+
+    /// Saves only the unlock policy, retaining the separate lock-at-quit choice.
+    pub fn set_unlock_method(&self, method: UnlockMethod) -> Result<(), KeyError> {
+        self.write(|fields| {
+            fields.insert(
+                "unlockMethod".to_owned(),
+                serde_json::to_value(method).unwrap_or(Value::String("password".to_owned())),
+            );
+        })
     }
 
     /// Saves the switch (atomic replace; other fields are kept).
@@ -136,6 +184,7 @@ mod tests {
 
     fn at_start(lock_on_quit: bool, locked_until_password: bool) -> AtStart {
         AtStart {
+            unlock_method: UnlockMethod::System,
             lock_on_quit,
             locked_until_password,
         }

@@ -12,7 +12,6 @@ import { Selector } from "../../components/Selector";
 import { useApp } from "../shell/AppContext";
 import { KeyNotice } from "../shell/KeyNotice";
 import { useVoiceSettings } from "../voice/hooks";
-import { PAUSE_MAX_MS, PAUSE_MIN_MS } from "../voice/turnEnd";
 
 /** The pause lengths offered (ms). */
 const PAUSES = [800, 1000, 1200, 1500, 2000, 2500] as const;
@@ -35,10 +34,7 @@ export function VoiceChatSettings(): ReactElement | null {
     <>
       <h4 id="voice-chat-title">Voice chat</h4>
       <p className="key-field-hint ui-help">
-        The Voice chat button next to the microphone: you talk, Vibe answers briefly and the answer
-        is read aloud with the voice above, then it listens again. What you say goes to Mistral
-        speech-to-text and the answers to Mistral text-to-speech, with your key and on your usage.
-        Audio is not saved.
+        Your speech and the answers go to Mistral with your key. Audio is not saved.
       </p>
       <KeyNotice
         inSettings
@@ -47,10 +43,7 @@ export function VoiceChatSettings(): ReactElement | null {
       <div className="check" data-setting="voice-chat-auto-end">
         <span>
           End my turn after a pause
-          <span className="d">
-            When you stop talking for the time below, what you said is sent. Off: press the voice
-            button to send.
-          </span>
+          <span className="d">Off: press the voice button to send.</span>
         </span>
         <Switch
           data-testid="settings.voice-chat-settings-update"
@@ -62,12 +55,7 @@ export function VoiceChatSettings(): ReactElement | null {
         />
       </div>
       <div className="check" data-setting="voice-chat-pause">
-        <span>
-          Pause before sending
-          <span className="d">
-            {`Between ${seconds(PAUSE_MIN_MS)} and ${seconds(PAUSE_MAX_MS)}. Longer if you think aloud.`}
-          </span>
-        </span>
+        <span>Pause before sending</span>
         <Selector
           testId="settings.voice-chat-settings-update-2"
           label="Pause before sending"

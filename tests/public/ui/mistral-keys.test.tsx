@@ -66,8 +66,6 @@ async function setup(locked = false, count = 2, rejected?: 401 | 403) {
               rememberNote: null,
             },
           };
-        if (op === "listKeyCandidates")
-          return { type: "keyCandidates", candidates: [] };
         if (op === "listMistralKeys")
           return {
             type: "mistralKeys",

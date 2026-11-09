@@ -1,5 +1,5 @@
 //! The browser page environment: an initialization script every page of a session's browser gets at
-//! document start, next to the console script. It answers dialogs raised during an agent action, and counts DOM mutations for settling (`js/page_init.js`).
+//! document start, next to the console script. Native dialogs belong to the engine; this script counts DOM mutations for settling (`js/page_init.js`).
 //! It also draws the page's own right-click menu, in the app's menu colours for the page's light or dark (the app's
 //! theme when the page shows neither).
 //!

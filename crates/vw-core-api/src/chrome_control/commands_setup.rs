@@ -80,11 +80,7 @@ impl Core {
         let installed = chrome
             .dir()
             .is_some_and(|dir| dir.join("setup.json").is_file());
-        if installed
-            && !edge
-            && (!chrome.config.is_macos()
-                || setup::registered(&chrome.config, chrome.dir(), "Google Chrome"))
-        {
+        if installed && !edge && setup::registered(&chrome.config, chrome.dir(), "Google Chrome") {
             return Err(invalid(vw_vocabulary::texts::CHROME_ALREADY_SET_UP));
         }
         self.shared.install_offers.take(

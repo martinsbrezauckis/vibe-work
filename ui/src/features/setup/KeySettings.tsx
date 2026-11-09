@@ -12,6 +12,7 @@ import { VAULT_LOCKED_NOTICE, vaultName } from "../../state/keyText";
 import { TEXT } from "../../vocabulary";
 import { useApp } from "../shell/AppContext";
 import { MistralKeyDetails } from "../secrets/MistralKeySettings";
+import { VaultUnlockSettings } from "../setup/VaultUnlockSettings";
 import { SharedVaultLockNote, VaultLockControls } from "../secrets/VaultLockControls";
 import { KeyStep } from "./KeyStep";
 import { useKeyUi } from "./useKeys";
@@ -76,6 +77,7 @@ export function KeySettings() {
       {unlocked && !ready && <KeyStep />}
 
       {ready && <SharedVaultLockNote />}
+      {(unlocked || locked) && <VaultUnlockSettings />}
       {(unlocked || locked) && <VaultLockOnQuit />}
     </section>
   );

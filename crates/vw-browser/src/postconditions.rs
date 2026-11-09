@@ -45,6 +45,7 @@ impl Browser {
         let mut request = action
             .page_request(&page)
             .ok_or_else(|| failed("this action has no requested control state"))?;
+        self.bind_ref_request(session, &mut request);
         request["postconditionOnly"] = json!(true);
         let answer: PageAnswer = self
             .run_in_mount(session, scripts::act(&request), Some(&mount))

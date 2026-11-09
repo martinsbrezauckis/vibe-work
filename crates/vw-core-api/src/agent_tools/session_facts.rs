@@ -278,7 +278,7 @@ mod tests {
                 .join("VibeWork/ChromeControl/setup.json");
             std::fs::write(
                 state,
-                json!({"files":[],"browsers":["Google Chrome","Microsoft Edge"],"userData":[]})
+                json!({"files":[],"browsers":["Google Chrome","Microsoft Edge"],"selectedBrowsers":["Google Chrome","Microsoft Edge"],"userData":[]})
                     .to_string(),
             )
             .unwrap();

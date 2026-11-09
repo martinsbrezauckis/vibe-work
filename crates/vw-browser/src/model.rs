@@ -255,6 +255,24 @@ pub struct PageModel {
     /// The visible text's full length.
     #[serde(default)]
     pub text_length: u64,
+    /// Host-side merged window length before slicing and byte fitting.
+    #[serde(skip)]
+    pub text_window_length: Option<u64>,
+    /// Host-side offset into this merged window.
+    #[serde(skip)]
+    pub text_cursor_offset: u64,
+    /// Host-selected covering-frame choice page, independent of text windows.
+    #[serde(skip)]
+    pub choice_cursor: Option<crate::ChoiceCursor>,
+    /// Maximum page count across the visible documents, set by the native frame merger.
+    #[serde(skip)]
+    pub text_page_count: Option<u64>,
+    /// Rendered level-one headings in the main document, distinct from its title.
+    #[serde(default)]
+    pub main_headings: Vec<String>,
+    /// Count before the heading list's cap.
+    #[serde(default)]
+    pub main_headings_total: u64,
     /// Hidden text (for the prompt guard only; never returned to the agent).
     #[serde(default)]
     pub hidden_text: String,
@@ -287,6 +305,10 @@ impl PageModel {
         cap(&mut self.title, 300);
         cap(&mut self.ready_state, 20);
         cap(&mut self.text, max_text);
+        self.main_headings.truncate(3);
+        for heading in &mut self.main_headings {
+            cap(heading, 180);
+        }
         cap(&mut self.hidden_text, 3000);
         self.choice_context.truncate(4);
         for context in self

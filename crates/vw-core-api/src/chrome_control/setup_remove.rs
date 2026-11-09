@@ -70,7 +70,7 @@ pub(crate) fn remove(config: &ChromeControlConfig, state: &Path) -> Result<(), S
     Ok(())
 }
 
-fn permission_failure(
+pub(super) fn permission_failure(
     config: &ChromeControlConfig,
     state: &Path,
     path: &Path,

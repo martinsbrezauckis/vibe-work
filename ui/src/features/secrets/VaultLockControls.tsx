@@ -1,4 +1,5 @@
 /**
+ * Depends on: Vault access state and shared controls. Called by: Vault, status bar and Account settings.
  * Shared direct lock buttons for the Vault header, status bar and Account settings, and the help line shown where
  * Lock is offered for a vault shared with ShellX (one vault file, so Lock also locks ShellX's copy at its next start).
  * Agent pause protects project secrets, website logins and MCP keys; vault lock also stops sessions.
@@ -11,7 +12,6 @@ import { useVaultAccess } from "./useVaultAccess";
 
 export type VaultLockMode = "agent" | "vault";
 export type VaultLockDisplay = "icon" | "status" | "button";
-export const VAULT_LOCK_TIP = term("locks", "vaultLock").tooltip;
 
 /** Direct action; its label, icon and tooltip always describe the current state and click. */
 export function VaultLockControls({

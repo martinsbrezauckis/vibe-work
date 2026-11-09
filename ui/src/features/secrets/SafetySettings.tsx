@@ -58,10 +58,7 @@ export function SafetySettings() {
     <section aria-labelledby="safety-title">
       <h3 id="safety-title">Safety reminders</h3>
       <p className="key-field-hint ui-help">
-        Before an agent runs a command, Vibe Work stops these and tells the agent why and what to do
-        instead. They are reminders against mistakes, not a sandbox: the agent works as you. Git
-        (force push, reset --hard, clean, deleting branches in your own folder) is handled by the
-        git guard, which asks you first.
+        Reminders against mistakes, not a sandbox: the agent works as you.
       </p>
       {view !== null && !view.active && (
         <p className="key-line">

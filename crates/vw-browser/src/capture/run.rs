@@ -225,7 +225,7 @@ impl Browser {
         let result = if by == Actor::Agent {
             tokio::select! {
                 result = work => result,
-                _ = cancel.changed() => Err(ActError { outcome: Outcome::Stopped, text: STOPPED.to_owned() }),
+                _ = cancel.changed() => Err(ActError { capture_block: None, outcome: Outcome::Stopped, text: STOPPED.to_owned() }),
             }
         } else {
             work.await
@@ -259,7 +259,11 @@ impl Browser {
             self.service()
                 .pixels_admitted(session_id)
                 .map_err(|error| match error {
-                    vw_preview::PreviewError::ScreenshotHidden(_) => refused(error.to_string()),
+                    vw_preview::PreviewError::ScreenshotHidden(ref block) => ActError {
+                        capture_block: Some(block.kind),
+                        outcome: Outcome::Refused,
+                        text: error.to_string(),
+                    },
                     other => failed(other.to_string()),
                 })?;
         }

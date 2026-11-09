@@ -8,7 +8,7 @@
  * Invariant: one capture at a time per session (a second request while one runs is refused here, not queued).
  */
 import { toCallError } from "../../protocol/client/types";
-import type { BrowserResult, JsonValue } from "../../protocol/core";
+import type { BrowserResult, CaptureBlock, JsonValue } from "../../protocol/core";
 import type { CoreController } from "../../state/coreStore";
 import { createStore } from "../../state/createStore";
 
@@ -119,6 +119,8 @@ export interface CaptureUi {
   busy: Readonly<Record<string, string | undefined>>;
   last: Readonly<Record<string, CaptureView | undefined>>;
   error: Readonly<Record<string, string | null>>;
+  /** Typed screenshot refusal for the visible short status. */
+  block: Readonly<Record<string, CaptureBlock | undefined>>;
 }
 
 function field(value: JsonValue | undefined, key: string): JsonValue | undefined {
@@ -167,15 +169,21 @@ export function captureView(kind: string, answer: JsonValue): CaptureView {
 
 /** Creates the controller for `core`. */
 export function createCapture(core: CoreController) {
-  const store = createStore<CaptureUi>({ busy: {}, last: {}, error: {} });
+  const store = createStore<CaptureUi>({ busy: {}, last: {}, error: {}, block: {} });
   const set = (
     sessionId: string,
-    patch: Partial<{ busy: string | undefined; last: CaptureView; error: string | null }>,
+    patch: Partial<{
+      busy: string | undefined;
+      last: CaptureView;
+      error: string | null;
+      block: CaptureBlock;
+    }>,
   ) => {
     store.set((s) => ({
       busy: "busy" in patch ? { ...s.busy, [sessionId]: patch.busy } : s.busy,
       last: patch.last !== undefined ? { ...s.last, [sessionId]: patch.last } : s.last,
       error: "error" in patch ? { ...s.error, [sessionId]: patch.error ?? null } : s.error,
+      block: "error" in patch ? { ...s.block, [sessionId]: patch.block } : s.block,
     }));
   };
   return {
@@ -220,11 +228,13 @@ export function createCapture(core: CoreController) {
         set(sessionId, { last: view, busy: undefined });
         return view;
       } catch (thrown) {
-        const reason = toCallError(thrown).error.message;
+        const failure = toCallError(thrown).error;
+        const reason = failure.message;
         const name =
           kind.id === "pdf" ? "PDF" : kind.id === "single_html" ? "one-file web page" : null;
         set(sessionId, {
           busy: undefined,
+          ...(failure.captureBlock === undefined ? {} : { block: failure.captureBlock }),
           error:
             name === null ? reason : `Could not save the ${name}: ${reason.replace(/\.+$/, "")}.`,
         });
@@ -237,6 +247,7 @@ export function createCapture(core: CoreController) {
         ...s,
         last: Object.fromEntries(Object.entries(s.last).filter(([id]) => id !== sessionId)),
         error: { ...s.error, [sessionId]: null },
+        block: { ...s.block, [sessionId]: undefined },
       }));
     },
   };

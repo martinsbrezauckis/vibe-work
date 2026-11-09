@@ -24,8 +24,7 @@ pub(crate) async fn execute(
         error.server_code = Some("notConfigured".to_owned());
         return Err(error);
     };
-    if let KeyRequest::UseMistralKey { item_id } | KeyRequest::UseExistingKey { item_id } = &request
-    {
+    if let KeyRequest::UseMistralKey { item_id } = &request {
         confirm_switch(shared, keys, item_id).await?;
         refuse_busy(shared)?;
     } else {

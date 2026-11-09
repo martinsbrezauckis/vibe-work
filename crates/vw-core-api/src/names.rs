@@ -131,8 +131,14 @@ impl Names {
 
     /// A bounded title whose controls the native dialog formatter must visibly escape.
     pub(crate) fn confirmation_title(&self, store: &SessionStore, id: &str) -> String {
-        self.title(store, id)
-            .map_or_else(|| "Untitled session".to_owned(), |title| title.confirmation)
+        self.title(store, id).map_or_else(
+            || {
+                vw_vocabulary::text("untitledSession")
+                    .unwrap_or_default()
+                    .to_owned()
+            },
+            |title| title.confirmation,
+        )
     }
 
     fn title(&self, store: &SessionStore, id: &str) -> Option<Title> {
@@ -151,8 +157,11 @@ impl Names {
 
     /// The session's visible name: title, first-message preview, then the untitled-session label.
     pub(crate) fn display_title(&self, store: &SessionStore, id: &str) -> String {
-        self.title_of(store, id)
-            .unwrap_or_else(|| "Untitled session".to_owned())
+        self.title_of(store, id).unwrap_or_else(|| {
+            vw_vocabulary::text("untitledSession")
+                .unwrap_or_default()
+                .to_owned()
+        })
     }
 
     /// Every `(session id, cwd)` known: loaded sessions' live folders, then listed ones (the folders a

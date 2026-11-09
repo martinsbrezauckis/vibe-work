@@ -460,7 +460,7 @@ mod tests {
     #[tokio::test]
     async fn the_persons_stop_holds_for_the_rest_of_the_turn() {
         let stopped = format!(
-            "Not run: you pressed Stop in {}. The turn is stopped; do not call browser tools again in this turn.",
+            "Not run: the person pressed Stop in {}. Do not use the browser again in this turn; tell them what you were doing and wait for their answer.",
             vw_vocabulary::texts::CHROME_NAME
         );
         let core = chat_with_session().await;

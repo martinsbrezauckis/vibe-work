@@ -21,7 +21,7 @@ async fn fixture(name: &str, profiles: serde_json::Value) -> crate::Core {
     .unwrap();
     std::fs::write(
         chrome.dir().unwrap().join("setup.json"),
-        json!({"files":[],"browsers":["Google Chrome","Microsoft Edge"],"userData":data})
+        json!({"files":[],"browsers":["Google Chrome","Microsoft Edge"],"selectedBrowsers":["Google Chrome","Microsoft Edge"],"userData":data})
             .to_string(),
     )
     .unwrap();
@@ -48,7 +48,7 @@ async fn stopped_session(browser: &str, profile: &str, other: &str) {
         &json!({"structuredContent":{"sessions":[{"sessionId":"task","state":"stopped"}]}}),
     );
     let expected = format!(
-        "Not run: you pressed Stop in Your {browser}. The turn is stopped; do not call browser tools again in this turn."
+        "Not run: the person pressed Stop in Your {browser}. Do not use the browser again in this turn; tell them what you were doing and wait for their answer."
     );
     for reset in [false, true] {
         if reset {

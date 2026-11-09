@@ -3,7 +3,9 @@
 use crate::{Broker, ENDPOINT_ENV, Request, call};
 use std::io::{self, BufRead, Read, Write};
 use std::path::Path;
-use std::process::{Command, Stdio};
+#[cfg(not(windows))]
+use std::process::Command;
+use std::process::Stdio;
 use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
@@ -57,6 +59,9 @@ pub fn shim() -> io::Result<i32> {
                 "GitHub reader local config is not available",
             ));
         }
+        #[cfg(windows)]
+        let mut child = vw_platform::process_command::hidden(executable);
+        #[cfg(not(windows))]
         let mut child = Command::new(executable);
         child.args(&argv).env_clear().stdin(Stdio::null());
         for name in [

@@ -1,7 +1,7 @@
-//! App-owned launch of a paired, closed browser before any action is sent. The pre-tool hook supplies Ask consent;
+//! App-owned launch of a paired, closed browser before any action is sent. Navigation runs in Ask;
 //! the gateway waits for the real helper connection. One launch is shared by concurrent chats, never their windows.
 use super::{AddonState, agent_browser::Browser};
-use crate::{ask::tool_calls, core::Shared};
+use crate::core::Shared;
 use serde_json::{Value, json};
 use std::{
     sync::{Arc, Mutex, PoisonError},
@@ -89,78 +89,13 @@ fn needed(shared: &Shared, browser: Browser) -> bool {
         }
 }
 
-/// Adds the usual card to a closed-browser call in Ask, preserving any prepared personal-read consent.
-pub(crate) async fn prepare(
-    shared: &Arc<Shared>,
-    owner: &str,
-    source: &str,
-    call: &str,
-    tool: &str,
-    args: &Value,
-    execution: Option<tool_calls::receipts::Execution>,
-) -> Result<Option<tool_calls::receipts::Execution>, String> {
-    if !(tool == "chrome_session" && args["action"] == "open" || tool == "chrome_execute")
-        || super::check::mode(shared, owner).as_deref() != Some("ask")
-    {
-        return Ok(execution);
-    }
-    let browser = super::agent_browser::selected(shared, owner, tool, args);
-    if !needed(shared, browser) {
-        return Ok(execution);
-    }
-    if tool == "chrome_session" {
-        super::gateway::validate_session_args(args)?;
-    } else {
-        super::gateway::validate_execute_args(args)?;
-    }
-    // Personal reads already passed their separate approval in prepare_inner.
-    if !super::read_consent::personal_read(tool, args) {
-        super::check::authorize(shared, owner, tool, args)?;
-    }
-    if let Err(reason) = super::gateway::validate_session(shared, owner, tool, args) {
-        let ended_here = args["sessionId"].as_str().is_some_and(|id| {
-            shared
-                .chrome_control
-                .turn_ended
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .get(owner)
-                .is_some_and(|ids| ids.iter().any(|ended| ended == id))
-        });
-        if !ended_here {
-            return Err(reason);
-        }
-    }
-    super::reconnect::stopped(shared, owner, browser)?;
-    tool_calls::approve(shared, owner, source, call, json!({"kind":"approval",
-        "effect":{"kind":"tool","toolName":format!("mcp_vw.{tool}"),"input":args},"requiredPermissions":[]})).await?;
-    let (shared, owner, tool, args) = (
-        Arc::downgrade(shared),
-        owner.to_owned(),
-        tool.to_owned(),
-        args.clone(),
-    );
-    Ok(Some(Box::pin(async move {
-        let shared = shared
-            .upgrade()
-            .ok_or("Vibe Work closed. Start a new turn before trying again.")?;
-        if let Some(reply) = wait(&shared, &owner, browser, true).await? {
-            return Ok(reply);
-        }
-        match execution {
-            Some(execution) => execution.await,
-            None => super::gateway::call(&shared, &owner, &tool, args).await,
-        }
-    })))
-}
-
 fn active(shared: &Shared, session: &str, browser: Browser, generation: u64) -> Result<(), String> {
     super::reconnect::stopped(shared, session, browser)?;
     if generation != crate::stops::generation(shared, session)
         || shared.store.view(session).is_none()
     {
-        return Err(browser.text(
-            "Not run: this chat's Chrome work ended. Start a new turn before trying again.",
+        return Err(browser.words(
+            "Not run: this chat's {browser} work ended. Start a new turn before trying again.",
         ));
     }
     super::check::authorize(
@@ -184,18 +119,14 @@ fn failure(browser: Browser, code: &str, reason: &str) -> Value {
     json!({"vwMcpResult":answer})
 }
 
-/// Runs only after the gateway's mode and ownership checks, or the authenticated launch approval.
+/// Runs only after the gateway's current mode and ownership checks.
 pub(super) async fn wait(
     shared: &Arc<Shared>,
     session: &str,
     browser: Browser,
-    approved: bool,
 ) -> Result<Option<Value>, String> {
     if !needed(shared, browser) {
         return Ok(None);
-    }
-    if !approved && super::check::mode(shared, session).as_deref() == Some("ask") {
-        return Err(browser.words("Not run: opening {yourBrowser} needs approval in Ask. Call chrome_session with action open and profileId {browser}; Vibe Work shows the permission card before opening it. Do not use process or shell tools."));
     }
     let generation = crate::stops::generation(shared, session);
     active(shared, session, browser, generation)?;
@@ -211,9 +142,6 @@ pub(super) async fn wait(
                 active(&shared, &chat, browser, generation)?;
                 if super::availability::live(&shared, browser) {
                     return Ok(());
-                }
-                if !approved && super::check::mode(&shared, &chat).as_deref() == Some("ask") {
-                    return Err("Opening the browser now needs approval in Ask".into());
                 }
                 if !browser.reconnectable(&shared)
                     || !matches!(
@@ -260,5 +188,28 @@ pub(super) async fn wait(
             return Ok(Some(failure(browser, "BROWSER_CONNECT_TIMEOUT", &browser.words("Vibe Work asked {fullBrowser} to open, but its extension did not connect within 10 seconds."))));
         }
         tokio::time::sleep_until((tokio::time::Instant::now() + POLL).min(deadline)).await;
+    }
+}
+
+#[cfg(test)]
+mod wording_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn ended_work_names_its_browser_and_keeps_the_recovery_instruction() {
+        for browser in [Browser::Chrome, Browser::Edge] {
+            let core =
+                crate::offline_core::start(&format!("ended-browser-work-{}", browser.id())).await;
+            let generation = crate::stops::generation(&core.shared, "a").wrapping_add(1);
+            let error = active(&core.shared, "a", browser, generation).unwrap_err();
+            assert_eq!(
+                error,
+                format!(
+                    "Not run: this chat's {} work ended. Start a new turn before trying again.",
+                    browser.short_name()
+                )
+            );
+            core.shutdown().await;
+        }
     }
 }

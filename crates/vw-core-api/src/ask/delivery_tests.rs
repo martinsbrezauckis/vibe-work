@@ -70,7 +70,7 @@ async fn core() -> (Core, std::path::PathBuf) {
     // A counter as well as the clock: macOS's clock ticks in microseconds, and these tests run in parallel.
     static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let root = std::env::temp_dir().join(format!(
-        "vw-dbk4-delivery-{}-{}-{}",
+        "vw-approval-delivery-{}-{}-{}",
         std::process::id(),
         NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
         std::time::SystemTime::now()

@@ -13,6 +13,7 @@
  */
 import { type ReactElement, useEffect, useRef } from "react";
 import { openHit } from "./openHit";
+import { useSettingsDescriptions } from "./useSettingsDescriptions";
 
 import { Highlight } from "../../components/Highlight";
 import { formatKeys } from "../../state/shortcuts";
@@ -228,6 +229,7 @@ export function SettingsPage(): ReactElement {
   const app = useApp();
   const view = useShellState((s) => s.settings);
   const root = useRef<HTMLDivElement>(null);
+  useSettingsDescriptions(root);
   useTargetFlash(root);
   useSettingsKeys();
   const offered = useOfferedCategories();

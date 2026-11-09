@@ -45,23 +45,32 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn remove_unregisters_only_the_embedded_extension_and_setup_registers_that_same_path() {
-        use std::os::unix::fs::PermissionsExt;
         let root = tempfile::tempdir().unwrap();
         let app = root.path().join("Moved Vibe Work.app");
         std::fs::create_dir_all(extension_at(&app)).unwrap();
         let program = root.path().join("pluginkit");
-        std::fs::write(
-            &program,
-            "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"${0%/*}/called\"\n",
-        )
-        .unwrap();
-        std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o700)).unwrap();
+        // A fork in another test can inherit this process's open write descriptor and make exec
+        // fail with ETXTBSY. Install from a separate process so this process never writes the program.
+        let write_program = |text: &str| {
+            let source = root.path().join("pluginkit.source");
+            std::fs::write(&source, text).unwrap();
+            assert!(
+                std::process::Command::new("install")
+                    .args(["-m", "0700"])
+                    .arg(&source)
+                    .arg(&program)
+                    .status()
+                    .unwrap()
+                    .success()
+            );
+        };
+        write_program("#!/bin/sh\nprintf '%s\\n' \"$@\" > \"${0%/*}/called\"\n");
         for (remove, flag) in [(true, "-r"), (false, "-a")] {
             change_at(&program, &app, remove).await.unwrap();
             let args = std::fs::read_to_string(root.path().join("called")).unwrap();
             assert_eq!(args, format!("{flag}\n{}\n", extension_at(&app).display()));
         }
-        std::fs::write(&program, "#!/bin/sh\nexit 1\n").unwrap();
+        write_program("#!/bin/sh\nexit 1\n");
         assert!(
             change_at(&program, &app, true)
                 .await

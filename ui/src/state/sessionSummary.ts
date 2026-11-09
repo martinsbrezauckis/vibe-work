@@ -6,6 +6,7 @@
  * Invariants: tolerant of the two shapes `status` has been seen in (`{type: "running"}` from Vibe,
  * a bare string from the scripted test server); an unknown status is shown as idle, never thrown.
  */
+import { TEXT } from "../vocabulary";
 import { pendingHistoryAsks } from "../features/transcript/model/protectedChange";
 import type { JsonValue } from "../protocol/core";
 import type { TurnRetry } from "./turnRetry";
@@ -130,7 +131,7 @@ export function badgeOf(
 
 /** The session's visible name while Vibe is still preparing its title. */
 export function sessionTitle(session: SessionEntry["session"] | undefined): string {
-  return str(session?.["title"]) ?? str(session?.["preview"]) ?? "Untitled session";
+  return str(session?.["title"]) ?? str(session?.["preview"]) ?? TEXT.untitledSession;
 }
 
 /** Derives the row for one entry (`waiting`: see `badgeOf`). */

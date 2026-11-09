@@ -85,7 +85,7 @@ fn helper_error(receipt: &Value) -> Option<Value> {
         "UNKNOWN_ACTION" => "Unknown browser action. Choose a supported action.",
         "EXTENSION_UPDATE_REQUIRED" => {
             return Some(json!({"code":code,"message":format!(
-                "The browser extension needs an update. Update {} and try again.",
+                "The browser extension needs an update. Ask the person to update {} before trying again.",
                 vw_vocabulary::label("workNames", "chromeExtension")
             )}));
         }
@@ -95,7 +95,9 @@ fn helper_error(receipt: &Value) -> Option<Value> {
         "SESSION_NOT_READY" => {
             "The browser session is not ready. Check its status before trying again."
         }
-        "CONTROL_SUSPENDED" => "Control is paused. Press Resume to continue.",
+        "CONTROL_SUSPENDED" => {
+            "Browser control is paused. Wait, or ask the person to press Resume before trying again."
+        }
         "UNSUPPORTED_TARGET" => {
             "This browser target cannot be controlled. Choose a supported tab or page."
         }

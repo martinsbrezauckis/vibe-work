@@ -1,4 +1,5 @@
 //! App-owned gh discovery, credential acquisition and broker lifecycle. Core startup and settings call this.
+//! Depends on: `process_wrap`, `serde_json` and the core lifecycle. Called by: core startup, session launch and Settings.
 //! Credentials travel only from app-side gh stdout to broker stdin, never into agent state or files.
 //! gh is asked outside the state lock and within [`GH_LIMIT`]: a gh that hangs (a keyring prompt, no network)
 //! never holds up a chat start, the git check's `enabled()` or Settings for longer than that.
@@ -6,7 +7,7 @@ use crate::{GithubReadsStatus as Status, GithubReadsView as View};
 use std::ffi::OsString;
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, Stdio};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 use zeroize::Zeroizing;
@@ -39,9 +40,9 @@ impl Drop for GhCall {
 /// `security` tool as a plain child on macOS). gh is the user's own program: this is cleanup, not a containment
 /// boundary.
 async fn gh(program: &Path, args: &[&str]) -> std::io::Result<std::process::Output> {
-    use process_wrap::tokio::{CommandWrap, KillOnDrop};
+    use process_wrap::tokio::KillOnDrop;
     use tokio::io::AsyncReadExt;
-    let mut command = CommandWrap::with_new(program, |cmd| {
+    let mut command = vw_platform::process_command::hidden_wrap(program, |cmd| {
         cmd.args(args)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
@@ -243,10 +244,35 @@ impl Reader {
         let Some(program) = self.real_gh.as_ref().filter(|p| p.is_file()) else {
             return Ok((Status::Missing, None));
         };
-        let output = match gh(program, &["auth", "status", "--hostname", "github.com"]).await {
+        let output = match gh(
+            program,
+            &[
+                "auth",
+                "status",
+                "--hostname",
+                "github.com",
+                "--json",
+                "hosts",
+            ],
+        )
+        .await
+        {
             Ok(output) => output,
             Err(error) if error.kind() == std::io::ErrorKind::TimedOut => return Err(GH_LATE),
             Err(_) => return Ok((Status::SignedOut, None)),
+        };
+        if let Some(status) = structured_login(&output.stdout) {
+            return Ok(status);
+        }
+        // Older gh versions reject --json. Preserve their existing text path without a version probe.
+        let output = if output.status.success() {
+            output
+        } else {
+            match gh(program, &["auth", "status", "--hostname", "github.com"]).await {
+                Ok(output) => output,
+                Err(error) if error.kind() == std::io::ErrorKind::TimedOut => return Err(GH_LATE),
+                Err(_) => return Ok((Status::SignedOut, None)),
+            }
         };
         let text = format!(
             "{}{}",
@@ -307,7 +333,7 @@ impl Reader {
             .real_gh
             .as_ref()
             .ok_or_else(|| std::io::Error::other("gh is not installed"))?;
-        let mut command = Command::new(binary);
+        let mut command = vw_platform::process_command::hidden(binary);
         command
             .arg("gh-broker")
             .arg(gh)
@@ -406,7 +432,7 @@ impl Reader {
             .ok()
     }
 
-    /// A refresh nobody waits for (a chat start, the app start). It ends within twice [`GH_LIMIT`] plus the
+    /// A refresh nobody waits for (a chat start, the app start). It ends within three times [`GH_LIMIT`] plus the
     /// broker start, and after `shutdown` it changes nothing.
     pub(crate) fn refresh_later(self: &Arc<Self>) {
         let reader = self.clone();
@@ -634,3 +660,35 @@ pub(crate) fn watch(shared: &Arc<crate::core::Shared>) {
 #[cfg(all(test, target_os = "linux"))]
 #[path = "github_reads_tests.rs"]
 mod tests;
+
+// Schema: cli/cli pkg/cmd/auth/status/status.go (hosts -> accounts, with state, active and login).
+// JSON status can exit zero even when authentication failed, so exit code alone never signs an account in.
+fn structured_login(bytes: &[u8]) -> Option<(Status, Option<String>)> {
+    let value: serde_json::Value = serde_json::from_slice(bytes).ok()?;
+    let hosts = value.get("hosts")?.as_object()?;
+    let Some(accounts) = hosts.get("github.com") else {
+        return Some((
+            if hosts.is_empty() {
+                Status::SignedOut
+            } else {
+                Status::Enterprise
+            },
+            None,
+        ));
+    };
+    let login = accounts
+        .as_array()?
+        .iter()
+        .find(|entry| entry["active"] == true && entry["state"] == "success")
+        .and_then(|entry| entry["login"].as_str())
+        .filter(|login| !login.is_empty())
+        .map(str::to_owned);
+    Some((
+        if login.is_some() {
+            Status::SignedIn
+        } else {
+            Status::SignedOut
+        },
+        login,
+    ))
+}

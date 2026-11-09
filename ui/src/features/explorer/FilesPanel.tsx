@@ -100,24 +100,12 @@ export function FilesPanel({
         }}
         legacy={legacy}
         workspaceActions={
-          <WorkspaceActions
-            key={folder}
-            app={app}
-            explorer={explorer}
-            init={false}
-            onInitClose={() => undefined}
-          />
+          <WorkspaceActions key={folder} app={app} explorer={explorer} init={false} />
         }
       />
       {init && (
         <div className="fx-init">
-          <WorkspaceActions
-            key={folder}
-            app={app}
-            explorer={explorer}
-            init
-            onInitClose={() => undefined}
-          />
+          <WorkspaceActions key={folder} app={app} explorer={explorer} init />
         </div>
       )}
       {error && (

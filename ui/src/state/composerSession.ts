@@ -413,7 +413,7 @@ export function createSessionControls(deps: {
                 return done();
               }
             } catch (thrown) {
-              const rejected = failed(thrown) === PLUGIN_RELOAD_REFUSED;
+              const rejected = toCallError(thrown).error.serverCode === "pluginReloadRejected";
               console.warn("Plugin refresh failed:", failed(thrown));
               const message = rejected
                 ? PLUGIN_RELOAD_REFUSED
@@ -482,15 +482,4 @@ function pluginComponents(reply: JsonValue | null): string[] {
     })
     .filter((x): x is string => x !== null)
     .sort();
-}
-
-/** The plugins of a `plugin/info` reply with their component count: the part before `:` of each component name. */
-export function pluginGroups(reply: JsonValue | null): Array<[string, number]> {
-  const counts = new Map<string, number>();
-  for (const entry of pluginComponents(reply)) {
-    const name = entry.slice(entry.indexOf(" ") + 1);
-    const plugin = name.includes(":") ? name.slice(0, name.indexOf(":")) : name;
-    counts.set(plugin, (counts.get(plugin) ?? 0) + 1);
-  }
-  return [...counts.entries()].sort(([a], [b]) => a.localeCompare(b));
 }

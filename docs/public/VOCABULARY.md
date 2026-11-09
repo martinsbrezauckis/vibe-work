@@ -92,6 +92,7 @@ Models use Vibe's reported display name, falling back to the configured alias. D
 | `vw:git` | Manage project changes | Helps Vibe check changes, make commits and prepare pull requests. | Helps Vibe check changes, make commits and prepare pull requests. |
 | `vw:handbook` | Keep a project handbook | Helps Vibe maintain your project’s plans, decisions, guides and reports. | Helps Vibe maintain your project’s plans, decisions, guides and reports. |
 | `vw:images` | Create and edit images | Lets Vibe make or change images for your task. | Lets Vibe make or change images for your task. |
+| `vw:video` | Review video frames | Lets Vibe inspect selected frames from a local video. | Lets Vibe inspect selected frames from a local video. |
 | `vw:libraries` | Use your libraries | Lets Vibe find answers in documents you keep in Vibe Work’s Libraries. | Lets Vibe find answers in documents you keep in Vibe Work’s Libraries. |
 | `vw:meeting-prep` | Prepare for a meeting | Helps Vibe write a brief with context, an agenda and questions to ask. | Helps Vibe write a brief with context, an agenda and questions to ask. |
 | `vw:preview` | Check your web app | Lets Vibe run and check your web app in the Browser tab. | Lets Vibe run and check your web app in the Browser tab. |

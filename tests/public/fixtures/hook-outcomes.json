@@ -183,9 +183,7 @@
         "text": "Not run: guard refused running commands."
       }
     ],
-    "effects": [
-      "effect-call"
-    ]
+    "effects": ["effect-call"]
   },
   {
     "name": "orphan placeholder",
@@ -203,9 +201,7 @@
       }
     ],
     "lines": [],
-    "effects": [
-      "effect-call"
-    ]
+    "effects": ["effect-call"]
   },
   {
     "name": "allowed note bookkeeping",
@@ -396,9 +392,7 @@
         "text": "guard: Hook timed out"
       }
     ],
-    "effects": [
-      "run"
-    ]
+    "effects": ["run"]
   },
   {
     "name": "unfamiliar warning stays visible",
@@ -539,9 +533,7 @@
         "text": "Not run: guard refused running commands."
       }
     ],
-    "effects": [
-      "other"
-    ]
+    "effects": ["other"]
   },
   {
     "name": "fallback for mcp_vw.process_start",
@@ -696,6 +688,100 @@
       {
         "id": "h2",
         "text": "Not run: remote writes need your approval. Use Push in Vibe Work."
+      }
+    ],
+    "effects": []
+  },
+  {
+    "name": "combined guard ok success",
+    "history": [
+      {
+        "id": "merged",
+        "type": "notice",
+        "detail": {
+          "kind": "hook_completed",
+          "hookName": "vibe-work safety reminder",
+          "scope": "pre_tool",
+          "status": "ok",
+          "content": ""
+        }
+      }
+    ],
+    "lines": [],
+    "effects": []
+  },
+  {
+    "name": "combined guard warning Rewrote tool_input for 'edit'",
+    "history": [
+      {
+        "id": "merged",
+        "type": "notice",
+        "detail": {
+          "kind": "hook_completed",
+          "hookName": "vibe-work safety reminder",
+          "scope": "pre_tool",
+          "status": "warning",
+          "content": "Rewrote tool_input for 'edit'"
+        }
+      }
+    ],
+    "lines": [],
+    "effects": []
+  },
+  {
+    "name": "combined guard warning Unexpected guard warning",
+    "history": [
+      {
+        "id": "merged",
+        "type": "notice",
+        "detail": {
+          "kind": "hook_completed",
+          "hookName": "vibe-work safety reminder",
+          "scope": "pre_tool",
+          "status": "warning",
+          "content": "Unexpected guard warning"
+        }
+      }
+    ],
+    "lines": [
+      {
+        "id": "merged",
+        "text": "vibe-work safety reminder: Unexpected guard warning"
+      }
+    ],
+    "effects": []
+  },
+  {
+    "name": "combined guard preserves the named refusal",
+    "history": [
+      {
+        "id": "hook",
+        "type": "notice",
+        "detail": {
+          "kind": "hook_completed",
+          "hookName": "vibe-work safety reminder",
+          "scope": "pre_tool",
+          "toolCallId": "call",
+          "status": "error",
+          "content": "Denied tool 'bash'"
+        }
+      },
+      {
+        "id": "placeholder",
+        "type": "effect",
+        "detail": {
+          "toolName": "tool"
+        },
+        "state": {
+          "status": "skipped",
+          "reason": "Process guard: Not run: the user declined this. Explain why it is needed for the user's delegated task."
+        }
+      }
+    ],
+    "lines": [
+      {
+        "id": "hook",
+        "text": "Process guard: Not run: the user declined this. Explain why it is needed for the user's delegated task."
       }
     ],
     "effects": []

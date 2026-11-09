@@ -56,67 +56,189 @@ pub(super) fn read() -> Vec<Value> {
         .collect()
 }
 
+#[cfg(any(windows, test))]
+enum RegistryValue {
+    Dword(u32),
+    String(String),
+    Other,
+}
+
+#[cfg(any(windows, test))]
+fn registry_policy(
+    value: impl Fn(&str) -> Option<RegistryValue>,
+    list: impl Fn(&str) -> Vec<RegistryValue>,
+) -> Value {
+    let mut values = serde_json::Map::new();
+    if let Some(RegistryValue::Dword(value)) = value("NativeMessagingUserLevelHosts") {
+        values.insert(
+            "NativeMessagingUserLevelHosts".into(),
+            Value::Bool(value != 0),
+        );
+    }
+    if let Some(RegistryValue::String(text)) = value("ExtensionSettings")
+        && let Ok(value) = serde_json::from_str(&text)
+    {
+        values.insert("ExtensionSettings".into(), value);
+    }
+    for name in [
+        "NativeMessagingBlocklist",
+        "NativeMessagingAllowlist",
+        "ExtensionInstallBlocklist",
+        "ExtensionInstallAllowlist",
+    ] {
+        let entries: Vec<_> = list(name)
+            .into_iter()
+            .filter_map(|value| match value {
+                RegistryValue::String(text) => Some(Value::String(text.trim().to_owned())),
+                _ => None,
+            })
+            .collect();
+        if !entries.is_empty() {
+            values.insert(name.into(), Value::Array(entries));
+        }
+    }
+    Value::Object(values)
+}
+
+#[cfg(windows)]
+fn registry_value(raw: &winreg::RegValue) -> RegistryValue {
+    use winreg::{
+        enums::{REG_DWORD, REG_SZ},
+        types::FromRegValue,
+    };
+    match raw.vtype {
+        REG_DWORD => u32::from_reg_value(raw).map_or(RegistryValue::Other, RegistryValue::Dword),
+        REG_SZ => String::from_reg_value(raw).map_or(RegistryValue::Other, RegistryValue::String),
+        _ => RegistryValue::Other,
+    }
+}
+
+#[cfg(windows)]
+fn read_key(root: &winreg::RegKey) -> Value {
+    registry_policy(
+        |name| {
+            root.get_raw_value(name)
+                .ok()
+                .map(|raw| registry_value(&raw))
+        },
+        |name| {
+            root.open_subkey(name).ok().map_or_else(Vec::new, |key| {
+                key.enum_values()
+                    .filter_map(Result::ok)
+                    .map(|(_, raw)| registry_value(&raw))
+                    .collect()
+            })
+        },
+    )
+}
+
 #[cfg(windows)]
 pub(super) fn read() -> Vec<Value> {
-    use std::os::windows::process::CommandExt;
-    [
-        r"HKLM\Software\Policies\Microsoft\Edge",
-        r"HKCU\Software\Policies\Microsoft\Edge",
-    ]
-    .into_iter()
-    .filter_map(|root| {
-        let out = std::process::Command::new("reg.exe")
-            .args(["query", root, "/s"])
-            .creation_flags(0x0800_0000)
-            .output()
-            .ok()?;
-        if !out.status.success() {
-            return None;
-        }
-        let text = String::from_utf8_lossy(&out.stdout);
-        let mut values = serde_json::Map::new();
-        let mut section = "";
-        for line in text.lines() {
-            let line = line.trim();
-            if line.starts_with("HKEY_") {
-                section = line.rsplit('\\').next().unwrap_or_default();
-                continue;
-            }
-            let Some((name, raw)) = line.split_once("REG_") else {
-                continue;
-            };
-            let name = name.trim();
-            if let Some(value) = raw.strip_prefix("DWORD") {
-                if name == "NativeMessagingUserLevelHosts" {
-                    values.insert(name.into(), Value::Bool(value.trim() != "0x0"));
-                }
-            } else if let Some(value) = raw.strip_prefix("SZ") {
-                if name == "ExtensionSettings" {
-                    if let Ok(value) = serde_json::from_str(value.trim()) {
-                        values.insert(name.into(), value);
-                    }
-                } else if [
-                    "NativeMessagingBlocklist",
-                    "NativeMessagingAllowlist",
-                    "ExtensionInstallBlocklist",
-                    "ExtensionInstallAllowlist",
-                ]
-                .contains(&section)
-                {
-                    values
-                        .entry(section)
-                        .or_insert_with(|| Value::Array(Vec::new()))
-                        .as_array_mut()?
-                        .push(Value::String(value.trim().into()));
-                }
-            }
-        }
-        Some(Value::Object(values))
-    })
-    .collect()
+    [winreg::HKLM, winreg::HKCU]
+        .into_iter()
+        .filter_map(|hive| {
+            hive.open_subkey(r"Software\Policies\Microsoft\Edge")
+                .ok()
+                .map(|key| read_key(&key))
+        })
+        .collect()
 }
 
 #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
 pub(super) fn read() -> Vec<Value> {
     Vec::new()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn registry_values_keep_types_unicode_and_only_recognized_lists() {
+        let values = |name: &str| match name {
+            "NativeMessagingUserLevelHosts" => Some(RegistryValue::Dword(0)),
+            "ExtensionSettings" => Some(RegistryValue::String(
+                r#"{"*":{"installation_mode":"blocked"}}"#.into(),
+            )),
+            _ => None,
+        };
+        let lists = |name: &str| match name {
+            "NativeMessagingAllowlist" => vec![
+                RegistryValue::String("host.Mārtiņš ; $`&".into()),
+                RegistryValue::Other,
+            ],
+            "ExtensionInstallBlocklist" => vec![RegistryValue::String("  *  ".into())],
+            _ => Vec::new(),
+        };
+        assert_eq!(
+            registry_policy(values, lists),
+            json!({
+                "NativeMessagingUserLevelHosts":false,
+                "ExtensionSettings":{"*":{"installation_mode":"blocked"}},
+                "NativeMessagingAllowlist":["host.Mārtiņš ; $`&"],
+                "ExtensionInstallBlocklist":["*"]
+            })
+        );
+        assert_eq!(
+            registry_policy(|_| Some(RegistryValue::Other), |_| Vec::new()),
+            json!({})
+        );
+        assert_eq!(
+            registry_policy(
+                |name| (name == "NativeMessagingUserLevelHosts").then_some(RegistryValue::Dword(2)),
+                |_| Vec::new()
+            ),
+            json!({"NativeMessagingUserLevelHosts":true})
+        );
+        assert_eq!(
+            registry_policy(
+                |_| Some(RegistryValue::String("invalid JSON".into())),
+                |_| Vec::new()
+            ),
+            json!({})
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn native_registry_reader_uses_utf16_and_ignores_other_value_types() {
+        struct Scratch(String);
+        impl Drop for Scratch {
+            fn drop(&mut self) {
+                let _ = winreg::HKCU.delete_subkey_all(&self.0);
+            }
+        }
+        let scratch = Scratch(format!(
+            r"Software\VibeWorkTests\EdgePolicy-{}",
+            std::process::id()
+        ));
+        let (key, _) = winreg::HKCU.create_subkey(&scratch.0).unwrap();
+        key.set_value("NativeMessagingUserLevelHosts", &0u32)
+            .unwrap();
+        key.set_value(
+            "ExtensionSettings",
+            &r#"{"*":{"installation_mode":"blocked"}}"#,
+        )
+        .unwrap();
+        let (list, _) = key.create_subkey("NativeMessagingAllowlist").unwrap();
+        list.set_value("1", &"host.Mārtiņš ; $`&").unwrap();
+        list.set_value("2", &1u32).unwrap();
+        assert_eq!(
+            read_key(&key),
+            json!({
+                "NativeMessagingUserLevelHosts":false,
+                "ExtensionSettings":{"*":{"installation_mode":"blocked"}},
+                "NativeMessagingAllowlist":["host.Mārtiņš ; $`&"]
+            })
+        );
+        key.set_value("ExtensionSettings", &vec!["wrong", "type"])
+            .unwrap();
+        key.set_value("NativeMessagingUserLevelHosts", &"0")
+            .unwrap();
+        assert_eq!(
+            read_key(&key),
+            json!({"NativeMessagingAllowlist":["host.Mārtiņš ; $`&"]})
+        );
+    }
 }

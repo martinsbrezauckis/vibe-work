@@ -37,6 +37,9 @@ use crate::shellx_profile::{RecoveryState, ShellxMode, ShellxProfile};
 
 #[path = "kept_key.rs"]
 mod kept_key;
+#[path = "unlock_policy.rs"]
+mod unlock_policy;
+use unlock_policy::{keyfile_from_json, unlock_keyfile};
 
 /// Which app layout a vault uses.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -114,22 +117,6 @@ pub struct Vault {
     remember_note: Mutex<Option<String>>,
     /// the head guard every session's reads go through (kept across lock and unlock).
     chain: Arc<ChainGuard>,
-}
-
-fn keyfile_from_json(raw: &str) -> Result<Keyfile, VaultError> {
-    if raw.len() > 64 * 1024 {
-        return Err(VaultError::Corrupt("keyfile too large".to_owned()));
-    }
-    serde_json::from_str(raw).map_err(|_| VaultError::Corrupt("keyfile is not valid".to_owned()))
-}
-
-fn unlock_keyfile(keyfile: &Keyfile, secret: &SecretString) -> Result<MasterKey, VaultError> {
-    keyfile
-        .unlock(secret.expose())
-        .map_err(|error| match error {
-            vault_core::KeysError::Unlock => VaultError::WrongPassphrase,
-            other => VaultError::Corrupt(other.to_string()),
-        })
 }
 
 fn locked_status(entry: &AvailableVault) -> VaultStatus {

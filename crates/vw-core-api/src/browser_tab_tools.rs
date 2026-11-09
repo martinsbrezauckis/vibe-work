@@ -13,19 +13,11 @@ use crate::browser::browser;
 use crate::core::Shared;
 use crate::previews::hub;
 
-fn close_allowed(shared: &Shared, owner: &str, user_origin: bool) -> Result<(), String> {
+fn close_allowed(shared: &Shared, owner: &str, _user_origin: bool) -> Result<(), String> {
     let mode = crate::chrome_control::check::mode(shared, owner);
-    let tier = mode
-        .as_deref()
+    mode.as_deref()
         .and_then(vw_ask::chrome::Tier::from_mode)
         .ok_or("Not run: closing browser tabs is unavailable in this access mode.")?;
-    if user_origin && tier < vw_ask::chrome::Tier::AcceptEdits {
-        return Err(format!(
-            "Not run: closing this tab needs {}; this chat is in {}.",
-            vw_ask::chrome::Tier::AcceptEdits.required_label(),
-            vw_ask::chrome::Tier::Ask.label()
-        ));
-    }
     Ok(())
 }
 
@@ -274,7 +266,17 @@ pub(crate) async fn call(
     match args.get("action").and_then(Value::as_str) {
         Some("list_tabs") => {
             still_running(shared, owner, owner)?;
-            list_pages(service.tabs(owner), tab)
+            let mut result = list_pages(service.tabs(owner), tab)?;
+            if let Some(tabs) = result["tabs"].as_array_mut() {
+                for tab in tabs {
+                    tab["windowId"] = json!(
+                        tab["id"]
+                            .as_str()
+                            .and_then(|page| service.page_window_id(page))
+                    );
+                }
+            }
+            Ok(result)
         }
         Some("close_tab") => prepare_close(shared, owner, tab.unwrap_or(""))?.await,
         _ => Err("unknown browser tab action".to_owned()),
@@ -334,11 +336,11 @@ mod tests {
             )
             .unwrap();
         for (mode, own, user) in [
-            ("ask", true, false),
+            ("ask", true, true),
             ("accept-edits", true, true),
             ("smart-approve", true, true),
             ("auto-approve", true, true),
-            ("ask", true, false),
+            ("ask", true, true),
             ("vw-plan", false, false),
             ("explore", false, false),
         ] {

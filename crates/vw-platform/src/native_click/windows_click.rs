@@ -24,51 +24,9 @@ pub fn click(
     point: (f64, f64),
     sent: &AtomicBool,
 ) -> Result<(), String> {
-    // SAFETY: the live controller comes from Tauri's with_webview on its UI thread. Every HWND is rechecked before
-    // posting; messages target only a child of this controller's host, never the desktop or another application.
+    let (target, packed) = target(controller, point)?;
+    // SAFETY: target rechecked this live controller's visible child HWND on the UI thread.
     unsafe {
-        let mut host = HWND::default();
-        controller
-            .ParentWindow(&raw mut host)
-            .map_err(|e| format!("WebView2 host window: {e}"))?;
-        if host.is_invalid() || !IsWindowVisible(host).as_bool() {
-            return Err("native preview host is not visible".to_owned());
-        }
-        let root = GetAncestor(host, GA_ROOT);
-        if root.is_invalid() || root != GetForegroundWindow() {
-            return Err("native preview window is not foreground".to_owned());
-        }
-        let mut rect = RECT::default();
-        GetClientRect(host, &raw mut rect).map_err(|e| format!("WebView2 host bounds: {e}"))?;
-        let width = f64::from(rect.right - rect.left);
-        let height = f64::from(rect.bottom - rect.top);
-        let (x, y) = super::map_point(point, (width, height))?;
-        // The mapped values are finite and strictly inside a positive HWND client rect (i32-sized pixels).
-        // Flooring keeps the chosen pixel inside that rect. Win32 POINT requires i32 coordinates.
-        #[allow(clippy::cast_possible_truncation)]
-        let mut at = POINT {
-            x: x.floor() as i32,
-            y: y.floor() as i32,
-        };
-        if !ClientToScreen(host, &raw mut at).as_bool() {
-            return Err("cannot map native preview point to screen".to_owned());
-        }
-        let target = WindowFromPoint(at);
-        if target.is_invalid()
-            || !IsChild(host, target).as_bool()
-            || !IsWindowVisible(target).as_bool()
-        {
-            return Err("native preview point is not over its browser child".to_owned());
-        }
-        if !ScreenToClient(target, &raw mut at).as_bool()
-            || at.x < 0
-            || at.y < 0
-            || at.x > i32::from(i16::MAX)
-            || at.y > i32::from(i16::MAX)
-        {
-            return Err("native browser child point is invalid".to_owned());
-        }
-        let packed = LPARAM(((at.y as isize) << 16) | (at.x as isize & 0xffff));
         PostMessageW(Some(target), WM_MOUSEMOVE, WPARAM(0), packed)
             .map_err(|e| format!("native mouse move: {e}"))?;
         PostMessageW(Some(target), WM_LBUTTONDOWN, WPARAM(1), packed)
@@ -143,5 +101,58 @@ pub fn click_checked(
         let _ = reply.send(Err(format!(
             "Not run: final page validation could not start: {error}"
         )));
+    }
+}
+
+pub(super) fn target(
+    controller: &ICoreWebView2Controller,
+    point: (f64, f64),
+) -> Result<(HWND, LPARAM), String> {
+    // SAFETY: the live controller comes from Tauri's with_webview on its UI thread. Every HWND is rechecked before
+    // posting; messages target only a child of this controller's host, never the desktop or another application.
+    unsafe {
+        let mut host = HWND::default();
+        controller
+            .ParentWindow(&raw mut host)
+            .map_err(|e| format!("WebView2 host window: {e}"))?;
+        if host.is_invalid() || !IsWindowVisible(host).as_bool() {
+            return Err("native preview host is not visible".to_owned());
+        }
+        let root = GetAncestor(host, GA_ROOT);
+        if root.is_invalid() || root != GetForegroundWindow() {
+            return Err("native preview window is not foreground".to_owned());
+        }
+        let mut rect = RECT::default();
+        GetClientRect(host, &raw mut rect).map_err(|e| format!("WebView2 host bounds: {e}"))?;
+        let width = f64::from(rect.right - rect.left);
+        let height = f64::from(rect.bottom - rect.top);
+        let (x, y) = super::map_point(point, (width, height))?;
+        // The mapped values are finite and strictly inside a positive HWND client rect (i32-sized pixels).
+        // Flooring keeps the chosen pixel inside that rect. Win32 POINT requires i32 coordinates.
+        #[allow(clippy::cast_possible_truncation)]
+        let mut at = POINT {
+            x: x.floor() as i32,
+            y: y.floor() as i32,
+        };
+        if !ClientToScreen(host, &raw mut at).as_bool() {
+            return Err("cannot map native preview point to screen".to_owned());
+        }
+        let target = WindowFromPoint(at);
+        if target.is_invalid()
+            || !IsChild(host, target).as_bool()
+            || !IsWindowVisible(target).as_bool()
+        {
+            return Err("native preview point is not over its browser child".to_owned());
+        }
+        if !ScreenToClient(target, &raw mut at).as_bool()
+            || at.x < 0
+            || at.y < 0
+            || at.x > i32::from(i16::MAX)
+            || at.y > i32::from(i16::MAX)
+        {
+            return Err("native browser child point is invalid".to_owned());
+        }
+        let packed = LPARAM(((at.y as isize) << 16) | (at.x as isize & 0xffff));
+        Ok((target, packed))
     }
 }

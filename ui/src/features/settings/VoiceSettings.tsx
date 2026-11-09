@@ -6,7 +6,7 @@
  * must not raise the unlock prompt).
  * Depends on: AppContext, the voice hooks and settings store, features/voice/pcmCapture
  * (`listMicrophones`). Called by: settings/SettingsPage (the Settings dialog is gone).
- * Invariants: every line says what the choice does and what leaves the computer; a failure to list
+ * Invariants: helper lines name timing or what leaves the computer; a failure to list
  * voices or microphones is shown as text, never swallowed; changing a choice never starts anything.
  */
 import { Switch } from "../../components/Controls";
@@ -70,10 +70,7 @@ export function VoiceSettings() {
       <div className="check" data-setting="microphone">
         <span>
           Microphone
-          <span className="d">
-            Names show after you allowed the microphone once. Dictation sends what it hears to
-            Mistral speech-to-text with your key.
-          </span>
+          <span className="d">Dictation sends your speech to Mistral with your key.</span>
         </span>
         <Selector
           testId="settings.voice-settings-update"
@@ -91,10 +88,7 @@ export function VoiceSettings() {
       <div className="check" data-setting="dictation-language">
         <span>
           Dictation language
-          <span className="d">
-            Auto shows the text live while you speak. A fixed language is more accurate when you
-            know it, and the text comes when you stop (live text cannot be told the language).
-          </span>
+          <span className="d">Fixed languages apply when dictation ends.</span>
         </span>
         <Selector
           testId="settings.voice-settings-update-2"
@@ -116,10 +110,7 @@ export function VoiceSettings() {
       <div className="check" data-setting="send-after-dictation">
         <span>
           Send after dictation
-          <span className="d">
-            Off by default. When on, the message is sent as soon as the dictated text is in the box,
-            like Mistral&apos;s Autosend.
-          </span>
+          <span className="d">Sends the message when dictation ends.</span>
         </span>
         <Switch
           data-testid="settings.voice-settings-update-3"
@@ -134,9 +125,7 @@ export function VoiceSettings() {
         <span>
           Read finished turns aloud
           <span className="d">
-            Off by default. When on, each turn that finishes in the session you are looking at is
-            summarized by Vibe and read aloud with Mistral text-to-speech: the turn&apos;s text goes
-            to Mistral and uses your quota. Never while you dictate.
+            Reads finished turns aloud. The text goes to Mistral and uses your quota.
           </span>
         </span>
         <Switch
@@ -155,9 +144,7 @@ export function VoiceSettings() {
       <div className="check" data-setting="narration-voice">
         <span>
           Narration voice
-          <span className="d">
-            Mistral&apos;s voices and your own saved voices. Voice chat speaks with it too.
-          </span>
+          <span className="d">Also used for voice chat.</span>
         </span>
         <Selector
           testId="settings.voice-settings-update-5"

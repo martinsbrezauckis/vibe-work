@@ -1,9 +1,9 @@
 //! Vibe Work's own facts for Mistral Large 4, for what Mistral's own Large 4 entry does not report: the window the
 //! Mistral API reports (1,048,576 tokens) and the published prices. They live in one `[[models]]` entry for Mistral's alias in Vibe
-//! Work's `config.toml`, marked by a comment and its shape (an alias and nothing but these facts: no `name`, no
-//! `provider`). Vibe's own config write drops comments. An unmarked entry could also be a person's identical
-//! replacement, so even a matching side record never authorizes its removal. Every unmarked entry is the person's
-//! and keeps every byte. Vibe deep-merges the facts entry onto Mistral's entry, so Vibe's compaction, the context
+//! Work's `config.toml`, identified by the exact fields and values we write (no `name` or `provider`). Vibe's own
+//! config write drops comments, so known Large 4 aliases are recognised without the comment or side record.
+//! Entries with different content are the person's and keep every byte. Vibe deep-merges the facts entry onto
+//! Mistral's entry, so Vibe's compaction, the context
 //! meter and the session's prices keep working.
 //!
 //! Mistral's own values win: the launch check (`model_check`) reads Mistral's entry with this entry taken out, and
@@ -12,7 +12,8 @@
 //!
 //! Depends on: `toml_edit`, the private atomic writer. Called by: `model_check`.
 //! Invariant: the record never names an entry the file may lack: it is cleared before a write that takes our entry
-//! out and written only after a write that puts it in. A lost record only ever keeps an entry, never removes one.
+//! out and written only after a write that puts it in. A record may identify an account-specific alias, but never
+//! authorizes removing different content.
 
 use std::path::{Path, PathBuf};
 
@@ -77,14 +78,35 @@ fn values(model: &Table) -> Option<Map<String, Value>> {
         .collect()
 }
 
-/// `text` without explicitly marked facts entries. Values and side records cannot prove ownership.
-pub(crate) fn without(text: &str, _written: Option<&Written>) -> Option<String> {
+fn ours(model: &Table, written: Option<&Written>) -> bool {
+    let Some(alias) = model.get("alias").and_then(Item::as_str) else {
+        return false;
+    };
+    let known = [
+        "mistral-large-4",
+        "mistral-large-4-0",
+        "mistral-large-4-0-3",
+    ]
+    .contains(&alias);
+    let recorded = written.is_some_and(|Written(record)| values(model).as_ref() == Some(record));
+    (known || marked(model) || recorded)
+        && shaped(model)
+        && PRICES
+            .iter()
+            .all(|(key, price)| model.get(key).and_then(Item::as_float) == Some(*price))
+        && model
+            .get("max_context_length")
+            .is_none_or(|item| item.as_integer() == Some(WINDOW))
+}
+
+/// `text` without our exact facts entries, including those whose comments Vibe stripped.
+pub(crate) fn without(text: &str, written: Option<&Written>) -> Option<String> {
     let mut config: DocumentMut = text.parse().ok()?;
     let models = config
         .get_mut("models")
         .and_then(Item::as_array_of_tables_mut)?;
     let before = models.len();
-    models.retain(|model| !marked(model));
+    models.retain(|model| !ours(model, written));
     (models.len() != before).then(|| config.to_string())
 }
 
@@ -140,8 +162,7 @@ fn record_path(home: &Path) -> PathBuf {
     home.join(RECORD)
 }
 
-/// The recorded facts entry in Vibe home `home`; `None` when there is none or it cannot be read (an unreadable
-/// record only keeps an unmarked entry, never removes one).
+/// The recorded facts entry in Vibe home `home`; `None` when there is none or it cannot be read.
 pub(crate) fn recorded(home: &Path) -> Option<Written> {
     let text = std::fs::read_to_string(record_path(home)).ok()?;
     match serde_json::from_str::<Value>(&text).ok()? {
@@ -203,19 +224,22 @@ mod tests {
                 let (combined, written) = with(&theirs, "mistral-large-4-0", &json!({}));
                 assert_eq!(without(&combined, None).as_deref(), Some(theirs.as_str()));
                 let unmarked = combined.replace(MARK.trim_end(), "");
-                assert_eq!(without(&unmarked, written.as_ref()), None, "{unmarked}");
+                assert_eq!(
+                    without(&unmarked, written.as_ref()).as_deref(),
+                    Some(theirs.as_str()),
+                    "{unmarked}"
+                );
             }
         }
     }
 
-    /// A person's own entry for a Large 4 alias, holding exactly the published prices (and the window), is theirs
-    /// without a record of ours, and stays theirs when the record names a different entry.
+    /// Different values on the same aliases belong to the person, even with a stale side record.
     #[test]
-    fn a_persons_same_alias_entry_with_our_values_is_never_taken_for_ours() {
+    fn a_persons_same_alias_entry_with_other_values_is_never_taken_for_ours() {
         for alias in ALIASES {
             for window in ["", "max_context_length = 1048576\n"] {
                 let theirs = format!(
-                    "[[models]]\nalias = \"{alias}\"\n{window}input_price = 0.7\ncached_input_price = 0.07\noutput_price = 2.1\n"
+                    "[[models]]\nalias = \"{alias}\"\n{window}input_price = 0.8\ncached_input_price = 0.07\noutput_price = 2.1\n"
                 );
                 assert_eq!(without(&theirs, None), None, "{theirs}");
                 assert!(has_entry_for(&theirs, alias));
@@ -266,8 +290,8 @@ mod tests {
             without(&reread, None).as_deref(),
             Some("active_model = \"large-4\"\n")
         );
-        // Without its comment and without its record it is just an entry of that shape: it stays.
-        assert_eq!(without(&reread.replace(MARK.trim_end(), ""), None), None);
+        // Exact facts remain ours after Vibe drops the comment and without a side record.
+        assert!(without(&reread.replace(MARK.trim_end(), ""), None).is_some());
     }
 
     #[test]
@@ -275,38 +299,54 @@ mod tests {
         let (ours, written) = with("", "account-large-4", &json!({"maxContextLength": 500_000}));
         assert_eq!(without(&ours, None).as_deref(), Some(""));
         let changed_price = ours.replace("input_price = 0.7", "input_price = 0.8");
-        assert_eq!(without(&changed_price, None).as_deref(), Some(""));
+        assert_eq!(without(&changed_price, None), None);
         let unmarked = ours.replace(MARK.trim_end(), "");
         assert_eq!(without(&unmarked, None), None);
-        assert_eq!(without(&unmarked, written.as_ref()), None);
+        assert_eq!(without(&unmarked, written.as_ref()).as_deref(), Some(""));
     }
 
-    /// Even an exact record cannot prove ownership after the marking comment is lost.
+    /// Exact known-alias facts survive serialization and need no side record; different content is untouched.
     #[test]
-    fn an_unmarked_entry_is_preserved_even_when_it_is_exactly_our_record() {
+    fn our_exact_unmarked_entry_is_recognised_with_or_without_a_record() {
         let base = "active_model = \"large-4\"\n";
         for alias in ALIASES {
             for row in [json!({}), json!({"maxContextLength": 500_000})] {
                 let (ours, written) = with(base, alias, &row);
                 let written = written.expect("a record of what was written");
                 let unmarked = ours.replace(MARK.trim_end(), "");
-                assert_eq!(without(&unmarked, None), None, "{unmarked}");
-                assert_eq!(without(&unmarked, Some(&written)), None, "{unmarked}");
-                // Vibe's own rewrite is indistinguishable from a replacement: preserve it too.
+                assert_eq!(
+                    without(&unmarked, None).as_deref(),
+                    Some(base),
+                    "{unmarked}"
+                );
+                assert_eq!(
+                    without(&unmarked, Some(&written)).as_deref(),
+                    Some(base),
+                    "{unmarked}"
+                );
+                // Field order and serialization spelling do not change recognition.
                 let rewritten = unmarked.parse::<toml::Table>().unwrap().to_string();
-                assert!(without(&rewritten, Some(&written)).is_none(), "{rewritten}");
+                assert!(without(&rewritten, None).is_some(), "{rewritten}");
                 for theirs in [
                     unmarked.replace("output_price = 2.1", "output_price = 2.5"),
                     unmarked.replace("output_price = 2.1", "output_price = 2"),
                     format!("{unmarked}max_output_tokens = 1000\n"),
+                    format!("{unmarked}name = 'personal-model'\n"),
+                    format!("{unmarked}provider = 'personal-provider'\n"),
+                    unmarked.replace("cached_input_price = 0.07", "cached_input_price = 0.08"),
+                    unmarked.replace("cached_input_price = 0.07\n", ""),
                     unmarked.replace(&format!("alias = \"{alias}\""), "alias = \"other\""),
                 ] {
                     assert_eq!(without(&theirs, Some(&written)), None, "{theirs}");
                 }
-                // Identical entries in either order are ambiguous: both stay.
+                // Duplicate exact facts are both ours; neither may reach Vibe as an orphan.
                 let entry = &unmarked[base.len()..];
                 let twice = format!("{base}{entry}{entry}");
-                assert_eq!(without(&twice, Some(&written)), None, "{twice}");
+                assert_eq!(
+                    without(&twice, Some(&written)).as_deref(),
+                    Some(base),
+                    "{twice}"
+                );
             }
         }
     }

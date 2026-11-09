@@ -19,6 +19,10 @@ mod scoped_profiles;
 #[path = "enroll_timing_tests.rs"]
 mod timing;
 
+#[cfg(feature = "your-edge")]
+#[path = "enroll_remove_tests.rs"]
+mod removal;
+
 const OURS: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const PROFILE: &str = "0b5f6a1e-27c4-4c1e-9d3a-6f1e2b3c4d5e";
 const TICKET: &str = "AbCdEfGhIjKlMnOpQrStUvWxYz0123456789-_AbCdE";
@@ -141,6 +145,8 @@ impl Rig {
 fn ticket_answer(name: &str, _: &Value) -> Value {
     if name == enroll::MINT {
         json!({"ticket":TICKET,"profileId":PROFILE,"fingerprint":OURS})
+    } else if name == "owner.browserUnpair" {
+        json!({"unpaired":true})
     } else {
         json!({})
     }
@@ -588,6 +594,7 @@ async fn connect_restores_a_registration_after_the_browser_profile_was_reset() {
     }
     #[cfg(feature = "your-edge")]
     {
+        setup::register_edge(&chrome.config, dir).unwrap();
         let data = setup::user_data(&chrome.config, Some(dir), "Microsoft Edge").remove(0);
         let manifest = data
             .join("NativeMessagingHosts")

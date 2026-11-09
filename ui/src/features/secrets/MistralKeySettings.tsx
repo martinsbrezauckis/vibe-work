@@ -4,6 +4,7 @@
  * The stored value is never read or copied; replacement input is cleared before the command
  * asks its native confirmation and writes the new key.
  */
+import { literalInputProps } from "../../components/inputProps";
 import { type ReactNode, useId, useState } from "react";
 import { TEXT } from "../../vocabulary";
 import { Badge, Button, LinkButton, RowDisclosure } from "../../components/Controls";
@@ -181,6 +182,7 @@ export function MistralKeyDetails({
             <label htmlFor={inputId}>New Mistral key</label>
             <div className="key-field-row">
               <input
+                {...literalInputProps}
                 data-testid="secrets.mistral-key-settings-set-value"
                 id={inputId}
                 type="password"
@@ -188,9 +190,6 @@ export function MistralKeyDetails({
                 value={value}
                 autoFocus
                 autoComplete="off"
-                autoCapitalize="off"
-                autoCorrect="off"
-                spellCheck={false}
                 maxLength={4096}
                 onChange={(event) => {
                   setValue(event.target.value);

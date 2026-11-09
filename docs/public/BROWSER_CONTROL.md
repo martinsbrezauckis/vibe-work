@@ -12,17 +12,21 @@ If Chrome turned the extension off, for example after an update that asked for n
 
 On macOS, you are asked once for permission when the helper reads a home folder or Chrome profile on an external drive.
 
+Remove on **Your Chrome** disconnects only Chrome; Remove on **Your Edge** disconnects only Edge. The other browser keeps its connection.
+
 ## Access modes
 
 | Chat mode | Browser actions |
 | --- | --- |
-| Ask | Read, screenshots, scroll, hover, menus, links, back/forward/reload and open tabs; console and network reads without bodies. Reading history or bookmarks asks first; closing a tab asks first on a card that names the tab. No typing or form submission. |
-| Accept edits | Also close tabs in the chat's own and handed windows, type, fill, choose, submit forms, answer page dialogs, upload/download, save PDFs, drag/drop, read/add/rename bookmarks, read history and save response bodies. Password and sensitive fields are refused. |
-| Full access | Also vault sign-in, cookies/site storage, page scripts, WebMCP tools, bookmark removal, history deletion and unredacted diagnostic headers. Vault consent remains separate. |
+| Ask | Read, screenshots, scroll, hover, menus, links, back/forward/reload, open and close tabs, select options, check and uncheck, and download files; console and network reads without bodies. Reading history or bookmarks asks first. Typing, uploads, drag/drop, accepting page dialogs and explicit sends need permission. |
+| Accept edits | Also type, fill, submit forms, answer page dialogs, upload, save PDFs, drag/drop, read/add/rename bookmarks and read history. Typing into password and sensitive fields is refused. |
+| Full access | Also cookie values, site-storage values, clipboard text, captured network response bodies and unredacted diagnostic headers, vault sign-in, site-data changes, page scripts, WebMCP tools, bookmark removal and history deletion. Vault consent remains separate. |
 | Smart approve | Accept edits. |
 | Plan on a page / Explore | Chrome tools are absent. |
 
-Each call and batch step checks the current mode. Above-tier actions return a plain refusal naming the required mode; in Ask, the cards above and opening a closed Chrome or Edge ask first. There is no first-use card, per-site plugin list, separate Chrome level or tab-closing switch. Old level files are ignored.
+Cookie values, local/session storage values, clipboard text, captured network response bodies and unredacted request/response headers require Full access in every browser, including the built-in browser. Ask and Accept edits refuse these reads with a reason and instructions for switching modes. Captured response bodies can contain credentials that were never displayed on the page. Rendered page content, cookie names and storage keys remain ordinary reads. Access modes are cumulative: Accept edits retains Ask's approval cards for actions it does not run directly, including HTTP sign-in with a saved vault login.
+
+Each call and batch step checks the current mode. Opening a paired, closed Chrome or Edge runs without a card. Secret reads below Full access return a refusal with a reason and instructions; other actions above the mode's delegated tier use a browser approval card. There is no first-use card, per-site plugin list, separate Chrome level or tab-closing switch. Old level files are ignored.
 
 Scroll results state when the page or selected scroll pane reaches its edge, including when another scroll cannot move it.
 
@@ -45,7 +49,7 @@ Reads support headings, lists, landmarks, tables, subtrees, depth, interactive e
 
 Screenshots, PDFs, response bodies and requested GIF recordings land in the chat's `chrome-files` folder. Uploads use chat-relative paths or files selected for that chat in the extension. Handles cannot cross chats. Uploads allow up to 16 files of 32 MiB each; completed downloads copied into the chat folder are limited to 256 MiB.
 
-Ask Vibe Work on selected text adds a chip to that window's chat, or New chat. The composer's Chrome tab picker adds URL, title and current selection. The agent lists and acts in your tabs within the chat's mode; other chats' tabs are not listed to it and are refused. Neither sends a message automatically. WebMCP tools require a supporting Chrome/page and Full access; absence is reported cleanly. Scripts can target a chosen frame. Only the chat's own window can be resized.
+Ask Vibe Work on selected text adds a chip to that window's chat, or New chat. The composer's Chrome tab picker adds URL, title and current selection. The agent lists and acts in your tabs within the chat's mode; other chats' tabs are not listed to it and are refused. Neither sends a message automatically. WebMCP tools require a supporting Chrome/page; invoking them needs browser approval below Full access; absence is reported cleanly. Scripts can target a chosen frame. Only the chat's own window can be resized.
 
 ## Limits
 

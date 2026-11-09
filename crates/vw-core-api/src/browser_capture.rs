@@ -1,13 +1,10 @@
 //! Capture in the core: the shared path of the `browser_capture` agent tool and the `browser` command's
 //! `capture` op (the window's Capture menu and the Debug API), and the media fetcher.
 //!
-//! The fetcher ([`CoreFetch`]) gets a capture's media: only `http`/`https`, each URL (and each redirect hop, at most
-//! [`MAX_HOPS`]) checked with the session's mount policy (`PreviewService::fetch_allowed`: public hosts for every
-//! page; loopback only the session's own ports; the Lan page's own host), public host names resolved by
-//! [`PublicOnly`], which refuses a name if ANY answer is not a public address and hands the checked addresses to the
-//! connection (no second lookup, so DNS rebinding cannot swap them). The one exception: the local-network page the
-//! user opened by NAME has its own host's media fetched from that name's private answers
-//! (`PreviewService::lan_media_addresses`). No cookies, no credentials, no proxy, bounded size and time.
+//! The media fetcher allows only HTTP(S), checks every redirect hop (at most [`MAX_HOPS`]), and pins DNS
+//! answers to the connection. A page whose current host is private may load media from other private hosts;
+//! public pages retain [`PublicOnly`]. Loopback follows the session-port policy; link-local and reserved addresses
+//! stay refused. No cookies, credentials or proxy; size and time are bounded.
 //!
 //! Depends on: vw-browser (`capture`), vw-preview (policy), vw-netguard (address classes), vw-mistral (TLS setup),
 //! reqwest, `agent_tools::session` (the session folder), `previews::hub`. Called by: `browser` (command),
@@ -124,9 +121,10 @@ impl CoreFetch {
     ) -> Result<Fetched, String> {
         let mut current = Url::parse(url).map_err(|_| "refused: not a URL".to_owned())?;
         for _ in 0..=MAX_HOPS {
-            let destination = self
+            let (destination, addresses) = self
                 .service
                 .fetch_allowed(session_id, &current)
+                .await
                 .map_err(|e| format!("refused: {e}"))?;
             if matches!(destination, Destination::Loopback { .. })
                 && current.host_str() == Some("localhost")
@@ -134,13 +132,11 @@ impl CoreFetch {
                 // The resolver accepts public answers only; a session port is reached by its literal address.
                 let _ = current.set_host(Some("127.0.0.1"));
             }
-            // Media of the user's local-network page opened by NAME are fetched from exactly the
-            // addresses its name has (private answers accepted for that one host only, like the navigation policy).
-            let lan_client = match self.service.lan_media_addresses(session_id, &current).await {
-                None => None,
-                Some(Ok(addrs)) => Some(Self::lan_client(&current, &addrs)?),
-                Some(Err(reason)) => return Err(format!("refused: {reason}")),
-            };
+            // The service checks the captured page's own address space and pins every media answer.
+            let lan_client = addresses
+                .as_deref()
+                .map(|addrs| Self::lan_client(&current, addrs))
+                .transpose()?;
             let mut response = lan_client
                 .as_ref()
                 .unwrap_or(&self.client)
@@ -234,6 +230,7 @@ pub(crate) async fn run(
     by: Actor,
 ) -> Result<Value, ActError> {
     let refused = |text: String| ActError {
+        capture_block: None,
         outcome: vw_browser::Outcome::Refused,
         text,
     };

@@ -251,7 +251,7 @@ impl DocumentStore {
         if entries.len() >= MAX_DOCS || held_now + bytes.len() as u64 > MAX_HELD_BYTES {
             return Err(AddError::Full);
         }
-        // Unknown/legacy binary formats are still useful to the agent as project files (shipped in 0.1.1): they
+        // Unknown/legacy binary formats are still useful to the agent as project files: they
         // are attached as the original file and its path, never read as text or sent to OCR because of a name.
         let kind = match detect(name, &bytes) {
             Ok(kind) => kind,

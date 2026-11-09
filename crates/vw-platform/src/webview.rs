@@ -30,6 +30,9 @@ pub mod agent_frames_win;
 #[cfg(windows)]
 #[allow(unsafe_code)]
 pub mod devtools_win;
+/// Held page dialogs and vault-only HTTP authentication on the native UI thread.
+#[allow(unsafe_code)]
+pub mod dialogs;
 mod full_clip;
 /// Full-screen changes of a page (an agent act's is left again at once).
 #[cfg(windows)]
@@ -58,10 +61,12 @@ pub mod click_marker_linux;
 #[cfg(all(target_os = "macos", feature = "click-marker"))]
 #[allow(unsafe_code)]
 pub mod click_marker_mac;
-/// Input-transparent click feedback in a native layered child window.
+/// Input-transparent click feedback in a native owned popup window.
 #[cfg(all(windows, feature = "click-marker"))]
 #[allow(unsafe_code)]
 pub mod click_marker_win;
+#[cfg(all(feature = "click-marker", any(windows, test)))]
+mod click_marker_win_math;
 /// Element full screen off while an agent act runs.
 #[cfg(target_os = "macos")]
 #[allow(unsafe_code)]

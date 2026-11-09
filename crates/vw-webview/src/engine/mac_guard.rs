@@ -1,7 +1,7 @@
 //! macOS parts of a preview's network check: the content rules before the first page and, with the feature
 //! `macos-proxy` ([`MAC_PROXY`]), the plain refusal when the check is not in place (fail closed)
-//! and the development-build fault switch the Mac review runs use. The feature is on in every app build since 0.1.7
-//! (minimum macOS 14). Without it (0.1.2-0.1.6, minimum macOS 11; now only `--no-default-features` on the app) all
+//! and the development-build fault switch the Mac review runs use. The feature is required in app builds
+//! (minimum macOS 14). Without it (`--no-default-features` on the app) all
 //! previews use content rules only, including required previews; failed rule installs refuse the mount.
 //! Depends on: `rules_macos`, `platform` (macOS). Called by: the engine's mount (`proxy_for`, `check_guard`,
 //! `mount_inner`).
@@ -41,7 +41,7 @@ pub(super) fn not_checked(why: &str) -> EngineError {
 /// with the session's own-server pages (which share the session's store) and theirs never with it (the guard grants
 /// a store only what every member may reach). Cost: such pages keep no cookies across
 /// remounts (macOS 11-13 treated local pages the same way). Only behind the proxy ([`MAC_PROXY`]); without it the
-/// page keeps its session's store, as in 0.1.1.
+/// page keeps its session's store.
 pub(super) fn own_store(spec: &vw_preview::MountSpec) -> bool {
     MAC_PROXY && matches!(spec.rules, Some(vw_netguard::rules::RulePage::Lan { .. }))
 }

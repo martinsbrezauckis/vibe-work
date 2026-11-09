@@ -86,4 +86,6 @@ export const nativeSelectors = new Map([
 // before choosing. One radio list, by its hook; any other radio still requires Selector.
 export const optionLists = new Map([
   ["ask/AnswerOptions.tsx", new Set(["transcript.question-card-option"])],
+  // Vault unlock is an explicit two-option question in setup and settings; both answers stay visible.
+  ["setup/VaultUnlockChoice.tsx", new Set(["setup.vault-unlock-option"])],
 ]);

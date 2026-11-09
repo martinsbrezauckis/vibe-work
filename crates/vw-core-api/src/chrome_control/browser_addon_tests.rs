@@ -122,7 +122,7 @@ async fn disconnected(name: &str, chrome_version: Option<&str>, chrome_off: bool
     }
     std::fs::write(
         chrome.dir().unwrap().join("setup.json"),
-        json!({"files":[],"browsers":["Google Chrome","Microsoft Edge"],"userData":data})
+        json!({"files":[],"browsers":["Google Chrome","Microsoft Edge"],"selectedBrowsers":["Google Chrome","Microsoft Edge"],"userData":data})
             .to_string(),
     )
     .unwrap();
@@ -255,7 +255,7 @@ async fn version_prefers_the_paired_profile_else_the_highest_in_this_browser() {
     }
     std::fs::write(
         chrome.dir().unwrap().join("setup.json"),
-        json!({"files":[],"browsers":["Google Chrome","Microsoft Edge"],"userData":[data]})
+        json!({"files":[],"browsers":["Google Chrome","Microsoft Edge"],"selectedBrowsers":["Google Chrome","Microsoft Edge"],"userData":[data]})
             .to_string(),
     )
     .unwrap();

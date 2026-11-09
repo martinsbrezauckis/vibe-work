@@ -10,10 +10,6 @@ impl History {
     pub(super) fn contains(&self, path: &std::path::Path) -> bool {
         self.0.values().flatten().any(|folder| folder == path)
     }
-
-    pub(super) fn uncertain(&self) -> bool {
-        self.0.values().any(Option::is_none)
-    }
 }
 
 fn record(chrome: &ChromeControl, browser: Browser) -> Option<PathBuf> {

@@ -142,14 +142,8 @@ pub async fn rig_with_script(
     tools.start_wait = Duration::from_secs(6);
     core_config.agent_tools = Some(tools);
     tweak(&mut core_config);
-    std::fs::write(
-        config.vibe_home.join("hooks.toml"),
-        vw_host::agent_tools::hook_block(
-            &core_config.agent_tools.as_ref().unwrap().binary,
-            &core_config.agent_tools.as_ref().unwrap().endpoint_file(),
-        ),
-    )
-    .unwrap();
+    vw_host::agent_tools::configure_hooks(&mut config, core_config.agent_tools.as_ref().unwrap())
+        .unwrap();
     let confirmer = FakeConfirmer::new();
     let secret = model.route(&mut config).await;
     let core = Core::start(config, secret, confirmer.clone(), core_config)

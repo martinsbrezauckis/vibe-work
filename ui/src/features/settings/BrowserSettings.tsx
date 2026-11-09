@@ -1,4 +1,4 @@
-/** Browser Settings category: groups the Vibe Work browser, Your Chrome, Your Edge, Your Firefox and settings shared by all browsers. Uses the sections' confirmed state and errors; called by SettingsPage. */
+/** Browser Settings category: groups the Vibe Work browser, Your Chrome, Your Edge, Your Safari, optional Your Firefox and settings shared by all browsers. Uses the sections' confirmed state and errors; called by SettingsPage. */
 import { useCoreState } from "../shell/hooks";
 import { useState } from "react";
 import { BrowserShieldsSettings } from "./BrowserShieldsSettings";

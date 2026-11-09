@@ -144,7 +144,7 @@ export function createSendActions(deps: {
         [],
         false,
         by,
-        pluginsHeld || isPluginReloadFailure(error.error.message),
+        pluginsHeld || isPluginReloadFailure(error.error),
       );
       return fail(sessionId, "shell", error);
     }
@@ -317,7 +317,7 @@ export function createSendActions(deps: {
           content.by,
           s.pluginReloadFailed[sessionId] === true ||
             composer.store.get().pluginReloadFailed[sessionId] === true ||
-            isPluginReloadFailure(error.error.message),
+            isPluginReloadFailure(error.error),
         )
       ) {
         if (deps.keyGuard?.() != null || error.error.code === "keyService")

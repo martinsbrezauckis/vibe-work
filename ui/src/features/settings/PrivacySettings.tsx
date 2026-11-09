@@ -120,18 +120,11 @@ export function PrivacySettings() {
           {row(
             "telemetry",
             "Send usage data to Mistral",
-            "Anonymous product usage from Vibe: which features are used, errors, timings.",
+            "Sends anonymous usage, errors and timings to Mistral.",
           )}
-          {row(
-            "experiments",
-            "Take part in Mistral's experiments",
-            "Mistral switches features on for groups of accounts. It needs usage data to be on.",
-          )}
+          {row("experiments", "Take part in Mistral's experiments", "Needs usage data on.")}
           <p className="key-field-hint ui-help" data-testid="privacy-consequence">
-            With usage data off, Mistral's experiments do not run, so features that are still being
-            rolled out to accounts (smart approve and some extra models) are not offered in sessions
-            you start afterwards; open sessions keep what they have. Turning it back on asks you
-            first.
+            Off: features still rolling out (smart approve, some models) are not offered.
           </p>
         </>
       )}

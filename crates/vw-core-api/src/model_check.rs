@@ -13,13 +13,17 @@
 //!
 //! Depends on: the gate (`config/read`), `default_model` (bounded config read), `model_facts`, `model_choices`, the
 //! private atomic writer. Called by: `dispatch` (`checkDefaultModel`).
-//! Invariants: no `[[models]]` entry but Vibe Work's own facts entry (explicitly marked) is ever removed
+//! Invariants: no `[[models]]` entry but Vibe Work's exact facts entry is ever removed
 //! or rewritten, and none is added for an alias the person has an entry of their own for; nothing
 //! changes while Vibe is still loading Mistral's lists (`awaitingExperimentModel`); a file that changed while it was
 //! read is left alone (the next launch tries again).
 
 use std::path::Path;
+
+#[path = "model_check_write.rs"]
+mod write;
 use std::sync::Arc;
+use write::replace;
 
 use serde_json::{Value, json};
 
@@ -54,19 +58,6 @@ fn failed(message: &'static str) -> CoreError {
     CoreError::new(ErrorCode::Internal, message)
 }
 
-/// Replaces `path` with `after` when it still holds `before`; false when another writer changed it meanwhile.
-fn replace(path: &Path, before: &str, after: &str) -> Result<bool, CoreError> {
-    if after.parse::<toml::Table>().is_err() {
-        return Err(failed("Vibe Work's model config cannot be edited safely"));
-    }
-    if crate::default_model::read(path)? != before {
-        return Ok(false);
-    }
-    vw_platform::replace_private(path, after.as_bytes())
-        .map_err(|_| failed("Vibe Work's model config could not be saved"))?;
-    Ok(true)
-}
-
 async fn lobby(shared: &Shared) -> Result<Value, CoreError> {
     shared
         .gate
@@ -88,26 +79,26 @@ async fn bare_lobby(
     let written = crate::model_facts::recorded(home);
     let Some(bare) = crate::model_facts::without(&original, written.as_ref()) else {
         if written.is_some() {
-            // An absent or unmarked entry has no provable ownership: discard the stale record.
+            // An absent or changed entry is no longer ours: discard the stale record.
             crate::model_facts::record(home, None)?;
         }
         return Ok((lobby(shared).await?, original));
     };
     crate::model_facts::record(home, None)?;
-    if !replace(path, &original, &bare)? {
+    if !replace(path, &original, &bare).await? {
         crate::model_facts::record(home, written.as_ref())?;
         return Ok((lobby(shared).await?, original));
     }
     let read = lobby(shared).await;
     // A successful, settled read is authoritative even when it has no account models:
     // facts-only overrides for absent experiments are orphans in Vibe. If the model returns,
-    // the next check can add its missing facts again. Only our explicitly marked rows were removed.
+    // the next check can add its missing facts again. Only our exact facts rows were removed.
     if read.is_err()
         || read
             .as_ref()
             .is_ok_and(|r| r["config"]["awaitingExperimentModel"] == true)
     {
-        if replace(path, &bare, &original)? {
+        if replace(path, &bare, &original).await? {
             crate::model_facts::record(home, written.as_ref())?;
         }
         return read.map(|r| (r, original));
@@ -137,7 +128,7 @@ pub(crate) async fn check(shared: &Arc<Shared>) -> Result<Value, CoreError> {
         }
     }
     if next != current {
-        if replace(&path, &current, &next)? {
+        if replace(&path, &current, &next).await? {
             crate::model_facts::record(home, written.as_ref())?;
         }
         reply = lobby(shared).await?;

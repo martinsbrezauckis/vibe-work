@@ -158,3 +158,43 @@ async fn disabled_paired_copies_count_until_their_folder_is_deleted() {
         core.shutdown().await;
     }
 }
+
+#[tokio::test]
+async fn stale_unknown_pairings_do_not_block_a_known_existing_profile() {
+    for browser in [Browser::Chrome, Browser::Edge] {
+        let core = super::browser_start_tests::fixture(
+            &format!("browser-deleted-unknown-{}", browser.id()),
+            browser,
+            Arc::new(|_| Ok(())),
+        )
+        .await;
+        let chrome = &core.shared.chrome_control;
+        let data = chrome
+            .config
+            .user_home
+            .as_ref()
+            .unwrap()
+            .join("browser-data");
+        let pending = data.join("Profile 2");
+        std::fs::create_dir_all(pending.join("Extensions").join(&chrome.config.extension_id))
+            .unwrap();
+        preferences(&pending, &chrome.config.extension_id, &json!(8192)).unwrap();
+        let record = chrome.dir().unwrap().join(if browser == Browser::Edge {
+            "edge/profile-folders.json"
+        } else {
+            "profile-folders.json"
+        });
+        std::fs::write(
+            record,
+            json!({format!("{}:p", browser.id()):data.join("Default"),
+            format!("{}:deleted", browser.id()):null})
+            .to_string(),
+        )
+        .unwrap();
+        assert_eq!(
+            installation::paired_directory(&core.shared, browser).as_deref(),
+            Some("Default")
+        );
+        core.shutdown().await;
+    }
+}

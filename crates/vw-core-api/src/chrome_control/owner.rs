@@ -333,18 +333,27 @@ pub(super) fn state_dir(config: &setup::ChromeControlConfig) -> Option<PathBuf> 
 }
 
 pub(crate) async fn start(shared: &Arc<Shared>) -> Result<(), String> {
+    start_inner(shared, false).await
+}
+
+pub(super) async fn start_for_removal(shared: &Arc<Shared>) -> Result<(), String> {
+    start_inner(shared, true).await
+}
+
+async fn start_inner(shared: &Arc<Shared>, removing: bool) -> Result<(), String> {
     let chrome = &shared.chrome_control;
-    if !chrome.any_enabled() && !super::safari::enabled(shared) {
+    if !removing && !chrome.any_enabled() && !super::safari::enabled(shared) {
         return Ok(());
     }
     let Some(dir) = chrome.dir() else {
         return Ok(());
     };
-    if setup::view(&chrome.config, Some(dir), &shared.instructions.own_home).state
-        == setup::SetupState::NotSetUp
-        && !(cfg!(feature = "your-firefox") && dir.join("firefox-window").is_file())
-        && !super::safari::enabled(shared)
-    {
+    let configured = setup::view(&chrome.config, Some(dir), &shared.instructions.own_home).state
+        != setup::SetupState::NotSetUp
+        || setup::registered(&chrome.config, Some(dir), "Microsoft Edge")
+        || (cfg!(feature = "your-firefox") && dir.join("firefox-window").is_file())
+        || super::safari::enabled(shared);
+    if !configured {
         return Ok(());
     }
     if chrome
@@ -466,6 +475,9 @@ fn update_pairing_state(shared: &Weak<Shared>, result: &Value) {
         return;
     };
     let mut data = result["structuredContent"].clone();
+    if !super::remove::filter_observation(&shared, &mut data) {
+        return;
+    }
     shared.chrome_control.owner.wake.observe(&data);
     shared.chrome_control.owner.profile_ids.observe(&data);
     // Keep all browsers' versions before the Chrome-only pairing view below filters them.
@@ -532,6 +544,17 @@ fn update_pairing_state(shared: &Weak<Shared>, result: &Value) {
     {
         return;
     }
+    let mut current = shared
+        .chrome_control
+        .owner
+        .pairing
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner);
+    // Removal clears this same lock after deleting the registration. A shared status
+    // poll may still name the owner's fingerprint, even with no Chrome profiles left.
+    if super::remove::is_removed(&shared, super::agent_browser::Browser::Chrome) {
+        return;
+    }
     if connected {
         shared.chrome_control.mark_paired();
         shared
@@ -542,12 +565,6 @@ fn update_pairing_state(shared: &Weak<Shared>, result: &Value) {
             .unwrap_or_else(PoisonError::into_inner)
             .connected();
     }
-    let mut current = shared
-        .chrome_control
-        .owner
-        .pairing
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner);
     let fingerprint = data["ownerFingerprint"]
         .as_str()
         .map(|fingerprint| fingerprint.chars().take(16).collect())

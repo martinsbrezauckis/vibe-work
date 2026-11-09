@@ -29,13 +29,27 @@ pub(super) fn steps(args: &Value) -> Result<Vec<Value>, String> {
     Ok(steps.clone())
 }
 
-pub(super) async fn run<F, Fut, C>(steps: Vec<Value>, mut execute: F, cancel: C) -> Value
+pub(super) async fn run<F, Fut, C>(steps: Vec<Value>, execute: F, cancel: C) -> Value
 where
     F: FnMut(Value) -> Fut,
     Fut: Future<Output = Result<Value, String>>,
     C: FnOnce(),
 {
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(25);
+    run_clocked(steps, execute, cancel, super::batch_wait::Clock::default()).await
+}
+
+async fn run_clocked<F, Fut, C>(
+    steps: Vec<Value>,
+    mut execute: F,
+    cancel: C,
+    clock: super::batch_wait::Clock,
+) -> Value
+where
+    F: FnMut(Value) -> Fut,
+    Fut: Future<Output = Result<Value, String>>,
+    C: FnOnce(),
+{
+    let mut deadline = tokio::time::Instant::now() + Duration::from_secs(25);
     let mut receipts = Vec::new();
     let mut remaining_bytes = 400_000usize;
     let mut images = Vec::new();
@@ -56,10 +70,12 @@ where
             step["args"]["saveTo"] = json!("file");
         }
         let started = tokio::time::Instant::now();
-        let result = match tokio::time::timeout_at(deadline, execute(step)).await {
+        let (result, waited) = clock.until(deadline, execute(step)).await;
+        deadline += waited;
+        let result = match result {
             Ok(Ok(result)) => result["vwMcpResult"].clone(),
             Ok(Err(reason)) => owner::failure(&reason, "REFUSED"),
-            Err(_) => {
+            Err(()) => {
                 if let Some(cancel) = cancel.take() {
                     cancel();
                 }
@@ -71,7 +87,7 @@ where
                 result
             }
         };
-        longest_step = longest_step.max(started.elapsed());
+        longest_step = longest_step.max(started.elapsed().saturating_sub(waited));
         if let Some(content) = result["content"].as_array() {
             images.extend(
                 content
@@ -125,36 +141,67 @@ pub(crate) async fn prepare(
         super::reopen::Resolved::Refused(answer) => return Ok(Box::pin(async move { Ok(answer) })),
     };
     super::gateway::validate_session(shared, chat, "chrome_execute", &args)?;
-    let mut prepared = std::collections::VecDeque::new();
-    for mut step in steps(&args)? {
-        step["sessionId"] = args["sessionId"].clone();
-        prepared.push_back(
-            if ["auth.fill", "auth.basic"].contains(&step["action"].as_str().unwrap_or_default()) {
-                Some(super::login::prepare(shared, chat, step).await?)
-            } else if super::read_consent::needed(shared, chat, &step) {
-                Some(super::read_consent::prepare(shared, chat, source, call, step).await?)
-            } else {
-                None
-            },
-        );
-    }
+    let mode = super::check::mode(shared, chat);
+    let current = mode.as_deref().and_then(vw_ask::chrome::Tier::from_mode);
+    let consent = if current.is_some_and(|tier| tier < vw_ask::chrome::Tier::FullAccess) {
+        let tier = steps(&args)?
+            .iter()
+            .filter_map(|step| super::mapping::ask_required("chrome_execute", step))
+            .max()
+            .unwrap_or(vw_ask::chrome::Tier::Ask);
+        let consent = super::read_consent::Consent(tier);
+        for mut step in steps(&args)? {
+            step["sessionId"] = args["sessionId"].clone();
+            super::check::authorize_read(shared, chat, "chrome_execute", &step, Some(&consent))?;
+        }
+        if Some(tier) > current {
+            crate::ask::tool_calls::approve(shared,chat,source,call,json!({"kind":"approval","vwBrowserTier":tier as u8,
+                "effect":{"kind":"tool","toolName":"mcp_vw.chrome_execute","input":args},"requiredPermissions":[]})).await?;
+        }
+        Some(consent)
+    } else {
+        None
+    };
+    let mut prepared = prepare_logins(shared, chat, &args, consent).await?;
     let shared = std::sync::Arc::downgrade(shared);
     let chat = chat.to_owned();
-    Ok(Box::pin(async move {
+    let (source, call) = (source.to_owned(), call.to_owned());
+    let execution: crate::ask::tool_calls::receipts::Execution = Box::pin(async move {
         let shared = shared.upgrade().ok_or("Vibe Work closed.")?;
         let id = args["sessionId"].clone();
-        let mut answer = run(
+        let clock = super::batch_wait::Clock::default();
+        let action_clock = clock.clone();
+        let mut answer = run_clocked(
             steps(&args)?,
             |mut step| {
                 step["sessionId"] = id.clone();
                 let prepared = prepared.pop_front().flatten();
                 let shared = &shared;
                 let chat = &chat;
+                let (source, call) = (&source, &call);
+                let action_clock = &action_clock;
                 async move {
                     match prepared {
                         Some(execution) => execution.await,
                         None => {
-                            super::gateway::call_one(shared, chat, "chrome_execute", step).await
+                            if let Some(consent) = consent {
+                                if super::interaction_consent::checks(&step) {
+                                    super::interaction_consent::run_clocked(
+                                        shared,
+                                        chat,
+                                        source,
+                                        call,
+                                        step,
+                                        Some(consent),
+                                        Some(action_clock),
+                                    )
+                                    .await
+                                } else {
+                                    super::read_consent::execute(shared, chat, step, consent).await
+                                }
+                            } else {
+                                super::gateway::call_one(shared, chat, "chrome_execute", step).await
+                            }
                         }
                     }
                 }
@@ -165,6 +212,7 @@ pub(crate) async fn prepare(
                     .owner
                     .control(json!({"action":"cancel","sessionId":id}));
             },
+            clock,
         )
         .await;
         if let Some(reopened) = reopened {
@@ -174,7 +222,33 @@ pub(crate) async fn prepare(
             super::output_cache::bound(&shared, &chat, &args, &mut answer["vwMcpResult"]);
         }
         Ok(answer)
-    }))
+    });
+    if consent.is_some() {
+        Ok(Box::pin(std::future::ready(execution.await)))
+    } else {
+        Ok(execution)
+    }
+}
+
+async fn prepare_logins(
+    shared: &std::sync::Arc<crate::core::Shared>,
+    chat: &str,
+    args: &Value,
+    consent: Option<super::read_consent::Consent>,
+) -> Result<std::collections::VecDeque<Option<crate::ask::tool_calls::receipts::Execution>>, String>
+{
+    let mut prepared = std::collections::VecDeque::new();
+    for mut step in steps(args)? {
+        step["sessionId"] = args["sessionId"].clone();
+        prepared.push_back(
+            if ["auth.fill", "auth.basic"].contains(&step["action"].as_str().unwrap_or_default()) {
+                Some(super::login::prepare_consented(shared, chat, step, consent).await?)
+            } else {
+                None
+            },
+        );
+    }
+    Ok(prepared)
 }
 
 #[cfg(test)]

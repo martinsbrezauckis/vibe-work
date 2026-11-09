@@ -14,8 +14,15 @@ use std::time::Duration;
 use crate::error::ChangesError;
 use crate::git::{Call, Index};
 
+#[path = "repo_negative.rs"]
+mod negative;
+
 /// Oldest git this crate supports (`add`/`restore` with `--pathspec-from-file`).
 pub const MIN_GIT: (u32, u32) = (2, 26);
+
+#[cfg(all(test, target_os = "linux"))]
+#[path = "repo_discovery_tests.rs"]
+mod discovery_tests;
 
 /// A repository as seen from a session folder.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -56,6 +63,10 @@ pub fn discover(folder: &Path) -> Result<Option<Repo>, ChangesError> {
     if !folder.is_dir() {
         return Ok(None);
     }
+    let negative = negative::key(folder);
+    if negative.as_ref().is_some_and(negative::known) {
+        return Ok(None);
+    }
     let out = Call::new(folder, Index::User)
         .args([
             "rev-parse",
@@ -75,11 +86,13 @@ pub fn discover(folder: &Path) -> Result<Option<Repo>, ChangesError> {
             ));
         }
         // "not a git repository", "must be run in a work tree" (bare), "inside .git": no repository.
+        negative::remember(negative);
         return Ok(None);
     }
     let text = String::from_utf8_lossy(&out.stdout);
     let mut lines = text.lines();
     if lines.next() != Some("true") {
+        negative::remember(negative);
         return Ok(None);
     }
     let (Some(root), Some(git_dir)) = (lines.next(), lines.next()) else {

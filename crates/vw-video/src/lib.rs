@@ -5,5 +5,6 @@ mod process;
 pub mod protocol;
 pub mod sandbox;
 pub mod scenes;
+mod staging;
 #[cfg(feature = "helper")]
 pub mod worker;

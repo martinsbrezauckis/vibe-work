@@ -1,5 +1,6 @@
-//! Project documents use the chat's access mode and read the original without saving a copy.
-//! Confined file handles keep reads in the chat's folders; Ask binds Allow to the bytes named on its card.
+//! Document reads keep local extraction card-free in every access mode; OCR follows the mode's approval rule.
+//! Depends on confined file handles, `saved_documents` and `tool_calls`; called by document tool preparation.
+//! Invariant: reads stay in the session's folders; an OCR approval binds to the exact checked bytes.
 use std::io::Read as _;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -148,6 +149,7 @@ pub(super) async fn prepare(
                 format!("{}\nIts pages go to Mistral OCR.", file.path.display())
             } else { file.path.display().to_string() }}}});
     if !allowed
+        && ocr
         && !matches!(
             shared.access.remembered(session).as_deref(),
             Some("auto-approve" | "accept-edits")
@@ -180,6 +182,96 @@ pub(super) async fn prepare(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn ask_local_documents_run_and_ocr_keeps_its_card() {
+        let f = crate::feature_test_core::Fixture::new().await;
+        let work = f.root.join("work");
+        std::fs::create_dir_all(&work).unwrap();
+        f.load("s", &work, &[], true);
+        f.core.shared.access.observe_request(
+            "session/agent/update",
+            "s",
+            &json!({"agentName":"ask"}),
+        );
+        std::fs::write(work.join("notes.txt"), "local document").unwrap();
+        let answer = tokio::time::timeout(
+            std::time::Duration::from_secs(1),
+            prepare(
+                &f.core.shared,
+                "s",
+                "s",
+                "read-local",
+                &json!({"path":"notes.txt"}),
+            ),
+        )
+        .await;
+        assert!(
+            matches!(answer, Ok(Ok(_))),
+            "a local document must prepare without its own card"
+        );
+        assert_eq!(f.core.shared.asks.list(), [] as [vw_ask::Ask; 0]);
+        std::fs::write(work.join("scan.png"), b"\x89PNG\r\n\x1a\n").unwrap();
+        let shared = f.core.shared.clone();
+        let task = tokio::spawn(async move {
+            prepare(&shared, "s", "s", "read-ocr", &json!({"path":"scan.png"})).await
+        });
+        tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            while crate::ask::tool_calls::open(&f.core.shared).is_empty() {
+                assert!(!task.is_finished(), "OCR must wait for its card");
+                tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .unwrap();
+        task.abort();
+        let _ = task.await;
+        f.finish().await;
+    }
+
+    #[tokio::test]
+    async fn local_documents_never_open_a_card_in_any_mode() {
+        let f = crate::feature_test_core::Fixture::new().await;
+        for mode in [
+            "ask",
+            "accept-edits",
+            "auto-approve",
+            "smart-approve",
+            "plan",
+            "vw-plan",
+            "explore",
+        ] {
+            let work = f.root.join(mode);
+            std::fs::create_dir_all(&work).unwrap();
+            f.load(mode, &work, &[], true);
+            f.core.shared.access.observe_request(
+                "session/agent/update",
+                mode,
+                &json!({"agentName":mode}),
+            );
+            std::fs::write(work.join("notes.txt"), "local document").unwrap();
+            let answer = tokio::time::timeout(
+                // prepare runs filesystem checks on the blocking pool. Under a parallel gate,
+                // 150 ms measures scheduling contention, not whether consent was requested.
+                // Keep the bound at the neighbouring OCR-card test's 2 s and assert no card below.
+                std::time::Duration::from_secs(2),
+                prepare(
+                    &f.core.shared,
+                    mode,
+                    mode,
+                    "local-read",
+                    &json!({"path":"notes.txt"}),
+                ),
+            )
+            .await;
+            assert!(
+                matches!(answer, Ok(Ok(_))),
+                "local read waited for a card in {mode}"
+            );
+            assert_eq!(f.core.shared.asks.list(), [] as [vw_ask::Ask; 0]);
+        }
+        f.finish().await;
+    }
 
     #[test]
     fn document_refuses_an_uncleared_hard_link_in_a_large_protected_tree() {

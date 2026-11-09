@@ -1,4 +1,4 @@
-//! The default `browser_read` answer keeps 0.1.4's ref density: frame identity and geometry stay in the host's
+//! The default `browser_read` answer keeps compact control-ref density: frame identity and geometry stay in the host's
 //! observation, the agent's text carries only what it acts on (a frame's origin, a visual region's box).
 //! Uses the shared real-page engine through the agent's read path; frame and visual refs must stay actionable.
 #![cfg(feature = "e2e-script")]
@@ -98,8 +98,8 @@ fn refs(answer: &Value) -> &Vec<Value> {
     answer["untrustedPageContent"]["refs"].as_array().unwrap()
 }
 
-/// How many refs 0.1.4 listed for the same observation and host facts. Its serializer is today's without the
-/// fields 0.1.5 added for frames and image regions (`label`, `coordinateKind`, `frameId`, `box`; the page's
+/// Reference density for the same observation and host facts, omitting the
+/// fields used for frames and image regions (`label`, `coordinateKind`, `frameId`, `box`; the page's
 /// `viewport`), with the same `fit`.
 fn baseline(answer: &Value, model: &PageModel) -> usize {
     let mut old = model.clone();

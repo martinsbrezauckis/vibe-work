@@ -24,12 +24,9 @@ url = "2"
 zeroize = "1.8"
 
 [target.'cfg(windows)'.dependencies]
+vw-platform = { path = "../vw-platform" }
 windows-permissions = "=0.2.4"
 widestring = "1"
-
-[[bin]]
-name = "vw-gh-broker"
-path = "src/bin/broker.rs"
 
 [[bin]]
 name = "gh"

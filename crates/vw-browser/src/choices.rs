@@ -2,7 +2,18 @@
 //! Used by read serialization and inline fitting; completeness always describes the returned inventory.
 
 use crate::model::PageModel;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+
+/// A position in one page-covering frame's observed choice list.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ChoiceCursor {
+    /// Index in the current covering-frame inventory.
+    pub frame: usize,
+    /// Choices already returned from that frame.
+    pub offset: usize,
+}
 
 pub(crate) fn include(content: &mut Value, model: &PageModel) {
     if model.covering_frames.is_empty() {
@@ -12,10 +23,14 @@ pub(crate) fn include(content: &mut Value, model: &PageModel) {
         model
             .covering_frames
             .iter()
-            .map(|frame| {
+            .enumerate()
+            .filter(|(index, _)| model.choice_cursor.as_ref().is_none_or(|cursor| cursor.frame == *index))
+            .map(|(index, frame)| {
+                let offset = model.choice_cursor.as_ref().map_or(0, |cursor| cursor.offset);
                 let choices: Vec<Value> = frame
                     .choices
                     .iter()
+                    .skip(offset)
                     .map(|r| {
                         let mut choice = json!({"ref":r.id,"role":r.role,"name":r.name});
                         if r.disabled == Some(true) {
@@ -33,11 +48,44 @@ pub(crate) fn include(content: &mut Value, model: &PageModel) {
                         choice
                     })
                     .collect();
-                json!({"frameOrigin":frame.origin,"coversPage":true,"choicesTotal":frame.total,
-            "complete":frame.complete,"choices":choices})
+                let mut item = json!({"index":index,"frameOrigin":frame.origin,"coversPage":true,"choicesTotal":frame.total,
+                    "complete":frame.complete && offset == 0,"choices":choices});
+                if offset > 0 { item["choicesOffset"] = json!(offset); }
+                if frame.choices.len() != frame.total as usize {
+                    item["choicesObserved"] = json!(frame.choices.len());
+                }
+                item
             })
             .collect::<Vec<_>>()
     );
+    update(content);
+}
+
+/// Recomputed after every fit; a partial list continues after retained choices, not omitted ones.
+pub(crate) fn update(content: &mut Value) {
+    let focused = content.get("choiceCursor").is_some();
+    let Some(frames) = content
+        .get_mut("coveringFrames")
+        .and_then(Value::as_array_mut)
+    else {
+        return;
+    };
+    for frame in frames {
+        let shown = frame["choices"].as_array().map_or(0, Vec::len) as u64;
+        let end = frame["choicesOffset"]
+            .as_u64()
+            .unwrap_or(0)
+            .saturating_add(shown);
+        let observed = frame["choicesObserved"]
+            .as_u64()
+            .or_else(|| frame["choicesTotal"].as_u64())
+            .unwrap_or(0);
+        if (shown > 0 || !focused) && end < observed {
+            frame["nextChoiceCursor"] = json!({"frame":frame["index"],"offset":end});
+        } else if let Some(map) = frame.as_object_mut() {
+            map.remove("nextChoiceCursor");
+        }
+    }
 }
 
 /// Large inventories cannot crowd every other field out. Small consent walls fit intact;

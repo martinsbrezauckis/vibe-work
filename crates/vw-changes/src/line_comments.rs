@@ -103,17 +103,23 @@ impl LineCommentStore {
         self.dir.join(format!("{}.json", session_key(session_id)))
     }
 
-    fn load(&self, session_id: &str) -> File {
+    fn load(&self, session_id: &str) -> Result<File, LineCommentError> {
         let path = self.file(session_id);
-        let Ok(text) = std::fs::read_to_string(&path) else {
-            return File::default();
+        let text = match std::fs::read_to_string(&path) {
+            Ok(text) => text,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                return Ok(File::default());
+            }
+            Err(error) => return Err(LineCommentError::Io(error.to_string())),
         };
         if let Ok(file) = serde_json::from_str::<File>(&text) {
-            return file;
+            return Ok(file);
         }
-        let aside = vw_platform::set_aside(&path, now_ms());
+        let aside = vw_platform::set_aside(&path, now_ms()).ok_or_else(|| {
+            LineCommentError::Io("the unreadable comments file could not be moved aside".to_owned())
+        })?;
         tracing::warn!(file = ?aside, "line comments file did not parse: moved aside");
-        File::default()
+        Ok(File::default())
     }
 
     fn save(&self, session_id: &str, file: &File) -> Result<(), LineCommentError> {
@@ -129,7 +135,7 @@ impl LineCommentStore {
     #[must_use]
     pub fn list(&self, session_id: &str) -> Vec<LineComment> {
         let _guard = self.lock.lock();
-        self.load(session_id).comments
+        self.load(session_id).unwrap_or_default().comments
     }
 
     /// Adds a comment on `lines` (already taken from the diff) at `anchor`. Returns it.
@@ -154,7 +160,7 @@ impl LineCommentStore {
             )));
         }
         let _guard = self.lock.lock();
-        let mut file = self.load(session_id);
+        let mut file = self.load(session_id)?;
         if file.comments.len() >= MAX_PER_SESSION {
             return Err(LineCommentError::Invalid(
                 "this session has too many comments; delete some first".to_owned(),
@@ -193,7 +199,7 @@ impl LineCommentStore {
     /// [`LineCommentError::NotFound`], [`LineCommentError::Io`].
     pub fn delete(&self, session_id: &str, id: &str) -> Result<(), LineCommentError> {
         let _guard = self.lock.lock();
-        let mut file = self.load(session_id);
+        let mut file = self.load(session_id)?;
         let before = file.comments.len();
         file.comments.retain(|c| c.id != id);
         if file.comments.len() == before {
@@ -212,7 +218,7 @@ impl LineCommentStore {
         ids: &[String],
     ) -> Result<Vec<LineComment>, LineCommentError> {
         let _guard = self.lock.lock();
-        let mut file = self.load(session_id);
+        let mut file = self.load(session_id)?;
         let now = now_ms();
         let mut marked = Vec::new();
         for comment in &mut file.comments {
@@ -235,12 +241,12 @@ impl LineCommentStore {
     /// [`LineCommentError::Io`] when `new`'s file cannot be written (`old`'s then stays as it was).
     pub fn move_session(&self, old: &str, new: &str) -> Result<usize, LineCommentError> {
         let _guard = self.lock.lock();
-        let from = self.load(old);
+        let from = self.load(old)?;
         if from.comments.is_empty() {
             return Ok(0);
         }
         let moved = from.comments.len();
-        let mut to = self.load(new);
+        let mut to = self.load(new)?;
         to.version = 1;
         to.comments.extend(from.comments);
         self.save(new, &to)?;

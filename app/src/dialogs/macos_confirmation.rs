@@ -62,10 +62,7 @@ pub(super) async fn show_dialog<R: Runtime>(
     };
     // A sheet on a hidden or background window could wait unseen: present the main window first. Native input itself
     // never brings a window forward or uses this path to obtain focus.
-    if let Some(window) = crate::main_window(app) {
-        let _ = window.show();
-        let _ = window.set_focus();
-    }
+    let _ = crate::tray::reveal_main_window(app);
     let (send, receive) = oneshot::channel();
     let (id, canceled, handle) = (owner.id.clone(), owner.canceled.clone(), app.clone());
     let posted = app.run_on_main_thread(move || {

@@ -8,7 +8,6 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
-use std::time::Duration;
 
 mod requests;
 
@@ -20,16 +19,13 @@ use crate::policy::{Destination, UrlPolicy};
 use crate::state::DownloadRecord;
 use crate::state::{Seen, State};
 
-/// Two download starts of the same URL within this window are the same download (`WebKitGTK` can call a web
-/// context's handler once per webview that ever registered on it).
-const DUPLICATE_WINDOW: Duration = Duration::from_secs(2);
-
 /// Shared registry + policy.
 pub(crate) type RefusalListener = Arc<dyn Fn(&str, &str) + Send + Sync>;
 
 pub(crate) type PopupListener = Arc<dyn Fn(crate::MountId, Url) -> bool + Send + Sync>;
 
 pub(crate) struct Inner {
+    pub(crate) window_close: Mutex<Option<crate::windows::CloseListener>>,
     pub(crate) popup: Mutex<Option<PopupListener>>,
     pub(crate) shields: Mutex<crate::shields::Saved>,
     pub(crate) guard_refused: Mutex<Option<RefusalListener>>,
@@ -246,6 +242,38 @@ fn add_layer(entry: &mut crate::state::Entry, layer: GuardLayer) {
 pub(crate) struct Hooks(pub(crate) Arc<Inner>);
 
 impl PreviewHooks for Hooks {
+    fn current_url(&self, label: &str) -> Option<Url> {
+        let state = self.0.lock();
+        let session = state.session_of(label)?;
+        state.entries.get(session)?.url.clone()
+    }
+
+    fn window_close_requested(&self, page: &str) {
+        let handler = self
+            .0
+            .window_close
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone();
+        if self.0.lock().windows.contains_key(page)
+            && let Some(handler) = handler
+        {
+            handler(page.into());
+        }
+    }
+    fn handles_dialog(&self, label: &str) -> bool {
+        let state = self.0.lock();
+        let Some(page) = state.session_of(label) else {
+            return false;
+        };
+        let owner = state.owner_of(page);
+        state
+            .tabs
+            .get(&owner)
+            .and_then(|tabs| tabs.owners.get(page))
+            .is_some_and(|kind| *kind != crate::PageTabOwner::User)
+    }
+
     fn content_filter(&self) -> Option<String> {
         Some(
             self.0
@@ -535,13 +563,6 @@ impl PreviewHooks for Hooks {
         let session = state.session_of(label)?.to_owned();
         let entry = state.entry(&session);
         let dir = entry.downloads_dir.clone()?;
-        if let Some(same) = entry.downloads.iter().rev().find(|d| {
-            d.view.url == url.as_str()
-                && d.view.state == DownloadState::Running
-                && d.at.elapsed() < DUPLICATE_WINDOW
-        }) {
-            return Some(same.staging.clone());
-        }
         let name = suggested
             .file_name()
             .and_then(|n| n.to_str())
@@ -558,6 +579,7 @@ impl PreviewHooks for Hooks {
         let name = downloads::clean_name(&name);
         let staging = downloads::staging_file(&self.0.staging).ok()?;
         entry.push_download(DownloadRecord {
+            source_label: label.to_owned(),
             view: DownloadView {
                 file_name: name.clone(),
                 path: String::new(),
@@ -574,19 +596,37 @@ impl PreviewHooks for Hooks {
         Some(staging)
     }
 
-    fn download_finished(&self, label: &str, url: &Url, _path: Option<&Path>, ok: bool) {
+    fn download_finished(&self, label: &str, url: &Url, path: Option<&Path>, ok: bool) {
         let mut state = self.0.lock();
-        let Some(session) = state.session_of(label).map(str::to_owned) else {
+        let Some(session) = state.entries.iter().find_map(|(key, entry)| {
+            entry
+                .downloads
+                .iter()
+                .any(|d| {
+                    d.source_label == label
+                        && d.view.state == DownloadState::Running
+                        && d.view.url == url.as_str()
+                        && path.is_none_or(|path| {
+                            path == d.staging
+                                || path.to_string_lossy()
+                                    == format!("file://{}", d.staging.display())
+                        })
+                })
+                .then(|| key.clone())
+        }) else {
             return;
         };
         let entry = state.entry(&session);
         // The engine's own path is not trusted (macOS reports none); the record knows the staged file.
-        let Some(record) = entry
-            .downloads
-            .iter()
-            .rev()
-            .find(|d| d.view.state == DownloadState::Running && d.view.url == url.as_str())
-        else {
+        let Some(record) = entry.downloads.iter().rev().find(|d| {
+            d.view.state == DownloadState::Running
+                && d.source_label == label
+                && d.view.url == url.as_str()
+                && path.is_none_or(|path| {
+                    path == d.staging
+                        || path.to_string_lossy() == format!("file://{}", d.staging.display())
+                })
+        }) else {
             return;
         };
         let (staging, dir, name) = (
@@ -595,10 +635,7 @@ impl PreviewHooks for Hooks {
             record.name.clone(),
         );
         drop(state);
-        // WORKAROUND(wry 0.57 WebKitGTK, web_context.rs:314-385): one `failed` flag per web context survives earlier
-        // failures, so a good download can be reported failed. A staged file with content counts as written.
-        // Exit: wry tracks failure per download.
-        let written = ok || std::fs::metadata(&staging).is_ok_and(|m| m.is_file() && m.len() > 0);
+        let written = ok;
         let inner = self.0.clone();
         let max = self.0.max_download_bytes;
         // Delivery copies the file: off the UI thread.

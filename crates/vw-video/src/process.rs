@@ -12,6 +12,7 @@ pub async fn capture(
     mut command: CommandWrap,
     deadline: Duration,
     input: Vec<u8>,
+    directory: Option<crate::staging::Directory>,
 ) -> Result<Vec<u8>, String> {
     use std::process::Stdio;
     use tokio::io::AsyncWriteExt;
@@ -25,12 +26,16 @@ pub async fn capture(
     #[cfg(windows)]
     command.wrap(process_wrap::tokio::JobObject);
     command.wrap(process_wrap::tokio::KillOnDrop);
-    let mut child =
-        Child(Some(command.spawn().map_err(
-            |_| "backend_unavailable: helper sandbox could not start",
-        )?));
+    let mut child = Child {
+        process: Some(
+            command
+                .spawn()
+                .map_err(|_| "backend_unavailable: helper sandbox could not start")?,
+        ),
+        directory,
+    };
     let process = child
-        .0
+        .process
         .as_mut()
         .ok_or("backend_unavailable: helper process")?;
     let mut stdin = process
@@ -91,13 +96,18 @@ pub async fn capture(
     let result = tokio::time::timeout(deadline, work)
         .await
         .unwrap_or_else(|_| Err("timeout: video helper deadline".into()));
-    // Kill even on success: no worker descendants are allowed to survive its response.
-    if let Some(mut process) = child.0.take() {
+    reap(&mut child).await;
+    result
+}
+// Kill even on success: no worker descendants are allowed to survive its response.
+async fn reap(child: &mut Child) {
+    // Retain ownership across the wait so cancellation can hand it to the drop reaper.
+    if let Some(process) = child.process.as_mut() {
         let _ = process.start_kill();
         let _ = process.wait().await;
-        ended();
     }
-    result
+    drop(child.process.take());
+    ended();
 }
 #[cfg(target_os = "macos")]
 async fn memory_limit(pid: u32) -> String {
@@ -114,15 +124,22 @@ async fn memory_limit(pid: u32) -> String {
         }
     }
 }
-struct Child(Option<Box<dyn ChildWrapper>>);
+struct Child {
+    process: Option<Box<dyn ChildWrapper>>,
+    directory: Option<crate::staging::Directory>,
+}
 impl Drop for Child {
     fn drop(&mut self) {
-        if let Some(mut process) = self.0.take() {
+        if let Some(mut process) = self.process.take() {
             let _ = process.start_kill();
             if let Ok(runtime) = tokio::runtime::Handle::try_current() {
+                let directory = self.directory.take();
                 runtime.spawn(async move {
                     let _ = process.wait().await;
+                    drop(process);
                     ended();
+                    // A cancelled extraction must keep its executable/input until the worker has exited.
+                    drop(directory);
                 });
             }
         }
@@ -149,3 +166,7 @@ async fn bounded(pipe: impl tokio::io::AsyncRead + Unpin, limit: usize) -> Resul
 #[cfg(test)]
 #[path = "process_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "process_cleanup_tests.rs"]
+mod cleanup_tests;

@@ -6,7 +6,7 @@ fn an_expired_identity_deadline_refuses_hard_links_but_allows_single_links() {
     let (root, policy, _) = fixture("deadline");
     let ordinary = root.join("ordinary.txt");
     std::fs::write(&ordinary, "ordinary").unwrap();
-    let deadline = Some(Instant::now());
+    let deadline = Some(policy.now());
     policy
         .check_opened(&File::open(&ordinary).unwrap(), &ordinary, deadline)
         .unwrap();
@@ -51,13 +51,18 @@ pub(crate) fn large_protected_tree(root: &Path) {
 #[cfg(any(unix, windows))]
 #[test]
 fn protected_symlinks_do_not_own_outside_hard_links_but_direct_files_do() {
-    let (root, policy, _) = fixture("symlinks");
+    let (root, mut policy, _) = fixture("symlinks");
+    let work = count_scan_work(&mut policy);
     let outside = root.join("outside");
     std::fs::create_dir(&outside).unwrap();
     let original = outside.join("ordinary.txt");
     let alias = root.join("alias.txt");
     std::fs::write(&original, "ordinary").unwrap();
     std::fs::hard_link(&original, &alias).unwrap();
+    // A nontrivial protected tree keeps the alias decision independent of scheduler speed.
+    for index in 0..128 {
+        std::fs::create_dir_all(root.join("app-data/cache").join(index.to_string())).unwrap();
+    }
     #[cfg(unix)]
     {
         std::os::unix::fs::symlink(&original, root.join("app-data/linked-file")).unwrap();
@@ -84,6 +89,14 @@ fn protected_symlinks_do_not_own_outside_hard_links_but_direct_files_do() {
     assert_eq!(
         policy.check_opened(&File::open(&alias).unwrap(), &alias, None),
         Err(PROTECTED.into())
+    );
+    let steps = work.load(std::sync::atomic::Ordering::SeqCst);
+    println!(
+        "protected symlink/direct-file decisions: {steps} scan budget checks for 128 cache entries"
+    );
+    assert!(
+        steps <= 8 * (128 + 16),
+        "the bounded tree was repeatedly scanned: {steps}"
     );
     std::fs::remove_dir_all(root).unwrap();
 }
@@ -214,8 +227,22 @@ pub(crate) fn fixture(name: &str) -> (PathBuf, ReadExclusions, Vec<PathBuf>) {
         path
     })
     .collect();
-    let policy = ReadExclusions::new(&home, &root, Some(selected), &input).unwrap();
+    let mut policy = ReadExclusions::new(&home, &root, Some(selected), &input).unwrap();
+    count_scan_work(&mut policy);
     (root, policy, paths)
+}
+
+/// Count the scan's per-root/entry/identity budget checks with a fixed monotonic clock. Production keeps its
+/// real 100 ms deadline; these policy tests measure traversal work even when the scheduler suspends the process.
+fn count_scan_work(policy: &mut ReadExclusions) -> std::sync::Arc<std::sync::atomic::AtomicUsize> {
+    let work = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let observed = work.clone();
+    let now = Instant::now();
+    policy.clock = Some(std::sync::Arc::new(move || {
+        observed.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        now
+    }));
+    work
 }
 
 #[test]

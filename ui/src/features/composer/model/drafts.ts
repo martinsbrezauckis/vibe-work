@@ -1,8 +1,8 @@
 /**
  * Composer drafts: the unsent text of each session, kept when the user switches sessions and across a
  * restart.
- * The three pure helpers preserve draft behavior (an empty draft removes the key; an unchanged draft returns the
- * same object; an unknown id reads as ""), keyed by session id. Drafts are stored in `localStorage`,
+ * The pure helpers preserve draft behavior (an empty draft removes the key; an unchanged draft returns the
+ * same object), keyed by session id. Drafts are stored in `localStorage`,
  * validated on read and capped; storage failures are ignored. Their author is recorded (unknown = the Debug API's,
  * fail closed).
  * Adapted from ShellX.
@@ -22,11 +22,6 @@ export const DRAFTS_KEY = "vw.composerDrafts";
 const MAX_DRAFTS = 200;
 /** Longest draft kept in storage (a longer one is kept in memory only). */
 const MAX_DRAFT_CHARS = 100_000;
-
-/** The draft of `sessionId`, or "" (no session, or nothing typed). */
-export function draftFor(drafts: Drafts, sessionId: string | null | undefined): string {
-  return sessionId ? (drafts[sessionId] ?? "") : "";
-}
 
 /**
  * `drafts` with the draft of `sessionId` set to `next`. Returns the same object when nothing changes;

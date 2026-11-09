@@ -155,6 +155,12 @@ impl Facts {
 #[derive(Default)]
 pub(super) struct ConnectedProfiles(std::sync::Mutex<Vec<(String, Option<String>)>>);
 impl ConnectedProfiles {
+    pub(super) fn remove_browser(&self, browser: super::agent_browser::Browser) {
+        self.0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .retain(|(profile, _)| !browser.owns_profile(profile));
+    }
     pub(super) fn observe(&self, data: &serde_json::Value) {
         let profiles = data["profiles"]
             .as_array()

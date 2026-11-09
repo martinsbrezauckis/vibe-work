@@ -125,7 +125,7 @@ async fn probe_inner(
             ("PYTHONUNBUFFERED".to_owned(), OsString::from("1")),
         ],
     );
-    let mut command = tokio::process::Command::new(program);
+    let mut command = vw_platform::process_command::hidden_tokio(program);
     command
         .args(args)
         .env_clear()
@@ -135,8 +135,6 @@ async fn probe_inner(
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .kill_on_drop(true);
-    #[cfg(windows)]
-    command.creation_flags(windows::Win32::System::Threading::CREATE_NO_WINDOW.0);
     let mut child = crate::steps::spawn_with_retry(|| command.spawn())
         .await
         .ok()?;

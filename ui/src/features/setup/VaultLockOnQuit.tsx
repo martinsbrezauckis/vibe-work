@@ -15,11 +15,14 @@ import { useKeyUi } from "./useKeys";
 export function VaultLockOnQuit() {
   const { keys } = useApp();
   const on = useKeyUi((s) => s.status?.lockVaultOnQuit ?? false);
+  const passwordOnly = useKeyUi(
+    (s) => s.status?.unlockMethod === "password" || s.status?.vaultKind === "desktop",
+  );
   const busy = useKeyUi((s) => s.busy);
   const problem = useKeyUi((s) =>
     s.problem?.operation === "setLockVaultOnQuit" ? s.problem.text : null,
   );
-  if (keys === null) return null;
+  if (keys === null || passwordOnly) return null;
   return (
     <>
       <SettingsRow data-setting="vault-lock-on-quit">

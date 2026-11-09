@@ -2,7 +2,7 @@
 //! The signed build supplies identities; agent arguments and environment cannot select another containing app.
 use std::path::{Path, PathBuf};
 
-fn app_at(executable: &Path) -> Option<PathBuf> {
+pub(super) fn app_at(executable: &Path) -> Option<PathBuf> {
     let macos = executable.parent()?;
     let contents = macos.parent()?;
     let app = contents.parent()?;

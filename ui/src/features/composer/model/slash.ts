@@ -10,7 +10,7 @@
 import type { JsonValue } from "../../../protocol/core";
 import { FEEDBACK_ENABLED } from "../../../state/feedbackEnabled";
 import { TEXT } from "../../../vocabulary";
-import { type ClientCommand, CLIENT_COMMANDS } from "./slashNames";
+import type { ClientCommand } from "./slashNames";
 
 /** One GUI command row. */
 export interface SlashCommandRow {
@@ -196,9 +196,4 @@ export function menuItems(text: string, skills: readonly SkillRow[]): MenuItem[]
     ...ranked(skills, query).map(({ row, hit }): MenuItem => ({ kind: "skill", skill: row, hit })),
     ...("manage skills".includes(query) ? [{ kind: "manage" as const, hit: -1 }] : []),
   ];
-}
-
-/** Every GUI command has a row (used by tests and by the palette registration). */
-export function tableIsComplete(): boolean {
-  return CLIENT_COMMANDS.every((name) => SLASH_COMMANDS.some((row) => row.name === name));
 }

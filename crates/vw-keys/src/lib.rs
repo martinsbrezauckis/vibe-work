@@ -45,6 +45,7 @@ pub use service::{
     MAX_KEY_LEN, MistralKey, OcrFailure, StoredKeyTest,
 };
 pub use speech::SpeechFailure;
+pub use vault_settings::UnlockMethod;
 pub use vibe_env::vibe_env;
 pub use vw_vault::entry_permission::EntryPermission;
 pub use vw_vault::fill_grant::FillGrant;

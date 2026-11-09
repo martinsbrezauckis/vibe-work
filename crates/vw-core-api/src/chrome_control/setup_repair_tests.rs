@@ -58,6 +58,7 @@ fn refresh_refuses_another_writers_manifest() {
 fn repeated_edge_setup_repairs_its_missing_registration() {
     let s = Scratch::new("repair-edge");
     install(&s.config(), &s.state(), &s.vibe_home()).unwrap();
+    register_edge(&s.config(), &s.state()).unwrap();
     let path = targets(&s.root.join("home"), &s.config())[1]
         .hosts
         .as_ref()

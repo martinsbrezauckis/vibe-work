@@ -2,6 +2,7 @@
  * One compact add form for secrets, logins and MCP keys. Depends on typed requests, SecretField and
  * Settings controls. Called by the Vault page; user input clears before dispatch, values never return.
  */
+import { literalInputProps } from "../../components/inputProps";
 import { Button } from "../../components/Controls";
 import { useState } from "react";
 import { Selector } from "../../components/Selector";
@@ -135,6 +136,7 @@ export function VaultAddEntry(props: {
         <label htmlFor="entry-name">Name</label>
         <div className="key-field-row">
           <input
+            {...literalInputProps}
             data-testid="secrets.vault-add-entry-set-name"
             id="entry-name"
             autoFocus
@@ -153,6 +155,7 @@ export function VaultAddEntry(props: {
             <label htmlFor="entry-site">Site</label>
             <div className="key-field-row">
               <input
+                {...literalInputProps}
                 data-testid="secrets.vault-add-entry-set-site"
                 id="entry-site"
                 value={site}
@@ -168,6 +171,7 @@ export function VaultAddEntry(props: {
             <label htmlFor="entry-user">User name</label>
             <div className="key-field-row">
               <input
+                {...literalInputProps}
                 data-testid="secrets.vault-add-entry-set-username"
                 id="entry-user"
                 value={username}

@@ -233,6 +233,9 @@ struct Receipt {
     user_data: Vec<PathBuf>,
     #[serde(default)]
     registry_keys: Vec<String>,
+    /// Explicit Connect choices; absent in receipts that could automatically include both browsers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    selected_browsers: Option<Vec<String>>,
 }
 
 impl Receipt {
@@ -262,6 +265,13 @@ pub use problem::SetupProblems;
 pub(super) mod files;
 #[path = "setup_registration.rs"]
 mod registration;
+#[path = "setup_selection.rs"]
+mod selection;
+
+pub(super) fn migrate_selections(config: &ChromeControlConfig, state: &Path) -> Result<(), String> {
+    let _held = registration_lock();
+    selection::migrate(config, state)
+}
 
 static REGISTRATION_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 fn registration_lock() -> std::sync::MutexGuard<'static, ()> {
@@ -317,9 +327,12 @@ pub(super) fn registered(
     state: Option<&Path>,
     browser: &str,
 ) -> bool {
-    state
-        .and_then(|state| read_receipt(config, state))
-        .is_some_and(|r| r.browsers.iter().any(|name| name == browser))
+    state.is_some_and(|state| {
+        read_receipt(config, state).is_some_and(|receipt| {
+            receipt.browsers.iter().any(|name| name == browser)
+                && selection::selected(config, state, &receipt, browser)
+        })
+    })
 }
 
 /// The files Set up wrote (helper copy and manifests); `None` before Set up.
@@ -381,8 +394,8 @@ pub(super) fn view_for(
     let receipt = state
         .and_then(|state| read_receipt(config, state))
         .filter(|receipt| {
-            (!config.is_macos() && !cfg!(any(feature = "your-edge", feature = "your-firefox")))
-                || receipt.browsers.iter().any(|name| name == browser)
+            receipt.browsers.iter().any(|name| name == browser)
+                && state.is_some_and(|state| selection::selected(config, state, receipt, browser))
         });
     let profiles: Vec<String> = user_data(config, state, browser)
         .iter()
@@ -405,11 +418,7 @@ pub(super) fn view_for(
             .map(|r| {
                 r.browsers
                     .into_iter()
-                    .filter(|name| {
-                        (!config.is_macos()
-                            && !cfg!(any(feature = "your-edge", feature = "your-firefox")))
-                            || name == browser
-                    })
+                    .filter(|name| name == browser)
                     .collect()
             })
             .unwrap_or_default(),
@@ -583,6 +592,9 @@ pub(super) use installing::install_for;
 #[path = "setup_remove.rs"]
 mod removal;
 pub(crate) use removal::remove;
+#[path = "setup_scoped_remove.rs"]
+mod scoped_removal;
+pub(super) use scoped_removal::{has_other, remove_browser};
 
 /// Opens the store page in Google Chrome.
 pub(crate) fn open_store(config: &ChromeControlConfig) -> Result<(), String> {

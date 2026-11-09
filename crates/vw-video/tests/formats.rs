@@ -1,6 +1,6 @@
 //! Per-format packaged-helper check: one frame from every video in a folder through the real sandbox
 //! launcher, exactly as the app calls it. Point `VW_VIDEO_HELPER` at an installed or extracted package helper (for
-//! an `AppImage`: `squashfs-root/usr/bin/vw-video-helper`, which selects the bundled launcher and its own libraries).
+//! an `AppImage`: `squashfs-root/usr/bin/vw-video-helper`, which selects its launcher and the system media runtime).
 //! `VW_VIDEO_FORMATS` names the folder; `VW_VIDEO_FORMATS_EXPECT` optionally pins each outcome as
 //! `file=ok` or `file=<error prefix>` entries separated by `;`, and the test fails on any difference.
 #![cfg(feature = "helper")]
@@ -17,7 +17,8 @@ async fn every_video_in_the_folder_reports_its_outcome() {
     let expect: Vec<(String, String)> = std::env::var("VW_VIDEO_FORMATS_EXPECT")
         .unwrap_or_default()
         .split(';')
-        .filter_map(|e| e.split_once('='))
+        .filter(|e| !e.is_empty())
+        .map(|e| e.split_once('=').expect("expected file=outcome"))
         .map(|(f, o)| (f.trim().to_owned(), o.trim().to_owned()))
         .collect();
     let mut names: Vec<_> = std::fs::read_dir(&root)
@@ -26,6 +27,16 @@ async fn every_video_in_the_folder_reports_its_outcome() {
         .filter(|p| p.is_file())
         .collect();
     names.sort();
+    assert!(!names.is_empty(), "format folder is empty");
+    for (name, outcome) in &expect {
+        assert!(!outcome.is_empty(), "empty expected outcome for {name}");
+        assert!(
+            names
+                .iter()
+                .any(|p| p.file_name().unwrap() == name.as_str()),
+            "missing expected fixture: {name}"
+        );
+    }
     let mut mismatches = Vec::new();
     for path in names {
         let path = path.canonicalize().unwrap();
@@ -41,12 +52,13 @@ async fn every_video_in_the_folder_reports_its_outcome() {
         let outcome = match vw_video::sandbox::extract(&helper, input, job).await {
             Ok(reply) => {
                 println!(
-                    "FORMAT | {name} | OK | codec={} size={}x{} frame_ns={} images={}",
+                    "FORMAT | {name} | OK | codec={} size={}x{} frame_ns={} images={} backend={}",
                     reply.codec,
                     reply.source_size[0],
                     reply.source_size[1],
                     reply.frames[0].actual_ns,
-                    reply.image_count
+                    reply.image_count,
+                    reply.backend
                 );
                 "ok".to_owned()
             }

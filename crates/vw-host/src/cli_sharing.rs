@@ -124,7 +124,7 @@ pub async fn detect_cli_version(probe: &CliProbe, timeout: Duration) -> Option<S
         mcp_token: None,
     })
     .ok()?;
-    let mut command = tokio::process::Command::new(exe);
+    let mut command = vw_platform::process_command::hidden_tokio(exe);
     command
         .arg("--version")
         .env_clear()
@@ -134,8 +134,6 @@ pub async fn detect_cli_version(probe: &CliProbe, timeout: Duration) -> Option<S
         .stdout(std::process::Stdio::piped())
         .kill_on_drop(true);
     // No console window for this probe (the app has no console of its own).
-    #[cfg(windows)]
-    command.creation_flags(0x0800_0000);
     let output = tokio::time::timeout(timeout, command.output())
         .await
         .ok()?

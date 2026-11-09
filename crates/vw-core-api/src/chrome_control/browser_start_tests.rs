@@ -1,7 +1,7 @@
 //! Closed-browser launch regressions through the gateway and approval hook. Fake launchers and reconnects
 //! keep the desktop untouched; the helper integration suite separately checks window ownership.
 use super::{AddonState, agent_browser::Browser, gateway, owner, test_support};
-use crate::{Origin, ask::tool_calls};
+use crate::ask::tool_calls;
 use serde_json::{Value, json};
 use std::sync::{Arc, Mutex};
 
@@ -249,7 +249,7 @@ async fn stopping_while_the_extension_reconnects_prevents_session_open() {
     let reason = gateway::call(&core.shared, "a", "chrome_session", open(Browser::Chrome))
         .await
         .unwrap_err();
-    assert!(reason.contains("you pressed Stop"), "{reason}");
+    assert!(reason.contains("the person pressed Stop"), "{reason}");
     assert!(
         seen.lock()
             .unwrap()
@@ -351,89 +351,55 @@ async fn launch_failure_keeps_the_reason_and_recovery_instruction() {
 }
 
 #[tokio::test]
-async fn ask_launch_waits_for_the_usual_card_and_no_leaves_the_browser_closed() {
-    for decision in ["approve", "deny"] {
-        let launches = Arc::new(Mutex::new(Vec::new()));
-        let recorded = launches.clone();
-        let core = fixture(
-            &format!("browser-start-ask-{decision}"),
-            Browser::Chrome,
-            Arc::new(move |url| {
-                recorded.lock().unwrap().push(url.to_owned());
-                Ok(())
-            }),
-        )
-        .await;
-        core.shared.access.observe_request(
-            "session/agent/update",
+async fn ask_open_launches_a_paired_browser_without_a_card() {
+    let launches = Arc::new(Mutex::new(Vec::new()));
+    let recorded = launches.clone();
+    let core = fixture(
+        "browser-start-ask-open",
+        Browser::Chrome,
+        Arc::new(move |url| {
+            recorded.lock().unwrap().push(url.to_owned());
+            Ok(())
+        }),
+    )
+    .await;
+    core.shared
+        .access
+        .observe_request("session/agent/update", "a", &json!({"agentName":"ask"}));
+    let weak = Arc::downgrade(&core.shared);
+    let recorded = launches.clone();
+    core.shared.chrome_control.owner.answering(move |tool,_| {
+        let result=if tool=="chrome_status" {
+            json!({"structuredContent":{"profiles":[{"profileId":"chrome:p","connected":!recorded.lock().unwrap().is_empty()}]}})
+        } else { json!({"structuredContent":{"sessionId":"task-a","profileId":"chrome:p","state":"active"}}) };
+        owner::update_pairing(&weak,&result); result
+    });
+    let preparation = tokio::time::timeout(
+        std::time::Duration::from_millis(200),
+        crate::agent_tools::prepare(
+            &core.shared,
             "a",
-            &json!({"agentName":"ask"}),
-        );
-        let weak = Arc::downgrade(&core.shared);
-        let recorded = launches.clone();
-        core.shared.chrome_control.owner.answering(move |tool, _| {
-            let result = if tool == "chrome_status" {
-                json!({"structuredContent":{"profiles":[{"profileId":"chrome:p","connected":!recorded.lock().unwrap().is_empty()}]}})
-            } else { json!({"structuredContent":{"sessionId":"task-a","profileId":"chrome:p","state":"active"}}) };
-            owner::update_pairing(&weak, &result); result
-        });
-        let shared = core.shared.clone();
-        let task = tokio::spawn(async move {
-            crate::agent_tools::prepare(
-                &shared,
-                "a",
-                "a",
-                "open-call",
-                "chrome_session",
-                &mut open(Browser::Chrome),
-            )
-            .await
-        });
-        let id = tokio::time::timeout(std::time::Duration::from_secs(2), async {
-            loop {
-                if let Some(card) = tool_calls::open(&core.shared).first() {
-                    break card.callback_id.clone();
-                }
-                assert!(
-                    !task.is_finished(),
-                    "launch preparation must wait for the usual approval card"
-                );
-                tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-            }
-        })
+            "a",
+            "open-call",
+            "chrome_session",
+            &mut open(Browser::Chrome),
+        ),
+    )
+    .await;
+    assert!(
+        matches!(preparation, Ok(Ok(None))),
+        "opening browser work must prepare without a card"
+    );
+    assert_eq!(core.shared.asks.list(), [] as [vw_ask::Ask; 0]);
+    let reply = gateway::call(&core.shared, "a", "chrome_session", open(Browser::Chrome))
         .await
         .unwrap();
-        assert!(launches.lock().unwrap().is_empty());
-        tool_calls::answer_by(
-            &core.shared,
-            Origin::Ui,
-            "a",
-            &id,
-            &json!({"decision":{"type":decision}}),
-            vw_ask::AnsweredBy::Person,
-        )
-        .unwrap();
-        let prepared = task.await.unwrap();
-        assert!(
-            launches.lock().unwrap().is_empty(),
-            "approval prepares, execution launches"
-        );
-        if decision == "deny" {
-            assert!(prepared.is_err());
-        } else {
-            let reply = prepared
-                .unwrap()
-                .expect("approved execution")
-                .await
-                .unwrap();
-            assert_eq!(
-                reply["vwMcpResult"]["structuredContent"]["sessionId"], "task-a",
-                "{reply}"
-            );
-            assert_eq!(launches.lock().unwrap().len(), 1);
-        }
-        core.shutdown().await;
-    }
+    assert_eq!(
+        reply["vwMcpResult"]["structuredContent"]["sessionId"],
+        "task-a"
+    );
+    assert_eq!(launches.lock().unwrap().len(), 1);
+    core.shutdown().await;
 }
 
 #[tokio::test]
@@ -487,8 +453,9 @@ async fn paired_profile_directory_requires_one_installed_profile_in_the_same_bro
         "ambiguous profiles keep the normal browser launch"
     );
     std::fs::remove_dir_all(data.join("Default")).unwrap();
-    assert!(
-        super::installation::paired_directory(shared, Browser::Chrome).is_none(),
-        "a different sole installed profile is not the profile observed at pairing"
+    assert_eq!(
+        super::installation::paired_directory(shared, Browser::Chrome).as_deref(),
+        Some("Profile 2"),
+        "a deleted pairing folder cannot strand the sole existing extension profile on the picker"
     );
 }

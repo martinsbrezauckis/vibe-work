@@ -36,8 +36,17 @@ pub async fn extract(helper: &Path, input: Input, job: Job) -> Result<Reply, Str
         Path::new(&job.request.path),
     );
     let bytes = serde_json::to_vec(&job).map_err(|_| "decode_failed: request serialization")?;
-    let reply =
-        crate::process::capture(command, vw_platform::video_sandbox::DEADLINE, bytes).await?;
+    #[cfg(windows)]
+    let directory = Some(crate::staging::Directory(stage));
+    #[cfg(not(windows))]
+    let directory = None;
+    let reply = crate::process::capture(
+        command,
+        vw_platform::video_sandbox::DEADLINE,
+        bytes,
+        directory,
+    )
+    .await?;
     if let Ok(error) = serde_json::from_slice::<serde_json::Value>(&reply)
         && let Some(message) = error["error"].as_str()
     {
@@ -51,11 +60,10 @@ pub async fn extract(helper: &Path, input: Input, job: Job) -> Result<Reply, Str
 
 #[cfg(not(target_os = "linux"))]
 fn native_command(helper: &Path, mode: &str, input: &Path) -> CommandWrap {
-    CommandWrap::with_new(helper, |c| {
+    vw_platform::process_command::hidden_wrap(helper, |c| {
         c.env_clear().arg(mode).arg(input);
         #[cfg(windows)]
         {
-            c.creation_flags(0x0800_0000); // CREATE_NO_WINDOW for the console helper bootstrap.
             // The bootstrap registers its AppContainer profile, which needs LOCALAPPDATA; the worker never gets it.
             for name in ["SystemRoot", "LOCALAPPDATA"] {
                 if let Some(value) = std::env::var_os(name) {
@@ -88,12 +96,7 @@ fn command(helper: &Path, input: &Input) -> Result<CommandWrap, String> {
     } else {
         Path::new("/usr/bin/bwrap")
     };
-    let libraries = helper
-        .parent()
-        .and_then(Path::parent)
-        .map(|root| root.join("lib"))
-        .filter(|dir| dir.join("libgstreamer-1.0.so.0").is_file());
-    Ok(CommandWrap::with_new(launcher, |c| {
+    Ok(vw_platform::process_command::hidden_wrap(launcher, |c| {
         c.env_clear()
             .env("PATH", "/usr/bin")
             .env("LANG", "C")
@@ -105,6 +108,16 @@ fn command(helper: &Path, input: &Input) -> Result<CommandWrap, String> {
             .env("GIO_USE_VFS", "local")
             .env("ORC_CODE", "backup")
             .env("MALLOC_ARENA_MAX", "1");
+        // FFmpeg's BLAS dependencies can use /etc/alternatives symlinks. Resolve their directories
+        // inside the already visible system library roots, without exposing any more of /etc.
+        c.env(
+            "LD_LIBRARY_PATH",
+            system_library_path(&[
+                Path::new("/usr/lib/x86_64-linux-gnu"),
+                Path::new("/usr/lib64"),
+                Path::new("/usr/lib"),
+            ]),
+        );
         c.args([
             "--unshare-all",
             "--die-with-parent",
@@ -126,47 +139,13 @@ fn command(helper: &Path, input: &Input) -> Result<CommandWrap, String> {
             c.args(["--ro-bind", "/etc/ld.so.cache", "/etc/ld.so.cache"]);
         }
         c.args(["--dir", "/plugins"]);
-        if let Some(lib) = &libraries {
-            c.arg("--ro-bind").arg(lib).arg("/runtime/lib").args([
-                "--setenv",
-                "LD_LIBRARY_PATH",
-                "/runtime/lib",
-            ]);
-        }
-        for mut path in system_plugins() {
-            // Bundled support plugins match the bundled GStreamer ABI; codecs remain the computer's own.
-            if let Some(lib) = &libraries
-                && let Some(name) = path.file_name()
-            {
-                let bundled = lib.join("gstreamer-1.0").join(name);
-                if bundled.is_file() {
-                    path = bundled;
-                }
-            }
+        // Keep core, support plugins and codecs on the same system ABI. An AppImage's older
+        // GStreamer cannot load a newer host's plugins; no bundled library enters this worker.
+        for path in system_plugins() {
             if let Some(name) = path.file_name() {
                 c.arg("--ro-bind")
                     .arg(&path)
                     .arg(Path::new("/plugins").join(name));
-            }
-        }
-        // The host may lack a container/conversion plugin which the AppImage supplies. The video parsers
-        // (videoparsersbad) are not bundled: they come from the computer's plugins-bad, like the decoders.
-        if let Some(lib) = &libraries {
-            for name in [
-                "coreelements",
-                "app",
-                "typefindfunctions",
-                "isomp4",
-                "matroska",
-                "videoconvertscale",
-            ] {
-                let filename = format!("libgst{name}.so");
-                let path = lib.join("gstreamer-1.0").join(&filename);
-                if path.is_file() {
-                    c.arg("--ro-bind")
-                        .arg(path)
-                        .arg(Path::new("/plugins").join(filename));
-                }
             }
         }
         c.arg("--ro-bind")
@@ -177,6 +156,27 @@ fn command(helper: &Path, input: &Input) -> Result<CommandWrap, String> {
             .arg("/worker")
             .args(["--remount-ro", "/", "--chdir", "/", "--", "/worker"]);
     }))
+}
+
+#[cfg(target_os = "linux")]
+fn system_library_path(roots: &[&Path]) -> std::ffi::OsString {
+    let mut directories = Vec::new();
+    for root in roots {
+        let Ok(root) = root.canonicalize() else {
+            continue;
+        };
+        for name in ["libblas.so.3", "liblapack.so.3"] {
+            if let Ok(target) = root.join(name).canonicalize()
+                && target.is_file()
+                && target.starts_with(&root)
+                && let Some(parent) = target.parent()
+                && !directories.iter().any(|p| p == parent)
+            {
+                directories.push(parent.to_owned());
+            }
+        }
+    }
+    std::env::join_paths(directories).unwrap_or_default()
 }
 
 /// Installed plugin files used by the explicit pipeline. Never scans user paths or unrelated device plugins.
@@ -220,7 +220,22 @@ pub fn system_plugins() -> Vec<std::path::PathBuf> {
 mod tests {
     use super::*;
     #[test]
-    fn packaged_launcher_and_libraries_are_selected() {
+    fn library_alternatives_stay_inside_the_visible_system_roots() {
+        let tree = tempfile::tempdir().unwrap();
+        let root = tree.path().join("usr/lib");
+        let provider = root.join("blas");
+        std::fs::create_dir_all(&provider).unwrap();
+        std::fs::write(provider.join("libblas.so.3"), b"library").unwrap();
+        std::os::unix::fs::symlink(provider.join("libblas.so.3"), root.join("libblas.so.3"))
+            .unwrap();
+        let outside = tree.path().join("private");
+        std::fs::write(&outside, b"not visible").unwrap();
+        std::os::unix::fs::symlink(outside, root.join("liblapack.so.3")).unwrap();
+        assert_eq!(system_library_path(&[&root]), provider.as_os_str());
+    }
+
+    #[test]
+    fn packaged_launcher_uses_the_system_media_runtime() {
         let root = tempfile::tempdir().unwrap();
         let bin = root.path().join("usr/bin");
         let lib = root.path().join("usr/lib");
@@ -239,7 +254,7 @@ mod tests {
         let command = command.command_mut().as_std();
         assert_eq!(command.get_program(), bin.join("vw-video-sandbox"));
         let args: Vec<_> = command.get_args().collect();
-        assert!(args.contains(&lib.as_os_str()));
-        assert!(args.contains(&std::ffi::OsStr::new("/runtime/lib")));
+        assert!(!args.contains(&lib.as_os_str()));
+        assert!(!args.contains(&std::ffi::OsStr::new("/runtime/lib")));
     }
 }

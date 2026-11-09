@@ -120,12 +120,13 @@
     }
   },
   "texts": {
+    "untitledSession": "Untitled session",
     "testProfileNotice": "Test profile: this window uses a separate test folder, not your normal data.",
     "accessMode": "Access mode",
     "accessUnknown": "Access",
     "accessChoose": "Choose access mode: {name}",
     "accessUse": "Use {name} access mode",
-    "accessDefaultDescription": "The mode new sessions start in. Full access asks you to confirm first.",
+    "accessDefaultDescription": "Applies to new sessions.",
     "accessDefaultFallback": "Vibe's default",
     "customAccessDescription": "A profile from your Vibe configuration.",
     "model": "Model",
@@ -140,7 +141,7 @@
     "modelThinkingSuffix": ", thinking {name}",
     "thinkingLevel": "Thinking level",
     "defaultThinkingLevel": "Default thinking level",
-    "defaultThinkingDescription": "New chats start with this level. You can change it in each session.",
+    "defaultThinkingDescription": "Applies to new chats.",
     "modelDefaultThinking": "Model's own default",
     "modelDefaultThinkingDescription": "Follow the selected model's own thinking default.",
     "thinkingUse": "Use {name} thinking level",
@@ -233,6 +234,8 @@
     "edgeNotConnected": "Your Edge is not connected.",
     "edgeSetupQuestion": "Set up Your Edge?",
     "edgeAddExtension": "Add the Vibe Work extension in Edge",
+    "browserRemoveQuestion": "Remove Your {browser}?",
+    "browserRemoveEffect": "Removes the {browser} connection from Vibe Work. Remove the Vibe Work extension in {browser} too.",
     "browsersRemoveQuestion": "Remove Your Chrome and Your Edge?",
     "browsersRemoveEffect": "Removes the setup for Chrome and Edge. Remove the Vibe Work extension in each browser too.",
     "addBrowserTab": "Add a browser tab…",
@@ -274,7 +277,12 @@
     "trayNotice": "Open it from the tray icon. Quit is in its menu.",
     "trayNoticeMac": "Open it from the menu bar or the Dock.",
     "captureWindowClosed": "The Vibe Work window is closed to the tray or minimized, so {label} cannot be captured. Ask the user to open the window, or check without a screenshot (browser_read text).",
-    "captureWindowClosedMac": "The Vibe Work window is closed to the menu bar or minimized, so {label} cannot be captured. Ask the user to open the window, or check without a screenshot (browser_read text)."
+    "captureWindowClosedMac": "The Vibe Work window is closed to the menu bar or minimized, so {label} cannot be captured. Ask the user to open the window, or check without a screenshot (browser_read text).",
+    "vaultUnlockLabel": "Unlock the vault:",
+    "vaultUnlockWindows": "With my Windows sign-in",
+    "vaultUnlockMac": "With my Mac login",
+    "vaultUnlockLinux": "With my login keyring",
+    "vaultUnlockPassword": "With the vault password each time"
   },
   "workNames": {
     "projectTab": {
@@ -405,6 +413,11 @@
       "name": "Create and edit images",
       "description": "Lets Vibe make or change images for your task.",
       "tooltip": "Lets Vibe make or change images for your task."
+    },
+    "vw:video": {
+      "name": "Review video frames",
+      "description": "Lets Vibe inspect selected frames from a local video.",
+      "tooltip": "Lets Vibe inspect selected frames from a local video."
     },
     "vw:libraries": {
       "name": "Use your libraries",

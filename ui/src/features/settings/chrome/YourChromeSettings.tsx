@@ -93,6 +93,9 @@ export function YourChromeSettings({
       ) : (
         <ChromeConnection chrome={chrome} browser={browser} showSwitch />
       )}
+      {firefox ? (
+        <p className="key-line">Other programs on this computer can also control this Firefox.</p>
+      ) : null}
       {(setUp || browser === "Safari") && !firefox ? (
         <SettingsRow data-setting={`${prefix}-control-enabled`}>
           <span>{useMyBrowser}</span>

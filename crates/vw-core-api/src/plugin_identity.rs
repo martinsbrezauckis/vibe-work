@@ -4,7 +4,7 @@
 
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::sync::{Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
@@ -133,7 +133,7 @@ pub(crate) fn run_vibe_python(
     max_bytes: u64,
 ) -> Result<Vec<u8>, String> {
     let until = Instant::now() + limit;
-    let mut command = Command::new(python);
+    let mut command = vw_platform::process_command::hidden(python);
     command
         .args(["-I", "-B", "-c", code])
         .args(args)
@@ -160,11 +160,6 @@ pub(crate) fn run_vibe_python(
         if let Some(value) = std::env::var_os(key) {
             command.env(key, value);
         }
-    }
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        command.creation_flags(0x0800_0000);
     }
     let mut child = command.spawn().map_err(|e| e.to_string())?;
     let Some(stdout) = child.stdout.take() else {

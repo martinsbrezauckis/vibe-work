@@ -43,6 +43,8 @@ pub mod remember;
 pub mod repo;
 mod secret;
 pub mod shellx_profile;
+#[cfg(any(windows, test))]
+mod stored_secret;
 mod vault;
 
 pub use error::VaultError;

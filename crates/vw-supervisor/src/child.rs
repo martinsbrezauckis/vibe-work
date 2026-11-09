@@ -31,7 +31,7 @@ use std::path::PathBuf;
 use std::process::{ExitStatus, Stdio};
 use std::time::Duration;
 
-use process_wrap::tokio::{ChildWrapper, CommandWrap, KillOnDrop};
+use process_wrap::tokio::{ChildWrapper, KillOnDrop};
 use tokio::process::{ChildStderr, ChildStdin, ChildStdout};
 use tokio::sync::{mpsc, watch};
 use tokio::task::JoinHandle;
@@ -153,7 +153,7 @@ impl Drop for TreeGuard {
 
 /// Spawns the process and its owner task; records the leader's and the watchdog's ids in `ids`.
 pub(crate) fn spawn(launch: &Launch, ids: &LiveIds) -> std::io::Result<(ServerChild, Pipes)> {
-    let mut command = CommandWrap::with_new(&launch.program, |cmd| {
+    let mut command = vw_platform::process_command::hidden_wrap(&launch.program, |cmd| {
         cmd.args(&launch.args)
             .env_clear()
             .envs(
@@ -171,10 +171,6 @@ pub(crate) fn spawn(launch: &Launch, ids: &LiveIds) -> std::io::Result<(ServerCh
     command.wrap(process_wrap::tokio::ProcessGroup::leader());
     #[cfg(windows)]
     {
-        // No console window per spawn (ShellX winproc.rs:27-58 scar), then the job object.
-        command.wrap(process_wrap::tokio::CreationFlags(
-            windows::Win32::System::Threading::CREATE_NO_WINDOW,
-        ));
         command.wrap(process_wrap::tokio::JobObject);
     }
     // Last resort for the leader; with JobObject it also makes the job kill-on-close.

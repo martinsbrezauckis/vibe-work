@@ -4,11 +4,11 @@
 //! - inputs that are secret (passphrase, API key) are [`SecretInput`]: redacted in `Debug`, written
 //!   as `"<redacted>"` if a command is ever serialized, zeroed on drop;
 //! - results are statuses, counts and metadata; `setupStoreKey`, `importVibeKey`,
-//!   `removeVibeKeyOriginal`, `createVault`, `unlockVault`, `lockVault`, `setLockVaultOnQuit` and `useExistingKey`
+//!   `removeVibeKeyOriginal`, `createVault`, `unlockVault`, `lockVault`, `setLockVaultOnQuit` and `useMistralKey`
 //!   answer `done` (ok) or an error, nothing else.
 //!
 //! Who may change the key and the vault: the window only (on the vault the Debug API has
-//! the agent's rights; `vault_scope` refuses it every op here except the reads `readStatus`, `listKeyCandidates`,
+//! the agent's rights; `vault_scope` refuses it every op here except the reads `readStatus`, `listMistralKeys`,
 //! `listMistralKeys`, `detectVibeKey` and `testKey`). What never changes: no
 //! command, result, event or log carries the key or the passphrase as a value (the Debug API's response
 //! guard in vw-debug-api also refuses to send any registered secret).
@@ -112,6 +112,26 @@ impl From<VibeKeySource> for ExistingSource {
     }
 }
 
+/// The person's persisted choice for unlocking this vault.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+pub enum VaultUnlockMethod {
+    /// Use the existing operating-system sign-in.
+    #[default]
+    System,
+    /// Enter the vault password each time.
+    Password,
+}
+impl From<VaultUnlockMethod> for vw_keys::UnlockMethod {
+    fn from(value: VaultUnlockMethod) -> Self {
+        match value {
+            VaultUnlockMethod::System => Self::System,
+            VaultUnlockMethod::Password => Self::Password,
+        }
+    }
+}
+
 /// One key or vault operation.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
@@ -124,13 +144,16 @@ impl From<VibeKeySource> for ExistingSource {
 pub enum KeyRequest {
     /// Vault and key status (no secret).
     ReadStatus {},
-    /// Creates a new private Vibe Work vault and unlocks it in a managed app. Its key is kept in
-    /// the computer's credential store until Lock (or a quit with `lockVaultOnQuit`).
+    /// Creates and opens a private Vibe Work vault with the person's chosen unlock policy.
     CreateVault {
         /// The new passphrase.
         passphrase: SecretInput,
+        /// The setup choice; older clients retain system sign-in.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[cfg_attr(feature = "ts", ts(optional))]
+        unlock_method: Option<VaultUnlockMethod>,
     },
-    /// Unlocks with the passphrase; the key is kept as for `createVault`.
+    /// Opens with the password, retaining the saved policy unless the first-run choice supplies one.
     UnlockVault {
         /// The passphrase.
         passphrase: SecretInput,
@@ -138,6 +161,10 @@ pub enum KeyRequest {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[cfg_attr(feature = "ts", ts(optional))]
         vault: Option<VaultChoice>,
+        /// The first-run choice; later unlocks retain the saved policy.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[cfg_attr(feature = "ts", ts(optional))]
+        unlock_method: Option<VaultUnlockMethod>,
     },
     /// Locks the vault and deletes its kept key (model requests wait for the next unlock, also
     /// after a restart).
@@ -147,18 +174,18 @@ pub enum KeyRequest {
         /// On: quitting locks the vault and deletes its kept key.
         on: bool,
     },
+    /// Changes the unlock choice after verifying the vault password. User-only.
+    SetVaultUnlockMethod {
+        /// The chosen method.
+        unlock_method: VaultUnlockMethod,
+        /// The current vault password.
+        passphrase: SecretInput,
+    },
     /// Stores the key (first setup or replacement). One-way: answers `done` or an error.
     /// Replacing an active key asks the native confirmation before storage.
     SetupStoreKey {
         /// The key.
         api_key: SecretInput,
-    },
-    /// Compatibility view of the saved-key catalog (metadata).
-    ListKeyCandidates {},
-    /// Compatibility name for selecting a saved credential through the shared policy.
-    UseExistingKey {
-        /// Its vault item id.
-        item_id: String,
     },
     /// Every saved Mistral credential, including the active one; metadata only.
     ListMistralKeys {},
@@ -228,6 +255,10 @@ pub struct KeyStatusView {
     /// "Lock the vault when Vibe Work quits" (absent in a status from before the switch: off).
     #[serde(default)]
     pub lock_vault_on_quit: bool,
+    /// Missing on older servers; existing vaults retain system sign-in.
+    #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(optional))]
+    pub unlock_method: Option<VaultUnlockMethod>,
     /// `unknown` (locked), `missing`, `ready`.
     pub key_state: String,
     /// The vault item the key comes from, when ready.
@@ -369,21 +400,12 @@ impl From<KeyStatus> for KeyStatusView {
             }),
             remember_note: status.remember_note,
             lock_vault_on_quit: status.lock_on_quit,
+            unlock_method: Some(match status.unlock_method {
+                vw_keys::UnlockMethod::System => VaultUnlockMethod::System,
+                vw_keys::UnlockMethod::Password => VaultUnlockMethod::Password,
+            }),
         }
     }
-}
-
-/// A Mistral credential already in the vault.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
-#[serde(rename_all = "camelCase")]
-pub struct KeyCandidateView {
-    /// Vault item id.
-    pub item_id: String,
-    /// Its title.
-    pub label: String,
-    /// `resource` or `compat`.
-    pub source: String,
 }
 
 /// A place where Vibe itself holds a key.
@@ -459,6 +481,25 @@ pub(crate) fn key_error(error: &KeyError) -> CoreError {
     core
 }
 
+async fn unlock_vault(
+    keys: &KeyService,
+    passphrase: SecretInput,
+    vault: Option<VaultChoice>,
+    unlock_method: Option<VaultUnlockMethod>,
+) -> Result<CommandResult, CoreError> {
+    let choice = vault.map(|v| match v {
+        VaultChoice::Shellx => VaultKind::Shellx,
+        VaultChoice::Desktop => VaultKind::Desktop,
+        VaultChoice::VibeWork => VaultKind::VibeWork,
+    });
+    let kept = passphrase.0.clone();
+    keys.unlock_with_method(passphrase.0, choice, unlock_method.map(Into::into))
+        .await
+        .map_err(|e| key_error(&e))?;
+    kept.register_as(vw_secrets::SecretKind::Typed);
+    Ok(CommandResult::Done {})
+}
+
 /// Executes one key request on `keys` (module header). Every origin runs it directly.
 ///
 /// # Errors
@@ -473,26 +514,36 @@ pub(crate) async fn execute(
         KeyRequest::ReadStatus {} => Ok(CommandResult::KeyStatus {
             status: keys.status().await.map_err(map)?.into(),
         }),
-        KeyRequest::CreateVault { passphrase } => {
+        KeyRequest::CreateVault {
+            passphrase,
+            unlock_method,
+        } => {
             // Registered only once the vault holds it (an unconfirmed input stays out of the redaction list).
             let kept = passphrase.0.clone();
-            keys.create_vault(passphrase.0).await.map_err(map)?;
+            keys.create_vault_with_unlock(passphrase.0, unlock_method.map(Into::into))
+                .await
+                .map_err(map)?;
             kept.register_as(vw_secrets::SecretKind::Typed);
             done
         }
-        KeyRequest::UnlockVault { passphrase, vault } => {
-            let choice = vault.map(|v| match v {
-                VaultChoice::Shellx => VaultKind::Shellx,
-                VaultChoice::Desktop => VaultKind::Desktop,
-                VaultChoice::VibeWork => VaultKind::VibeWork,
-            });
-            let kept = passphrase.0.clone();
-            keys.unlock(passphrase.0, choice).await.map_err(map)?;
-            kept.register_as(vw_secrets::SecretKind::Typed);
-            done
-        }
+        KeyRequest::UnlockVault {
+            passphrase,
+            vault,
+            unlock_method,
+        } => unlock_vault(keys, passphrase, vault, unlock_method).await,
         KeyRequest::LockVault {} => {
             keys.lock();
+            done
+        }
+        KeyRequest::SetVaultUnlockMethod {
+            unlock_method,
+            passphrase,
+        } => {
+            let kept = passphrase.0.clone();
+            keys.set_unlock_method(unlock_method.into(), passphrase.0)
+                .await
+                .map_err(map)?;
+            kept.register_as(vw_secrets::SecretKind::Typed);
             done
         }
         KeyRequest::SetLockVaultOnQuit { on } => keys.set_lock_on_quit(on).map_err(map).and(done),
@@ -502,23 +553,9 @@ pub(crate) async fn execute(
             kept.register_as(vw_secrets::SecretKind::MistralKey);
             done
         }
-        KeyRequest::ListKeyCandidates {} => Ok(CommandResult::KeyCandidates {
-            candidates: keys
-                .candidates()
-                .await
-                .map_err(map)?
-                .into_iter()
-                .map(|c| KeyCandidateView {
-                    item_id: c.item_id,
-                    label: c.label,
-                    source: c.source.to_owned(),
-                })
-                .collect(),
-        }),
         request @ (KeyRequest::ListMistralKeys {}
         | KeyRequest::AddMistralKey { .. }
         | KeyRequest::UseMistralKey { .. }
-        | KeyRequest::UseExistingKey { .. }
         | KeyRequest::RenameMistralKey { .. }
         | KeyRequest::RemoveMistralKey { .. }) => crate::mistral_keys::execute(keys, request).await,
         KeyRequest::TestKey {} => Ok(CommandResult::KeyTest {
@@ -551,5 +588,25 @@ pub(crate) async fn execute(
             .await
             .map_err(map)
             .and(done),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::KeyRequest;
+    use serde_json::json;
+
+    #[test]
+    fn retired_key_operations_are_unknown() {
+        for op in ["listKeyCandidates", "useExistingKey"] {
+            let mut request = json!({"op":op});
+            if op == "useExistingKey" {
+                request["itemId"] = json!("saved-key");
+            }
+            assert!(
+                serde_json::from_value::<KeyRequest>(request).is_err(),
+                "{op} remains accepted"
+            );
+        }
     }
 }

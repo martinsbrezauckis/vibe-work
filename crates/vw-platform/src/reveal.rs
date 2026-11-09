@@ -20,7 +20,6 @@
 
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 /// Why a folder could not be shown.
 #[derive(Debug, thiserror::Error)]
@@ -126,7 +125,7 @@ pub fn reveal_target(path: &Path) -> Result<PathBuf, RevealError> {
 pub fn reveal_folder(path: &Path) -> Result<(), RevealError> {
     let target = reveal_target(path)?;
     let (program, args) = Opener::current().command(&target);
-    let mut command = Command::new(program);
+    let mut command = crate::process_command::hidden(program);
     crate::child_env::remove_own_run_settings(&mut command);
     let mut child = command
         .args(args)

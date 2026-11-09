@@ -11,6 +11,7 @@ const { chromium } = createRequire(process.env.VW_BROWSER_UI_PACKAGE)("playwrigh
 const debugPort = await new Promise(resolve => { const s = createServer().listen(0, "127.0.0.1", () => { const p = s.address().port; s.close(() => resolve(p)); }); });
 // Site isolation as WebView2 ships it: cross-site frames run in processes (DevTools sessions) of their own.
 const browser = await chromium.launch({ args: [`--remote-debugging-port=${debugPort}`, "--site-per-process"] });
+let captureDeviceScale = false;
 const page = await browser.newPage({ viewport: { width: 300, height: 200 } });
 let raw = null;
 const rawEvents = [];
@@ -157,10 +158,25 @@ try {
         await page.waitForTimeout(200);
       } else if (request.op === "viewport") {
         await page.setViewportSize({width:request.width,height:request.height});
+        captureDeviceScale = Boolean(request.scale);
+        if (captureDeviceScale) await cdp.send("Emulation.setDeviceMetricsOverride", {
+          width: request.width, height: request.height, deviceScaleFactor: request.scale, mobile: false,
+        });
       } else if (request.op === "screenshot") {
-        value = (await page.screenshot()).toString("base64");
+        // The CDP session that owns the emulated metrics captures the same device pixels as a native view.
+        value = captureDeviceScale ? (await cdp.send("Page.captureScreenshot", { format: "png" })).data :
+          (await page.screenshot()).toString("base64");
       } else if (request.op === "click") {
-        await page.mouse.click(request.x, request.y);
+        const options = request.options || { button: 0, count: 1, modifiers: 0 };
+        const keys = ["Alt", "Control", "Meta", "Shift"].filter((_, i) => options.modifiers & (1 << i));
+        for (const key of keys) await page.keyboard.down(key);
+        try {
+          await page.mouse.click(request.x, request.y, { button: ["left", "middle", "right"][options.button], clickCount: options.count });
+        } finally {
+          for (const key of keys.reverse()) await page.keyboard.up(key);
+        }
+      } else if (request.op === "hover") {
+        await page.mouse.move(request.x, request.y);
       }
       process.stdout.write(`${JSON.stringify({ value })}\n`);
     } catch (error) {

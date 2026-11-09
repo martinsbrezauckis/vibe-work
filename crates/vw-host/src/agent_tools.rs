@@ -1,5 +1,5 @@
 //! Turning the session tools on for a run: find the `vw-agent-tools` binary, give the core its
-//! config, add the guards to Vibe Work's own `$VIBE_HOME/hooks.toml` (one named `[[hooks]]` entry per guard),
+//! config, add the guards to Vibe Work's own `$VIBE_HOME/hooks.toml` (one combined pre-tool entry),
 //! and load the built-in plugin.
 //!
 //! - **Binary:** next to the app executable (a bundled sidecar), else in the cargo target folder of a
@@ -57,38 +57,99 @@ fn shell_quote(path: &Path) -> String {
     format!("'{}'", text.replace('\'', r"'\''"))
 }
 
-/// A fixed PowerShell launcher is parseable in both Git Bash and PowerShell.
-/// Paths stay inside its UTF-16 script, so neither outer shell expands path characters.
-fn hook_command(binary: &Path, endpoint: &Path, guard: Guard, windows: bool) -> String {
+/// Command-name segments join literally in both shells (PowerShell argument mode differs).
+fn both_quote(text: &str) -> String {
+    let mut quoted = String::from("'");
+    for c in text.chars() {
+        // PowerShell's single-quote delimiters include all four typographic apostrophes.
+        if matches!(c, '\'' | '\u{2018}' | '\u{2019}' | '\u{201a}' | '\u{201b}') {
+            quoted.push_str("'\"");
+            quoted.push(c);
+            quoted.push_str("\"'");
+        } else {
+            quoted.push(c);
+        }
+    }
+    quoted.push('\'');
+    quoted
+}
+
+/// An unquoted root makes PowerShell parse a command rather than a string expression.
+/// All user-controlled text is quoted; the absolute path bypasses PATH and current-folder lookup.
+fn windows_hook_binary(binary: &Path) -> String {
+    let plain = vw_platform::plain_path(binary);
+    let text = plain.to_string_lossy().replace('\\', "/");
+    let root = if text.starts_with("//") {
+        2
+    } else if text.starts_with('/') {
+        1
+    } else if text.as_bytes().get(1..3) == Some(b":/") && text.as_bytes()[0].is_ascii_alphabetic() {
+        3
+    } else {
+        0
+    };
+    let (root, rest) = text.split_at(root);
+    format!("{root}{}", both_quote(rest))
+}
+
+#[cfg(any(windows, test))]
+fn hook_environment(
+    endpoint: &Path,
+    existing_exclusions: Option<std::ffi::OsString>,
+) -> Vec<(String, std::ffi::OsString)> {
+    let mut exclusions = existing_exclusions.unwrap_or_default();
+    if exclusions != "*" {
+        if !exclusions.is_empty() {
+            exclusions.push(";");
+        }
+        exclusions.push(format!("{}=", vw_agent_tools::hook::ENV_ENDPOINT_FILE));
+    }
+    vec![
+        (
+            vw_agent_tools::hook::ENV_ENDPOINT_FILE.to_owned(),
+            endpoint.as_os_str().to_owned(),
+        ),
+        ("MSYS2_ENV_CONV_EXCL".to_owned(), exclusions),
+    ]
+}
+
+/// Installs the hook block and the child environment as one launcher configuration.
+/// Real-server fixtures use this same path so Windows hooks can find their endpoint.
+///
+/// # Errors
+/// The Vibe home's managed hook file could not be written.
+pub fn configure_hooks(
+    supervisor: &mut SupervisorConfig,
+    config: &AgentToolsConfig,
+) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        let exclusions = supervisor
+            .extra_env
+            .iter()
+            .rev()
+            .find(|(name, _)| name.eq_ignore_ascii_case("MSYS2_ENV_CONV_EXCL"))
+            .map(|(_, value)| value.clone())
+            .or_else(|| std::env::var_os("MSYS2_ENV_CONV_EXCL"));
+        supervisor
+            .extra_env
+            .extend(hook_environment(&config.endpoint_file(), exclusions));
+    }
+    write_hooks(
+        &supervisor.vibe_home,
+        Some(&hook_block(&config.binary, &config.endpoint_file())),
+    )
+}
+
+/// Windows invokes the binary directly with a line parsed identically by Git Bash and PowerShell.
+/// Unix keeps its existing shell quoting.
+fn hook_command(binary: &Path, endpoint: &Path, action: &str, windows: bool) -> String {
     if windows {
-        use base64::Engine as _;
-        // PowerShell ends a single-quoted string at ' and at the typographic quotes U+2018-U+201B; each is
-        // escaped by doubling it, or a folder such as `O’Neil` breaks every hook.
-        let quote = |path: &Path| {
-            let mut out = String::from("'");
-            for c in path.to_string_lossy().chars() {
-                if matches!(c, '\'' | '\u{2018}' | '\u{2019}' | '\u{201a}' | '\u{201b}') {
-                    out.push(c);
-                }
-                out.push(c);
-            }
-            out.push('\'');
-            out
-        };
-        let script = format!(
-            "& {} guard {} --endpoint-file {}; exit $LASTEXITCODE",
-            quote(binary),
-            guard.arg(),
-            quote(endpoint)
-        );
-        let bytes: Vec<u8> = script.encode_utf16().flat_map(u16::to_le_bytes).collect();
-        let encoded = base64::engine::general_purpose::STANDARD.encode(bytes);
-        format!("powershell.exe -NoLogo -NoProfile -NonInteractive -EncodedCommand {encoded}")
+        format!("{} {action}", windows_hook_binary(binary))
     } else {
         format!(
-            "{} guard {} --endpoint-file {}",
+            "{} {action} --endpoint-file {}",
             shell_quote(binary),
-            guard.arg(),
             shell_quote(endpoint)
         )
     }
@@ -112,53 +173,42 @@ fn toml_string(text: &str) -> String {
     out
 }
 
-/// What each guard tells a reader of `hooks.toml` (Vibe shows the hook's name, not this).
-fn guard_description(guard: Guard) -> &'static str {
-    match guard {
-        Guard::Safety => {
-            "Vibe Work: reminders before dangerous commands (deleting the home folder, disk tools, shutdown, the user's own rules)"
-        }
-        Guard::Process => {
-            "Vibe Work: literal kill commands aimed at other sessions' or apps' processes, or with nonliteral targets, wait for the user"
-        }
-        Guard::Git => {
-            "Vibe Work: literal git push and GitHub writes are the user's Push / Create PR buttons; rewrites outside the own copy branch wait for the user"
-        }
-        Guard::Folder => {
-            "Vibe Work: another session's copy is not this session's to read or change"
-        }
-        Guard::Connector => {
-            "Vibe Work: connector tools that change a repository on a code forge are the user's Push / Create PR buttons"
-        }
-        Guard::Receipt => {
-            "Vibe Work: wait for permission and bind the decision to its originating agent and call"
-        }
-        Guard::Allowed => {
-            "Vibe Work: a command the user allowed in a guard's dialog says so in its result"
-        }
-    }
-}
-
-/// Our `hooks.toml` block for `binary` and the core's endpoint file: one `[[hooks]]` entry per guard,
-/// in [`Guard::ALL`] order, then the after-call entries ([`Guard::AFTER`]), each named so Vibe's notice says which
-/// guard spoke.
-/// The folder guard precedes git so another session's copy is refused before git can ask for approval.
+/// Our managed hooks: one strict pre-tool entry for the union of the original matchers (`*`),
+/// followed by the unchanged post-tool allowed note. The combined CLI preserves per-guard selection and order.
+/// Existing markers let both newer and older hosts replace the block on every start.
 #[must_use]
 pub fn hook_block(binary: &Path, endpoint_file: &Path) -> String {
     let mut out = format!("{BEGIN}\n");
-    for guard in Guard::ALL.into_iter().chain(Guard::AFTER) {
-        let command = hook_command(binary, endpoint_file, guard, cfg!(windows));
-        // The guards before a call are strict (a crash refuses it); the note after a call is not (a failure leaves
-        // the result as it is).
-        let strict = guard.event() == "pre_tool";
+    for guard in std::iter::once(None).chain(Guard::AFTER.map(Some)) {
+        let (name, event, matcher, timeout, description, action) = match guard {
+            None => (
+                // Interrupted sessions keep their old bindings. Retain the first wildcard guard's ID
+                // so their original pre-tool action still resolves to the complete combined check.
+                Guard::Safety.hook_name(),
+                "pre_tool",
+                "*",
+                f64::INFINITY,
+                "Vibe Work: safety reminders, processes, folders, Git, connectors and tool permissions",
+                "kill-guard".to_owned(),
+            ),
+            Some(guard) => (
+                guard.hook_name(),
+                guard.event(),
+                guard.matcher(),
+                guard.timeout_secs(),
+                "Vibe Work: a command the user allowed in a guard's dialog says so in its result",
+                format!("guard {}", guard.arg()),
+            ),
+        };
+        let command = hook_command(binary, endpoint_file, &action, cfg!(windows));
+        let strict = event == "pre_tool";
         let _ = write!(
             out,
-            "[[hooks]]\nname = {}\ntype = {}\nmatch = {}\nstrict = {strict}\ntimeout = {}\ndescription = {}\ncommand = {}\n\n",
-            toml_string(guard.hook_name()),
-            toml_string(guard.event()),
-            toml_string(guard.matcher()),
-            guard.timeout_secs(),
-            toml_string(guard_description(guard)),
+            "[[hooks]]\nname = {}\ntype = {}\nmatch = {}\nstrict = {strict}\ntimeout = {timeout}\ndescription = {}\ncommand = {}\n\n",
+            toml_string(name),
+            toml_string(event),
+            toml_string(matcher),
+            toml_string(description),
             toml_string(&command)
         );
     }
@@ -266,10 +316,7 @@ pub fn prepare(
         data_dir.join("agent-tools"),
         supervisor.home.as_deref(),
     );
-    write_hooks(
-        &supervisor.vibe_home,
-        Some(&hook_block(&binary, &config.endpoint_file())),
-    )?;
+    configure_hooks(supervisor, &config)?;
     core.agent_tools = Some(config);
     let plugin = plugin_root.filter(|r| r.join("vw").join("plugin.json").is_file());
     let staged = match (plugin, vw_core_api::working_note::vault_capture_line()) {
@@ -297,63 +344,5 @@ fn note_line(vibe_home: &Path, on: bool) -> String {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::{Guard, Path, hook_command};
-    use base64::Engine as _;
-
-    #[test]
-    fn windows_hooks_keep_paths_out_of_both_outer_shells() {
-        let line = hook_command(
-            Path::new(r"C:\a b\$cash`tick'quote\vw-agent-tools.exe"),
-            Path::new(r"C:\a b\hook.json"),
-            Guard::Safety,
-            true,
-        );
-        let encoded = line.split_whitespace().last().unwrap();
-        let bytes = base64::engine::general_purpose::STANDARD
-            .decode(encoded)
-            .unwrap();
-        let units: Vec<u16> = bytes
-            .as_chunks::<2>()
-            .0
-            .iter()
-            .map(|b| u16::from_le_bytes([b[0], b[1]]))
-            .collect();
-        let script = String::from_utf16(&units).unwrap();
-        assert_eq!(
-            script,
-            r"& 'C:\a b\$cash`tick''quote\vw-agent-tools.exe' guard safety --endpoint-file 'C:\a b\hook.json'; exit $LASTEXITCODE"
-        );
-        assert!(
-            line.bytes()
-                .all(|c| c.is_ascii_alphanumeric() || b" -+/=.".contains(&c))
-        );
-    }
-
-    /// PowerShell also ends a single-quoted string at the typographic quotes U+2018–U+201B, so a user folder
-    /// such as `O’Neil` must have each of them doubled like the ASCII apostrophe.
-    #[test]
-    fn windows_hooks_double_typographic_apostrophes_too() {
-        let line = hook_command(
-            Path::new("C:\\Users\\O\u{2019}Neil\\a\u{2018}b\u{201a}c\u{201b}d\\vw-agent-tools.exe"),
-            Path::new("C:\\Users\\O\u{2019}Neil\\hook.json"),
-            Guard::Receipt,
-            true,
-        );
-        let encoded = line.split_whitespace().last().unwrap();
-        let bytes = base64::engine::general_purpose::STANDARD
-            .decode(encoded)
-            .unwrap();
-        let units: Vec<u16> = bytes
-            .as_chunks::<2>()
-            .0
-            .iter()
-            .map(|b| u16::from_le_bytes([b[0], b[1]]))
-            .collect();
-        let script = String::from_utf16(&units).unwrap();
-        assert_eq!(
-            script,
-            "& 'C:\\Users\\O\u{2019}\u{2019}Neil\\a\u{2018}\u{2018}b\u{201a}\u{201a}c\u{201b}\u{201b}d\\vw-agent-tools.exe' guard receipt --endpoint-file 'C:\\Users\\O\u{2019}\u{2019}Neil\\hook.json'; exit $LASTEXITCODE"
-        );
-    }
-}
+#[path = "agent_tools_tests.rs"]
+mod tests;

@@ -24,6 +24,13 @@ impl TauriEngine {
         limit: Duration,
         sharp: bool,
     ) -> Result<Vec<u8>, EngineError> {
+        if let Some(window) = self.page_window_native(&id.session_id)
+            && (!window.is_visible().unwrap_or(false) || window.is_minimized().unwrap_or(true))
+        {
+            return Err(EngineError::Unsupported(
+                "The browser window is hidden or minimized. Focus it before capturing.".into(),
+            ));
+        }
         let webview = self.webview(&id)?;
         let visibility = self.visibility.clone().lock_owned().await;
         let shown = self
@@ -78,6 +85,9 @@ impl TauriEngine {
         id: MountId,
         hidden: bool,
     ) -> Result<(), EngineError> {
+        if self.page_window_native(&id.session_id).is_some() {
+            return Ok(());
+        }
         let webview = self.webview(&id)?;
         let _visibility = self.visibility.lock().await;
         #[cfg(target_os = "linux")]

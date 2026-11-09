@@ -121,19 +121,19 @@ pub async fn cli_sharing(
     Ok(host.cli_sharing(&probe).await)
 }
 
-/// The Debug API vault item id (historical command name), regenerating when `rotate` is true.
+/// The Debug API vault item id, regenerating when `rotate` is true.
 /// Never returns the token itself; Copy uses the ordinary vault clipboard command.
 ///
 /// # Errors
 /// `internal` when the vault cannot read or save the token.
 #[tauri::command]
-pub async fn debug_api_token_file(
+pub async fn debug_api_token_item(
     host: State<'_, HostHandle>,
     rotate: bool,
 ) -> Result<Option<String>, CoreError> {
     host.get()
         .await
-        .debug_token_file(rotate)
+        .debug_token_item(rotate)
         .await
         .map_err(|error| CoreError::new(ErrorCode::Internal, error.to_string()))
 }

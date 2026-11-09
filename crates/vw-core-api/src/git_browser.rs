@@ -334,10 +334,10 @@ impl Core {
             if !in_project {
                 continue;
             }
-            let Ok(repos) = self.git_repos(&member) else {
+            let Ok(discovered) = self.git_repos(&member) else {
                 continue;
             };
-            for (selector, place) in repos {
+            for (selector, place) in discovered.places {
                 if actions_started.elapsed() >= Duration::from_secs(3) {
                     break;
                 }

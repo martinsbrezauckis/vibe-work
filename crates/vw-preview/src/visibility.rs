@@ -4,6 +4,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::service::PreviewService;
+use crate::{CaptureBlock, CaptureRefusal};
 
 /// What the main window currently shows, reported whenever its visibility or selection changes.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -68,37 +69,37 @@ pub(crate) fn screenshot_reason(
     paused: bool,
     native_shown: bool,
     on_new_chat: bool,
-) -> Option<String> {
+) -> Option<CaptureRefusal> {
     let check = text_check(target == owner);
     if let Some(report) = report {
         if !report.window_visible {
-            return Some(window_closed_text(label, target == owner));
+            return Some(window_closed(label, target == owner));
         }
         if report.selected_session_id.is_none() {
-            return Some(format!(
+            return Some(CaptureBlock::AnotherPage.because(format!(
                 "The user is viewing another page, so {label} cannot be captured. Ask the user to open this session, or {check}."
-            ));
+            )));
         }
         if report.selected_session_id.as_deref() != Some(owner) && on_new_chat {
-            return Some(format!(
+            return Some(CaptureBlock::NoChatSelected.because(format!(
                 "No chat is selected, so {label} cannot be captured. Ask the user to open this session, or {check}."
-            ));
+            )));
         }
         if report.selected_session_id.as_deref() != Some(owner) {
-            return Some(format!(
+            return Some(CaptureBlock::AnotherSession.because(format!(
                 "The user is viewing another session, so {label} cannot be captured. Ask the user to open this session, or {check}."
-            ));
+            )));
         }
         if !report.browser_panel_open {
-            return Some(format!(
+            return Some(CaptureBlock::BrowserPanelClosed.because(format!(
                 "The Browser side panel is closed or shows another panel tab, so {label} cannot be captured. Ask the user to open Browser, or {check}."
-            ));
+            )));
         }
     }
     if paused {
-        return Some(format!(
+        return Some(CaptureBlock::BrowserPaused.because(format!(
             "The browser engine for {label} is paused to save memory. Ask the user to show {label} in Browser, then retry the screenshot."
-        ));
+        )));
     }
     if let Some(report) = report
         && report.selected_page_key.as_deref() != Some(target)
@@ -108,25 +109,37 @@ pub(crate) fn screenshot_reason(
         } else {
             "another tab"
         };
-        return Some(format!(
+        let kind = if target == owner {
+            CaptureBlock::AppPreviewNotSelected
+        } else {
+            CaptureBlock::WebTabNotSelected
+        };
+        return Some(kind.because(format!(
             "The user has selected {selected} instead of {label}. Ask the user to select {label}, or {check}."
-        ));
+        )));
     }
     (!native_shown).then(|| {
-        format!("{label} is not shown in the Browser panel. Ask the user to show it, or {check}.")
+        let kind = if target == owner {
+            CaptureBlock::AppPreviewNotShown
+        } else {
+            CaptureBlock::WebTabNotShown
+        };
+        kind.because(format!(
+            "{label} is not shown in the Browser panel. Ask the user to show it, or {check}."
+        ))
     })
 }
 
 /// The same reason whether native state or the webview reported the hidden window.
-pub(crate) fn window_closed_text(label: &str, app_preview: bool) -> String {
+pub(crate) fn window_closed(label: &str, app_preview: bool) -> CaptureRefusal {
     #[cfg(target_os = "macos")]
     let text = vw_vocabulary::texts::CAPTURE_WINDOW_CLOSED_MAC;
     #[cfg(not(target_os = "macos"))]
     let text = vw_vocabulary::texts::CAPTURE_WINDOW_CLOSED;
-    text.replace("{label}", label).replace(
+    CaptureBlock::WindowHidden.because(text.replace("{label}", label).replace(
         "check without a screenshot (browser_read text)",
         text_check(app_preview),
-    )
+    ))
 }
 
 #[cfg(test)]
@@ -140,6 +153,22 @@ mod tests {
             browser_panel_open: true,
             selected_page_key: Some("s".into()),
         }
+    }
+
+    #[test]
+    fn visibility_refusals_keep_stable_kinds_beside_agent_instructions() {
+        let mut report = visible();
+        report.window_visible = false;
+        let hidden =
+            screenshot_reason(Some(&report), "s", "s", "App preview", false, true, false).unwrap();
+        assert_eq!(hidden.kind, CaptureBlock::WindowHidden);
+        assert!(hidden.text.contains("Ask the user"));
+        report.window_visible = true;
+        report.selected_session_id = Some("new-chat".into());
+        let no_chat =
+            screenshot_reason(Some(&report), "s", "s", "App preview", false, true, true).unwrap();
+        assert_eq!(no_chat.kind, CaptureBlock::NoChatSelected);
+        assert!(no_chat.text.starts_with("No chat is selected,"));
     }
 
     #[test]

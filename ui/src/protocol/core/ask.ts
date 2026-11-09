@@ -275,7 +275,7 @@ offerId: string, } | { "op": "openFirefoxStore", } | { "op": "openFirefox", } | 
 /**
  * Whether the optional Safari connection is enabled.
  */
-enabled: boolean, } | { "op": "removeSafari", } | { "op": "remove", };
+enabled: boolean, } | { "op": "removeSafari", } | { "op": "remove", } | { "op": "removeEdge", };
 
 export type ChromeControlView = {
 /**

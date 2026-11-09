@@ -23,6 +23,10 @@ impl PreviewService {
         let Some(url) = entry.url.as_ref() else {
             return Err(PreviewError::NothingOpen);
         };
+        // Independent windows have their own native visibility check in the engine's capture path.
+        if state.windows.contains_key(session_id) && entry.server_status.is_none() {
+            return Ok(());
+        }
         let owner = state.owner_of(session_id);
         let label = if owner == session_id {
             "App preview".to_owned()
@@ -40,9 +44,10 @@ impl PreviewService {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             == Some(false)
         {
-            return Err(PreviewError::ScreenshotHidden(
-                visibility::window_closed_text(&label, owner == session_id),
-            ));
+            return Err(PreviewError::ScreenshotHidden(visibility::window_closed(
+                &label,
+                owner == session_id,
+            )));
         }
         if let Some(reason) = visibility::screenshot_reason(
             report.as_ref().map(|(report, _)| report),
@@ -58,9 +63,11 @@ impl PreviewService {
             return Err(PreviewError::ScreenshotHidden(reason));
         }
         if entry.server_status.is_some() {
-            return Err(PreviewError::ScreenshotHidden(format!(
-                "{label} for {url} remains stopped. Start its server if needed, then Reload."
-            )));
+            return Err(PreviewError::ScreenshotHidden(
+                crate::CaptureBlock::ServerStopped.because(format!(
+                    "{label} for {url} remains stopped. Start its server if needed, then Reload."
+                )),
+            ));
         }
         Ok(())
     }

@@ -4,6 +4,7 @@
  * Depends on: the drop router's item type. Called by: ComposerTools, Composer and the drop router.
  * Invariant: picker, paste and drop share byte-based routing; filenames only describe a refused type.
  */
+import type { DocumentRefusalKind } from "../../protocol/core";
 import type { DroppedItem } from "./drop";
 
 /** The picker offers every extension from the native document picker and the four inline image MIME types. */
@@ -29,9 +30,13 @@ export function fileItems(files: readonly File[]): DroppedItem[] {
 }
 
 /** Adds the named type and supported kinds to type refusals, retaining other core messages (including limits). */
-export function attachmentRefusal(name: string, reason: string): string {
-  const unsupported = reason.startsWith("This file type is not supported.");
-  const archive = reason.startsWith("Archives are not unpacked.");
+export function attachmentRefusal(
+  name: string,
+  reason: string,
+  kind?: DocumentRefusalKind,
+): string {
+  const unsupported = kind === "unsupported";
+  const archive = kind === "archive";
   if (!unsupported && !archive) return reason;
   const extension = /\.([a-z0-9]{1,20})$/i.exec(name)?.[1]?.toUpperCase();
   return `This ${extension ?? "binary"} file is not supported.${archive ? ` ${reason}` : ""} Supported: ${SUPPORTED}.`;

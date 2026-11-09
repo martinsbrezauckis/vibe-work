@@ -180,46 +180,6 @@ impl<T: Transport, C: Confirmer> Gate<T, C> {
         result
     }
 
-    /// Like [`Gate::call`], but when the server refuses the forwarded request with an error `retry` accepts, the
-    /// SAME request is sent once more after `pause`: the user's confirmation covered that request, so it is spent
-    /// once, never redeemed again (a second [`Gate::call`] would be refused as "token already used"). For a
-    /// refusal the server reports as passing (on Windows a file of the session read by someone else for a moment).
-    ///
-    /// # Errors
-    /// As [`Gate::call`]; the second answer is returned when there was one.
-    pub async fn call_with_retry<F, P, Fut>(
-        &self,
-        method: &str,
-        params: Value,
-        token: Option<&ConfirmationToken>,
-        retry: F,
-        pause: P,
-    ) -> Result<Reply, GateError>
-    where
-        F: Fn(&GateError) -> bool,
-        P: FnOnce() -> Fut,
-        Fut: std::future::Future<Output = ()>,
-    {
-        let result = async {
-            let plan = self.authorise(method, &params, token)?;
-            let first = self.transport.request(method, plan.params.clone()).await;
-            let result = match first.map_err(GateError::from) {
-                Err(error) if retry(&error) => {
-                    warn!(method, %error, "gate: the server refused for a moment; the same request once more");
-                    pause().await;
-                    self.transport.request(method, plan.params.clone()).await?
-                }
-                other => other?,
-            };
-            Ok(self.answered(method, plan, result))
-        }
-        .await;
-        if let Err(error) = &result {
-            log_refusal("call", method, error);
-        }
-        result
-    }
-
     async fn call_unlogged(
         &self,
         method: &str,
@@ -587,11 +547,6 @@ impl<T: Transport, C: Confirmer> Gate<T, C> {
         if let Some(aliases) = model_aliases(snapshot) {
             self.state().aliases = aliases;
         }
-    }
-
-    /// Sets the configured model aliases directly (the core may know them from its own state).
-    pub fn set_model_aliases(&self, aliases: impl IntoIterator<Item = String>) {
-        self.state().aliases = aliases.into_iter().collect();
     }
 
     /// Records a folder the user picked in a native dialog. Only such folders (and folders inside

@@ -26,10 +26,11 @@ feedback = ["vw-core-api/feedback"]
 plan-usage = ["vw-keyproxy/plan-usage"]
 # Bounded video review using installed system decoders and the packaged isolated helper.
 video = ["vw-core-api/video"]
+linux-video = ["video", "vw-core-api/linux-video"]
 # Firefox remains optional; Edge ships in the default build.
 your-firefox = ["vw-core-api/your-firefox"]
 your-edge = ["vw-core-api/your-edge"]
-# Safari is excluded from default builds pending native acceptance.
+# The macOS release builder enables Safari; other platforms leave it out.
 your-safari = ["vw-core-api/your-safari"]
 # Embed ui/dist instead of loading the dev server (what `tauri build` turns on). The private
 # end-to-end runs build with it so a debug binary (Debug API and dev launch on) shows the real UI.
@@ -44,8 +45,8 @@ vault-e2e = ["vw-debug-api/vault-e2e"]
 # (vw-webview `macos-proxy`, Network.framework's proxy API: macOS 14+, the release minimum in tauri.conf.json and
 # .cargo/config.toml). No effect on Linux and Windows. `--no-default-features` builds the macOS content-rules-only
 # previews (minimum 11), which no release ships.
-default = ["macos-proxy", "your-edge", "proxy-transports", "video", "plan-usage", "context-composition", "feedback"]
-# Optional input feedback; not in the default list, so release builds leave it out.
+default = ["macos-proxy", "your-edge", "proxy-transports", "video", "plan-usage", "context-composition", "feedback", "click-marker", "linux-video"]
+# Optional input feedback, included in release builds through the default list.
 click-marker = ["vw-core-api/click-marker", "vw-webview/click-marker"]
 macos-proxy = ["vw-webview/macos-proxy"]
 

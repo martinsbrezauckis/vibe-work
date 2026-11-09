@@ -21,6 +21,7 @@ pub(super) fn preview_decls(cfg: &Config) -> Vec<String> {
         vw_preview::PreviewState::decl(cfg),
         vw_preview::PreviewServerState::decl(cfg),
         vw_preview::VisibilityReport::decl(cfg),
+        vw_preview::CaptureBlock::decl(cfg),
         vw_preview::DeviceWidth::decl(cfg),
         vw_preview::Rect::decl(cfg),
         vw_preview::ConsoleEntry::decl(cfg),

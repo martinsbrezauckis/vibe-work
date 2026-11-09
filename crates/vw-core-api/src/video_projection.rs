@@ -305,7 +305,7 @@ mod tests {
 mod delivery_tests {
     use crate::feature_test_core::Fixture;
     use serde_json::json;
-    #[cfg(target_os = "linux")]
+    #[cfg(all(target_os = "linux", not(feature = "linux-video")))]
     #[tokio::test]
     async fn linux_video_rows_are_not_sent_to_the_window() {
         let f = Fixture::new().await;
@@ -332,7 +332,7 @@ mod delivery_tests {
         assert!(row.get("vwVideo").is_none());
         f.finish().await;
     }
-    #[cfg(any(windows, target_os = "macos"))]
+    #[cfg(any(windows, target_os = "macos", feature = "linux-video"))]
     #[tokio::test]
     async fn preflight_reaches_the_window_stream_before_execution_without_an_ask() {
         let f = Fixture::new().await;

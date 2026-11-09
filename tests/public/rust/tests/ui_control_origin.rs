@@ -96,6 +96,8 @@ async fn window_commands_stay_the_windows_and_only_an_exact_grant_runs_as_the_de
     supervisor.shutdown_grace = Duration::from_secs(1);
     let confirmer = common::host_fakes::Scripted::default();
     let secret = model.route(&mut supervisor).await;
+    // A real shell round trip must fit inside the pending request even on a loaded test host.
+    let reply_timeout = Duration::from_secs(5);
     let host = Arc::new(
         Host::start(HostConfig {
             launch: Ok(supervisor),
@@ -104,7 +106,7 @@ async fn window_commands_stay_the_windows_and_only_an_exact_grant_runs_as_the_de
             settings_path: dir.join("settings.json"),
             descriptor_dir: dir.join("debug-api"),
             dev_build: true,
-            ui_reply_timeout: Duration::from_millis(600),
+            ui_reply_timeout: reply_timeout,
             picked_folders: Vec::new(),
             confirmer: confirmer.confirmer(),
             notifier: Arc::new(common::host_fakes::Recording::default()),
@@ -156,9 +158,9 @@ async fn window_commands_stay_the_windows_and_only_an_exact_grant_runs_as_the_de
     waiting.await.unwrap();
     assert_denied(&host.execute_window(pick(&picked)).await, "answered");
 
-    // Past its deadline (600 ms): gone too.
+    // Past its deadline: gone too.
     let (_late, late_waiting) = served(&host, "worktrees", body.clone()).await;
-    tokio::time::sleep(Duration::from_millis(700)).await;
+    tokio::time::sleep(reply_timeout + Duration::from_millis(100)).await;
     assert_denied(&host.execute_window(pick(&picked)).await, "timed out");
     late_waiting.await.unwrap();
 

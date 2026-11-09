@@ -102,17 +102,49 @@ pub(crate) async fn permission(
         return Ok(());
     }
     let mode = shared.access.remembered(owner);
-    if asks_inside(tool, args) || mode.as_deref() == Some("auto-approve") {
+    if tool == names::BROWSER_ACT {
+        crate::chrome_control::builtin::check_full(mode.as_deref(), args)?;
+    }
+    let ask = mode.as_deref() == Some("ask");
+    let browser_tier = (tool == names::BROWSER_ACT)
+        .then(|| crate::chrome_control::builtin::approval_tier(mode.as_deref(), args))
+        .flatten();
+    let browser_write = browser_tier.is_some();
+    let headless = ask && tool == names::USE_HEADLESS_BROWSER;
+    if headless
+        && shared
+            .agent_tools
+            .as_ref()
+            .is_some_and(|tools| tools.on_demand.consented(owner))
+    {
         return Ok(());
     }
-    if (accepts_edits(tool, args)
-        || (tool == names::BROWSER_ACT && crate::chrome_control::builtin::accepts_edits(args)))
-        && mode.as_deref() == Some("accept-edits")
+    if ask
+        && (matches!(tool, names::BROWSER_READ | names::BROWSER_CAPTURE)
+            || tool == names::BROWSER_ACT
+                && crate::chrome_control::builtin::ask_required(args)
+                    == Some(vw_ask::chrome::Tier::Ask))
         && !stricter_rule(shared, owner, tool).await
     {
         return Ok(());
     }
-    let detail = json!({"kind":"approval", "effect":{"kind":"tool", "toolName":format!("mcp_vw.{tool}"), "input":args}, "requiredPermissions":[]});
+    if (asks_inside(tool, args) && !browser_write && !headless)
+        || mode.as_deref() == Some("auto-approve")
+    {
+        return Ok(());
+    }
+    if (accepts_edits(tool, args)
+        || (tool == names::BROWSER_ACT && crate::chrome_control::builtin::accepts_edits(args)))
+        && (mode.as_deref() == Some("accept-edits")
+            || tool == names::BROWSER_ACT && mode.as_deref() == Some("smart-approve"))
+        && !stricter_rule(shared, owner, tool).await
+    {
+        return Ok(());
+    }
+    let mut detail = json!({"kind":"approval", "effect":{"kind":"tool", "toolName":format!("mcp_vw.{tool}"), "input":args}, "requiredPermissions":[]});
+    if let Some(tier) = browser_tier {
+        detail["vwBrowserTier"] = json!(tier as u8);
+    }
     #[cfg(feature = "video")]
     let detail = if tool == "video_frames" {
         let request: vw_agent_tools::video::Request =
@@ -123,7 +155,11 @@ pub(crate) async fn permission(
     } else {
         detail
     };
-    approve(shared, owner, source, call, detail).await
+    approve(shared, owner, source, call, detail).await?;
+    if headless && let Some(tools) = &shared.agent_tools {
+        tools.on_demand.allow(owner);
+    }
+    Ok(())
 }
 
 pub(crate) async fn approve(

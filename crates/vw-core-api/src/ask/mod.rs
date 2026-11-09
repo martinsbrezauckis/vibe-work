@@ -1,4 +1,7 @@
 //! Shared permission service. Depends on pure ask policy; native and callback adapters call one registry.
+mod browser_package;
+#[cfg(test)]
+mod browser_package_tests;
 pub(crate) mod cards;
 pub(crate) mod commands;
 pub(crate) mod grants;

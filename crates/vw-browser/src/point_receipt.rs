@@ -27,6 +27,7 @@ pub(crate) async fn confirm(
     token: &str,
     frame: &str,
     document: &str,
+    options: vw_preview::ClickOptions,
 ) -> Result<(), ActError> {
     let read = |clear: bool| async move {
         input
@@ -37,7 +38,7 @@ pub(crate) async fn confirm(
     let deadline = tokio::time::Instant::now() + WAIT;
     let polled = async {
         loop {
-            if complete(&read(false).await?, token, frame, document)? {
+            if complete(&read(false).await?, token, frame, document, options)? {
                 return Ok(true);
             }
             if tokio::time::Instant::now() >= deadline {
@@ -54,7 +55,7 @@ pub(crate) async fn confirm(
     let last = read(true).await;
     polled?;
     // A final read that failed says why (for example the page's frames changed while clicking).
-    match complete(&last?, token, frame, document) {
+    match complete(&last?, token, frame, document, options) {
         Ok(true) => Ok(()),
         Ok(false) => Err(unconfirmed()),
         Err(diagnosis) => Err(diagnosis),
@@ -76,7 +77,9 @@ fn complete(
     token: &str,
     frame: &str,
     document: &str,
+    options: vw_preview::ClickOptions,
 ) -> Result<bool, ActError> {
+    let expected = options.events();
     let receipts: Vec<_> = answers
         .iter()
         .filter_map(|answer| {
@@ -96,7 +99,7 @@ fn complete(
         .filter_map(|(_, value)| value["events"].as_array())
         .map(Vec::len)
         .sum();
-    if count > 3 || receipts.iter().any(|(_, v)| v["ambiguous"] == true) {
+    if count > expected.len() || receipts.iter().any(|(_, v)| v["ambiguous"] == true) {
         return Err(ambiguous());
     }
     let mut confirmed = false;
@@ -111,7 +114,9 @@ fn complete(
             if !event["timeStamp"]
                 .as_f64()
                 .is_some_and(|time| time.is_finite() && time > dispatch)
-                || event["type"] != ["mousedown", "mouseup", "click"][index]
+                || expected
+                    .get(index)
+                    .is_none_or(|kind| event["type"] != *kind)
             {
                 return Err(ambiguous());
             }
@@ -125,7 +130,8 @@ fn complete(
                 )));
             }
         }
-        confirmed |= answer.id == frame && value["document"] == document && events.len() == 3;
+        confirmed |=
+            answer.id == frame && value["document"] == document && events.len() == expected.len();
     }
     Ok(confirmed)
 }

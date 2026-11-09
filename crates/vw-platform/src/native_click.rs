@@ -81,6 +81,23 @@ mod linux {
         point: (f64, f64),
         sent: &AtomicBool,
     ) -> Result<(), String> {
+        click_options(view, point, sent, (0, 1, 0))
+    }
+
+    /// Sends a bounded click variant: DOM button, click count and Alt/Control/Meta/Shift bits.
+    ///
+    /// # Errors
+    /// The native view is unavailable, hidden, inactive or has invalid geometry/options.
+    pub fn click_options(
+        view: &webkit2gtk::WebView,
+        point: (f64, f64),
+        sent: &AtomicBool,
+        options: (u8, u8, u8),
+    ) -> Result<(), String> {
+        let (button, count, modifiers) = options;
+        if options != (0, 0, 0) && (button > 2 || !(1..=3).contains(&count) || modifiers > 15) {
+            return Err("invalid native click options".into());
+        }
         let widget: &gtk::Widget = view.upcast_ref();
         if !widget.is_mapped()
             || !widget.is_visible()
@@ -120,18 +137,23 @@ mod linux {
         let (rx, ry) = (f64::from(root_x) + x, f64::from(root_y) + y);
         // Marked as our own so the person's pointer watch leaves it out.
         super::person::own_input(|| {
-            move_pointer(&window, &device, x, y, rx, ry);
             sent.store(true, Ordering::Release);
-            dispatch(&window, &device, gdk::EventType::ButtonPress, x, y, rx, ry);
-            dispatch(
-                &window,
-                &device,
-                gdk::EventType::ButtonRelease,
-                x,
-                y,
-                rx,
-                ry,
-            );
+            move_pointer(&window, &device, x, y, rx, ry);
+            for n in 1..=count {
+                let kind = match n {
+                    2 => gdk::EventType::DoubleButtonPress,
+                    3 => gdk::EventType::TripleButtonPress,
+                    _ => gdk::EventType::ButtonPress,
+                };
+                dispatch(&window, &device, kind, (x, y, rx, ry), options);
+                dispatch(
+                    &window,
+                    &device,
+                    gdk::EventType::ButtonRelease,
+                    (x, y, rx, ry),
+                    options,
+                );
+            }
         });
         Ok(())
     }
@@ -200,11 +222,38 @@ mod linux {
         window: &gdk::Window,
         device: &gdk::Device,
         kind: gdk::EventType,
-        x: f64,
-        y: f64,
-        root_x: f64,
-        root_y: f64,
+        position: (f64, f64, f64, f64),
+        options: (u8, u8, u8),
     ) {
+        let (x, y, root_x, root_y) = position;
+        let (dom_button, _, modifiers) = options;
+        let native_button = match dom_button {
+            1 => 2,
+            2 => 3,
+            _ => 1,
+        };
+        let held = match native_button {
+            2 => gdk::ffi::GDK_BUTTON2_MASK,
+            3 => gdk::ffi::GDK_BUTTON3_MASK,
+            _ => gdk::ffi::GDK_BUTTON1_MASK,
+        };
+        let state = if modifiers & 1 != 0 {
+            gdk::ffi::GDK_MOD1_MASK
+        } else {
+            0
+        } | if modifiers & 2 != 0 {
+            gdk::ffi::GDK_CONTROL_MASK
+        } else {
+            0
+        } | if modifiers & 4 != 0 {
+            gdk::ffi::GDK_META_MASK | gdk::ffi::GDK_SUPER_MASK
+        } else {
+            0
+        } | if modifiers & 8 != 0 {
+            gdk::ffi::GDK_SHIFT_MASK
+        } else {
+            0
+        };
         let mut event = gdk::Event::new(kind);
         // SAFETY: GTK created this GdkEventButton on the UI thread. The GObject refs below are transferred to the
         // event, which releases them when it is dropped. The event is synchronously delivered before that drop.
@@ -216,16 +265,17 @@ mod linux {
             button.device = device.to_glib_none().0;
             glib::gobject_ffi::g_object_ref(button.device.cast());
             button.send_event = 1;
-            button.button = 1;
+            button.button = native_button;
             button.x = x;
             button.y = y;
             button.x_root = root_x;
             button.y_root = root_y;
-            button.state = if kind == gdk::EventType::ButtonRelease {
-                gdk::ffi::GDK_BUTTON1_MASK
-            } else {
-                0
-            };
+            button.state = state
+                | if kind == gdk::EventType::ButtonRelease {
+                    held
+                } else {
+                    0
+                };
             button.time = 0; // GDK_CURRENT_TIME
         }
         // GTK explicitly recommends main_do_event over Widget.event for synthetic input.
@@ -240,6 +290,8 @@ pub mod person;
 pub use linux::click as linux_click;
 #[cfg(target_os = "linux")]
 pub use linux::click_checked as linux_click_checked;
+#[cfg(target_os = "linux")]
+pub use linux::click_options as linux_click_options;
 
 #[cfg(windows)]
 mod windows_click;
@@ -256,3 +308,10 @@ pub use macos::after as macos_after;
 pub use macos::click as macos_click;
 #[cfg(target_os = "macos")]
 pub use macos::click_checked as macos_click_checked;
+#[cfg(target_os = "macos")]
+pub use macos::click_options as macos_click_options;
+
+#[cfg(windows)]
+mod windows_sequence;
+#[cfg(windows)]
+pub use windows_sequence::click as windows_click_options;

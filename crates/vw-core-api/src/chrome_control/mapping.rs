@@ -1,14 +1,14 @@
 //! The single action-to-permission table for the owned helper. Depends on vw-ask;
 //! used by the checked gateway and owner policy, so both enforce the same groups.
 use serde_json::{Value, json};
-use vw_ask::chrome::{Group, Need, Tier};
+use vw_ask::chrome::{Group, Need, SecretRead, Tier};
 
 // action, helper capability, Vibe Work permission
 const ACTIONS: &[(&str, &str, Need)] = &[
     (
         "clipboard.read",
         "clipboard.read",
-        Need::Group(Group::SiteData),
+        Need::SecretRead(SecretRead::Clipboard),
     ),
     (
         "clipboard.write",
@@ -62,7 +62,11 @@ const ACTIONS: &[(&str, &str, Need)] = &[
     ("console.read", "page.read", Need::Group(Group::Read)),
     ("network.list", "page.read", Need::Group(Group::Read)),
     ("network.headers", "page.read", Need::Group(Group::Read)),
-    ("network.body", "files.download", Need::Group(Group::Forms)),
+    (
+        "network.body",
+        "files.download",
+        Need::SecretRead(SecretRead::ResponseBody),
+    ),
     ("auth.fill", "auth.secrets", Need::Group(Group::SignIn)),
     ("tabs.list", "tabs.inspect_other", Need::Group(Group::Read)),
     ("page.back", "page.navigate", Need::Group(Group::Navigate)),
@@ -78,7 +82,11 @@ const ACTIONS: &[(&str, &str, Need)] = &[
         "files.download",
         Need::Group(Group::Forms),
     ),
-    ("cookies.read", "cookies.read", Need::Group(Group::SiteData)),
+    (
+        "cookies.read",
+        "cookies.read",
+        Need::SecretRead(SecretRead::Cookies),
+    ),
     ("page.read", "page.read", Need::Group(Group::Read)),
     ("page.find", "page.read", Need::Group(Group::Read)),
     ("page.wait", "page.read", Need::Group(Group::Read)),
@@ -136,7 +144,11 @@ const ACTIONS: &[(&str, &str, Need)] = &[
         "storage.metadata",
         Need::Group(Group::SiteData),
     ),
-    ("storage.read", "storage.read", Need::Group(Group::SiteData)),
+    (
+        "storage.read",
+        "storage.read",
+        Need::SecretRead(SecretRead::Storage),
+    ),
     (
         "storage.change",
         "storage.change",
@@ -215,17 +227,17 @@ pub(super) fn need(tool: &str, args: &Value) -> Need {
     if tool == "chrome_status" || tool == "chrome_session" {
         return Need::Nothing;
     }
+    if action(tool, args) == "network.headers" && args["args"]["unredacted"] == true {
+        return Need::SecretRead(SecretRead::Headers);
+    }
     ACTIONS
         .iter()
         .find(|(id, _, _)| *id == action(tool, args))
         .map_or(Need::Unknown, |(_, _, need)| *need)
 }
 
-/// The required tier is action-specific even when two actions share a helper capability.
-pub(super) fn required(tool: &str, args: &Value) -> Option<Tier> {
-    if action(tool, args) == "network.headers" && args["args"]["unredacted"] == true {
-        return Some(Tier::FullAccess);
-    }
+/// The package tier keeps broad helper capabilities out of lower-mode leases.
+fn package_required(tool: &str, args: &Value) -> Option<Tier> {
     if action(tool, args) == "page.key" {
         let key = args["args"]["key"].as_str().unwrap_or_default();
         if !matches!(
@@ -253,21 +265,82 @@ pub(super) fn required(tool: &str, args: &Value) -> Option<Tier> {
         Need::Group(Group::Forms | Group::Send | Group::Bookmarks | Group::History) => {
             Some(Tier::AcceptEdits)
         }
-        Need::Group(_) => Some(Tier::FullAccess),
+        Need::Group(_) | Need::SecretRead(_) => Some(Tier::FullAccess),
         Need::Unknown => None,
     }
+}
+
+/// Wider modes include every ordinary read allowed in Ask; writes retain their package tier.
+pub(super) fn required(tool: &str, args: &Value) -> Option<Tier> {
+    let tier = package_required(tool, args)?;
+    Some(if ask_required(tool, args) == Some(Tier::Ask) {
+        tier.min(Tier::AcceptEdits)
+    } else {
+        tier
+    })
+}
+
+/// Ask separates ordinary reads/navigation from write packages; secret reads retain Full access.
+pub(crate) fn ask_required(tool: &str, args: &Value) -> Option<Tier> {
+    let tier = package_required(tool, args)?;
+    if matches!(need(tool, args), Need::SecretRead(_)) {
+        return Some(Tier::FullAccess);
+    }
+    if action(tool, args) == "tabs.emulate"
+        && args["args"]["userAgent"]
+            .as_str()
+            .is_some_and(|value| !value.is_empty())
+    {
+        return Some(Tier::AcceptEdits);
+    }
+    if vw_ask::chrome::asks(&action(tool, args), args["args"]["key"].as_str()) {
+        Some(tier.max(Tier::AcceptEdits))
+    } else {
+        Some(Tier::Ask)
+    }
+}
+
+/// A tool grant cannot substitute for the chat's mode when reading secret values.
+pub(super) fn check_full(mode: Option<&str>, tool: &str, args: &Value) -> Result<(), String> {
+    if mode.and_then(Tier::from_mode) != Some(Tier::FullAccess)
+        && let Need::SecretRead(secret) = need(tool, args)
+    {
+        return Err(secret.refusal());
+    }
+    Ok(())
+}
+
+/// Approval options are cumulative too; Full-only reads never offer a card.
+pub(super) fn approval_tier(mode: Option<&str>, tool: &str, args: &Value) -> Option<Tier> {
+    let tier = mode.and_then(Tier::from_mode)?;
+    if matches!(need(tool, args), Need::SecretRead(_)) {
+        return None;
+    }
+    let required = if tier == Tier::Ask {
+        ask_required(tool, args)?
+    } else {
+        required(tool, args)?
+    };
+    (required > tier).then_some(required)
 }
 
 pub(super) fn capabilities(tier: Tier) -> Vec<&'static str> {
     let mut caps = std::collections::BTreeSet::new();
     for (action, cap, _) in ACTIONS {
-        if required("chrome_execute", &json!({"action":action,"args":{}}))
+        if package_required("chrome_execute", &json!({"action":action,"args":{}}))
             .is_some_and(|need| need <= tier)
         {
             caps.insert(*cap);
         }
     }
     caps.into_iter().collect()
+}
+
+pub(super) fn capability(tool: &str, args: &Value) -> Option<&'static str> {
+    ACTIONS
+        .iter()
+        .find(|(id, _, _)| *id == action(tool, args))
+        .map(|(_, cap, _)| *cap)
 }
 
 /// Helper capabilities are admitted per call, never by a saved profile-wide level.
@@ -303,6 +376,9 @@ mod tier_tests {
             "tabs.close_owned",
             "files.upload",
             "page.commit",
+            "webmcp.list",
+            "cookies.metadata",
+            "storage.metadata",
         ] {
             assert_eq!(
                 required("chrome_execute", &json!({"action":action})),
@@ -312,7 +388,6 @@ mod tier_tests {
         }
         for action in [
             "raw.execute",
-            "webmcp.list",
             "webmcp.call",
             "auth.fill",
             "auth.basic",
@@ -343,7 +418,7 @@ mod tier_tests {
                 json!({"unredacted":true}),
                 Tier::FullAccess,
             ),
-            ("network.body", json!({}), Tier::AcceptEdits),
+            ("network.body", json!({}), Tier::FullAccess),
         ] {
             assert_eq!(
                 required("chrome_execute", &json!({"action":action,"args":args})),

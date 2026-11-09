@@ -73,9 +73,36 @@ async fn check(core: &crate::Core) {
     assert!(matches!(result, crate::CommandResult::Reply { .. }));
 }
 
-/// A stale side record cannot distinguish a person's identical replacement from our former entry.
 #[tokio::test]
-async fn an_identical_unmarked_replacement_survives_a_stale_record() {
+async fn vibe_rewritten_facts_are_removed_before_the_lobby_reads_an_experiments_off_config() {
+    let (core, root, home) = Box::pin(start("rewritten-facts")).await;
+    let original = include_str!("fixtures/models_rewritten.toml");
+    std::fs::write(home.join("config.toml"), original).unwrap();
+    offer(&home, None);
+    check(&core).await;
+    let read = std::fs::read_to_string(home.join("read-config.toml")).unwrap();
+    assert!(
+        !read.contains("mistral-large-4-0-3"),
+        "orphan facts still reach Vibe: {read}"
+    );
+    let expected: toml::Table = original.parse().unwrap();
+    let actual: toml::Table = read.parse().unwrap();
+    assert_eq!(
+        actual["models"].as_array().unwrap(),
+        &expected["models"].as_array().unwrap()[..1]
+    );
+    check(&core).await;
+    assert_eq!(
+        std::fs::read_to_string(home.join("config.toml")).unwrap(),
+        read
+    );
+    core.shutdown().await;
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+/// Exact facts remain ours after Vibe rewrites the file, even when the side record is stale.
+#[tokio::test]
+async fn an_identical_unmarked_rewrite_is_removed_with_a_stale_record() {
     // Boxed (clippy large_futures): the start future exceeds 16 KiB on aarch64.
     let (core, root, home) = Box::pin(start("replacement")).await;
     let file = home.join("config.toml");
@@ -89,10 +116,11 @@ async fn an_identical_unmarked_replacement_survives_a_stale_record() {
     std::fs::write(&file, &replacement).unwrap();
     offer(&home, None);
     check(&core).await;
-    assert_eq!(std::fs::read_to_string(&file).unwrap(), replacement);
+    let bare = crate::model_facts::without(&replacement, None).unwrap();
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), bare);
     assert_eq!(
         std::fs::read_to_string(home.join("read-config.toml")).unwrap(),
-        replacement
+        bare
     );
     assert!(crate::model_facts::recorded(&home).is_none());
     core.shutdown().await;
@@ -169,11 +197,11 @@ async fn a_different_alias_with_our_prices_survives_the_launch_check_byte_for_by
     std::fs::remove_dir_all(root).unwrap();
 }
 
-/// A person's own unmarked entry for one of Mistral's Large 4 aliases, holding exactly the published prices (and
-/// the window), is theirs: every launch check leaves the file byte for byte, offered or not, and never adds a
-/// second entry for that alias (Vibe keeps only the last entry of an alias, which would replace theirs).
+/// A person's entry with extra settings belongs to them, even on the same alias and with our prices.
+/// Every launch check leaves it byte for byte, offered or not, and never adds a second entry for that alias
+/// (Vibe keeps only the last entry of an alias, which would replace theirs).
 #[tokio::test]
-async fn a_persons_same_alias_entry_with_our_prices_survives_the_launch_check_byte_for_byte() {
+async fn a_persons_same_alias_entry_with_other_content_survives_the_launch_check_byte_for_byte() {
     // Boxed (clippy large_futures): the start future exceeds 16 KiB on aarch64.
     let (core, root, home) = Box::pin(start("same-alias")).await;
     let file = home.join("config.toml");
@@ -187,7 +215,7 @@ async fn a_persons_same_alias_entry_with_our_prices_survives_the_launch_check_by
             for window in ["", "max_context_length = 1048576\n"] {
                 for spelling in ["0.70", "0.7"] {
                     let original = format!(
-                        "active_model = \"large-4\"\n\n[[models]]\nalias = \"{alias}\"\n{window}input_price = {spelling}\ncached_input_price = 0.07\noutput_price = 2.1\n"
+                        "active_model = \"large-4\"\n\n[[models]]\nalias = \"{alias}\"\n{window}input_price = {spelling}\ncached_input_price = 0.07\noutput_price = 2.1\nmax_output_tokens = 1000\n"
                     );
                     std::fs::write(&file, &original).unwrap();
                     for _ in 0..2 {
@@ -208,9 +236,9 @@ async fn a_persons_same_alias_entry_with_our_prices_survives_the_launch_check_by
     std::fs::remove_dir_all(root).unwrap();
 }
 
-/// Vibe strips comments, leaving ownership ambiguous. Keep the entry once, offered or retired.
+/// Vibe strips comments: refresh our exact entry while offered and remove it when retired.
 #[tokio::test]
-async fn our_entry_that_lost_its_mark_is_preserved_without_a_record() {
+async fn our_entry_that_lost_its_mark_is_refreshed_or_removed_without_a_record() {
     // Boxed (clippy large_futures): the start future exceeds 16 KiB on aarch64.
     let (core, root, home) = Box::pin(start("record")).await;
     let file = home.join("config.toml");
@@ -235,7 +263,11 @@ async fn our_entry_that_lost_its_mark_is_preserved_without_a_record() {
         check(&core).await;
         let again = std::fs::read_to_string(&file).unwrap();
         assert_eq!(again.matches(alias).count(), 1, "{again}");
-        assert_eq!(crate::model_facts::without(&again, None), None, "{again}");
+        assert_eq!(
+            crate::model_facts::without(&again, None).as_deref(),
+            Some(base),
+            "{again}"
+        );
         std::fs::write(
             &file,
             again.replace(crate::model_facts::MARK.trim_end(), ""),
@@ -243,12 +275,12 @@ async fn our_entry_that_lost_its_mark_is_preserved_without_a_record() {
         .unwrap();
         offer(&home, None);
         check(&core).await;
-        assert_eq!(std::fs::read_to_string(&file).unwrap(), unmarked, "{alias}");
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), base, "{alias}");
         assert!(crate::model_facts::recorded(&home).is_none());
-        // Nothing of ours is left, so the same text written again (by a person) is theirs.
+        // Recognition does not require the side record on a later launch either.
         std::fs::write(&file, &unmarked).unwrap();
         check(&core).await;
-        assert_eq!(std::fs::read_to_string(&file).unwrap(), unmarked, "{alias}");
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), base, "{alias}");
     }
     core.shutdown().await;
     std::fs::remove_dir_all(root).unwrap();

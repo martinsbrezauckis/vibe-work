@@ -542,18 +542,8 @@
 .set-cat-body .secrets-add > .tb-btn:not(.primary) {
   border: 1px solid var(--line-2);
 }
-.set-cat-body .secrets-uses {
-  margin: 4px 0 8px;
-  padding: 0;
-  list-style: none;
-}
 .set-cat-body section h4 + .key-line {
   margin-top: 0;
-}
-
-/* The All / MCP filter. */
-.set-cat-body .secrets-filter {
-  margin: 4px 0 8px;
 }
 
 /* Metadata stays on one line; shared .check rows own typography, padding and separators. */
@@ -594,11 +584,6 @@
 .set-cat-body .secrets-toolbar .set-search {
   flex: 1;
   min-width: 0;
-}
-.set-cat-body .secrets-count {
-  flex: none;
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
 }
 .account-sign-in-viewport {
   height: min(560px, 55vh);

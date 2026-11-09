@@ -1,6 +1,20 @@
 //! Built-in browser input keys checked against the shipped schema, before consent or tab selection.
 //! Used by the MCP server and core tool boundary; keeps extra argument objects out of execution.
 use serde_json::Value;
+use std::{collections::BTreeMap, sync::OnceLock};
+
+/// The executable action names and their fixed approval verbs, shared with the UI.
+/// A malformed catalog offers no actions or session scope.
+#[must_use]
+pub fn actions() -> &'static BTreeMap<String, String> {
+    static ACTIONS: OnceLock<BTreeMap<String, String>> = OnceLock::new();
+    ACTIONS.get_or_init(|| {
+        serde_json::from_str::<Value>(include_str!("browser_actions.json"))
+            .ok()
+            .and_then(|value| serde_json::from_value(value["actions"].clone()).ok())
+            .unwrap_or_default()
+    })
+}
 
 /// Reject fields the built-in read/action executors do not advertise.
 ///

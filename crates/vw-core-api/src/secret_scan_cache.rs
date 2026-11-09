@@ -178,7 +178,7 @@ pub(crate) fn unified_store(folder: &Path, path: &Path) -> Option<PathBuf> {
 /// 3.0.2 checks them when it loads the chat (`mistralai_vibe_local_harness/vibe/_storage.py`: "stored chunk digest
 /// mismatch", "stored record digest mismatch"). A replaced value would make the chat unloadable, so the scanner
 /// reports these files and leaves them unchanged (the chat can be deleted instead). The 2.x layout
-/// (`session_<...>/meta.json` and `messages.jsonl`, the logs of 0.1.1 users) has no digests and stays redactable.
+/// (`session_<...>/meta.json` and `messages.jsonl`, legacy session logs) has no digests and stays redactable.
 ///
 /// Fails towards "sealed": the path is compared as written and in canonical form (a folder configured through a
 /// link, or `\\?\C:\...` on Windows, as in `inside_log_folder`), and a side that cannot be resolved counts as sealed.
@@ -239,6 +239,11 @@ pub(crate) fn chat(folder: &Path, path: &Path) -> Option<(String, String)> {
     if id.is_empty() {
         return None;
     }
-    let title = clean(value.title.as_deref().unwrap_or("Untitled chat"));
+    let title = clean(
+        value
+            .title
+            .as_deref()
+            .unwrap_or(vw_vocabulary::text("untitledSession").unwrap_or_default()),
+    );
     Some((id, title))
 }

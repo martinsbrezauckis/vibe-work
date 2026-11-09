@@ -17,7 +17,7 @@ use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::Duration;
 
-use process_wrap::tokio::{CommandWrap, KillOnDrop};
+use process_wrap::tokio::KillOnDrop;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::sync::{mpsc, watch};
 
@@ -155,7 +155,7 @@ pub async fn run(
     tail: &mut Tail,
     mut on_line: impl FnMut(&str),
 ) -> Result<(), StepError> {
-    let mut command = CommandWrap::with_new(&step.program, |cmd| {
+    let mut command = vw_platform::process_command::hidden_wrap(&step.program, |cmd| {
         cmd.args(&step.args)
             .env_clear()
             .envs(env.iter().map(|(k, v)| (k.as_os_str(), v.as_os_str())))
@@ -168,9 +168,6 @@ pub async fn run(
     command.wrap(process_wrap::tokio::ProcessGroup::leader());
     #[cfg(windows)]
     {
-        command.wrap(process_wrap::tokio::CreationFlags(
-            windows::Win32::System::Threading::CREATE_NO_WINDOW,
-        ));
         command.wrap(process_wrap::tokio::JobObject);
     }
     command.wrap(KillOnDrop);

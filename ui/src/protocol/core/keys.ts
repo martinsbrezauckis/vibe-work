@@ -9,7 +9,11 @@ export type KeyRequest = { "op": "readStatus", } | { "op": "createVault",
 /**
  * The new passphrase.
  */
-passphrase: SecretInput, } | { "op": "unlockVault",
+passphrase: SecretInput,
+/**
+ * The setup choice; older clients retain system sign-in.
+ */
+unlockMethod?: VaultUnlockMethod, } | { "op": "unlockVault",
 /**
  * The passphrase.
  */
@@ -17,19 +21,27 @@ passphrase: SecretInput,
 /**
  * Which vault, when two exist.
  */
-vault?: VaultChoice, } | { "op": "lockVault", } | { "op": "setLockVaultOnQuit",
+vault?: VaultChoice,
+/**
+ * The first-run choice; later unlocks retain the saved policy.
+ */
+unlockMethod?: VaultUnlockMethod, } | { "op": "lockVault", } | { "op": "setLockVaultOnQuit",
 /**
  * On: quitting locks the vault and deletes its kept key.
  */
-on: boolean, } | { "op": "setupStoreKey",
+on: boolean, } | { "op": "setVaultUnlockMethod",
+/**
+ * The chosen method.
+ */
+unlockMethod: VaultUnlockMethod,
+/**
+ * The current vault password.
+ */
+passphrase: SecretInput, } | { "op": "setupStoreKey",
 /**
  * The key.
  */
-apiKey: SecretInput, } | { "op": "listKeyCandidates", } | { "op": "useExistingKey",
-/**
- * Its vault item id.
- */
-itemId: string, } | { "op": "listMistralKeys", } | { "op": "addMistralKey",
+apiKey: SecretInput, } | { "op": "listMistralKeys", } | { "op": "addMistralKey",
 /**
  * The vault display label.
  */
@@ -129,6 +141,10 @@ rememberedDevice: boolean,
  */
 lockVaultOnQuit: boolean,
 /**
+ * Missing on older servers; existing vaults retain system sign-in.
+ */
+unlockMethod?: VaultUnlockMethod,
+/**
  * `unknown` (locked), `missing`, `ready`.
  */
 keyState: string,
@@ -165,20 +181,6 @@ addedMs: number, };
 
 export type KeySourceView = "vault" | "vibe";
 
-export type KeyCandidateView = {
-/**
- * Vault item id.
- */
-itemId: string,
-/**
- * Its title.
- */
-label: string,
-/**
- * `resource` or `compat`.
- */
-source: string, };
-
 export type VibeKeyView = {
 /**
  * Where.
@@ -196,3 +198,5 @@ macKeychain: boolean, };
 export type VibeKeySource = "dotEnv" | "keyring";
 
 export type VaultChoice = "shellx" | "desktop" | "vibeWork";
+
+export type VaultUnlockMethod = "system" | "password";

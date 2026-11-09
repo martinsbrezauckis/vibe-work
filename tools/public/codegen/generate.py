@@ -110,17 +110,31 @@ def _tool(name: str) -> str:
     return found
 
 
+def format_batches(command: list[str], paths: list[str]) -> None:
+    """Leave room below cmd.exe's 8191-character limit for pnpm's Windows shim."""
+    batch: list[str] = []
+    for path in paths:
+        if len(subprocess.list2cmdline([*command, path])) >= 6000:
+            raise SystemExit(f"generate.py: formatter command is too long for one file: {path}")
+        if batch and len(subprocess.list2cmdline([*command, *batch, path])) >= 6000:
+            subprocess.run([*command, *batch], check=True)
+            batch = []
+        batch.append(path)
+    if batch:
+        subprocess.run([*command, *batch], check=True)
+
+
 def format_tree(base: Path, rel_paths: list[Path]) -> None:
     """Format generated files in place with the project's rustfmt and prettier settings."""
     rust = [str(base / p) for p in rel_paths if p.suffix == ".rs"]
     ts = [str(base / p) for p in rel_paths if p.suffix == ".ts"]
-    subprocess.run(
-        [_tool("rustfmt"), "--edition", "2024", "--config-path", str(ROOT / "rustfmt.toml"), *rust], check=True
+    format_batches(
+        [_tool("rustfmt"), "--edition", "2024", "--config-path", str(ROOT / "rustfmt.toml")], rust
     )
-    subprocess.run(
+    format_batches(
         [_tool("pnpm"), "--silent", "--dir", str(ROOT / "ui"), "exec", "prettier", "--config", str(ROOT / "ui/.prettierrc.json"),
-         "--write", "--log-level", "warn", *ts],
-        check=True,
+         "--write", "--log-level", "warn"],
+        ts,
     )
 
 

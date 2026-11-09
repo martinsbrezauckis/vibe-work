@@ -355,7 +355,11 @@ pub(crate) fn core_error(error: &PreviewError) -> CoreError {
         | PreviewError::Image(_)
         | PreviewError::PoolStorage(_) => ErrorCode::Internal,
     };
-    CoreError::new(code, error.to_string())
+    let mut result = CoreError::new(code, error.to_string());
+    if let PreviewError::ScreenshotHidden(block) = error {
+        result.capture_block = Some(block.kind);
+    }
+    result
 }
 
 fn unavailable() -> CoreError {

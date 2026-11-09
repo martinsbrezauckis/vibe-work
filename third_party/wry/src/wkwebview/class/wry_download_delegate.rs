@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-License-Identifier: MIT
 
-use std::{cell::RefCell, path::PathBuf, rc::Rc};
+use std::{cell::RefCell, collections::HashMap, path::PathBuf, rc::Rc};
 
 use objc2::{define_class, msg_send, rc::Retained, runtime::NSObject, MainThreadOnly};
 use objc2_foundation::{
@@ -15,6 +15,8 @@ use crate::wkwebview::download::{download_did_fail, download_did_finish, downloa
 pub struct WryDownloadDelegateIvars {
   pub started: Option<RefCell<Box<dyn FnMut(String, &mut PathBuf) -> bool + 'static>>>,
   pub completed: Option<Rc<dyn Fn(String, Option<PathBuf>, bool) + 'static>>,
+  // Match completion to its own staging file, including concurrent downloads of one URL.
+  pub destinations: RefCell<HashMap<usize, PathBuf>>,
 }
 
 define_class!(
@@ -60,6 +62,7 @@ impl WryDownloadDelegate {
       .set_ivars(WryDownloadDelegateIvars {
         started: download_started_handler.map(|handler| RefCell::new(handler)),
         completed: download_completed_handler,
+        destinations: RefCell::new(HashMap::new()),
       });
 
     unsafe { msg_send![super(delegate), init] }

@@ -30,6 +30,9 @@ pub(super) async fn show_dialog<R: Runtime>(
         body,
         buttons: ordered.clone(),
     };
+    if modal {
+        let _ = crate::tray::reveal_main_window(app);
+    }
     // Modal over the main window when it exists; an agent's request is a window of its own (no owner to disable).
     let parent = crate::main_window(app)
         .filter(|_| modal)

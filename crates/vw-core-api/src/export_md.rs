@@ -341,7 +341,7 @@ pub(crate) fn render(head: &ExportHead, entries: &[Value]) -> (String, ExportCou
         .title
         .as_deref()
         .and_then(|t| nonempty(Some(t)))
-        .unwrap_or("Untitled session");
+        .unwrap_or(vw_vocabulary::text("untitledSession").unwrap_or_default());
     let _ = writeln!(out, "# {}\n", title.replace('\n', " "));
     if let Some(cwd) = head.cwd.as_deref() {
         let _ = writeln!(out, "- Folder: {}", inline_code(cwd));

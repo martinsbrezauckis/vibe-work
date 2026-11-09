@@ -117,6 +117,7 @@ pub trait WebContextExt {
 
   fn register_download_handler(
     &mut self,
+    webview: WebView,
     download_started_callback: Option<Box<dyn FnMut(String, &mut PathBuf) -> bool>>,
     download_completed_callback: Option<Rc<dyn Fn(String, Option<PathBuf>, bool) + 'static>>,
   );
@@ -306,15 +307,18 @@ impl WebContextExt for super::WebContext {
 
   fn register_download_handler(
     &mut self,
+    webview: WebView,
     download_started_handler: Option<Box<dyn FnMut(String, &mut PathBuf) -> bool>>,
     download_completed_handler: Option<Rc<dyn Fn(String, Option<PathBuf>, bool) + 'static>>,
   ) {
     let context = &self.os.context;
 
     let download_started_handler = Rc::new(RefCell::new(download_started_handler));
-    let failed = Rc::new(RefCell::new(false));
+    let owner = webview.downgrade();
 
     context.connect_download_started(move |_context, download| {
+      if download.web_view() != owner.upgrade() || owner.upgrade().is_none() { return; }
+      let failed = Rc::new(RefCell::new(false));
       let download_started_handler = download_started_handler.clone();
       download.connect_decide_destination(move |download, suggested_filename| {
         if let Some(uri) = download.request().and_then(|req| req.uri()) {

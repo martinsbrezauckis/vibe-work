@@ -15,7 +15,6 @@
 //!   so the opener never sees quotes, spaces or other characters a command line could split on.
 
 use std::ffi::OsString;
-use std::process::Command;
 
 use url::Url;
 
@@ -155,7 +154,7 @@ pub fn open_mail_url(text: &str) -> Result<(), OpenUrlError> {
 /// Starts the platform opener for an already checked link and reaps it in the background.
 fn spawn_opener(url: &str) -> Result<(), OpenUrlError> {
     let (program, args) = LinkOpener::current().command(url);
-    let mut command = Command::new(program);
+    let mut command = crate::process_command::hidden(program);
     crate::child_env::remove_own_run_settings(&mut command);
     let mut child = command
         .args(args)

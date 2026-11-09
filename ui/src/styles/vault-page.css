@@ -137,3 +137,49 @@
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+
+/* Native radio semantics for the two vault unlock choices in setup and settings. */
+.vault-unlock-choice {
+  border: 0;
+  padding: 0;
+  margin: 12px 0;
+  min-width: 0;
+}
+.vault-unlock-choice legend {
+  margin-bottom: 6px;
+}
+.vault-unlock-choice label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+}
+.vault-unlock-choice input[type="radio"] {
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  flex: 0 0 14px;
+  border: 1px solid var(--control-line);
+  border-radius: var(--radius-round);
+  background: var(--bg);
+  display: inline-grid;
+  place-content: center;
+}
+.vault-unlock-choice input:checked {
+  border-color: var(--orange);
+}
+.vault-unlock-choice input:checked::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-round);
+  background: var(--orange);
+}
+.vault-unlock-choice:disabled {
+  opacity: 0.5;
+}
+
+.vault-unlock-choice label:has(input[disabled]) {
+  opacity: 0.5;
+}

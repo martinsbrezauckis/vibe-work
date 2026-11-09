@@ -8,7 +8,6 @@ use std::process::Stdio;
 use std::time::Duration;
 
 use serde_json::{Value, json};
-use tokio::process::Command;
 use tokio::sync::OnceCell;
 use vw_supervisor::SupervisorConfig;
 
@@ -46,11 +45,10 @@ impl Context {
     }
 
     async fn check(&self, shell: &str, script: &str) -> &'static str {
-        let mut command = Command::new(shell);
+        let mut command = vw_platform::process_command::hidden_tokio(shell);
         #[cfg(windows)]
         {
             command.args(["-NoProfile", "-NonInteractive", "-Command", script]);
-            command.creation_flags(0x0800_0000);
         }
         #[cfg(not(windows))]
         command.args(["-c", script]);

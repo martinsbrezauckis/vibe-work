@@ -175,7 +175,14 @@ async fn a_ticket_finishing_the_same_pairing_closes_the_unused_dialog() {
     })).unwrap();
     settle().await;
     assert!(answer.send(Confirmation::Approved).is_err());
-    assert!(calls.lock().unwrap().is_empty());
+    assert!(
+        calls
+            .lock()
+            .unwrap()
+            .iter()
+            .all(|(method, _)| method == "chrome_status"),
+        "finishing pairing may refresh metadata but must never approve the unused dialog"
+    );
     notify(&core, ID, "chrome");
     settle().await;
     assert!(receive.try_recv().is_err());

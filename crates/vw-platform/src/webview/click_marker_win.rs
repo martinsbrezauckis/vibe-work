@@ -1,6 +1,6 @@
-//! Windows click feedback: a layered, input-transparent child of this WebView2's host HWND.
+//! Windows click feedback: a layered, input-transparent popup owned by the app's main HWND.
 //! Depends on Win32/GDI and WebView2; vw-webview calls `show` on the UI thread after input.
-//! No page evaluation, capture compositing or global pointer hook. Parent destruction owns cleanup.
+//! No page evaluation, capture compositing or global pointer hook. Owner destruction owns cleanup.
 
 use std::{
     cell::RefCell,
@@ -10,7 +10,10 @@ use std::{
 use webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2Controller;
 use windows::{
     Win32::{
-        Foundation::{COLORREF, HWND, LPARAM, LRESULT, POINT, RECT, SIZE, WPARAM},
+        Foundation::{
+            COLORREF, ERROR_CLASS_ALREADY_EXISTS, ERROR_SUCCESS, GetLastError, HWND, LPARAM,
+            LRESULT, POINT, RECT, SIZE, SetLastError, WPARAM,
+        },
         Graphics::Gdi::{
             AC_SRC_ALPHA, AC_SRC_OVER, BI_RGB, BITMAPINFO, BITMAPINFOHEADER, BLENDFUNCTION,
             ClientToScreen, CreateCompatibleDC, CreateDIBSection, DIB_RGB_COLORS, DeleteDC,
@@ -20,20 +23,29 @@ use windows::{
         UI::{
             HiDpi::GetDpiForWindow,
             WindowsAndMessaging::{
-                CreateWindowExW, DefWindowProcW, DestroyWindow, FindWindowExW, HTTRANSPARENT,
-                HWND_TOP, IsWindowVisible, KillTimer, MA_NOACTIVATE, RegisterClassW,
-                SWP_NOACTIVATE, SWP_SHOWWINDOW, SetTimer, SetWindowPos, ULW_ALPHA,
+                CreateWindowExW, DefWindowProcW, DestroyWindow, GA_ROOT, GetAncestor,
+                HTTRANSPARENT, HWND_TOP, IsIconic, IsWindowVisible, KillTimer, MA_NOACTIVATE,
+                RegisterClassW, SWP_NOACTIVATE, SWP_SHOWWINDOW, SetTimer, SetWindowPos, ULW_ALPHA,
                 UpdateLayeredWindow, WM_MOUSEACTIVATE, WM_NCDESTROY, WM_NCHITTEST, WM_TIMER,
-                WNDCLASSW, WS_CHILD, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TRANSPARENT,
+                WNDCLASSW, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT,
+                WS_POPUP,
             },
         },
     },
     core::w,
 };
 
+#[path = "click_marker_win_calls.rs"]
+mod calls;
+use super::click_marker_win_math::{Position, position};
+use calls::{error_text, win32};
+
 const CLASS: windows::core::PCWSTR = w!("VibeWorkClickMarker");
 struct Marker {
     controller: ICoreWebView2Controller,
+    parent: HWND,
+    owner: HWND,
+    origin: POINT,
     bounds: RECT,
     until: Instant,
     dpi: u32,
@@ -101,76 +113,116 @@ unsafe fn show_inner(
             return Err("the preview has no display scale".into());
         }
         let scale = f64::from(dpi) / 96.0;
-        let side = rounded(28.0 * scale);
-        let left = bounds.left + rounded(x) - side / 2;
-        let top = bounds.top + rounded(y) - side / 2;
-        let instance = GetModuleHandleW(None).map_err(|e| e.to_string())?;
-        // Registering an existing class is harmless; CreateWindowEx reports a real failure below.
-        RegisterClassW(&WNDCLASSW {
-            lpfnWndProc: Some(window_proc),
-            hInstance: instance.into(),
-            lpszClassName: CLASS,
-            ..Default::default()
-        });
-        if let Ok(old) = FindWindowExW(Some(parent), None, CLASS, None) {
-            let _ = DestroyWindow(old);
+        let mut origin = POINT::default();
+        win32("ClientToScreen", || {
+            ClientToScreen(parent, &raw mut origin).ok()
+        })?;
+        let position = position((origin.x, origin.y), (bounds.left, bounds.top), (x, y), dpi);
+        let owner = GetAncestor(parent, GA_ROOT);
+        if owner.is_invalid() || !IsWindowVisible(owner).as_bool() || IsIconic(owner).as_bool() {
+            return Err("the preview has no visible app window".into());
         }
-        let window = CreateWindowExW(
-            WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE,
-            CLASS,
-            w!(""),
-            WS_CHILD,
-            left,
-            top,
-            side,
-            side,
-            Some(parent),
-            None,
-            Some(instance.into()),
-            None,
-        )
-        .map_err(|e| e.to_string())?;
-        let result = paint(window, parent, (left, top), side, scale, bounds);
+        let window = create_popup(parent, owner, &position)?;
+        let result = paint(
+            window,
+            &position,
+            (position.left - origin.x, position.top - origin.y),
+            scale,
+            bounds,
+        );
         if let Err(error) = result {
             let _ = DestroyWindow(window);
-            return Err(error.to_string());
+            return Err(error);
         }
         MARKERS.with(|markers| {
             markers.borrow_mut().insert(
                 window.0 as isize,
                 Marker {
                     controller: controller.clone(),
+                    parent,
+                    owner,
+                    origin,
                     bounds,
                     until: Instant::now() + remaining.min(Duration::from_millis(700)),
                     dpi,
                 },
             )
         });
-        if SetTimer(Some(window), 1, 16, None) == 0 {
+        if let Err(error) = win32("SetTimer", || {
+            if SetTimer(Some(window), 1, 16, None) == 0 {
+                Err(windows::core::Error::empty())
+            } else {
+                Ok(())
+            }
+        }) {
             let _ = DestroyWindow(window);
-            return Err("the click marker timer is unavailable".into());
+            return Err(error);
         }
-        SetWindowPos(
-            window,
-            Some(HWND_TOP),
-            left,
-            top,
-            side,
-            side,
-            SWP_NOACTIVATE | SWP_SHOWWINDOW,
-        )
-        .map_err(|e| {
+        let result = win32("SetWindowPos", || {
+            SetWindowPos(
+                window,
+                Some(HWND_TOP),
+                position.left,
+                position.top,
+                position.side,
+                position.side,
+                SWP_NOACTIVATE | SWP_SHOWWINDOW,
+            )
+        });
+        if let Err(error) = result {
             let _ = DestroyWindow(window);
-            e.to_string()
-        })?;
+            return Err(error);
+        }
     }
     Ok(())
 }
 
-// Viewport bounds and DPI are bounded by the native window; values here fit an i32.
-#[allow(clippy::cast_possible_truncation)]
-fn rounded(value: f64) -> i32 {
-    value.round() as i32
+unsafe fn create_popup(parent: HWND, owner: HWND, position: &Position) -> Result<HWND, String> {
+    // SAFETY: the owner and host HWNDs are live on this UI thread; the registered procedure owns cleanup.
+    unsafe {
+        let instance = win32("GetModuleHandleW", || GetModuleHandleW(None))?;
+        SetLastError(ERROR_SUCCESS);
+        let class = RegisterClassW(&WNDCLASSW {
+            lpfnWndProc: Some(window_proc),
+            hInstance: instance.into(),
+            lpszClassName: CLASS,
+            ..Default::default()
+        });
+        let class_error = GetLastError();
+        if class == 0 && class_error != ERROR_CLASS_ALREADY_EXISTS {
+            return Err(error_text("RegisterClassW", class_error));
+        }
+        // Owned popups are not children, so FindWindowEx(parent) cannot find the previous ring.
+        // Release the map borrow before destruction reenters window_proc for WM_NCDESTROY.
+        let old: Vec<_> = MARKERS.with(|markers| {
+            markers
+                .borrow()
+                .iter()
+                .filter_map(|(&handle, marker)| {
+                    (marker.parent == parent).then_some(HWND(handle as *mut _))
+                })
+                .collect()
+        });
+        for window in old {
+            let _ = DestroyWindow(window);
+        }
+        win32("CreateWindowExW", || {
+            CreateWindowExW(
+                WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW,
+                CLASS,
+                w!(""),
+                WS_POPUP,
+                position.left,
+                position.top,
+                position.side,
+                position.side,
+                Some(owner),
+                None,
+                Some(instance.into()),
+                None,
+            )
+        })
+    }
 }
 
 unsafe extern "system" fn window_proc(window: HWND, message: u32, w: WPARAM, l: LPARAM) -> LRESULT {
@@ -187,8 +239,14 @@ unsafe extern "system" fn window_proc(window: HWND, message: u32, w: WPARAM, l: 
                         .is_some_and(|marker| {
                             let mut visible = windows::core::BOOL::default();
                             let mut bounds = RECT::default();
+                            let mut origin = POINT::default();
                             Instant::now() < marker.until
-                                && GetDpiForWindow(window) == marker.dpi
+                                && IsWindowVisible(marker.parent).as_bool()
+                                && IsWindowVisible(marker.owner).as_bool()
+                                && !IsIconic(marker.owner).as_bool()
+                                && GetDpiForWindow(marker.parent) == marker.dpi
+                                && ClientToScreen(marker.parent, &raw mut origin).as_bool()
+                                && origin == marker.origin
                                 && marker.controller.IsVisible(&raw mut visible).is_ok()
                                 && visible.as_bool()
                                 && marker.controller.Bounds(&raw mut bounds).is_ok()
@@ -212,19 +270,23 @@ unsafe extern "system" fn window_proc(window: HWND, message: u32, w: WPARAM, l: 
 
 unsafe fn paint(
     window: HWND,
-    parent: HWND,
+    position: &Position,
     (left, top): (i32, i32),
-    side: i32,
     scale: f64,
     bounds: RECT,
-) -> windows::core::Result<()> {
+) -> Result<(), String> {
     // SAFETY: bounded 32-bit top-down DIB. Every allocated GDI object is restored/deleted below,
     // including on UpdateLayeredWindow failure; pixels are copied only into this owned bitmap.
     unsafe {
-        let dc = CreateCompatibleDC(None);
-        if dc.is_invalid() {
-            return Err(windows::core::Error::from_thread());
-        }
+        let side = position.side;
+        let dc = win32("CreateCompatibleDC", || {
+            let dc = CreateCompatibleDC(None);
+            if dc.is_invalid() {
+                Err(windows::core::Error::empty())
+            } else {
+                Ok(dc)
+            }
+        })?;
         let mut bits = std::ptr::null_mut();
         let info = BITMAPINFO {
             bmiHeader: BITMAPINFOHEADER {
@@ -238,25 +300,44 @@ unsafe fn paint(
             },
             ..Default::default()
         };
-        let bitmap = match CreateDIBSection(
-            Some(dc),
-            &raw const info,
-            DIB_RGB_COLORS,
-            &raw mut bits,
-            None,
-            0,
-        ) {
+        let bitmap = match win32("CreateDIBSection", || {
+            CreateDIBSection(
+                Some(dc),
+                &raw const info,
+                DIB_RGB_COLORS,
+                &raw mut bits,
+                None,
+                0,
+            )
+        }) {
             Ok(bitmap) => bitmap,
             Err(error) => {
                 let _ = DeleteDC(dc);
                 return Err(error);
             }
         };
-        let old = SelectObject(dc, HGDIOBJ(bitmap.0));
+        let old = match win32("SelectObject", || {
+            let old = SelectObject(dc, HGDIOBJ(bitmap.0));
+            if old.is_invalid() {
+                Err(windows::core::Error::empty())
+            } else {
+                Ok(old)
+            }
+        }) {
+            Ok(old) => old,
+            Err(error) => {
+                let _ = DeleteObject(HGDIOBJ(bitmap.0));
+                let _ = DeleteDC(dc);
+                return Err(error);
+            }
+        };
         let pixels = ring_pixels(side, scale, left, top, bounds);
         std::ptr::copy_nonoverlapping(pixels.as_ptr(), bits.cast::<u8>(), pixels.len());
-        let mut origin = POINT { x: left, y: top };
-        let result = if ClientToScreen(parent, &raw mut origin).as_bool() {
+        let origin = POINT {
+            x: position.left,
+            y: position.top,
+        };
+        let result = win32("UpdateLayeredWindow", || {
             UpdateLayeredWindow(
                 window,
                 None,
@@ -273,9 +354,7 @@ unsafe fn paint(
                 }),
                 ULW_ALPHA,
             )
-        } else {
-            Err(windows::core::Error::from_thread())
-        };
+        });
         SelectObject(dc, old);
         let _ = DeleteObject(HGDIOBJ(bitmap.0));
         let _ = DeleteDC(dc);

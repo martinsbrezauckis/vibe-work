@@ -9,8 +9,6 @@ use tauri::{Webview, Wry};
 use url::Url;
 use vw_preview::{EngineError, GuardCheck, MountId, MountSpec, PreviewHooks};
 
-/// End macOS canary navigation before reporting it (`WebKit` asks about the URL again while finishing).
-const CANARY_SETTLE: Duration = Duration::from_millis(300);
 /// One budget for both canaries: cold engines may take over four seconds to send the first one.
 const CANARY_WAIT: Duration = Duration::from_secs(6);
 
@@ -35,7 +33,7 @@ impl TauriEngine {
     /// - macOS with `macos-proxy` ([`MAC_PROXY`]): the listener of the mount's website data store (the store carries
     ///   the setting; the shared web store serves several mounts), the same port for the store's life; the content
     ///   rules keep each mount to its own rights for literals. A listener that cannot start, or no guard at all on the
-    ///   previews' instance, refuses the mount (fail closed). Without the feature (0.1.2-0.1.6), macOS previews use
+    ///   previews' instance, refuses the mount (fail closed). Without the feature, macOS previews use
     ///   content rules only, including required previews; a failed rule install refuses the mount.
     pub(super) fn proxy_for(&self, spec: &MountSpec) -> Result<Option<String>, EngineError> {
         let id = &spec.id;
@@ -79,18 +77,16 @@ impl TauriEngine {
     /// Proves that the fresh mount's traffic passes the guard (Linux, Windows): a request for a
     /// public-looking name (`*.vw-guard.invalid`, only the proxy can answer it) and a navigation to the listener's
     /// own port on loopback, which reaches the guard in proxy form only when the engine does not bypass the proxy
-    /// for loopback. macOS: the name canary only, and only with WebTransport off (`bypass_closed`): `WebKit` sends
+    /// for loopback. On macOS only the name canary is used: `WebKit` sends
     /// address literals around the proxy by design (measured on macOS 27.0.1: `127.0.0.1`, `[::1]`, `localhost` and
     /// this computer's own LAN address went direct, names and other literals through the proxy), so a loopback
     /// canary can never arrive there; the content rules cover literals. The result is reported
     /// (`network_guard(Done(..))`) and returned; an unproven required proxy refuses the mount (the caller).
-    /// Default macOS builds use content rules only and do not require this proof.
     pub(super) async fn check_guard(
         &self,
         webview: &Webview<Wry>,
         id: &MountId,
         proxy: Option<&str>,
-        bypass_closed: bool,
         hooks: &Arc<dyn PreviewHooks>,
     ) -> bool {
         let (Some(guard), Some(proxy)) = (&self.guard, proxy) else {
@@ -114,19 +110,10 @@ impl TauriEngine {
                 )
                 .await
             && !mac_fault("canary");
-        // macOS: the guard sees the canary at its CONNECT, before WebKit has finished that navigation; WebKit then
-        // asks about the canary URL once more. Leave it for about:blank while the canary is still the expected URL,
-        // so that late question never meets an ended check (real app: a "Not opened ... vw-guard.invalid" banner).
-        if cfg!(target_os = "macos")
-            && web
-            && let Ok(blank) = Url::parse("about:blank")
-        {
-            let _ = webview.navigate(blank);
-            tokio::time::sleep(CANARY_SETTLE).await;
-        }
+        // Late canary navigation and load reports are handled by the shared preview hooks' ended-canary state.
         let loopback = if cfg!(target_os = "macos") {
-            // Literals bypass the proxy on macOS (see above): the proof is the name canary and WebTransport off.
-            web && bypass_closed
+            // Literals bypass the proxy on macOS (see above): the name canary proves the proxy route, and content rules cover literals.
+            web
         } else {
             let token = vw_netguard::NetGuard::new_token();
             let port = Url::parse(proxy).ok().and_then(|u| u.port()).unwrap_or(0);
@@ -142,7 +129,6 @@ impl TauriEngine {
         if !loopback {
             tracing::warn!(
                 web,
-                bypass_closed,
                 "the browser's network guard is not proven for this webview"
             );
         }
@@ -151,7 +137,7 @@ impl TauriEngine {
     }
 }
 
-/// On macOS the proxy is required with `macos-proxy` (the app's default since 0.1.7, minimum macOS 14); a build
+/// On macOS the proxy is required with `macos-proxy` (required in app builds, minimum macOS 14); a build
 /// without it keeps content-rules-only previews. Explicit platform inputs let every build test that policy.
 fn proxy_required_for(needs_guard: bool, macos: bool, mac_proxy: bool) -> bool {
     needs_guard && (!macos || mac_proxy)

@@ -228,7 +228,9 @@ pub(crate) fn act_error(error: &ActError) -> CoreError {
         Outcome::Failed => ErrorCode::Internal,
         _ => ErrorCode::Denied,
     };
-    CoreError::new(code, error.text.clone())
+    let mut result = CoreError::new(code, error.text.clone());
+    result.capture_block = error.capture_block;
+    result
 }
 
 /// The read options from optional numbers.
@@ -384,6 +386,7 @@ impl Core {
                 driver.sessions().stop(&session_id);
                 for key in hub(shared)?.service.web_tabs(&session_id) {
                     driver.sessions().stop(&key);
+                    hub(shared)?.service.dismiss_dialog(&key).await;
                 }
                 BrowserResult::State {
                     state: browser_state(shared, &session_id)?,
@@ -516,6 +519,29 @@ async fn act_receipt(
     session_id: &str,
     args: &serde_json::Value,
 ) -> Result<BrowserResult, CoreError> {
+    if args["action"] == "auth.basic" {
+        let receipt = crate::browser_auth::prepare(
+            shared,
+            session_id,
+            args,
+            actor(shared, origin),
+            crate::command::requester(origin),
+        )
+        .await
+        .map_err(|e| CoreError::new(ErrorCode::Denied, e))?
+        .await
+        .map_err(|e| CoreError::new(ErrorCode::Denied, e))?;
+        return Ok(BrowserResult::Receipt { receipt });
+    }
+    if matches!(
+        args["action"].as_str(),
+        Some("clipboard.read" | "clipboard.write")
+    ) {
+        let receipt = crate::browser_clipboard::run(shared, args)
+            .await
+            .map_err(|e| CoreError::new(ErrorCode::Denied, e))?;
+        return Ok(BrowserResult::Receipt { receipt });
+    }
     let action =
         vw_browser::parse(args).map_err(|error| CoreError::new(ErrorCode::InvalidParams, error))?;
     // An upload reads its files from the chat that owns this page.

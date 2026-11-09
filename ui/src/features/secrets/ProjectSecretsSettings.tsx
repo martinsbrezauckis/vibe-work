@@ -2,6 +2,7 @@
  * Settings Vault: one filter/search/action row and one expandable metadata list. Depends on shared
  * Settings controls, key state and project-scoped Vault state. No stored value is read by this page.
  */
+import { literalInputProps } from "../../components/inputProps";
 import { useState } from "react";
 import { Button } from "../../components/Controls";
 import { Selector } from "../../components/Selector";
@@ -13,6 +14,7 @@ import { isMcp } from "./McpLabel";
 import { MistralKeyRow } from "./MistralKeySettings";
 import { VaultAddEntry } from "./VaultAddEntry";
 import { entryAddress, VaultEntryRow, type VaultEntry } from "./VaultEntryRow";
+import { VaultUnlockSettings } from "../setup/VaultUnlockSettings";
 import { SharedVaultLockNote, VaultLockControls } from "./VaultLockControls";
 import { useVaultEntries } from "./vaultEntries";
 
@@ -110,6 +112,7 @@ export function ProjectSecretsSettings() {
         />
         <div className="set-search">
           <input
+            {...literalInputProps}
             data-testid="secrets.project-secrets-settings-set-query"
             type="search"
             aria-label="Search entries"
@@ -143,6 +146,7 @@ export function ProjectSecretsSettings() {
         <VaultLockControls mode="vault" display="icon" />
       </div>
       <SharedVaultLockNote />
+      <VaultUnlockSettings />
       <details className="vault-permission-scope-disclosure">
         <summary data-testid="secrets.project-secrets-settings-summary">Project exceptions</summary>
         <div className="secrets-toolbar vault-permission-scope" aria-label="Permission scope">

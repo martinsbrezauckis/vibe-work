@@ -49,7 +49,7 @@ function ReadyAction({ core, title, text, onOpen }: Props & { core: CoreControll
           });
       }}
     >
-      Send feedback
+      Send feedback…
     </Button>
   );
 }

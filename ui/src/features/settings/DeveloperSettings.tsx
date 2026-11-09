@@ -1,4 +1,5 @@
 /**
+ * Depends on: the typed host client and core state. Called by: SettingsPage.
  * Developer settings: Debug API enablement and its ordinary vault secret.
  * Uses the typed host client for metadata/regeneration and the core's user-only native clipboard command.
  * No token value enters React state, the bridge or Debug API UI replies.
@@ -29,7 +30,7 @@ export function DeveloperSettings(): ReactElement {
     // action that opened Developer.
     void core
       .trackAction(
-        core.client.debugApiTokenFile(false).then(
+        core.client.debugApiTokenItem(false).then(
           (id) => (id === null ? "Not set" : "In vault"),
           () => "Vault unavailable" as const,
         ),
@@ -47,7 +48,7 @@ export function DeveloperSettings(): ReactElement {
     if (core === null) return;
     setBusy(true);
     try {
-      const id = await core.client.debugApiTokenFile(rotate);
+      const id = await core.client.debugApiTokenItem(rotate);
       setTokenState(id === null ? "Not set" : "In vault");
       if (id === null) return;
       if (!rotate) await core.run({ type: "secrets", request: { op: "copy", id } });

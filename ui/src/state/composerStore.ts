@@ -28,7 +28,7 @@
  *   full text back in place of each marker, so what is sent is the message as pasted. Only what the user
  *   can see is a command: a message that starts with a marker is sent as text (`literal`).
  */
-import type { ChromeTab, JsonValue } from "../protocol/core";
+import type { ChromeTab, CoreError, JsonValue } from "../protocol/core";
 import {
   type DraftBy,
   type Drafts,
@@ -56,9 +56,8 @@ export const PLUGIN_RELOAD_REFUSED =
   "This chat could not refresh its plugins and still has its previous plugins.";
 
 /** Both the definitive refusal and the uncertain-reply message describe a held plugin refresh. */
-export const isPluginReloadFailure = (message: string): boolean =>
-  message.includes(PLUGIN_RELOAD_REFUSED) ||
-  message.includes("This chat could not finish refreshing its plugins");
+export const isPluginReloadFailure = (error: CoreError): boolean =>
+  error.serverCode === "pluginReloadRejected" || error.serverCode === "pluginReloadUncertain";
 
 export interface ResendKeys {
   /** The content they belong to (`contentKey`). */
@@ -549,11 +548,7 @@ export function createComposerStore(persist: boolean) {
         pluginReloadFailed: setIn(
           s.pluginReloadFailed,
           sessionId,
-          text === null
-            ? undefined
-            : isPluginReloadFailure(text)
-              ? true
-              : s.pluginReloadFailed[sessionId],
+          text === null ? undefined : s.pluginReloadFailed[sessionId],
         ),
       }));
     },

@@ -80,6 +80,13 @@ unsafe extern "system" fn notified(
         route_programmatic_presses(hwnd, &shared.labels);
         if shared.closed.load(Ordering::Acquire) {
             shared.cancel_window();
+        } else {
+            // SAFETY: TDN_CREATED supplies the live dialog. The app has revealed its parent; raise the
+            // dialog only once it exists, using the same focus path as an already shown confirmation.
+            unsafe {
+                let _ = BringWindowToTop(hwnd);
+                let _ = SetForegroundWindow(hwnd);
+            }
         }
     } else if msg == TDN_DESTROYED {
         *shared.window.lock().unwrap_or_else(PoisonError::into_inner) = None;

@@ -8,7 +8,7 @@ use std::{
 
 #[cfg(any(target_os = "macos", test))]
 fn mac_command(browser: Browser, url: &str) -> Command {
-    let mut command = Command::new("/usr/bin/open");
+    let mut command = crate::process_command::hidden("/usr/bin/open");
     command.args([
         "-g",
         "-b",
@@ -82,20 +82,20 @@ fn detach(command: &mut Command) {
 
 #[cfg(windows)]
 fn detach(command: &mut Command) {
-    use std::os::windows::process::CommandExt;
     use windows::Win32::System::Threading::{
         CREATE_BREAKAWAY_FROM_JOB, CREATE_NEW_PROCESS_GROUP, DETACHED_PROCESS,
     };
     // A browser must outlive the app even when its launcher inherited a job. Refuse a prohibited breakaway
     // instead of silently attaching the person's browser to a kill-on-close job.
-    command.creation_flags(
+    crate::process_command::set_creation_flags(
+        command,
         (CREATE_BREAKAWAY_FROM_JOB | CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS).0,
     );
 }
 
 #[cfg(any(not(target_os = "macos"), test))]
 pub(super) fn native_command(executable: &Path, url: &str, profile: Option<&str>) -> Command {
-    let mut command = Command::new(executable);
+    let mut command = crate::process_command::hidden(executable);
     if let Some(profile) = profile {
         command.arg(format!("--profile-directory={profile}"));
     }

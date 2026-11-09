@@ -8,8 +8,15 @@ pub fn windows_path(path: &str) -> std::borrow::Cow<'_, str> {
     crate::msys_paths::native_drive(path)
         .map_or_else(|| std::borrow::Cow::Borrowed(path), std::borrow::Cow::Owned)
 }
-/// Shipping availability; keep the Linux implementation compiled for its future release.
-pub const ENABLED: bool = cfg!(all(feature = "video", any(windows, target_os = "macos")));
+/// Shipping availability; Linux requires its explicit rollout feature.
+pub const ENABLED: bool = cfg!(all(
+    feature = "video",
+    any(
+        windows,
+        target_os = "macos",
+        all(target_os = "linux", feature = "linux-video")
+    )
+));
 /// Reason and next action for a stale or direct call on an unsupported platform.
 pub const UNAVAILABLE: &str = if cfg!(target_os = "linux") {
     "Not run: video review is not available on Linux yet. Ask for still images or review the video on Windows or macOS."
@@ -279,7 +286,15 @@ pub(crate) fn spec() -> serde_json::Value {
     scenes["required"] = json!(["kind", "start_ms", "end_ms", "step_ms", "max_frames"]);
     scenes["properties"]["step_ms"] = json!({"type":"integer","minimum":1,"maximum":MAX_RANGE_MS});
     scenes["properties"]["max_frames"] = json!({"type":"integer","minimum":1,"maximum":MAX_FRAMES});
-    json!({"name":"video_frames","description":"Windows and macOS only: extract selected video moments from a regular local file up to 512 MiB and at most two hours long using Windows Media Foundation or macOS AVFoundation. Select at most 24 frames across ten minutes; frame output requires one frame. Images share this user turn's image allowance. Returns a single frame or contact sheet as image content with requested and actual presentation times; metadata output uses the same media support and sends no image. Reports the planned frame and image counts before extraction. Uniform gives an overview; uniform, interval and scene_changes use start_ms and exclusive end_ms, refused outside the video. Scene changes compare consecutive small pictures at step_ms (at most 240 samples), returning the earliest cuts up to max_frames and reporting sampled coverage and omitted cuts. Subtle cuts and events between samples may be missed; request a narrower range or smaller step for more detail. Audio is not processed. Unsupported formats or codecs are reported separately from worker failures and limits.","annotations":{"readOnlyHint":true},"inputSchema":{"type":"object","additionalProperties":false,"required":["path","selection","output"],"properties":{
+    let platform = if cfg!(all(target_os = "linux", feature = "linux-video")) {
+        "Linux: extract selected video moments from a regular local file up to 512 MiB and at most two hours long using this computer's installed media support."
+    } else {
+        "Windows and macOS only: extract selected video moments from a regular local file up to 512 MiB and at most two hours long using Windows Media Foundation or macOS AVFoundation."
+    };
+    let description = format!(
+        "{platform} Select at most 24 frames across ten minutes; frame output requires one frame. Images share this user turn's image allowance. Returns a single frame or contact sheet as image content with requested and actual presentation times; metadata output uses the same media support and sends no image. Reports the planned frame and image counts before extraction. Uniform gives an overview; uniform, interval and scene_changes use start_ms and exclusive end_ms, refused outside the video. Scene changes compare consecutive small pictures at step_ms (at most 240 samples), returning the earliest cuts up to max_frames and reporting sampled coverage and omitted cuts. Subtle cuts and events between samples may be missed; request a narrower range or smaller step for more detail. Audio is not processed. Unsupported formats or codecs are reported separately from worker failures and limits."
+    );
+    json!({"name":"video_frames","description":description,"annotations":{"readOnlyHint":true},"inputSchema":{"type":"object","additionalProperties":false,"required":["path","selection","output"],"properties":{
         "path":{"type":"string","minLength":1,"maxLength":4096},
         "selection":{"oneOf":[uniform,interval,scenes,{"type":"object","additionalProperties":false,"required":["kind","times_ms"],"properties":{"kind":{"const":"timestamps"},"times_ms":{"type":"array","minItems":1,"maxItems":MAX_FRAMES,"items":integer}}}]},
         "output":{"enum":["frame","contact_sheet","metadata"]},"max_edge":{"type":"integer","minimum":64,"maximum":1280}

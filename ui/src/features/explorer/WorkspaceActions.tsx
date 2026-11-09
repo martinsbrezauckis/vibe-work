@@ -1,4 +1,5 @@
 /**
+ * Depends on: workspaceModel and shared controls. Called by: FilesPanel.
  * Folder review and history initialization before a session exists. Reuses the Commit dialog and the existing
  * diff renderer; the steps and their state are the shared workspace model (`workspaceModel.ts`), which the
  * `ui/explorer` route drives too. Two instances render: the inline actions (`init` false: Review, Commit, Revert
@@ -20,12 +21,10 @@ export function WorkspaceActions({
   app,
   explorer,
   init,
-  onInitClose,
 }: {
   app: App;
   explorer: Explorer;
   init: boolean;
-  onInitClose: () => void;
 }) {
   const model = workspaceModelOf(app, explorer);
   const status = useStore(explorer.store, (s) => s.status);
@@ -41,7 +40,6 @@ export function WorkspaceActions({
   }, [init, model]);
   const closeInit = () => {
     model.closeInit();
-    onInitClose();
   };
   return (
     <>
@@ -158,11 +156,7 @@ export function WorkspaceActions({
                 data-testid="explorer.confirm-history"
                 variant="primary"
                 disabled={busy || !validIdentity(identity)}
-                onClick={() =>
-                  void model.confirmInit().then(() => {
-                    if (!model.store.get().init) onInitClose();
-                  })
-                }
+                onClick={() => void model.confirmInit()}
               >
                 {busy ? "Creating history…" : "Turn on version history"}
               </Button>

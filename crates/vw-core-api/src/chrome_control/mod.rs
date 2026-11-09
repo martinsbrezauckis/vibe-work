@@ -5,6 +5,8 @@ mod action_tracking;
 mod addon;
 pub(crate) mod safari;
 mod safari_package;
+#[cfg(any(all(feature = "your-safari", target_os = "macos"), test))]
+mod safari_startup;
 pub use safari::SafariView;
 pub(crate) mod agent_browser;
 pub(crate) mod approval;
@@ -12,6 +14,7 @@ pub(crate) mod approval;
 mod approval_tests;
 mod availability;
 pub(crate) mod batch;
+mod batch_wait;
 mod browser;
 pub(crate) mod browser_start;
 #[cfg(all(test, feature = "your-edge"))]
@@ -80,7 +83,12 @@ pub use pairing_approval::BROWSER_PAIRING_DIALOG_METHOD;
 mod pairing_approval_tests;
 pub use pairing::PairingState;
 #[cfg(test)]
+mod ask_policy_tests;
+#[cfg(test)]
 mod close_consent_tests;
+pub(crate) mod interaction_consent;
+#[cfg(test)]
+mod interaction_consent_tests;
 mod person_stop;
 #[cfg(test)]
 mod person_stop_tests;
@@ -97,6 +105,9 @@ pub(crate) mod read_consent;
 mod read_consent_tests;
 #[cfg(test)]
 mod read_output_tests;
+
+#[cfg(test)]
+mod output_secret_tests;
 mod receipt;
 #[cfg(test)]
 mod receipt_tests;
@@ -105,9 +116,14 @@ mod reconnect;
 mod reconnect_tests;
 #[cfg(test)]
 mod registry_native_tests;
+mod remove;
 mod reopen;
 #[cfg(all(test, feature = "your-safari"))]
+mod safari_action_tests;
+#[cfg(all(test, feature = "your-safari"))]
 mod safari_tests;
+#[cfg(test)]
+mod secret_policy_tests;
 #[cfg(test)]
 mod security_tests;
 mod selection;
@@ -528,6 +544,13 @@ pub(crate) fn declarations(config: &ts_rs::Config) -> Vec<String> {
         addon::AddonAction::decl(config),
     ]
 }
+/// Repairs the running app's browser packages in the background, once at core startup.
+pub(crate) async fn startup(shared: &std::sync::Arc<crate::core::Shared>) {
+    #[cfg(all(feature = "your-safari", target_os = "macos"))]
+    safari_startup::start(shared);
+    refresh_helper(shared).await;
+}
+
 /// Brings the helper copy Chrome starts up to this app version (see `helper_refresh`), on the blocking pool and
 /// under the setup lock, so Set up and Remove never run beside it. A failure is logged and retried at the next
 /// start or Connect; it never stops the app.
@@ -715,3 +738,6 @@ mod switches;
 
 #[cfg(any(target_os = "macos", all(test, unix)))]
 mod safari_registration;
+
+#[cfg(test)]
+mod agent_outcome_tests;

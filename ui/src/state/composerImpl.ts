@@ -73,7 +73,7 @@ export function createComposerActions(deps: {
     chains,
     keyGuard: deps.keyGuard,
     beforeTurn: (id) => controls.prepareSession(id),
-    // UX-05: the channel is open after a turn went out, so the chips can name the real mode and model.
+    // the channel is open after a turn went out, so the chips can name the real mode and model.
     afterTurn: (id) => {
       if (core.store.get().sessions[id]?.runtime === undefined) void controls.loadRuntime(id);
     },

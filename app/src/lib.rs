@@ -33,6 +33,7 @@ compile_error!(
 
 mod attention;
 mod commands;
+mod dialog_plugin;
 mod dialogs;
 #[cfg(feature = "feedback")]
 mod feedback_entry;
@@ -240,7 +241,7 @@ fn bridge_commands() -> impl Fn(tauri::ipc::Invoke) -> bool + Send + Sync + 'sta
         commands::ui_control_reply,
         commands::debug_api_set,
         commands::cli_sharing,
-        commands::debug_api_token_file,
+        commands::debug_api_token_item,
         commands::host_subscribe,
         commands::pick_folder,
         commands::pick_documents,
@@ -289,7 +290,7 @@ pub fn run() -> tauri::Result<()> {
     let update_checks = updater.is_some();
     let mut builder = tauri::Builder::default()
         .plugin(navigation_guard())
-        .plugin(tauri_plugin_dialog::init());
+        .plugin(dialog_plugin::init());
     if let Some(plugin) = updater {
         builder = builder.plugin(plugin);
     }

@@ -32,6 +32,7 @@ async fn session(rig: &ScriptRig) -> String {
 }
 
 async fn callback(rig: &ScriptRig, session_id: &str) -> String {
+    let mut events = rig.core.subscribe(None);
     rig.core
         .execute(
             Origin::Ui,
@@ -43,21 +44,24 @@ async fn callback(rig: &ScriptRig, session_id: &str) -> String {
         )
         .await
         .unwrap();
-    for _ in 0..250 {
-        let CommandResult::Callbacks { open } = rig
-            .core
-            .execute(Origin::Ui, Command::ListCallbacks {})
-            .await
-            .unwrap()
-        else {
-            panic!("expected callback list");
-        };
-        if let Some(found) = open.iter().find(|item| item.session_id == session_id) {
-            return found.callback_id.clone();
+    // Subscribe before starting: the callback event establishes readiness without spending a fixed
+    // number of polls while the real server/model is scheduled. This timeout is a deadlock watchdog.
+    tokio::time::timeout(std::time::Duration::from_secs(60), async {
+        while let Some(event) = events.next().await {
+            if let CoreEvent::CallbackOpened {
+                session_id: owner,
+                callback_id,
+                ..
+            } = event
+                && owner == session_id
+            {
+                return callback_id;
+            }
         }
-        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-    }
-    panic!("approval callback did not open");
+        panic!("approval event stream closed before the callback opened");
+    })
+    .await
+    .expect("approval callback did not open")
 }
 
 fn answer(session_id: &str, callback_id: &str, decision: &str) -> Command {

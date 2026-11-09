@@ -11,7 +11,7 @@ pub enum PreviewError {
     NothingOpen,
     /// A hidden native webview can return a blank PNG even though its page is loaded.
     #[error("Not run: {0}")]
-    ScreenshotHidden(String),
+    ScreenshotHidden(crate::CaptureRefusal),
     /// The URL was refused.
     #[error(transparent)]
     Refused(#[from] crate::policy::UrlRefusal),

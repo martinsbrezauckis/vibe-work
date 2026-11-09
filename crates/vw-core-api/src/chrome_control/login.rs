@@ -15,6 +15,7 @@ struct ChromeLoginWriter {
     shared: Weak<Shared>,
     session: String,
     args: Value,
+    consent: Option<super::read_consent::Consent>,
 }
 impl LoginWriter for ChromeLoginWriter {
     async fn write(
@@ -28,7 +29,14 @@ impl LoginWriter for ChromeLoginWriter {
         super::gateway::validate_session(&shared, session, "chrome_execute", &self.args)?;
         crate::agent_access::check_for(&shared, browser_fill::METHOD, session)?;
         if shared.store.view(session).is_none()
-            || super::check::authorize(&shared, session, "chrome_execute", &self.args).is_err()
+            || super::check::authorize_read(
+                &shared,
+                session,
+                "chrome_execute",
+                &self.args,
+                self.consent.as_ref(),
+            )
+            .is_err()
         {
             return Err(
                 "Not filled: this chat closed or Chrome login access was turned off.".to_owned(),
@@ -100,13 +108,29 @@ pub(super) async fn send(
 pub(crate) async fn prepare(
     shared: &Arc<Shared>,
     session: &str,
+    args: Value,
+) -> Result<Execution, String> {
+    prepare_consented(shared, session, args, None).await
+}
+
+pub(super) async fn prepare_consented(
+    shared: &Arc<Shared>,
+    session: &str,
     mut args: Value,
+    consent: Option<super::read_consent::Consent>,
 ) -> Result<Execution, String> {
     super::gateway::validate_public_args(&args)?;
     // The mode refusal comes first, as in the gateway: the agent learns which mode the action needs.
-    super::check::authorize(shared, session, "chrome_execute", &args)?;
+    super::check::authorize_read(shared, session, "chrome_execute", &args, consent.as_ref())?;
     super::gateway::validate_session(shared, session, "chrome_execute", &args)?;
-    let checked = escalation::send(shared, session, "chrome_execute", args.clone()).await?;
+    let checked = escalation::send_read(
+        shared,
+        session,
+        "chrome_execute",
+        args.clone(),
+        consent.as_ref(),
+    )
+    .await?;
     let vault = matches!(&checked, owner::Answer::Helper(result)
         if result["structuredContent"]["status"] == "failed"
             && result["structuredContent"]["error"]["code"] == "VAULT_REQUIRED"
@@ -160,6 +184,7 @@ pub(crate) async fn prepare(
         shared: Arc::downgrade(shared),
         session: session.to_owned(),
         args,
+        consent,
     };
     let current_args = writer.args.clone();
     let current_session = session.to_owned();
@@ -175,7 +200,13 @@ pub(crate) async fn prepare(
             "chrome_execute",
             &current_args,
         )?;
-        super::check::authorize(&shared, &current_session, "chrome_execute", &current_args)?;
+        super::check::authorize_read(
+            &shared,
+            &current_session,
+            "chrome_execute",
+            &current_args,
+            consent.as_ref(),
+        )?;
         let mut receipt = execution.await?;
         super::content::mark(&mut receipt);
         super::output::guard(&mut receipt);
@@ -250,6 +281,7 @@ mod tests {
         let writer = ChromeLoginWriter {
             shared: Arc::downgrade(shared),
             session: "s".into(),
+            consent: None,
             args: json!({"sessionId":"t","action":"auth.fill","args":{"ref":"field","login":"Demo"}}),
         };
         let target = FillTarget {

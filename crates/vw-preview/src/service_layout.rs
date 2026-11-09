@@ -80,6 +80,9 @@ impl PreviewService {
         let state = self.inner.lock();
         let entry = state.entries.get(session_id)?;
         entry.ready_mount()?;
+        if state.windows.contains_key(session_id) {
+            return None;
+        }
         let placement = match &state.shown {
             Some(shown) if shown.session_id == session_id => {
                 layout::place(shown.area, entry.width).ok()?
@@ -101,6 +104,9 @@ impl PreviewService {
         session_id: &str,
     ) -> Result<Option<(f64, f64)>, PreviewError> {
         let _activity = self.session_lock(session_id).await;
+        if let Some(window) = self.native_window_info(session_id).await? {
+            return Ok(Some((window.width, window.height)));
+        }
         let (mount, placement) = {
             let state = self.inner.lock();
             let Some(entry) = state.entries.get(session_id) else {

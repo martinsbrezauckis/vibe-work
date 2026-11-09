@@ -65,9 +65,6 @@ const LOADERS: Record<HighlightLanguage, () => Promise<Extension>> = {
   yaml: async () => (await import("@codemirror/lang-yaml")).yaml(),
 };
 
-/** Every language the editor colours: the same ids as the view's `HIGHLIGHT_LANGUAGES`. */
-export const EDITOR_LANGUAGES = Object.keys(LOADERS) as readonly HighlightLanguage[];
-
 /** The editor language for a file name, or no extension (plain text) when the view does not colour it either. */
 export async function languageFor(filename: string): Promise<Extension> {
   const id = languageOf(languageForName(filename));

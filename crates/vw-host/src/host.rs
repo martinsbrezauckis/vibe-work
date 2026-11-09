@@ -673,7 +673,7 @@ impl Host {
     ///
     /// No dialog is needed to turn it on, in any build: the bearer token is the
     /// gate. A script in the webview can flip the switch but cannot read its vault value, so it
-    /// gains nothing (and the token never crosses the bridge, see [`Host::debug_token_file`]).
+    /// gains nothing (and the token never crosses the bridge, see [`Host::debug_token_item`]).
     ///
     /// # Errors
     /// The I/O error when the setting cannot be saved (the switch is then not applied).

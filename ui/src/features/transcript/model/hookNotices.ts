@@ -134,7 +134,9 @@ export function hookLine(entry: Obj, steps: ReadonlyMap<string, Obj>): HookLine 
   if (
     reason === null &&
     ((name === "vibe-work tool receipt" && status === "ok") ||
-      ((name === "vibe-work tool receipt" || name === "vibe-work folder guard") &&
+      ((name === "vibe-work safety reminder" ||
+        name === "vibe-work tool receipt" ||
+        name === "vibe-work folder guard") &&
         detail["scope"] === "pre_tool" &&
         status === "warning" &&
         /^Rewrote tool_input for '[a-z][a-z0-9_]*'$/.test(content)))

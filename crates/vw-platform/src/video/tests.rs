@@ -140,7 +140,7 @@ fn resource_caps_child() {
     super::limits::restrict().unwrap();
     assert_eq!(
         rustix::process::getrlimit(rustix::process::Resource::As).maximum,
-        Some(512 * 1024 * 1024)
+        Some(1024 * 1024 * 1024)
     );
     assert_eq!(
         rustix::process::getrlimit(rustix::process::Resource::Fsize).maximum,
@@ -152,14 +152,14 @@ fn resource_caps_child() {
     unsafe {
         let mapping = libc::mmap(
             std::ptr::null_mut(),
-            600 * 1024 * 1024,
+            2 * 1024 * 1024 * 1024,
             libc::PROT_READ | libc::PROT_WRITE,
             libc::MAP_PRIVATE | libc::MAP_ANONYMOUS,
             -1,
             0,
         );
         if mapping != libc::MAP_FAILED {
-            libc::munmap(mapping, 600 * 1024 * 1024);
+            libc::munmap(mapping, 2 * 1024 * 1024 * 1024);
             panic!("memory cap was not enforced");
         }
     }

@@ -50,27 +50,19 @@ export function AnswerOptions({
   name,
   picked,
   disabled,
-  labelledBy,
   onChange,
 }: {
   question: Question;
   name: string;
   picked: Picked;
   disabled: boolean;
-  /** The question's own words (its legend), naming the radio group. */
-  labelledBy: string;
   onChange: (next: Picked) => void;
 }): ReactElement {
   const id = useId();
   const multi = question.multiSelect;
   return (
-    // One answer: a radio group named by the question. Several: the question's fieldset is already their group.
-    <div
-      className="q-opts"
-      role={multi ? undefined : "radiogroup"}
-      aria-labelledby={multi ? undefined : labelledBy}
-      data-option-list={multi ? "checkbox" : "radio"}
-    >
+    // The fieldset owns the question label and group role for both radio and checkbox options.
+    <div className="q-opts" data-option-list={multi ? "checkbox" : "radio"}>
       {question.options.map((option, index) => {
         const labelId = `${id}-${String(index)}`;
         const descId = option.description === "" ? undefined : `${labelId}-d`;

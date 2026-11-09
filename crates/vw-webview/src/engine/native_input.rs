@@ -74,6 +74,7 @@ impl TauriEngine {
         label: &str,
     ) -> Result<(), EngineError> {
         crate::agent_frames::install(webview).await?;
+        self.install_dialogs(webview, label).await?;
         #[cfg(target_os = "macos")]
         {
             let source = self

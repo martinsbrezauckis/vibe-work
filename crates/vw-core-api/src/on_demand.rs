@@ -115,6 +115,7 @@ pub(crate) struct Pending {
 
 #[derive(Default)]
 struct Inner {
+    consented: BTreeSet<String>,
     on: HashMap<String, BTreeSet<ToolSet>>,
     pending: HashMap<String, Pending>,
     interrupts: HashMap<String, usize>,
@@ -154,6 +155,16 @@ pub(crate) enum Requested {
 }
 
 impl OnDemand {
+    pub(crate) fn consented(&self, session: &str) -> bool {
+        let inner = self.inner();
+        inner.consented.contains(session)
+            || inner.on.contains_key(session)
+            || inner.pending.contains_key(session)
+    }
+
+    pub(crate) fn allow(&self, session: &str) {
+        self.inner().consented.insert(session.to_owned());
+    }
     fn inner(&self) -> MutexGuard<'_, Inner> {
         self.inner.lock().unwrap_or_else(PoisonError::into_inner)
     }
@@ -229,6 +240,9 @@ impl OnDemand {
     /// Session `old` continues as `new` (`/clear`, a rewind into a new id): its sets follow it.
     pub(crate) fn hand_off(&self, old: &str, new: &str) {
         let mut inner = self.inner();
+        if inner.consented.remove(old) {
+            inner.consented.insert(new.to_owned());
+        }
         if let Some(on) = inner.on.remove(old) {
             inner.on.insert(new.to_owned(), on);
         }
@@ -240,6 +254,7 @@ impl OnDemand {
     /// A deleted session's sets are dropped.
     pub(crate) fn forget(&self, session: &str) {
         let mut inner = self.inner();
+        inner.consented.remove(session);
         inner.on.remove(session);
         inner.pending.remove(session);
     }

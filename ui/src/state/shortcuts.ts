@@ -2,7 +2,7 @@
  * Keyboard shortcut registry: features register `{id, keys, run}`; one capture-phase listener
  * dispatches and skips shortcuts while typing. The registry pattern is adapted from ShellX.
  * Depends on: nothing (the listener lives in `features/shell/useShellWiring.ts`). Called by: the shell
- * and feature routes (`registerShortcut`), tests.
+ * and feature routes (`createShortcuts().register`), tests.
  * Invariants:
  * - Letters, digits and punctuation match by physical key (`event.code`), so Ctrl+K works on any
  *   keyboard layout, including Cyrillic and Greek layouts.

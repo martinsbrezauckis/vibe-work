@@ -14,7 +14,7 @@
     "allow-ui-control-reply",
     "allow-debug-api-set",
     "allow-cli-sharing",
-    "allow-debug-api-token-file",
+    "allow-debug-api-token-item",
     "allow-host-subscribe",
     "allow-pick-folder",
     "allow-pick-documents",

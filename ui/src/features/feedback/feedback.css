@@ -16,7 +16,8 @@
 .feedback-dialog .git-field {
   margin: 0;
 }
-.feedback-dialog textarea {
+.feedback-dialog .git-field textarea {
+  font-family: var(--font-ui);
   resize: vertical;
   min-height: 48px;
   width: 100%;

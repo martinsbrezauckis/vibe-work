@@ -36,26 +36,17 @@ export function ChromeRemoveDialog({
       >
         <header>
           <h2 id={`${prefix}-remove-title`}>
-            {browser === "Safari"
-              ? TEXT.safariRemoveQuestion
-              : chrome.view?.firefox !== undefined
-                ? TEXT.allBrowsersRemoveQuestion
-                : chrome.view?.edge === undefined
-                  ? TEXT.chromeRemoveQuestion
-                  : TEXT.browsersRemoveQuestion}
+            {TEXT.browserRemoveQuestion.replace("{browser}", browser)}
           </h2>
         </header>
         <section>
           <p>
             {browser === "Safari"
               ? TEXT.safariRemoveEffect
-              : chrome.view?.firefox !== undefined
-                ? TEXT.allBrowsersRemoveEffect
-                : chrome.view?.edge === undefined
-                  ? ["external", "restartChrome"].includes(chrome.view?.setup.installState ?? "")
-                    ? TEXT.chromeRemoveExternalEffect
-                    : TEXT.chromeRemoveEffect
-                  : TEXT.browsersRemoveEffect}
+              : browser === "Chrome" &&
+                  ["external", "restartChrome"].includes(chrome.view?.setup.installState ?? "")
+                ? TEXT.chromeRemoveExternalEffect
+                : TEXT.browserRemoveEffect.replaceAll("{browser}", browser)}
           </p>
         </section>
         <footer className="modal-actions">
