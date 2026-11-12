@@ -1,9 +1,8 @@
 //! User-only directories and files, for secrets that must sit on disk for a while (the Debug API's
 //! per-run token descriptor).
 //!
-//! Depends on: std; on Windows the Win32 security API (`windows` crate) to set DACLs and read owners,
-//! and the OS tools `whoami.exe` and `icacls.exe` from `%SystemRoot%\System32` (absolute paths, never a
-//! PATH lookup) only to read permissions back ([`is_user_only`]). Called by: vw-debug-api, the stores
+//! Depends on: std; on Windows the Win32 security API (`windows` crate) to set DACLs, read owners and read
+//! permissions back ([`is_user_only`], by SID). Called by: vw-debug-api, the stores
 //! (projects, comments, settings, changes, agent tools, previews).
 //! Invariants:
 //! - Unix: the directory is mode 0700 and the file mode 0600, created new (`O_CREAT|O_EXCL`, so an
@@ -15,15 +14,16 @@
 //!   descriptor, so it is user-only from its first moment (it never carries the folder's
 //!   inherited entries). Both use the Win32 security
 //!   API (`os::acl`, with `unsafe` confined to vw-platform). Previously PowerShell handled it,
-//!   adding about 0.6 s per store save on Windows 11. Reading back (`is_user_only`) stays on
-//!   `icacls`, a second, independent mechanism. Paths past 248 characters are handed to these calls in the
+//!   adding about 0.6 s per store save on Windows 11. Reading back (`is_user_only`) reads the
+//!   DACL with `GetNamedSecurityInfoW` and compares SIDs, so the result is the same for any characters in the
+//!   path and any console code page. Paths past 248 characters are handed to these calls in the
 //!   `\\?\` form (`os::long_path`), as `std::fs` does for its own calls, so a deep folder works the same.
 //! - A directory owned by another user is refused (Unix: `chmod` fails with EPERM; Windows: its owner is
 //!   read first, because replacing the DACL leaves the owner its implicit right to change it back).
 //! - Every function fails closed: an error means the caller must not use the path for a secret.
 //!
 //! Remaining window (documented, not closed): on Windows a new directory briefly carries the
-//! inherited ACL of its parent before `icacls` replaces it. Under the user's profile folder that
+//! inherited ACL of its parent before the DACL is replaced. Under the user's profile folder that
 //! ACL already excludes other non-admin users, and the secret is written only after the directory
 //! is user-only.
 
@@ -55,7 +55,7 @@ pub enum PrivateFileError {
     /// An OS permission tool failed or printed something we could not read (Windows).
     #[error("{tool} failed for {path}: {detail}")]
     Tool {
-        /// The tool (`whoami`, `icacls`).
+        /// The tool that failed.
         tool: &'static str,
         /// The path involved.
         path: String,
@@ -234,7 +234,7 @@ mod os {
 #[cfg(windows)]
 mod os {
     //! Windows DACLs: set with `SetNamedSecurityInfoW` (a protected one-entry DACL for the SID in the
-    //! process token), read back with `icacls`, keyed by the current user's name from `whoami`.
+    //! process token), read back with `GetNamedSecurityInfoW` and compared by SID.
     use std::fs::File;
     use std::path::{Path, PathBuf};
 
@@ -276,7 +276,7 @@ mod os {
     const LONG_FROM: usize = 248;
 
     /// `path` as Win32 calls accept it past 260 characters. `std::fs` converts long paths itself; the calls made
-    /// here directly (`CreateFileW`, the named security calls, `icacls`) failed instead ("The system cannot find
+    /// here directly (`CreateFileW`, the named security calls) failed instead ("The system cannot find
     /// the path specified."), so a data folder deeper than about 120 characters could not hold the session lease
     /// records. A long path is made absolute the way Windows does it (`std::path::absolute`: `/` becomes `\`,
     /// `.` and `..` are applied) and gets the `\\?\` prefix (`\\?\UNC\` for a network share). Shorter paths, and
@@ -305,79 +305,6 @@ mod os {
         let mut long: Vec<u16> = prefix.encode_utf16().collect();
         long.extend_from_slice(rest);
         std::borrow::Cow::Owned(PathBuf::from(std::ffi::OsString::from_wide(&long)))
-    }
-
-    fn system_tool(name: &str) -> PathBuf {
-        let root = std::env::var_os("SystemRoot").unwrap_or_else(|| "C:\\Windows".into());
-        PathBuf::from(root).join("System32").join(name)
-    }
-
-    fn run(
-        tool: &'static str,
-        args: &[&std::ffi::OsStr],
-        path: &Path,
-    ) -> Result<String, PrivateFileError> {
-        let fail = |detail: String| PrivateFileError::Tool {
-            tool,
-            path: path.display().to_string(),
-            detail,
-        };
-        let output = crate::process_command::hidden(system_tool(tool))
-            .args(args)
-            .output()
-            .map_err(|e| fail(e.to_string()))?;
-        if !output.status.success() {
-            return Err(fail(failure_detail(&output)));
-        }
-        Ok(String::from_utf8_lossy(&output.stdout).into_owned())
-    }
-
-    /// Exit status plus the tool's own error text, whitespace-collapsed and capped at 400 chars,
-    /// so a failure on another machine can be diagnosed from the log. Uses stderr, or stdout when
-    /// stderr is empty (`icacls` and `whoami` print errors there). These tools only see paths and
-    /// SIDs, never secrets.
-    fn failure_detail(output: &std::process::Output) -> String {
-        let text = if output.stderr.iter().all(u8::is_ascii_whitespace) {
-            String::from_utf8_lossy(&output.stdout)
-        } else {
-            String::from_utf8_lossy(&output.stderr)
-        };
-        let reason: String = text
-            .split_whitespace()
-            .collect::<Vec<_>>()
-            .join(" ")
-            .chars()
-            .take(400)
-            .collect();
-        format!("exit status {}: {reason}", output.status)
-    }
-
-    /// The current user's SID and `DOMAIN\name`, from `whoami /user /fo csv /nh`
-    /// (`"desktop-1\user","S-1-5-21-..."`).
-    fn current_user(path: &Path) -> Result<(String, String), PrivateFileError> {
-        let text = run(
-            "whoami.exe",
-            &[
-                "/user".as_ref(),
-                "/fo".as_ref(),
-                "csv".as_ref(),
-                "/nh".as_ref(),
-            ],
-            path,
-        )?;
-        let fields: Vec<&str> = text
-            .trim()
-            .split(',')
-            .map(|f| f.trim_matches('"'))
-            .collect();
-        match fields.as_slice() {
-            [name, sid] if sid.starts_with("S-1-") => Ok(((*sid).to_owned(), (*name).to_owned())),
-            _ => Err(PrivateFileError::Tool {
-                tool: "whoami.exe",
-                path: path.display().to_string(),
-                detail: "unexpected output shape".to_owned(),
-            }),
-        }
     }
 
     /// Replaces the whole DACL of `path` with one protected entry: full control for the current
@@ -449,9 +376,10 @@ mod os {
             GetNamedSecurityInfoW, SDDL_REVISION_1, SE_FILE_OBJECT, SetNamedSecurityInfoW,
         };
         use windows::Win32::Security::{
-            ACL, DACL_SECURITY_INFORMATION, GetSecurityDescriptorDacl, GetTokenInformation,
-            OWNER_SECURITY_INFORMATION, PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR,
-            PSID, SECURITY_ATTRIBUTES, TOKEN_QUERY, TOKEN_USER, TokenUser,
+            ACCESS_ALLOWED_ACE, ACE_HEADER, ACL, ACL_SIZE_INFORMATION, AclSizeInformation,
+            DACL_SECURITY_INFORMATION, GetAce, GetAclInformation, GetSecurityDescriptorDacl,
+            GetTokenInformation, OWNER_SECURITY_INFORMATION, PROTECTED_DACL_SECURITY_INFORMATION,
+            PSECURITY_DESCRIPTOR, PSID, SECURITY_ATTRIBUTES, TOKEN_QUERY, TOKEN_USER, TokenUser,
         };
         use windows::Win32::Storage::FileSystem::{
             CREATE_NEW, CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_GENERIC_WRITE, FILE_SHARE_DELETE,
@@ -684,27 +612,67 @@ mod os {
             // SAFETY: `owner` points into `descriptor`, alive until the guard drops after this call.
             unsafe { sid_text(owner) }
         }
-    }
 
-    /// The principals named by the access entries of `icacls <path>` (names, or bare SIDs when a
-    /// SID does not resolve). Lines without `:(` (summary line, blanks) are not entries.
-    fn principals(path: &Path) -> Result<Vec<String>, PrivateFileError> {
-        // icacls prints the path as it was given, so the prefix stripped below is the same long form.
-        let long = long_path(path);
-        let listing = run("icacls.exe", &[long.as_os_str()], path)?;
-        let shown = long.display().to_string();
-        Ok(listing
-            .lines()
-            .filter(|line| line.contains(":("))
-            .map(|line| {
-                let line = line.strip_prefix(shown.as_str()).unwrap_or(line).trim();
-                line.split(":(")
-                    .next()
-                    .unwrap_or_default()
-                    .trim()
-                    .to_owned()
-            })
-            .collect())
+        /// Whether the DACL of `path` holds exactly one entry and it allows access to `sid`. A null
+        /// DACL (access for everyone) or any other entry, also a deny entry, is not user-only.
+        pub(super) fn is_only_user(path: &Path, sid: &str) -> io::Result<bool> {
+            /// `ACCESS_ALLOWED_ACE_TYPE` (winnt.h), kept local to avoid another `windows` feature.
+            const ACCESS_ALLOWED: u8 = 0;
+            let name = wide(path);
+            let mut dacl: *mut ACL = std::ptr::null_mut();
+            let mut descriptor = PSECURITY_DESCRIPTOR::default();
+            // SAFETY: `name` is NUL-terminated and lives across the call; the out-pointers are valid;
+            // the descriptor is freed by the guard and `dacl` points into it.
+            status(unsafe {
+                GetNamedSecurityInfoW(
+                    PCWSTR(name.as_ptr()),
+                    SE_FILE_OBJECT,
+                    DACL_SECURITY_INFORMATION,
+                    None,
+                    None,
+                    Some(&raw mut dacl),
+                    None,
+                    &raw mut descriptor,
+                )
+            })?;
+            let _free = Local(descriptor.0);
+            if dacl.is_null() {
+                return Ok(false);
+            }
+            let mut info = ACL_SIZE_INFORMATION::default();
+            let size = u32::try_from(std::mem::size_of::<ACL_SIZE_INFORMATION>())
+                .map_err(io::Error::other)?;
+            // SAFETY: `dacl` points into the live descriptor; `info` is writable for `size` bytes.
+            unsafe {
+                GetAclInformation(
+                    dacl.cast_const(),
+                    (&raw mut info).cast(),
+                    size,
+                    AclSizeInformation,
+                )
+            }
+            .map_err(io::Error::other)?;
+            if info.AceCount != 1 {
+                return Ok(false);
+            }
+            let mut ace: *mut core::ffi::c_void = std::ptr::null_mut();
+            // SAFETY: index 0 exists (AceCount is 1); `ace` is a valid out-pointer into the DACL.
+            unsafe { GetAce(dacl.cast_const(), 0, &raw mut ace) }.map_err(io::Error::other)?;
+            if ace.is_null() {
+                return Ok(false);
+            }
+            // SAFETY: every ACE starts with an ACE_HEADER; `ace` points into the live DACL.
+            let header = unsafe { &*ace.cast::<ACE_HEADER>() };
+            if header.AceType != ACCESS_ALLOWED {
+                return Ok(false);
+            }
+            // SAFETY: an access-allowed ACE is an ACCESS_ALLOWED_ACE whose SID starts at `SidStart`
+            // and lies within the ACE, inside the live descriptor.
+            let entry =
+                unsafe { PSID((&raw mut (*ace.cast::<ACCESS_ALLOWED_ACE>()).SidStart).cast()) };
+            // SAFETY: `entry` points to the ACE's SID, alive until the guard drops after this call.
+            Ok(unsafe { sid_text(entry) }? == sid)
+        }
     }
 
     pub(super) fn restrict_dir(path: &Path) -> Result<(), PrivateFileError> {
@@ -716,12 +684,17 @@ mod os {
         acl::create_only_user(path, &acl::current_user_sid()?)
     }
 
-    /// Reads `icacls <path>`: every access entry line is `<principal>:<flags>`; the path is
-    /// user-only when there is exactly one entry and it names the current user. Lines without
-    /// `:(` (the localized summary line, blank lines) are not entries.
+    /// The path is user-only when its DACL holds exactly one entry: access allowed to the current
+    /// user's SID ([`acl::is_only_user`]). Compared by SID through the Win32 API, never by a printed
+    /// name, so a path with any characters (`C:\Users\Jānis\...`) reads back the same on every console
+    /// code page.
     pub(super) fn is_user_only(path: &Path) -> Result<bool, PrivateFileError> {
-        let (_, name) = current_user(path)?;
-        let entries = principals(path)?;
-        Ok(entries.len() == 1 && entries[0].eq_ignore_ascii_case(&name))
+        let fail = |e: std::io::Error| PrivateFileError::Io {
+            action: "read the access list of",
+            path: path.display().to_string(),
+            source: e,
+        };
+        let sid = acl::current_user_sid().map_err(fail)?;
+        acl::is_only_user(path, &sid).map_err(fail)
     }
 }
